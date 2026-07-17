@@ -1,9 +1,10 @@
-# aztec-5.0.1-line — plan (v3 — mega-PR restructure + double-audit round folded)
+# aztec-5.0.1-line — plan (v4 — final fresh-context codex pass folded; GATE-READY)
 
 Deep-tier blueprint. Legs archived (`leg-main.md`, `leg-codex.md`, `leg-fable-summary.md`);
 contradiction round folded in v2; double audit folded here (`audit-codex-r1.md` reject → all
 critical/high addressed; `audit-fable-r1.md` conditional-approve → all findings addressed).
-Final fresh-context codex pass pends; then the approval gate.
+Final fresh-context codex pass: **conditional-approve** (`audit-codex-final.md`) — all six
+conditions folded in this v4. Ready for the approval gate.
 
 ## Summary
 
@@ -53,8 +54,9 @@ tap; targeted network pair under the proverless double-opt-in (`VITE_NULO_E2E_PR
 flag + runtime flag) for fast loops. Deliver a dep-light `*.composition.test.ts` pin (shallow
 PXE, bb-free per COMPOSITION-TESTS.md) that drives restore → finalize → an active-profile
 listener requiring the missing-key→provision→retry round-trip — **must FAIL on the pre-fix code**
-for the localized mechanism (facade-lock re-entry). Write the proven chain to
-`lessons/phase-p0.md`.
+for the localized mechanism (facade-lock re-entry). The pin lands marked `test.fails` (green in
+suites while the bug exists; flips to a NORMAL test in P2 — resolves the final-pass gate
+contradiction with P1's `test:all` green). Write the proven chain to `lessons/phase-p0.md`.
 **Gate**: repro observed red; pin red for the same mechanism. No repro → STOP and re-aim.
 
 ### P1 — Client 5.0.1 bump (identity-preserving; deployment untouched)
@@ -88,9 +90,10 @@ for the localized mechanism (facade-lock re-entry). Write the proven chain to
 - KATs: derivation vectors must stay byte-identical under 5.0.1 (any shift = STOP — protocol
   break, plan wrong). Backup compat-epoch stays 3 with round-trip tests (epoch-3 5.0.0-stamped
   backup imports under 5.0.1; export stamps 3; undecodable slice = STOP, never epoch-mask).
-**Gate**: `typecheck:all` + `test:all` + lint green; `verify:deployments` GREEN (committed
-artifacts still 5.0.0-compiled — the live deployment is untouched by this phase); P0 pin still
-red; smokes that don't touch the restore path green.
+**Gate**: `typecheck:all` + `test:all` + lint green (the P0 pin counts via its `test.fails`
+marker — substance still red, suite green); `verify:deployments` GREEN (committed artifacts
+still 5.0.0-compiled — the live deployment is untouched by this phase); a manual run of the pin
+confirms the SAME failing mechanism post-bump; smokes that don't touch the restore path green.
 
 ### P2 — Emits after lock release (the deadlock-class fix)
 Design per v2 (D2 resolved: typed transition results; SessionManager `onChange` removed; facade
@@ -112,13 +115,20 @@ Per v2 with the audit folds:
   capture under the facade lock and carry in transient NetworkInfo; retry REUSES the capture. SW
   numeric deletion-epoch fence for leaf services PRESERVED (incarnation is the offscreen fence).
 - Offscreen lifecycle `unseen → live(gen) → deleting(gen) → deleted(gen)`; ops verify inside the
-  barrier; provision under the WRITE barrier rejects `deleting` AND `deleted` (audit: was
-  unspecified); **provision-on-`unseen` consults the DURABLE tombstone rows directly via a
-  chrome.storage read from the offscreen** (no ProfileService RPC — respects the lock order) and
-  rejects tombstoned ids/generations — closing the stale-provision-after-offscreen-restart
-  resurrection window (both audits). `clearProfileState` marks `deleting` synchronously; failure
-  retains state+barrier; same-gen retry idempotent; late old-gen clear can never erase a live
-  successor; barriers/guards never deleted.
+  barrier; provision under the WRITE barrier rejects `deleting` AND `deleted`. **Restart fence
+  (final-pass correction — the offscreen has NO chrome.storage access, `offscreen/index.ts:102`,
+  so the v3 direct-tombstone-read mechanism was impossible)**: the fence is SW-AUTHORITATIVE —
+  `provisionChainStoreKey`'s generation is derived FRESH under the facade lock at SEND time
+  (never reused from an older capture; only request-path OP fencing reuses captures), and the SW
+  validates row-exists + not-reserved + gen-is-current immediately before sending. Offscreen-side,
+  provision installs only from `unseen` or same-gen `live`. Cross-restart stale DELIVERY is
+  transport-impossible (the port and its queue die with the offscreen document) — asserted by a
+  test rather than assumed; same-id re-import is fenced by the fresh random generation (no
+  tombstone dependency — tombstones clear after successful purge, `service.ts:731`). Test matrix
+  adds: successful purge → offscreen restart → stale-shaped provision replay is rejected.
+  `clearProfileState` marks `deleting` synchronously; failure retains state+barrier; same-gen
+  retry idempotent; late old-gen clear can never erase a live successor; barriers/guards never
+  deleted.
 - D3 rebind under chain WRITE (peek/create split; no read→write upgrade; bounded retry);
   dispose propagates stop/close failures (AggregateError; poisoned entries; allSettled profile
   dispose); D7 sweep removed (profile dirs only via profile purge + positive absence check);
@@ -139,7 +149,11 @@ backup pair via `e2e:agent`).
   build). Scope legitimacy itself is covered by the user's explicit instruction to adopt this
   package + the technical binding above. Then: swap the 5 package.json + ~22 import sites +
   `renovate.json`; excludes updated; zero-`@alejoamiras/aztec-standards` sweep (archived
-  reference/ untouched); suggest `npm deprecate` to the user (their auth).
+  reference/ untouched); suggest `npm deprecate` to the user (their auth). **The FULL P1 install
+  ritual REPEATS here for the identity deps** (final-pass condition: no dep enters outside the
+  ritual): secret-free shell, fresh lock, `--ignore-scripts` first install, scratch-npm
+  `npm audit signatures`, integrity-set comparison of the lock delta, allowlist diff. Noir deps
+  pinned by TAG + PEELED COMMIT (both recorded; movement fails).
 - fee-payment → 5.0.1: recompute digest + canonical address LOCALLY; descriptor +
   `PRIVATE_FPC_ADDRESS` + tripwire re-pinned in ONE commit; salt-construction sweep. **Source
   binding** (audit): diff the published 5.0.1 tarball against the fee-payment source repo at its
@@ -165,8 +179,9 @@ Per v2/audits: strict-zod intent; signer re-validation REQUIRED (absent key = fa
 operational allowlist; **network-identity pinning** (audit): the intent build compares
 node-claimed L1 addresses against the COMMITTED previous-arc values (no-reset ⇒ must be
 byte-equal; mismatch = STOP) in addition to code-presence corroboration; second Aztec endpoint
-attempted via `INTENT_SECOND_AZTEC_RPC`, single-node posture documented if absent (per the 5.0.0
-arc's accepted pattern — conditional Ask ONLY if the posture itself changes); FPC digest
+attempted via `INTENT_SECOND_AZTEC_RPC`; **endpoint DISAGREEMENT = unconditional STOP** (never
+an ask); ABSENCE of a second endpoint = the intent-documented capped-risk acceptance (the 5.0.0
+arc's accepted posture, exposure bounded by the caps) — final-pass flip of the v3 ask polarity; FPC digest
 re-check at every verify; Dripper/Token digests + expected L2 class-ids pinned; candidate
 addresses re-derived (self-consistency ≠ authentication).
 **`reuse-token` mode built + unit-tested** in `deploy-bridge-testnet.ts` (existing AZLO supplied
@@ -204,6 +219,12 @@ index.md; stale-5.0.0-ref sweep (live refs only). Full gates: `audit:vue` + `aud
 REAL prove on the accelerator path). `/code-review max --fix` (separate commits) → codex
 post-impl audit (gpt-5.6-sol xhigh; targeted: lock/emit redesign, incarnation fence, FPC compat
 map + source binding, promote path, reuse-token mode, trust gates) → high/critical addressed.
+**Post-live source-mutation stop rule** (final-pass condition): after the P6 intent is built,
+every subsequent commit (review fixes included) classifies its files — deploy-affecting
+(bridge-core src/scripts, contracts/, faucet deploy surface, canary scripts) vs client-only/docs.
+A deploy-affecting change invalidates the intent → new intent revision + re-run of the impacted
+P6 proofs before merge; client-only changes re-run the standard suites only. The classification
+is recorded per-commit in lessons.
 PR #282 body rewritten for the full arc (`Closes #281`); labels `e2e:network`+`e2e:smoke`; all
 three aggregators green on the head → squash-merge → dev CI green. Min-age-exclude removal
 follow-up filed (~07-23).
@@ -211,9 +232,15 @@ follow-up filed (~07-23).
 
 ### R — Release (standing authorization)
 R1 promote PR (merge-commit) → R2 release PR merge; `AUTO_UNSTICK_ENABLED` on; publish chain
-watched; assets verified. **Staged-rollout flip** (audit + runbook due): add `verify-live` to the
-`status` aggregator in `release.yml` as part of this arc (v0.24.0 was its clean observation
-release); the draft-release-until-green redesign is filed as a follow-up, not done in-arc.
+watched; assets verified. **Release-gating folds (final-pass, partial adopt)**: (a) `verify-live`
+→ required in the `status` aggregator (staged-rollout flip, due); (b) a release.yml pre-flight
+asserts the faucet deploy hook secret IS wired (absent hook = early red, not silent fallback);
+(c) **rollback defined**: if post-public acceptance fails — re-fire `refresh-landing.yml`
+(break-glass) for deploy-staleness; for a genuinely bad build, land a revert PR on main via the
+normal promote path (the release tag is never deleted; the landing re-points at the next good
+release). The full draft-release-until-green redesign is REJECTED for this arc with reason
+(release-pipeline redesign is its own epic; testnet-only blast radius; the three folds above
+cover the realistic failure = stale/mismatched deploy) and filed as a follow-up issue.
 R3 live acceptance: build-id equality + chainId 1816023401 served + **two PUBLIC-surface flows
 with the released artifact** (drip; minimum public Fuel deposit→claim; hashes + FJ delta
 recorded) + require-deployed FPC gate + spend reconciliation. R4 back-sync merge-commit;
@@ -266,3 +293,10 @@ untenable for this arc (a second endpoint exists but disagrees); (3) any probe c
 | D19 | verify-live → required in-arc (staged-rollout flip due); draft-release redesign = follow-up | codex #4 (partial adopt) |
 | D20 | Deletion-wait UX surfaced as work | fable #7 |
 | D21 | Intent pins L1 addresses against committed prior-arc values; dual-L1-RPC = attempt, not requirement | codex #2 (adopted core) |
+| D22 | P0 pin lands `test.fails`, flips at P2 | final-pass #3 |
+| D16v4 | Restart fence is SW-authoritative (fresh-gen-at-send + transport-death assertion); offscreen storage read was IMPOSSIBLE | final-pass #1 (corrects v3's D16) |
+| D23 | P4 repeats the full install ritual; Noir deps tag+peeled-commit pinned | final-pass #4 |
+| D24 | Post-intent source-mutation stop rule (classify → re-intent → re-proof) | final-pass #5 |
+| D25 | RPC polarity: disagreement = STOP; absence = intent-documented capped acceptance | final-pass #6 |
+| D19v4 | verify-live required + hook-wired preflight + defined rollback; draft-release redesign REJECTED-with-reason for this arc (filed follow-up) | final-pass #2 (partial adopt, documented) |
+| D15v4 | If attestation absent: the resolution path is reproducible-build/diff-vs-repo binding (a concrete alternative, not a waiver), user-approved via the conditional ask | final-pass (decision-trail note) |
