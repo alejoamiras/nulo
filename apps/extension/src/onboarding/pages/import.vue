@@ -4,10 +4,10 @@
 
 <script setup lang="ts">
 /** Composables */
+import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
 import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
-import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Services */
 import { setSentinel } from "@/utils/core"
@@ -29,26 +29,29 @@ const router = useRouter()
 const appStore = useAppStore()
 const notificationStore = useNotificationStore()
 const { openToast } = useToast()
-const { bootstrapActiveProfile } = useProfileBootstrap()
+const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 
 // Onboarding has no popup app.vue `onActiveProfileChanged` listener, so it
-// bootstraps the freshly activated profile itself — exactly once, here.
-// (Threaded into useFullBackupImport too, so the full-backup path activates
-// the same way.) Without the bootstrap, `waitForProfileActive` would hang the
-// full 30s because appStore.isLogined / profile.id never flip.
+// bootstraps the freshly activated profile itself — its "wait for active" IS the
+// direct bootstrap. If that bootstrap doesn't activate (an MV3 worker restart
+// mid-import, so the session couldn't be confirmed), the recovery re-reads the
+// active profile and bootstraps again, matching the popup path. Onboarding routes
+// to /onboarding/learn regardless (that screen gates on unlock); only the toast
+// copy reflects the outcome.
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
-	await bootstrapActiveProfile(p)
 	await setLastActiveProfileId(p.id)
 	await setSentinel()
-	try {
-		await waitForProfileActive(appStore, p.id, 30_000)
-		openToast({ label: "Profile imported", icon: "check-circle" })
-		router.push("/onboarding/learn")
-	} catch {
-		openToast({ label: "Profile imported. Unlock to continue." })
-		router.push("/onboarding/learn")
-	}
+	const outcome = await completeImportWithRecovery({
+		waitForActive: async () => {
+			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")
+		},
+		recover: async () => (await hydrateKnownProfile())?.id === p.id && appStore.isLogined,
+	})
+	openToast(
+		outcome === "active" ? { label: "Profile imported", icon: "check-circle" } : { label: "Profile imported. Unlock to continue." },
+	)
+	router.push("/onboarding/learn")
 }
 
 const {

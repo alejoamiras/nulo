@@ -124,7 +124,20 @@ artifacts still 5.0.0-compiled — the live deployment is untouched by this phas
 still reproduces the SAME way post-bump (or is noted as resolved by 5.0.1 itself); smokes that
 don't touch the restore path green. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p1.md`.**
 
-### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0)
+### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0) ◑
+> **◑ CODE COMPLETE; e2e gate CI-DEFERRED (local box blocked, root-caused).** New pure
+> `completeImportWithRecovery` orchestrator (+7 unit tests): fast-path activation else run the
+> fresh-popup recovery (`hydrateKnownProfile`) — never a dead-end wait. Both import pages wired;
+> onboarding unified on it. A disconnect-watch variant was tried + reverted (races the live
+> bootstrap — the timeout is the only race-free signal). The three restore e2e rewritten to the
+> realistic settle→recover model + a lock/unlock store-reopen assertion (new `reopenAndRecoverAfterImport`
+> helper). **Local smoke/network e2e cannot pass on THIS host: the MV3 SW is evicted under
+> multi-agent load → master dropped → `PXE_STORE_KEY_MISSING` → account-state restore errors. Proven
+> environmental (identical failure on the PRISTINE pre-P2 tree; NOT 5.0.1 — the error is store-key
+> provisioning, not a protocol/version rejection). Honest gate = CI (green on dev).** typecheck:all 0,
+> composable units 57, lint 0, build green. **NEW FINDING handed to P3** (see P3). Not marked ✓ — the
+> e2e gate line is validated at CI/P7. `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.
+
 The bug (P0-proven): the full-backup import page silently wedges when the MV3 service worker
 restarts mid-bootstrap, because `completeImport` (`import.vue`) awaits `waitForProfileActive` on a
 now-dead SW connection and neither completes nor routes anywhere for 30 s+. The wallet itself is
@@ -157,6 +170,16 @@ restore-time-wedged profile reaches `/popup/general` with a working PXE read; no
 remains on the import path. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.**
 
 ### P3 — Deletion fence + remaining #281
+> **NEW (from P2, 5.0.1 arc):** account-state `registerContract` runs DURING restore, BEFORE
+> `finalizeRestore` opens the session + provisions the PXE store key — it leans on the
+> `PXE_STORE_KEY_MISSING` provider→retry-once to provision from the available master. If the SW
+> restarts mid-restore (production-plausible for MV3), that retry can't provision → contract
+> registrations are silently lost from the restored profile (balances won't sync until re-registered).
+> Fold into the store-key-provisioning/incarnation-fence work: either (a) provision the store key
+> BEFORE the account-state restore step, or (b) make the retry survive a mid-restore SW restart, or
+> (c) re-register-on-next-unlock. Add a test that restarts the SW mid-restore and asserts contracts
+> survive. (Root-cause evidence + repro in `lessons/phase-p2.md`.)
+
 Per v2 with the audit folds:
 - **Persisted ≥128-bit (Web-Crypto) `pxeGeneration`** on Profile rows + tombstone carry; requests
   capture under the facade lock and carry in transient NetworkInfo; retry REUSES the capture. SW
