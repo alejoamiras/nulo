@@ -557,8 +557,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 */
 	public async clearProfileState(profileId: string): Promise<void> {
 		const barrier = this.getProfileBarrier(profileId)
+		await barrier.enterWrite()
 		try {
-			await barrier.enterWrite()
 			await this.registry.disposeProfile(profileId)
 			const guardPrefix = chainRegistryKeyPrefix(profileId)
 			for (const k of Array.from(this.chainGuards.keys())) if (k.startsWith(guardPrefix)) this.chainGuards.delete(k)
@@ -580,9 +580,15 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				const keyval = (await indexedDB.databases()).find((x) => x.name === "keyval-store")
 				if (keyval?.name) await this.deleteDb(keyval.name)
 			}
-		} finally {
-			barrier.leaveWrite()
+			// SUCCESS ONLY: drop the barrier so a re-added profile gets a fresh one. On FAILURE the
+			// entry is RETAINED (this line is skipped by the throw) so the profile stays a known
+			// being-deleted entity and a same-gen retry reuses the SAME barrier — deleting it on a
+			// failed erase would let a read slip past the fence before the coordinator retries.
 			this.profileBarriers.delete(profileId)
+		} finally {
+			// Always release the write lock — retained-but-unlocked lets the retry re-acquire WRITE
+			// (an unreleased write lock would deadlock the retry, not fence it).
+			barrier.leaveWrite()
 		}
 	}
 

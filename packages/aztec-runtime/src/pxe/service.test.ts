@@ -278,4 +278,25 @@ describe("PxeService deletion honesty (finding D)", () => {
 		expect(deleted).not.toContain("pxe/p2/1") // another profile's DB — untouched
 		expect(deleted).not.toContain("keyval-store") // shared — kept while p2 survives
 	})
+
+	test("clearProfileState RETAINS the profile barrier on erase failure, then drops it on a successful retry", async () => {
+		const service = makeService(makeFactory({ nodeBehavior: "throws" }).factory)
+		const barriers = (service as unknown as { profileBarriers: Map<string, unknown> }).profileBarriers
+		let disposeShouldFail = true
+		;(service as unknown as { registry: unknown }).registry = {
+			disposeProfile: async () => {
+				if (disposeShouldFail) throw new AggregateError([new Error("close failed")], "dispose failed")
+			},
+		}
+		vi.stubGlobal("indexedDB", { databases: async () => [], deleteDatabase: () => fireReq("success") })
+
+		// Failed erase: rejects AND keeps the barrier entry so the profile stays fenced for a retry.
+		await expect(service.clearProfileState("p1")).rejects.toBeInstanceOf(AggregateError)
+		expect(barriers.has("p1")).toBe(true)
+
+		// Same-gen retry now succeeds → the barrier is dropped (the profile is gone).
+		disposeShouldFail = false
+		await service.clearProfileState("p1")
+		expect(barriers.has("p1")).toBe(false)
+	})
 })
