@@ -306,14 +306,41 @@ export class ChainRuntimeRegistry {
 		return promise
 	}
 
+	/**
+	 * Dispose the given (key, runtime) pairs, tolerating individual failures:
+	 *  - settle ALL (a failed close on one chain must not skip disposing the rest — `Promise.all`
+	 *    would abandon the siblings on the first rejection, leaking their locks);
+	 *  - RE-ADD any runtime whose `dispose()` threw (its `store.close()` failed → the SAH-pool lock
+	 *    is leaked; keeping the reference is the ONLY retry handle — dropping it wedges every future
+	 *    open of that chain forever, silently);
+	 *  - propagate the collected failures as an `AggregateError` so the deletion coordinator treats
+	 *    the erasure as INCOMPLETE + retryable, never falsely successful.
+	 * Callers hold the PxeService write barrier, so a re-added poisoned entry can't be observed by a
+	 * concurrent read.
+	 */
+	private async settleDisposals(entries: Array<[string, ChainRuntime]>): Promise<void> {
+		const results = await Promise.allSettled(entries.map(([, r]) => r.dispose()))
+		const errors: unknown[] = []
+		results.forEach((res, i) => {
+			if (res.status === "rejected") {
+				errors.push(res.reason)
+				const [k, runtime] = entries[i]
+				this.runtimes.set(k, runtime)
+			}
+		})
+		if (errors.length) {
+			throw new AggregateError(errors, `${errors.length} PXE runtime(s) failed to dispose (store close failed — lock may be leaked)`)
+		}
+	}
+
 	/** Dispose every runtime this registry owns. Must be called under
 	 *  the PxeService write lock — otherwise concurrent reads may
 	 *  observe a torn-down runtime. */
 	public async clear(): Promise<void> {
-		const runtimes = Array.from(this.runtimes.values())
+		const entries = Array.from(this.runtimes.entries())
 		this.runtimes.clear()
 		this.initPromises.clear()
-		await Promise.all(runtimes.map((r) => r.dispose()))
+		await this.settleDisposals(entries)
 	}
 
 	/** Dispose the single runtime (if any) for `(profileId, chainId)`. Must
@@ -340,16 +367,16 @@ export class ChainRuntimeRegistry {
 	 */
 	public async disposeProfile(profileId: string): Promise<void> {
 		const prefix = chainRegistryKeyPrefix(profileId)
-		const victims: ChainRuntime[] = []
+		const victims: Array<[string, ChainRuntime]> = []
 		for (const [k, runtime] of this.runtimes) {
 			if (k.startsWith(prefix)) {
-				victims.push(runtime)
+				victims.push([k, runtime])
 				this.runtimes.delete(k)
 			}
 		}
 		for (const k of Array.from(this.initPromises.keys())) {
 			if (k.startsWith(prefix)) this.initPromises.delete(k)
 		}
-		await Promise.all(victims.map((r) => r.dispose()))
+		await this.settleDisposals(victims)
 	}
 }

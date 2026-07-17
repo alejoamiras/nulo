@@ -58,7 +58,7 @@ vi.mock("@alejoamiras/aztec-accelerator", () => ({
 }))
 
 import { createPXE } from "@aztec/pxe/client/bundle"
-import { ProductionPxeFactory } from "./chain-runtime"
+import { ChainRuntime, ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
 import type { NodeFactory } from "../ports/node-factory-port"
 
 // The injected encrypted store is unit-mocked (real OPFS needs a browser; the production-build
@@ -223,5 +223,44 @@ describe("ProductionPxeFactory proverless mode (e2e-only)", () => {
 		// @ts-expect-error - `provingMode: "proverless"` cannot also carry `required`.
 		const factory = new ProductionPxeFactory(fakeNodeFactory, { provingMode: "proverless", required: true })
 		expect(factory).toBeDefined()
+	})
+})
+
+describe("ChainRuntimeRegistry.disposeProfile — allSettled + AggregateError + poisoned re-add (P3 audit fold)", () => {
+	const P = "prof-1"
+	const net = (chainId: number) => ({ profileId: P, chainId, rpcUrl: `http://n/${chainId}` }) as never
+
+	function runtimeWith(chainId: number, close: () => Promise<void>): ChainRuntime {
+		const pxe = { stop: async () => {} } as never
+		const node = {} as never
+		const store = { close } as never
+		return new ChainRuntime(chainId, node, pxe, `http://n/${chainId}`, store)
+	}
+
+	test("disposes all, throws AggregateError on a failed close, and re-adds ONLY the poisoned runtime", async () => {
+		const ok = runtimeWith(1, async () => {})
+		const bad = runtimeWith(2, async () => {
+			throw new Error("close failed: lock leaked")
+		})
+		const factory: PxeFactory = { createChainRuntime: async (n) => (n.chainId === 1 ? ok : bad) }
+		const reg = new ChainRuntimeRegistry(factory)
+		await reg.getOrInit(net(1))
+		await reg.getOrInit(net(2))
+
+		await expect(reg.disposeProfile(P)).rejects.toBeInstanceOf(AggregateError)
+		// The cleanly-disposed chain is gone; the poisoned one is RETAINED as the retry handle.
+		expect(reg.peek(P, 1)).toBeUndefined()
+		expect(reg.peek(P, 2)).toBe(bad)
+	})
+
+	test("resolves cleanly + clears the registry when every close succeeds", async () => {
+		const factory: PxeFactory = { createChainRuntime: async (n) => runtimeWith(n.chainId, async () => {}) }
+		const reg = new ChainRuntimeRegistry(factory)
+		await reg.getOrInit(net(1))
+		await reg.getOrInit(net(2))
+
+		await expect(reg.disposeProfile(P)).resolves.toBeUndefined()
+		expect(reg.peek(P, 1)).toBeUndefined()
+		expect(reg.peek(P, 2)).toBeUndefined()
 	})
 })
