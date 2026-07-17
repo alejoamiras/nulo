@@ -1,18 +1,12 @@
-# aztec-5.0.1-line — plan (v4 — APPROVED 2026-07-17)
+# aztec-5.0.1-line — plan (v5 — APPROVED; P0 done, P2 re-aimed 2026-07-17)
 
-> **⚠️ P0 STOPPED THE RUN (2026-07-17) — the restore-boot diagnosis was WRONG.** P0's instrumented
-> repro proved there is **no lock/emit deadlock**: the restored profile's session is *locked/inactive*
-> when its encrypted PXE store boots, so the store key can't be derived and the PXE fail-closes
-> forever (`lessons/phase-p0.md`). **P2 (emit-after-release) targets a non-existent bug.** The
-> restore fix needs a re-aim around the session-secret ↔ encrypted-store-key lifecycle. **ROOT
-> CAUSE now DEFINITIVE (`lessons/phase-p0.md`):** an MV3 worker restart drops the in-memory master;
-> in strict mode (no bearer) the encrypted-store key is unrecoverable without re-unlock, so the PXE
-> fail-closes forever with no recovery path. **Re-aimed P2 = strict-mode/SW-restart/encrypted-store
-> recovery** (stop the infinite retry → surface locked → re-provision + reboot the PXE on unlock).
-> **VERIFIED (`lessons/phase-p0.md`): recovery HOLDS** — close+reopen the popup lands on
-> `/popup/general` cleanly; the wallet is NOT broken, only the IMPORT PAGE wedges on the worker
-> restart. So the re-aimed **P2 shrinks to import-page resilience + realistic-recovery e2e** (no
-> lock/emit/lifecycle redesign). P3's #281 hardening + P1 + P4–R all stand. Awaiting the user's go.
+> **P0 COMPLETE ✓ — P2 re-aimed, user re-approved 2026-07-17.** P0 disproved the plan's hypothesized
+> lock/emit deadlock: the restore-boot bug is the IMPORT PAGE wedging when the MV3 worker restarts
+> mid-bootstrap; the wallet + encrypted store are FINE (close+reopen the popup lands on
+> `/popup/general` cleanly — verified, `lessons/phase-p0.md`). **P2 is now import-page recovery +
+> realistic-recovery e2e** (the emit-after-release lock redesign is dropped → Appendix P2-OLD; its
+> ticketed-guard/force-release-diagnostic piece survives independently in P3/#281-D11). P1, P3, and
+> P4–R are unchanged. Ledger D26. Executing.
 
 
 Deep-tier blueprint. Legs archived (`leg-main.md`, `leg-codex.md`, `leg-fable-summary.md`);
@@ -54,25 +48,34 @@ BUILT** (audit finding, previously assumed).
 ## Phase map (single PR; each phase gates before the next; sizing is coarse)
 
 ```
-P0  pin + baseline        (~half day)   P4  standards + FPC identity + Noir   (~1 day)
+P0  repro + root-cause ✓  (DONE)        P4  standards + FPC identity + Noir   (~1 day)
 P1  client 5.0.1 bump     (~half day)   P5  deploy-tooling hardening          (~1 day)
-P2  lock/emit redesign    (~1-2 days)   P6  live redeploy + promotion         (~half day live)
+P2  import-page recovery  (~half-1 day) P6  live redeploy + promotion         (~half day live)
 P3  fence + #281 items    (~1-2 days)   P7  delivery: gates, audits, merge    (~1 day)
                                         R   release + public acceptance       (~half day)
 ```
+> **P2 was re-aimed after P0** (2026-07-17): P0 proved there is NO lock/emit deadlock — the restore
+> bug is the IMPORT PAGE wedging when the MV3 worker restarts mid-bootstrap (the wallet itself
+> recovers on popup reopen; verified `lessons/phase-p0.md`). So P2 shrank from a lock/emit/lifecycle
+> redesign to import-page recovery + realistic-recovery e2e. The v3/v4 lock-redesign text is
+> preserved as **Appendix P2-OLD** (superseded) for the audit trail.
 
 ---
 
-### P0 — Reproduce + pin (pre-fix code; before ANY dep movement)
-Local repro of the node-free smoke (`backup-roundtrip.test.ts`) with the SW/offscreen console
-tap; targeted network pair under the proverless double-opt-in (`VITE_NULO_E2E_PROVERLESS` build
-flag + runtime flag) for fast loops. Deliver a dep-light `*.composition.test.ts` pin (shallow
-PXE, bb-free per COMPOSITION-TESTS.md) that drives restore → finalize → an active-profile
-listener requiring the missing-key→provision→retry round-trip — **must FAIL on the pre-fix code**
-for the localized mechanism (facade-lock re-entry). The pin lands marked `test.fails` (green in
-suites while the bug exists; flips to a NORMAL test in P2 — resolves the final-pass gate
-contradiction with P1's `test:all` green). Write the proven chain to `lessons/phase-p0.md`.
-**Gate**: repro observed red; pin red for the same mechanism. No repro → STOP and re-aim.
+### P0 ✓ — Reproduce + root-cause (DONE 2026-07-17 — `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p0.md`)
+Instrumented the node-free smoke (`backup-roundtrip.test.ts`) at the four suspected wedge points +
+an SW/offscreen console tap. **Result: the hypothesized lock/emit deadlock DOES NOT EXIST** — the
+facade lock never contends; the emit is fire-and-forget for async listeners. The real mechanism
+(pinned across three instrumented runs): a routine MV3 **worker restart** ~18 s into the restore
+drops the in-memory master; in strict mode (default `true`, no persisted bearer) the encrypted
+per-profile PXE store key is unrecoverable without re-unlock, so the PXE fail-closes on every
+retry — but this is confined to the **stuck import page**: a verified (reverted) harness experiment
+showed **close + reopen the popup lands on `/popup/general` cleanly** (`fresh-hash=#/popup/general`,
+`recovery=HOLDS`), so the wallet + encrypted store are fine.
+**Gate — MET**: repro observed; mechanism proven (and the plan's premise disproven → the STOP rule
+fired correctly, re-aiming P2 below). The originally-planned `test.fails` composition pin is
+SUPERSEDED by the P2 e2e that models real recovery (the composition layer can't reproduce a
+cross-process SW-restart; the e2e is the honest harness). ✓
 
 ### P1 — Client 5.0.1 bump (identity-preserving; deployment untouched)
 - `@aztec/*` → exact 5.0.1 (viem independent); `@alejoamiras/aztec-accelerator` → 5.0.1
@@ -88,7 +91,9 @@ contradiction with P1's `test:all` green). Write the proven chain to `lessons/ph
   a SCRATCH npm project (`npm i --package-lock-only` over the same specs, then
   `npm audit signatures`; bun repos have no npm lockfile — audit fix) → `bun install` →
   `bun install --frozen-lockfile`; allowlist-diff; zero-old-pin sweeps.
-- Re-confirm P0's pin still fails for the SAME mechanism post-bump (causal chain preserved).
+- Re-confirm the restore hang still reproduces the SAME way post-bump (the P0 smoke repro; the
+  causal chain must survive the 5.0.1 store-lifecycle changes — if 5.0.1's SQLite handle-release
+  fix #24647 ALONE resolves the wedge, note it and P2 shrinks to just the e2e realism fix).
 - 5.0.1 store-semantics absorption for OUR injected stores: verify `PXE_DATA_SCHEMA_VERSION`
   (pin/test re-point if moved); adopt `SqliteEncryptionError` (typed wrong-key ≠ corruption ≠
   absence); assert upstream's `OPFS_POOL_DIR_PREFIX` convention leaves our
@@ -105,24 +110,42 @@ contradiction with P1's `test:all` green). Write the proven chain to `lessons/ph
 - KATs: derivation vectors must stay byte-identical under 5.0.1 (any shift = STOP — protocol
   break, plan wrong). Backup compat-epoch stays 3 with round-trip tests (epoch-3 5.0.0-stamped
   backup imports under 5.0.1; export stamps 3; undecodable slice = STOP, never epoch-mask).
-**Gate**: `typecheck:all` + `test:all` + lint green (the P0 pin counts via its `test.fails`
-marker — substance still red, suite green); `verify:deployments` GREEN (committed artifacts
-still 5.0.0-compiled — the live deployment is untouched by this phase); a manual run of the pin
-confirms the SAME failing mechanism post-bump; smokes that don't touch the restore path green.
+**Gate**: `typecheck:all` + `test:all` + lint green; `verify:deployments` GREEN (committed
+artifacts still 5.0.0-compiled — the live deployment is untouched by this phase); the restore hang
+still reproduces the SAME way post-bump (or is noted as resolved by 5.0.1 itself); smokes that
+don't touch the restore path green. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p1.md`.**
 
-### P2 — Emits after lock release (the deadlock-class fix)
-Design per v2 (D2 resolved: typed transition results; SessionManager `onChange` removed; facade
-emits post-release UNIFORMLY across all ops incl. TTL/`applyTtlChange`; ordering contract
-**state → release → emit** only — listeners re-enter as normal waiters). Store-key provider →
-lock-free `peekProfileSecretForStoreKey` (single-shot; mutators-under-lock invariant documented;
-fail-closed undefined). Eager provisioning on session open with the LIVENESS fast-path (no-op
-when offscreen holds the current `{generation, key}`; WRITE barrier only on rotation).
-Lock hardening: ticketed ownership on BOTH `Lock` and `ReadWriteGuard`; force-release
-**diagnostic-only on both** (never mutates ownership; a >5-min hold logs loudly).
-**Gate**: P0 pin GREEN; profile unit+integration suites; the v2 test list (listener re-entry
-completes; finalizeRestore+listener; open/close/open ordering; silent restore; delete-listener
-observations; pre-commit error emits nothing); rw-guard/Lock suites (no negative counts;
-late-finally no-op; writer-after-release exactly-once).
+### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0)
+The bug (P0-proven): the full-backup import page silently wedges when the MV3 service worker
+restarts mid-bootstrap, because `completeImport` (`import.vue`) awaits `waitForProfileActive` on a
+now-dead SW connection and neither completes nor routes anywhere for 30 s+. The wallet itself is
+fine (reopen recovers). Fix the PAGE, not the lock/session/store subsystems.
+
+1. **Detect the stuck/dead-SW state and recover in-page or route promptly.** `completeImport` must
+   not present a silent 30 s+ "Finishing…" screen: on a bootstrap timeout OR a detectable SW
+   disconnect, either (a) transparently re-derive state (re-open the popup connection / re-read the
+   session so a still-valid session bootstraps to `/popup/general`), or (b) route to `/popup/auth`
+   with a clear "reopen or unlock to finish" message. No dead-end wait. Tighten the timeout so the
+   user reaches an actionable screen in seconds, not after 30 s.
+2. **Make re-entry land on `/popup/general` with a live PXE.** After the recovery (reopen and/or
+   unlock), the bootstrap must provision the store key and boot the chain runtime (the existing
+   missing-key retry already does this once the session is active — confirm end-to-end, don't
+   assume). If the profile is genuinely locked (strict + worker restart), the unlock path is the
+   recovery and must re-provision + boot.
+3. **Fix the three restore e2e to model reality.** `backup-roundtrip` (smoke) +
+   `backup-restore-integrity` + `backup-migration-roundtrip` (network) currently assert a straight
+   path to `/popup/general` with NO reopen — which the SW restart breaks. Update them to drive the
+   realistic recovery (reopen and/or unlock) and then assert `/popup/general` + one PXE-dependent
+   read (proving the store actually re-opened, not just the route). Keep them as the honest harness
+   for this bug (the P0 composition pin is dropped — a cross-process SW restart is not reproducible
+   at the shallow-PXE composition layer).
+Out of scope for P2 (do NOT do here): the emit-after-release lock redesign (no deadlock exists —
+Appendix P2-OLD), the `pxeGeneration` fence (that's P3/#281), and any change to the strict-mode
+default or the F-11 bearer policy (surfaced as a separate follow-up — see Assumptions).
+**Gate**: the three restore e2e GREEN under the realistic-recovery assertions (smoke via
+`test:e2e`, network via `e2e:agent`); `test:all` + lint green; a manual reopen/unlock of a
+restore-time-wedged profile reaches `/popup/general` with a working PXE read; no dead 30 s+ wait
+remains on the import path. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.**
 
 ### P3 — Deletion fence + remaining #281
 Per v2 with the audit folds:
@@ -287,9 +310,17 @@ prerelease manifest re-baselined; signing-backfill reminder.
 drip canary's hard-coded live path; PXE store carries user-added senders/registered contracts;
 node-derived stamp input at `chain-runtime.ts:150`; facade-lock non-reentrancy + emit wiring
 (all audit-verified against source).
-**Inferences** (verified at their gates): deadlock mechanism (P0 proves); PXE_DATA_SCHEMA_VERSION
-locatable (P1); accelerator 5.0.0-server compat if no new binary (P1/P7 full-prove e2e verifies,
-not just preflight); reuse-token mode feasible against the live L1 set (P5 unit + P6 preflight).
+**Inferences** (verified at their gates): restore-boot mechanism = import-page wedge on worker
+restart (**P0 PROVED this, replacing the deadlock inference**); PXE_DATA_SCHEMA_VERSION locatable
+(P1); accelerator 5.0.0-server compat if no new binary (P1/P7 full-prove e2e verifies, not just
+preflight); reuse-token mode feasible against the live L1 set (P5 unit + P6 preflight); the P2
+recovery reaches `/popup/general` with a LIVE PXE (P0 confirmed the ROUTE recovers; P2 confirms the
+PXE op).
+**Follow-up filed (NOT in this arc)**: strict mode defaults to `true` (`config/config.ts:26`), so a
+routine MV3 worker restart forces a re-unlock in normal use too. The UX mitigation (a short-lived
+strict-compatible recovery bearer that survives a worker cycle within the session TTL) touches the
+security-sensitive F-11 bearer policy and deserves its own audited change — filed as an issue at
+P7, not folded into P2.
 **Asks — none open; three CONDITIONAL asks surface only if hit**: (1) provenance attestation
 absent on `@aztec-foundation/aztec-standards@5.0.1`; (2) the single-Aztec-RPC posture becomes
 untenable for this arc (a second endpoint exists but disagrees); (3) any probe contradiction
@@ -315,3 +346,16 @@ untenable for this arc (a second endpoint exists but disagrees); (3) any probe c
 | D25 | RPC polarity: disagreement = STOP; absence = intent-documented capped acceptance | final-pass #6 |
 | D19v4 | verify-live required + hook-wired preflight + defined rollback; draft-release redesign REJECTED-with-reason for this arc (filed follow-up) | final-pass #2 (partial adopt, documented) |
 | D15v4 | If attestation absent: the resolution path is reproducible-build/diff-vs-repo binding (a concrete alternative, not a waiver), user-approved via the conditional ask | final-pass (decision-trail note) |
+| **D26** | **P2 RE-AIMED: import-page recovery, NOT the emit-after-release lock redesign** — P0 empirically disproved the deadlock; the wallet recovers on popup reopen (verified). P2-OLD lock text preserved as an appendix; the `pxeGeneration` fence stays in P3. Strict-mode/F-11 bearer = separate filed follow-up. | **P0 result + user go (2026-07-17)** |
+
+---
+
+## Appendix P2-OLD (SUPERSEDED by D26 — kept for the audit trail)
+The pre-P0 P2 assumed an emit-under-lock deadlock and prescribed: typed transition results
+(SessionManager `onChange` removed; facade emits post-release uniformly; ordering state→release→emit);
+a lock-free `peekProfileSecretForStoreKey`; eager provisioning with a liveness fast-path; ticketed
+ownership on `Lock` + `ReadWriteGuard` with force-release diagnostic-only. **P0 proved no deadlock
+exists**, so none of this ships as the restore fix. NOTE: the ticketed-`ReadWriteGuard` /
+force-release-diagnostic-only hardening was ALSO an independent #281 (D11) item — it survives THERE,
+in P3, on its own merits (the 5-min force-release vs 30-min proves is real regardless of the restore
+bug). Only the emit-after-release + lock-free-peek + eager-provision pieces are dropped.
