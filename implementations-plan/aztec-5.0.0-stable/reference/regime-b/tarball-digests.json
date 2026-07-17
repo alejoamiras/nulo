@@ -1,41 +1,42 @@
 {
-	"capturedAt": "2026-07-14",
+	"capturedAt": "2026-07-17",
+	"note": "regenerated for the 5.0.1 client bump (aztec-5.0.1-line P1)",
 	"packages": [
 		{
 			"name": "@aztec/accounts",
-			"version": "5.0.0",
-			"dist.shasum": "dd9fcd804920c99d85a4d3b5c8fdd4ddb9f10ee4",
-			"dist.integrity": "sha512-T50GX20Ekw45+OT/LeQya+TFTBZ5Bda20dnRAyEjQSiuBcKeaxncKVW4CTCPPo3kHbklND547cRCloCEk9b6fw=="
+			"version": "5.0.1",
+			"dist.shasum": "bf41787c43ca4c4ffbe63f676bafc1e2b94fa2de",
+			"dist.integrity": "sha512-IeHbWmvXtus4D6LoMLhkahkxdPGf42tUGVY8Qs4gpFvcPhoHwkfDRie/RlBKAkhiGjMJytkZLnq7rqxkNEMzYQ=="
 		},
 		{
 			"name": "@aztec/aztec.js",
-			"version": "5.0.0",
-			"dist.shasum": "3ff02b8a54a22ce9189d7207f5c1d97fce20d4db",
-			"dist.integrity": "sha512-oYcDlBo8Bpm0dD60RLa7e9qEqiSoe7YjGGREpkOAW/bPcRaA0/96pvSCO3VqFJ99e/nbLCJLUy+cy8fG/rK9HA=="
+			"version": "5.0.1",
+			"dist.shasum": "f2bfa2ec10c97bcd2b048fc9c01a0a625d58f2a4",
+			"dist.integrity": "sha512-aEAhMDhfYwLmpht1AlWuXrYUbgwZgSrXoTsT0NIVb3ACM3ksTJvhy1WFkdaNe2odgkU8nBGxWYnWQxX4WACZ7g=="
 		},
 		{
 			"name": "@aztec/constants",
-			"version": "5.0.0",
-			"dist.shasum": "03c126360a80a1d04448529839dc2cdf89948394",
-			"dist.integrity": "sha512-vfnA9qFcgLKXNdnmvAekpvIf6fdCQjghh9/h/rm4Nip3QdJ0tFS5drUPIx7DhIiWYF7QuoPmzhHHLD0ikb8lNA=="
+			"version": "5.0.1",
+			"dist.shasum": "9deb1271af66e3ed537def14a417853d4f474fb4",
+			"dist.integrity": "sha512-wJEuQ3LQ9vXy4fmvr502Cu+BK38Lrlc8NnoQxwW0NPcdYtQAkriJVvJRhlPDjZc9zhFz2XuzCPlWMedfbbvwqQ=="
 		},
 		{
 			"name": "@aztec/foundation",
-			"version": "5.0.0",
-			"dist.shasum": "40807858fa96960d794ffde66bc282d19409dbbb",
-			"dist.integrity": "sha512-M/+bgYg753kl0BcQsZMSUzUdtE32SD0rGwhk8iJJ/JGFrV5Q8o09EqOu1T+ikf8m9MWlhFPp48CfO07yyxzOkw=="
+			"version": "5.0.1",
+			"dist.shasum": "e053edd7d30aaa40bf2cb948b4dea3b8f5b091aa",
+			"dist.integrity": "sha512-5CIc3JMTEjODf9gHu19wij5KOV3yn3iU5CtDfQR7CPXhzE6HfVbgSJIA57opgOd46K/82uQ0EVnLszpo//3bPw=="
 		},
 		{
 			"name": "@aztec/pxe",
-			"version": "5.0.0",
-			"dist.shasum": "d7eb2e6de4e8d4af56b54575aa189fcf949d0ed5",
-			"dist.integrity": "sha512-jRbK/ttGYsPkXfagJZ4kcB4BAs9s8zpewHMYLqWAu18esthj1X2AYv9xL/p2OJsqJ1mAbLYFwlpig7LTOOq/9g=="
+			"version": "5.0.1",
+			"dist.shasum": "0f9b99527624310fabb6d53a64ca257ef2b11c85",
+			"dist.integrity": "sha512-bMnkRKeh7sjmfWKxoZ2TM0DynyrIOY5zLXGVL201FC+Uae36URRtFUR5wjZeVq7GAfKilGE8EflYLklm1xyzkA=="
 		},
 		{
 			"name": "@aztec/stdlib",
-			"version": "5.0.0",
-			"dist.shasum": "37d2622f62fc5b198dae22cd2eb459ec353cdf32",
-			"dist.integrity": "sha512-bFS6bzxYP1INlSEDJrSkRKRBCZ7iUrBq/ygEnrga/EhD4ECShWuSidYHsGwEkc8u6Mtp3neT7Xcvb02M7tTJng=="
+			"version": "5.0.1",
+			"dist.shasum": "c8a07da903d8df7afa9602212a0f9fe1950b8424",
+			"dist.integrity": "sha512-CSwsM65EzmSmcL+xot+b/DF1W3OrmVfpy/QvYVE9NPj2q3KE5vUCcJqzfVW04Imq/43ctHRg3vBs3qZf5Qd6kQ=="
 		}
 	]
 }

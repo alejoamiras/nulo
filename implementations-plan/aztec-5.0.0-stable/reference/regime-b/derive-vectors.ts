@@ -94,7 +94,7 @@ for (const { seed: seedHex, signingKey: expectedSigningKey } of REGIME_A) {
 }
 
 const out = {
-	source: "published 5.0.0 tarballs (see package.json pins + tarball-digests.json)",
+	source: "published 5.0.1 tarballs (see package.json pins + tarball-digests.json)",
 	chain: "seed -> sha512ToGrumpkinScalar([seed, IVSK_M]) -> deriveSecretKeyFromSigningKey -> deriveKeys -> instance(salt=0, immutablesHash) -> address",
 	domainSeparator: { name: "IVSK_M", value: Number(DomainSeparator.IVSK_M) },
 	salt: SALT.toString(),

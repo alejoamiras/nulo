@@ -41,15 +41,16 @@ linker = "hoisted"
 # CLI equivalent: --minimum-release-age=604800
 minimumReleaseAge = 604800
 
-# Excludes (the ONLY packages exempt from the 7-day gate):
-# - The @aztec/* 5.0.0 stable set (names incl. transitives, enumerated from the lockfile —
-#   the gate bites ANY fresh resolution, not just direct pins): published 2026-07-13, ages
-#   out ~2026-07-21. TEMPORARY — remove in a follow-up PR after that date. Provenance is
-#   checked at bump time instead (npm audit signatures + attestations; see the aztec-update
-#   skill + implementations-plan/aztec-5.0.0-stable/).
-# - @alejoamiras/{aztec-accelerator,aztec-standards,aztec-fee-payment}: the 5.0.0 line
-#   (accelerator published 2026-07-13; standards + fee-payment 2026-07-14, age out
-#   ~2026-07-21). Same follow-up removes them.
+# Excludes (the ONLY packages exempt from the 7-day gate). Name-based, so they cover the 5.0.1
+# client re-resolution too:
+# - The @aztec/* 5.0.1 client set (names incl. transitives, enumerated from the lockfile — the
+#   gate bites ANY fresh resolution, not just direct pins): 5.0.1 published 2026-07-15, ages out
+#   ~2026-07-22. TEMPORARY — remove in a follow-up PR after that date. Provenance is checked at
+#   bump time instead (npm audit signatures + attestations; see the aztec-update skill +
+#   implementations-plan/aztec-5.0.1-line/).
+# - @alejoamiras/aztec-accelerator: 5.0.1 published 2026-07-16, ages out ~2026-07-23. Same
+#   follow-up removes it. @alejoamiras/aztec-{standards,fee-payment} STAY 5.0.0 this phase
+#   (identity-coupled — they move to @aztec-foundation / 5.0.1 in P4, re-dated there).
 # The puppeteer closure (aged out 2026-05) and the rc.1 set were dropped once past the
 # window. On Bun 1.3.13+ a frozen-lockfile install of already-pinned versions doesn't trip
 # the gate; it only bites active re-resolution, so dropping aged-out excludes is safe.
