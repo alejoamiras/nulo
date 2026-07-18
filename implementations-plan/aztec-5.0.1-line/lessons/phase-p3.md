@@ -145,6 +145,26 @@ post-import **balance projection's note-sync fails HARD on an unregistered contr
 This is the network-e2e blocker; it is NOT P4-coupled after all (my earlier standards-artifact
 hypothesis was also wrong — the token registers fine; it's the FPC fee-note sync).
 
+### Fix MECHANICS (analyzed — implement race-free next session)
+- `FpcService.getFpcs(chainId)` ALREADY registers the protocol FPCs in the offscreen PXE (the
+  `toDiscover` → `pxe.registerContract(...)` block, service.ts ~195). So NO new registration code is
+  needed — the fix is purely making that registration run BEFORE the account's first note-sync.
+- KEY constraint: `sync_state` is ACCOUNT-WIDE (any `getNotes`/`simulate`/`balance_of` for the account
+  triggers it and processes ALL incoming notes, incl. the FPC fee note). So eager registration must be
+  GUARANTEED-ORDERED ahead of the incoming-transfer scan / token-balance projection — a plain
+  "register on onActiveProfileChanged" can RACE the scan (both subscribe to activation; order
+  undefined). Safer: have the note-sync / balance-projection path call a new
+  `FpcService.ensureProtocolFpcsRegistered(chainId)` (idempotent, reuses the getFpcs register block)
+  BEFORE it syncs — guarantees ordering at the cost of a note-sync → fpc dependency.
+- Watch: don't break the lazy getFpcs path, the private-fuel address keying, or fee flows; the
+  register block is under `this.lock` — keep it idempotent. Verify with the local repro (importToken
+  must reach "Token added" and the balance must show 1,000).
+- Alt (broader resilience, separate concern): a wallet can receive notes from ARBITRARY unregistered
+  contracts; 5.0.1 hard-failing the whole sync on ONE unknown emitter is fragile. A general fix would
+  make note-sync skip/scope unregistered emitters — but upstream `sync_state` throws+aborts, so this
+  needs upstream cooperation or sync-scoping; out of scope for unblocking the gate (register the known
+  protocol FPCs first).
+
 ### (SUPERSEDED — was a guess) Leading HYPOTHESIS (UNVERIFIED — do not trust without evidence; I was wrong twice)
 The imported token is a **5.0.0-compiled `@alejoamiras/aztec-standards` artifact (HELD at 5.0.0 in
 P1)**; projecting its notes through a **5.0.1 PXE** may hang/fail if the 5.0.0 note-layout/contract
