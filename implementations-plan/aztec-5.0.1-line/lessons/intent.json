@@ -52,5 +52,6 @@
 			"implementations-plan/aztec-5.0.0-stable/lessons/",
 			"implementations-plan/aztec-5.0.1-line/lessons/"
 		]
-	}
+	},
+	"candidateSha256": "910421983e65a316009982b0f9fd9781a1d3ed5ff37a3e7d40ae0c24d67a9649"
 }
