@@ -19,10 +19,11 @@
  */
 import { createHash } from "node:crypto"
 import { execFileSync, execSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseCandidateManifest } from "../src/candidate-schema"
+import { assertFaucetCandidateShape, assertZeroSeed } from "../src/promotion"
 import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
 /** The ONLY L1 signer authorized for this arc — pinned in the PLAN (and here), never derived
@@ -105,9 +106,11 @@ export interface DeployIntent {
 const OPERATIONAL_ALLOWLIST = [
 	"apps/faucet/public/testnet-bridge.candidate.json",
 	"apps/faucet/public/testnet-bridge.json",
+	"apps/faucet/src/contracts/deployments.candidate.json",
 	"apps/faucet/src/contracts/deployments.json",
 	"packages/bridge-core/deploy-journal.jsonl",
 	"implementations-plan/aztec-5.0.0-stable/lessons/",
+	"implementations-plan/aztec-5.0.1-line/lessons/",
 ]
 
 async function build(intentPath: string): Promise<void> {
@@ -348,9 +351,108 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	}
 }
 
+/**
+ * Crash-safe, receipted promotion of BOTH candidates to their live paths:
+ *   apps/faucet/public/testnet-bridge.candidate.json      → testnet-bridge.json
+ *   apps/faucet/src/contracts/deployments.candidate.json  → deployments.json
+ *
+ * Invariant (audit): verify → validate-in-memory → temp-write+rename → re-hash →
+ * re-verify → receipt. The candidates are read ONCE into buffers and every later
+ * step operates on/against those exact bytes; symlinked candidates or live paths
+ * are rejected; each write is a same-directory temp + rename (atomic on one fs);
+ * both written files are re-hashed against the source buffers and the faucet
+ * derivation is re-proven by the REAL verify-deployments gate over the live file.
+ * Nothing here runs `git commit` — a crash at any point leaves only uncommitted
+ * working-tree changes (never a partially-promoted COMMITTED state), and the
+ * next `verify` sees them via the tree-discipline check.
+ *
+ * Zero-seed assertion (this arc deploys no fuel/router and seeds no WETH): the
+ * candidate's `l1.fuel` section must be BYTE-carried from the current live
+ * manifest — new or changed fuel infrastructure hard-fails the promotion.
+ */
+async function promote(intentPath: string): Promise<void> {
+	const bridgeCandidatePath = join(repoRoot, "apps/faucet/public/testnet-bridge.candidate.json")
+	const bridgeLivePath = join(repoRoot, "apps/faucet/public/testnet-bridge.json")
+	const faucetCandidatePath = join(repoRoot, "apps/faucet/src/contracts/deployments.candidate.json")
+	const faucetLivePath = join(repoRoot, "apps/faucet/src/contracts/deployments.json")
+
+	// 0. The full gate, candidate-pinned, immediately before anything is written.
+	await verify(intentPath, bridgeCandidatePath)
+
+	// 1. Symlink rejection on every involved path (a symlinked live target would
+	// redirect the rename; a symlinked candidate breaks the read-once contract).
+	for (const p of [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]) {
+		let st: ReturnType<typeof lstatSync> | undefined
+		try {
+			st = lstatSync(p)
+		} catch {
+			if (p === bridgeCandidatePath || p === faucetCandidatePath) throw new Error(`candidate missing: ${p} — nothing to promote`)
+			continue // a live target may not exist yet — rename will create it
+		}
+		if (st.isSymbolicLink()) throw new Error(`refusing to promote through a symlink: ${p}`)
+	}
+
+	// 2. Read ONCE into buffers + validate the exact bytes that will be written.
+	const bridgeBytes = readFileSync(bridgeCandidatePath)
+	const faucetBytes = readFileSync(faucetCandidatePath)
+	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")
+	const faucetSha = createHash("sha256").update(faucetBytes).digest("hex")
+	const bridgeCandidate = parseCandidateManifest(JSON.parse(bridgeBytes.toString("utf8")))
+	assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
+
+	// 3. Zero-seed assertion: fuel section byte-carried from live (or absent in both).
+	let liveFuel: unknown
+	try {
+		liveFuel = (JSON.parse(readFileSync(bridgeLivePath, "utf8")) as { l1?: { fuel?: unknown } }).l1?.fuel
+	} catch {
+		liveFuel = undefined
+	}
+	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel)
+
+	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
+	const writes: Array<[string, Buffer, string]> = [
+		[bridgeLivePath, bridgeBytes, bridgeSha],
+		[faucetLivePath, faucetBytes, faucetSha],
+	]
+	for (const [target, bytes, sha] of writes) {
+		mkdirSync(dirname(target), { recursive: true })
+		const tmp = `${target}.promote-tmp`
+		writeFileSync(tmp, bytes)
+		renameSync(tmp, target)
+		const written = createHash("sha256").update(readFileSync(target)).digest("hex")
+		if (written !== sha) throw new Error(`re-hash mismatch after write: ${target} ${written} != ${sha} — investigate before committing`)
+	}
+
+	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
+	// re-prove the faucet derivation through the real gate.
+	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
+	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], { stdio: "inherit" })
+
+	// 6. Promotion receipt — committed by the operator alongside the promoted files.
+	const receiptPath = join(repoRoot, "implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json")
+	mkdirSync(dirname(receiptPath), { recursive: true })
+	const commit = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim()
+	writeFileSync(
+		receiptPath,
+		`${JSON.stringify(
+			{
+				promotedAt: new Date().toISOString(),
+				intent: intentPath,
+				commitAtPromotion: commit,
+				bridge: { candidateSha256: bridgeSha, live: "apps/faucet/public/testnet-bridge.json" },
+				faucet: { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" },
+				zeroSeed: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
+			},
+			null,
+			"\t",
+		)}\n`,
+	)
+	console.log(`✓ promoted both candidates; receipt at ${receiptPath} — commit the promoted files + receipt together`)
+}
+
 const [, , cmd, intentPath, ...rest] = process.argv
 if (!cmd || !intentPath) {
-	console.error("usage: live-intent.ts build|verify <intent-path> [--candidate <path>]")
+	console.error("usage: live-intent.ts build|verify|promote <intent-path> [--candidate <path>]")
 	process.exit(1)
 }
 const candidateFlag = rest.indexOf("--candidate")
@@ -360,7 +462,9 @@ const run =
 		? build(intentPath)
 		: cmd === "verify"
 			? verify(intentPath, candidatePath)
-			: Promise.reject(new Error(`unknown command ${cmd}`))
+			: cmd === "promote"
+				? promote(intentPath)
+				: Promise.reject(new Error(`unknown command ${cmd}`))
 run.catch((err) => {
 	console.error(`✗ ${err instanceof Error ? err.message : err}`)
 	process.exit(1)
