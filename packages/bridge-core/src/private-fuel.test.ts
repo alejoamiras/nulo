@@ -151,26 +151,38 @@ describe("private-fuel keystone", () => {
 	})
 })
 
+// Canonical FeeJuice lives at protocol address 3.
+const FEE_JUICE_ADDRESS = `0x${"0".repeat(63)}3`
+
 describe("privateMintAndPayFee", () => {
-	it("builds a method paying via the FPC with a two-call setup payload", async () => {
+	it("builds a two-call payload whose TARGETS + SELECTORS are pinned (not just the count)", async () => {
 		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 		const method = privateMintAndPayFee(fpc, 1_000n, new Fr(123n), Fr.zero(), new Fr(7n))
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
-		// FeeJuice.claim + PrivateFPC.mint_and_pay_fee, run verbatim by the wallet's EXTERNAL path.
 		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(2)
+		// Pin the exact (to, selector) of each call. Count-only would pass a tampered
+		// fee-payment SDK that re-pointed the claim recipient or swapped a selector while
+		// keeping two calls (codex ultra-audit HIGH #3). Call 0 = FeeJuice.claim (protocol
+		// address 3); call 1 = PrivateFPC.mint_and_pay_fee (our pinned FPC address).
+		expect(payload.calls[0].to.toString()).toBe(FEE_JUICE_ADDRESS)
+		expect(payload.calls[0].selector.toString()).toBe("0xe8d374b6")
+		expect(payload.calls[1].to.toString()).toBe(PRIVATE_FPC_ADDRESS)
+		expect(payload.calls[1].selector.toString()).toBe("0xd43b351a")
 	})
 })
 
 describe("privateFeeJuicePayment", () => {
-	it("pays via the FPC with a SINGLE pay_fee setup call (the manifest-scope assumption)", async () => {
+	it("pays via the FPC with a SINGLE pay_fee call whose target + selector are pinned", async () => {
 		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 		const method = privateFeeJuicePayment(fpc)
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
-		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee. The faucet
-		// manifest therefore scopes `pay_fee` alone; a Wonderland change that adds a setup call would
-		// break that scope assumption and is meant to trip here.
+		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee — targeting
+		// the pinned FPC address with the pinned selector. A tampered SDK re-pointing/renaming it,
+		// or a Wonderland change adding a setup call, trips here (count + target + selector).
 		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(1)
+		expect(payload.calls[0].to.toString()).toBe(PRIVATE_FPC_ADDRESS)
+		expect(payload.calls[0].selector.toString()).toBe("0xb596dfae")
 	})
 })

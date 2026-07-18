@@ -158,7 +158,8 @@ async function main() {
 	const token = await deployL2(
 		"Token",
 		TokenContractArtifact,
-		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO = none).
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
 		"constructor_with_minter",
 	)
 	const bridge = await deployL2(

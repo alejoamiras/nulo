@@ -99,7 +99,11 @@ export function rebuildBridgeTokenInstance() {
 	const [name, symbol, decimals] = config.l2.token.constructorArgs
 	return getContractInstanceFromInstantiationParams(TokenContractArtifact, {
 		...common,
-		constructorArgs: [name, symbol, decimals, BRIDGE_PROXY],
+		// 5.0.1 standards Token: constructor_with_minter's 5th param auth_contract (ZERO = none,
+		// matching deploy-bridge-testnet). The minter (4th) stays hardcoded to BRIDGE_PROXY — an
+		// invariant cross-check, not trusted from config. The reconstructed address is 5.0.1-derived,
+		// so it matches only a 5.0.1-deployed bridge (P6 coupling; the live 5.0.0 manifest differs).
+		constructorArgs: [name, symbol, decimals, BRIDGE_PROXY, AztecAddress.ZERO],
 		salt: new Fr(config.l2.token.salt),
 		constructorArtifact: config.l2.token.constructorArtifact,
 	})
