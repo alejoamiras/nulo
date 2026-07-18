@@ -175,3 +175,21 @@ intent; client-only/docs re-runs the standard suites only.
 
 No deploy-affecting source mutation since the intent build → intent remains valid; standard
 suites ran green on `75e7756` (Quality + Smoke + Network e2e + Lint workflows all success).
+
+## P7 CLOSED — #282 merged
+
+Squash `f9f28cf` on dev, 2026-07-18. Merge was blocked twice past green checks:
+
+1. **`required_signatures` blocked the self-authored squash** — all 104 branch commits were
+   AFK-unsigned (`-c commit.gpgsign=false` per policy). The CLAUDE.md claim "GitHub signs the
+   squash on your behalf, so signatures don't independently block" was verified with a SIGNED
+   PR; with unsigned branch commits the classic protection refuses even the API squash. Fix
+   (user-approved): `git rebase --exec 'git commit --amend --no-edit -S --no-verify' <base>`
+   (SSH key signs headlessly), tree verified byte-identical pre-push, `--force-with-lease`,
+   full CI re-run on the signed head. Lesson: on a signature-protected base, AFK-unsigned
+   commits defer the merge to a user decision — budget for backfill + one extra CI cycle.
+2. **One more network flake** (`contracts-getMetadata`, shard 2, 6.5s in) on the byte-identical
+   signed tree — re-ran failed jobs only, green, merged.
+
+Gate: merged ✓; dev green ✓ (no push:dev workflows exist — verified by trigger scan; the PR's
+three required aggregators are the binding gate and were green on the final head).
