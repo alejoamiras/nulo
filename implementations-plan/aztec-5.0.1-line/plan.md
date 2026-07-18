@@ -299,7 +299,22 @@ vs the live node; tripwire green on the new pin; compile clean + keystone `nargo
 `test:all` green; drift detectors now EXPECTED red (verify:deployments + instance re-derive) —
 recorded as the redeploy's evidence; anything else red = STOP.
 
-### P5 — Deploy-tooling hardening (before any live use)
+### P5 — Deploy-tooling hardening (before any live use) ✓ GATE GREEN
+> **✅ DONE (4 commits).** `c3062d7` intent identity pinning: build compares every node-claimed L1
+> address + l1ChainId/rollupVersion against the COMMITTED 5.0.0-arc intent (byte-equal or STOP) on
+> top of the existing eth_getCode corroboration; second-endpoint DISAGREEMENT was already an
+> unconditional STOP and absence the documented capped-risk posture. `561a16a` faucet
+> candidate-first: 5-arg token deploys (auth_contract=ZERO), records carry `authContract`, deploy
+> writes `deployments.candidate.json` by default; record-parameterized rebuilds power
+> `verify-deployments --config` + `drip-canary --config`; pre-5.0.1 records fail targeted.
+> `be438b1` `live-intent.ts promote`: verify → symlink-reject → read-once validated buffers →
+> zero-seed assertion (l1.fuel byte-carried) → temp+rename → re-hash → strict re-parse + real
+> verify-deployments re-proof → receipt; never git-commits (no partially-promoted COMMITTED
+> state); allowlist gains the faucet candidate + 5.0.1 lessons dir. `5db0076` `--reuse-token`
+> (readback-verified AZLO; malformed flag hard-stops) + portal-init preflight (live `l2Bridge()`
+> must be ZERO — portal reuse forbidden). **Gate**: +14 unit tests over the new modes/promote
+> (bridge-core 148/148, faucet 428/428), `test:all` rc=0; lint green on CI (worktree biome skew
+> documented in p3 lessons). `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p5.md`.
 Per v2/audits: strict-zod intent; signer re-validation REQUIRED (absent key = fail); exact-file
 operational allowlist; **network-identity pinning** (audit): the intent build compares
 node-claimed L1 addresses against the COMMITTED previous-arc values (no-reset ⇒ must be
