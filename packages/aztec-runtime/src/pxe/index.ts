@@ -19,6 +19,6 @@ export {
 export type { IPXE } from "./ipxe"
 export { PXE_SERVICE_NAME, type Methods, type NotesFilter } from "./spec"
 export { PxeService, type IProfileReader } from "./service"
-export { PxeServiceClientBase } from "./client"
+export { PxeServiceClientBase, type StoreKeyProvision } from "./client"
 export { PXEProxy } from "./proxy"
 export { NoteDaoSchema, PackedPrivateEventSchema, NotesFilterSchema } from "./schemas"

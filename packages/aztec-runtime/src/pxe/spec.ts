@@ -81,10 +81,15 @@ export type Methods = {
 	 *  prefix (catches orphan/network-less DBs a per-chain clear misses) and
 	 *  the shared keyval-store only when no PXE DB survives. Awaited +
 	 *  failure-propagating — the deletion coordinator treats a rejection as a
-	 *  critical, retryable erasure failure. */
-	clearProfileState(profileId: string): void
+	 *  critical, retryable erasure failure. `generation` is the incarnation
+	 *  being erased (from the tombstone carry): a late clear carrying a
+	 *  superseded generation can never erase a live successor (#281 D4). */
+	clearProfileState(profileId: string, generation: string): void
 	/** Provision the per-profile 32-byte PXE store encryption key (base64). Derived SW-side
 	 *  from the profile master; in-memory only offscreen-side; a chain runtime fail-closes
-	 *  without it. Idempotent — re-provisioned after an offscreen restart. */
-	provisionChainStoreKey(profileId: string, storeKeyBase64: string): void
+	 *  without it. Idempotent — re-provisioned after an offscreen restart. `generation` is
+	 *  the profile row's incarnation generation, derived FRESH under the facade lock at
+	 *  send time; the offscreen lifecycle fence rejects it for deleting/erased
+	 *  incarnations (#281 D4). */
+	provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): void
 }

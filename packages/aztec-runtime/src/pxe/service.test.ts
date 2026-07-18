@@ -273,7 +273,7 @@ describe("PxeService deletion honesty (finding D)", () => {
 				return fireReq("success")
 			},
 		})
-		await service.clearProfileState("p1")
+		await service.clearProfileState("p1", "gen-1")
 		expect(deleted).toContain("pxe/p1/1")
 		expect(deleted).not.toContain("pxe/p2/1") // another profile's DB — untouched
 		expect(deleted).not.toContain("keyval-store") // shared — kept while p2 survives
@@ -291,12 +291,12 @@ describe("PxeService deletion honesty (finding D)", () => {
 		vi.stubGlobal("indexedDB", { databases: async () => [], deleteDatabase: () => fireReq("success") })
 
 		// Failed erase: rejects AND keeps the barrier entry so the profile stays fenced for a retry.
-		await expect(service.clearProfileState("p1")).rejects.toBeInstanceOf(AggregateError)
+		await expect(service.clearProfileState("p1", "gen-1")).rejects.toBeInstanceOf(AggregateError)
 		expect(barriers.has("p1")).toBe(true)
 
 		// Same-gen retry now succeeds → the barrier is dropped (the profile is gone).
 		disposeShouldFail = false
-		await service.clearProfileState("p1")
+		await service.clearProfileState("p1", "gen-1")
 		expect(barriers.has("p1")).toBe(false)
 	})
 })

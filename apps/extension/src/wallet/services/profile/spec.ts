@@ -24,8 +24,14 @@ export type ProfileInfo = {
 	type: ProfileType
 }
 
-export type Profile = ProfileInfo &
-	(
+export type Profile = ProfileInfo & {
+	/** 128-bit random incarnation generation (hex), minted fresh at EVERY row
+	 *  creation — including a same-id backup re-import. The PXE layer fences
+	 *  provisions/ops/clears on it so a deleted incarnation can never be
+	 *  resurrected in the offscreen document (#281 D4). Never reused, never
+	 *  derived from the id. */
+	pxeGeneration: string
+} & (
 		| {
 				type: "password"
 				guard: string
@@ -36,6 +42,12 @@ export type Profile = ProfileInfo &
 				credentialId: string
 		  }
 	)
+
+/** Mint a fresh 128-bit Web-Crypto incarnation generation (32 hex chars). */
+export function mintPxeGeneration(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(16))
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+}
 
 export type Session = {
 	/** Profile id. */

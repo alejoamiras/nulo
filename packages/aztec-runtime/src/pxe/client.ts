@@ -59,10 +59,24 @@ import { PXEProxy } from "./proxy"
  */
 const PROVE_TX_TIMEOUT_MS = 30 * 60_000
 
+/** What the SW-side store-key provider yields: the derived 32-byte key PLUS the
+ *  profile row's current incarnation generation, both read under the facade lock
+ *  at SEND time — a provision can never pair a fresh key with a stale generation
+ *  (or vice versa), which is what lets the offscreen lifecycle fence reject
+ *  resurrection attempts (#281 D4). */
+export interface StoreKeyProvision {
+	key: Uint8Array
+	generation: string
+}
+
 export class PxeServiceClientBase extends ServiceClient<Methods> implements ServiceSpec<Methods> {
 	/** SW-side derivation hook for the per-profile store encryption key (see
 	 *  `setStoreKeyProvider`). Undefined until the embedder wires it at boot. */
-	private storeKeyProvider?: (profileId: string) => Promise<Uint8Array | undefined>
+	private storeKeyProvider?: (profileId: string) => Promise<StoreKeyProvision | undefined>
+	/** SW-side lookup of the profile row's CURRENT incarnation generation, used to
+	 *  stamp `pxeGeneration` onto outgoing ops' NetworkInfo (see `request`). Kept
+	 *  separate from the key provider so op capture doesn't pay an HKDF per call. */
+	private generationProvider?: (profileId: string) => Promise<string | undefined>
 
 	public constructor(logger: ILogger) {
 		super(PXE_SERVICE_NAME, logger)
@@ -75,20 +89,47 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 
 	/**
 	 * Register the SW-side store-key derivation hook (typically `derivePxeStoreKey(master,
-	 * profileId)` against the in-memory session). The offscreen holds provisioned keys in memory
-	 * only, so an offscreen-document restart drops them; when a request then fails with the
+	 * profileId)` against the in-memory session, paired with the row's `pxeGeneration`, all
+	 * under the facade lock). The offscreen holds provisioned keys in memory only, so an
+	 * offscreen-document restart drops them; when a request then fails with the
 	 * `PXE_STORE_KEY_MISSING` marker, this client derives + re-provisions + retries ONCE. The
-	 * provider returning `undefined` (profile locked / no session) lets the original error
-	 * propagate — a locked profile cannot open its encrypted PXE store, by design.
+	 * provider returning `undefined` (profile locked / row gone / tombstoned) lets the original
+	 * error propagate — a locked or deleted profile cannot open its encrypted PXE store.
 	 */
-	public setStoreKeyProvider(provider: (profileId: string) => Promise<Uint8Array | undefined>): void {
+	public setStoreKeyProvider(provider: (profileId: string) => Promise<StoreKeyProvision | undefined>): void {
 		this.storeKeyProvider = provider
+	}
+
+	/** Register the generation lookup for op capture. Optional: without it, ops go
+	 *  out uncaptured and only the provision-time fence applies. */
+	public setGenerationProvider(provider: (profileId: string) => Promise<string | undefined>): void {
+		this.generationProvider = provider
 	}
 
 	protected override async request<T extends keyof Methods>(
 		method: T,
 		...args: Parameters<Methods[T]>
 	): Promise<Awaited<ReturnType<Methods[T]>>> {
+		// Capture the incarnation generation ONCE per logical op, before the first
+		// send: the missing-key retry below re-sends the SAME args, so the retry
+		// REUSES the capture — an op that outlived a delete + same-id re-import
+		// carries its original generation and is rejected offscreen-side instead
+		// of silently running against the successor's store (#281 D4).
+		const netArg = args[0] as (NetworkInfo & { pxeGeneration?: string }) | undefined
+		if (
+			netArg &&
+			typeof netArg === "object" &&
+			"profileId" in netArg &&
+			"chainId" in netArg &&
+			!netArg.pxeGeneration &&
+			this.generationProvider
+		) {
+			const generation = await this.generationProvider(netArg.profileId)
+			if (generation) {
+				args = [...args] as Parameters<Methods[T]>
+				args[0] = { ...netArg, pxeGeneration: generation }
+			}
+		}
 		try {
 			return await super.request(method, ...args)
 		} catch (err) {
@@ -97,11 +138,11 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
 				throw err
 			}
-			const key = await this.storeKeyProvider(profileId)
-			if (!key) throw err
+			const provision = await this.storeKeyProvider(profileId)
+			if (!provision) throw err
 			await super.request(
 				"provisionChainStoreKey" as T,
-				...([profileId, btoa(String.fromCharCode(...key))] as unknown as Parameters<Methods[T]>),
+				...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<Methods[T]>),
 			)
 			return await super.request(method, ...args)
 		}
@@ -234,13 +275,15 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		await this.request("clearChainState", profileId, chainId)
 	}
 
-	public async clearProfileState(profileId: string): Promise<void> {
-		await this.request("clearProfileState", profileId)
+	/** `generation` is the incarnation being erased, read from the tombstone carry —
+	 *  NOT the row (the row is already gone by deletion time). */
+	public async clearProfileState(profileId: string, generation: string): Promise<void> {
+		await this.request("clearProfileState", profileId, generation)
 	}
 
-	/** Provision the per-profile PXE store encryption key (32 bytes, base64-encoded). Called by
-	 *  the embedder after unlock; also fired automatically by the missing-key retry path. */
-	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string): Promise<void> {
-		await this.request("provisionChainStoreKey", profileId, storeKeyBase64)
+	/** Provision the per-profile PXE store encryption key (32 bytes, base64-encoded) under the
+	 *  profile's current incarnation generation. Fired by the missing-key retry path. */
+	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
+		await this.request("provisionChainStoreKey", profileId, storeKeyBase64, generation)
 	}
 }

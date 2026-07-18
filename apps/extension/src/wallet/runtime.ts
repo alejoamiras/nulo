@@ -39,7 +39,7 @@ import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
 import { ProfileService } from "./services/profile/service"
-import { registerPxeStoreKeyProvider } from "./services/pxe/client"
+import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
 import { derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
@@ -198,12 +198,20 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// The per-profile PXE store encryption key: derived on demand from the in-memory master
 		// (HKDF, wallet-crypto) and provisioned to the offscreen by the PXE clients' missing-key
 		// retry path. The master never crosses the seam; a locked profile yields undefined and
-		// the PXE op fails as it should.
+		// the PXE op fails as it should. The provision pairs the key with the row's CURRENT
+		// pxeGeneration — read fresh under the facade lock (row-exists + not-tombstoned), so a
+		// provider that captured the master before a deletion cannot re-provision the erased
+		// incarnation afterwards (#281 D4).
 		registerPxeStoreKeyProvider(async (profileId) => {
+			const generation = await profileService.getPxeGeneration(profileId)
+			if (!generation) return undefined
 			const master = await profileService.getProfileSecret(profileId).catch(() => undefined)
 			if (!master) return undefined
-			return derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId)
+			return { key: await derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId), generation }
 		})
+		// Generation-only capture for outgoing ops (no HKDF per op) — stamps
+		// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.
+		registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))

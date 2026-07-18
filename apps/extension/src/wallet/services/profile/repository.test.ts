@@ -22,6 +22,7 @@ const samplePasswordProfile = (id: string): Profile => ({
 	id,
 	name: "test",
 	type: "password",
+	pxeGeneration: "gen-test",
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
 })

@@ -123,6 +123,22 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 *  re-provisioned on demand after an offscreen restart — in-memory only, never persisted).
 	 *  Dropped on profile delete. */
 	private readonly storeKeys = new Map<string, Uint8Array>()
+	/**
+	 * Per-profile incarnation lifecycle (issue #281 D4), keyed by profileId:
+	 * absent = `unseen` → `live(gen)` on provision → `deleting(gen)` marked
+	 * SYNCHRONOUSLY when a clear starts → `deleted(gen)` on successful erase.
+	 *
+	 * `gen` is the profile row's persisted 128-bit `pxeGeneration`, minted fresh
+	 * at every row creation (including a same-id re-import) and carried by the
+	 * SW on provision/clear/ops. The map is in-memory only: an offscreen restart
+	 * resets everything to `unseen`, which is safe because stale DELIVERY dies
+	 * with the port and the SW re-validates gen-currency at every SEND — the map
+	 * exists to fence SAME-incarnation resurrection: a key provider that captured
+	 * the profile master before deletion cannot re-provision after the purge
+	 * (its generation is the deleted one), so the missing-key retry can no longer
+	 * recreate a deleted profile's runtime + OPFS store.
+	 */
+	private readonly profileLifecycles = new Map<string, { kind: "live" | "deleting" | "deleted"; gen: string }>()
 
 	public constructor(profiles: IProfileReader, logger: ILogger, factory?: PxeFactory) {
 		super(PXE_SERVICE_NAME, logger)
@@ -558,7 +574,22 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * survives for ANY profile. AWAITED + rejects on failure so the deletion
 	 * coordinator can treat a rejection as a critical, retryable erasure failure.
 	 */
-	public async clearProfileState(profileId: string): Promise<void> {
+	public async clearProfileState(profileId: string, generation: string): Promise<void> {
+		if (!generation) throw new Error("clearProfileState: missing pxe generation")
+		const current = this.profileLifecycles.get(profileId)
+		// A late clear carrying a superseded generation must NEVER erase a live
+		// successor (same-id re-import minted a fresh generation): reject before
+		// touching any state. A same-gen clear after success is an idempotent
+		// no-op — the erase already completed.
+		if (current && current.gen !== generation) {
+			throw new Error(
+				`clearProfileState: generation mismatch for ${profileId} — a ${current.kind} incarnation with a different generation exists; refusing to erase`,
+			)
+		}
+		if (current?.kind === "deleted") return
+		// Mark `deleting` SYNCHRONOUSLY (before any await): a provision arriving
+		// while we wait for the write barrier must already see the fence.
+		this.profileLifecycles.set(profileId, { kind: "deleting", gen: generation })
 		const barrier = this.getProfileBarrier(profileId)
 		await barrier.enterWrite()
 		try {
@@ -588,6 +619,12 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// being-deleted entity and a same-gen retry reuses the SAME barrier — deleting it on a
 			// failed erase would let a read slip past the fence before the coordinator retries.
 			this.profileBarriers.delete(profileId)
+			// SUCCESS ONLY: `deleted(gen)` is retained (not removed) so a same-incarnation
+			// stale provision replay of THIS generation is rejected forever; a re-imported
+			// same-id profile provisions with a fresh generation and goes live over it.
+			// On FAILURE the state stays `deleting(gen)` — provisions stay fenced, the
+			// coordinator's same-gen retry is idempotent.
+			this.profileLifecycles.set(profileId, { kind: "deleted", gen: generation })
 		} finally {
 			// Always release the write lock — retained-but-unlocked lets the retry re-acquire WRITE
 			// (an unreleased write lock would deadlock the retry, not fence it).
@@ -602,11 +639,36 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * `PXE_STORE_KEY_MISSING` in chain-runtime.ts). Idempotent; re-provision after an offscreen
 	 * restart is the expected path.
 	 */
-	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string): Promise<void> {
+	public async provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): Promise<void> {
 		const key = Uint8Array.from(atob(storeKeyBase64), (c) => c.charCodeAt(0))
 		if (key.length !== 32) {
 			throw new Error(`provisionChainStoreKey: expected a 32-byte key, got ${key.length}`)
 		}
+		if (!generation) throw new Error("provisionChainStoreKey: missing pxe generation")
+		// The D4 resurrection fence. Atomicity with `clearProfileState` comes from
+		// run-to-completion, NOT the profile barrier: the check+install below is one
+		// synchronous block, and clear marks `deleting` synchronously before its
+		// first await — so this either runs wholly before the marking (the clear
+		// then erases the key, orderly) or wholly after (rejected). Taking the
+		// WRITE barrier here instead would drain readers, stalling an unlock-time
+		// re-provision behind a 30-minute in-flight prove on the same profile.
+		//  - deleting(any):        the purge is in flight — no key may (re)install.
+		//  - deleted(same gen):    a stale replay of the erased incarnation — rejected forever.
+		//  - live(different gen):  a successor key while the predecessor is live — the SW
+		//    must clear first; failing loudly beats silently swapping keys under a runtime.
+		//  - unseen / live(same) / deleted(different gen): install (fresh incarnation,
+		//    idempotent re-provision, or a re-imported profile going live over a dead one).
+		const current = this.profileLifecycles.get(profileId)
+		if (current?.kind === "deleting") {
+			throw new Error(`provisionChainStoreKey: profile ${profileId} is being deleted — provision rejected`)
+		}
+		if (current?.kind === "deleted" && current.gen === generation) {
+			throw new Error(`provisionChainStoreKey: profile ${profileId} generation was erased — stale provision rejected`)
+		}
+		if (current?.kind === "live" && current.gen !== generation) {
+			throw new Error(`provisionChainStoreKey: profile ${profileId} is live under a different generation — clear it first`)
+		}
+		this.profileLifecycles.set(profileId, { kind: "live", gen: generation })
 		this.storeKeys.set(profileId, key)
 	}
 
@@ -640,6 +702,27 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 *  or endpoint churn the caller should surface, not spin through. */
 	private static readonly MAX_RUNTIME_BIND_ATTEMPTS = 3
 
+	/**
+	 * The op-level D4 fence, checked INSIDE the profile barrier: an op that
+	 * carries a `pxeGeneration` capture may only run while its profile is
+	 * `live` under that same generation. Absent captures pass — test fakes and
+	 * the store-key fail-close cover them — and `unseen` passes so the
+	 * missing-key retry can provision-then-retry. The error deliberately does
+	 * NOT contain the PXE_STORE_KEY_MISSING marker: re-provisioning cannot
+	 * rescue a stale-generation op, so the client must not retry it.
+	 */
+	private assertGenerationCurrent(network: NetworkInfo): void {
+		const captured = network.pxeGeneration
+		if (!captured) return
+		const current = this.profileLifecycles.get(network.profileId)
+		if (!current) return
+		if (current.kind !== "live" || current.gen !== captured) {
+			throw new Error(
+				`pxe op rejected: profile ${network.profileId} is ${current.kind} (generation ${current.gen === captured ? "matches" : "superseded"}) — the capture is stale`,
+			)
+		}
+	}
+
 	private async withPxeRead<T>(label: string, network: NetworkInfo, fn: (pxe: PXE, node: AztecNode) => Promise<T>): Promise<T> {
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
@@ -655,6 +738,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			for (let attempt = 0; attempt < PxeService.MAX_RUNTIME_BIND_ATTEMPTS; attempt++) {
 				const result = await barrier.read(async () => {
 					return chainGuard.read(async () => {
+						this.assertGenerationCurrent(network)
 						const runtime = this.registry.peekMatching(network)
 						if (!runtime) return missed
 						return fn(runtime.pxe, runtime.node)
@@ -685,6 +769,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
 				return chainGuard.write(async () => {
+					this.assertGenerationCurrent(network)
 					// Already under the chain WRITE guard — `ensure` may rebind here.
 					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)

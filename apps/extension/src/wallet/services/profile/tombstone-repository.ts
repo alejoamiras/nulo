@@ -17,6 +17,9 @@ export const TombstoneSchema = z.object({
 	networkIds: z.array(z.string()),
 	/** Deletion epoch captured when the tombstone was written (fencing + clear-guard). */
 	epoch: z.number(),
+	/** The incarnation generation being erased — carried so a RESUMED deletion
+	 *  still fences its PXE clear after the profile row is gone (#281 D4). */
+	pxeGeneration: z.string(),
 })
 export type Tombstone = z.infer<typeof TombstoneSchema>
 

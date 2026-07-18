@@ -58,6 +58,13 @@ export interface NetworkInfo {
 	profileId: string
 	chainId: number
 	rpcUrl: string
+	/** The profile row's persisted 128-bit incarnation generation (#281 D4),
+	 *  captured SW-side under the facade lock when the request is built and
+	 *  verified offscreen-side inside the profile barrier. A retry reuses its
+	 *  original capture, so an op that outlived a delete + same-id re-import is
+	 *  rejected instead of running against the successor's store. Optional at
+	 *  the type level (test fakes; the production client always attaches it). */
+	pxeGeneration?: string
 }
 
 /**

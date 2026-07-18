@@ -13,10 +13,10 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { TokenBalanceService } from "@/wallet/services/token-balance/service"
 import { TokenService } from "@/wallet/services/token/service"
 import { TransactionService } from "@/wallet/services/transaction/service"
-import type { ProfileDeletionDelegate, ProfileDeletionSnapshot } from "./types"
+import type { ProfileDeletionDelegate, ProfileDeletionRows, ProfileDeletionSnapshot } from "./types"
 
 export const PROFILE_DELETION_COORDINATOR_NAME = "profile-deletion-coordinator"
-export type { ProfileDeletionDelegate, ProfileDeletionSnapshot } from "./types"
+export type { ProfileDeletionDelegate, ProfileDeletionRows, ProfileDeletionSnapshot } from "./types"
 
 /**
  * ProfileDeletionCoordinator — the awaited, idempotent purge of EVERY
@@ -80,7 +80,7 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 	}
 
 	/** Lock-free profileId reads only (safe under ProfileService's facade lock). */
-	public async snapshot(profileId: string): Promise<ProfileDeletionSnapshot> {
+	public async snapshot(profileId: string): Promise<ProfileDeletionRows> {
 		const [accounts, tokens, networks] = await Promise.all([
 			this.accounts.getAccountsRaw(profileId),
 			this.tokens.getTokensRaw(profileId),
@@ -120,7 +120,7 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 		await this.accounts.purgeForProfile(profileId)
 		await this.tokens.purgeForProfile(profileId)
 		await this.networks.purgeForProfile(profileId)
-		await this.pxe.clearProfileState(profileId)
+		await this.pxe.clearProfileState(profileId, s.pxeGeneration)
 	}
 
 	/** Resume any tombstoned deletion after a restart. Called AFTER `services.start()`

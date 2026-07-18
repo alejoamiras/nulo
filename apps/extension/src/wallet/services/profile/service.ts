@@ -24,7 +24,15 @@ import { PasskeyService } from "@/wallet/services/passkey/service"
 import { PasskeyRecoveryCoordinator, type PasskeyRecovery } from "./passkey-recovery-coordinator"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import { SessionManager } from "./session-manager"
-import { PROFILE_SERVICE_NAME, type ProfileInfo, type Profile, type Events, type Methods, type RestoreSecret } from "./spec"
+import {
+	mintPxeGeneration,
+	PROFILE_SERVICE_NAME,
+	type ProfileInfo,
+	type Profile,
+	type Events,
+	type Methods,
+	type RestoreSecret,
+} from "./spec"
 import { TombstoneRepository } from "./tombstone-repository"
 import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
 import type { ProfileDeletionDelegate } from "../profile-deletion/types"
@@ -216,6 +224,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					id,
 					name,
 					type: "password",
+					pxeGeneration: mintPxeGeneration(),
 					guard: encrypted.guard,
 					secret: encrypted.secret,
 				}
@@ -351,6 +360,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					id,
 					name,
 					type: "passkey",
+					pxeGeneration: mintPxeGeneration(),
 					credentialId: recovery.credentialId,
 				}
 				await this.repo.set(id, profile)
@@ -710,7 +720,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!profile || this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
-			const snapshot = await delegate.snapshot(id)
+			const rows = await delegate.snapshot(id)
+			const snapshot = { ...rows, pxeGeneration: profile.pxeGeneration }
 			const epoch = this.deletionState.beginDeletion(id)
 			await this.tombstones.write({ profileId: id, ...snapshot, epoch })
 			await this.repo.delete(id)
@@ -763,7 +774,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					if (await this.repo.get(t.profileId)) await this.repo.delete(t.profileId)
 					if (this.sessionManager.isActive(t.profileId)) await this.sessionManager.close()
 				})
-				await delegate.runFor(t.profileId, { addresses: t.addresses, tokenIds: t.tokenIds, networkIds: t.networkIds })
+				await delegate.runFor(t.profileId, {
+					addresses: t.addresses,
+					tokenIds: t.tokenIds,
+					networkIds: t.networkIds,
+					pxeGeneration: t.pxeGeneration,
+				})
 				await this.runExclusive(async () => {
 					await this.tombstones.clearIfSame(t.profileId, t.epoch)
 					this.deletionState.release(t.profileId)
@@ -1015,6 +1031,20 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
+	 * The profile row's CURRENT incarnation generation, read under the facade
+	 * lock with the row-exists + not-reserved validation the D4 fence requires
+	 * at SEND time. `undefined` (row gone or tombstoned) makes the PXE client
+	 * skip the capture/provision — a deleted profile cannot re-key its store.
+	 */
+	public async getPxeGeneration(id: string): Promise<string | undefined> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			if (this.deletionState.isReserved(id)) return undefined
+			return (await this.repo.get(id))?.pxeGeneration
+		})
+	}
+
+	/**
 	 * takes ownership of `secret` + `passhash` from the public
 	 * import* methods. Zeroes both in finally — runs on success, throw,
 	 * and re-throw paths.
@@ -1028,6 +1058,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					id,
 					name,
 					type: "password",
+					pxeGeneration: mintPxeGeneration(),
 					guard: encrypted.guard,
 					secret: encrypted.secret,
 				}
@@ -1072,6 +1103,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					id,
 					name,
 					type: "passkey",
+					pxeGeneration: mintPxeGeneration(),
 					credentialId,
 				}
 				await this.repo.set(id, profile)
@@ -1154,6 +1186,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 								id,
 								name,
 								type: "password",
+								// Fresh generation even on a same-id re-import: the D4 fence
+								// distinguishes this incarnation from the deleted one.
+								pxeGeneration: mintPxeGeneration(),
 								guard: sealed.encrypted.guard,
 								secret: sealed.encrypted.secret,
 							}
@@ -1230,6 +1265,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 							id,
 							name,
 							type: "passkey",
+							pxeGeneration: mintPxeGeneration(),
 							credentialId: recovery.credentialId,
 						}
 						await this.repo.set(id, newProfile)
