@@ -192,7 +192,22 @@ default or the F-11 bearer policy (surfaced as a separate follow-up — see Assu
 restore-time-wedged profile reaches `/popup/general` with a working PXE read; no dead 30 s+ wait
 remains on the import path. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.**
 
-### P3 — Deletion fence + remaining #281
+### P3 — Deletion fence + remaining #281 ✓ GATE GREEN
+> **✅✅ DONE (5 commits: `08caf1f` D11, `58642ab` D7, `91dde16` D3, `8f82ed2` D4, `4956259`+`528e76d`
+> P3.e).** All of #281 closed: D11 (35-min drain ceiling + skew-proof token-set readers), D7 (sweep
+> removed; orphan removal whole-profile under positive absence), D3 (peekMatching/ensure split,
+> rebind only under chain WRITE, no upgrade, bounded ×3), D4 (persisted 128-bit `pxeGeneration` on
+> Profile rows + tombstone carry + facade-locked send-time derivation + op capture with retry-reuse
+> + offscreen unseen→live→deleting→deleted lifecycle; provision/clear atomicity via
+> run-to-completion instead of the write barrier — documented deviation, avoids stalling
+> re-provision behind a 30-min prove). P3.e: deletion-wait UX (10s-delayed ~30-min hint) + the
+> fold's SW-restart-mid-restore e2e (kill between profile-row-appears and success-nav; recovery
+> reaches the synced 1,000 balance — mid-restore path exercised, no degenerate fallback).
+> **Gate output**: matrix green (fence 8/8, capture 3/3, rw-guard 16/16, opfs 12/12, registries
+> 21+15); `test:all` exit 0; the three previously-red e2e GREEN locally (smoke backup-roundtrip
+> 1/1; network backup pair 4/4 via `e2e:agent`) + network-e2e CI green ×2 on the batch; lint green
+> on CI (local worktree biome skew documented in lessons — pre-existing at HEAD).
+> `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p3.md`.
 > **NEW (from P2, 5.0.1 arc):** account-state `registerContract` runs DURING restore, BEFORE
 > `finalizeRestore` opens the session + provisions the PXE store key — it leans on the
 > `PXE_STORE_KEY_MISSING` provider→retry-once to provision from the available master. If the SW

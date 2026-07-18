@@ -350,3 +350,25 @@ fully unit-validated (aztec-runtime 66 passed, typecheck 0, lint 0).
 - Remaining for P3: P3.e — mid-restore SW-restart contract-survival e2e + deletion-wait UX, then
   the phase gate (full matrix + test:all + smoke backup-roundtrip + network backup pair via
   e2e:agent).
+
+## 2026-07-18 — P3 CLOSED: gate green end-to-end
+P3.e landed: deletion-wait UX (`4956259` — "Deleting…" + 10s-delayed ~30-min proving hint,
+`reset-wait-hint` testid) and the fold's SW-restart e2e (`528e76d` —
+`backup-restore-sw-restart.test.ts`: real funded backup export → fresh-extension import → SW
+`Runtime.terminateExecution` between the restored-profile-row marker and the success nav →
+reopen+unlock recovery → the imported account syncs its real 1,000 balance). The local run
+exercised the genuine MID-restore path (no degenerate fallback) — proving the P2 reordering +
+missing-key retry survive an MV3 SW death mid-restore with contracts intact.
+
+**Gate evidence (all real output, this date):**
+- Matrix: incarnation-fence 8/8 (incl. purge→restart→stale-replay + late-old-gen-clear vs live
+  successor), client-capture 3/3, rw-guard 16/16, opfs-store 12/12, registry 21+15.
+- `test:all` exit 0 (no failures in any package; the faucet cross-run flake didn't reproduce).
+- Smoke `backup-roundtrip` 1/1 local; network backup pair 4/4 local via `e2e:agent`; plus the P3
+  batch went through FULL network-e2e CI green (runs 29651144451, 29652417759).
+- Lint: green on CI for the batch; the root `bun run lint` in THIS worktree is red at HEAD
+  (pre-existing biome env/version skew — 3 findings in untouched files, verified present with the
+  P3 diff stashed).
+- Ops lesson: never run the smoke e2e concurrently with an `e2e:agent` run in the SAME worktree —
+  both share `apps/extension/dist/chrome`; the smoke leg raced the agent's rebuild and failed on
+  "Extension not found". Sequence smoke AFTER the agent run (or build first).
