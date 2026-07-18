@@ -30,7 +30,7 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
  * The CANONICAL PrivateFPC identity — from 5.0.0 onward the salt is a fixed project constant of the
  * fee-payment package (ecosystem-tooling `canonical-deployment.json`; rc-era pins used
  * operator-local salts and are dead). The address is deterministic from the INSTALLED
- * `@alejoamiras/aztec-fee-payment@5.0.0` artifact at `salt=PRIVATE_FPC_SALT, deployer=ZERO` — the
+ * `@alejoamiras/aztec-fee-payment@5.0.1` artifact at `salt=PRIVATE_FPC_SALT, deployer=ZERO` — the
  * exact instance the wallet auto-registers (`extension/src/wallet/services/fpc/service.ts`, which
  * MUST use the same salt).
  *
@@ -45,7 +45,7 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
  * on exact-version + artifact-digest + live-class agreement; the live re-canary (a private fueled
  * claim settling against this instance, pre-promotion) is the redeploy's gate.
  */
-export const PRIVATE_FPC_ADDRESS = "0x257aa8701e8801b2c03a6b03cdf385c4fa9200efda1dc41f94a905980efc86e9"
+export const PRIVATE_FPC_ADDRESS = "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0"
 
 /** The canonical instance salt (fixed from 5.0.0 onward — see PRIVATE_FPC_ADDRESS). */
 export const PRIVATE_FPC_SALT = "0x0000000000000000000000000000000000000000000000000000000000000001"

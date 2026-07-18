@@ -171,7 +171,29 @@ NOT fix the hang, because **`0x0193c31b…` is NEITHER protocol FPC**:
      a note. The user (who confirmed 5.0.1 nr/js compat earlier) likely knows whether 5.0.1 changed
      note-sync to hard-fail on unknown emitters.
 
-### ✅✅✅ NETWORK ROOT CAUSE — DEFINITIVE (node lookup + artifact-source confirmed). It is P4-coupled.
+### ✅✅✅✅ ACTUAL ROOT CAUSE (from SOURCE, after the fee-payment hypothesis ALSO proved wrong)
+`grep 0x0193c31b node_modules` found it: **`0x0193c31b` = `HandshakeRegistry`** in
+`@aztec/standard-contracts@5.0.0`'s `standard_contract_data.ts` — pulled transitively by the
+**5.0.0-HELD `@alejoamiras/aztec-standards@5.0.0`**. The e2e test TOKEN is compiled from those 5.0.0
+standards, so its notes reference the **5.0.0 HandshakeRegistry (`0x0193c31b`)**, which is NOT deployed
+on the 5.0.1 e2e sandbox → 5.0.1 note-sync throws "not registered" → the account sync aborts →
+`importToken` hangs → all `tokenReadyExtension` tests fail.
+- **The fee-payment bump did NOT fix it** (0x0193c31b is UNCHANGED after bumping fee-payment 5.0.0→5.0.1;
+  I verified via the repro). My "fee-payment PrivateFPC phantom" diagnosis was WRONG — but the
+  fee-payment bump is still valid P4 work (the plan requires it; bridge-core 136 tests green; PrivateFPC
+  re-pinned 0x257aa870→0x1a6d21ce, artifact sha256 → 94fa4c71; couples to P6 as expected). Kept.
+- **The REAL fix is P4's STANDARDS SWAP** — `@alejoamiras/aztec-standards@5.0.0` →
+  `@aztec-foundation/aztec-standards@5.0.1` (whose `@aztec/standard-contracts@5.0.1` has the 5.0.1
+  HandshakeRegistry that DOES exist on the 5.0.1 sandbox). This was my ORIGINAL hypothesis (which I
+  wrongly abandoned). The P4 standards trust-gate is already CLEARED (see phase-p4.md). Swap surface:
+  33 import sites across apps/{extension,faucet,playground} + packages/{bridge-core,aztec-runtime} + 5
+  package.json + the e2e fixture's token deploy (`aztec.ts` — it deploys the test token from the
+  standards, so BOTH the wallet AND the fixture must swap for the e2e to go green).
+- **This connects to the earlier P4-coupling read** — the network gate IS coupled to P4, but via
+  STANDARDS (the token's HandshakeRegistry), not fee-payment. 7 wrong contract IDs before the source
+  grep nailed it — the lesson: grep node_modules for the literal address FIRST.
+
+### ✅✅✅ (SUPERSEDED — the fee-payment theory) NETWORK ROOT CAUSE — DEFINITIVE (node lookup). It is P4-coupled.
 Node lookup during the local repro: **`node.getContract(0x0193c31b)` → `onNode=false`** — `0x0193c31b`
 is NOT deployed on the 5.0.1 e2e sandbox; it is a PHANTOM address. And it is DETERMINISTIC (identical
 every run). Traced to source:

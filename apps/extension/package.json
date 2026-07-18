@@ -62,7 +62,7 @@
 		"@nulo/wallet-crypto": "workspace:*",
 		"@nulo/wallet-sdk-schema-patch": "workspace:*",
 		"@replit/codemirror-indentation-markers": "^6.5.3",
-		"@alejoamiras/aztec-fee-payment": "5.0.0",
+		"@alejoamiras/aztec-fee-payment": "5.0.1",
 		"codemirror": "^6.0.2",
 		"focus-trap": "^8.2.1",
 		"lean-qr": "^2.7.1",

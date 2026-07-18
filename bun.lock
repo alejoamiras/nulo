@@ -15,7 +15,7 @@
       "version": "0.24.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.1",
-        "@alejoamiras/aztec-fee-payment": "5.0.0",
+        "@alejoamiras/aztec-fee-payment": "5.0.1",
         "@alejoamiras/aztec-standards": "5.0.0",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
@@ -171,7 +171,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.1",
-        "@alejoamiras/aztec-fee-payment": "5.0.0",
+        "@alejoamiras/aztec-fee-payment": "5.0.1",
         "@alejoamiras/aztec-standards": "5.0.0",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
@@ -198,7 +198,7 @@
       "name": "@nulo/bridge-core",
       "version": "0.1.0",
       "dependencies": {
-        "@alejoamiras/aztec-fee-payment": "5.0.0",
+        "@alejoamiras/aztec-fee-payment": "5.0.1",
         "@alejoamiras/aztec-standards": "5.0.0",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
@@ -329,7 +329,7 @@
 
     "@alejoamiras/aztec-accelerator": ["@alejoamiras/aztec-accelerator@5.0.1", "", { "dependencies": { "@aztec/bb-prover": "5.0.1", "@aztec/foundation": "5.0.1", "@aztec/noir-acvm_js": "5.0.1", "@aztec/noir-noirc_abi": "5.0.1", "@aztec/stdlib": "5.0.1", "@logtape/logtape": "^2.0", "ky": "^2.0.2", "ms": "^2.1.3" } }, "sha512-qWnITjJizcfyhmlwqyZ4VBoPtbssgNuSFEuVGP33e+OTdf1tAWZ72mfDO09yGmvBvJ9MuaZcfeIO99eb3Dj5tg=="],
 
-    "@alejoamiras/aztec-fee-payment": ["@alejoamiras/aztec-fee-payment@5.0.0", "", { "peerDependencies": { "@aztec/aztec.js": "5.0.0", "@aztec/protocol-contracts": "5.0.0", "@aztec/stdlib": "5.0.0" } }, "sha512-QEnpenB6aDnbzUS3DctMjXrcNn1hUa0uC4xXPFEo6ByHBQsXeKALf8i4AycXoR6xLkcd7Ki9plAtlauTcfTmyQ=="],
+    "@alejoamiras/aztec-fee-payment": ["@alejoamiras/aztec-fee-payment@5.0.1", "", { "peerDependencies": { "@aztec/aztec.js": "5.0.1", "@aztec/protocol-contracts": "5.0.1", "@aztec/stdlib": "5.0.1" } }, "sha512-jSChEwN6nDRFohFrO87y0xOUE4NQ9a1fcGUd47R1jL8OFKoVz/1RorwELeifsLi5+f1F6ws0RkW5R/lsYXfnqQ=="],
 
     "@alejoamiras/aztec-standards": ["@alejoamiras/aztec-standards@5.0.0", "", { "peerDependencies": { "@aztec/accounts": "5.0.0", "@aztec/aztec.js": "5.0.0", "@aztec/noir-contracts.js": "5.0.0", "@aztec/protocol-contracts": "5.0.0", "@aztec/pxe": "5.0.0", "@aztec/stdlib": "5.0.0", "@aztec/wallet-sdk": "5.0.0", "@aztec/wallets": "5.0.0" } }, "sha512-chTI8O++7DtFTre/Kc3ewFlvJYPlu1liHDo9GtZf4nxL0BjVmGyl3xIE29SDOanRa76umceAMBGSThCv6pMbsA=="],
 
