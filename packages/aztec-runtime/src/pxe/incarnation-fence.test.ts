@@ -141,6 +141,37 @@ describe("incarnation fence (#281 D4)", () => {
 		await expect(service.clearProfileState("p1", "")).rejects.toThrow(/missing pxe generation/)
 	})
 
+	test("clearChainState bumps the purge epoch and fences an op whose capture predates it", async () => {
+		const { service } = makeService()
+		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+		const svc = service as unknown as {
+			withPxeWrite: (l: string, n: NetworkInfo, fn: () => Promise<void>) => Promise<void>
+			clearChainState: (p: string, c: number) => Promise<void>
+			chainPurgeEpochs: Map<string, number>
+			chainKey: (p: string, c: number) => string
+		}
+		await svc.withPxeWrite("boot", net(GEN_1), async () => {})
+
+		// The purge bumps the per-chain epoch (concurrency audit MED #4).
+		const key = svc.chainKey("p1", 31337)
+		const before = svc.chainPurgeEpochs.get(key) ?? 0
+		await service.clearChainState("p1", 31337)
+		expect(svc.chainPurgeEpochs.get(key) ?? 0).toBe(before + 1)
+
+		// An op that captured the PRE-purge epoch is rejected at the write-path rebind rather
+		// than resurrecting the purged chain's runtime + store. withPxeWrite reads the epoch
+		// SYNCHRONOUSLY at entry (before its first await), so starting the op then bumping the
+		// epoch before its guard body runs models a concurrent purge landing mid-op.
+		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+		let ran = false
+		const stale = svc.withPxeWrite("stale", { ...net(GEN_1) }, async () => {
+			ran = true
+		})
+		svc.chainPurgeEpochs.set(key, before + 2) // concurrent purge advances the epoch after entry-read
+		await expect(stale).rejects.toThrow(/purged mid-operation/)
+		expect(ran).toBe(false)
+	})
+
 	test("ops: a stale-generation capture is rejected inside the barrier; current and absent captures pass", async () => {
 		const { service } = makeService()
 		const read = (service as unknown as { withPxeRead: (l: string, n: NetworkInfo, fn: () => Promise<string>) => Promise<string> })

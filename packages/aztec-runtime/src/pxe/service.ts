@@ -783,11 +783,19 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
 		const chainGuard = this.getChainGuard(network.profileId, network.chainId)
+		const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
 		try {
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
 				return chainGuard.write(async () => {
 					this.assertGenerationCurrent(network)
+					// A write op that captured NetworkInfo before a mid-flight clearChainState must
+					// NOT resurrect the purged chain by re-creating its runtime + a fresh OPFS store
+					// (concurrency audit MED #4 — the read path fenced this but the write path called
+					// ensure directly). Same epoch check as withPxeRead.
+					if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
+						throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
+					}
 					// Already under the chain WRITE guard — `ensure` may rebind here.
 					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)

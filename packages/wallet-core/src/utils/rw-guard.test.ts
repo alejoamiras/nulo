@@ -511,8 +511,9 @@ describe("ReadWriteGuard — per-token force-release + wake recheck (review find
 		})
 		await vi.advanceTimersByTimeAsync(0)
 
-		// 20 minutes later reader B starts — occupancy is continuous, but B is young.
-		await vi.advanceTimersByTimeAsync(20 * 60_000)
+		// Reader B starts at 60% of the ceiling — occupancy is continuous, but B is young.
+		const bStartOffset = Math.floor(MAX_READER_DRAIN_MS * 0.6)
+		await vi.advanceTimersByTimeAsync(bStartOffset)
 		const dB = deferred()
 		const order: string[] = []
 		const rB = guard.read(async () => {
@@ -527,9 +528,9 @@ describe("ReadWriteGuard — per-token force-release + wake recheck (review find
 		})
 		await vi.advanceTimersByTimeAsync(0)
 
-		// Cross the ceiling for A (35 min from A's start): A expires, B (15 min old) must survive —
+		// Cross the ceiling for A: A expires, B (younger than the ceiling) must survive —
 		// the writer must NOT run while B is mid-flight.
-		await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000)
+		await vi.advanceTimersByTimeAsync(MAX_READER_DRAIN_MS - bStartOffset + 1_000)
 		expect(order).toEqual(["rB:start"])
 
 		// B finishes → writer runs.

@@ -2,12 +2,18 @@ import { type ILogger, LogLevel } from "../logger/interfaces"
 
 /** Force-release timeout for stuck readers (ms). Converts a deadlock into a
  *  loud log + forced drain so the wallet recovers on its own instead of
- *  hanging forever. MUST exceed the longest legitimate reader: a `proveTx`
- *  can legitimately hold a read for up to 30 minutes (aztec-runtime's
- *  `PROVE_TX_TIMEOUT_MS` — not importable here, wallet-core sits below it),
- *  and a premature force-release lets a writer (profile deletion) run
- *  concurrently with live PXE work over an encrypted store. */
-export const MAX_READER_DRAIN_MS = 35 * 60_000
+ *  hanging forever — a DEBUGGABILITY backstop for reentry, NOT a mechanism
+ *  for a writer to force past live work.
+ *
+ *  It MUST exceed the longest legitimate reader, and a profile-barrier reader's
+ *  lifetime is NOT just its own proof: the PxeService holds the profile READ
+ *  across the wait for the inner per-chain guard, so a chain op can sit ~30 min
+ *  queued behind another chain's proof and THEN prove ~30 min itself (concurrency
+ *  audit HIGH #3 — a 35-min ceiling force-released the queued-then-proving reader
+ *  and let a delete overlap it). 90 min covers queue-behind-one-proof + own-proof
+ *  + margin; the delete path itself now WAITS behind the proof (its clear ops got
+ *  the proof-length request timeout) rather than relying on this force-release. */
+export const MAX_READER_DRAIN_MS = 90 * 60_000
 
 interface Deferred<T> {
 	promise: Promise<T>

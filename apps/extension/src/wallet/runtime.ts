@@ -207,7 +207,16 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			if (!generation) return undefined
 			const master = await profileService.getProfileSecret(profileId).catch(() => undefined)
 			if (!master) return undefined
-			return { key: await derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId), generation }
+			const key = await derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId)
+			// Re-read the generation AFTER the slow HKDF and require it unchanged: a deletion
+			// (+ possible same-id re-import) can land during derivation, and the offscreen's
+			// in-memory `deleted(gen)` fence does NOT survive an offscreen restart — a stale
+			// provision that crosses a restart would otherwise be accepted by a fresh `unseen`
+			// offscreen and resurrect the erased store (concurrency audit HIGH #1). This SW-side
+			// re-check closes the read→HKDF→send gap regardless of offscreen reincarnation.
+			const generationNow = await profileService.getPxeGeneration(profileId)
+			if (generationNow !== generation) return undefined
+			return { key, generation }
 		})
 		// Generation-only capture for outgoing ops (no HKDF per op) — stamps
 		// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.

@@ -83,7 +83,13 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	}
 
 	protected override getRequestTimeoutMs(method: keyof Methods): number {
-		if (method === "proveTx") return PROVE_TX_TIMEOUT_MS
+		// `proveTx` and the profile-destructive clears all DRAIN behind a proof: a delete
+		// acquires the profile WRITE barrier, which waits for an in-flight ~30-minute proof
+		// on that profile to finish. At the default ~90s these clears timed out behind a
+		// legitimate proof, the deletion coordinator rejected, tombstone phase-3 never ran,
+		// and the id stayed reserved forever (concurrency audit HIGH #2). Give them the same
+		// envelope as the proof they wait on.
+		if (method === "proveTx" || method === "clearChainState" || method === "clearProfileState") return PROVE_TX_TIMEOUT_MS
 		return super.getRequestTimeoutMs(method)
 	}
 
