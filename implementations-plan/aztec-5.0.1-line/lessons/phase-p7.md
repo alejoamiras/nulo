@@ -61,3 +61,29 @@ UPDATE.md 5.0.1 couplings.
   greens on a forged absence.
 - l2RecordSchema's `constructorArgs: z.array(z.unknown())` stays loose (the deploy writes the
   args; the address re-derivation is the binding check).
+
+## 2026-07-18 — codex GO/NO-GO resume → the one HIGH that was NOT addressed → fixed
+Codex's post-fix resume returned **NO-GO** with a single remaining HIGH: `require-deployed` ran
+only inside `promote()`, but `fuel-testnet.ts` (the PrivateFPC fund-mover) deposits Fee Juice +
+pays fees through `PRIVATE_FPC_ADDRESS` BEFORE promotion — promotion-time enforcement is too late,
+and the separate `--mode require-deployed` command was operator discipline.
+
+**Fix (`6a78e25`)**: extracted the gate to an importable `runFpcGate(mode)` (throws on RED; CLI
+wrapped behind an `isMain` guard, behavior unchanged — re-verified predeploy/require-deployed/
+no-mode exit codes live) and call it INLINE at the top of `fuel-testnet.main()` before any
+broadcast. Confirmed `fuel-testnet` is the ONLY script that funds through the PrivateFPC — the
+fee-juice + drip canaries use the SponsoredFPC and recoverable FeeJuicePortal deposits;
+deposit-testnet uses the bridge token portal (recoverable claim). promote keeps its shell-out gate
+too (belt + suspenders).
+
+**Updated P6 operator flow**: the `require-deployed` gate is now UNSKIPPABLE for the PrivateFPC
+canary (inline in fuel-testnet). The operator still runs `check-fpc-version --mode predeploy`
+before the FPC deploy, and `--mode require-deployed` is additionally enforced by both the canary
+and promote.
+
+## 2026-07-18 — four gpt-5.6-sol ULTRA audits commissioned (running)
+At the user's request ("very solid thing"), four independent xhigh audits of the whole arc as
+COMPOSED FLOWS (not per-file): (1) fund-moving deploy chain end-to-end (sequencing/resume/operator
+error); (2) PXE/profile concurrency + MV3 crash-safety under adversarial SW/offscreen death
+interleavings; (3) supply-chain + artifact byte-identity (what pins BYTES vs versions); (4)
+backup/restore user-data integrity + P2-recovery durability. Findings triaged in the next entries.
