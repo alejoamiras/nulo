@@ -319,3 +319,34 @@ multi-agent load — see `phase-p2.md`); composition/unit tests run locally.** F
 fully unit-validated (aztec-runtime 66 passed, typecheck 0, lint 0).
 
 `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p3.md`
+
+## 2026-07-18 — P3 body landed: D11 + D7 + D3 + D4 (four commits, pushed)
+- **D11 (`08caf1f`)**: rw-guard drain ceiling 5→35 min (> proveTx's 30) + readers as a token Set —
+  force-release clears the set so an outlived reader's finally is a no-op, never a −1 skew that let
+  writers overlap live readers. +2 tests (ceiling outlasts a 30-min reader; post-force-release
+  exclusion stays sound).
+- **D7 (`58642ab`)**: removeChainStoreDir's empty-profile-dir sweep removed (TOCTOU vs sibling-chain
+  open); orphan sweep now removes whole profile dirs under a positive profile-absence check.
+  +4 tests on a new in-memory OPFS fake.
+- **D3 (`91dde16`)**: registry split peekMatching (read-safe) / ensure (WRITE-guard contract);
+  read path exits read → rebinds under write → re-enters read, bounded ×3 (no upgrade); the
+  init-promise dedup map removed (write exclusivity replaces it; it could hand a new-URL caller a
+  stale-URL init). ensure keeps a failed-dispose runtime referenced (SAH-lock retry handle).
+- **D4 (`8f82ed2`)**: the incarnation fence. Persisted 128-bit `pxeGeneration` on Profile rows
+  (minted at all SIX construction sites — grep `: Profile = {` found 6, not the 3 first assumed);
+  tombstone carry; SW derives gen fresh under the facade lock at send (row-exists + !reserved);
+  ops stamp the gen once + retry reuses the capture; offscreen lifecycle
+  unseen→live→deleting→deleted gates provision/clear/ops. DESIGN DEVIATION from the plan letter:
+  provision's atomicity with clear is run-to-completion (one synchronous check+install block vs
+  clear's synchronous deleting-mark), NOT the write barrier — barrier.write drains readers, which
+  would stall an unlock-time re-provision behind a 30-min in-flight prove (request-timeout risk).
+  The plan's intent (no interleave with clear) holds; documented in the code comment.
+  +8 lifecycle-matrix tests (incarnation-fence.test.ts), +3 client capture tests
+  (client-capture.test.ts; ServiceClient.prototype spy intercepts super.request — [[HomeObject]]
+  resolution makes prototype spies work for super calls).
+- Gates at this point: typecheck:all 0, aztec-runtime 85/85, wallet-core 159/159, extension units
+  3150 (+ new). Root `bun run lint` is red at HEAD in this worktree (pre-existing env/version skew
+  vs CI's green lint — NOT ours; the 3 biome findings in touched files pre-exist at HEAD).
+- Remaining for P3: P3.e — mid-restore SW-restart contract-survival e2e + deletion-wait UX, then
+  the phase gate (full matrix + test:all + smoke backup-roundtrip + network backup pair via
+  e2e:agent).
