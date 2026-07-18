@@ -111,7 +111,41 @@ sentinel text) with real runtime output, which is how I mis-read a transient as 
 - Every test using `tokenReadyExtension` (backup-restore-integrity, opfs-storage, tokens, …) fails as
   a consequence — the fixture never finishes setup.
 
-### Leading HYPOTHESIS (UNVERIFIED — do not trust without evidence; I was wrong twice)
+### ✅✅ VERIFIED ROOT CAUSE (local `e2e:agent` repro + offscreen-console capture)
+Reproduced the exact failure locally (`bun run e2e:agent tests/e2e/network/opfs-storage.test.ts`) with
+offscreen/SW console forwarded. The `tokenReadyExtension` fixture hangs at `importToken` because the
+post-import **balance projection's note-sync fails HARD on an unregistered contract**:
+```
+[sw:note] Failed to fetch incoming notes  Cannot call 0x0193c31b…:0xc475a0eb: the contract is not registered. Register it via wallet.registerContract(...).
+[sw:balance-projector] Failed to sync chunk: Cannot call 0x0193c31b…:0xc475a0eb: the contract is not registered.
+[sw:wallet] Error: Cannot call 0x0193c31b…: the contract is not registered.
+```
+- The mint uses **sponsored fees**, so the account receives a **fee note from the SponsoredFPC**. Its
+  address is derived from the **5.0.1** `SponsoredFPCContractArtifact` (bumped in P1). `0x0193c31b…`
+  is (strongly, pending a 1-line address-compare confirmation) that SponsoredFPC.
+- The extension's fpc service registers protocol FPCs in the PXE **lazily, only on `getFpcs`** — so
+  during `importToken`'s projection (which runs BEFORE `getFpcs`), the FPC is NOT registered in the
+  offscreen PXE, and **5.0.1's `sync_state` THROWS on the unregistered note-emitter** (5.0.0 tolerated
+  it), aborting the WHOLE sync → the token balance never projects → "Token added" toast never fires →
+  `importToken` 60 s timeout → every `tokenReadyExtension` test fails.
+- NOT infra, NOT proving (bb_available=true), NOT my P2/P3 code, NOT the P4 standards swap. It is a
+  **5.0.1 note-sync-resilience / protocol-FPC-registration-TIMING gap**.
+
+### FIX DIRECTION (next session — confirm identity first, then implement + verify locally; ~3 min/run)
+1. **Confirm** `0x0193c31b…` == the derived SponsoredFPC address (log `getOrComputeProtocolAddresses`
+   in the repro, compare). Almost certainly yes.
+2. **Preferred fix**: register the protocol FPCs (SponsoredFPC + PrivateFPC) in the offscreen PXE at
+   PROFILE BOOTSTRAP / before the incoming-note sync runs — not lazily on `getFpcs`. So `sync_state`
+   can always process fee notes. (The fpc service already has the register logic in `getFpcs`; the fix
+   is TIMING — run it during bootstrap.)
+3. **Alt/complementary**: make the balance-projector/note-sync RESILIENT to unregistered note-emitters
+   (a wallet can receive notes from arbitrary contracts it can't all register) — but upstream
+   `sync_state` throws+aborts, so this likely means scoping the sync or pre-registering known emitters.
+4. Verify locally via the `e2e:agent` single-file repro, then push for the full network suite.
+This is the network-e2e blocker; it is NOT P4-coupled after all (my earlier standards-artifact
+hypothesis was also wrong — the token registers fine; it's the FPC fee-note sync).
+
+### (SUPERSEDED — was a guess) Leading HYPOTHESIS (UNVERIFIED — do not trust without evidence; I was wrong twice)
 The imported token is a **5.0.0-compiled `@alejoamiras/aztec-standards` artifact (HELD at 5.0.0 in
 P1)**; projecting its notes through a **5.0.1 PXE** may hang/fail if the 5.0.0 note-layout/contract
 artifact isn't understood by 5.0.1 — which would make the network gate **coupled to P4** (standards →
