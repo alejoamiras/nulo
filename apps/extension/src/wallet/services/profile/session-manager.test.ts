@@ -64,6 +64,7 @@ const passwordProfile = (id = "pid"): Profile & { type: "password" } => ({
 	id,
 	name: "P",
 	type: "password",
+	pxeGeneration: "gen-test",
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
 })
@@ -72,6 +73,7 @@ const passkeyProfile = (id = "pid"): Profile & { type: "passkey" } => ({
 	id,
 	name: "P",
 	type: "passkey",
+	pxeGeneration: "gen-test",
 	credentialId: "cred-123",
 })
 

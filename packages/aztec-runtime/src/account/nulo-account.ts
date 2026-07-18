@@ -17,9 +17,10 @@ import {
 import type { GasSettings } from "@aztec/stdlib/gas"
 import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
-import { deriveKeys, deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveKeys } from "@aztec/stdlib/keys"
 import { ExecutionPayload, type TxExecutionRequest } from "@aztec/stdlib/tx"
 import { SchnorrAccountContract, SchnorrAccountContractArtifact } from "@aztec/accounts/schnorr"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { AccountFeePaymentMethodOptions, DefaultAccountEntrypoint, type DefaultAccountEntrypointOptions } from "@aztec/entrypoints/account"
 import { DefaultMultiCallEntrypoint } from "@aztec/entrypoints/multicall"
 import { APP_MAX_CALLS } from "@aztec/entrypoints/encoding"
@@ -39,10 +40,12 @@ export class NuloAccount implements IAccountContract {
 	private readonly authWitnessProvider: AuthWitnessProvider
 
 	constructor(
-		private readonly secret: Fr,
+		// The derived privacy secret key (NEVER the seed and NEVER the signing key): it is the only
+		// key material this class hands to the PXE, and the signing key is not recoverable from it.
+		private readonly secretKey: Fr,
 		private readonly instance: ContractInstanceWithAddress,
 		private readonly completeAddress: CompleteAddress,
-		signingAccountContract: SchnorrAccountContract,
+		private readonly signingAccountContract: SchnorrAccountContract,
 		private readonly logger: ILogger,
 	) {
 		this.address = instance.address
@@ -50,9 +53,11 @@ export class NuloAccount implements IAccountContract {
 		this.entrypoint = new DefaultAccountEntrypoint(this.address, this.authWitnessProvider)
 	}
 
-	public static async new(secret: Fr, logger: ILogger): Promise<NuloAccount> {
-		const signingKey = deriveSigningKey(secret)
-		const keys = await deriveKeys(secret)
+	public static async new(seed: Fr, logger: ILogger): Promise<NuloAccount> {
+		// Signing-key-root model (NULO-ACCOUNT-KDF v1): the seed derives the signing key (the
+		// ownership root); the privacy secret derives one-way FROM the signing key.
+		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
+		const keys = await deriveKeys(secretKey)
 		const accountContract = new SchnorrAccountContract(signingKey)
 		const init = await accountContract.getInitializationFunctionAndArgs()
 		if (!init) {
@@ -64,21 +69,33 @@ export class NuloAccount implements IAccountContract {
 			constructorArtifact: constructorName,
 			publicKeys: keys.publicKeys,
 			salt: Fr.ZERO,
+			immutablesHash: await accountContract.getImmutablesHash(),
 		})
-		const completeAddress = await CompleteAddress.fromSecretKeyAndInstance(secret, instance)
-		return new NuloAccount(secret, instance, completeAddress, accountContract, logger)
+		const completeAddress = await CompleteAddress.fromSecretKeyAndInstance(secretKey, instance)
+		return new NuloAccount(secretKey, instance, completeAddress, accountContract, logger)
 	}
 
 	public async ensureRegistered(pxe: IPXE): Promise<void> {
 		const accounts = await pxe.getRegisteredAccounts()
 		if (!accounts.find((x) => x.address.toString() === this.address.toString())) {
 			this.logger.log(this.name, LogLevel.Debug, "register account...")
-			await pxe.registerAccount(this.secret, await computePartialAddress(this.instance))
+			const registered = await pxe.registerAccount(this.secretKey, await computePartialAddress(this.instance))
+			if (!registered.address.equals(this.address)) {
+				throw new Error(
+					`registered account address mismatch: PXE=${registered.address.toString()} expected=${this.address.toString()}`,
+				)
+			}
 		}
 	}
 
 	public async ensureContractRegistered(pxe: IPXE): Promise<void> {
-		const instance = await pxe.getContractInstance(this.address)
+		// PXE-LOCAL ONLY: this asks "is OUR account contract already registered in the PXE?" — a local
+		// question. The default node cascade is both wrong (an extension account is ctor-init only and
+		// never published on-chain, so the node never has it) and dangerous: against an unreachable node
+		// (offline / node-free smoke) the node client retries with backoff and blows the caller's timeout,
+		// which wedged the post-restore boot. 5.0.0's PXE returns a preimage, so a local miss cascaded to
+		// the node where rc.2 returned the instance directly — pxeOnly restores the offline-safe behavior.
+		const instance = await pxe.getContractInstance(this.address, { pxeOnly: true })
 		if (!instance) {
 			this.logger.log(this.name, LogLevel.Debug, "register contract...")
 			await pxe.registerContract({ instance: this.instance, artifact: this.artifact })
@@ -186,8 +203,7 @@ export class NuloAccount implements IAccountContract {
 			throw new Error("constructor not found in account artifact")
 		}
 		const ctorSelector = await FunctionSelector.fromNameAndParameters(ctorFn.name, ctorFn.parameters)
-		const schnorr = new SchnorrAccountContract(deriveSigningKey(this.secret))
-		const schnorrInit = await schnorr.getInitializationFunctionAndArgs()
+		const schnorrInit = await this.signingAccountContract.getInitializationFunctionAndArgs()
 		if (!schnorrInit) {
 			throw new Error("Schnorr account contract is missing its initializer")
 		}

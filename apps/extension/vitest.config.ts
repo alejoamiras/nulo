@@ -42,7 +42,18 @@ export default defineConfig({
 			"../../packages/wallet-bridge/src/**/*.test.ts",
 			"../../packages/wallet-sdk-schema-patch/src/**/*.test.ts",
 		],
-		exclude: ["tests/e2e/**", "node_modules/**"],
+		exclude: [
+			"tests/e2e/**",
+			"node_modules/**",
+			// Needs bb.js WASM poseidon2 (deriveSecretKeyFromSigningKey + address derivation),
+			// which crashes under jsdom (`BBApiException: std::bad_cast` — the same limitation
+			// that defers V4/V10 in key-vectors.test.ts). It runs in aztec-runtime's OWN suite
+			// (node environment) via `test:all`.
+			"../../packages/aztec-runtime/src/account/derivation-vectors.test.ts",
+			// Node-only (fs + import.meta.url file resolution — jsdom's URL isn't file-scheme).
+			// Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/pxe/opfs-store.test.ts",
+		],
 		// Inline workspace @nulo/* packages so vite processes their TS
 		// source entry points instead of externalizing them (default
 		// vitest behavior for node_modules, which breaks on

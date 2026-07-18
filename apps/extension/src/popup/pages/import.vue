@@ -10,6 +10,8 @@
 
 <script setup>
 /** Composables */
+import { completeImportWithRecovery } from "@/composables/completeImportWithRecovery"
+import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
@@ -54,18 +56,33 @@ let scrollEl = null
 onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 
 // Popup activation is listener-based: profile activation in the SW fires
-// `popup/app.vue`'s `onActiveProfileChanged`, which runs the bootstrap and
-// flips `appStore.isLogined`. completeImport does NOT bootstrap here — it
-// waits for that handshake and routes. 30s covers SW init + PXE state load;
-// a longer hang escapes to /popup/auth so the user can retry.
+// `popup/app.vue`'s `onActiveProfileChanged`, which runs the bootstrap and flips
+// `appStore.isLogined`. completeImport waits for that ONE bootstrapper (up to the
+// 30s backstop — long enough for a legitimately slow bootstrap on a loaded runner).
+// The wedge (P0-proven): an MV3 worker restart mid-import kills the in-process emit,
+// so the listener never fires and the wait used to dead-end on a silent "Finishing…"
+// screen, then blindly route to /popup/auth. The fix is recovery-on-timeout: once the
+// wait times out the listener has genuinely given up (so there is no bootstrap left to
+// race), and we re-run the SAME recovery a fresh popup would — `hydrateKnownProfile`
+// wakes the SW via getActiveProfile() and bootstraps. A surviving session now lands on
+// /popup/general instead of a forced re-auth; a genuinely-locked profile (strict mode +
+// worker restart dropped the master) routes to /popup/auth to unlock. No dead-end.
+// (An earlier attempt watched the SW connection to escape sub-timeout, but a transient
+// reconnect is indistinguishable from the wedge at drop-time and racing the live
+// listener regressed the healthy path — the timeout is the only race-free signal.)
+const { hydrateKnownProfile } = useProfileBootstrap()
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
 	await setSentinel()
-	try {
-		await waitForProfileActive(appStore, profile.id, 30_000)
+	const outcome = await completeImportWithRecovery({
+		waitForActive: (ms) => waitForProfileActive(appStore, profile.id, ms),
+		recover: async () => (await hydrateKnownProfile())?.id === profile.id && appStore.isLogined,
+		timeoutMs: 30_000,
+	})
+	if (outcome === "active") {
 		openToast({ label: "Profile imported", icon: "check-circle" })
 		router.push("/popup/general")
-	} catch {
+	} else {
 		openToast({ label: "Profile imported — unlock to continue", icon: "info" }, TOAST_DURATION.LONG)
 		router.push("/popup/auth")
 	}

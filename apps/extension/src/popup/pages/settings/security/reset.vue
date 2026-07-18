@@ -39,6 +39,14 @@ const isReadyToReset = computed(() => checks.permanent && checks.undone && check
 
 const isResetting = ref(false)
 
+// The purge drains the profile's in-flight PXE work before erasing — a running
+// proof legitimately holds that drain for up to ~30 minutes. Surface the wait
+// once the delete has clearly outlived the quick path, so the disabled button
+// reads as "working", not wedged.
+const SLOW_DELETE_HINT_DELAY_MS = 10_000
+const isSlowDelete = ref(false)
+let slowDeleteTimer = null
+
 const handleReset = async () => {
 	if (!isReadyToReset.value || isResetting.value) return
 
@@ -51,14 +59,21 @@ const handleReset = async () => {
 	// purge failed and the tombstone was retained), we must NOT clear local state
 	// or show success — the profile still exists and its data is mid-erase.
 	isResetting.value = true
+	slowDeleteTimer = setTimeout(() => {
+		isSlowDelete.value = true
+	}, SLOW_DELETE_HINT_DELAY_MS)
 	try {
 		await managers.profile.deleteProfile(deletedId)
 	} catch (_err) {
 		isResetting.value = false
+		clearTimeout(slowDeleteTimer)
+		isSlowDelete.value = false
 		openToast({ label: "Couldn't delete profile — try again", icon: "warning" })
 		return
 	}
 	isResetting.value = false
+	clearTimeout(slowDeleteTimer)
+	isSlowDelete.value = false
 
 	appStore.profiles = appStore.profiles.filter((p) => p.id !== deletedId)
 	appStore.profile = appStore.profiles.length && appStore.profiles[0]
@@ -104,6 +119,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
 	scrollEl?.removeEventListener("scroll", handleScroll)
 	scrollEl = null
+	if (slowDeleteTimer) clearTimeout(slowDeleteTimer)
 })
 </script>
 
@@ -169,8 +185,12 @@ onBeforeUnmount(() => {
 		</Flex>
 
 		<div :class="$style.bottom">
+			<Text v-if="isSlowDelete" size="12" color="secondary" data-testid="reset-wait-hint">
+				Waiting for an in-flight operation to finish — this can take up to ~30 minutes while a
+				transaction is proving. Keep this window open.
+			</Text>
 			<Button @click="handleReset" :disabled="!isReadyToReset || isResetting" variant="cta_destructive" data-testid="reset-submit-btn">
-				Delete Profile
+				{{ isResetting ? "Deleting…" : "Delete Profile" }}
 			</Button>
 		</div>
 	</Flex>

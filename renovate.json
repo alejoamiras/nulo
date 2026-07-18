@@ -64,7 +64,7 @@
 			"matchPackageNames": [
 				"/^@aztec\\//",
 				"@alejoamiras/aztec-accelerator",
-				"@alejoamiras/aztec-standards",
+				"@aztec-foundation/aztec-standards",
 				"@alejoamiras/aztec-fee-payment"
 			],
 			"enabled": false

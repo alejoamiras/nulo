@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -12,6 +13,7 @@ import { describe, expect, it } from "vitest"
 import {
 	DOM_SEP__FPC_BRIDGE_SECRET,
 	PRIVATE_FPC_ADDRESS,
+	PRIVATE_FPC_SALT,
 	deriveBridgeSecret,
 	privateFeeJuicePayment,
 	privateFuelSecretHash,
@@ -79,40 +81,108 @@ describe("private-fuel keystone", () => {
 		expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
 	})
 
-	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact matches PRIVATE_FPC_ADDRESS", async () => {
-		const rawJson = JSON.parse(
-			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"), "utf8"),
-		)
-		const artifact = loadContractArtifact(rawJson)
+	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact at the CANONICAL salt matches PRIVATE_FPC_ADDRESS", async () => {
+		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+		const artifact = loadContractArtifact(JSON.parse(rawBytes.toString("utf8")))
 		const instance = await getContractInstanceFromInstantiationParams(artifact, {
 			constructorArgs: [],
-			salt: Fr.zero(),
+			salt: Fr.fromHexString(PRIVATE_FPC_SALT),
 			deployer: AztecAddress.ZERO,
 		})
 		expect(instance.address.toString()).toBe(PRIVATE_FPC_ADDRESS)
 	})
+
+	it("CANONICAL DESCRIPTOR — constants, descriptor JSON, and the installed artifact digest all agree", async () => {
+		// private-fpc-canonical.json mirrors the publisher's canonical-deployment.json (extended
+		// with the artifact digest). This pin makes the pinned identity single-sourced-by-test:
+		// the exported constants, the committed descriptor, and the actually-installed artifact
+		// bytes cannot drift apart silently. check-fpc-version.ts consumes the same descriptor.
+		const descriptor = JSON.parse(
+			readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "private-fpc-canonical.json"), "utf8"),
+		)
+		expect(descriptor.expectedAddress).toBe(PRIVATE_FPC_ADDRESS)
+		expect(descriptor.salt).toBe(PRIVATE_FPC_SALT)
+		expect(descriptor.deployer).toBe(AztecAddress.ZERO.toString())
+
+		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+		const digest = createHash("sha256").update(rawBytes).digest("hex")
+		expect(digest).toBe(descriptor.artifactSha256)
+
+		// The RUNTIME-imported copy (dist/target — what PrivateFPCContract loads) must be
+		// CORE-equal to the gated artifact; the copies differ legitimately only in the
+		// debug file_map (codex audit: a divergent dist copy would execute unchecked bytes).
+		const canonicalize = (value: unknown): unknown => {
+			if (Array.isArray(value)) return value.map(canonicalize)
+			if (value && typeof value === "object") {
+				const out: Record<string, unknown> = {}
+				for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+					out[key] = canonicalize((value as Record<string, unknown>)[key])
+				}
+				return out
+			}
+			return value
+		}
+		const core = (bytes: Buffer): string => {
+			const parsed = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>
+			delete parsed.file_map
+			return createHash("sha256")
+				.update(JSON.stringify(canonicalize(parsed)))
+				.digest("hex")
+		}
+		const distBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "dist/target/private_contract-PrivateFPC.json"))
+		expect(core(distBytes)).toBe(core(rawBytes))
+
+		const installedVersion = JSON.parse(
+			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"),
+		).version
+		expect(installedVersion).toBe(descriptor.aztecVersion)
+
+		// Compat coherence: the digest-keyed node-compat map must carry an entry for EXACTLY the
+		// pinned digest (the gate fails closed on a missing key, so a digest change without fresh
+		// human curation trips here first), and the network identity pins must name the Sepolia
+		// v5 testnet this descriptor deploys to. The 5.0.0 entry encodes the owner ruling that
+		// the 5.0.1 artifact is protocol-compatible with the live 5.0.0 node.
+		const compat = descriptor.compatibleNodeVersions[descriptor.artifactSha256]
+		expect(Array.isArray(compat)).toBe(true)
+		expect(compat).toContain("5.0.0")
+		expect(compat).toContain("5.0.1")
+		expect(descriptor.network.l1ChainId).toBe(11155111)
+		expect(descriptor.network.rollupVersion).toBe(1821665230)
+	})
 })
 
+// Canonical FeeJuice lives at protocol address 3.
+const FEE_JUICE_ADDRESS = `0x${"0".repeat(63)}3`
+
 describe("privateMintAndPayFee", () => {
-	it("builds a method paying via the FPC with a two-call setup payload", async () => {
+	it("builds a two-call payload whose TARGETS + SELECTORS are pinned (not just the count)", async () => {
 		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 		const method = privateMintAndPayFee(fpc, 1_000n, new Fr(123n), Fr.zero(), new Fr(7n))
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
-		// FeeJuice.claim + PrivateFPC.mint_and_pay_fee, run verbatim by the wallet's EXTERNAL path.
 		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(2)
+		// Pin the exact (to, selector) of each call. Count-only would pass a tampered
+		// fee-payment SDK that re-pointed the claim recipient or swapped a selector while
+		// keeping two calls (codex ultra-audit HIGH #3). Call 0 = FeeJuice.claim (protocol
+		// address 3); call 1 = PrivateFPC.mint_and_pay_fee (our pinned FPC address).
+		expect(payload.calls[0].to.toString()).toBe(FEE_JUICE_ADDRESS)
+		expect(payload.calls[0].selector.toString()).toBe("0xe8d374b6")
+		expect(payload.calls[1].to.toString()).toBe(PRIVATE_FPC_ADDRESS)
+		expect(payload.calls[1].selector.toString()).toBe("0xd43b351a")
 	})
 })
 
 describe("privateFeeJuicePayment", () => {
-	it("pays via the FPC with a SINGLE pay_fee setup call (the manifest-scope assumption)", async () => {
+	it("pays via the FPC with a SINGLE pay_fee call whose target + selector are pinned", async () => {
 		const fpc = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 		const method = privateFeeJuicePayment(fpc)
 		expect((await method.getFeePayer()).toString()).toBe(PRIVATE_FPC_ADDRESS)
-		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee. The faucet
-		// manifest therefore scopes `pay_fee` alone; a Wonderland change that adds a setup call would
-		// break that scope assumption and is meant to trip here.
+		// FPCFeePaymentMethod emits exactly ONE private setup call — PrivateFPC.pay_fee — targeting
+		// the pinned FPC address with the pinned selector. A tampered SDK re-pointing/renaming it,
+		// or a Wonderland change adding a setup call, trips here (count + target + selector).
 		const payload = await method.getExecutionPayload()
 		expect(payload.calls).toHaveLength(1)
+		expect(payload.calls[0].to.toString()).toBe(PRIVATE_FPC_ADDRESS)
+		expect(payload.calls[0].selector.toString()).toBe("0xb596dfae")
 	})
 })

@@ -50,7 +50,7 @@ import {
 	flagRecordError,
 	markApproveOutcome,
 	markSessionLive,
-	isMsgNotReady,
+	isMsgConsumed,
 	resumeSessionWork,
 	runDepositClaim,
 	runOnLane,
@@ -172,22 +172,20 @@ async function sendStandaloneFjClaim(
 	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	let receiptTxHash: string
 	try {
+		// Plain `claim`, NOT `claim_and_end_setup`: the sponsored fee payment already ends setup, so
+		// the end-setup variant asserts as an app-phase call (see fuelClaim.ts — same live-caught bug).
 		const { receipt } = (await fj.methods
-			.claim_and_end_setup(
-				recipientAddr,
-				BigInt(fuel.received ?? "0"),
-				Fr.fromString(fuel.secret),
-				new Fr(BigInt(fuel.leafIndex ?? "0")),
-			)
+			.claim(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
 			.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
 			receipt: { txHash: unknown }
 		}
 		receiptTxHash = String(receipt.txHash)
 	} catch (e) {
-		// The FJ message is already gone ⇒ the gas is already in the wallet. Self-correct: settle
-		// rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly (the affordance
-		// becomes exact, not just safe - the post-impl audit's residual false-positive).
-		if (isMsgNotReady(e instanceof Error ? e.message : String(e))) {
+		// The FJ message is already CONSUMED (nullified) ⇒ the gas is already in the wallet. Self-correct:
+		// settle rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly. Must be the
+		// consumed shape, NOT not-ready: latching standaloneClaimed on a not-yet-anchored message would
+		// permanently hide the recovery affordance for FJ that was never claimed (fund-stranding).
+		if (isMsgConsumed(e instanceof Error ? e.message : String(e))) {
 			updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
 			log("standalone FJ claim: message already consumed - gas already in wallet", id)
 			return

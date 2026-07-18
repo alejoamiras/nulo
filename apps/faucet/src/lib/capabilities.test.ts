@@ -108,6 +108,7 @@ describe("buildBridgeManifest", () => {
 		expect(cap.transactions.scope.map((s) => `${s.contract.toString()}::${s.function}`)).toEqual([
 			`${TOKEN.toString()}::balance_of_public`,
 			`${feeJuiceAddress}::claim_and_end_setup`,
+			`${feeJuiceAddress}::claim`,
 		])
 	})
 
@@ -123,6 +124,7 @@ describe("buildBridgeManifest", () => {
 			"burn_private",
 			"sponsor_unconditionally",
 			"claim_and_end_setup",
+			"claim",
 		])
 		const sponsor = cap.scope.find((s) => s.function === "sponsor_unconditionally")
 		expect(sponsor?.contract.toString()).toBe(SPONSORED_FPC.toString())
@@ -279,9 +281,12 @@ describe("fuel claim scope (canonical FeeJuice)", () => {
 		expect(hasFjBalance(txScope(m))).toBe(false)
 	})
 
-	it("the FJ entry is exactly one function on one protocol contract - no wildcards", () => {
+	it("the FJ entries are exactly the two claim functions on one protocol contract - no wildcards", () => {
 		const m = buildBridgeManifest(bridgeInput())
 		const fj = txScope(m).filter((s) => String(s.contract) === feeJuiceAddress)
-		expect(fj.map((s) => `${String(s.contract)}::${s.function}`)).toEqual([`${feeJuiceAddress}::claim_and_end_setup`])
+		expect(fj.map((s) => `${String(s.contract)}::${s.function}`)).toEqual([
+			`${feeJuiceAddress}::claim_and_end_setup`,
+			`${feeJuiceAddress}::claim`,
+		])
 	})
 })

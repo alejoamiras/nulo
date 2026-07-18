@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, afterEach } from "vitest"
-import { ReadWriteGuard } from "./rw-guard"
+import { MAX_READER_DRAIN_MS, ReadWriteGuard } from "./rw-guard"
 import type { ILogger } from "../logger/interfaces"
 
 /** Creates a deferred promise for controlling async timing in tests. */
@@ -375,8 +375,8 @@ describe("ReadWriteGuard", () => {
 		await vi.advanceTimersByTimeAsync(0)
 		expect(wRan).toBe(false)
 
-		// Advance past the 5-minute force-release
-		await vi.advanceTimersByTimeAsync(5 * 60_000 + 100)
+		// Advance past the force-release ceiling
+		await vi.advanceTimersByTimeAsync(MAX_READER_DRAIN_MS + 100)
 
 		// Writer should have run by now via force-drain
 		expect(wRan).toBe(true)
@@ -386,6 +386,93 @@ describe("ReadWriteGuard", () => {
 		// Stuck read is still pending in the event loop; drop it.
 		dStuck.resolve()
 		await r
+	})
+
+	test("drain ceiling outlasts a 30-minute proof: no force-release fires for a legitimate long reader", async () => {
+		// The longest legitimate reader is a proveTx (30 min). A drain ceiling
+		// below that let profile deletion overlap live PXE work; the ceiling
+		// must sit above the proving envelope.
+		expect(MAX_READER_DRAIN_MS).toBeGreaterThan(30 * 60_000)
+
+		vi.useFakeTimers()
+		const logCalls: unknown[][] = []
+		const logger: ILogger = {
+			log: (_source: string, _level: number, ...data: unknown[]) => {
+				logCalls.push(data)
+			},
+		}
+		const guard = new ReadWriteGuard("test", logger)
+
+		const dProof = deferred()
+		const r = guard.read(async () => {
+			await dProof.promise
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		let wRan = false
+		const w = guard.write(async () => {
+			wRan = true
+		})
+
+		// 30 minutes in: the proof is still legitimately holding the read.
+		await vi.advanceTimersByTimeAsync(30 * 60_000)
+		expect(wRan).toBe(false)
+		expect(logCalls.length).toBe(0)
+
+		dProof.resolve()
+		await r
+		await vi.advanceTimersByTimeAsync(0)
+		expect(wRan).toBe(true)
+		await w
+	})
+
+	test("a force-released reader's late finish cannot skew exclusion (no negative reader count)", async () => {
+		// Regression for the counter-skew hazard: force-release zeroed a numeric
+		// count, the outlived reader's finally decremented it to -1, and from
+		// then on a writer could enter concurrently with one live reader.
+		vi.useFakeTimers()
+		const guard = new ReadWriteGuard("test", {
+			log: () => {},
+		})
+
+		// Reader A outlives the drain ceiling.
+		const dA = deferred()
+		const rA = guard.read(async () => {
+			await dA.promise
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		// Writer 1 queues, force-release lets it through.
+		const w1 = guard.write(async () => {})
+		await vi.advanceTimersByTimeAsync(MAX_READER_DRAIN_MS + 100)
+		await w1
+
+		// The orphaned reader finally finishes AFTER the force-release.
+		dA.resolve()
+		await rA
+		await vi.advanceTimersByTimeAsync(0)
+
+		// Post-skew probe: a NEW live reader must still exclude a writer.
+		const dB = deferred()
+		const order: string[] = []
+		const rB = guard.read(async () => {
+			order.push("rB:start")
+			await dB.promise
+			order.push("rB:end")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		const w2 = guard.write(async () => {
+			order.push("w2")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		// With the skew, w2 would already have run here (readers === 0 while rB live).
+		expect(order).toEqual(["rB:start"])
+
+		dB.resolve()
+		await Promise.all([rB, w2])
+		expect(order).toEqual(["rB:start", "rB:end", "w2"])
 	})
 
 	test("read result still returned when writer queues behind it", async () => {
@@ -405,5 +492,88 @@ describe("ReadWriteGuard", () => {
 		const [rv, wv] = await Promise.all([r, w])
 		expect(rv).toBe("value")
 		expect(wv).toBe(99)
+	})
+})
+
+describe("ReadWriteGuard — per-token force-release + wake recheck (review findings)", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test("serialized long readers: only the INDIVIDUALLY-stuck reader is expired; a younger live reader keeps excluding writers", async () => {
+		vi.useFakeTimers()
+		const guard = new ReadWriteGuard("test", { log: () => {} })
+
+		// Reader A gets stuck (will exceed the ceiling).
+		const dA = deferred()
+		const rA = guard.read(async () => {
+			await dA.promise
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		// Reader B starts at 60% of the ceiling — occupancy is continuous, but B is young.
+		const bStartOffset = Math.floor(MAX_READER_DRAIN_MS * 0.6)
+		await vi.advanceTimersByTimeAsync(bStartOffset)
+		const dB = deferred()
+		const order: string[] = []
+		const rB = guard.read(async () => {
+			order.push("rB:start")
+			await dB.promise
+			order.push("rB:end")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		const w = guard.write(async () => {
+			order.push("w")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		// Cross the ceiling for A: A expires, B (younger than the ceiling) must survive —
+		// the writer must NOT run while B is mid-flight.
+		await vi.advanceTimersByTimeAsync(MAX_READER_DRAIN_MS - bStartOffset + 1_000)
+		expect(order).toEqual(["rB:start"])
+
+		// B finishes → writer runs.
+		dB.resolve()
+		await vi.advanceTimersByTimeAsync(0)
+		await rB
+		await w
+		expect(order).toEqual(["rB:start", "rB:end", "w"])
+
+		dA.resolve()
+		await rA
+	})
+
+	test("woken readers re-check: a writer acquiring synchronously after leaveWrite excludes them", async () => {
+		const guard = new ReadWriteGuard()
+		const order: string[] = []
+
+		await guard.enterWrite()
+		const dRead = deferred()
+		const r = guard.read(async () => {
+			order.push("r:start")
+			await dRead.promise
+			order.push("r:end")
+		})
+		await flush()
+
+		// Release the write and IMMEDIATELY (synchronously) start another writer:
+		// the woken reader must re-queue behind it, not run concurrently.
+		const dW2 = deferred()
+		guard.leaveWrite()
+		const w2 = guard.write(async () => {
+			order.push("w2:start")
+			await dW2.promise
+			order.push("w2:end")
+		})
+		await flush()
+
+		expect(order).toEqual(["w2:start"])
+		dW2.resolve()
+		await w2
+		await flush()
+		expect(order.slice(0, 3)).toEqual(["w2:start", "w2:end", "r:start"])
+		dRead.resolve()
+		await r
 	})
 })

@@ -37,7 +37,15 @@ import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "../fixtures/extension"
-import { getAccountAddress, navigateByHash, refreshBalances, resetProfile, switchToLocalNetwork, waitForBalance } from "../fixtures/helpers"
+import {
+	getAccountAddress,
+	navigateByHash,
+	refreshBalances,
+	reopenAndRecoverAfterImport,
+	resetProfile,
+	switchToLocalNetwork,
+	waitForBalance,
+} from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
@@ -164,6 +172,23 @@ test.skipIf(!hasConfig)(
 				await refreshBalances(page2)
 				const bodyText = await page2.evaluate(() => document.body.innerText)
 				if (bodyText.includes("1,000")) break
+				await page2
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
+					.catch(() => {})
+			}
+			await waitForBalance(page2, "1,000", 30_000)
+
+			// ── 5b. Realistic-recovery leg ──────────────────────────────────
+			// Model the strict-mode + MV3-worker-restart path: the in-memory master
+			// is dropped and re-derived on unlock, which re-provisions the encrypted
+			// per-chain PXE store key and re-opens the OPFS store. Prove the store
+			// re-opened (never wiped — refuse-and-preserve) by re-syncing the SAME
+			// on-chain balance after the reopen+unlock.
+			await reopenAndRecoverAfterImport(page2)
+			expect(await getAccountAddress(page2)).toBe(funded)
+			for (let i = 0; i < 20; i++) {
+				await refreshBalances(page2)
+				if ((await page2.evaluate(() => document.body.innerText)).includes("1,000")) break
 				await page2
 					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
 					.catch(() => {})

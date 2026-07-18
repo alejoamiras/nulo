@@ -29,7 +29,14 @@ import { dirname, join } from "node:path"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
-import { getAccountAddress, navigateByHash, refreshBalances, switchToLocalNetwork, waitForBalance } from "../fixtures/helpers"
+import {
+	getAccountAddress,
+	navigateByHash,
+	refreshBalances,
+	reopenAndRecoverAfterImport,
+	switchToLocalNetwork,
+	waitForBalance,
+} from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
 
@@ -127,6 +134,23 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 				await refreshBalances(page2)
 				const bodyText = await page2.evaluate(() => document.body.innerText)
 				if (bodyText.includes("1,000")) break
+				await page2
+					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
+					.catch(() => {})
+			}
+			await waitForBalance(page2, "1,000", 30_000)
+
+			// ── 5. Realistic-recovery leg ──────────────────────────────────
+			// Model the strict-mode + MV3-worker-restart path: the master is dropped
+			// and re-derived on unlock, re-provisioning the encrypted PXE store key
+			// and re-opening the OPFS store. Prove the store re-opened (never wiped —
+			// refuse-and-preserve) by re-syncing the SAME migrated on-chain balance
+			// after the reopen+unlock.
+			await reopenAndRecoverAfterImport(page2)
+			expect(await getAccountAddress(page2)).toBe(tokenReadyExtension.accountAddress)
+			for (let i = 0; i < 20; i++) {
+				await refreshBalances(page2)
+				if ((await page2.evaluate(() => document.body.innerText)).includes("1,000")) break
 				await page2
 					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
 					.catch(() => {})

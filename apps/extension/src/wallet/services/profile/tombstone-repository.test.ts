@@ -8,6 +8,7 @@ const mk = (profileId: string, over: Partial<Tombstone> = {}): Tombstone => ({
 	tokenIds: [],
 	networkIds: [],
 	epoch: 1,
+	pxeGeneration: "gen-test",
 	...over,
 })
 

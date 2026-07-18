@@ -9,8 +9,8 @@ const claimMethod = vi.fn(() => ({
 }))
 
 vi.mock("@aztec/aztec.js/contracts", () => ({
-	Contract: { at: vi.fn(async () => ({ methods: { claim_and_end_setup: claimMethod } })) },
-	// biome-ignore lint/complexity/useArrowFunction: `new BatchCall(...)` needs a constructable fn, not an arrow.
+	Contract: { at: vi.fn(async () => ({ methods: { claim: claimMethod } })) },
+	// `new BatchCall(...)` needs a constructable fn, not an arrow.
 	BatchCall: vi.fn(function () {
 		return { simulate: async () => ({}), send: async () => ({ receipt: { txHash: "0xprivclaim" } }) }
 	}),
@@ -108,7 +108,7 @@ describe("buildFuelClaimInteraction — fail-closed guards", () => {
 describe("buildFuelClaimInteraction — public claim", () => {
 	beforeEach(() => claimMethod.mockClear())
 
-	it("builds claim_and_end_setup(recipient, received, secret, leaf) paid by the Sponsored FPC", async () => {
+	it("builds claim(recipient, received, secret, leaf) paid by the Sponsored FPC", async () => {
 		const i = await buildFuelClaimInteraction(rec({}), deps())
 		expect(await i.send()).toEqual({ txHash: "0xpubclaim" })
 		const [to, amount] = claimMethod.mock.calls[0] as unknown as [AztecAddress, bigint]
@@ -158,7 +158,7 @@ describe("buildFuelClaimInteraction — authoritative claim material wins over t
 			rec({ fuel: { received: ABOVE_FLOOR, leafIndex: "7", secret: "0xbad" } }),
 			deps({ resolvedSecret: "0x1234" }),
 		)
-		await i.send() // claim_and_end_setup runs inside send, not at build time.
+		await i.send() // the claim call runs inside send, not at build time.
 		expect(secretArgOf().toString()).toBe(Fr.fromString("0x1234").toString())
 	})
 

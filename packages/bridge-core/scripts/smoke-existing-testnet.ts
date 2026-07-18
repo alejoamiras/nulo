@@ -29,9 +29,9 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 
@@ -83,7 +83,8 @@ async function main() {
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
 	const secret = Fr.random()
-	const manager = await ewallet.createSchnorrAccount(secret, Fr.random(), deriveSigningKey(secret))
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
+	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
 	const deployer = await manager.getAccount()
 	const from = deployer.getAddress()
 	console.log("L2 smoke account", from.toString())
@@ -145,7 +146,8 @@ async function main() {
 	const token = await registerL2(
 		"token",
 		TokenContractArtifact,
-		[tName, tSymbol, tDec, proxy.address],
+		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO).
+		[tName, tSymbol, tDec, proxy.address, AztecAddress.ZERO],
 		CONFIG.l2.token.constructorArtifact,
 		CONFIG.l2.token.salt,
 		CONFIG.l2.token.address,

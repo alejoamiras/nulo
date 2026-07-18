@@ -9,7 +9,8 @@
  * Optional flags:
  *   --dry-run     compute + print addresses without sending txs
  *   --network     `testnet` (default) | `local-network`
- *   --output      override the output path (default: src/contracts/deployments.json)
+ *   --output      override the output path (default: src/contracts/deployments.candidate.json —
+ *                 candidate-first; `promote` owns the live deployments.json)
  *
  * Idempotency: each contract deploy checks `node.getContract(addr)` first;
  * skips with `[EXISTING]` if found. Re-running is a no-op when everything
@@ -21,7 +22,7 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import {
@@ -40,10 +41,11 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import { createLogger } from "@aztec/foundation/log"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { DripperContract, DripperContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js"
-import { TokenContract, TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { DripperContract, DripperContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js"
+import { TokenContract, TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type DeploymentConfig, getDeploymentConfig, type Network } from "./deploy-config.js"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -69,11 +71,22 @@ function parseArgs(argv: string[]): CLIOptions {
 	if (networkArg !== "testnet" && networkArg !== "local-network") {
 		throw new Error(`unknown --network: ${networkArg}`)
 	}
-	const defaultOutput = join(__dirname, "..", "src", "contracts", "deployments.json")
+	// Candidate-first (P5): a live deploy writes the CANDIDATE; only the receipted
+	// `promote` step may touch the committed live deployments.json.
+	const defaultOutput = join(__dirname, "..", "src", "contracts", "deployments.candidate.json")
+	const output = flag("--output") ?? defaultOutput
+	// Candidate-first guard: writing the LIVE deployments.json directly bypasses the
+	// receipted promote step. Allowed only with an explicit acknowledgement flag.
+	const livePath = resolve(join(__dirname, "..", "src", "contracts", "deployments.json"))
+	if (resolve(output) === livePath && !args.includes("--allow-live-output")) {
+		throw new Error(
+			"refusing to write the live deployments.json directly — use the candidate + promote flow, or pass --allow-live-output",
+		)
+	}
 	return {
 		network: networkArg,
 		dryRun: args.includes("--dry-run"),
-		output: flag("--output") ?? defaultOutput,
+		output,
 	}
 }
 
@@ -89,6 +102,9 @@ interface TokenDeploymentRecord {
 		readonly symbol: "NULO" | "OLUN"
 		readonly decimals: number
 		readonly minter: string
+		/** 5.0.1 standards Token: constructor_with_minter's 5th parameter. ZERO = no
+		 *  authorization contract; REQUIRED for the rebuild to derive the address. */
+		readonly authContract: string
 	}
 }
 
@@ -121,6 +137,7 @@ function buildDeploymentJson(
 				symbol: t.symbol,
 				decimals: t.decimals,
 				minter: dripperAddress.toString(),
+				authContract: AztecAddress.ZERO.toString(),
 			},
 		}))
 	return {
@@ -256,7 +273,9 @@ async function computeAddresses(config: DeploymentConfig): Promise<{
 	const tokens: Record<string, AztecAddress> = {}
 	for (const t of config.contracts.tokens) {
 		const inst = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
-			constructorArgs: [t.name, t.symbol, t.decimals, dripperInstance.address],
+			// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO), matching the
+			// live-deploy path — a 4-arg dry-run would derive a DIFFERENT address than the deploy.
+			constructorArgs: [t.name, t.symbol, t.decimals, dripperInstance.address, AztecAddress.ZERO],
 			salt: new Fr(t.salt),
 			publicKeys: PublicKeys.default(),
 			deployer: AztecAddress.ZERO,
@@ -298,9 +317,9 @@ async function run(): Promise<void> {
 		const nodeInfo = await node.getNodeInfo()
 		logger.info(`Connected to node ${nodeInfo.nodeVersion}`)
 
-		const accountManager = await (account.kind === "hex"
-			? wallet.createSchnorrAccount(account.secret, account.salt, account.signingKey)
-			: wallet.createSchnorrAccount(account.secret, Fr.ZERO))
+		// Signing-key-root model (NULO-ACCOUNT-KDF v1): the env-derived value is the SEED; the
+		// signing key roots the account and the privacy secret derives one-way from it.
+		const accountManager = await wallet.createSchnorrAccount(account.secretKey, account.salt, account.signingKey)
 		const accountInstance = await accountManager.getAccount()
 		logger.info(`Deployer account: ${accountInstance.getAddress().toString()}`)
 
@@ -328,7 +347,7 @@ async function run(): Promise<void> {
 				node,
 				`Token ${t.symbol}`,
 				TokenContractArtifact,
-				[t.name, t.symbol, t.decimals, dripperContract.address],
+				[t.name, t.symbol, t.decimals, dripperContract.address, AztecAddress.ZERO],
 				"constructor_with_minter",
 				new Fr(t.salt),
 				deployOptions,
@@ -358,7 +377,7 @@ async function run(): Promise<void> {
 
 // Allow `bun run scripts/deploy.ts` direct invocation. Also exports the
 // helpers above so tests (if added later) can import them.
-type DeployerKeys = { kind: "hex"; secret: Fr; salt: Fr; signingKey: ReturnType<typeof deriveSigningKey> } | { kind: "utf8"; secret: Fr }
+type DeployerKeys = { secretKey: Fr; salt: Fr; signingKey: GrumpkinScalar }
 
 function frFromHexReduce(hex: string): Fr {
 	return Fr.fromBufferReduce(Buffer.from(hex.replace(/^0x/, "").padStart(64, "0"), "hex"))
@@ -374,16 +393,18 @@ async function resolveDeployerKeys(): Promise<DeployerKeys> {
 	if (hexSecret && hexSalt) {
 		// An Ethereum secp256k1 key can exceed the BN254 field modulus - reduce instead of
 		// throwing (deterministic: the same input always derives the same account).
-		const secret = frFromHexReduce(hexSecret)
+		const seed = frFromHexReduce(hexSecret)
 		const salt = frFromHexReduce(hexSalt)
-		return { kind: "hex", secret, salt, signingKey: deriveSigningKey(secret) }
+		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
+		return { secretKey, salt, signingKey }
 	}
 	// Fallback: a free-form string that gets poseidon-hashed. Original
 	// upstream pattern; convenient for one-off testnet experiments.
 	const utf8 = process.env.DEPLOYER_SECRET
 	if (utf8 && utf8.trim().length >= 32) {
-		const secret = await poseidon2Hash([Fr.fromBufferReduce(Buffer.from(utf8, "utf8"))])
-		return { kind: "utf8", secret }
+		const seed = await poseidon2Hash([Fr.fromBufferReduce(Buffer.from(utf8, "utf8"))])
+		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
+		return { secretKey, salt: Fr.ZERO, signingKey }
 	}
 	throw new Error(
 		"Provide either DEPLOYER_SECRET_KEY+DEPLOYER_SALT (hex Frs, reuses an existing account) " +

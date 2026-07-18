@@ -91,6 +91,30 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 	await page.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
 }
 
+/**
+ * Model the realistic post-import recovery. The P0-proven wedge: an MV3 service
+ * worker restart mid-import drops the in-memory master secret, so in strict mode
+ * (the default) the just-imported profile is locked until the user reopens and
+ * unlocks. This reproduces that recovery deterministically:
+ *
+ *   lock  — drops the session record from chrome.storage.session, exactly as a
+ *           worker restart drops the in-memory master;
+ *   reopen via the auth route (lockWallet reloads a fresh popup that derives the
+ *           locked state from storage — the real reopen path);
+ *   unlock — re-derives the master, which re-provisions the encrypted per-chain
+ *           PXE store key and boots the chain runtime.
+ *
+ * Asserts the wallet lands back on /popup/general. Callers then do a
+ * store-dependent read (account address / on-chain balance) to prove the
+ * encrypted PXE store actually RE-OPENED under the re-derived key — never wiped
+ * (refuse-and-preserve), never dead-ended.
+ */
+export async function reopenAndRecoverAfterImport(page: Page, password = TEST_PASSWORD): Promise<void> {
+	await lockWallet(page)
+	await ensureUnlocked(page, password)
+	await page.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 30_000 })
+}
+
 // ── Navigation ─────────────────────────────────────────────────────────
 
 /** Click a bottom navigation tab. */

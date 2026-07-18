@@ -164,8 +164,8 @@ function fnLabel(fn: string): string {
 								<Text size="11" weight="600" color="secondary" :class="$style.mono">
 									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
 								</Text>
-								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function))" size="11" color="tertiary">
-									· {{ getMethodLabel(String(p.function)) }}
+								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function), String(p.contract))" size="11" color="tertiary">
+									· {{ getMethodLabel(String(p.function), String(p.contract)) }}
 								</Text>
 							</Flex>
 						</Flex>
@@ -199,8 +199,8 @@ function fnLabel(fn: string): string {
 								<Text size="11" weight="600" color="secondary" :class="$style.mono">
 									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
 								</Text>
-								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function))" size="11" color="tertiary">
-									· {{ getMethodLabel(String(p.function)) }}
+								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function), String(p.contract))" size="11" color="tertiary">
+									· {{ getMethodLabel(String(p.function), String(p.contract)) }}
 								</Text>
 							</Flex>
 						</Flex>
@@ -241,8 +241,8 @@ function fnLabel(fn: string): string {
 								<Text size="11" weight="600" color="secondary" :class="$style.mono">
 									{{ String(p.function) === "*" ? "*" : fnLabel(String(p.function)) }}
 								</Text>
-								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function))" size="11" color="tertiary">
-									· {{ getMethodLabel(String(p.function)) }}
+								<Text v-if="String(p.function) !== '*' && getMethodLabel(String(p.function), String(p.contract))" size="11" color="tertiary">
+									· {{ getMethodLabel(String(p.function), String(p.contract)) }}
 								</Text>
 							</Flex>
 						</Flex>
