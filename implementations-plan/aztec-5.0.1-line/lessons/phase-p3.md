@@ -171,7 +171,35 @@ NOT fix the hang, because **`0x0193c31b…` is NEITHER protocol FPC**:
      a note. The user (who confirmed 5.0.1 nr/js compat earlier) likely knows whether 5.0.1 changed
      note-sync to hard-fail on unknown emitters.
 
-### DEFINITIVELY ruled out (derivation, not guessing) — `0x0193c31b` identity still open
+### ✅✅✅ NETWORK ROOT CAUSE — DEFINITIVE (node lookup + artifact-source confirmed). It is P4-coupled.
+Node lookup during the local repro: **`node.getContract(0x0193c31b)` → `onNode=false`** — `0x0193c31b`
+is NOT deployed on the 5.0.1 e2e sandbox; it is a PHANTOM address. And it is DETERMINISTIC (identical
+every run). Traced to source:
+- `@private-fpc-artifact` (vite alias, `vite.shared.ts:46`) = `@alejoamiras/aztec-fee-payment`'s
+  `target/private_contract-PrivateFPC.json` — the **5.0.0-HELD** fee-payment package (P1 held
+  fee-payment + standards at 5.0.0 → they move in P4).
+- The wallet auto-discovers + registers a PrivateFPC (derived from that 5.0.0 artifact →
+  `0x257aa870`). Reading/syncing it (`gas-balance-reader.balance_of` + the account note-sync) makes
+  the 5.0.0-compiled PrivateFPC call a contract at `0x0193c31b` that the **5.0.1 sandbox does not
+  deploy**. 5.0.1's `sync_state` THROWS on the unregistered/non-existent `0x0193c31b` (5.0.0 tolerated
+  it), ABORTING the whole account note-sync → the token-import balance projection hangs → `importToken`
+  times out → every `tokenReadyExtension` test fails.
+- **THE FIX IS P4's fee-payment bump.** `@alejoamiras/aztec-fee-payment@5.0.1` EXISTS (npm: `5.0.0`,
+  `5.0.1-revision.1`, `5.0.1`). Bumping it → 5.0.1 gives a PrivateFPC artifact that matches the 5.0.1
+  protocol, so `0x0193c31b`'s reference resolves. (Standards → `@aztec-foundation` scope in P4;
+  fee-payment stays `@alejoamiras` scope — there is NO `@aztec-foundation/aztec-fee-payment` (npm 404),
+  so the fee-payment "swap" is a same-scope version bump, NOT a scope migration.)
+- **STRATEGIC coupling the user must weigh:** bumping fee-payment shifts the PrivateFPC IDENTITY
+  (address changes like SchnorrAccount did). The e2e sandbox is **5.0.1** (`Setting up Aztec local
+  network 5.0.1`) but the LIVE testnet is **5.0.0**. So a 5.0.1 PrivateFPC artifact fits the e2e
+  sandbox but derives a PrivateFPC address NOT deployed on the 5.0.0 live network → live private-fuel
+  would break until P6 redeploys (which can't deploy 5.0.1 contracts to a 5.0.0 network). Either (a)
+  the e2e sandbox should be pinned to 5.0.0 to match live (testing the real 5.0.1-client-vs-5.0.0-net
+  topology the user described), or (b) accept the fee-payment identity shift + sequence P6. THIS IS A
+  PLAN-TOPOLOGY DECISION FOR THE USER (their 5.0.1/deploy-strategy call). Note SponsoredFPC is fine
+  (its 5.0.0 artifact still resolves — only the PrivateFPC/private-fuel path hits `0x0193c31b`).
+
+### (superseded) DEFINITIVELY ruled out (derivation, not guessing) — `0x0193c31b` identity still open
 - SponsoredFPC = `0x1441491b` (derived==stored). PrivateFPC = `0x257aa870` (derived==stored).
 - **Canonical FeeJuice instance = `0x0000…0003`** (`getCanonicalFeeJuice()` from
   `@aztec/protocol-contracts/fee-juice/lazy`). The other FeeJuice constants in
