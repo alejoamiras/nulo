@@ -145,7 +145,33 @@ post-import **balance projection's note-sync fails HARD on an unregistered contr
 This is the network-e2e blocker; it is NOT P4-coupled after all (my earlier standards-artifact
 hypothesis was also wrong — the token registers fine; it's the FPC fee-note sync).
 
-### Fix MECHANICS (analyzed — implement race-free next session)
+### ⚠️⚠️⚠️ FPC HYPOTHESIS ALSO WRONG (attempted + reverted) — the real target is `0x0193c31b`, NOT an FPC
+I built the retry-hook fix (PXE-client `protocolContractProvider` + `FpcService.ensureProtocolFpcsRegistered`,
+mirroring the `PXE_STORE_KEY_MISSING` retry-once) and VERIFIED it via the local repro. The mechanism
+works — on "the contract is not registered" the client calls the provider + retries once — but it does
+NOT fix the hang, because **`0x0193c31b…` is NEITHER protocol FPC**:
+- DIAG proved: derived == stored → SponsoredFPC `0x1441491b…`, PrivateFPC `0x257aa870…` (both
+  `isProtocol=true`, both now registered by the hook). The failing contract `0x0193c31b…` is neither.
+- `0x0193c31b…` is called via selector `0xc475a0eb` during (a) `PrivateFPC.balance_of` (the "private
+  FeeJuice balance" read, `gas-balance-reader.ts:117`), (b) incoming-note sync (`sw:note`), and (c)
+  the token-balance projection. So it's a contract the PrivateFPC (and note-sync) call INTERNALLY — a
+  fee-juice-related contract — but it is NOT the canonical FeeJuice either (that's address `3`).
+- So registering the FPCs is the wrong target; the retry loops on `0x0193c31b`. **The whole retry-hook
+  change was REVERTED** (unverified + possibly the wrong DIRECTION).
+- **5 wrong contract identifications this session is the signal: stop reasoning about which contract
+  this is; look it up.** Next session, get `0x0193c31b`'s identity DEFINITIVELY: `getContractInstance`/
+  node lookup for its class id, or grep the sandbox's `deploy-test-contracts` output / `[e2e-setup]
+  Test contracts deployed: {...}` for `0x0193c31b`. THEN decide the fix.
+- **Two real directions (needs the actual identity + likely the user's 5.0.1 domain knowledge):**
+  1. If `0x0193c31b` is a KNOWN protocol/fee-juice contract the wallet can derive → register it (extend
+     the reverted `ensureProtocolFpcsRegistered` to include it; the retry-hook infra then works).
+  2. If it's an ARBITRARY note-emitter → this is an upstream **5.0.1 note-sync strictness regression**
+     (`sync_state` THROWS on an unregistered note-emitter where 5.0.0 SKIPPED it), and the fix is
+     wallet/upstream note-sync resilience — a wallet cannot register every contract that ever sends it
+     a note. The user (who confirmed 5.0.1 nr/js compat earlier) likely knows whether 5.0.1 changed
+     note-sync to hard-fail on unknown emitters.
+
+### Fix MECHANICS (superseded by the above — the FPC-registration target was wrong)
 - `FpcService.getFpcs(chainId)` ALREADY registers the protocol FPCs in the offscreen PXE (the
   `toDiscover` → `pxe.registerContract(...)` block, service.ts ~195). So NO new registration code is
   needed — the fix is purely making that registration run BEFORE the account's first note-sync.
