@@ -365,7 +365,7 @@ hard stop. Every command in the execution ledger form (cwd + env-prefix + exact 
 output + exit gate) — written into `lessons/phase-p6.md` as run.
 **Gate**: all proofs + promotion + reconciliation green.
 
-### P7 — Delivery (single squash-merge of #282)
+### P7 ✓ — Delivery DONE 2026-07-18 (#282 squash-merged as `f9f28cf`; dev green)
 Docs: UPDATE.md (line 5.0.1; new couplings: compat map, refuse-and-preserve stamp, incarnation
 fence, transition-result emits); aztec-update skill (bump-first rationale, drift-triggered
 worked example, @aztec-foundation verification procedure, portal preflight, reuse-token mode);
