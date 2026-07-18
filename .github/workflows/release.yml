@@ -374,13 +374,43 @@ jobs:
           fi
           echo "deploy-hook triggered (HTTP $code)"
 
+  # Fails a stable publish EARLY (right after resolve, before the ~20-min build
+  # chain) when the faucet deploy hook secret is not wired — an unwired hook used
+  # to fall back silently to the CF dashboard Git-integration, which strands the
+  # faucet on workflow_dispatch republishes (those don't push to main, so the
+  # Git-integration never fires). `environment: production` so an env-scoped
+  # secret is visible here exactly as it is in deploy-faucet.
+  faucet-hook-preflight:
+    name: pre-flight — faucet deploy hook wired
+    needs: resolve
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.is_prerelease == 'false' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment: production
+    steps:
+      - name: Assert the faucet deploy hook secret is wired
+        env:
+          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$DEPLOY_HOOK" ]; then
+            echo "::error::CLOUDFLARE_FAUCET_DEPLOY_HOOK is not wired (repo or production-environment secret) — a stable publish must not fall back silently to the dashboard Git-integration. Wire it (CF Pages → nulo-faucet → Settings → Builds & deployments → Deploy hooks), or pass dry_run=true."
+            exit 1
+          fi
+          echo "faucet deploy hook present"
+
   deploy-faucet:
     name: deploy faucet (Cloudflare Pages deploy hook)
-    needs: [resolve, attach-assets]
+    needs: [resolve, attach-assets, faucet-hook-preflight]
     if: |
       always() && !cancelled() &&
       needs.resolve.result == 'success' &&
       needs.attach-assets.result == 'success' &&
+      needs.faucet-hook-preflight.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
@@ -393,11 +423,10 @@ jobs:
           DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            # Not yet wired (A5: the faucet's CF dashboard Git-integration still
-            # deploys it on push:main — double-deploy accepted until the cutover).
-            # Skip, don't fail, so an unwired secret never blocks a release.
-            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping CI faucet deploy (dashboard Git-integration still deploys it)."
-            exit 0
+            # Unreachable when the preflight passed; red here means an
+            # env-visibility bug, not an unwired secret — fail loud either way.
+            echo "::error::CLOUDFLARE_FAUCET_DEPLOY_HOOK empty at deploy time despite the preflight — investigate secret scoping."
+            exit 1
           fi
           code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
             --retry 3 --retry-all-errors --retry-delay 2 \
@@ -410,13 +439,12 @@ jobs:
           echo "faucet deploy-hook triggered (HTTP $code)"
 
   verify-live:
-    name: verify live deploys (advisory)
+    name: verify live deploys
     needs: [resolve, attach-assets, refresh-landing, deploy-faucet]
-    # ADVISORY for now — deliberately NOT in the `status` aggregator. This
-    # fail-closed check ships unrehearsed (no test repo), so it reports red
-    # without blocking the required check until it's proven on the first clean
-    # real release; a follow-up then adds it to `status`'s needs (staged, like
-    # vars.AUTO_UNSTICK_ENABLED).
+    # REQUIRED — in the `status` aggregator since the staged-rollout flip
+    # (shipped advisory, proven on a real release, then promoted — same
+    # lifecycle as vars.AUTO_UNSTICK_ENABLED). A red here fails the release's
+    # status: re-fire the deploy (refresh-landing.yml break-glass) and re-run.
     if: |
       always() &&
       needs.resolve.outputs.is_prerelease == 'false' &&
@@ -546,8 +574,10 @@ jobs:
         build-firefox,
         smoke-against-artifact,
         attach-assets,
+        faucet-hook-preflight,
         refresh-landing,
         deploy-faucet,
+        verify-live,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -567,8 +597,10 @@ jobs:
             "${{ needs.build-firefox.result }}" \
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
+            "${{ needs.faucet-hook-preflight.result }}" \
             "${{ needs.refresh-landing.result }}" \
             "${{ needs.deploy-faucet.result }}" \
+            "${{ needs.verify-live.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do
