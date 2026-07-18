@@ -160,6 +160,35 @@ async function main() {
 		fail(`installed artifact sha256 ${digest} != descriptor ${descriptor.artifactSha256}.`)
 	}
 
+	// 2b. The RUNTIME-imported artifact (dist/target — what `PrivateFPCContract` actually loads)
+	// must be CORE-equal to the gated target artifact. The two copies legitimately differ only in
+	// the debug `file_map`; a divergent dist copy would let the wallet derive/execute against
+	// bytes the gate never checked (codex audit).
+	const canonicalize = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(canonicalize)
+		if (value && typeof value === "object") {
+			const out: Record<string, unknown> = {}
+			for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+				out[key] = canonicalize((value as Record<string, unknown>)[key])
+			}
+			return out
+		}
+		return value
+	}
+	const coreDigest = (bytes: Buffer): string => {
+		const parsed = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>
+		delete parsed.file_map
+		return createHash("sha256")
+			.update(JSON.stringify(canonicalize(parsed)))
+			.digest("hex")
+	}
+	const distBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "dist/target/private_contract-PrivateFPC.json"))
+	if (coreDigest(distBytes) !== coreDigest(artifactBytes)) {
+		fail(
+			"dist/target PrivateFPC artifact diverges from the gated target artifact (beyond file_map) — the runtime would use unchecked bytes.",
+		)
+	}
+
 	// 1 (compat). Digest-keyed, human-curated node compat: the live nodeVersion must be in the
 	// entry for EXACTLY this artifact digest. Missing entry = RED — compat is never inherited
 	// across artifact changes.

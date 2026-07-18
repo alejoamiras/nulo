@@ -108,6 +108,30 @@ describe("private-fuel keystone", () => {
 		const digest = createHash("sha256").update(rawBytes).digest("hex")
 		expect(digest).toBe(descriptor.artifactSha256)
 
+		// The RUNTIME-imported copy (dist/target — what PrivateFPCContract loads) must be
+		// CORE-equal to the gated artifact; the copies differ legitimately only in the
+		// debug file_map (codex audit: a divergent dist copy would execute unchecked bytes).
+		const canonicalize = (value: unknown): unknown => {
+			if (Array.isArray(value)) return value.map(canonicalize)
+			if (value && typeof value === "object") {
+				const out: Record<string, unknown> = {}
+				for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+					out[key] = canonicalize((value as Record<string, unknown>)[key])
+				}
+				return out
+			}
+			return value
+		}
+		const core = (bytes: Buffer): string => {
+			const parsed = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>
+			delete parsed.file_map
+			return createHash("sha256")
+				.update(JSON.stringify(canonicalize(parsed)))
+				.digest("hex")
+		}
+		const distBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "dist/target/private_contract-PrivateFPC.json"))
+		expect(core(distBytes)).toBe(core(rawBytes))
+
 		const installedVersion = JSON.parse(
 			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"),
 		).version

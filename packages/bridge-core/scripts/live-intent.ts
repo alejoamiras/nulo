@@ -395,8 +395,11 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * both written files are re-hashed against the source buffers and the faucet
  * derivation is re-proven by the REAL verify-deployments gate over the live file.
  * Nothing here runs `git commit` — a crash at any point leaves only uncommitted
- * working-tree changes (never a partially-promoted COMMITTED state), and the
- * next `verify` sees them via the tree-discipline check.
+ * working-tree changes (never a partially-promoted COMMITTED state). NOTE the
+ * live paths are operationally allowlisted, so tree discipline does NOT flag a
+ * crash-interrupted pair; the recovery is to RE-RUN promote — it is idempotent
+ * (re-verifies and rewrites BOTH targets from the same pinned candidates) and
+ * converges the pair before anything is committed (codex audit).
  *
  * Zero-seed assertion (this arc deploys no fuel/router and seeds no WETH): the
  * candidate's `l1.fuel` section must be BYTE-carried from the current live

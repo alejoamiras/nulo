@@ -174,6 +174,14 @@ async function main() {
 	const usdcArt = evmArtifact("MintableERC20")
 	let usdc: `0x${string}`
 	if (reuseTokenAddress) {
+		// --from-journal resume: the flag must agree with the journal's recorded usdc —
+		// journaling the flag value unchecked would poison later resumes (codex audit).
+		if (fromJournalMode) {
+			const recordedUsdc = recorded?.confirmed["usdc"]
+			if (recordedUsdc && recordedUsdc.toLowerCase() !== reuseTokenAddress.toLowerCase()) {
+				throw new Error(`--reuse-token ${reuseTokenAddress} != journal-recorded usdc ${recordedUsdc} — STOP`)
+			}
+		}
 		// Reuse mode: the reused address must BE the manifest's token when a live
 		// manifest exists (metadata alone accepts any same-shaped ERC20), and the
 		// live contract's metadata must match the expected identity.
@@ -293,7 +301,8 @@ async function main() {
 		"token",
 		"Token",
 		TokenContractArtifact,
-		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO = none).
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
 		"constructor_with_minter",
 		salts.token,
 	)
@@ -443,7 +452,7 @@ async function main() {
 				address: token.address.toString(),
 				salt: salts.token,
 				constructorArtifact: "constructor_with_minter",
-				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString()],
+				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString(), AztecAddress.ZERO.toString()],
 			},
 			bridge: {
 				address: bridge.address.toString(),
