@@ -32,7 +32,7 @@
  */
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { loadContractArtifact } from "@aztec/stdlib/abi"
@@ -44,7 +44,7 @@ import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
-type GateMode = "predeploy" | "require-deployed"
+export type GateMode = "predeploy" | "require-deployed"
 
 function parseMode(argv: string[]): GateMode {
 	const i = argv.indexOf("--mode")
@@ -103,14 +103,19 @@ async function rpcOptional<T>(method: string, params: unknown[]): Promise<T | un
 	return body.result ?? undefined
 }
 
+/** Throws (never exits) so importers get a catchable failure; the CLI wrapper maps it to exit 1. */
 const fail = (msg: string): never => {
-	console.error(`\n✗ ${msg}`)
-	process.exit(1)
+	throw new Error(msg)
 }
 
-async function main() {
+/**
+ * The FPC gate as an IMPORTABLE async function — throws on any RED so a fund-moving
+ * script can `await runFpcGate("require-deployed")` inline BEFORE its first broadcast,
+ * closing the "operator forgot the separate --mode require-deployed command" gap
+ * (codex ultra-audit HIGH). The CLI at the bottom wraps it.
+ */
+export async function runFpcGate(mode: GateMode): Promise<void> {
 	const here = fileURLToPath(new URL(".", import.meta.url))
-	const mode = parseMode(process.argv.slice(2))
 	const descriptor = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")) as {
 		aztecVersion: string
 		salt: string
@@ -250,7 +255,11 @@ async function main() {
 	console.log(`\n✓ FPC gate green (${mode}) — compat + identity + digest + live class all agree.`)
 }
 
-main().catch((err) => {
-	console.error("\n✗ gate errored (treat as RED — an RPC failure is never absence):", err instanceof Error ? err.message : err)
-	process.exit(1)
-})
+/** True only when this file is the process entrypoint (not when imported). */
+const isMain = process.argv[1] ? fileURLToPath(import.meta.url) === resolve(process.argv[1]) : false
+if (isMain) {
+	runFpcGate(parseMode(process.argv.slice(2))).catch((err) => {
+		console.error("\n✗ gate errored (treat as RED — an RPC failure is never absence):", err instanceof Error ? err.message : err)
+		process.exit(1)
+	})
+}

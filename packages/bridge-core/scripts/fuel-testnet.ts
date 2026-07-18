@@ -26,6 +26,7 @@ import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { PRIVATE_FPC_SALT } from "../src/private-fuel"
+import { runFpcGate } from "./check-fpc-version"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
@@ -76,6 +77,13 @@ const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1.5)
 async function main() {
 	const t0 = Date.now()
 	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+
+	// FUND-MOVING PREFLIGHT (codex ultra-audit HIGH): this canary deposits Fee Juice
+	// and pays fees THROUGH the PrivateFPC at PRIVATE_FPC_ADDRESS — an unrecoverable
+	// loss if that address isn't the deployed, class-correct, version-compatible
+	// contract. The gate runs INLINE here (not as a separate operator command) so it
+	// can never be skipped before the first broadcast.
+	await runFpcGate("require-deployed")
 
 	// ─── L1 (live contracts, viem) ───────────────────────────────────
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
