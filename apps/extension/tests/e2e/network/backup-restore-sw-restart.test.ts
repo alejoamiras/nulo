@@ -55,10 +55,19 @@ test("agent-runner contract: a live sandbox must be configured (no false skip)",
 })
 
 // Mirrors sw-restart-network.test.ts — kept inline per that file's precedent.
+// One deviation: an ABSENT service-worker target is a pass-through, not a failure.
+// The precedent tests kill the SW right after actively messaging it (guaranteed
+// awake); here the kill lands mid-restore, and under CI load Chrome's own MV3
+// reaper can take the SW down first — which IS the mid-restore SW death this
+// test exists to exercise, so proceed to the recovery leg instead of failing.
 async function stopServiceWorker(ctx: ExtensionContext): Promise<void> {
-	const swTarget = await ctx.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), {
-		timeout: 5_000,
-	})
+	const swTarget = await ctx.browser
+		.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), { timeout: 5_000 })
+		.catch(() => null)
+	if (!swTarget) {
+		console.warn("[sw-restart-restore] no live SW target — Chrome already killed it; proceeding to recovery")
+		return
+	}
 	const swSession = await swTarget.createCDPSession()
 	try {
 		await swSession.send("Runtime.terminateExecution")

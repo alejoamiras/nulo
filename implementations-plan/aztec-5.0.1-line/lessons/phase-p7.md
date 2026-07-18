@@ -135,3 +135,25 @@ Each finding was VERIFIED against the code before acting; accepted residuals car
 
 **Full gate after all four**: typecheck:all 0; bridge-core 156, wallet-core 161, aztec-runtime 86,
 faucet 428, extension units 3165. Follow-ups: #284 (strict-mode bearer), #285 (restore auth+resume).
+
+## CI flake hunt: backup-restore-sw-restart (3 consecutive network-e2e reds)
+
+Three failures, two distinct root causes — the timeout bump surfaced the second one:
+
+1. **Runs 1–2** (`TimeoutError: 60000ms exceeded`): the post-kill recovery wait
+   (`/popup/general` after reopen+unlock) was 60s; recovery re-derives the master,
+   re-provisions the store key, re-boots the chain runtime, and re-registers contracts —
+   too slow under CI proving load. Fix: 60s→240s, balance sync 30s→120s, test budget
+   600s→900s, mid-restore marker made non-fatal.
+2. **Run 3** (`TimeoutError: 5000ms exceeded` at ~53s): with the marker no longer
+   masking it, `stopServiceWorker`'s `waitForTarget` hard-failed because there was NO
+   service-worker target to kill — under CI load Chrome's MV3 reaper takes the idle SW
+   down mid-restore before the test does (heavy restore work lives in the offscreen doc,
+   so the SW can go idle). That is *the exact event the test exercises*, so the fix is
+   semantic: absent SW target ⇒ already-stopped ⇒ proceed to the recovery leg
+   (warn-logged). The precedent helper in `sw-restart-network.test.ts` never hits this
+   because it kills immediately after actively messaging the SW.
+
+Lesson: in MV3 e2e, "kill the SW" helpers must tolerate the SW being already dead —
+Chrome's reaper is a concurrent actor, and its kill is indistinguishable from (and as
+valid as) ours for crash-recovery assertions.
