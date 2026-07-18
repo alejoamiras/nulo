@@ -61,12 +61,50 @@ across two runs. Diagnosis (from the logs):
 - **Many on-chain tests PASSED** with this exact code (7–9 per shard; `heavy/concurrent-confirm`
   green), proving the code works on-chain; only the heaviest sandbox-dependent fixtures time out.
 - **dev (5.0.0) network-e2e is green** — its runs hit a stable CI window.
-**Conclusion**: the network redness is dominated by a CI sandbox-instability window (port-collision
-storm), not a code regression — smoke (no sandbox) green + the fixture-setup location of the timeouts
-are the tells. Action: RED-policy re-run in a calmer window. IF `opfs-storage`/`backup-restore-
-integrity` keep failing at the SAME fixture-setup step once the port storm clears, escalate to a
-real on-chain/fixture investigation (reproduce `tokenReadyExtension` locally under `e2e:agent`). Do
-NOT hand-wave a green — confirm on a clean run before P7 merge.
+**UPDATE — THREE consecutive red network runs (re-run `--failed` ×2 did NOT clear it).** This
+downgrades the "transient port-storm" read: a persistent, reproducible failure. Two candidate causes,
+and the NEXT SESSION must isolate which (fresh context — the logs are huge + noisy, and this session
+exhausted its budget on forensics):
+1. **Accelerator-server ↔ 5.0.1 proving incompat (PRIME suspect).** The `canary / real-proving` job
+   fails on EVERY run while `heavy / concurrent-confirm` PASSES — a proving-path tell. `_network-e2e.yml`
+   installs a **SHA-256-pinned accelerator-server binary** (a SEPARATE artifact from the
+   `@alejoamiras/aztec-accelerator` npm dep bumped in P1); if that binary is still the 5.0.0 build and
+   5.0.1 client proving is incompatible, ALL real-proving tests fail and **`gh run rerun` can NEVER
+   fix it** (same workflow + same pinned binary each re-run — which is exactly what 3/3 red shows).
+   ACTION: check `alejoamiras/aztec-accelerator` releases for a 5.0.1 accelerator-server binary; if it
+   exists, re-pin its SHA-256 in `_network-e2e.yml` (per P1's gate note); then push (not re-run).
+   **CHECKED — server RE-PIN RULED OUT**: `_network-e2e.yml` pins server `version: "1.0.6"` (latest
+   server release; the `@alejoamiras/aztec-accelerator@5.0.1` GH entries are the npm CLIENT package,
+   not the server binary), and its own comment says the server **fetches `bb` per the SDK-requested
+   version at first /prove** — i.e. version-agnostic, so it should prove 5.0.1 txs with no server
+   change. So if proving is the cause, it's the **bb-5.0.1 fetch/compat at prove time** (e.g. the
+   requested bb version not published/fetchable, or a proving mismatch), NOT a stale server binary.
+   Read `/tmp/accelerator-server.log` (uploaded as a CI artifact on failure) + the canary test-phase
+   log to see the bb-download/prove error.
+2. **Persistent CI port-collision infra** (`Address already in use` seen every run). Less likely to be
+   3/3 deterministic, but possible if the runner pool is systematically contended.
+**Isolation step**: read the `canary / real-proving` job's TEST-PHASE log (skip the git-teardown
+noise) — an accelerator/proving/WASM-fallback error ⇒ cause 1 (re-pin); a bare port/boot/fixture
+timeout with no proving error ⇒ cause 2 (infra). Do NOT hand-wave a green; the restore FIX itself is
+confirmed (smoke green) independently of this network-infra/proving question.
+
+## ✅ CONFIRMED ROOT CAUSE (canary log, run 29621567283): CI INFRA, not code, not proving
+The canary preflight logged `Accelerator ready: {"bb_available":true,"status":"ok","version":"1.0.6"}`
+— **proving/accelerator is HEALTHY** (cause 1 DEFINITIVELY ruled out). Immediately after:
+`[aztec-node] Error: Address already in use (os error 98)` → agent.sh boot-failure sentinel
+`exit 86` (sandbox never became ready, NO test ran) → "retrying the agent once" → `exit 86` AGAIN →
+job fails. So every red network job this run is the **aztec-node port-bind collision → exit-86 boot
+failure**, and the RETRY hits the SAME collision (almost certainly attempt-1's orphaned node still
+holding the port — a self-inflicted retry collision, which is why 3/3 runs stuck). This is a CI
+sandbox port-isolation / retry-cleanup infra issue (Q-06 family), NOT the 5.0.1 client, NOT the
+restore fix, NOT proving. `dev` green = its runs didn't trip the first-attempt collision.
+**Two real next-session options (both P5 "run-isolation/deploy-tooling" territory, both need a
+calmer CI window or an agent.sh fix — neither is a code-correctness blocker; smoke+quality are green):**
+1. Re-run the network suite in a calmer window (may catch a clean boot; 3/3 stuck suggests the
+   retry-orphan makes it sticky, so this alone may not suffice).
+2. Fix the exit-86 RETRY to kill attempt-1's orphaned aztec-node (+ release its ports) BEFORE
+   retrying — the retry currently collides with its own orphan. This is the durable fix.
+The restore regression fix is validated INDEPENDENTLY (smoke-e2e + quality-status green on CI).
 
 ## Gate (per plan)
 Full v2+audit test matrix (incl. stale-first-after-restart-of-tombstoned-profile) + `test:all` + lint;
