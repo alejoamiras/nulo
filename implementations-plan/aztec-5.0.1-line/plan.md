@@ -335,7 +335,22 @@ receipt; verify → write → re-verify → commit; a crash mid-promote leaves n
 COMMITTED state). Zero-seed assertion (any WETH seed or fuel/router deploy = hard fail).
 **Gate**: unit coverage over the new modes + promote path; `test:all` + lint.
 
-### P6 — Live redeploy (intent-gated, candidate-first)
+### P6 — Live redeploy (intent-gated, candidate-first) ✓ DONE — PROMOTED LIVE
+> **✅✅ EXECUTED LIVE (user-driven, 2026-07-18).** Full intent-gated candidate-first redeploy to
+> the live Sepolia v5 testnet. **PrivateFPC 5.0.1 deployed at the pinned `0x1a6d21ce`** (class
+> `0x032bc73c`, sponsored, address-verified; the old 5.0.0 `0x257aa870` confirmed ABSENT on-chain).
+> Bridge candidate via `--reuse-token` (AZLO readback-verified; NuloTokenPortal `0x6d614378`;
+> 8 L1 readbacks + Etherscan-verified; the `l2Bridge()==ZERO` portal-init preflight passed). Faucet
+> candidate: Dripper `0x064399d4`, NULO `0x0262b24b`, OLUN `0x14e0a251` (5-arg). **`verify` green
+> before every broadcast group; the completed 5.0.0 journal was archived for a clean generation.**
+> **Six canaries GREEN**: verify-l1, candidate smoke (deposit→claim), fueled smoke (swap→self-pay),
+> **PrivateFPC settle (private `pay_fee` SETTLED through `0x1a6d21ce`, fee 1.85/2.8 FJ)**, direct-FJ,
+> drip. **`promote` (receipted)**: candidate digests bound (bridge `910421`, faucet `52a2c870`),
+> require-deployed gate + faucet-derivation re-proven, zero-seed confirmed, atomic flip. **Post-
+> promotion**: `verify:deployments` GREEN on live (the CI Build Faucet gate now passes), live drip
+> ✅, **caps reconciliation 0.0032/0.5 ETH**. Committed `30963e0`. 5.0.1 artifacts against the
+> compatible live 5.0.0 node (per the compat map + owner ruling). `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p6.md`.
+
 Scope: REUSE protocol FeeJuicePortal, AZLO L1, fuel/router/swap/pools; REDEPLOY app
 NuloTokenPortal + L2 Proxy/Token/Bridge (via `reuse-token` mode) + faucet Dripper/NULO/OLUN
 (candidate file) + PrivateFPC at the 5.0.1 identity. Order: intent `build` (committed before
