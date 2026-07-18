@@ -101,3 +101,10 @@ UI's own state machine** (button label + rendered error) — it names the stuck 
 distinguishes "stuck" from "cleanly errored with no toast". And when an ABI consumer misbehaves
 after a package swap, run the PURE matcher against the REAL artifact before theorizing about
 runtime/sync/eviction.
+
+## 2026-07-18 — CI CONFIRMATION: descriptor-path fix clears the ENTIRE network suite
+Run 29651144451 (head `450ae47`): all 5 shards, real-proving canary, heavy fee-methods +
+concurrent-confirm, `network-e2e-status` — ALL SUCCESS. 13/13 previously-failing tests pass;
+the lone 'error'-vs-'ok' assertion also cleared (it was downstream of the same broken import).
+P4's remaining open items: deploy-script 5-arg arity + descriptor regen (P6-coupled), Noir
+recompile against 5.0.1 toolchain, fee-payment tarball source-binding diff.

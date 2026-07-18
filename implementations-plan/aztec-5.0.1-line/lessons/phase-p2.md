@@ -127,3 +127,11 @@ expand P2 to fix it.
   (documented above). This is the one gate line P2 cannot turn green locally.
 
 `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`
+
+## 2026-07-18 — P2 CLOSED: network e2e fully green on CI
+Run 29651144451 (head `450ae47`): 5/5 shards + real-proving canary (5 accelerator /prove) + both
+heavy jobs + `network-e2e-status` SUCCESS — restore trio (`backup-restore-integrity`,
+`backup-migration-roundtrip`) green inside the shards. Smoke green. Quality red ONLY via
+`Build Faucet / vite build` (verify:deployments arity — the plan's EXPECTED P6-coupled red).
+The final blocker was not P2's restore ordering (that fix held) but the suite-wide importToken
+descriptor-path failure — root cause + fix logged in `lessons/phase-p4.md` (2026-07-18 entries).

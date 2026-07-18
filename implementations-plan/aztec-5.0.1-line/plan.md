@@ -124,20 +124,23 @@ artifacts still 5.0.0-compiled — the live deployment is untouched by this phas
 still reproduces the SAME way post-bump (or is noted as resolved by 5.0.1 itself); smokes that
 don't touch the restore path green. **`LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p1.md`.**
 
-### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0) ◑ FIX LANDED, CI re-validating
-> **✅ RESTORE REGRESSION FIXED (`c7420f6`).** Root cause (CI-confirmed, corrected from an earlier
-> wrong "environmental" call): under 5.0.1 the exported account-state includes the account's own
-> contract; restoring it in the pre-finalize loop called `registerContract` before the PXE store key
-> could be provisioned (`PXE_STORE_KEY_MISSING`) → "completed with errors" → no auto-advance. **Fix:
-> move the account-state restore step to AFTER `finalizeRestore` opens the session** (the store-key
-> provider needs an open session; app.vue's activation handler only auto-seeds networks/accounts, so
-> no import-race). +1 ordering unit test (restore-after-finalize). **Local smoke `backup-roundtrip`
-> now PASSES in 27s (was 240s+ timeout), on the SAME loaded box — proving it was the ordering, not
-> SW-eviction.** Plus the P2 recovery orchestrator (`completeImportWithRecovery`, +7 tests) + the 3
-> restore e2e rewritten to settle→recover. typecheck:all 0, extension units 3129, lint 0.
-> **Pushed to CI to validate the network restore trio (needs a sandbox); the `tokens` frame-detach +
-> `Address already in use` network failures are documented flakes (Q-06/07).** Mark ✓ once the CI
-> restore trio is green. `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.
+### P2 — Import-page recovery (the ACTUAL restore fix; re-aimed from P0) ✓ CI-GREEN
+> **✅✅ DONE — network e2e FULLY GREEN on CI (run 29651144451, head `450ae47`): all 5 shards +
+> real-proving canary + heavy jobs, restore trio included.** Two fixes got it there:
+> 1. **The restore regression (`c7420f6`)**: under 5.0.1 the exported account-state includes the
+>    account's own contract; restoring it pre-finalize called `registerContract` before the PXE
+>    store key existed (`PXE_STORE_KEY_MISSING`) → "completed with errors" → no auto-advance.
+>    Fixed by moving the account-state restore AFTER `finalizeRestore` opens the session. +1
+>    ordering unit test; recovery orchestrator (`completeImportWithRecovery`, +7 tests); the 3
+>    restore e2e rewritten to settle→recover.
+> 2. **The suite-wide importToken failure (`450ae47`, diagnosed under P4)**: the 5.0.1 standards
+>    artifact crate-prefixes AztecAddress struct paths; exact-path descriptor predicates resolved
+>    zero candidates for 6/9 kinds → `isComplete: false` → silent popup error → no "Token added"
+>    toast → every tokenReady-fixture test red. Fixed with `matchesStructPath` suffix tolerance +
+>    a real-artifact pin test. (The long-blamed `Address already in use` line is BENIGN node
+>    boot noise — the Q-06/07 "infra flake" taxonomy was a misread; see phase-p4 lessons.)
+> typecheck:all 0, extension units 3129+36, lint 0, smoke-e2e ✓, network-e2e ✓.
+> `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p2.md`.
 
 <!-- superseded banner retained below for the diagnosis trail -->
 ### (diagnosis trail) P2 — earlier BLOCKED banner
