@@ -248,7 +248,24 @@ Per v2 with the audit folds:
 `test:all` + lint; the three previously-red e2e GREEN locally (smoke backup-roundtrip; network
 backup pair via `e2e:agent`).
 
-### P4 — Identity generation: standards swap + fee-payment 5.0.1 + Noir
+### P4 — Identity generation: standards swap + fee-payment 5.0.1 + Noir ✓ GATE GREEN
+> **✅✅ DONE.** Standards swap (trust-gate cleared; `@aztec-foundation/aztec-standards@5.0.1`
+> across 5 package.json + 33 sites; the descriptor-path fix `450ae47` made it land) — network e2e
+> CI green ×2 on it. fee-payment 5.0.1 re-pinned (`0x1a6d21ce`, digest `94fa4c71…`) with **source
+> binding PROVEN**: publish tag = `ecosystem-tooling@v5.0.1` (pkg byte-match), canonical json
+> identical tarball↔tags↔our descriptor, and a fresh toolchain rebuild's core digest
+> (sans file_map) EQUALS the published artifact's. **FPC gate redesigned (`25de2d0`)**:
+> digest-keyed human-curated `compatibleNodeVersions` (`94fa4c71… → ["5.0.0","5.0.1"]`), hard
+> l1ChainId=11155111 + rollupVersion=1821665230 pins, REQUIRED `--mode predeploy|require-deployed`
+> (absence red under require-deployed — mandatory pre-funding/canary/promotion), `rpcOptional`
+> for the live node's omitted-result absence encoding. Verified LIVE: predeploy GREEN,
+> require-deployed RED (not yet deployed), no-mode RED. **Noir (`616ecc6`)**: aztec-packages tags
+> → v5.0.1 ×3 (peeled `b97ff8c3…`), token dep → `AztecProtocol/aztec-standards@v5.0.1` (peeled
+> `c74541f7…`, path API-verified), compile.sh → 5.0.1, all three compile clean + path-scrubbed,
+> keystone byte-identical + `nargo test` 3/3; class-id table in lessons. **Gate**: tripwire 8/8
+> (+ compat coherence pins), bridge-core 136/136, `test:all` rc=0, drift detectors EXPECTED red
+> (verify:deployments — the redeploy's evidence, P6). Deploy-script 5-arg arity stays P6-coupled.
+> `LESSONS_FILE=implementations-plan/aztec-5.0.1-line/lessons/phase-p4.md`.
 - Standards swap: **trust STOP-gate first** (audit-hardened): npm provenance attestation whose
   subject binds `AztecProtocol/aztec-standards` @ the `v5.0.1` peeled commit — **absent
   attestation = STOP and surface to the user** (conditional Ask); reverse anchor: the repo's

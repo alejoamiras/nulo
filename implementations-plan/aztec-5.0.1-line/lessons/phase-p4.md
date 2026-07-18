@@ -142,3 +142,22 @@ recompile against 5.0.1 toolchain, fee-payment tarball source-binding diff.
 
 - keystone `nargo test` 3/3 ✓; bridge-core suite 136/136 ✓ (tripwire + derivation pins green
   against the new state).
+
+## 2026-07-18 — P4 CLOSED: FPC gate redesign verified live; gate green end-to-end
+- **Gate redesign (`25de2d0`)**: `--mode predeploy|require-deployed` REQUIRED (predeploy green on
+  clean absence; require-deployed red until the P6 deploy — mandatory before funding/canary/
+  promotion); digest-keyed human-curated compat map (`94fa4c71… → ["5.0.0","5.0.1"]` — missing
+  entry fails closed, compat never inherited across digests); hard l1ChainId=11155111 +
+  rollupVersion=1821665230 pins (re-verified live this date).
+- **Live-node RPC gotcha**: the v5 testnet encodes `node_getContract` ABSENCE by OMITTING the
+  `result` key from a well-formed success envelope (JS `undefined` doesn't serialize). The old
+  "no result = malformed" guard would deadlock predeploy forever. `rpcOptional` accepts exactly
+  that envelope shape as absence; HTTP/RPC-error/non-JSON still throw. Deployed-branch verified
+  against canonical FeeJuice (0x…03) and the LIVE SponsoredFPC (0x1441491b — deployed on testnet
+  with class `0x2015e1c6…`, matching our 5.0.1-derived class).
+- **Gate outputs (real)**: predeploy rc=0; require-deployed rc=1; no-mode rc=1; tripwire 8/8 incl.
+  new compat-coherence pins; bridge-core 136/136; `test:all` rc=0. Drift detectors (CI Build
+  Faucet / verify:deployments) EXPECTED red until P6's redeploy — recorded as evidence.
+- Remaining coupling for P6: deploy-script 5-arg `constructor_with_minter` arity + descriptor
+  regen (deploy.ts / deploy-bridge-testnet.ts / deposit-testnet.ts / deployments.ts) + the NULO
+  token + PrivateFPC live redeploys + require-deployed re-run.
