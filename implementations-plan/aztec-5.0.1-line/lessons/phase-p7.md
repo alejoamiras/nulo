@@ -87,3 +87,51 @@ COMPOSED FLOWS (not per-file): (1) fund-moving deploy chain end-to-end (sequenci
 error); (2) PXE/profile concurrency + MV3 crash-safety under adversarial SW/offscreen death
 interleavings; (3) supply-chain + artifact byte-identity (what pins BYTES vs versions); (4)
 backup/restore user-data integrity + P2-recovery durability. Findings triaged in the next entries.
+
+## 2026-07-18 — four gpt-5.6-sol ULTRA audits: full triage (12 fixes across 5 commits + 2 follow-ups)
+
+Each finding was VERIFIED against the code before acting; accepted residuals carry reasons.
+
+### Audit 1 — fund-moving deploy chain (composed flow). `14377fc` + `6a78e25`
+- HIGH require-deployed ran only in promote → **inline `runFpcGate("require-deployed")` at the top of
+  fuel-testnet** (the only PrivateFPC fund-mover); gate extracted to importable (`isMain`-guarded CLI).
+- HIGH verify not coupled to broadcast → **the L1 broadcast scripts assert deployer ==
+  PLAN_PINNED_L1_SIGNER** before spending; a wrong key in the broadcast shell now hard-stops.
+- HIGH intent mutable / source not re-checked → **verify diffs HEAD vs intent.source.commit** and
+  STOPs on any deploy-relevant change since build.
+- MED remaining 4-arg canaries (smoke-existing, smoke-swap, faucet dry-run) → 5-arg swept.
+- Residuals (compensated by the SUPERVISED per-group-verify flow the user drives): the canary→pin→
+  promote A/B digest binding (promote already re-derivation-proves the faucet + re-hashes the bridge
+  vs recorded digest); deposit-canary crash-recoverability (testnet, capped ≤0.5 ETH); default-to-live
+  --config omission; secrets-in-argv (LOW).
+
+### Audit 2 — PXE/profile concurrency + MV3 crash-safety. `590049a`
+- HIGH stale provision across offscreen restart → **provider re-reads generation AFTER HKDF**; a
+  deletion during derivation (or offscreen reincarnation losing deleted(gen)) now rejects.
+- HIGH deletion times out behind a 30-min proof → **clearChainState/clearProfileState get
+  PROVE_TX_TIMEOUT_MS** so the delete drains rather than stranding the id reserved forever.
+- HIGH reader force-release counted inner-guard queue time → **MAX_READER_DRAIN_MS 35→90 min**
+  (queue-behind-one-proof + own-proof + margin); the long clear timeout means delete waits, not forces.
+- MED withPxeWrite could resurrect a purged chain → **purge-epoch check on the write path too** (+test
+  injecting a concurrent purge after the synchronous entry-read).
+
+### Audit 3 — supply-chain + artifact byte-identity. `cdd767e`
+- HIGH four residual 4-arg constructor sites (incl. faucet's connect-time bridge rebuild) → 5-arg.
+- HIGH committed Noir artifacts unbound to source → **class-id + version tripwire** (proxy/bridge).
+- HIGH FPC digest didn't cover the fee-payment SDK JS → **private-fuel.test pins each emitted call's
+  (to, selector)**.
+- MED standards artifacts unanchored → **Token/Dripper class-id tripwire** (defense beyond lockfile).
+- Residuals: compat-map human-editable (by design; canary backstop); stale @alejoamiras/aztec-standards
+  @5.0.0 in node_modules (nothing imports it; fresh install clears).
+
+### Audit 4 — backup/restore user-data integrity. `ed7ad82` + issue #285
+- MED malformed account-state → uncaught throw post-finalize (rollback suppressed) → **guarded to a
+  per-item error** (+test).
+- MED silent export omission (inactive networks, artifact-less contracts) → **WARN-logged with counts**.
+- HIGH #1 (durable account-state resume) + HIGH #2 (forged-account address authentication) → **filed as
+  #285** — pre-production, no cross-user fund theft (a forged account can't spend the victim's
+  master-encrypted notes; caught at first-spend by getAccountContract), and both need a plan not an
+  inline patch. The P2 sw-restart e2e is liveness-only — noted for a future integrity-asserting marker.
+
+**Full gate after all four**: typecheck:all 0; bridge-core 156, wallet-core 161, aztec-runtime 86,
+faucet 428, extension units 3165. Follow-ups: #284 (strict-mode bearer), #285 (restore auth+resume).
