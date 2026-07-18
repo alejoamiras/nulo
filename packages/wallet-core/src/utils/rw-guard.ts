@@ -1,9 +1,13 @@
 import { type ILogger, LogLevel } from "../logger/interfaces"
 
-/** Force-release timeout for stuck readers (ms). Mirrors `Lock.MAX_HOLD_MS`.
- *  Converts a deadlock into a loud log + forced drain so the wallet
- *  recovers on its own instead of hanging forever. */
-const MAX_READER_DRAIN_MS = 5 * 60_000
+/** Force-release timeout for stuck readers (ms). Converts a deadlock into a
+ *  loud log + forced drain so the wallet recovers on its own instead of
+ *  hanging forever. MUST exceed the longest legitimate reader: a `proveTx`
+ *  can legitimately hold a read for up to 30 minutes (aztec-runtime's
+ *  `PROVE_TX_TIMEOUT_MS` — not importable here, wallet-core sits below it),
+ *  and a premature force-release lets a writer (profile deletion) run
+ *  concurrently with live PXE work over an encrypted store. */
+export const MAX_READER_DRAIN_MS = 35 * 60_000
 
 interface Deferred<T> {
 	promise: Promise<T>
@@ -46,7 +50,12 @@ function deferred<T = void>(): Deferred<T> {
  * not nest.
  */
 export class ReadWriteGuard {
-	private readers = 0
+	/** Live readers, one token per `read()` in flight. A Set (not a counter) so a
+	 *  force-release can clear it without skew: when a force-released reader's
+	 *  `finally` eventually runs — e.g. a legitimate long proof that outlived the
+	 *  drain timeout — its `delete` is a no-op instead of decrementing a fresh
+	 *  count to -1 (which let writers overlap later live readers). */
+	private readonly readerTokens = new Set<symbol>()
 	private writeActive = false
 	private readonly writeWaiters: Deferred<void>[] = []
 	private readonly readWaiters: Deferred<void>[] = []
@@ -57,6 +66,10 @@ export class ReadWriteGuard {
 		private readonly logger?: ILogger,
 	) {}
 
+	private get readers(): number {
+		return this.readerTokens.size
+	}
+
 	async read<T>(fn: () => Promise<T>): Promise<T> {
 		if (this.writeActive || this.writeWaiters.length > 0) {
 			const d = deferred()
@@ -65,12 +78,13 @@ export class ReadWriteGuard {
 		}
 
 		if (this.readers === 0) this.startForceReleaseTimer()
-		this.readers++
+		const token = Symbol("reader")
+		this.readerTokens.add(token)
 
 		try {
 			return await fn()
 		} finally {
-			this.readers--
+			this.readerTokens.delete(token)
 			if (this.readers === 0) {
 				this.stopForceReleaseTimer()
 				this.drainWriteIfReady()
@@ -139,7 +153,10 @@ export class ReadWriteGuard {
 						`ReadWriteGuard: force-released ${this.readers} stuck reader(s) after ${MAX_READER_DRAIN_MS}ms`,
 					)
 				}
-				this.readers = 0
+				// Clearing the set orphans the stuck readers' tokens: their
+				// `finally` deletes become no-ops, so the count can never go
+				// negative and later writer/reader exclusion stays sound.
+				this.readerTokens.clear()
 				this.drainWriteIfReady()
 			}
 			this.forceReleaseTimer = undefined
