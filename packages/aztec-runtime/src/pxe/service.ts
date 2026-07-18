@@ -634,20 +634,43 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		})
 	}
 
+	/** Attempts before giving up on the read path's peek → write-rebind → re-peek
+	 *  loop. Each miss means the runtime was (re)bound or torn down between our
+	 *  write and re-entering read — more than a couple in a row is a live purge
+	 *  or endpoint churn the caller should surface, not spin through. */
+	private static readonly MAX_RUNTIME_BIND_ATTEMPTS = 3
+
 	private async withPxeRead<T>(label: string, network: NetworkInfo, fn: (pxe: PXE, node: AztecNode) => Promise<T>): Promise<T> {
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
 		const chainGuard = this.getChainGuard(network.profileId, network.chainId)
 		try {
 			this.logDebug(`[DEBUG] [READ] ${label} starting`)
-			const result = await barrier.read(async () => {
-				return chainGuard.read(async () => {
-					const runtime = await this.registry.getOrInit(network, this.storeKeys.get(network.profileId))
-					return fn(runtime.pxe, runtime.node)
+			// Peek under READ; on a miss/mismatch, EXIT the read and (re)bind under
+			// the chain WRITE guard, then re-enter read and retry. Rebinding (which
+			// disposes a live runtime on endpoint switch) under a mere read lock
+			// raced concurrent readers + the SAH-pool lock (#281 D3). The read is
+			// fully released before the write is requested — no read→write upgrade.
+			const missed = Symbol("runtime-miss")
+			for (let attempt = 0; attempt < PxeService.MAX_RUNTIME_BIND_ATTEMPTS; attempt++) {
+				const result = await barrier.read(async () => {
+					return chainGuard.read(async () => {
+						const runtime = this.registry.peekMatching(network)
+						if (!runtime) return missed
+						return fn(runtime.pxe, runtime.node)
+					})
 				})
-			})
-			this.logDebug(`[DEBUG] [READ] ${label} completed (${Date.now() - start}ms)`)
-			return result
+				if (result !== missed) {
+					this.logDebug(`[DEBUG] [READ] ${label} completed (${Date.now() - start}ms)`)
+					return result as T
+				}
+				await barrier.read(async () => {
+					await chainGuard.write(async () => {
+						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
+					})
+				})
+			}
+			throw new Error(`${label}: chain runtime kept rebinding/vanishing after ${PxeService.MAX_RUNTIME_BIND_ATTEMPTS} attempts`)
 		} catch (err) {
 			this.logError(`[READ] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
 			throw err
@@ -662,7 +685,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
 				return chainGuard.write(async () => {
-					const runtime = await this.registry.getOrInit(network, this.storeKeys.get(network.profileId))
+					// Already under the chain WRITE guard — `ensure` may rebind here.
+					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)
 					const result = await fn(runtime.pxe, runtime.node)
 					this.logDebug(`[DEBUG] [WRITE] ${label} completed (${Date.now() - start}ms)`)

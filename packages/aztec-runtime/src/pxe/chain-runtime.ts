@@ -244,19 +244,18 @@ export class ProductionPxeFactory implements PxeFactory {
 }
 
 /**
- * Per-(profileId, chainId) registry of `ChainRuntime` instances. Owns
- * the dedup-on-concurrent-init promise map so two callers asking for
- * the same chain at once share the init, not double-init.
+ * Per-(profileId, chainId) registry of `ChainRuntime` instances.
  *
- * The registry is intended to be called from INSIDE the PxeService
- * ReadWriteGuard's read lock. Under that contract, `clear()` (called
- * from the write lock on profile switch / delete) never runs
- * concurrently with `getOrInit`, so there is no separate stale-init
- * race to handle here — the guard serializes it.
+ * Locking contract (enforced by the PxeService callers, not here):
+ * `peek`/`peekMatching` are safe under the chain READ guard; `ensure`
+ * (init or endpoint rebind — it may DISPOSE a live runtime) requires the
+ * chain WRITE guard; `clear`/`dispose*` run under the profile write
+ * barrier. Write exclusivity replaces the old shared-init-promise dedup:
+ * two readers that both miss simply serialize through `ensure`, and the
+ * second finds the runtime already bound.
  */
 export class ChainRuntimeRegistry {
 	private readonly runtimes = new Map<string, ChainRuntime>()
-	private readonly initPromises = new Map<string, Promise<ChainRuntime>>()
 
 	public constructor(private readonly factory: PxeFactory) {}
 
@@ -271,39 +270,41 @@ export class ChainRuntimeRegistry {
 		return this.runtimes.get(this.key(profileId, chainId))
 	}
 
-	/** Lazy-init for `(network.profileId, network.chainId)`. Concurrent
-	 *  callers share the same init promise. If the runtime exists but
-	 *  its rpcUrl no longer matches (network re-bound), the existing
-	 *  runtime is disposed and re-initialized under the new URL.
-	 *  `storeKey` is only consumed on an actual init (the production
-	 *  factory fail-closes without it). */
-	public async getOrInit(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
+	/** URL-checked peek: the runtime for `network`'s coordinates, but only if it
+	 *  is already bound to `network.rpcUrl`. `undefined` on a miss OR an endpoint
+	 *  mismatch — the caller escalates to `ensure` under the chain WRITE guard.
+	 *  Never mutates registry state, so it is safe under a chain READ. */
+	public peekMatching(network: NetworkInfo): ChainRuntime | undefined {
+		const existing = this.runtimes.get(this.key(network.profileId, network.chainId))
+		return existing && existing.rpcUrl === network.rpcUrl ? existing : undefined
+	}
+
+	/** Init-or-rebind for `(network.profileId, network.chainId)`.
+	 *
+	 *  MUST be called under the chain WRITE guard (and the profile barrier read):
+	 *  an endpoint rebind disposes the live runtime, which under a mere read lock
+	 *  raced concurrent readers of the same chain and a third caller against the
+	 *  not-yet-released SAH-pool lock (#281 D3). Write exclusivity also makes the
+	 *  old shared-init-promise dedup unnecessary — and that map was itself a
+	 *  hazard, keyed only by chain so a new-URL caller could inherit a stale-URL
+	 *  init in flight.
+	 *
+	 *  Dispose-failure semantics mirror `settleDisposals`: the runtime reference
+	 *  is dropped only AFTER a successful dispose — a failed `store.close()`
+	 *  leaks the SAH lock, and the kept reference is the only retry handle.
+	 *  `storeKey` is only consumed on an actual init (the production factory
+	 *  fail-closes without it). */
+	public async ensure(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
 		const k = this.key(network.profileId, network.chainId)
 		const existing = this.runtimes.get(k)
-		if (existing && existing.rpcUrl === network.rpcUrl) {
-			return existing
-		}
-		if (existing && existing.rpcUrl !== network.rpcUrl) {
-			this.runtimes.delete(k)
+		if (existing) {
+			if (existing.rpcUrl === network.rpcUrl) return existing
 			await existing.dispose()
+			this.runtimes.delete(k)
 		}
-
-		let promise = this.initPromises.get(k)
-		if (!promise) {
-			promise = this.factory
-				.createChainRuntime(network, storeKey)
-				.then((runtime) => {
-					this.runtimes.set(k, runtime)
-					this.initPromises.delete(k)
-					return runtime
-				})
-				.catch((err) => {
-					this.initPromises.delete(k)
-					throw err
-				})
-			this.initPromises.set(k, promise)
-		}
-		return promise
+		const runtime = await this.factory.createChainRuntime(network, storeKey)
+		this.runtimes.set(k, runtime)
+		return runtime
 	}
 
 	/**
@@ -339,7 +340,6 @@ export class ChainRuntimeRegistry {
 	public async clear(): Promise<void> {
 		const entries = Array.from(this.runtimes.entries())
 		this.runtimes.clear()
-		this.initPromises.clear()
 		await this.settleDisposals(entries)
 	}
 
@@ -350,7 +350,6 @@ export class ChainRuntimeRegistry {
 		const k = this.key(profileId, chainId)
 		const runtime = this.runtimes.get(k)
 		this.runtimes.delete(k)
-		this.initPromises.delete(k)
 		if (runtime) await runtime.dispose()
 	}
 
@@ -373,9 +372,6 @@ export class ChainRuntimeRegistry {
 				victims.push([k, runtime])
 				this.runtimes.delete(k)
 			}
-		}
-		for (const k of Array.from(this.initPromises.keys())) {
-			if (k.startsWith(prefix)) this.initPromises.delete(k)
 		}
 		await this.settleDisposals(victims)
 	}

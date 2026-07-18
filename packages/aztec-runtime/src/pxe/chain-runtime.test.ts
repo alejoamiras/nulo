@@ -244,8 +244,8 @@ describe("ChainRuntimeRegistry.disposeProfile — allSettled + AggregateError + 
 		})
 		const factory: PxeFactory = { createChainRuntime: async (n) => (n.chainId === 1 ? ok : bad) }
 		const reg = new ChainRuntimeRegistry(factory)
-		await reg.getOrInit(net(1))
-		await reg.getOrInit(net(2))
+		await reg.ensure(net(1))
+		await reg.ensure(net(2))
 
 		await expect(reg.disposeProfile(P)).rejects.toBeInstanceOf(AggregateError)
 		// The cleanly-disposed chain is gone; the poisoned one is RETAINED as the retry handle.
@@ -256,11 +256,77 @@ describe("ChainRuntimeRegistry.disposeProfile — allSettled + AggregateError + 
 	test("resolves cleanly + clears the registry when every close succeeds", async () => {
 		const factory: PxeFactory = { createChainRuntime: async (n) => runtimeWith(n.chainId, async () => {}) }
 		const reg = new ChainRuntimeRegistry(factory)
-		await reg.getOrInit(net(1))
-		await reg.getOrInit(net(2))
+		await reg.ensure(net(1))
+		await reg.ensure(net(2))
 
 		await expect(reg.disposeProfile(P)).resolves.toBeUndefined()
 		expect(reg.peek(P, 1)).toBeUndefined()
 		expect(reg.peek(P, 2)).toBeUndefined()
+	})
+})
+
+describe("ChainRuntimeRegistry peek/ensure split (#281 D3)", () => {
+	const P = "prof-1"
+	const netAt = (chainId: number, rpcUrl: string) => ({ profileId: P, chainId, rpcUrl }) as never
+
+	function runtimeAt(chainId: number, rpcUrl: string, close: () => Promise<void> = async () => {}): ChainRuntime {
+		const pxe = { stop: async () => {} } as never
+		const node = {} as never
+		const store = { close } as never
+		return new ChainRuntime(chainId, node, pxe, rpcUrl, store)
+	}
+
+	test("peekMatching returns the runtime only when the rpcUrl matches; never mutates", async () => {
+		const rt = runtimeAt(1, "http://a")
+		const reg = new ChainRuntimeRegistry({ createChainRuntime: async () => rt })
+		await reg.ensure(netAt(1, "http://a"))
+
+		expect(reg.peekMatching(netAt(1, "http://a"))).toBe(rt)
+		// Endpoint switched: a read-path caller gets a miss (it escalates to
+		// ensure under the chain WRITE guard) — the live runtime is untouched.
+		expect(reg.peekMatching(netAt(1, "http://b"))).toBeUndefined()
+		expect(reg.peek(P, 1)).toBe(rt)
+	})
+
+	test("ensure rebinds on endpoint switch: disposes the old runtime, binds the new URL", async () => {
+		let closed = 0
+		const made: ChainRuntime[] = []
+		const reg = new ChainRuntimeRegistry({
+			createChainRuntime: async (n) => {
+				const rt = runtimeAt(n.chainId, n.rpcUrl, async () => {
+					closed++
+				})
+				made.push(rt)
+				return rt
+			},
+		})
+		const first = await reg.ensure(netAt(1, "http://a"))
+		expect(await reg.ensure(netAt(1, "http://a"))).toBe(first) // idempotent on match
+
+		const second = await reg.ensure(netAt(1, "http://b"))
+		expect(second).not.toBe(first)
+		expect(closed).toBe(1) // the old runtime was disposed
+		expect(reg.peekMatching(netAt(1, "http://b"))).toBe(second)
+	})
+
+	test("ensure keeps the old runtime referenced when its dispose fails (retry handle, no double-open)", async () => {
+		const bad = runtimeAt(1, "http://a", async () => {
+			throw new Error("close failed: lock leaked")
+		})
+		let factoryCalls = 0
+		const reg = new ChainRuntimeRegistry({
+			createChainRuntime: async (n) => {
+				factoryCalls++
+				return n.rpcUrl === "http://a" ? bad : runtimeAt(n.chainId, n.rpcUrl)
+			},
+		})
+		await reg.ensure(netAt(1, "http://a"))
+		expect(factoryCalls).toBe(1)
+
+		// The rebind's dispose throws: ensure must NOT init the new URL over a
+		// possibly-leaked SAH lock, and must keep the old reference for retry.
+		await expect(reg.ensure(netAt(1, "http://b"))).rejects.toThrow("close failed")
+		expect(factoryCalls).toBe(1)
+		expect(reg.peek(P, 1)).toBe(bad)
 	})
 })

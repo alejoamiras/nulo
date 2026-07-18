@@ -54,34 +54,33 @@ describe("ChainRuntime.dispose", () => {
 })
 
 describe("ChainRuntimeRegistry", () => {
-	test("getOrInit returns same runtime for same (profileId, chainId)", async () => {
+	test("ensure returns same runtime for same (profileId, chainId)", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const r1 = await registry.getOrInit(network("p1", 1))
-		const r2 = await registry.getOrInit(network("p1", 1))
+		const r1 = await registry.ensure(network("p1", 1))
+		const r2 = await registry.ensure(network("p1", 1))
 		expect(r1).toBe(r2)
 		expect(creations.length).toBe(1)
 	})
 
-	test("getOrInit dedupes concurrent calls for same key", async () => {
+	test("sequential ensure calls reuse the bound runtime (concurrency is the caller's WRITE guard)", async () => {
+		// The old shared-init-promise dedup is gone (#281 D3): `ensure` may
+		// dispose a live runtime on rebind, so it runs under the chain WRITE
+		// guard — per-key concurrency is impossible by contract, and the
+		// second caller simply finds the runtime already bound.
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-
-		const [a, b, c] = await Promise.all([
-			registry.getOrInit(network("p1", 1)),
-			registry.getOrInit(network("p1", 1)),
-			registry.getOrInit(network("p1", 1)),
-		])
+		const a = await registry.ensure(network("p1", 1))
+		const b = await registry.ensure(network("p1", 1))
 		expect(a).toBe(b)
-		expect(b).toBe(c)
 		expect(creations.length).toBe(1)
 	})
 
 	test("different profileId produces separate runtimes even for same chainId", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const r1 = await registry.getOrInit(network("p1", 1))
-		const r2 = await registry.getOrInit(network("p2", 1))
+		const r1 = await registry.ensure(network("p1", 1))
+		const r2 = await registry.ensure(network("p2", 1))
 		expect(r1).not.toBe(r2)
 		expect(creations.length).toBe(2)
 	})
@@ -89,8 +88,8 @@ describe("ChainRuntimeRegistry", () => {
 	test("rebinding rpcUrl disposes the old runtime and creates a new one", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const r1 = await registry.getOrInit(network("p1", 1, "https://a"))
-		const r2 = await registry.getOrInit(network("p1", 1, "https://b"))
+		const r1 = await registry.ensure(network("p1", 1, "https://a"))
+		const r2 = await registry.ensure(network("p1", 1, "https://b"))
 		expect(r1).not.toBe(r2)
 		expect(r1.rpcUrl).toBe("https://a")
 		expect(r2.rpcUrl).toBe("https://b")
@@ -98,25 +97,25 @@ describe("ChainRuntimeRegistry", () => {
 		expect(creations[1].stop).not.toHaveBeenCalled()
 	})
 
-	test("peek does not initialize; returns undefined before getOrInit", () => {
+	test("peek does not initialize; returns undefined before ensure", () => {
 		const { factory } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
 		expect(registry.peek("p1", 1)).toBeUndefined()
 	})
 
-	test("peek returns initialized runtime after getOrInit", async () => {
+	test("peek returns initialized runtime after ensure", async () => {
 		const { factory } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const r = await registry.getOrInit(network("p1", 1))
+		const r = await registry.ensure(network("p1", 1))
 		expect(registry.peek("p1", 1)).toBe(r)
 	})
 
 	test("clear disposes all runtimes", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		await registry.getOrInit(network("p1", 1))
-		await registry.getOrInit(network("p1", 2))
-		await registry.getOrInit(network("p2", 1))
+		await registry.ensure(network("p1", 1))
+		await registry.ensure(network("p1", 2))
+		await registry.ensure(network("p2", 1))
 		await registry.clear()
 		expect(registry.peek("p1", 1)).toBeUndefined()
 		expect(registry.peek("p1", 2)).toBeUndefined()
@@ -126,7 +125,7 @@ describe("ChainRuntimeRegistry", () => {
 		}
 	})
 
-	test("factory failure drops the init-promise so a retry succeeds", async () => {
+	test("factory failure leaves no binding, so a retry re-invokes the factory", async () => {
 		let callCount = 0
 		const factory: PxeFactory = {
 			async createChainRuntime(net) {
@@ -137,18 +136,18 @@ describe("ChainRuntimeRegistry", () => {
 			},
 		}
 		const registry = new ChainRuntimeRegistry(factory)
-		await expect(registry.getOrInit(network("p1", 1))).rejects.toThrow("first call fails")
-		const r = await registry.getOrInit(network("p1", 1))
+		await expect(registry.ensure(network("p1", 1))).rejects.toThrow("first call fails")
+		const r = await registry.ensure(network("p1", 1))
 		expect(r).toBeDefined()
 		expect(callCount).toBe(2)
 	})
 
-	test("clear after getOrInit: subsequent getOrInit re-creates", async () => {
+	test("clear after ensure: subsequent ensure re-creates", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const r1 = await registry.getOrInit(network("p1", 1))
+		const r1 = await registry.ensure(network("p1", 1))
 		await registry.clear()
-		const r2 = await registry.getOrInit(network("p1", 1))
+		const r2 = await registry.ensure(network("p1", 1))
 		expect(r1).not.toBe(r2)
 		expect(creations.length).toBe(2)
 		expect(creations[0].stop).toHaveBeenCalledTimes(1)
@@ -157,9 +156,9 @@ describe("ChainRuntimeRegistry", () => {
 	test("disposeProfile only disposes runtimes for the named profile", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const p1c1 = await registry.getOrInit(network("p1", 1))
-		const p1c2 = await registry.getOrInit(network("p1", 2))
-		const p2c1 = await registry.getOrInit(network("p2", 1))
+		const p1c1 = await registry.ensure(network("p1", 1))
+		const p1c2 = await registry.ensure(network("p1", 2))
+		const p2c1 = await registry.ensure(network("p2", 1))
 
 		await registry.disposeProfile("p1")
 
@@ -180,18 +179,18 @@ describe("ChainRuntimeRegistry", () => {
 	test("disposeProfile is a no-op for a profile with no runtimes", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		await registry.getOrInit(network("p1", 1))
+		await registry.ensure(network("p1", 1))
 		await registry.disposeProfile("p99")
 		expect(registry.peek("p1", 1)).toBeDefined()
 		expect(creations[0].stop).not.toHaveBeenCalled()
 	})
 
-	test("disposeProfile then getOrInit re-creates the runtime", async () => {
+	test("disposeProfile then ensure re-creates the runtime", async () => {
 		const { factory, creations } = makeFactory()
 		const registry = new ChainRuntimeRegistry(factory)
-		const r1 = await registry.getOrInit(network("p1", 1))
+		const r1 = await registry.ensure(network("p1", 1))
 		await registry.disposeProfile("p1")
-		const r2 = await registry.getOrInit(network("p1", 1))
+		const r2 = await registry.ensure(network("p1", 1))
 		expect(r1).not.toBe(r2)
 		expect(creations.length).toBe(2)
 		expect(creations[0].stop).toHaveBeenCalledTimes(1)
