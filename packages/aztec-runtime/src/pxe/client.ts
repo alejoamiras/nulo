@@ -125,10 +125,15 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 			this.generationProvider
 		) {
 			const generation = await this.generationProvider(netArg.profileId)
-			if (generation) {
-				args = [...args] as Parameters<Methods[T]>
-				args[0] = { ...netArg, pxeGeneration: generation }
+			// A registered provider returning undefined means the profile row is GONE or
+			// tombstoned — exactly the deletion window the fence exists for. Failing here
+			// beats silently sending the op UNCAPTURED (which would bypass the op-level
+			// fence and rely solely on the store-key fail-close; review finding).
+			if (!generation) {
+				throw new Error(`pxe op rejected: profile ${netArg.profileId} has no current incarnation (deleted or tombstoned)`)
 			}
+			args = [...args] as Parameters<Methods[T]>
+			args[0] = { ...netArg, pxeGeneration: generation }
 		}
 		try {
 			return await super.request(method, ...args)

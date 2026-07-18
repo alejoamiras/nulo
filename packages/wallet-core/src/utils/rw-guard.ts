@@ -44,18 +44,22 @@ function deferred<T = void>(): Deferred<T> {
  * Reentry: calling `write()` from within a `read()` callback will
  * deadlock (the write waits for the read to finish; the read can't
  * finish until the write returns). The force-release unsticks this
- * after 5 minutes. MV3 lacks `AsyncLocalStorage`, so we don't detect
- * reentry statically — the sync-detector approach produces false
- * positives under legitimate concurrent reads vs. writes. Callers must
- * not nest.
+ * after `MAX_READER_DRAIN_MS` (35 minutes). MV3 lacks
+ * `AsyncLocalStorage`, so we don't detect reentry statically — the
+ * sync-detector approach produces false positives under legitimate
+ * concurrent reads vs. writes. Callers must not nest.
  */
 export class ReadWriteGuard {
-	/** Live readers, one token per `read()` in flight. A Set (not a counter) so a
-	 *  force-release can clear it without skew: when a force-released reader's
-	 *  `finally` eventually runs — e.g. a legitimate long proof that outlived the
-	 *  drain timeout — its `delete` is a no-op instead of decrementing a fresh
-	 *  count to -1 (which let writers overlap later live readers). */
-	private readonly readerTokens = new Set<symbol>()
+	/** Live readers, one token per `read()` in flight, mapped to entry timestamps.
+	 *  A collection (not a counter) so a force-release can drop tokens without
+	 *  skew: an orphaned reader's late `finally` delete is a no-op instead of
+	 *  decrementing a fresh count to -1 (which let writers overlap later live
+	 *  readers). PER-TOKEN ages matter: the force-release must expire only
+	 *  readers INDIVIDUALLY stuck past the ceiling — serialized long readers
+	 *  (queued proves) keep the guard continuously occupied far longer than any
+	 *  single reader runs, and expiring ALL of them let a profile delete overlap
+	 *  a mid-flight prove. */
+	private readonly readerTokens = new Map<symbol, number>()
 	private writeActive = false
 	private readonly writeWaiters: Deferred<void>[] = []
 	private readonly readWaiters: Deferred<void>[] = []
@@ -71,7 +75,11 @@ export class ReadWriteGuard {
 	}
 
 	async read<T>(fn: () => Promise<T>): Promise<T> {
-		if (this.writeActive || this.writeWaiters.length > 0) {
+		// Re-check after every wake (condition-variable discipline): a writer can
+		// acquire SYNCHRONOUSLY between releaseWrite's resolve loop and this
+		// microtask resuming — installing the token unconditionally would run the
+		// read concurrently with that writer.
+		while (this.writeActive || this.writeWaiters.length > 0) {
 			const d = deferred()
 			this.readWaiters.push(d)
 			await d.promise
@@ -79,7 +87,7 @@ export class ReadWriteGuard {
 
 		if (this.readers === 0) this.startForceReleaseTimer()
 		const token = Symbol("reader")
-		this.readerTokens.add(token)
+		this.readerTokens.set(token, Date.now())
 
 		try {
 			return await fn()
@@ -143,24 +151,41 @@ export class ReadWriteGuard {
 		}
 	}
 
-	private startForceReleaseTimer(): void {
+	private startForceReleaseTimer(delay = MAX_READER_DRAIN_MS): void {
 		this.forceReleaseTimer = setTimeout(() => {
-			if (this.readers > 0) {
-				if (this.logger && this.name) {
-					this.logger.log(
-						this.name,
-						LogLevel.Error,
-						`ReadWriteGuard: force-released ${this.readers} stuck reader(s) after ${MAX_READER_DRAIN_MS}ms`,
-					)
-				}
-				// Clearing the set orphans the stuck readers' tokens: their
-				// `finally` deletes become no-ops, so the count can never go
-				// negative and later writer/reader exclusion stays sound.
-				this.readerTokens.clear()
-				this.drainWriteIfReady()
-			}
 			this.forceReleaseTimer = undefined
-		}, MAX_READER_DRAIN_MS)
+			if (this.readers === 0) return
+			// Expire only tokens INDIVIDUALLY older than the ceiling — serialized
+			// long readers (queued proves) keep the guard continuously occupied far
+			// longer than any single reader runs, and expiring ALL of them would let
+			// a profile delete overlap a mid-flight prove. Dropping a token orphans
+			// it: the reader's `finally` delete becomes a no-op, so the count can
+			// never go negative and later exclusion stays sound.
+			const now = Date.now()
+			let expired = 0
+			let oldestRemaining = 0
+			for (const [token, startedAt] of this.readerTokens) {
+				if (now - startedAt >= MAX_READER_DRAIN_MS) {
+					this.readerTokens.delete(token)
+					expired++
+				} else {
+					oldestRemaining = Math.max(oldestRemaining, now - startedAt)
+				}
+			}
+			if (expired > 0 && this.logger && this.name) {
+				this.logger.log(
+					this.name,
+					LogLevel.Error,
+					`ReadWriteGuard: force-released ${expired} stuck reader(s) after ${MAX_READER_DRAIN_MS}ms`,
+				)
+			}
+			if (this.readers === 0) {
+				this.drainWriteIfReady()
+			} else {
+				// Survivors: re-arm for the moment the OLDEST of them hits the ceiling.
+				this.startForceReleaseTimer(Math.max(1_000, MAX_READER_DRAIN_MS - oldestRemaining))
+			}
+		}, delay)
 	}
 
 	private stopForceReleaseTimer(): void {

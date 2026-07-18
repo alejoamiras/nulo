@@ -180,7 +180,7 @@ async function main() {
 		let manifestUsdc: string | undefined
 		try {
 			manifestUsdc = (
-				JSON.parse(readFileSync(join(repoRoot, "apps", "faucet", "public", "testnet-bridge.json"), "utf8")) as {
+				JSON.parse(readFileSync(join(PUBLIC_DIR, "testnet-bridge.json"), "utf8")) as {
 					l1?: { usdc?: string }
 				}
 			).l1?.usdc
@@ -197,7 +197,7 @@ async function main() {
 			{ name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS },
 		)
 		usdc = reuseTokenAddress
-		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: usdc, reused: true })
+		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: usdc })
 		console.log(`reusing L1 token ${usdc} (readback-verified ${TOKEN_SYMBOL}/${TOKEN_DECIMALS})`)
 	} else {
 		usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])

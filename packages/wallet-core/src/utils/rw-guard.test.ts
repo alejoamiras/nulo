@@ -494,3 +494,85 @@ describe("ReadWriteGuard", () => {
 		expect(wv).toBe(99)
 	})
 })
+
+describe("ReadWriteGuard — per-token force-release + wake recheck (review findings)", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	test("serialized long readers: only the INDIVIDUALLY-stuck reader is expired; a younger live reader keeps excluding writers", async () => {
+		vi.useFakeTimers()
+		const guard = new ReadWriteGuard("test", { log: () => {} })
+
+		// Reader A gets stuck (will exceed the ceiling).
+		const dA = deferred()
+		const rA = guard.read(async () => {
+			await dA.promise
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		// 20 minutes later reader B starts — occupancy is continuous, but B is young.
+		await vi.advanceTimersByTimeAsync(20 * 60_000)
+		const dB = deferred()
+		const order: string[] = []
+		const rB = guard.read(async () => {
+			order.push("rB:start")
+			await dB.promise
+			order.push("rB:end")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		const w = guard.write(async () => {
+			order.push("w")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+
+		// Cross the ceiling for A (35 min from A's start): A expires, B (15 min old) must survive —
+		// the writer must NOT run while B is mid-flight.
+		await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000)
+		expect(order).toEqual(["rB:start"])
+
+		// B finishes → writer runs.
+		dB.resolve()
+		await vi.advanceTimersByTimeAsync(0)
+		await rB
+		await w
+		expect(order).toEqual(["rB:start", "rB:end", "w"])
+
+		dA.resolve()
+		await rA
+	})
+
+	test("woken readers re-check: a writer acquiring synchronously after leaveWrite excludes them", async () => {
+		const guard = new ReadWriteGuard()
+		const order: string[] = []
+
+		await guard.enterWrite()
+		const dRead = deferred()
+		const r = guard.read(async () => {
+			order.push("r:start")
+			await dRead.promise
+			order.push("r:end")
+		})
+		await flush()
+
+		// Release the write and IMMEDIATELY (synchronously) start another writer:
+		// the woken reader must re-queue behind it, not run concurrently.
+		const dW2 = deferred()
+		guard.leaveWrite()
+		const w2 = guard.write(async () => {
+			order.push("w2:start")
+			await dW2.promise
+			order.push("w2:end")
+		})
+		await flush()
+
+		expect(order).toEqual(["w2:start"])
+		dW2.resolve()
+		await w2
+		await flush()
+		expect(order.slice(0, 3)).toEqual(["w2:start", "w2:end", "r:start"])
+		dRead.resolve()
+		await r
+	})
+})

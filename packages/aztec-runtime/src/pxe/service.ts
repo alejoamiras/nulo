@@ -115,6 +115,13 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * scoped clear).
 	 */
 	private readonly chainGuards = new Map<string, ReadWriteGuard>()
+	/** Per-chain purge epochs (#281 review): bumped by `clearChainState` so an
+	 *  in-flight read op cannot RESURRECT a just-purged chain — its write-rebind
+	 *  step would otherwise re-create the runtime + a fresh OPFS store dir for a
+	 *  chain whose network row is gone (nothing ever removes that dir again). A
+	 *  read that entered BEFORE the purge refuses to rebind; a new op after the
+	 *  purge sees the new epoch at entry and may legitimately re-create. */
+	private readonly chainPurgeEpochs = new Map<string, number>()
 	private readonly profileBarriers = new Map<string, ReadWriteGuard>()
 	private readonly guardLogger: ILogger
 	private readonly registry: ChainRuntimeRegistry
@@ -218,16 +225,19 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		}
 		if (pxes.length) {
 			for (let i = pxes.length - 1; i >= 0; i--) {
-				await new Promise<void>((resolve, reject) => {
+				const deleted = await new Promise<boolean>((resolve, reject) => {
 					const req = indexedDB.deleteDatabase(pxes[i].name!)
-					req.onsuccess = () => resolve()
+					req.onsuccess = () => resolve(true)
 					req.onerror = () => reject(req.error)
 					req.onblocked = () => {
 						this.logWarn("deleteDatabase blocked (DB still in use):", pxes[i].name)
-						resolve() // Skip — don't hang the sweep forever
+						resolve(false) // Skip — don't hang the sweep forever
 					}
 				})
-				pxes.splice(i, 1)
+				// Only a REAL deletion clears the entry: a blocked DB survives, and the
+				// shared keyval-store guard below must see it (review finding — the
+				// unconditional splice made the emptiness check vacuous).
+				if (deleted) pxes.splice(i, 1)
 			}
 			if (!pxes.length) {
 				const keyval = dbs.find((x) => x.name === "keyval-store")
@@ -560,6 +570,10 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				// with the profile (other chains share it); crypto-erase for the profile as a
 				// whole happens in clearProfileState. The IndexedDB delete is the LEGACY
 				// (rc.2-era) cleanup layer.
+				this.chainPurgeEpochs.set(
+					this.chainKey(profileId, chainId),
+					(this.chainPurgeEpochs.get(this.chainKey(profileId, chainId)) ?? 0) + 1,
+				)
 				await this.registry.dispose(profileId, chainId)
 				await removeChainStoreDir({ profileId, chainId })
 				await this.deleteDb(chainDataDir({ profileId, chainId }))
@@ -735,6 +749,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// raced concurrent readers + the SAH-pool lock (#281 D3). The read is
 			// fully released before the write is requested — no read→write upgrade.
 			const missed = Symbol("runtime-miss")
+			const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
 			for (let attempt = 0; attempt < PxeService.MAX_RUNTIME_BIND_ATTEMPTS; attempt++) {
 				const result = await barrier.read(async () => {
 					return chainGuard.read(async () => {
@@ -750,6 +765,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 				await barrier.read(async () => {
 					await chainGuard.write(async () => {
+						if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
+							throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
+						}
 						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					})
 				})

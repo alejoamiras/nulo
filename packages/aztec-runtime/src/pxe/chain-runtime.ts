@@ -356,8 +356,13 @@ export class ChainRuntimeRegistry {
 	public async dispose(profileId: string, chainId: number): Promise<void> {
 		const k = this.key(profileId, chainId)
 		const runtime = this.runtimes.get(k)
+		if (!runtime) return
+		// Dispose BEFORE dropping the reference (mirrors `ensure` + `settleDisposals`):
+		// a failed store.close() leaks the SAH-pool lock, and the kept entry is the
+		// only retry handle — deleting first left the chain purge permanently wedged
+		// with no recovery path (review finding).
+		await runtime.dispose()
 		this.runtimes.delete(k)
-		if (runtime) await runtime.dispose()
 	}
 
 	/**
