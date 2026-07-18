@@ -44,6 +44,7 @@ import { type Abi, createPublicClient, createWalletClient, defineChain, getContr
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { assertPortalUninitialized, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 const TOKEN_NAME = "Aztec Nulo"
@@ -57,6 +58,9 @@ const MNEMONIC = process.env.MNEMONIC
 if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
 
 const fromJournalMode = process.argv.includes("--from-journal")
+// `--reuse-token <address>`: keep the EXISTING AZLO L1 ERC20 (readback-verified below)
+// and deploy only a NEW portal + L2 set against it. Malformed input hard-stops.
+const reuseTokenAddress = parseReuseTokenArg(process.argv)
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -168,7 +172,23 @@ async function main() {
 	if (!recorded) appendJournal(JOURNAL_PATH, { phase: "generation", salts })
 
 	const usdcArt = evmArtifact("MintableERC20")
-	const usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
+	let usdc: `0x${string}`
+	if (reuseTokenAddress) {
+		// Reuse mode: verify the live contract IS the token we mean to keep before
+		// anything downstream binds to it. All three metadata reads must match.
+		const tokenR = getContract({ address: reuseTokenAddress, abi: usdcArt.abi as Abi, client: pub })
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const tr = tokenR.read as any
+		assertReusedTokenMetadata(
+			{ name: String(await tr.name()), symbol: String(await tr.symbol()), decimals: Number(await tr.decimals()) },
+			{ name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS },
+		)
+		usdc = reuseTokenAddress
+		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: usdc, reused: true })
+		console.log(`reusing L1 token ${usdc} (readback-verified ${TOKEN_SYMBOL}/${TOKEN_DECIMALS})`)
+	} else {
+		usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
+	}
 	const portal = await deployEvm("portal", "NuloTokenPortal", portalArt.abi, portalArt.bytecode, [])
 
 	// ─── L2 (testnet aztec.js - REAL proofs) ─────────────────────────
@@ -285,6 +305,13 @@ async function main() {
 		console.log(`proxy wired (${mins()})`)
 
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
+		// Preflight (P5): the portal we are about to initialize must still be
+		// UNINITIALIZED — a non-zero l2Bridge() means this address is an
+		// already-bound portal and reusing it is forbidden (the one-shot
+		// initialize binding to the NEW L2 bridge is the security anchor).
+		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		assertPortalUninitialized(String(await (portalPre.read as any).l2Bridge()))
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, usdc, bridge.address.toString()])
 		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
