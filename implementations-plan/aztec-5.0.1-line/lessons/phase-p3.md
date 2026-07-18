@@ -88,7 +88,49 @@ noise) — an accelerator/proving/WASM-fallback error ⇒ cause 1 (re-pin); a ba
 timeout with no proving error ⇒ cause 2 (infra). Do NOT hand-wave a green; the restore FIX itself is
 confirmed (smoke green) independently of this network-infra/proving question.
 
-## ✅ CONFIRMED ROOT CAUSE (canary log, run 29621567283): CI INFRA, not code, not proving
+## ⚠️⚠️ BOTH earlier network conclusions were WRONG — accurate evidence-based finding below
+I made TWO premature confident calls this session (first "environmental SW-eviction", then "confirmed
+CI infra port-collision") — BOTH wrong. Discipline note for next session: get the actual stack/error
+BEFORE concluding; the CI `--log` interleaves workflow-SCRIPT-SOURCE echoes (e.g. the `exit 86`
+sentinel text) with real runtime output, which is how I mis-read a transient as a boot failure.
+
+### Accurate diagnosis (stack-trace evidence, run 29621567283 shard 1)
+- The sandbox BOOTS FINE: `[aztec-node] Error: Address already in use` is a TRANSIENT the node
+  recovers from (`Setting up Aztec local network 5.0.1` → `Local Aztec node is ready` → `Test
+  contracts deployed`). Tests RUN. (The `exit 86` lines were the step's echoed script source, not
+  actual events.)
+- `register-token.test.ts` (registerToken happy-path) PASSES under 5.0.1 — the token-register RPC +
+  metadata resolution work.
+- The RED network jobs fail in the **`tokenReadyExtension` fixture SETUP**, deterministically, at:
+  `waitForToast(page, "Token added", 60_000)` ← `importToken` (helpers.ts:544) ←
+  `tokenReadyExtension.scope` (extension.ts:644). i.e. the fixture mints 1000 REAL tokens on-chain,
+  drives the extension's import-token UI, and the **"Token added" toast never fires within 60 s**.
+- `importToken`'s toast fires only AFTER the popup finishes the imported token's INITIAL BALANCE
+  PROJECTION (its own comment, helpers.ts:539). So the projection of REAL minted token notes is what
+  hangs — NOT registration (which register-token proves works without a real-balance projection).
+- Every test using `tokenReadyExtension` (backup-restore-integrity, opfs-storage, tokens, …) fails as
+  a consequence — the fixture never finishes setup.
+
+### Leading HYPOTHESIS (UNVERIFIED — do not trust without evidence; I was wrong twice)
+The imported token is a **5.0.0-compiled `@alejoamiras/aztec-standards` artifact (HELD at 5.0.0 in
+P1)**; projecting its notes through a **5.0.1 PXE** may hang/fail if the 5.0.0 note-layout/contract
+artifact isn't understood by 5.0.1 — which would make the network gate **coupled to P4** (standards →
+`@aztec-foundation`/5.0.1 recompiled artifacts + fee-payment 5.0.1). dev (5.0.0 PXE + 5.0.0 token) is
+green, consistent with a 5.0.0-artifact ↔ 5.0.1-PXE mismatch. Alternatively a 5.0.1 PXE
+projection/`getNotes` change, or an in-popup projection-timeout regression suppressing the toast.
+### VERIFY NEXT SESSION (fresh context + real tooling — no more guessing)
+1. Forward the offscreen/SW console during `importToken` (as done for the smoke test earlier) OR
+   reproduce `importToken` locally via `e2e:agent`, and capture the projection error/hang.
+2. If it's the 5.0.0-artifact↔5.0.1-PXE mismatch → the network gate unblocks only after **P4** swaps
+   standards to `@aztec-foundation`/5.0.1 (recompiled). That reorders the plan: **P4 may need to
+   precede a green network-e2e**, i.e. P2/P3's network gate can't be fully green until P4 lands.
+3. Smoke + quality are green independently — the P2 restore FIX itself is validated; this is a
+   separate token-projection issue in the network fixture.
+
+## (WITHDRAWN — WRONG) earlier "CONFIRMED ROOT CAUSE: CI INFRA" section
+Kept for the diagnosis trail; superseded by the accurate finding above. The sandbox boots; the
+failure is the importToken balance-projection toast, not a port-collision boot failure.
+### (WITHDRAWN) CONFIRMED ROOT CAUSE (canary log, run 29621567283): CI INFRA, not code, not proving
 The canary preflight logged `Accelerator ready: {"bb_available":true,"status":"ok","version":"1.0.6"}`
 — **proving/accelerator is HEALTHY** (cause 1 DEFINITIVELY ruled out). Immediately after:
 `[aztec-node] Error: Address already in use (os error 98)` → agent.sh boot-failure sentinel
