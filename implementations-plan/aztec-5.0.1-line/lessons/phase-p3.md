@@ -171,6 +171,19 @@ NOT fix the hang, because **`0x0193c31b…` is NEITHER protocol FPC**:
      a note. The user (who confirmed 5.0.1 nr/js compat earlier) likely knows whether 5.0.1 changed
      note-sync to hard-fail on unknown emitters.
 
+### DEFINITIVELY ruled out (derivation, not guessing) — `0x0193c31b` identity still open
+- SponsoredFPC = `0x1441491b` (derived==stored). PrivateFPC = `0x257aa870` (derived==stored).
+- **Canonical FeeJuice instance = `0x0000…0003`** (`getCanonicalFeeJuice()` from
+  `@aztec/protocol-contracts/fee-juice/lazy`). The other FeeJuice constants in
+  `protocol_contract_data.js` (`0x07434038…`, `0x1f85d8b9…`) also don't match.
+- So `0x0193c31b` is NONE of those. It is a non-canonical contract the **PrivateFPC's `balance_of`
+  calls internally** (per `gas-balance-reader.ts:113-120` + the note-sync). NEXT SESSION identify it
+  by a NODE lookup on the live sandbox (`node.getContract(0x0193c31b)` → class id → match to an
+  artifact) or by reading the PrivateFPC contract source for what it calls at selector `0xc475a0eb`.
+- **This is the single remaining network-e2e blocker and it needs the user's 5.0.1 domain knowledge or
+  a node-level lookup — NOT more reasoning (5 wrong IDs is enough).** Everything else (P2 restore fix)
+  is CI-green.
+
 ### Fix MECHANICS (superseded by the above — the FPC-registration target was wrong)
 - `FpcService.getFpcs(chainId)` ALREADY registers the protocol FPCs in the offscreen PXE (the
   `toDiscover` → `pxe.registerContract(...)` block, service.ts ~195). So NO new registration code is
