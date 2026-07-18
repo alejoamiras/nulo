@@ -19,7 +19,7 @@
  */
 import { createHash } from "node:crypto"
 import { execFileSync, execSync } from "node:child_process"
-import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseCandidateManifest } from "../src/candidate-schema"
@@ -128,7 +128,12 @@ async function build(intentPath: string): Promise<void> {
 	// mismatch is a STOP — either the network reset (redeploy plan changes) or the node is
 	// lying/stale (never build an intent from it). Code-presence corroboration below stays: this
 	// check authenticates the claims against history, that one against the L1 itself.
-	const previousArc = JSON.parse(readFileSync(join(repoRoot, "implementations-plan/aztec-5.0.0-stable/lessons/intent.json"), "utf8")) as {
+	// Read the pin from the COMMITTED blob (git show HEAD:…), never the working tree:
+	// the lessons dir is allowlisted-dirty during live arcs, so a tree read could be
+	// silently re-pointed without tripping tree discipline (review finding #7).
+	const previousArc = JSON.parse(
+		execSync("git show HEAD:implementations-plan/aztec-5.0.0-stable/lessons/intent.json", { cwd: repoRoot, encoding: "utf8" }),
+	) as {
 		identity: { l1ChainId: number; rollupVersion: number }
 		l1: Record<string, string>
 	}
@@ -288,10 +293,19 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 		if (signer.toLowerCase() !== intent.signer.toLowerCase()) throw new Error(`signer ${signer} != intent ${intent.signer} — STOP`)
 	}
 
-	// Artifact digests unchanged.
+	// Artifact digests unchanged — the Noir targets AND the canonical PrivateFPC
+	// (previously recorded at build but never re-verified — review finding #6).
 	for (const [rel, expected] of Object.entries(intent.artifacts.noirTargets)) {
 		const actual = sha256(join(repoRoot, "contracts", "bridge", "aztec", rel))
 		if (actual !== expected) throw new Error(`Noir artifact drifted since intent: ${rel}`)
+	}
+	{
+		const descriptorSha = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")).artifactSha256
+		if (descriptorSha !== intent.artifacts.privateFpc.sha256) {
+			throw new Error(
+				`canonical PrivateFPC digest drifted since intent: ${descriptorSha} != ${intent.artifacts.privateFpc.sha256} — STOP`,
+			)
+		}
 	}
 
 	if (candidatePath) {
@@ -310,6 +324,24 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 		// candidate addresses are schema-validated (EVM-address regex), so they're shell-safe; passed
 		// as argv all the same. The `"UNDERLYING()(address)"` sig is one argv element (no shell parse).
 		if (candidate.l1.feeJuice) {
+			// Cross-pin against the intent's corroborated L1 set FIRST (review finding #1):
+			// internal consistency (portal↔asset readbacks below) is not authentication —
+			// a lying node at deploy time can mint a self-consistent FAKE pair. The intent's
+			// values went through previous-arc byte-equality + eth_getCode; the candidate
+			// must match them exactly or deposits go to the wrong portal (unrecoverable).
+			if (candidate.l1.feeJuice.portal.toLowerCase() !== intent.l1.feeJuicePortal.toLowerCase()) {
+				throw new Error(
+					`candidate feeJuice.portal ${candidate.l1.feeJuice.portal} != intent pin ${intent.l1.feeJuicePortal} — STOP`,
+				)
+			}
+			if (candidate.l1.feeJuice.asset.toLowerCase() !== intent.l1.feeJuice.toLowerCase()) {
+				throw new Error(`candidate feeJuice.asset ${candidate.l1.feeJuice.asset} != intent pin ${intent.l1.feeJuice} — STOP`)
+			}
+			if (candidate.l1.feeJuice.feeAssetHandler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
+				throw new Error(
+					`candidate feeJuice.feeAssetHandler ${candidate.l1.feeJuice.feeAssetHandler} != intent pin ${intent.l1.feeAssetHandler} — STOP`,
+				)
+			}
 			const underlying = cast(["call", candidate.l1.feeJuice.portal, "UNDERLYING()(address)", "--rpc-url", sepolia])
 			if (underlying.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
 				throw new Error(`portal UNDERLYING ${underlying} != manifest asset ${candidate.l1.feeJuice.asset} — STOP`)
@@ -379,6 +411,20 @@ async function promote(intentPath: string): Promise<void> {
 	// 0. The full gate, candidate-pinned, immediately before anything is written.
 	await verify(intentPath, bridgeCandidatePath)
 
+	// 0b. The recorded candidate digest is REQUIRED at promote time: without it, promote
+	// would be the first-ever verify (digest recorded mid-promote — the one-time recording
+	// regime never happened; review finding #5), and the re-read below could not be bound
+	// to the bytes verify actually checked.
+	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
+	if (!intent.candidateSha256) {
+		throw new Error("intent has no recorded candidateSha256 — run verify --candidate (and commit the intent) BEFORE promote — STOP")
+	}
+
+	// 0c. The FPC require-deployed gate as CODE, not operator discipline (review finding #6):
+	// promotion enables the faucet's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
+	// undeployed or upgraded-out FPC at that address must abort the promotion.
+	execFileSync("bun", [join(here, "check-fpc-version.ts"), "--mode", "require-deployed"], { stdio: "inherit" })
+
 	// 1. Symlink rejection on every involved path (a symlinked live target would
 	// redirect the rename; a symlinked candidate breaks the read-once contract).
 	for (const p of [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]) {
@@ -392,13 +438,27 @@ async function promote(intentPath: string): Promise<void> {
 		if (st.isSymbolicLink()) throw new Error(`refusing to promote through a symlink: ${p}`)
 	}
 
-	// 2. Read ONCE into buffers + validate the exact bytes that will be written.
+	// 2. Read ONCE into buffers + validate the exact bytes that will be written. The
+	// bridge buffer must equal the RECORDED digest — verify() above read the file
+	// separately, and an edit between the two reads would otherwise ship bytes that
+	// skipped the digest pin + privileged readbacks (review finding #4).
 	const bridgeBytes = readFileSync(bridgeCandidatePath)
 	const faucetBytes = readFileSync(faucetCandidatePath)
 	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")
 	const faucetSha = createHash("sha256").update(faucetBytes).digest("hex")
+	if (bridgeSha !== intent.candidateSha256) {
+		throw new Error(
+			`bridge candidate bytes changed between verify and promote: ${bridgeSha} != recorded ${intent.candidateSha256} — STOP`,
+		)
+	}
 	const bridgeCandidate = parseCandidateManifest(JSON.parse(bridgeBytes.toString("utf8")))
 	assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
+
+	// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
+	// previously a junk candidate failed only AFTER the live file was overwritten.
+	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
+		stdio: "inherit",
+	})
 
 	// 3. Zero-seed assertion: fuel section byte-carried from live (or absent in both).
 	let liveFuel: unknown
@@ -417,7 +477,10 @@ async function promote(intentPath: string): Promise<void> {
 	for (const [target, bytes, sha] of writes) {
 		mkdirSync(dirname(target), { recursive: true })
 		const tmp = `${target}.promote-tmp`
-		writeFileSync(tmp, bytes)
+		// A pre-planted tmp (symlink or file) must not be followed or reused: remove it,
+		// then exclusive-create so a racing recreate fails loudly (review finding #10).
+		rmSync(tmp, { force: true })
+		writeFileSync(tmp, bytes, { flag: "wx" })
 		renameSync(tmp, target)
 		const written = createHash("sha256").update(readFileSync(target)).digest("hex")
 		if (written !== sha) throw new Error(`re-hash mismatch after write: ${target} ${written} != ${sha} — investigate before committing`)

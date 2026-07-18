@@ -8,6 +8,8 @@ export interface FaucetCandidateShape {
 	dripper?: unknown
 }
 
+const AZTEC_ADDRESS_HEX = /^0x[0-9a-fA-F]{64}$/
+
 /** The faucet candidate must be post-5.0.1 shaped: tokens[] + dripper present and
  *  EVERY token record carrying constructorArgs.authContract (the 5th constructor
  *  parameter the 5.0.1 standards Token requires to re-derive its address). */
@@ -18,6 +20,11 @@ export function assertFaucetCandidateShape(candidate: FaucetCandidateShape): voi
 	for (const t of candidate.tokens) {
 		if (!t.constructorArgs?.authContract) {
 			throw new Error("faucet candidate has a token without constructorArgs.authContract (pre-5.0.1 shape) — STOP")
+		}
+		if (!AZTEC_ADDRESS_HEX.test(t.constructorArgs.authContract)) {
+			throw new Error(
+				`faucet candidate authContract is not a 32-byte aztec address: ${JSON.stringify(t.constructorArgs.authContract)} — STOP`,
+			)
 		}
 	}
 }

@@ -41,7 +41,7 @@ const deployments = JSON.parse(readFileSync(deploymentsPath, "utf8")) as {
 		address: string
 		salt: number
 		constructorArtifact: string
-		constructorArgs: { name: string; symbol: string; decimals: number; minter: string }
+		constructorArgs: { name: string; symbol: string; decimals: number; minter: string; authContract?: string }
 	}[]
 }
 
@@ -86,6 +86,9 @@ async function main() {
 	const nulo = deployments.tokens.find((t) => t.constructorArgs.symbol === "NULO")
 	if (!nulo) throw new Error("no NULO token record in deployments.json")
 	const a = nulo.constructorArgs
+	// 5.0.1 standards Token: constructor_with_minter takes 5 args; a record without
+	// authContract predates the fence and cannot re-derive under the installed artifact.
+	if (!a.authContract) throw new Error("NULO record lacks constructorArgs.authContract (pre-5.0.1 shape) — redeploy/promote first")
 	const tokenInstance = await getContractInstanceFromInstantiationParams(
 		TokenContractArtifact as never,
 		{
@@ -93,7 +96,13 @@ async function main() {
 			publicKeys: PublicKeys.default(),
 			deployer: AztecAddress.ZERO,
 			constructorArtifact: nulo.constructorArtifact,
-			constructorArgs: [a.name, a.symbol, a.decimals, AztecAddress.fromStringUnsafe(a.minter)],
+			constructorArgs: [
+				a.name,
+				a.symbol,
+				a.decimals,
+				AztecAddress.fromStringUnsafe(a.minter),
+				AztecAddress.fromStringUnsafe(a.authContract),
+			],
 		} as never,
 	)
 	if (tokenInstance.address.toString() !== nulo.address) {

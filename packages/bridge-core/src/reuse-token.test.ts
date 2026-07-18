@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assertPortalUninitialized, assertReusedTokenMetadata, parseReuseTokenArg } from "./reuse-token"
+import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "./reuse-token"
 
 const ADDR = `0x${"ab".repeat(20)}` as const
 
@@ -35,5 +35,15 @@ describe("assertPortalUninitialized", () => {
 	})
 	it("rejects an already-initialized portal", () => {
 		expect(() => assertPortalUninitialized(ADDR)).toThrow(/portal reuse is forbidden/)
+	})
+})
+
+describe("assertReuseMatchesManifest", () => {
+	it("accepts a case-insensitive match and an absent manifest (first deploy)", () => {
+		expect(() => assertReuseMatchesManifest(ADDR, ADDR.toUpperCase().replace("0X", "0x"))).not.toThrow()
+		expect(() => assertReuseMatchesManifest(ADDR, undefined)).not.toThrow()
+	})
+	it("rejects a reused address that differs from the live manifest token", () => {
+		expect(() => assertReuseMatchesManifest(ADDR, `0x${"cd".repeat(20)}`)).toThrow(/forks the bridge identity/)
 	})
 })

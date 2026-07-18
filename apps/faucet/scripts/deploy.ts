@@ -22,7 +22,7 @@
  */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import {
@@ -74,10 +74,19 @@ function parseArgs(argv: string[]): CLIOptions {
 	// Candidate-first (P5): a live deploy writes the CANDIDATE; only the receipted
 	// `promote` step may touch the committed live deployments.json.
 	const defaultOutput = join(__dirname, "..", "src", "contracts", "deployments.candidate.json")
+	const output = flag("--output") ?? defaultOutput
+	// Candidate-first guard: writing the LIVE deployments.json directly bypasses the
+	// receipted promote step. Allowed only with an explicit acknowledgement flag.
+	const livePath = resolve(join(__dirname, "..", "src", "contracts", "deployments.json"))
+	if (resolve(output) === livePath && !args.includes("--allow-live-output")) {
+		throw new Error(
+			"refusing to write the live deployments.json directly — use the candidate + promote flow, or pass --allow-live-output",
+		)
+	}
 	return {
 		network: networkArg,
 		dryRun: args.includes("--dry-run"),
-		output: flag("--output") ?? defaultOutput,
+		output,
 	}
 }
 

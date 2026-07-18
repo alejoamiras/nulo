@@ -44,7 +44,7 @@ import { type Abi, createPublicClient, createWalletClient, defineChain, getContr
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
-import { assertPortalUninitialized, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
+import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 const TOKEN_NAME = "Aztec Nulo"
@@ -174,8 +174,21 @@ async function main() {
 	const usdcArt = evmArtifact("MintableERC20")
 	let usdc: `0x${string}`
 	if (reuseTokenAddress) {
-		// Reuse mode: verify the live contract IS the token we mean to keep before
-		// anything downstream binds to it. All three metadata reads must match.
+		// Reuse mode: the reused address must BE the manifest's token when a live
+		// manifest exists (metadata alone accepts any same-shaped ERC20), and the
+		// live contract's metadata must match the expected identity.
+		let manifestUsdc: string | undefined
+		try {
+			manifestUsdc = (
+				JSON.parse(readFileSync(join(repoRoot, "apps", "faucet", "public", "testnet-bridge.json"), "utf8")) as {
+					l1?: { usdc?: string }
+				}
+			).l1?.usdc
+		} catch {
+			manifestUsdc = undefined
+		}
+		if (manifestUsdc === undefined) console.log("no live manifest l1.usdc — metadata-only reuse verification")
+		assertReuseMatchesManifest(reuseTokenAddress, manifestUsdc)
 		const tokenR = getContract({ address: reuseTokenAddress, abi: usdcArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const tr = tokenR.read as any

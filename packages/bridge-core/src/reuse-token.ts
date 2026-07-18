@@ -37,6 +37,18 @@ export function assertReusedTokenMetadata(live: Erc20Metadata, expected: Erc20Me
 	}
 }
 
+/** When a live manifest already names the L1 token, a reused address must BE that
+ *  token — metadata (name/symbol/decimals) alone would accept any same-shaped ERC20.
+ *  Absent manifest (first deploy) falls back to metadata-only, which the caller logs. */
+export function assertReuseMatchesManifest(reused: string, manifestUsdc: string | undefined): void {
+	if (manifestUsdc === undefined) return
+	if (reused.toLowerCase() !== manifestUsdc.toLowerCase()) {
+		throw new Error(
+			`--reuse-token ${reused} != live manifest l1.usdc ${manifestUsdc} — reusing a DIFFERENT token forks the bridge identity; STOP`,
+		)
+	}
+}
+
 const ZERO_EVM = `0x${"0".repeat(40)}`
 
 /** Portal-reuse preflight: the freshly-deployed portal's `l2Bridge()` must still be
