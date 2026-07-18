@@ -93,3 +93,17 @@ Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, n
 - A CONFLICTING PR runs **zero CI silently** (GitHub can't build the merge ref) — check `mergeable` before wondering where the checks went.
 - `FeeJuice.claim_and_end_setup` is ONLY valid as the fee payload (setup phase — where `FeeJuicePaymentMethodWithClaim` places it). An app-phase claim under a sponsored fee must use plain `claim`, or it asserts on EVERY attempt — which looks exactly like a slow L1→L2 message sync if the retry loop swallows errors. Print the caught error on the retry cadence, and when a claim "never syncs", independently check the message witness (`node_getL1ToL2MessageMembershipWitness` with the key from the portal's deposit event) before blaming the network.
 - Blanket `biome check --write` on test trees converts `vi.fn(function () {…})` mocks to arrows and breaks `new`-constructed service-client mocks (~95 failures) — format only the files you touched.
+
+- **Standards/token package swaps: noir struct paths are NOT stable across dep graphs.** The same
+  `AztecAddress` param can arrive as `aztec::protocol_types::…::AztecAddress` from one compile and
+  `authorization_contract::aztec::protocol_types::…::AztecAddress` (crate-prefixed by the artifact's
+  import chain) from another. Any exact-path ABI matching silently zeroes out — in the wallet this
+  made every balance/transfer descriptor resolve no candidates, so token imports returned
+  `isComplete: false` and the popup dead-ended with "Couldn't auto-detect this token's interface"
+  (the whole network suite red via `importToken` timeouts, mislabeled a "hang"). Match struct paths
+  suffix-tolerantly (`matchesStructPath` in
+  `apps/extension/src/wallet/services/token/functions/descriptors.ts`) and, after ANY standards bump,
+  run `descriptors-real-artifact.test.ts` — it pins all nine token-fn kinds against the REAL installed
+  artifact and is the first thing that must go red if upstream reshapes the ABI. Also remember 5.x
+  `loadContractArtifact` splits public fns into `artifact.nonDispatchPublicFunctions` — a raw-JSON
+  diff is NOT what the wallet's matcher sees; probe through the package's own `Token.js` export.

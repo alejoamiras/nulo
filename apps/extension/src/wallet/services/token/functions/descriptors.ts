@@ -9,12 +9,25 @@ import type { TokenFnDescriptor, TokenFnKind } from "./types"
  * by `token-functions.characterization.test.ts` + `registry-equivalence.test.ts`. Do not
  * "improve" while transcribing (see the module headers for the accepted loose predicates).
  *
+ * ONE deliberate divergence from the verbatim pin: struct-path matching is crate-prefix
+ * tolerant (`matchesStructPath`). Noir namespaces ABI struct paths by the artifact's import
+ * chain, so the same AztecAddress param arrives as `aztec::protocol_types::...::AztecAddress`
+ * from one compile and `authorization_contract::aztec::protocol_types::...::AztecAddress`
+ * from another (observed in `@aztec-foundation/aztec-standards@5.0.1`). Exact matching made
+ * every balance/transfer kind resolve to zero candidates on such artifacts — a token that
+ * imports as "incomplete" with no interface. Pinned against the real installed artifact by
+ * `descriptors-real-artifact.test.ts`.
+ *
  * Migration status: kinds are added here one at a time, each proven equivalent to its old
  * module before the old module is deleted (Q-12 phasing). All 9 kinds present (5 read + 4 transfer).
  */
 
 const AZTEC_ADDRESS_PATH = "aztec::protocol_types::address::aztec_address::AztecAddress"
 const FIELD_COMPRESSED_STRING_PATH = "compressed_string::field_compressed_string::FieldCompressedString"
+
+/** Crate-prefix-tolerant struct-path compare (see the header note). */
+const matchesStructPath = (actual: string | undefined, canonical: string): boolean =>
+	actual === canonical || (actual?.endsWith(`::${canonical}`) ?? false)
 
 // Shared ABI sub-objects — byte-identical to the ones inlined in the old modules.
 const OWNER_ADDRESS_PARAM = {
@@ -52,7 +65,7 @@ export const balanceOfPublicDescriptor: TokenFnDescriptor = {
 		fn.isStatic &&
 		fn.functionType === FunctionType.PUBLIC &&
 		fn.parameters.length === 1 &&
-		(fn.parameters[0].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+		matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 		fn.returnTypes.length === 1 &&
 		fn.returnTypes[0].kind === "integer",
 	score: (fn): number => {
@@ -91,7 +104,7 @@ export const balanceOfPrivateDescriptor: TokenFnDescriptor = {
 		!fn.isStatic &&
 		fn.functionType === FunctionType.UTILITY &&
 		fn.parameters.length === 1 &&
-		(fn.parameters[0].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+		matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 		fn.returnTypes.length === 1 &&
 		fn.returnTypes[0].kind === "integer",
 	score: (fn): number => {
@@ -169,7 +182,7 @@ function metadataDescriptor(config: {
 }
 
 const matchesFieldCompressedString = (actual: FunctionAbi["returnTypes"][number]): boolean =>
-	(actual as StructType)?.path === FIELD_COMPRESSED_STRING_PATH
+	matchesStructPath((actual as StructType)?.path, FIELD_COMPRESSED_STRING_PATH)
 
 /** getName — from get-name.ts. */
 export const getNameDescriptor: TokenFnDescriptor = metadataDescriptor({
@@ -253,9 +266,9 @@ const transfer4Predicate = (fn: FunctionAbi, functionType: FunctionType): boolea
 	fn.functionType === functionType &&
 	fn.parameters.length === 4 &&
 	fn.parameters[0].name === "from" &&
-	(fn.parameters[0].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+	matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 	fn.parameters[1].name === "to" &&
-	(fn.parameters[1].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+	matchesStructPath((fn.parameters[1].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 	fn.parameters[2].name === "amount" &&
 	fn.parameters[2].type.kind === "integer" &&
 	(fn.parameters[3].name === "authwit_nonce" || fn.parameters[3].name === "_nonce") &&
@@ -268,7 +281,7 @@ const transfer2Predicate = (fn: FunctionAbi): boolean =>
 	fn.functionType === FunctionType.PRIVATE &&
 	fn.parameters.length === 2 &&
 	fn.parameters[0].name === "to" &&
-	(fn.parameters[0].type as StructType)?.path === AZTEC_ADDRESS_PATH &&
+	matchesStructPath((fn.parameters[0].type as StructType)?.path, AZTEC_ADDRESS_PATH) &&
 	fn.parameters[1].name === "amount" &&
 	fn.parameters[1].type.kind === "integer" &&
 	fn.returnTypes.length === 0

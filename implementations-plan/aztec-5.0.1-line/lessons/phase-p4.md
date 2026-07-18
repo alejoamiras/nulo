@@ -70,3 +70,34 @@ Noir artifacts recompiled + `verify:deployments` green. The fee-payment identity
 **Next:** disposable `zz-debug-import.test.ts` (SW console tapped via CDP; offscreen logs forward
 into the SW) drives the import flow step-by-step under `e2e:agent` to expose where the pipeline
 stalls. NEVER commit that file.
+
+## 2026-07-18 — ✅✅ importToken "hang" ROOT-CAUSED + FIXED: crate-prefixed struct paths broke descriptor matching
+
+**It was never a hang.** SW CDP tap + a popup phase-sampler (disposable `zz-debug-import.test.ts`,
+since deleted) showed the popup dead-ending at *"Couldn't auto-detect this token's interface"* —
+`parseTokenInterface` returned `isComplete: false` and `NewTokenPopup.handleAddToken` early-returns
+with an inline error and NO toast, so `waitForToast("Token added")` times out. Deterministic,
+CI and local.
+
+**Root cause** (proven by running the pure matcher against the real installed artifact): the
+5.0.1 `@aztec-foundation/aztec-standards` Token artifact namespaces AztecAddress params by the
+artifact's import chain — `authorization_contract::aztec::protocol_types::…::AztecAddress` — while
+`descriptors.ts` predicates exact-matched `aztec::protocol_types::…::AztecAddress`. Six kinds
+(both balances + all four transfers) resolved ZERO candidates; the three metadata kinds survived
+because they key on the (unchanged) `FieldCompressedString` return path / integer widths. All other
+predicate inputs (flags, `_nonce`, u128 amount, `nonDispatchPublicFunctions` sourcing) already
+matched — the wallet's public-fn split handling was fine.
+
+**Fix**: `matchesStructPath` — crate-prefix-tolerant compare (`=== canonical` or
+`endsWith("::" + canonical)`) at the five predicate sites + `matchesFieldCompressedString`.
+Documented as the ONE deliberate divergence from the characterization pin's VERBATIM rule.
+New pin: `descriptors-real-artifact.test.ts` asserts all nine kinds resolve their canonical
+defaults against the REAL installed artifact (+ that the artifact still splits publics, + that
+params still arrive crate-prefixed). Characterization + registry-equivalence stay green (old paths
+still match exactly). 36/36 token tests, typecheck 0, lint 0.
+
+**Method lesson (the one that ended a 9-misdiagnosis streak): when a pipeline "hangs", sample the
+UI's own state machine** (button label + rendered error) — it names the stuck stage instantly and
+distinguishes "stuck" from "cleanly errored with no toast". And when an ABI consumer misbehaves
+after a package swap, run the PURE matcher against the REAL artifact before theorizing about
+runtime/sync/eviction.
