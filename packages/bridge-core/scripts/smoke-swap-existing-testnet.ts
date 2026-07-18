@@ -150,7 +150,8 @@ async function main() {
 	const token = await registerL2(
 		"token",
 		TokenContractArtifact,
-		[tName, tSymbol, tDec, proxy.address],
+		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO).
+		[tName, tSymbol, tDec, proxy.address, AztecAddress.ZERO],
 		CONFIG.l2.token.constructorArtifact,
 		CONFIG.l2.token.salt,
 		CONFIG.l2.token.address,

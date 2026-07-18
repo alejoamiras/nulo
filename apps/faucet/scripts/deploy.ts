@@ -273,7 +273,9 @@ async function computeAddresses(config: DeploymentConfig): Promise<{
 	const tokens: Record<string, AztecAddress> = {}
 	for (const t of config.contracts.tokens) {
 		const inst = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
-			constructorArgs: [t.name, t.symbol, t.decimals, dripperInstance.address],
+			// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO), matching the
+			// live-deploy path — a 4-arg dry-run would derive a DIFFERENT address than the deploy.
+			constructorArgs: [t.name, t.symbol, t.decimals, dripperInstance.address, AztecAddress.ZERO],
 			salt: new Fr(t.salt),
 			publicKeys: PublicKeys.default(),
 			deployer: AztecAddress.ZERO,

@@ -45,6 +45,7 @@ import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
+import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 const TOKEN_NAME = "Aztec Nulo"
@@ -135,6 +136,12 @@ async function main() {
 
 	// ─── L1 (Sepolia) ────────────────────────────────────────────────
 	const account = PRIVATE_KEY ? privateKeyToAccount(PRIVATE_KEY) : mnemonicToAccount(MNEMONIC as string)
+	// Signer pin (codex ultra-audit HIGH): the broadcast script itself asserts the
+	// deployer == the plan-pinned signer, so sourcing a WRONG key/mnemonic before this
+	// script can't spend from an unexpected account (verify runs in a separate shell).
+	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
+		throw new Error(`L1 deployer ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
+	}
 	console.log("L1 deployer", account.address)
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })

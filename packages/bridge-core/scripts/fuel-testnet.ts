@@ -27,6 +27,7 @@ import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { PRIVATE_FPC_SALT } from "../src/private-fuel"
 import { runFpcGate } from "./check-fpc-version"
+import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
@@ -87,6 +88,9 @@ async function main() {
 
 	// ─── L1 (live contracts, viem) ───────────────────────────────────
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
+	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
+		throw new Error(`L1 sender ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
+	}
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const azlo = CONFIG.l1.usdc as `0x${string}`

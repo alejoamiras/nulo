@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto"
 import { execFileSync, execSync } from "node:child_process"
 import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve as resolvePath } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseCandidateManifest } from "../src/candidate-schema"
 import { assertFaucetCandidateShape, assertZeroSeed } from "../src/promotion"
@@ -278,6 +278,24 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 		throw new Error(`non-allowlisted files dirty during the live arc — commit or revert first:\n${dirtyNow.join("\n")}`)
 	}
 
+	// Source-commit discipline (codex ultra-audit HIGH): tree-discipline catches UNCOMMITTED
+	// changes, but a CLEAN commit between build and a later verify (changing a deploy script or
+	// EVM artifact) would pass. Diff HEAD against the intent's recorded build commit and require
+	// every changed path to be allowlisted — so the intent commit itself (allowlisted lessons)
+	// is fine, but a deploy-relevant change since build is a STOP.
+	if (intent.source?.commit) {
+		const changedSinceBuild = execSync(`git diff --name-only ${intent.source.commit} HEAD`, { cwd: repoRoot, encoding: "utf8" })
+			.split("\n")
+			.filter(Boolean)
+			.filter((path) => !OPERATIONAL_ALLOWLIST.some((a) => path.startsWith(a)))
+		if (changedSinceBuild.length > 0) {
+			throw new Error(
+				`deploy-relevant files changed since the intent was built (commit ${intent.source.commit.slice(0, 12)}):\n` +
+					`${changedSinceBuild.join("\n")}\nrebuild the intent — STOP`,
+			)
+		}
+	}
+
 	// Identity re-validation (before EVERY broadcast group + at promotion).
 	const now = await probeIdentity(intent.primaryRpc)
 	if (now.rollupVersion !== intent.identity.rollupVersion)
@@ -516,22 +534,27 @@ async function promote(intentPath: string): Promise<void> {
 	console.log(`✓ promoted both candidates; receipt at ${receiptPath} — commit the promoted files + receipt together`)
 }
 
-const [, , cmd, intentPath, ...rest] = process.argv
-if (!cmd || !intentPath) {
-	console.error("usage: live-intent.ts build|verify|promote <intent-path> [--candidate <path>]")
-	process.exit(1)
+// CLI dispatch — guarded so importing this module (e.g. for PLAN_PINNED_L1_SIGNER)
+// never triggers argv parsing / process.exit.
+const isMain = process.argv[1] ? fileURLToPath(import.meta.url) === resolvePath(process.argv[1]) : false
+if (isMain) {
+	const [, , cmd, intentPath, ...rest] = process.argv
+	if (!cmd || !intentPath) {
+		console.error("usage: live-intent.ts build|verify|promote <intent-path> [--candidate <path>]")
+		process.exit(1)
+	}
+	const candidateFlag = rest.indexOf("--candidate")
+	const candidatePath = candidateFlag !== -1 ? rest[candidateFlag + 1] : undefined
+	const run =
+		cmd === "build"
+			? build(intentPath)
+			: cmd === "verify"
+				? verify(intentPath, candidatePath)
+				: cmd === "promote"
+					? promote(intentPath)
+					: Promise.reject(new Error(`unknown command ${cmd}`))
+	run.catch((err) => {
+		console.error(`✗ ${err instanceof Error ? err.message : err}`)
+		process.exit(1)
+	})
 }
-const candidateFlag = rest.indexOf("--candidate")
-const candidatePath = candidateFlag !== -1 ? rest[candidateFlag + 1] : undefined
-const run =
-	cmd === "build"
-		? build(intentPath)
-		: cmd === "verify"
-			? verify(intentPath, candidatePath)
-			: cmd === "promote"
-				? promote(intentPath)
-				: Promise.reject(new Error(`unknown command ${cmd}`))
-run.catch((err) => {
-	console.error(`✗ ${err instanceof Error ? err.message : err}`)
-	process.exit(1)
-})
