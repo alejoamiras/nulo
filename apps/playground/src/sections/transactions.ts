@@ -40,7 +40,7 @@ async function buildTransferExec(callCount = 1) {
 	const amount = getInput("amount") || "1"
 	if (!tokenAddress || !recipient) throw new Error("tokenAddress + recipient inputs required")
 
-	const { TokenContract } = await import("@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js")
+	const { TokenContract } = await import("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js")
 	const wallet = getWallet()!
 	// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
 	const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)

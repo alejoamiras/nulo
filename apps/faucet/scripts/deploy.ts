@@ -43,8 +43,8 @@ import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { DripperContract, DripperContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Dripper.js"
-import { TokenContract, TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
+import { DripperContract, DripperContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js"
+import { TokenContract, TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type DeploymentConfig, getDeploymentConfig, type Network } from "./deploy-config.js"
 
 const __filename = fileURLToPath(import.meta.url)

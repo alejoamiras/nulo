@@ -28,7 +28,7 @@
 		"@aztec/pxe": "5.0.1",
 		"@aztec/simulator": "5.0.1",
 		"@aztec/stdlib": "5.0.1",
-		"@alejoamiras/aztec-standards": "5.0.0",
+		"@aztec-foundation/aztec-standards": "5.0.1",
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-core": "workspace:*",
 		"@nulo/wallet-crypto": "workspace:*",

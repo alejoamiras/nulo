@@ -22,7 +22,7 @@ import { L1FeeJuicePortalManager } from "@aztec/aztec.js/ethereum"
 import { ProtocolContractAddress } from "@aztec/aztec.js/protocol"
 import { createExtendedL1Client } from "@aztec/ethereum/client"
 import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { TokenContract } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
+import { TokenContract } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 
 /**
  * Aztec L2 node URL. Defaults to http://localhost:8080 (the standard sandbox port).
@@ -116,6 +116,9 @@ export async function deployTestToken(
 		"TST",
 		18,
 		minterAddress,
+		// 5.0.1 standards added a 5th `auth_contract` param to constructor_with_minter — pass ZERO
+		// (no transfer-authorization gating) for the plain test token.
+		AztecAddress.ZERO,
 	).send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from: minterAddress })
 
 	return contract.address.toString()

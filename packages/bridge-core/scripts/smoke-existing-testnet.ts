@@ -31,7 +31,7 @@ import { TokenPortalAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 

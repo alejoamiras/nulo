@@ -52,7 +52,7 @@
 		"@codemirror/search": "^6.7.1",
 		"@codemirror/state": "^6.6.0",
 		"@codemirror/view": "^6.43.1",
-		"@alejoamiras/aztec-standards": "5.0.0",
+		"@aztec-foundation/aztec-standards": "5.0.1",
 		"@lezer/highlight": "^1.2.3",
 		"@nulo/aztec-runtime": "workspace:*",
 		"@nulo/design": "workspace:*",

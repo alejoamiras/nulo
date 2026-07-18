@@ -11,7 +11,7 @@
  * `extension/src/wallet/services/execution/helpers/batched-view-simulation.ts`
  * and is called directly by balance-projector + gas-balance.
  *
- * Function-call construction uses @alejoamiras/aztec-standards Token
+ * Function-call construction uses @aztec-foundation/aztec-standards Token
  * artifact + Contract.at() pattern, mirroring real dApps.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -40,7 +40,7 @@ async function buildTransferPayload() {
 	const amount = getInput("amount") || "1"
 	if (!tokenAddress || !recipient) throw new Error("tokenAddress + recipient inputs required")
 
-	const { TokenContract } = await import("@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js")
+	const { TokenContract } = await import("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js")
 	const wallet = getWallet()!
 	// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
 	const token: any = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet as any)
@@ -93,7 +93,7 @@ export function bindSimulation(root: HTMLElement): void {
 		"click",
 		safe("executeUtility", async () => {
 			const wallet = getWallet()!
-			const { TokenContract } = await import("@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js")
+			const { TokenContract } = await import("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js")
 			const tokenAddress = getInput("tokenAddress")
 			if (!tokenAddress) throw new Error("tokenAddress input required")
 			// biome-ignore lint/suspicious/noExplicitAny: structural Contract typing

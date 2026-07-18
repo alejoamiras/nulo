@@ -11,7 +11,7 @@ import { type WithdrawJournalRecord, makeProvisionalWithdrawId } from "@nulo/bri
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { decodeFunctionData } from "viem"
 import { sepolia } from "viem/chains"
 import { computed, ref, watch } from "vue"

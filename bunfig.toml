@@ -56,6 +56,7 @@ minimumReleaseAge = 604800
 # the gate; it only bites active re-resolution, so dropping aged-out excludes is safe.
 minimumReleaseAgeExcludes = [
 	"@alejoamiras/aztec-accelerator",
+	"@aztec-foundation/aztec-standards",
 	"@alejoamiras/aztec-standards",
 	"@alejoamiras/aztec-fee-payment",
 	"@aztec/accounts",

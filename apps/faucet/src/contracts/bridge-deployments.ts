@@ -3,7 +3,7 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/cont
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { EthAddress } from "@aztec/foundation/eth-address"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/artifacts/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { parseCandidateManifest } from "@nulo/bridge-core"
 import rawConfig from "../../public/testnet-bridge.json"

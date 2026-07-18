@@ -171,6 +171,27 @@ NOT fix the hang, because **`0x0193c31b…` is NEITHER protocol FPC**:
      a note. The user (who confirmed 5.0.1 nr/js compat earlier) likely knows whether 5.0.1 changed
      note-sync to hard-fail on unknown emitters.
 
+### ✅ STANDARDS SWAP DONE — network root cause FIXED (verified via repro). Now P6-coupled.
+Executed the swap: `@alejoamiras/aztec-standards@5.0.0` → `@aztec-foundation/aztec-standards@5.0.1`
+across all 5 package.json + 33 import sites (scope-only; identical `artifacts/src/artifacts/*.js`
+paths) + bunfig exclude + renovate + the `@wonderland-token-artifact` vite alias. **Repro-VERIFIED:
+`0x0193c31b`/"not registered" is GONE** (the 5.0.1 token references the 5.0.1 HandshakeRegistry that
+EXISTS on the 5.0.1 sandbox). typecheck:all 0, lint 0, unit suites green (extension 3129, bridge-core
+136, aztec-runtime 67; the lone `@nulo/faucet useL1FeeAsset` fail is the known cross-run flake —
+426/426 isolated).
+- **Fixture arity fix**: 5.0.1's `Token.constructor_with_minter` added a 5th param `auth_contract`;
+  `aztec.ts:deployTestToken` now passes `AztecAddress.ZERO`. (Local repro still hangs at importToken's
+  "Token added" toast AFTER the 0x0193 fix, but with ONLY benign `[popup:ui] Client disconnected` SW
+  noise — the local-box SW-eviction signature from P2, which passes on CI. The real code error is gone.)
+- **P6 COUPLING (now concrete)**: the same 5-arg constructor change breaks `verify:deployments` +
+  `apps/faucet/scripts/deploy.ts` + `deployments.ts` + `deploy-bridge-testnet.ts` + `deposit-testnet.ts`
+  (they pass 4 args to derive the token address). Those pass the LIVE token's 5.0.0 args (4); the token
+  must be REDEPLOYED with the 5.0.1 5-arg constructor (P6) and the deployment descriptors regenerated
+  before verify:deployments can pass. So the faucet build is P6-blocked — exactly the "fee-payment/
+  standards identity shift couples to P6" the plan anticipated. The deploy-script arity + descriptor
+  updates are PART OF P6's redeploy (live, hard limit → needs the user). Both the standards token AND
+  the fee-payment PrivateFPC (0x1a6d21ce) redeploy in P6.
+
 ### ✅✅✅✅ ACTUAL ROOT CAUSE (from SOURCE, after the fee-payment hypothesis ALSO proved wrong)
 `grep 0x0193c31b node_modules` found it: **`0x0193c31b` = `HandshakeRegistry`** in
 `@aztec/standard-contracts@5.0.0`'s `standard_contract_data.ts` — pulled transitively by the

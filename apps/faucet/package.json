@@ -31,7 +31,7 @@
 		"@aztec/stdlib": "5.0.1",
 		"@aztec/wallet-sdk": "5.0.1",
 		"@aztec/wallets": "5.0.1",
-		"@alejoamiras/aztec-standards": "5.0.0",
+		"@aztec-foundation/aztec-standards": "5.0.1",
 		"@nulo/bridge-core": "workspace:*",
 		"@nulo/design": "workspace:*",
 		"@nulo/wallet-crypto": "workspace:*",

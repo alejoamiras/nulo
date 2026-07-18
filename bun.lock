@@ -16,7 +16,7 @@
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.1",
         "@alejoamiras/aztec-fee-payment": "5.0.1",
-        "@alejoamiras/aztec-standards": "5.0.0",
+        "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
         "@aztec/bb.js": "5.0.1",
@@ -98,7 +98,7 @@
       "name": "@nulo/faucet",
       "version": "0.1.0",
       "dependencies": {
-        "@alejoamiras/aztec-standards": "5.0.0",
+        "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
         "@aztec/bb.js": "5.0.1",
@@ -149,7 +149,7 @@
       "name": "@nulo/playground",
       "version": "0.1.0",
       "dependencies": {
-        "@alejoamiras/aztec-standards": "5.0.0",
+        "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
         "@aztec/bb.js": "5.0.1",
         "@aztec/foundation": "5.0.1",
@@ -172,7 +172,7 @@
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.1",
         "@alejoamiras/aztec-fee-payment": "5.0.1",
-        "@alejoamiras/aztec-standards": "5.0.0",
+        "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
         "@aztec/bb.js": "5.0.1",
@@ -199,7 +199,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@alejoamiras/aztec-fee-payment": "5.0.1",
-        "@alejoamiras/aztec-standards": "5.0.0",
+        "@aztec-foundation/aztec-standards": "5.0.1",
         "@aztec/accounts": "5.0.1",
         "@aztec/aztec.js": "5.0.1",
         "@aztec/constants": "5.0.1",
@@ -331,8 +331,6 @@
 
     "@alejoamiras/aztec-fee-payment": ["@alejoamiras/aztec-fee-payment@5.0.1", "", { "peerDependencies": { "@aztec/aztec.js": "5.0.1", "@aztec/protocol-contracts": "5.0.1", "@aztec/stdlib": "5.0.1" } }, "sha512-jSChEwN6nDRFohFrO87y0xOUE4NQ9a1fcGUd47R1jL8OFKoVz/1RorwELeifsLi5+f1F6ws0RkW5R/lsYXfnqQ=="],
 
-    "@alejoamiras/aztec-standards": ["@alejoamiras/aztec-standards@5.0.0", "", { "peerDependencies": { "@aztec/accounts": "5.0.0", "@aztec/aztec.js": "5.0.0", "@aztec/noir-contracts.js": "5.0.0", "@aztec/protocol-contracts": "5.0.0", "@aztec/pxe": "5.0.0", "@aztec/stdlib": "5.0.0", "@aztec/wallet-sdk": "5.0.0", "@aztec/wallets": "5.0.0" } }, "sha512-chTI8O++7DtFTre/Kc3ewFlvJYPlu1liHDo9GtZf4nxL0BjVmGyl3xIE29SDOanRa76umceAMBGSThCv6pMbsA=="],
-
     "@asamuzakjp/css-color": ["@asamuzakjp/css-color@5.1.11", "", { "dependencies": { "@asamuzakjp/generational-cache": "^1.0.1", "@csstools/css-calc": "^3.2.0", "@csstools/css-color-parser": "^4.1.0", "@csstools/css-parser-algorithms": "^4.0.0", "@csstools/css-tokenizer": "^4.0.0" } }, "sha512-KVw6qIiCTUQhByfTd78h2yD1/00waTmm9uy/R7Ck/ctUyAPj+AEDLkQIdJW0T8+qGgj3j5bpNKK7Q3G+LedJWg=="],
 
     "@asamuzakjp/dom-selector": ["@asamuzakjp/dom-selector@7.1.1", "", { "dependencies": { "@asamuzakjp/generational-cache": "^1.0.1", "@asamuzakjp/nwsapi": "^2.3.9", "bidi-js": "^1.0.3", "css-tree": "^3.2.1", "is-potential-custom-element-name": "^1.0.1" } }, "sha512-67RZDnYRc8H/8MLDgQCDE//zoqVFwajkepHZgmXrbwybzXOEwOWGPYGmALYl9J2DOLfFPPs6kKCqmbzV895hTQ=="],
@@ -376,6 +374,8 @@
     "@aws-sdk/xml-builder": ["@aws-sdk/xml-builder@3.972.34", "", { "dependencies": { "@smithy/types": "^4.16.0", "tslib": "^2.6.2" } }, "sha512-wHhWL1y7sN3enBA8POrPpQM5jCcmu2ozyhbRei4c8OjVcEaEs6yLucLa/pla457ggS/ysuy7bosagz3HaJkZXA=="],
 
     "@aws/lambda-invoke-store": ["@aws/lambda-invoke-store@0.3.0", "", {}, "sha512-sl4Bm6yiMNYrZKkqqDFWN0UfnWhlS8ivKxrYl+6t0gCLrqr8y3B2IqZZbFRkfaVVp7C/baApyh71P+LeE1A2sQ=="],
+
+    "@aztec-foundation/aztec-standards": ["@aztec-foundation/aztec-standards@5.0.1", "", {}, "sha512-i+O7v7Qqu2O9haFFducx7+42DIpxOUj+JNWUqIaE+laZJ2x+le/XEXuTLr60gCDQfo2m3b97ywH/QLk5engwAA=="],
 
     "@aztec/accounts": ["@aztec/accounts@5.0.1", "", { "dependencies": { "@aztec/aztec.js": "5.0.1", "@aztec/entrypoints": "5.0.1", "@aztec/ethereum": "5.0.1", "@aztec/foundation": "5.0.1", "@aztec/stdlib": "5.0.1", "tslib": "^2.4.0" } }, "sha512-IeHbWmvXtus4D6LoMLhkahkxdPGf42tUGVY8Qs4gpFvcPhoHwkfDRie/RlBKAkhiGjMJytkZLnq7rqxkNEMzYQ=="],
 
