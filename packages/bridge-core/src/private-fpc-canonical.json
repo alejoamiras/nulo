@@ -1,9 +1,18 @@
 {
-	"$comment": "Canonical PrivateFPC deployment descriptor — mirrors ecosystem-tooling's canonical-deployment.json at tag v5.0.1 (the publisher of @alejoamiras/aztec-fee-payment), extended with the installed artifact's digest. The address is derived from compiled bytecode + salt and is ONLY valid for this exact aztecVersion + artifact — depositing Fee Juice to a stale address is UNRECOVERABLE. The canonical salt is a fixed project constant from 5.0.0 onward; rc-era pins used operator-local salts and are dead. Machine-asserted by private-fuel.test.ts (derivation + digest) and consumed by check-fpc-version.ts (exact-version + digest + live-class gate).",
+	"$comment": "Canonical PrivateFPC deployment descriptor — mirrors ecosystem-tooling's canonical-deployment.json at tag v5.0.1 (the publisher of @alejoamiras/aztec-fee-payment), extended with the installed artifact's digest, the target-network identity pins, and the digest-keyed node-compat map. The address is derived from compiled bytecode + salt and is ONLY valid for this exact aztecVersion + artifact — depositing Fee Juice to a stale address is UNRECOVERABLE. The canonical salt is a fixed project constant from 5.0.0 onward; rc-era pins used operator-local salts and are dead. Machine-asserted by private-fuel.test.ts (derivation + digest + compat coherence) and consumed by check-fpc-version.ts (compat-gated version + digest + network-identity + live-class gate, --mode predeploy|require-deployed).",
 	"aztecVersion": "5.0.1",
 	"salt": "0x0000000000000000000000000000000000000000000000000000000000000001",
 	"deployer": "0x0000000000000000000000000000000000000000000000000000000000000000",
 	"expectedAddress": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
 	"artifactSha256": "94fa4c71d612ac27b06fcce51a6b0d74cfe43c5ea84035b0357b6125d29be9b5",
-	"artifactPath": "@alejoamiras/aztec-fee-payment/target/private_contract-PrivateFPC.json"
+	"artifactPath": "@alejoamiras/aztec-fee-payment/target/private_contract-PrivateFPC.json",
+	"network": {
+		"$comment": "Hard identity pins for the ONE network this descriptor deploys to (Sepolia-anchored v5 testnet, verified live 2026-07-18). A gate run against any other network is a wrong-network operator error, not a compat question.",
+		"l1ChainId": 11155111,
+		"rollupVersion": 1821665230
+	},
+	"compatibleNodeVersions": {
+		"$comment": "HUMAN-CURATED, digest-keyed: node versions this exact artifact (by sha256) may be deployed/run against. 5.0.1 aztec-nr/js are protocol-compatible with the live 5.0.0 node (owner ruling, aztec-5.0.1-line plan); a new artifact digest REQUIRES a fresh entry — the gate fails closed on a missing key.",
+		"94fa4c71d612ac27b06fcce51a6b0d74cfe43c5ea84035b0357b6125d29be9b5": ["5.0.0", "5.0.1"]
+	}
 }

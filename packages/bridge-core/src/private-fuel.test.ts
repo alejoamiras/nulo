@@ -112,6 +112,18 @@ describe("private-fuel keystone", () => {
 			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"),
 		).version
 		expect(installedVersion).toBe(descriptor.aztecVersion)
+
+		// Compat coherence: the digest-keyed node-compat map must carry an entry for EXACTLY the
+		// pinned digest (the gate fails closed on a missing key, so a digest change without fresh
+		// human curation trips here first), and the network identity pins must name the Sepolia
+		// v5 testnet this descriptor deploys to. The 5.0.0 entry encodes the owner ruling that
+		// the 5.0.1 artifact is protocol-compatible with the live 5.0.0 node.
+		const compat = descriptor.compatibleNodeVersions[descriptor.artifactSha256]
+		expect(Array.isArray(compat)).toBe(true)
+		expect(compat).toContain("5.0.0")
+		expect(compat).toContain("5.0.1")
+		expect(descriptor.network.l1ChainId).toBe(11155111)
+		expect(descriptor.network.rollupVersion).toBe(1821665230)
 	})
 })
 
