@@ -108,3 +108,37 @@ concurrent-confirm, `network-e2e-status` — ALL SUCCESS. 13/13 previously-faili
 the lone 'error'-vs-'ok' assertion also cleared (it was downstream of the same broken import).
 P4's remaining open items: deploy-script 5-arg arity + descriptor regen (P6-coupled), Noir
 recompile against 5.0.1 toolchain, fee-payment tarball source-binding diff.
+
+## 2026-07-18 — fee-payment SOURCE BINDING PROVEN + Noir recompile on 5.0.1
+
+**Source binding (the audit's "the diff is the review"):**
+- Publish tag resolved: the npm `@alejoamiras/aztec-fee-payment@5.0.1` tarball's `package.json`
+  byte-matches `ecosystem-tooling@v5.0.1` (NOT `v5.0.1-revision.1`, which differs only in
+  TS/tests/docs/audit files — the FPC Noir source is untouched between the tags).
+- `canonical-deployment.json`: byte-identical across tarball, v5.0.1, and v5.0.1-revision.1;
+  salt/aztecVersion/expectedAddress match our `private-fpc-canonical.json` (the published file has
+  no `deployer` key — our ZERO-deployer pin is bound via the address re-derivation instead).
+- Tarball artifact sha256 == our descriptor pin (`94fa4c71…`).
+- **Rebuild-compare**: fresh `aztec compile` of the FPC at `ecosystem-tooling@v5.0.1` with the
+  5.0.1 toolchain → raw digests differ ONLY via the debug `file_map` (machine-local paths);
+  stripping `file_map`, the core digests (bytecode+ABI+VKs) are EQUAL: `e35b7bb75687a5dc…` both
+  sides. The published package IS its tagged source. (Gotcha: the 5.0 CLI shells out to bare
+  `nargo`; export `NARGO=$AZTEC_HOME/bin/aztec-nargo` + `BB=…/bb` or compile dies ENOENT — same
+  wiring our compile.sh already documents.)
+
+**Noir recompile (tags → v5.0.1 ×3, upstream token dep, toolchain already installed):**
+- `aztec-packages` deps → `v5.0.1` (peeled `b97ff8c3e88f…`); token dep moved
+  `alejoamiras/ecosystem-tooling → AztecProtocol/aztec-standards @ v5.0.1` (peeled
+  `c74541f7cf2bb23b704e96fd326ea95d98252669`; `src/token_contract` path verified via API at the
+  tag before edit). compile.sh → 5.0.1. All three compile clean; artifacts path-scrubbed
+  (no home/abs paths — verified).
+- Class-id table (address shifts follow at the P6 redeploy):
+
+| contract | old class id | new class id |
+|---|---|---|
+| TokenMinterProxy | `0x055b5878e732a09a…` | `0x07689a539bf0a60a…` |
+| TokenBridge | `0x0aea399e74e99a55…` | `0x2206e145ab6054f1…` |
+| keystone (bin) | artifact byte-identical (`402be972…`) | unchanged |
+
+- keystone `nargo test` 3/3 ✓; bridge-core suite 136/136 ✓ (tripwire + derivation pins green
+  against the new state).
