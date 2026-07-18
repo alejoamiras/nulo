@@ -119,6 +119,38 @@ async function build(intentPath: string): Promise<void> {
 	const identity = await probeIdentity(NODE_URL)
 	const walletChainId = (identity.l1ChainId ^ identity.rollupVersion) >>> 0
 
+	// Network-identity pinning against the COMMITTED previous-arc intent: no network reset has
+	// happened on this line (nodeVersion 5.0.0, rollupVersion unchanged), so every node-claimed
+	// L1 address MUST be byte-equal to the values the 5.0.0 arc recorded and committed. A
+	// mismatch is a STOP — either the network reset (redeploy plan changes) or the node is
+	// lying/stale (never build an intent from it). Code-presence corroboration below stays: this
+	// check authenticates the claims against history, that one against the L1 itself.
+	const previousArc = JSON.parse(readFileSync(join(repoRoot, "implementations-plan/aztec-5.0.0-stable/lessons/intent.json"), "utf8")) as {
+		identity: { l1ChainId: number; rollupVersion: number }
+		l1: Record<string, string>
+	}
+	if (identity.l1ChainId !== previousArc.identity.l1ChainId || identity.rollupVersion !== previousArc.identity.rollupVersion) {
+		throw new Error(
+			`network identity moved: live l1ChainId=${identity.l1ChainId}/rollupVersion=${identity.rollupVersion} != ` +
+				`committed ${previousArc.identity.l1ChainId}/${previousArc.identity.rollupVersion} — RESET or wrong network; STOP`,
+		)
+	}
+	const l1Pins: Array<[keyof typeof previousArc.l1, string]> = [
+		["rollup", identity.l1ContractAddresses.rollupAddress],
+		["feeJuicePortal", identity.l1ContractAddresses.feeJuicePortalAddress],
+		["feeJuice", identity.l1ContractAddresses.feeJuiceAddress],
+		["feeAssetHandler", identity.l1ContractAddresses.feeAssetHandlerAddress],
+		["registry", identity.l1ContractAddresses.registryAddress],
+	]
+	for (const [key, claimed] of l1Pins) {
+		const committed = previousArc.l1[key]
+		if (!committed || String(claimed).toLowerCase() !== committed.toLowerCase()) {
+			throw new Error(
+				`node-claimed L1 ${String(key)} ${claimed} != committed previous-arc ${committed} — no-reset pin violated; STOP`,
+			)
+		}
+	}
+
 	// Independent L1 corroboration of the node's claims — a lying/stale node fails here. The node
 	// controls these strings, so validate them as addresses BEFORE they reach `cast`.
 	const rollup = requireAddress(identity.l1ContractAddresses.rollupAddress, "node rollupAddress")
