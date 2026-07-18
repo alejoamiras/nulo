@@ -157,3 +157,21 @@ Three failures, two distinct root causes — the timeout bump surfaced the secon
 Lesson: in MV3 e2e, "kill the SW" helpers must tolerate the SW being already dead —
 Chrome's reaper is a concurrent actor, and its kill is indistinguishable from (and as
 valid as) ours for crash-recovery assertions.
+
+## Post-live source-mutation classification (per-commit, intent build → merge)
+
+Rule: after the P6 intent build, every commit classifies its files — deploy-affecting
+(bridge-core src/scripts, contracts/, faucet deploy surface, canary scripts) invalidates the
+intent; client-only/docs re-runs the standard suites only.
+
+| Commit | Files | Class | Consequence |
+|---|---|---|---|
+| `3783f89` | intent.json (candidate digest) | P6-flow artifact (intent revision, in-flow) | none — part of the supervised deploy |
+| `30963e0` | live manifests + promotion receipt | P6-flow artifact (receipted promotion output) | none — the promotion itself |
+| `41e551a` | plan.md + phase-p6 lessons | docs | none |
+| `b26ad11` | backup-restore-sw-restart.test.ts | client-only (e2e test timing) | standard suites |
+| `75e7756` | same test + phase-p7 lessons | client-only (e2e helper) + docs | standard suites |
+| this commit | phase-p7 lessons (this table) | docs | none |
+
+No deploy-affecting source mutation since the intent build → intent remains valid; standard
+suites ran green on `75e7756` (Quality + Smoke + Network e2e + Lint workflows all success).
