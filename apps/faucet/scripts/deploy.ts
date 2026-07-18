@@ -9,7 +9,8 @@
  * Optional flags:
  *   --dry-run     compute + print addresses without sending txs
  *   --network     `testnet` (default) | `local-network`
- *   --output      override the output path (default: src/contracts/deployments.json)
+ *   --output      override the output path (default: src/contracts/deployments.candidate.json —
+ *                 candidate-first; `promote` owns the live deployments.json)
  *
  * Idempotency: each contract deploy checks `node.getContract(addr)` first;
  * skips with `[EXISTING]` if found. Re-running is a no-op when everything
@@ -70,7 +71,9 @@ function parseArgs(argv: string[]): CLIOptions {
 	if (networkArg !== "testnet" && networkArg !== "local-network") {
 		throw new Error(`unknown --network: ${networkArg}`)
 	}
-	const defaultOutput = join(__dirname, "..", "src", "contracts", "deployments.json")
+	// Candidate-first (P5): a live deploy writes the CANDIDATE; only the receipted
+	// `promote` step may touch the committed live deployments.json.
+	const defaultOutput = join(__dirname, "..", "src", "contracts", "deployments.candidate.json")
 	return {
 		network: networkArg,
 		dryRun: args.includes("--dry-run"),
@@ -90,6 +93,9 @@ interface TokenDeploymentRecord {
 		readonly symbol: "NULO" | "OLUN"
 		readonly decimals: number
 		readonly minter: string
+		/** 5.0.1 standards Token: constructor_with_minter's 5th parameter. ZERO = no
+		 *  authorization contract; REQUIRED for the rebuild to derive the address. */
+		readonly authContract: string
 	}
 }
 
@@ -122,6 +128,7 @@ function buildDeploymentJson(
 				symbol: t.symbol,
 				decimals: t.decimals,
 				minter: dripperAddress.toString(),
+				authContract: AztecAddress.ZERO.toString(),
 			},
 		}))
 	return {
@@ -329,7 +336,7 @@ async function run(): Promise<void> {
 				node,
 				`Token ${t.symbol}`,
 				TokenContractArtifact,
-				[t.name, t.symbol, t.decimals, dripperContract.address],
+				[t.name, t.symbol, t.decimals, dripperContract.address, AztecAddress.ZERO],
 				"constructor_with_minter",
 				new Fr(t.salt),
 				deployOptions,

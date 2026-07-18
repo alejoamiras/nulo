@@ -28,9 +28,14 @@ const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-lab
 const DRIP_AMOUNT = 1_000_000_000n
 
 const here = dirname(fileURLToPath(import.meta.url))
-const deployments = JSON.parse(
-	readFileSync(join(here, "..", "..", "..", "apps", "faucet", "src", "contracts", "deployments.json"), "utf8"),
-) as {
+// `--config <path>` targets a CANDIDATE manifest (candidate-first: the canary must
+// prove the candidate BEFORE promote touches the live file); default = live.
+const configArgIndex = process.argv.indexOf("--config")
+const deploymentsPath =
+	configArgIndex >= 0 && process.argv[configArgIndex + 1]
+		? process.argv[configArgIndex + 1]
+		: join(here, "..", "..", "..", "apps", "faucet", "src", "contracts", "deployments.json")
+const deployments = JSON.parse(readFileSync(deploymentsPath, "utf8")) as {
 	dripper: { address: string; salt: number; constructorArtifact: string }
 	tokens: {
 		address: string
@@ -41,6 +46,7 @@ const deployments = JSON.parse(
 }
 
 async function main() {
+	console.log(`drip canary config: ${deploymentsPath}`)
 	const t0 = Date.now()
 	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
 

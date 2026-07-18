@@ -17,7 +17,7 @@ import deploymentsJson from "./deployments.json"
  * an array; we never rely on its order.
  */
 
-interface TokenDeployment {
+export interface TokenDeployment {
 	readonly address: string
 	readonly salt: number
 	readonly deployer: string
@@ -27,17 +27,22 @@ interface TokenDeployment {
 		readonly symbol: "NULO" | "OLUN"
 		readonly decimals: number
 		readonly minter: string
+		/** 5.0.1 standards Token: the 5th constructor parameter. Absent only on
+		 *  pre-5.0.1 records, which can no longer derive under the installed
+		 *  artifact — the rebuild fails with a targeted error instead of an
+		 *  arity crash. */
+		readonly authContract?: string
 	}
 }
 
-interface DripperDeployment {
+export interface DripperDeployment {
 	readonly address: string
 	readonly salt: number
 	readonly deployer: string
 	readonly constructorArtifact: "constructor"
 }
 
-interface DeploymentsJson {
+export interface DeploymentsJson {
 	readonly tokens: readonly TokenDeployment[]
 	readonly dripper: DripperDeployment
 }
@@ -65,20 +70,33 @@ export const DEPLOYMENT_RECORDS = {
 
 type ReconstructedInstance = Awaited<ReturnType<typeof getContractInstanceFromInstantiationParams>>
 
-export async function rebuildDripperInstance(): Promise<ReconstructedInstance> {
+/** Record-parameterized rebuilds: the committed live json and a candidate json
+ *  (`verify-deployments --config`) go through the SAME derivation, so candidate
+ *  verification proves exactly what the app will later trust. */
+export async function rebuildDripperInstanceFrom(record: DripperDeployment): Promise<ReconstructedInstance> {
 	return getContractInstanceFromInstantiationParams(DripperContractArtifact, {
 		constructorArgs: [],
-		salt: new Fr(data.dripper.salt),
+		salt: new Fr(record.salt),
 		publicKeys: PublicKeys.default(),
-		deployer: AztecAddress.fromStringUnsafe(data.dripper.deployer),
-		constructorArtifact: data.dripper.constructorArtifact,
+		deployer: AztecAddress.fromStringUnsafe(record.deployer),
+		constructorArtifact: record.constructorArtifact,
 	})
 }
 
-async function rebuildTokenInstance(record: TokenDeployment): Promise<ReconstructedInstance> {
-	const { name, symbol, decimals, minter } = record.constructorArgs
+export async function rebuildDripperInstance(): Promise<ReconstructedInstance> {
+	return rebuildDripperInstanceFrom(data.dripper)
+}
+
+export async function rebuildTokenInstanceFrom(record: TokenDeployment): Promise<ReconstructedInstance> {
+	const { name, symbol, decimals, minter, authContract } = record.constructorArgs
+	if (authContract === undefined) {
+		throw new Error(
+			`token ${symbol}: pre-5.0.1 record lacks constructorArgs.authContract — the installed 5.0.1 Token ` +
+				"artifact takes 5 constructor args; this record cannot re-derive. Redeploy + promote (aztec-5.0.1-line P6).",
+		)
+	}
 	return getContractInstanceFromInstantiationParams(TokenContractArtifact, {
-		constructorArgs: [name, symbol, decimals, AztecAddress.fromStringUnsafe(minter)],
+		constructorArgs: [name, symbol, decimals, AztecAddress.fromStringUnsafe(minter), AztecAddress.fromStringUnsafe(authContract)],
 		salt: new Fr(record.salt),
 		publicKeys: PublicKeys.default(),
 		deployer: AztecAddress.fromStringUnsafe(record.deployer),
@@ -87,9 +105,9 @@ async function rebuildTokenInstance(record: TokenDeployment): Promise<Reconstruc
 }
 
 export async function rebuildNuloInstance(): Promise<ReconstructedInstance> {
-	return rebuildTokenInstance(NULO_RECORD)
+	return rebuildTokenInstanceFrom(NULO_RECORD)
 }
 
 export async function rebuildOlunInstance(): Promise<ReconstructedInstance> {
-	return rebuildTokenInstance(OLUN_RECORD)
+	return rebuildTokenInstanceFrom(OLUN_RECORD)
 }
