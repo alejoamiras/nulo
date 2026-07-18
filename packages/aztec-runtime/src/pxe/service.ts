@@ -190,11 +190,14 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		const pxes = dbs.filter((x) => x.name?.startsWith(PXE_DATA_DIR_ROOT))
 		if (opfsDirs.length) {
 			const profiles = await this.profiles.getProfiles()
-			for (const coords of opfsDirs) {
-				if (!profiles.some((x) => x.id === coords.profileId)) {
-					this.logWarn(`sweep: removing orphan OPFS PXE store ${chainDataDir(coords)}`)
-					await removeChainStoreDir(coords)
-				}
+			// Remove orphans whole-profile-at-a-time: the profile is POSITIVELY absent
+			// from the profiles store (a chain can only open under an existing profile
+			// row), so recursively dropping its dir cannot race a sibling-chain open —
+			// unlike the removed per-chain empty-dir sweep (D7 TOCTOU).
+			const orphanProfiles = [...new Set(opfsDirs.map((c) => c.profileId))].filter((id) => !profiles.some((x) => x.id === id))
+			for (const profileId of orphanProfiles) {
+				this.logWarn(`sweep: removing orphan OPFS PXE profile dir ${PXE_DATA_DIR_ROOT}/${profileId}`)
+				await removeProfileStoreDirs(profileId)
 			}
 		}
 		if (pxes.length) {

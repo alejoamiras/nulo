@@ -187,20 +187,22 @@ export async function listChainStoreDirs(): Promise<ChainCoordinates[]> {
 	return out
 }
 
-/** Remove one chain's OPFS pool directory. Works with NO live runtime. Idempotent. */
+/** Remove one chain's OPFS pool directory. Works with NO live runtime. Idempotent.
+ *
+ *  Deliberately leaves the profile dir in place even when this was its last chain:
+ *  the old "drop the profile dir once empty" sweep TOCTOU-raced a concurrent
+ *  sibling-chain open on the SAME live profile — the emptiness probe passed, the
+ *  sibling created its dir, and the recursive profile removal deleted the brand-new
+ *  sibling store (or tripped over its SAH lock). Profile dirs are removed ONLY by
+ *  `removeProfileStoreDirs`, whose callers hold a positive profile-absence or
+ *  profile-write guarantee, so no sibling open can race them. An empty profile dir
+ *  is inert: `listChainStoreDirs` yields nothing for it. */
 export async function removeChainStoreDir({ profileId, chainId }: ChainCoordinates): Promise<void> {
 	const root = await opfsRoot()
 	if (!root) return
 	try {
 		const profileHandle = await root.getDirectoryHandle(profileId)
 		await profileHandle.removeEntry(String(chainId), { recursive: true })
-		// Drop the profile dir too once its last chain is gone (keeps the registry clean).
-		let empty = true
-		for await (const _ of profileHandle.keys()) {
-			empty = false
-			break
-		}
-		if (empty) await root.removeEntry(profileId, { recursive: true })
 	} catch (err) {
 		if ((err as DOMException)?.name === "NotFoundError") return
 		throw err
