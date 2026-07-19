@@ -79,7 +79,7 @@ describe("useL1Usdc", () => {
 		expect(writeContract).toHaveBeenCalledWith(
 			expect.objectContaining({ functionName: "mint", args: [OWNER, MINT_AMOUNT], account: OWNER }),
 		)
-		expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xminttx" })
+		expect(waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: "0xminttx" }))
 		expect(usdc.balance.value).toBe(777n)
 		expect(usdc.minting.value).toBe(false)
 	})

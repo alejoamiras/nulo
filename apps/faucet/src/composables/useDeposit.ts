@@ -942,7 +942,7 @@ export function useDepositFlow() {
 						account: from,
 					}),
 				)
-				await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
+				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`)
 				markApproveOutcome(id, "done")
 			} else {
 				log("allowance sufficient - skipping approve")
