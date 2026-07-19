@@ -12,7 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
-import { buildCapabilityItems, type UICapabilityItem } from "./build-items"
+import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -40,19 +40,6 @@ const capabilities = ref<UICapabilityItem[]>([])
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
 
-// The `accounts` capability's `canCreateAuthWit` sub-permission lets the dApp obtain the
-// user's signature over auth-witnesses (authorizing actions on their behalf). It used to be
-// granted invisibly — the accounts cap is approved via the account picker and this flag was
-// never surfaced. Surface it explicitly so consent is informed.
-const accountsCanCreateAuthWit = computed(() => {
-	const delta = (payload.value?.params?.delta ?? []) as Capability[]
-	// Coerce truthy — NOT `=== true`. The wire value is unstructured (`unknown`,
-	// raw-cast at the dispatcher), and enforcement reads it truthy
-	// (method-scope-checkers `c.canCreateAuthWit &&`, dispatcher `Boolean(...)`).
-	// A strict `=== true` here would let a dApp send `canCreateAuthWit: 1` to
-	// suppress this consent warning while the capability is still granted+enforced.
-	return delta.some((c) => c.type === "accounts" && Boolean((c as { canCreateAuthWit?: unknown }).canCreateAuthWit))
-})
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
@@ -210,14 +197,18 @@ const approve = async () => {
 	}
 	try {
 		isLoading.value = true
-		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected).map((c) => c.capability)
+		// Riders are excluded here: the authwit rider's `capability` IS the
+		// accounts cap, which is pushed separately below — including riders
+		// would grant accounts twice (and bypass the account picker's own
+		// selected-accounts gate).
+		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
 		const existing = capabilities.value.filter((c) => !c.isNew).map((c) => c.capability)
 
 		const granted: Capability[] = [...approvedNew, ...existing]
 		if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
 			const delta = payload.value!.params.delta as Capability[]
 			const accountsCap = delta.find((cap) => cap.type === "accounts")
-			if (accountsCap) granted.push(accountsCap)
+			if (accountsCap) granted.push(buildGrantedAccountsCap(accountsCap, capabilities.value))
 		}
 
 		let resultSelectedAccounts: string[] | undefined
@@ -278,14 +269,6 @@ onUnmounted(disposeWindow)
 			<Flex direction="column" gap="20" :class="$style.sections">
 				<Flex v-if="needsAccountSelection" direction="column" gap="10" wide>
 					<SectionLabel label="Select accounts to share" :count="availableAccounts.length" />
-
-					<Flex v-if="accountsCanCreateAuthWit" gap="6" align="center" data-testid="cap-can-create-authwit-warning">
-						<Icon name="info" size="14" color="orange" />
-						<Text size="12" color="secondary">
-							This app can create auth-witnesses — request your signature to authorize actions on your behalf — for
-							the account(s) you share.
-						</Text>
-					</Flex>
 
 					<ItemsContainer>
 						<AccountSelectRow

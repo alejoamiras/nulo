@@ -59,8 +59,11 @@ test.skipIf(!hasConfig)(
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "registerContract", async () => {
 			await clickByTestId(page, "pg-btn-registerContract")
 		})
-		// ok if the wallet accepted the instance; error if our JSON serialization
-		// missed a field — either way it's silent (no popup).
-		expect(["ok", "error"]).toContain(result.status)
+		// Strict "ok": the playground calls through the real wallet-sdk Wallet, whose
+		// proxy validates the response with z.void() — so this also pins the 5.0.1
+		// return-shape conformance (a non-undefined result rejects client-side even
+		// though registration succeeded wallet-side). The old ["ok","error"] tolerance
+		// masked exactly that bug.
+		expect(result.status).toBe("ok")
 	},
 )
