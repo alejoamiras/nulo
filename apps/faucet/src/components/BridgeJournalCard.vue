@@ -142,7 +142,11 @@ const stageLabel = computed(() => {
 	if (r.direction === "deposit") {
 		switch (stage.value) {
 			case "depositing":
-				return "The deposit never confirmed on Ethereum. Check your wallet activity, then discard if it never landed."
+				// With a recorded tx hash the leg is chain-recoverable (the engine re-derives it from
+				// the mined receipt) - offer the action instead of the discard guidance.
+				return (r as DepositJournalRecord).depositTxHash
+					? "The Ethereum deposit was sent but its confirmation was interrupted. Press CLAIM to check it on-chain and continue."
+					: "The deposit never confirmed on Ethereum. Check your wallet activity, then discard if it never landed."
 			case "syncing":
 			case "claimable":
 				return r.isPrivate
@@ -169,9 +173,20 @@ const stageLabel = computed(() => {
 })
 
 // Buttons appear only when PRESSING them does something: never while the engine is driving.
+// A "depositing" record WITH a recorded depositTxHash is the stranded L1-timeout shape - the
+// engine's deposit-leg recovery makes CLAIM meaningful there (it re-derives the leg from the
+// mined receipt and continues); only a genuinely pre-send record keeps the button hidden.
 const idle = computed(() => !rt.value.busy)
+const depositLegRecoverable = computed(
+	() => props.record.direction === "deposit" && stage.value === "depositing" && !!(props.record as DepositJournalRecord).depositTxHash,
+)
 const showClaim = computed(
-	() => props.record.direction === "deposit" && stage.value !== "done" && stage.value !== "depositing" && actionable.value && idle.value,
+	() =>
+		props.record.direction === "deposit" &&
+		stage.value !== "done" &&
+		(stage.value !== "depositing" || depositLegRecoverable.value) &&
+		actionable.value &&
+		idle.value,
 )
 const showFinish = computed(
 	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value && idle.value,
