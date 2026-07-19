@@ -102,7 +102,7 @@ describe("decideFuelClaim (L14 v3 truth table)", () => {
 	})
 })
 
-const privBase: PrivateFuelClaimEvidence = { attempt: false, txHashKnown: false, setupInsufficiency: false }
+const privBase: PrivateFuelClaimEvidence = { attempt: false, txHashKnown: false, setupInsufficiency: false, attemptAgedOut: false }
 
 describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
 	it("fresh record (no attempt) ⇒ private-fpc", () => {
@@ -119,16 +119,34 @@ describe("decidePrivateFuelClaim (Option A — never public/Sponsored)", () => {
 			"private-fpc",
 		)
 	})
-	it("pending receipt ⇒ wait (never guess)", () => {
+	it("pending receipt, FRESH attempt ⇒ wait (never guess)", () => {
 		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "pending" }).action).toBe("wait")
+	})
+	it("pending receipt, AGED-OUT attempt ⇒ private-fpc (limbo escape; simulate gate guards the re-send)", () => {
+		expect(
+			decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "pending", attemptAgedOut: true })
+				.action,
+		).toBe("private-fpc")
+	})
+	it("aged-out NEVER overrides positive consumption evidence", () => {
+		expect(
+			decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, receiptStatus: "included", attemptAgedOut: true })
+				.action,
+		).toBe("consumed")
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: true, consumed: true, attemptAgedOut: true }).action).toBe(
+			"consumed",
+		)
 	})
 	it("attempt, no hash, setup-insufficiency ⇒ private-fpc (the narrow retry allow-list)", () => {
 		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, setupInsufficiency: true }).action).toBe(
 			"private-fpc",
 		)
 	})
-	it("attempt, no hash, NOT insufficiency, not consumed ⇒ wait (fail-closed)", () => {
+	it("attempt, no hash, NOT insufficiency, not consumed, fresh ⇒ wait (fail-closed)", () => {
 		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, setupInsufficiency: false }).action).toBe("wait")
+	})
+	it("attempt, no hash, aged out ⇒ private-fpc (crashed-mid-send limbo escape)", () => {
+		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, attemptAgedOut: true }).action).toBe("private-fpc")
 	})
 	it("attempt, no hash, consumed ⇒ consumed", () => {
 		expect(decidePrivateFuelClaim({ ...privBase, attempt: true, txHashKnown: false, consumed: true }).action).toBe("consumed")

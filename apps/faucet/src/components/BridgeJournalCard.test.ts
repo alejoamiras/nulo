@@ -71,6 +71,19 @@ describe("BridgeJournalCard", () => {
 		clearDone.mockClear()
 	})
 
+	it("stranded L1-timeout shape (depositTxHash, no leafIndex) OFFERS CLAIM - the deposit-leg recovery entry", () => {
+		const w = mountCard(deposit({ depositTxHash: `0x${"ab".repeat(32)}` }))
+		const btn = w.find(`[data-testid="${TESTIDS.journalClaim}"]`)
+		expect(btn.exists()).toBe(true)
+		btn.trigger("click")
+		expect(runDepositClaim).toHaveBeenCalledWith("0xdep")
+	})
+
+	it("genuinely pre-send deposit (no depositTxHash, no leafIndex) hides CLAIM (discard guidance)", () => {
+		const w = mountCard(deposit({}))
+		expect(w.find(`[data-testid="${TESTIDS.journalClaim}"]`).exists()).toBe(false)
+	})
+
 	it("renders direction, amount, privacy and the stage attrs", () => {
 		const w = mountCard(deposit({ isPrivate: true, leafIndex: "7" }))
 		const card = w.find(sel(TESTIDS.journalCard))

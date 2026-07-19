@@ -38,6 +38,7 @@ import { ref, watch } from "vue"
 import { BRIDGE, BRIDGE_FUEL, FUEL_MIN_FJ, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import {
 	FUEL_FEE_MARGIN,
+	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
 	decideNoFuelClaimGate,
 	decidePrivateFuelClaim,
@@ -353,8 +354,8 @@ export function ensureDepositJournalDeps(): void {
 					// the gated top-level secret (public) — never the plaintext journal copy (codex HIGH/LOW).
 					resolvedSalt: rec.isPrivate ? envelope?.salt : undefined,
 					resolvedSecret: rec.isPrivate ? undefined : secretHex,
-					onAttempt: () => latchFuel({ claimAttempt: true, setupInsufficiency: false }),
-					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimTxHash: txHash }),
+					onAttempt: () => latchFuel({ claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false }),
+					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimAttemptAt: Date.now(), claimTxHash: txHash }),
 					onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),
 				})
 			}
@@ -407,6 +408,8 @@ export function ensureDepositJournalDeps(): void {
 					receiptStatus,
 					consumed: fb.consumed === true || receiptStatus === "included",
 					setupInsufficiency: fb.setupInsufficiency === true,
+					// Missing timestamp = every pre-fix record ⇒ aged out (their limbo is exactly the bug).
+					attemptAgedOut: fb.claimAttemptAt === undefined || Date.now() - fb.claimAttemptAt > PRIVATE_ATTEMPT_STALE_MS,
 				})
 				log("private fuel claim decision", { id: rec.id, action: decision.action })
 				if (decision.action !== "private-fpc") {
@@ -441,7 +444,7 @@ export function ensureDepositJournalDeps(): void {
 					simulate: () => claimPriv().simulate({ from: recipientAddr, fee: privateFee } as never),
 					send: async () => {
 						// Latch the attempt JOURNAL-FIRST (before the wallet call), clearing any stale insufficiency.
-						updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: false } })
+						updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false } })
 						try {
 							const { receipt } = (await claimPriv().send({
 								from: recipientAddr,
@@ -450,7 +453,15 @@ export function ensureDepositJournalDeps(): void {
 							} as never)) as { receipt: { txHash: unknown } }
 							const txHash = String(receipt.txHash)
 							// PROPOSED is NOT inclusion; `consumed` is set inclusion-grade later from the receipt probe.
-							updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimTxHash: txHash, setupInsufficiency: false } })
+							updateRecord(rec.id, {
+								fuel: {
+									...fb,
+									claimAttempt: true,
+									claimAttemptAt: Date.now(),
+									claimTxHash: txHash,
+									setupInsufficiency: false,
+								},
+							})
 							return { txHash }
 						} catch (e) {
 							const msg = e instanceof Error ? e.message : String(e)
@@ -458,7 +469,9 @@ export function ensureDepositJournalDeps(): void {
 							// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
 							// NEVER fall back to public/Sponsored on the private path (L11).
 							if (isPrivateFuelInsufficiency(msg)) {
-								updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: true } })
+								updateRecord(rec.id, {
+									fuel: { ...fb, claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: true },
+								})
 							}
 							throw e
 						}
@@ -537,7 +550,7 @@ export function ensureDepositJournalDeps(): void {
 				simulate: () => interaction().simulate({ from: recipientAddr, ...(fee ? { fee } : {}) } as never),
 				send: async () => {
 					// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
-					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true } })
+					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimAttemptAt: Date.now() } })
 					const { receipt } = (await interaction().send({
 						from: recipientAddr,
 						...(fee ? { fee } : {}),
