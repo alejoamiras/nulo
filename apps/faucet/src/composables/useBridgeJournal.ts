@@ -115,6 +115,13 @@ export interface JournalEngineDeps {
 	/** Aztec-node receipt lookup. "unreachable" = transport failure - a dead RPC must read as a
 	 *  connectivity problem, never as a slow ("pending") claim. */
 	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">
+	/** Complete a deposit record's L1 leg from its recorded `depositTxHash`: fetch the mined
+	 *  receipt, parse the deposit event, and PATCH the record (leafIndex + variant fields).
+	 *  "pending" = not mined yet (caller bails softly and retries later); throws on a reverted
+	 *  tx or a receipt with no recognizable deposit event. This is what makes an L1-timeout
+	 *  stranding recoverable: the flow died after the tx was sent, so only the chain knows how
+	 *  the leg ended. */
+	recoverDepositLeg?: (rec: DepositJournalRecord) => Promise<"recovered" | "pending">
 	/** Drive a withdraw record's proven-wait → witness → L1 consume. Returns the consume tx hash.
 	 *  onProgress streams { provenBlock, targetBlock } for the countdown. */
 	consume?: (
@@ -557,12 +564,32 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 			return
 		}
 
-		// No leafIndex ⇒ the deposit leg hasn't finished. Claiming now would gate-poll on leaf 0 while
-		// HOLDING the record lock - and the deposit flow's own claim would then be skipped as a
-		// duplicate. Bail; the flow (or an explicit click once leafIndex exists) re-enters.
+		// No leafIndex ⇒ the deposit leg hasn't finished. With a recorded depositTxHash the leg is
+		// chain-recoverable: the flow may have DIED mid-wait (L1 timeout, closed tab) after the tx
+		// was sent — without this recovery every retry would bail here forever while a confirmed
+		// L1 deposit sits stranded with no L2 claim (user money). Without a txHash the flow is
+		// genuinely still pre-send: bail and let it (or a later click) re-enter.
 		if (!rec.leafIndex) {
-			log("no leafIndex yet - the deposit leg is still running", id)
-			return
+			if (!rec.depositTxHash || !deps.recoverDepositLeg) {
+				log("no leafIndex yet - the deposit leg is still running", id)
+				return
+			}
+			setStep(id, "depositing", "checking the Ethereum deposit")
+			let outcome: "recovered" | "pending"
+			try {
+				outcome = await deps.recoverDepositLeg(rec)
+			} catch (e) {
+				const msg = humanizeWalletError(e instanceof Error ? e.message : String(e))
+				setRuntime(id, { attention: "error", note: msg })
+				return
+			}
+			if (outcome === "pending") {
+				setStep(id, "depositing", "waiting for the Ethereum confirmation")
+				setRuntime(id, { attention: "error", note: "The Ethereum deposit isn't confirmed yet - retry in a minute." })
+				return
+			}
+			log("deposit leg recovered from L1", id)
+			setRuntime(id, { attention: undefined, note: undefined })
 		}
 
 		let secretHex: string
