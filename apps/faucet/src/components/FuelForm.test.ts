@@ -48,6 +48,8 @@ vi.mock("@/composables/useBridgeJournal", () => ({
 	hideCompleted,
 	useBridgeJournal: () => ({ activeFlowId, records, claimForeground, releaseForeground }),
 }))
+// Deterministic minimum for the debounce cases (the real constant is deployment-derived).
+vi.mock("@/contracts/bridge-deployments", () => ({ FUEL_MIN_FJ: 16n * 10n ** 18n }))
 
 import { TESTIDS } from "@/lib/testids"
 import FuelForm from "./FuelForm.vue"
@@ -99,5 +101,43 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		await w.vm.$nextTick()
 		expect(hideCompleted).toHaveBeenCalledWith("rec-1")
 		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+	})
+})
+
+describe("FuelForm: minimum-amount error display is settle-debounced", () => {
+	beforeEach(() => {
+		isConnected.value = true
+		bridgeStatus.value = "connected"
+		activeFlowId.value = null
+		records.value = []
+		fuelError.value = null
+	})
+
+	it("typing a below-minimum amount shows no error until the settle window elapses", async () => {
+		vi.useFakeTimers()
+		try {
+			const w = mount(FuelForm, { global: { stubs: STUBS } })
+			await w.find(sel(TESTIDS.fuelAmount)).setValue("15")
+			expect(w.find(sel(TESTIDS.fuelFormError)).exists()).toBe(false)
+			vi.advanceTimersByTime(600)
+			await w.vm.$nextTick()
+			expect(w.find(sel(TESTIDS.fuelFormError)).text()).toContain("Minimum is 16")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("blur settles instantly — no window wait for a deliberate leave", async () => {
+		vi.useFakeTimers()
+		try {
+			const w = mount(FuelForm, { global: { stubs: STUBS } })
+			const input = w.find(sel(TESTIDS.fuelAmount))
+			await input.setValue("15")
+			expect(w.find(sel(TESTIDS.fuelFormError)).exists()).toBe(false)
+			await input.trigger("blur")
+			expect(w.find(sel(TESTIDS.fuelFormError)).text()).toContain("Minimum is 16")
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })
