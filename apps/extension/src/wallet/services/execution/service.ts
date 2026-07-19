@@ -5,7 +5,6 @@ import type { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
 	computeContractAddressFromInstance,
-	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
 	getContractClassFromArtifact,
 	computePartialAddress,
@@ -610,13 +609,17 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		return this.pxeService.registerSender(networkInfoFrom(network), op.address)
 	}
 
-	private async executeAztecRegisterContract(op: AztecRegisterContractOperation): Promise<ContractInstanceWithAddress> {
+	// Resolves to void: the 5.0.1 wallet-sdk WalletSchema declares
+	// `registerContract(): Promise<void>`, and the dApp-side proxy validates the
+	// response with z.void() — any non-undefined result rejects the whole call
+	// on the dApp even though registration succeeded wallet-side.
+	private async executeAztecRegisterContract(op: AztecRegisterContractOperation): Promise<void> {
 		const instance = await ContractInstanceWithAddressSchema.parseAsync(op.instance)
 		const network = await this.networkService.getNetwork(op.networkId)
 
 		const addressNum = instance.address.toBigInt()
 		if (addressNum >= 0 && addressNum <= 6) {
-			return instance
+			return
 		}
 
 		let providedArtifact: ContractArtifact | undefined
@@ -651,8 +654,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		if (op.secretKey) {
 			await this.pxeService.registerAccount(networkInfoFrom(network), op.secretKey, await computePartialAddress(instance))
 		}
-
-		return instance
 	}
 
 	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation): Promise<AuthWitness> {
