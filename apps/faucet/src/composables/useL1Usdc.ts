@@ -1,4 +1,5 @@
 import { sepolia } from "viem/chains"
+import { awaitL1Receipt } from "@nulo/bridge-core"
 import { ref, watch } from "vue"
 import { BRIDGE_TOKEN_DECIMALS, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
 import { useL1Wallet } from "./useL1Wallet"
@@ -114,7 +115,7 @@ export function useL1Usdc() {
 				chain: sepolia,
 				account: owner,
 			})
-			await l1.publicClient.waitForTransactionReceipt({ hash })
+			await awaitL1Receipt(l1.publicClient, hash)
 			await refresh()
 		} catch (err) {
 			error.value = errorMessage(err, "Mint failed")

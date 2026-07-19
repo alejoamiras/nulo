@@ -7,7 +7,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi } from "@aztec/l1-artifacts"
-import { type WithdrawJournalRecord, makeProvisionalWithdrawId } from "@nulo/bridge-core"
+import { awaitL1Receipt, type WithdrawJournalRecord, makeProvisionalWithdrawId } from "@nulo/bridge-core"
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
@@ -125,7 +125,7 @@ function wireWithdrawDeps(): void {
 		},
 		waitConsumeReceipt: async (txHash) => {
 			try {
-				const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: txHash as `0x${string}` })
+				const receipt = await awaitL1Receipt(l1.publicClient, txHash as `0x${string}`)
 				return receipt.status === "success"
 			} catch {
 				return false

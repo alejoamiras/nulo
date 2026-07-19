@@ -81,7 +81,7 @@ describe("useL1FeeAsset", () => {
 		expect(writeContract).toHaveBeenCalledWith(
 			expect.objectContaining({ address: "0xfjasset", functionName: "approve", args: ["0xfjportal", 1000n], account: OWNER }),
 		)
-		expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xapprovetx" })
+		expect(waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: "0xapprovetx" }))
 		expect(fa.approving.value).toBe(false)
 	})
 
@@ -141,7 +141,7 @@ describe("useL1FeeAsset", () => {
 		expect(writeContract).toHaveBeenCalledWith(
 			expect.objectContaining({ address: "0xfjhandler", functionName: "mint", args: [OWNER], account: OWNER }),
 		)
-		expect(waitForTransactionReceipt).toHaveBeenCalledWith({ hash: "0xapprovetx" })
+		expect(waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: "0xapprovetx" }))
 		expect(fa.mintError.value).toBeNull()
 		expect(fa.minting.value).toBe(false)
 	})
