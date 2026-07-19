@@ -26,3 +26,21 @@ CLAUDE.md's runbook/troubleshooting/staged-rollout rows updated in the same PR.
 R NOT started — execution is user-gated ("test it before approving R"): the user is manually
 smoke-testing the local rig (extension dist/chrome build + faucet preview of the 583168d tree,
 `buildId 0.1.0+583168df`, chainId 1816023401, verify:deployments green) before giving the go.
+
+## Pre-R smoke findings (user manual test, 2026-07-19) — both fixed in #288 (`3f4785f` on dev)
+
+1. **registerContract void-conformance (connect-blocking)**: 5.0.1 WalletSchema returns
+   `Promise<void>`; our handler returned the instance → dApp-side `z.void()` ZodError killed the
+   faucet handshake. THE CI BLIND SPOT: unit tests never execute the dApp-side wallet-sdk
+   validator, and the one e2e that does (`contracts-register`) asserted `["ok","error"]` — the
+   ZodError fired on every CI run as status "error" and was ACCEPTED. Now strict "ok" + a bb-free
+   unit pin. Lesson: conformance to an externally-owned schema needs a pin against that schema;
+   an assertion that tolerates "error" isn't a test, it's a mute button.
+2. **authwit warning UX**: floating icon+text above the account picker → first-class deselectable
+   card ("Act on your behalf", risk high); deselection strips `canCreateAuthWit` from the grant
+   (`buildGrantedAccountsCap`, pure + pinned). Display info deliberately NOT a CAPABILITY_LABELS
+   key (dApp-controlled `cap.type` lookup would render a fake type as recognized/default-ON).
+
+Also: local smoke rig needed a secure origin — raw tailnet-IP HTTP is not a secure context
+(COOP ignored, `crypto.randomUUID` absent). Fixed via Tailscale Serve HTTPS in front of the vite
+preview (`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` for the host allowlist; no repo config).
