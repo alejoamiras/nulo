@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { awaitL1Receipt } from "./l1-receipt"
 
 const HASH = "0xabc" as `0x${string}`
