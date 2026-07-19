@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bridge-journal-ux — ELI5</title>
+<style>
+  :root{
+    --bg:#faf9f6; --ink:#1c1b18; --muted:#6b675e; --accent:#b4530a; --card:#ffffff;
+    --line:#e4e1d8; --ok:#2e7d43; --warn:#b4530a; --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#171613; --ink:#e8e5dd; --muted:#9b968a; --accent:#e8833a; --card:#201f1b; --line:#33312a; --ok:#5dbb78; }
+  }
+  html{ background:var(--bg); color:var(--ink); font:16px/1.6 system-ui,sans-serif; }
+  body{ max-width:46rem; margin:0 auto; padding:2.5rem 1.25rem 5rem; }
+  h1{ font-size:1.7rem; line-height:1.25; margin:0 0 .4rem; text-wrap:balance; }
+  h2{ font-size:1.15rem; margin:2.2rem 0 .6rem; border-bottom:1px solid var(--line); padding-bottom:.3rem; }
+  .sub{ color:var(--muted); margin:0 0 1.8rem; }
+  .card{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding: .9rem 1.1rem; margin: .7rem 0; }
+  .phase{ display:flex; gap: .8rem; }
+  .phase b{ color:var(--accent); font-family:var(--mono); font-size:.85rem; white-space:nowrap; padding-top:.15rem;}
+  .gate{ color:var(--muted); font-size:.88rem; margin-top:.35rem; }
+  .gate::before{ content:"proves itself by: "; color:var(--ok); font-weight:600; }
+  code,pre{ font-family:var(--mono); font-size:.85em; }
+  pre{ background:var(--card); border:1px solid var(--line); border-radius:8px; padding: .8rem 1rem; overflow-x:auto; }
+  a{ color:var(--accent); }
+  ul{ padding-left:1.2rem; }
+  .why{ font-size:.92rem; }
+  .pill{ display:inline-block; border:1px solid var(--line); border-radius:99px; padding:.05rem .6rem; font-size:.8rem; color:var(--muted); margin-right:.35rem;}
+</style>
+</head>
+<body>
+<h1>Making the bridge tell the truth (and offer a way back)</h1>
+<p class="sub">bridge-journal-ux — plain-language companion to <a href="plan.md">plan.md</a></p>
+
+<p>During live testing, a bridge attempt died while Ethereum was confirming a boring permission
+step (the "approve"). The card then claimed <em>"the deposit never confirmed"</em> — scary and
+wrong: no money had moved at all. There was also no button to pick up where it left off. The
+machinery underneath is already safe (money is never lost); this project makes what the user
+<em>sees</em> match that safety, and adds a real <strong>RESUME</strong> button.</p>
+
+<h2>Why this size of plan (tier: mid)</h2>
+<p class="why">It redesigns a user-facing flow (auto-trigger for planning), spans two packages,
+and RESUME feeds locally-stored data into real on-chain transactions — that's the one high-risk
+dimension (security). One high → mid tier: one plan, a competing alternative, two independent
+audits, one final fresh review. The audits mattered: they overturned two of the original design's
+assumptions (see "What the audits changed").</p>
+
+<h2>The phases</h2>
+<div class="card phase"><b>J1</b><div>Make the record REMEMBER how it died: which step, whether
+money moved, when — plus the approval transaction id. Today that knowledge evaporates on reload.
+<div class="gate">unit tests for every (step × outcome) combination + typecheck/lint/build.</div></div></div>
+<div class="card phase"><b>J2</b><div>Build the safety net BEFORE any button exists: a strict
+validator that rejects tampered records, a "you must be the same account this was meant for"
+guard, browser-wide locking, and — the load-bearing piece — a <strong>one-shot resume ticket</strong>:
+each record gets exactly one resume attempt, and if that attempt ends ambiguously the record
+locks itself into review-only forever (double deposits are unrecoverable, so ambiguity must end
+resumability).
+<div class="gate">a tamper-fuzz table, a two-tab race, and crash-between-prompt-and-record fault injection.</div></div></div>
+<div class="card phase"><b>J3</b><div>The card tells the truth: which step failed, "no funds
+moved" only when proven, honest hedging when the outcome is unknowable — plus a
+<strong>paste-the-transaction-id box</strong> for that unknowable case (the engine verifies the
+pasted id against the chain before trusting it). The right button per situation: RESUME / CLAIM /
+redo — and redo only ever appears when it's PROVEN nothing was spent.
+<div class="gate">a component test per card state + the full faucet suite.</div></div></div>
+<div class="card phase"><b>J4</b><div>RESUME for the simple cases: gas top-ups (public and
+private) and plain token bridges. One click re-enters the flow on the same record — skipping the
+steps that already finished — and shows you amount + recipient before any wallet prompt.
+<div class="gate">per-variant flow tests: happy path, tampered-record rejection, race abort, skip logic.</div></div></div>
+<div class="card phase"><b>J5</b><div>RESUME for the hard case (token bridge with gas top-up
+attached): reuses the exact one-time signature slot so the old signed permission can never
+execute twice. The private variant of this one case stays "redo-only" for now — its sealed
+backup doesn't yet cover the gas fields (follow-up filed).
+<div class="gate">signature-slot reuse tests (no double authorization) + the full suite.</div></div></div>
+<div class="card phase"><b>J6</b><div>You test it on the live rig with a MANDATORY checklist:
+the old broken record narrates honestly; a forced failure RESUMEs to completion; a two-tab race
+(the second tab must refuse); a kill-right-after-wallet-confirm (the card must go review-only,
+and pasting the tx id must recover it); and the fueled-public resume including its signature
+edge cases.
+<div class="gate">your explicit go on the full checklist — then it merges, and the release (R) unblocks.</div></div></div>
+
+<h2>What the audits changed</h2>
+<ul>
+  <li><span class="pill">overturned</span> "Just sign a fresh permission on resume" — unsafe: the
+  old signed permission could still execute later → two deposits. The plan now reuses the same
+  one-time slot.</li>
+  <li><span class="pill">overturned</span> "No recorded deposit = no money moved" — there's a
+  crash window where the deposit WAS broadcast but never recorded. That case gets honest hedging
+  and no RESUME.</li>
+  <li><span class="pill">added</span> Browser-wide locking (a per-tab lock wasn't enough), a
+  one-shot resume ticket per record (final review: no lock is atomic with a wallet broadcast, so
+  ambiguity must permanently end resumability), and a paste-the-id recovery for the unknowable
+  case.</li>
+  <li><span class="pill">narrowed</span> "The record's id is a cryptographic self-check" was an
+  overclaim (final review): it binds the secret, not the recipient/amount. Real intent safety =
+  same-account guard + an explicit review screen before any signature.</li>
+  <li><span class="pill">deferred</span> Private fueled-token resume (seal gap) — redo-only until
+  its backup format is upgraded.</li>
+</ul>
+
+<h2>Human context</h2>
+<ul>
+  <li>The journal lives in the browser's local storage — treated as hostile input everywhere it
+  feeds a transaction.</li>
+  <li>"Approve" only grants permission; it can never move funds. That's why an approve-stage
+  death is provably harmless — and why the card saying "deposit failed" was so misleading.</li>
+  <li>This work blocks the public release (your decision): the release ships with honest
+  narration.</li>
+</ul>
+
+<h2>Open questions</h2>
+<p>None — the three the audits raised (unknown-outcome policy, who may resume, which variants)
+were decided and are recorded in the plan's decision ledger.</p>
+
+<h2>Seed strings (DRAFT — finalized after approval)</h2>
+<pre>/goal bridge-journal-ux merged to dev with J1–J6 gates green (vitest+typecheck+lint+build per
+phase, decision tables pinned, two-tab race + tamper-fuzz pins), the user's rig smoke passed as
+the final gate, fueled-private follow-up issue filed — then unblock R.</pre>
+<pre>/loop 15m work implementations-plan/bridge-journal-ux/plan.md phase by phase from J1. Before
+each phase re-read its section + gate; run every gate command with real output; append lessons to
+implementations-plan/bridge-journal-ux/lessons/phase-&lt;N&gt;.md and print LESSONS_FILE=&lt;path&gt; per
+closed phase. Honor the ledger (L1–L14): click-only resume, unknown-outcome cell never resumes,
+Permit2 nonce reuse, fueled-private redo-only. Never weaken a CI gate. Small conventional
+commits. J6 stops for the user's rig smoke — never merge past it.</pre>
+</body>
+</html>
