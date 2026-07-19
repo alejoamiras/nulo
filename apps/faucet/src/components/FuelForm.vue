@@ -2,12 +2,13 @@
 /** Services */
 import { assetKindOf, type DepositJournalRecord } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
-import { computed, ref, watch } from "vue"
+import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { FUEL_MIN_FJ } from "@/contracts/bridge-deployments"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
 import BridgeStepper from "./BridgeStepper.vue"
+import FeeJuiceNotice from "./FeeJuiceNotice.vue"
 
 /** Composables */
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
@@ -16,6 +17,7 @@ import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useFuelFlow } from "@/composables/useFuel"
 import { FUEL_ASSET_DECIMALS, useL1FeeAsset } from "@/composables/useL1FeeAsset"
 import { useL1Wallet } from "@/composables/useL1Wallet"
+import { useSettledError } from "@/composables/useSettledError"
 
 /** Utils */
 import { formatBigInt, parseAmount } from "@/lib/format"
@@ -44,7 +46,6 @@ const activeRecord = computed(() => (activeId.value ? journal.records.value.find
 const fuelActive = computed(() => formStage.value === "stepper" && !!activeRecord.value && assetKindOf(activeRecord.value) === "fee-juice")
 
 const amountUnits = computed(() => parseAmount(amount.value || "0", FUEL_ASSET_DECIMALS))
-const amountTouched = ref(false)
 const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (feeAsset.balance.value !== null && amountUnits.value > feeAsset.balance.value)
@@ -54,11 +55,13 @@ const validationError = computed(() => {
 	}
 	return null
 })
-const amountError = computed(() => (amountTouched.value ? validationError.value : null))
+// Display-debounced: no minimum-error flash while typing "15" en route to "150"; blur/submit settle instantly.
+const settledAmount = useSettledError(amount, validationError)
+const amountError = settledAmount.shown
 const flowError = computed(() => fuelFlow.error.value)
 
 async function onSubmit() {
-	amountTouched.value = true
+	settledAmount.settleNow()
 	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
 	submitting.value = true
 	const onRecord = (id: string) => {
@@ -113,6 +116,8 @@ watch(
 
 const onBackup = backup.exportBridgeWithToast
 
+onBeforeUnmount(settledAmount.dispose)
+
 function fmt(b: bigint | null): string {
 	return b === null ? "-" : formatBigInt(b, FUEL_ASSET_DECIMALS)
 }
@@ -145,7 +150,7 @@ function fmt(b: bigint | null): string {
 					:disabled="submitting"
 					:data-testid="TESTIDS.fuelAmount"
 					:data-invalid="!!amountError"
-					@input="amountTouched = true"
+					@blur="settledAmount.settleNow"
 				/>
 				<span class="unit">$AZTEC</span>
 			</Flex>
@@ -162,6 +167,8 @@ function fmt(b: bigint | null): string {
 					<span class="md">Gas arrives in your public Fee Juice balance, visible on Aztec.</span>
 				</button>
 			</div>
+
+			<FeeJuiceNotice />
 
 			<Button :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.fuelSubmit" @click="onSubmit">
 				{{ !bothConnected ? "CONNECT BOTH WALLETS" : isPrivate ? "GET PRIVATE GAS" : "GET GAS" }}

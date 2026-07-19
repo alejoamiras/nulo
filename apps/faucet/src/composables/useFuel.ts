@@ -2,6 +2,7 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import {
+	awaitL1Receipt,
 	FeeJuicePortalAbi,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
@@ -169,7 +170,11 @@ export function useFuelFlow() {
 			)
 			updateRecord(id, { depositTxHash: depositTxHash as string })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
-			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: depositTxHash as `0x${string}` })
+			const recId = id
+			const receipt = await awaitL1Receipt(l1.publicClient, depositTxHash as `0x${string}`, {
+				onStillWaiting: (attempt) =>
+					setRecordStep(recId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
+			})
 
 			// `received` comes from the portal's DepositToAztecPublic event - the content-hash law.
 			const ev = parseFeeJuiceDeposit(receipt.logs as never)

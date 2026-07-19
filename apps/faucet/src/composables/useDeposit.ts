@@ -11,6 +11,7 @@ import {
 	type DepositJournalRecord,
 	type EncryptionKey,
 	assetKindOf,
+	awaitL1Receipt,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
@@ -22,6 +23,7 @@ import {
 	minOutputForSlippage,
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
+	parseFeeJuiceDeposit,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	quoteFuelPath,
@@ -261,6 +263,64 @@ export function ensureDepositJournalDeps(): void {
 			const account = l1.address.value
 			if (!wallet || !account) throw new Error("Connect your Ethereum wallet first.")
 			return wallet.signMessage({ account, message } as never) as Promise<string>
+		},
+		// Deposit-leg recovery: the leg is chain-recoverable from the recorded depositTxHash alone
+		// (every flow persists the hash BEFORE waiting), so a flow that died mid-wait — L1 timeout,
+		// closed tab — completes here on Retry instead of stranding a confirmed deposit. Patches the
+		// same fields the live flows write post-receipt; depositL2Block stays unset so the engine
+		// skips the display countdown and goes straight to the claim-simulate gate (the recovered
+		// deposit is old — its message is likely already consumable).
+		recoverDepositLeg: async (rec) => {
+			const hash = rec.depositTxHash as `0x${string}`
+			const receipt = await l1.publicClient.getTransactionReceipt({ hash }).catch(() => null)
+			if (!receipt) return "pending"
+			if (receipt.status !== "success") {
+				throw new Error("The Ethereum deposit transaction reverted - there is nothing to claim. You can discard this record.")
+			}
+			if (assetKindOf(rec) === "fee-juice") {
+				const ev = parseFeeJuiceDeposit(receipt.logs as never)
+				const fuel = rec.fuel as NonNullable<DepositJournalRecord["fuel"]>
+				updateRecord(rec.id, {
+					leafIndex: ev.leafIndex.toString(),
+					fuel: { ...fuel, received: ev.amount.toString(), leafIndex: ev.leafIndex.toString() },
+				})
+				return "recovered"
+			}
+			// Fueled token deposit (router) carries a BridgeWithFuel event; the plain portal deposit
+			// carries the Inbox MessageSent. Try the richer one first.
+			const fuelEvents = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "BridgeWithFuel", logs: receipt.logs })
+			const fe = fuelEvents[0] as
+				| {
+						args?: {
+							tokenKey?: `0x${string}`
+							tokenIndex?: bigint
+							fuelKey?: `0x${string}`
+							fuelIndex?: bigint
+							fuelAmount?: bigint
+						}
+				  }
+				| undefined
+			if (fe?.args?.tokenIndex !== undefined && fe.args.fuelIndex !== undefined && fe.args.fuelAmount !== undefined) {
+				const fuel = rec.fuel as NonNullable<DepositJournalRecord["fuel"]>
+				updateRecord(rec.id, {
+					leafIndex: fe.args.tokenIndex.toString(),
+					messageHash: fe.args.tokenKey,
+					fuel: {
+						...fuel,
+						leafIndex: fe.args.fuelIndex.toString(),
+						messageHash: fe.args.fuelKey,
+						received: fe.args.fuelAmount.toString(),
+					},
+				})
+				return "recovered"
+			}
+			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
+			const event = sent[0] as { args?: { index?: bigint } } | undefined
+			if (event?.args?.index === undefined) {
+				throw new Error("The confirmed Ethereum transaction has no recognizable deposit event - contact support before retrying.")
+			}
+			updateRecord(rec.id, { leafIndex: event.args.index.toString() })
+			return "recovered"
 		},
 		claim: async (rec, secretHex, envelope) => {
 			const aztec = bridgeWallet.wallet.value
@@ -781,7 +841,11 @@ export function useDepositFlow() {
 				)
 				updateRecord(id, { depositTxHash: fuelTxHash as string })
 				setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
-				const fuelReceipt = await l1.publicClient.waitForTransactionReceipt({ hash: fuelTxHash as `0x${string}` })
+				const fuelRecId = id
+				const fuelReceipt = await awaitL1Receipt(l1.publicClient, fuelTxHash as `0x${string}`, {
+					onStillWaiting: (attempt) =>
+						setRecordStep(fuelRecId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
+				})
 				const fuelEvents = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "BridgeWithFuel", logs: fuelReceipt.logs })
 				const fe = fuelEvents[0] as
 					| {
@@ -889,7 +953,11 @@ export function useDepositFlow() {
 			// Persisted the moment the hash exists - leafIndex stays chain-recoverable from here on.
 			updateRecord(id, { depositTxHash: depositTxHash as string })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
-			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: depositTxHash as `0x${string}` })
+			const recId = id
+			const receipt = await awaitL1Receipt(l1.publicClient, depositTxHash as `0x${string}`, {
+				onStillWaiting: (attempt) =>
+					setRecordStep(recId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
+			})
 
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
 			const event = sent[0] as { args?: { index?: bigint } } | undefined
