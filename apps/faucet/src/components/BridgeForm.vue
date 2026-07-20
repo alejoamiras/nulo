@@ -211,7 +211,11 @@ async function onSubmit() {
 	// keeps the stepper or already moved to the receipt. (Read through a local: TS keeps the
 	// pre-await narrowing on `.value` otherwise.)
 	const stageNow: string = formStage.value
-	if (stageNow === "stepper" && activeId.value && !journal.records.value.some((r) => r.id === activeId.value)) {
+	const activeRec = activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined
+	// Release the stepper takeover when the record was DISCARDED (clean rejection) OR FAILED but
+	// kept: a failed attempt belongs in the journal list below (RESUME / CLAIM / paste-hash), not
+	// trapped behind the stepper with the form hidden.
+	if (stageNow === "stepper" && activeId.value && (!activeRec || (!activeRec.completedAt && flowError.value))) {
 		journal.releaseForeground(activeId.value)
 		formStage.value = "form"
 	}

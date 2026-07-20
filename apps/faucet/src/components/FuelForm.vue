@@ -71,6 +71,18 @@ async function onSubmit() {
 	}
 	await fuelFlow.deposit(amountUnits.value, isPrivate.value, { onRecord })
 	submitting.value = false
+	// A FAILED attempt must not trap the stepper takeover: drop back to the form so "Get Gas" is
+	// usable again AND the failed record lands in the journal list below, where its recovery
+	// affordances (RESUME for a proven-safe pre-deposit death, CLAIM for a stranded deposit,
+	// paste-hash for an unknown outcome) live — none of which exist on the in-flow stepper.
+	const rec = activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined
+	// Read stage through a widened local: TS keeps the pre-await narrowing on `.value` otherwise
+	// (the onRecord callback flips it to "stepper" inside the await, invisible to control-flow).
+	const stageNow: string = formStage.value
+	// Release the stepper takeover on ANY failure: a DISCARDED record (clean rejection removes it)
+	// OR a KEPT-but-failed pre-completion record. Either way the form must return so "Get Gas" works
+	// and the failed record (if kept) lands in the journal list below with its RESUME affordance.
+	if (stageNow === "stepper" && activeId.value && (!rec || (!rec.completedAt && fuelFlow.error.value))) onBackground()
 	void feeAsset.refresh()
 }
 

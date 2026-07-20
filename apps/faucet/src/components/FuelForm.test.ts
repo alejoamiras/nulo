@@ -141,3 +141,65 @@ describe("FuelForm: minimum-amount error display is settle-debounced", () => {
 		}
 	})
 })
+
+describe("FuelForm: a failed attempt returns to the form (bug: stepper trap)", () => {
+	beforeEach(() => {
+		isConnected.value = true
+		bridgeStatus.value = "connected"
+		activeFlowId.value = null
+		records.value = []
+		fuelError.value = null
+		deposit.mockReset()
+	})
+
+	it("a pre-deposit failure releases the stepper takeover so the form + Get Gas return", async () => {
+		// The approve-death shape: the flow sets fuelFlow.error and leaves a failed, not-completed record.
+		deposit.mockImplementation(async (_u: bigint, _p: boolean, opts: { onRecord: (id: string) => void }) => {
+			records.value = [
+				fuelRecord({
+					completedAt: undefined,
+					failedLeg: "approving",
+					failedOutcome: "no-funds-moved",
+				} as Partial<BridgeJournalRecord>),
+			]
+			opts.onRecord("rec-1")
+			fuelError.value = "Rejected in your wallet"
+		})
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		// Back on the form: the stepper is gone, the submit button is usable again, foreground released.
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+		expect(releaseForeground).toHaveBeenCalled()
+	})
+
+	it("a DISCARDED record (clean rejection removes it) also returns to the form (bug #1 discard path)", async () => {
+		deposit.mockImplementation(async (_u: bigint, _p: boolean, opts: { onRecord: (id: string) => void }) => {
+			records.value = [fuelRecord()]
+			opts.onRecord("rec-1")
+			// Clean rejection: the flow discards the record + sets the error.
+			records.value = []
+			fuelError.value = "Rejected in your wallet - nothing was sent."
+		})
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+	})
+
+	it("a COMPLETED flow keeps the takeover (moves to the receipt, not back to the form)", async () => {
+		deposit.mockImplementation(async (_u: bigint, _p: boolean, opts: { onRecord: (id: string) => void }) => {
+			records.value = [fuelRecord()]
+			opts.onRecord("rec-1")
+			// no error → success path
+		})
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+	})
+})
