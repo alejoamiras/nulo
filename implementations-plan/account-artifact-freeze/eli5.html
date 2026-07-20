@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — account-artifact-freeze</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>account-artifact-freeze</h1>
+  <p>Your wallet computes each account's address from two things: the user's seed, and the compiled account-contract file that ships inside an Aztec npm package. The seed part was frozen earlier this month. The contract file was not — so every Aztec library update can silently change what address a seed produces. Today that mismatch surfaces as a cryptic error whose only way out is deleting the profile (the scare you hit). This plan copies that contract file INTO our repo as a frozen, fingerprinted artifact of "Nulo V5", makes any address change impossible to ship by accident, adds a dedicated test proving the frozen contract still <em>executes</em> after every Aztec update (the audits' biggest catch — freezing the file trades one risk for another if nobody checks this), replaces the cryptic error with a proper explanation screen, and writes the whole policy down: V5 addresses never change; a protocol break means shipping "Nulo V6" as a separate extension, never breaking V5 in place.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>mid.</strong> Rubric: irreversibility HIGH (production account identity) and security sensitivity HIGH (key/address derivation) — which technically points at <code>deep</code> — but novelty is LOW: the 5.0.1 work already froze the seed-side derivation with the exact vector machinery this plan extends, and there are no migrations (pre-production). <code>mid</code>'s dual audit was run and earned its keep: one auditor initially <strong>rejected</strong> the draft, and three audit rounds reshaped it (see plan.md's decision ledger).</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Copy the contract file into our repo</h3>
+    <p>Take the raw compiled account contract out of the Aztec package (recording exactly where it came from and its fingerprint) and make the wallet use OUR copy. Existing address tests must pass completely unchanged — proof the copy changes nothing today.</p>
+    <p class="muted">Proves itself by: lint + typecheck + the full all-workspaces test suite, address tests untouched.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Freeze the construction recipe</h3>
+    <p>Besides the file, a few small setup values feed the address (which constructor, its two arguments, some zeros). Today they're read from Aztec's code in TWO places — one for computing the address, one for actually deploying the account. Both now read from ONE frozen recipe in our repo, so they can never disagree (an auditor showed that disagreement would brick account creation while every test stays green).</p>
+    <p class="muted">Proves itself by: address tests unchanged + a new test that both places use the identical recipe.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: The "no accidental changes" lock</h3>
+    <p>A small registry records V5's fingerprints (file, contract ID, recipe). Changing ANY of them turns the test suite red on every PR unless a new entry is <em>added</em> with a written justification that embeds the new fingerprint — editing an existing entry is never legal. One registry entry per extension major: changing addresses IS shipping a new major, by construction.</p>
+    <p class="muted">Proves itself by: deliberately corrupting the file/registry locally and watching the tests go red (then reverting).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: The "still works" canary — REQUIRED</h3>
+    <p>The audits' headline finding: freezing the file protects addresses but creates a new risk — a future Aztec update might no longer be able to <em>run</em> the old contract (fails at transaction time, worse than the address problem). So: a new dedicated browser test walks the full life of a frozen account — brand-new account, first transaction (which deploys the contract), simulation, a REAL cryptographic proof, network acceptance, a follow-up permission-based transaction, and recovery after a restart. Every future Aztec version bump must run this test green before merging; red means the bump is blocked.</p>
+    <p class="muted">Proves itself by: the canary green on a live local node with native proving, at today's versions.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: A real answer instead of a scary error</h3>
+    <p>If a mismatch ever does occur, the wallet checks for it up front (in the background, before anything can act on the account — deterministic math, so no false alarms from flaky network state) and shows one clear screen: what happened, that your seed phrase still derives your accounts on a compatible Nulo version, and what to do. It never asks for your seed, links nowhere, and offers no delete button — per your decision, deletion stays a deliberate settings action. dApps just see a generic failure, no internals.</p>
+    <p class="muted">Proves itself by: unit tests (tampered account → session blocked, state survives restarts) + a component test for the screen.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 6: Write the law down</h3>
+    <p>CLAUDE.md gets the policy (frozen addresses, the rotation procedure, the V5/V6 separate-extension strategy); the Aztec-update runbook gets the mandatory canary step; two small doc drifts found during audit get fixed.</p>
+    <p class="muted">Proves itself by: lint + typecheck + your read of the docs at PR review.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 7: Full quality gates</h3>
+    <p>The complete pre-PR audit, the full cross-package test suite, the smoke browser suite, and BOTH browser builds (Chrome and Firefox), plus a record of how much the vendored file grew the bundle.</p>
+    <p class="muted">Proves itself by: audit:vue + test:all + smoke + the Firefox build, all green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>An Aztec account address is like a fingerprint of three things mixed together: your seed, the exact bytes of the account contract, and the protocol's mixing formula. You can only freeze what you own — this plan freezes the middle ingredient (the bytes) and the setup values around it. The mixing formula itself belongs to the protocol: if Aztec ever changes <em>that</em>, no freeze can help, and that's exactly when "Nulo V6" ships as a fresh extension while V5 keeps working for existing users. The tests added here make sure that day is a conscious decision, never a surprise in a routine dependency update.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>A1 — Cross-major semantics (docs only)</strong>: V6 = separate extension ID and store listing, coexisting with V5; V5 backups restore only in V5; recovering in V6 = importing the seed, which derives V6-style addresses. Confirm this is the policy to write down.</li>
+    <li><strong>A2 — When the canary fails a bump</strong>: default = hold the Aztec version line (recommended); the alternative = deliberately cut the next major. Confirm the default.</li>
+    <li><strong>A3 — The one auditor disagreement</strong>: freeze the setup recipe too (chosen — codex's pick, fixes a real trap) vs. vendor only the file and rely on tripwires (the other auditor's initial preference). Confirm the chosen path.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: vendored artifact + frozen recipe + rotation lock + execution canary + handled mismatch screen + policy docs. No delete CTA anywhere.</li>
+      <li>Confirm tier <code>mid</code> (dual audit run: codex reject→rework→final conditional-approve, fable conditional-approve — all conditions folded; verdicts inline in plan.md).</li>
+      <li>Confirm validation: all-workspaces tests per phase; the Phase 4 canary as a REQUIRED per-bump gate; audit:vue + smoke + both builds at the end.</li>
+      <li>Answer A1, A2, A3 above.</li>
+      <li>Decide: schedule <code>/harden security</code> at the pre-production checkpoint with this plan's surface in scope (recommended, not part of this plan).</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and is the official primitive for "work until the condition holds"; recurring <code>/loop</code> tasks fire on their interval until they expire after 7 days.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/account-artifact-freeze/lessons/phase-N.md` in the transcript; the Phase 4 dedicated frozen-account canary reported green via e2e:agent with native proving; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue`, `bun run test:all`, `bun run test:e2e`, and `bun run build:firefox` all report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/account-artifact-freeze forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/account-artifact-freeze/plan.md and lessons/ (authoritative state — not the chat); run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch).
+2. Waiting on CI is fine — confirm it's progressing (`gh run watch &lt;run-id&gt;` up to 10 minutes). Use the wait productively; don't start conflicting work.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint &amp;&amp; bun run typecheck:all &amp;&amp; bun run test:all`. Then commit → push.
+4. Stuck, or facing a decision you'd normally bring to me? Call /codex xhigh with full context, reach a defensible decision, act on it, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never regenerate reference vectors from the implementation, never expand scope beyond plan.md.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? "Green" = the phase's validation gate as written in plan.md. Run it, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=..., advance.
+7. All phases ✓? Post-impl sequence: /code-review max --fix → commit separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → wrap-up report. Surface and stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">Codex audits</a> · <a href="audit-fable.md">Fable audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>
