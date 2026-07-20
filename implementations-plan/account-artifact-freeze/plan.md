@@ -96,7 +96,7 @@ address derivation used. KAT stays green unchanged.
 **Validation gate** — commands: `bun run lint && bun run typecheck:all && bun run test:all`.
 Pass: KAT green, zero vector edits, consistency test green. Layers: lint/typecheck(all)/unit(all).
 
-### Phase 3 — Append-only regime record (one regime per extension major)
+### Phase 3 ✓ — Append-only regime record (one regime per extension major)
 `packages/aztec-runtime/src/account/address-freeze.ts`: an append-only `REGIMES` record. Entry
 `"nulo-v5"` = { artifactSha256, classId, descriptorVersion + descriptorDigest,
 kdf: "nulo-account-kdf-v1", ack }. **No `ACTIVE_REGIME` pointer** (final-pass condition 4): each
