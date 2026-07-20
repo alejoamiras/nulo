@@ -14,6 +14,7 @@ import { computed, ref, watch } from "vue"
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useFuelFlow } from "@/composables/useFuel"
+import { useDepositFlow } from "@/composables/useDeposit"
 
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
@@ -22,7 +23,7 @@ import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/useDeposit"
-import { resumeEligibleShape } from "@/lib/resume-validator"
+import { resumeEligibleShape, resumeVariantOf } from "@/lib/resume-validator"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -42,6 +43,10 @@ const exportable = computed(() => {
 const discardArmed = ref(false)
 const resumeArmed = ref(false)
 const fuelFlow = useFuelFlow()
+const depositFlow = useDepositFlow()
+const pasteHash = ref("")
+const pasteError = ref<string | null>(null)
+const pasteBusy = ref(false)
 // An armed CONFIRM DISCARD that never fires must disarm - a stale armed state turns a later
 // stray click into destroying a private deposit's only sealed secret.
 let disarmTimer: ReturnType<typeof setTimeout> | undefined
@@ -200,11 +205,14 @@ const showFinish = computed(
 // is gated by a cheap sync shape check; the click runs the full authoritative validation inside the
 // fuel flow's resume() (validator + origin lock + one-shot latch), so visibility never authorizes a
 // spend. Direct-fuel only this phase (token/fueled variants land later).
+const resumeVariant = computed(() => (props.record.direction === "deposit" ? resumeVariantOf(props.record as DepositJournalRecord) : null))
+const DRIVEABLE_RESUME = new Set(["direct-fuel-public", "direct-fuel-private", "plain-token"])
 const showResume = computed(
 	() =>
 		props.record.direction === "deposit" &&
-		assetKindOf(props.record) === "fee-juice" &&
 		resumeEligibleShape(props.record as DepositJournalRecord) &&
+		resumeVariant.value !== null &&
+		DRIVEABLE_RESUME.has(resumeVariant.value) &&
 		idle.value,
 )
 const resumeReview = computed(
@@ -217,7 +225,27 @@ async function onResume() {
 		return
 	}
 	resumeArmed.value = false
-	await fuelFlow.resume(props.record.id)
+	// direct fuel is owned by the fuel flow; plain-token by the deposit flow.
+	if (resumeVariant.value === "plain-token") await depositFlow.resume(props.record.id)
+	else await fuelFlow.resume(props.record.id)
+}
+
+// Paste-hash recovery for the unknown-outcome cell (a deposit prompt was issued, no hash recorded).
+const showPasteHash = computed(
+	() =>
+		props.record.direction === "deposit" &&
+		(props.record as DepositJournalRecord).failedOutcome === "unknown-outcome" &&
+		!(props.record as DepositJournalRecord).depositTxHash &&
+		idle.value,
+)
+async function onPasteHash() {
+	if (pasteBusy.value) return
+	pasteBusy.value = true
+	pasteError.value = null
+	const err = await depositFlow.attachDepositHash(props.record.id, pasteHash.value)
+	pasteError.value = err
+	if (!err) pasteHash.value = ""
+	pasteBusy.value = false
 }
 
 /** Soft notes only (e.g. the 30-min "still confirming"): ANY attention's note renders in the
@@ -336,6 +364,21 @@ function onDiscard() {
 			>{{ link.label }}</a>
 		</div>
 
+		<div v-if="showPasteHash" class="paste-hash">
+			<input
+				v-model="pasteHash"
+				class="paste-input"
+				type="text"
+				placeholder="Paste the Ethereum deposit tx id (0x…)"
+				aria-label="Ethereum deposit transaction id"
+				:disabled="pasteBusy"
+				:data-testid="TESTIDS.journalPasteHash"
+			/>
+			<button type="button" class="action" :disabled="pasteBusy || !pasteHash" :data-testid="TESTIDS.journalPasteHashSubmit" @click="onPasteHash">
+				{{ pasteBusy ? "CHECKING…" : "RECOVER FROM TX" }}
+			</button>
+			<p v-if="pasteError" class="err-line" :data-testid="TESTIDS.journalPasteHashError">{{ pasteError }}</p>
+		</div>
 		<p v-if="resumeArmed" class="resume-review" :data-testid="TESTIDS.journalResumeReview">{{ resumeReview }}</p>
 		<div class="actions">
 			<button
@@ -595,5 +638,24 @@ function onDiscard() {
 	margin: 0 0 6px;
 	font: 500 12px/1.4 var(--font-mono);
 	color: var(--txt-secondary);
+}
+
+.paste-hash {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 8px;
+}
+.paste-input {
+	background: transparent;
+	border: 1px solid var(--nulo-outline);
+	padding: 8px 10px;
+	color: var(--txt-primary);
+	font: 500 12px/1 var(--font-mono);
+}
+.err-line {
+	margin: 0;
+	color: var(--red);
+	font: 500 12px/1.4 var(--font-mono);
 }
 </style>

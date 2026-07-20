@@ -18,10 +18,13 @@ vi.mock("@/composables/useFuel", () => ({
 	useFuelFlow: () => ({ resume: fuelResume, busy: ref(false), error: ref(null) }),
 }))
 const claimFuelStandalone = vi.fn(async () => {})
+const depositResume = vi.fn(async () => {})
+const attachDepositHash = vi.fn(async () => null as string | null)
 vi.mock("@/composables/useDeposit", () => ({
 	claimFuelStandalone: (...a: unknown[]) => claimFuelStandalone(...(a as [])),
 	overrideFuelClaim: vi.fn(),
 	reconcileFuelConsumed: vi.fn(async () => {}),
+	useDepositFlow: () => ({ resume: depositResume, attachDepositHash, busy: ref(false), error: ref(null) }),
 }))
 
 import { TESTIDS } from "@/lib/testids"
@@ -361,5 +364,35 @@ describe("RESUME affordance (J4 — fee-juice)", () => {
 	it("a legacy fuel record (no persisted facts) shows no RESUME", () => {
 		const w = mountCard(fuelDep({}))
 		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(false)
+	})
+})
+
+describe("RESUME — plain token + paste-hash (J5)", () => {
+	beforeEach(() => {
+		depositResume.mockClear()
+		attachDepositHash.mockClear()
+	})
+
+	it("a plain-token proven-safe record routes RESUME to the deposit flow", async () => {
+		const w = mountCard(deposit({ failedLeg: "approving", failedOutcome: "no-funds-moved" }))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(true)
+		await w.find(sel(TESTIDS.journalResume)).trigger("click")
+		await w.find(sel(TESTIDS.journalResume)).trigger("click")
+		expect(depositResume).toHaveBeenCalledWith("0xdep")
+	})
+
+	it("an unknown-outcome record shows the paste-hash input, not RESUME", () => {
+		const w = mountCard(deposit({ failedLeg: "depositing", failedOutcome: "unknown-outcome" }))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalPasteHash)).exists()).toBe(true)
+	})
+
+	it("submitting a pasted hash calls the engine handler; a returned error surfaces", async () => {
+		attachDepositHash.mockResolvedValueOnce("That transaction reverted on Ethereum")
+		const w = mountCard(deposit({ failedLeg: "depositing", failedOutcome: "unknown-outcome" }))
+		await w.find(sel(TESTIDS.journalPasteHash)).setValue("0xabc")
+		await w.find(sel(TESTIDS.journalPasteHashSubmit)).trigger("click")
+		expect(attachDepositHash).toHaveBeenCalledWith("0xdep", "0xabc")
+		expect(w.find(sel(TESTIDS.journalPasteHashError)).text()).toMatch(/reverted/i)
 	})
 })

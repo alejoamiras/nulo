@@ -27,6 +27,7 @@ import {
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
 	parseFeeJuiceDeposit,
+	privateFuelSecretHash,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	quoteFuelPath,
@@ -54,6 +55,7 @@ import {
 	connectJournalDeps,
 	discard,
 	flagRecordError,
+	latchResumeAttempt,
 	markApproveOutcome,
 	markSessionLive,
 	isMsgConsumed,
@@ -65,6 +67,10 @@ import {
 	useBridgeJournal,
 } from "./useBridgeJournal"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { withOriginLock } from "@/lib/origin-lock"
+import { type ResumeHashers, type ResumeVariant, validateResume } from "@/lib/resume-validator"
+import { runResume } from "./resume-runner"
+import { type MinimalReceipt, validatePastedDepositHash } from "@/lib/paste-hash"
 import { buildFuelClaimInteraction } from "./fuelClaim"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
@@ -620,6 +626,17 @@ export function ensureDepositJournalDeps(): void {
  * private bridge), and re-seal the finalized envelope (leafIndex) with the retained in-memory
  * key - zero extra signatures.
  */
+/** Real crypto for the resume validator's secret-binding checks (bb-backed). */
+const RESUME_HASHERS: ResumeHashers = {
+	computeSecretHashHex: async (secretHex) => (await computeSecretHash(Fr.fromString(secretHex))).toString(),
+	privateFuelSecretHashHex: async (saltHex, claimerHex) =>
+		(await privateFuelSecretHash(Fr.fromString(saltHex), AztecAddress.fromStringUnsafe(claimerHex))).toString(),
+}
+
+/** Variants the token deposit flow's resume runner can drive (J5). Fueled (Permit2) variants are a
+ *  deferred follow-up; direct fuel is owned by useFuelFlow.resume. */
+const TOKEN_RESUME_VARIANTS: ReadonlySet<ResumeVariant> = new Set(["plain-token"])
+
 export function useDepositFlow() {
 	ensureDepositJournalDeps()
 	const l1 = useL1Wallet()
@@ -1060,5 +1077,122 @@ export function useDepositFlow() {
 		{ immediate: true },
 	)
 
-	return { busy, error, deposit, journal }
+	/** Re-enter a pre-deposit PLAIN-TOKEN record's flow on the SAME record (journal-ux J5).
+	 *  Click-only; gated by the resume validator + origin lock + write-once latch (resume-runner).
+	 *  Fueled token variants are NOT handled here (Permit2 re-sign is a deferred follow-up). */
+	async function resume(recordId: string): Promise<void> {
+		error.value = null
+		const wallet = l1.ensureWalletClient()
+		const from = l1.address.value
+		const recipient = bridgeWallet.selectedAccount.value
+		if (!wallet || !from) {
+			error.value = "Connect your Ethereum wallet first."
+			return
+		}
+		if (!bridgeWallet.wallet.value || !recipient) {
+			error.value = "Connect your Aztec wallet first."
+			return
+		}
+		busy.value = true
+		try {
+			const result = await runResume(recordId, {
+				getRecord: (id) =>
+					journal.records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined,
+				validate: (rec) =>
+					validateResume(
+						rec,
+						{
+							connectedAztec: recipient,
+							deployment: { chainId: sepolia.id, portal: L1_PORTAL, bridge: BRIDGE.toString() },
+							enabledVariants: TOKEN_RESUME_VARIANTS,
+						},
+						RESUME_HASHERS,
+					),
+				withLock: (name, fn) => withOriginLock(name, fn),
+				latch: (id) => latchResumeAttempt(id),
+				allowanceSufficient: async (rec) => {
+					const allowance = (await l1.publicClient.readContract({
+						address: L1_USDC,
+						abi: ERC20_ABI,
+						functionName: "allowance",
+						args: [from, L1_PORTAL],
+					})) as bigint
+					return allowance >= BigInt(rec.amount)
+				},
+				approve: async (rec) => {
+					setRecordStep(rec.id, "approving", "confirm the allowance in your Ethereum wallet")
+					const approveHash = await runOnLane("l1", () =>
+						wallet.writeContract({
+							address: L1_USDC,
+							abi: ERC20_ABI,
+							functionName: "approve",
+							args: [L1_PORTAL, BigInt(rec.amount)],
+							chain: sepolia,
+							account: from,
+						}),
+					)
+					updateRecord(rec.id, { approveTxHash: approveHash as string, approveOwner: from })
+					await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`)
+				},
+				deposit: async (rec) => {
+					const amt = BigInt(rec.amount)
+					const fn = rec.isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
+					const args = rec.isPrivate
+						? [amt, rec.id as `0x${string}`]
+						: [rec.recipient as `0x${string}`, amt, rec.id as `0x${string}`]
+					const hash = await runOnLane("l1", () =>
+						wallet.writeContract({
+							address: L1_PORTAL,
+							abi: TokenPortalAbi,
+							functionName: fn,
+							args,
+							chain: sepolia,
+							account: from,
+						} as never),
+					)
+					return hash as string
+				},
+				onDepositHash: (id, hash) => updateRecord(id, { depositTxHash: hash, ...CLEAR_FAILURE_FACTS }),
+				reclassifyUnknownOutcome: (rec) =>
+					updateRecord(rec.id, {
+						...classifyDepositFailure({ leg: "depositing", depositPromptIssued: true, hasDepositTxHash: false }),
+						failedAt: Date.now(),
+					}),
+				runClaim: (id) => runDepositClaim(id),
+				setStep: (id, step, detail) => setRecordStep(id, step as never, detail),
+				flagError: (id, note) => flagRecordError(id, note),
+				lockName: (id) => `bridge-resume:${id}`,
+			})
+			if (result.status === "refused") error.value = result.verdict.reason
+			else if (result.status === "error") error.value = humanizeWalletError(result.message)
+			else if (result.status === "already-attempted")
+				error.value = "A resume was already attempted for this bridge - check your wallet activity."
+		} catch (e) {
+			error.value = humanizeWalletError(e instanceof Error ? e.message : "Resume failed")
+		} finally {
+			busy.value = false
+		}
+	}
+
+	/** Paste-hash recovery for an unknown-outcome record (journal-ux J5/L16): the user pastes the
+	 *  L1 deposit tx id from their wallet; we validate it against chain truth (mined success, sent
+	 *  to this record's portal, its secret-hash in the logs) BEFORE trusting it, then attach it and
+	 *  let the engine's deposit-leg recovery finish. Returns an error string on failure, null on ok. */
+	async function attachDepositHash(recordId: string, rawHash: string): Promise<string | null> {
+		const rec = journal.records.value.find((r) => r.id === recordId && r.direction === "deposit") as DepositJournalRecord | undefined
+		if (!rec) return "This bridge record no longer exists."
+		if (rec.depositTxHash) return "This bridge already has a deposit transaction."
+		const verdict = await validatePastedDepositHash(
+			rec,
+			rawHash,
+			(h) => l1.publicClient.getTransactionReceipt({ hash: h }).catch(() => null) as Promise<MinimalReceipt | null>,
+		)
+		if (!verdict.ok) return verdict.reason
+		// Chain-verified: attach + clear the unknown-outcome facts, then hand to recovery.
+		updateRecord(recordId, { depositTxHash: rawHash.trim(), ...CLEAR_FAILURE_FACTS })
+		await runDepositClaim(recordId)
+		return null
+	}
+
+	return { busy, error, deposit, resume, attachDepositHash, journal }
 }
