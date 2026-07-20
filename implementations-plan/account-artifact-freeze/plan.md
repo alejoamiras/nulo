@@ -117,7 +117,7 @@ red; edit the v5 entry → paired test red (then revert).
 **Validation gate** — commands: `bun run lint && bun run typecheck:all && bun run test:all` + the
 two red-demonstrations logged in lessons. Layers: lint/typecheck(all)/unit(all).
 
-### Phase 4 — Dedicated frozen-account execution canary (REQUIRED, per-bump)
+### Phase 4 ✓ — Dedicated frozen-account execution canary (REQUIRED, per-bump)
 Two parts:
 1. **New dedicated network e2e** (final-pass condition 1 — existing tests proven insufficient):
    fresh profile → assert the account's initialization nullifier is ABSENT on the node → first tx

@@ -9,7 +9,7 @@ import { NuloAccount } from "./nulo-account"
 /**
  * Full-chain known-answer test for the signing-key-root inversion (NULO-ACCOUNT-KDF v1).
  *
- * The expected values are REFERENCE-GENERATED from the published 5.0.0 packages by a committed
+ * The expected values are REFERENCE-GENERATED from the published 5.0.1 packages by a committed
  * script that never touches this repo's helpers (`reference/regime-b/derive-vectors.ts`; the
  * address comes from upstream's own `getSchnorrAccountContractAddress` oracle). Equality is the
  * gate — a mismatch means OUR derivation diverged from upstream's model; stop and investigate,
