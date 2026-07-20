@@ -62,7 +62,7 @@ a move impossible to ship silently; the Phase 4 canary catches the execution sid
 
 ## Phases
 
-### Phase 1 — Vendor the raw artifact, with provenance
+### Phase 1 ✓ — Vendor the raw artifact, with provenance
 Copy the RAW `SchnorrAccount.json` from `@aztec/accounts@5.0.1/artifacts/` (not the TS-wrapped
 export) into `packages/aztec-runtime/src/account/artifacts/`, recording provenance in the PR and
 in a committed `PROVENANCE.md`: package name@version, the lockfile's tarball integrity hash, the

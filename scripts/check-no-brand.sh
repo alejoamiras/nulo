@@ -4,13 +4,16 @@ set -euo pipefail
 
 pattern='azguard|vibeguard|bb strategy|jp4g-azguard|/Users/[A-Za-z]|/home/[A-Za-z]'
 
+# Vendored upstream noir artifacts are byte-exact (digest-pinned); their file_map embeds
+# Aztec's own public CI build paths (/home/aztec-dev/...), not a local-machine leak.
 mapfile -t hits < <(
 	git grep -i -l -E "$pattern" -- \
 		. \
 		':!scripts/check-no-brand.sh' \
 		':!ACKNOWLEDGEMENTS.md' \
 		':!implementations-plan' \
-		':!implementations-plan/**' || true
+		':!implementations-plan/**' \
+		':!packages/aztec-runtime/src/account/artifacts/*.json' || true
 )
 
 if ((${#hits[@]} > 0)); then

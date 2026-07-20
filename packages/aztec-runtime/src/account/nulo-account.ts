@@ -19,7 +19,10 @@ import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { deriveKeys } from "@aztec/stdlib/keys"
 import { ExecutionPayload, type TxExecutionRequest } from "@aztec/stdlib/tx"
-import { SchnorrAccountContract, SchnorrAccountContractArtifact } from "@aztec/accounts/schnorr"
+// The lazy variant: same upstream signing/auth-witness provider, but the npm artifact sits behind
+// a dynamic import we never trigger — the vendored copy in `./frozen-artifact` is the only
+// artifact this account ever loads (the eager module would double-bundle ~1.4 MB).
+import { SchnorrAccountContract } from "@aztec/accounts/schnorr/lazy"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { AccountFeePaymentMethodOptions, DefaultAccountEntrypoint, type DefaultAccountEntrypointOptions } from "@aztec/entrypoints/account"
 import { DefaultMultiCallEntrypoint } from "@aztec/entrypoints/multicall"
@@ -29,12 +32,13 @@ import type { AuthWitnessProvider } from "@aztec/entrypoints/interfaces"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 import type { IPXE } from "../pxe/ipxe"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "./fee-options"
+import { FrozenSchnorrAccountArtifact } from "./frozen-artifact"
 import type { IAccountContract } from "."
 
 export class NuloAccount implements IAccountContract {
 	public readonly name = "nulo-v1"
 	public readonly address: AztecAddress
-	public readonly artifact: ContractArtifact = SchnorrAccountContractArtifact
+	public readonly artifact: ContractArtifact = FrozenSchnorrAccountArtifact
 
 	private readonly entrypoint: DefaultAccountEntrypoint
 	private readonly authWitnessProvider: AuthWitnessProvider
@@ -64,7 +68,7 @@ export class NuloAccount implements IAccountContract {
 			throw new Error("Schnorr account contract is missing its initializer")
 		}
 		const { constructorName, constructorArgs } = init
-		const instance = await getContractInstanceFromInstantiationParams(SchnorrAccountContractArtifact, {
+		const instance = await getContractInstanceFromInstantiationParams(FrozenSchnorrAccountArtifact, {
 			constructorArgs,
 			constructorArtifact: constructorName,
 			publicKeys: keys.publicKeys,
