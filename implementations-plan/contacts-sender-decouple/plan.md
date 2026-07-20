@@ -121,7 +121,7 @@ row cap + dedup enforced; no-network → per-row skip). Respect the L-layer cove
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test`.
 Pass: new tests green and included in the run. Layers: lint/typecheck + unit/component.
 
-### Phase 4 — E2E rework (existing suite)
+### Phase 4 ✓ — E2E rework (existing suite)
 - `tests/e2e/fixtures/helpers.ts` `addContact`: drop the `registerAsSender` option + toggle click.
 - `tests/e2e/network/contacts-sender.test.ts`: remove the delete-confirm-toggle and edit-toggle
   scenarios (including the migration scenario — behavior deleted); re-point PXE sender CRUD

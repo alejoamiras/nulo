@@ -35,7 +35,6 @@ test("add contact via popup", async ({ registeredExtension }) => {
 			body: (document.body?.innerText ?? "").slice(0, 500).replace(/\s+/g, " "),
 			testIds: [...document.querySelectorAll("[data-testid]")].slice(0, 30).map((el) => el.getAttribute("data-testid")),
 			submitDisabled: (document.querySelector('[data-testid="new-contact-submit"]') as HTMLButtonElement | null)?.disabled,
-			toggleActive: document.querySelector('[data-testid="new-contact-register-sender"]')?.getAttribute("data-toggle-active"),
 			nameInputVal: (document.querySelector('input[placeholder="New contact"]') as HTMLInputElement | null)?.value,
 			addrInputVal: (() => {
 				const inputs = [...document.querySelectorAll<HTMLInputElement>('input[placeholder*="0x15c4"]')]
@@ -100,7 +99,7 @@ test.skip("delete contact", async ({ registeredExtension }) => {
 	expect(registeredExtension.pageErrors).toEqual([])
 })
 
-test("delete-confirm has no unregister-sender toggle for a non-sender contact", async ({ registeredExtension }) => {
+test("delete-confirm never offers sender options (contacts are decoupled from sender state)", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 

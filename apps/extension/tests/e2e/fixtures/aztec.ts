@@ -218,6 +218,37 @@ export async function mintPrivateTokens(
 	})
 }
 
+/** Private → private transfer between two addresses the test wallet can
+ *  act for (sender must hold private balance — see `mintPrivateTokens`).
+ *  Same registration + `wait` traps as the private mint above. */
+export async function transferPrivateTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+
+	const token = await TokenContract.at(addr, wallet)
+	await token.methods
+		.transfer_private_to_private(AztecAddress.fromStringUnsafe(fromAddress), AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({
+			fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
+			from: AztecAddress.fromStringUnsafe(fromAddress),
+			wait: { timeout: 120 },
+		})
+}
+
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
 
 /**

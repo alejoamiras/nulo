@@ -344,22 +344,10 @@ export async function switchAccountByAddress(page: Page, address: string): Promi
 
 // ── Contact ────────────────────────────────────────────────────────────
 
-/** Add a contact via the NewContactPopup.
- *
- *  `opts.registerAsSender` controls the register-as-sender toggle. Default
- *  is `false` because `registeredExtension` runs without a real PXE node —
- *  the popup's add-sender call would fail with the WARNING toast
- *  "Contact saved · sender registration failed" rather than the success
- *  toast "Contact is added". Tests that need a sender contact must use
- *  `localNetworkExtension` and pass `registerAsSender: true`.
- *
- *  The popup's default toggle state is ON (per `NewContactPopup.vue`'s
- *  `useFormState({ registerAsSender: { initial: true } })`); the helper
- *  flips when `registerAsSender === false` to land on the requested state.
- */
-export async function addContact(page: Page, name: string, address: string, opts: { registerAsSender?: boolean } = {}): Promise<void> {
-	const registerAsSender = opts.registerAsSender ?? false
-
+/** Add a contact via the NewContactPopup. Saving a contact touches the
+ *  contact service only — sender registration is a separate concern
+ *  (Settings → Advanced → Account State → Senders). */
+export async function addContact(page: Page, name: string, address: string): Promise<void> {
 	await clickByTestId(page, "contacts-new-btn")
 
 	// Wait for form inputs to mount
@@ -368,14 +356,6 @@ export async function addContact(page: Page, name: string, address: string, opts
 
 	await page.waitForSelector('input[placeholder*="0x15c4"]', { visible: true, timeout: 5_000 })
 	await replaceInputValue(page, 'input[placeholder*="0x15c4"]', address)
-
-	// Toggle defaults ON; click flips it OFF when the caller doesn't want
-	// sender registration. Idempotent across calls because `form.reset()`
-	// (NewContactPopup.vue watcher) re-applies `initial: true` on every
-	// popup open.
-	if (!registerAsSender) {
-		await clickByTestId(page, "new-contact-register-sender")
-	}
 
 	await clickByTestId(page, "new-contact-submit")
 
@@ -391,19 +371,6 @@ export async function addContact(page: Page, name: string, address: string, opts
 		{ timeout: 10_000, polling: 200 },
 		name,
 	)
-
-	// When the caller asked for sender registration, also wait for the chip
-	// to render BEFORE we close the popup. The submit handler awaits both
-	// addContact and addSender before emitting onClose, but the contact-row
-	// (storage write) lands well before addSender (PXE write) — so the
-	// previous early `closeStuckPopup` call ran while addSender was still in
-	// flight and we'd race the popup tear-down.
-	if (registerAsSender) {
-		await page.waitForSelector(`[data-testid="contact-row"][data-contact-name="${name}"] [data-testid="contact-sender-chip"]`, {
-			visible: true,
-			timeout: 30_000,
-		})
-	}
 
 	await closeStuckPopup(page)
 }

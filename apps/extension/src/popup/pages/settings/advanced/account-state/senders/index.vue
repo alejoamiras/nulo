@@ -98,7 +98,7 @@ onBeforeUnmount(() => {
 			</Tooltip>
 
 			<Flex v-else-if="senders.length" direction="column" gap="8">
-				<Flex v-for="sender in senders" justify="between" :class="$style.card">
+				<Flex v-for="sender in senders" justify="between" :class="$style.card" data-testid="sender-row" :data-sender-address="sender">
 					<Flex align="center" gap="10">
 						<Icon name="user" size="16" color="tertiary" />
 
@@ -133,6 +133,7 @@ onBeforeUnmount(() => {
 								size="14"
 								color="tertiary"
 								:class="$style.icon_btn"
+								data-testid="sender-delete"
 							/>
 
 							<template #content> Delete sender </template>
@@ -146,7 +147,7 @@ onBeforeUnmount(() => {
 				<span :class="$style.empty_sub">Standard transfers are detected automatically. Add a sender only for tokens using legacy address-derived delivery.</span>
 			</div>
 
-			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large">
+			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large" data-testid="senders-add-btn">
 				Add sender
 			</Button>
 		</Flex>

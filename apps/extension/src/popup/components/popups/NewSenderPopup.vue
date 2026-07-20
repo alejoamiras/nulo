@@ -113,6 +113,7 @@ const onKeydown = (e) => {
 					autofocus
 					sanitize
 					v-model="senderAddress"
+					data-testid="new-sender-address-input"
 				>
 					<template #right>
 						<Transition name="fade">
@@ -161,6 +162,7 @@ const onKeydown = (e) => {
 						:loading="isLoading"
 						:class="error.type === 'error' && $style.shake"
 						:disabled="!!error.type || !senderAddress"
+						data-testid="new-sender-submit"
 					>
 						Add sender
 					</Button>
