@@ -5,7 +5,7 @@ import type { IConfig } from "@/wallet/config"
 import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import { AccountAddressInconsistencyError, InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -536,6 +536,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	}
 
 	/**
+	 * Close the active session ONLY if it belongs to `profileId`. Used by the integrity
+	 * coordinator so a mismatch detected for profile P can't close a DIFFERENT profile that became
+	 * active during the (slow, unlocked) re-derivation. The `isActive` check + `close` run under
+	 * the facade lock so no unlock can interleave between them.
+	 */
+	public async lockProfileIfActive(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			if (this.sessionManager.isActive(profileId)) {
+				await this.sessionManager.close()
+			}
+		})
+	}
+
+	/**
 	 * F-12: derive the per-profile, NON-EXTRACTABLE HMAC key that signs
 	 * DappSession rows. The raw master secret never leaves this service — only
 	 * the derived (non-exportable) key is handed out. Propagates the "Profile
@@ -727,7 +742,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 */
 	private async openSessionVerified(profile: Profile, secret: MasterSecretBytes, passhash?: Passhash): Promise<void> {
 		try {
-			await this.integrityDelegate?.verifyBeforeSessionOpen(profile.id, secret)
+			if (this.integrityDelegate) {
+				await this.integrityDelegate.verifyBeforeSessionOpen(profile.id, secret)
+			} else if (await this.integrityBlocked.isBlocked(profile.id)) {
+				// STARTUP-WINDOW FAIL-CLOSED: the coordinator injects the delegate in a later phase,
+				// but each service accepts RPCs from construction — an unlock racing startup would
+				// otherwise open UNCHECKED. With no delegate we can't re-derive, but a KNOWN durable
+				// block still refuses the open. (A never-before-seen drift in this window is caught by
+				// the coordinator's boot verification, which runs right after it registers; the
+				// version-keyed stamp means a drift can't already carry a green stamp.)
+				throw new AccountAddressInconsistencyError(undefined, { profileId: profile.id })
+			}
 		} catch (error) {
 			// A freshly-flagged profile must not keep a PRIOR live session either (the password-change
 			// flow re-opens over one): withholding the new session while the old stays usable would
@@ -736,6 +761,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				await this.sessionManager.close()
 			}
 			throw error
+		}
+		// Re-validate deletion state AFTER the (possibly slow) verification: a deletion that began
+		// during it — or a force-released facade lock — must abort the open rather than resurrect a
+		// deleted profile's session.
+		if (this.deletionState.isReserved(profile.id)) {
+			throw new Error("Invalid profile id")
 		}
 		await this.sessionManager.open(profile, secret, passhash)
 	}
@@ -840,6 +871,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				await this.runExclusive(async () => {
 					if (await this.repo.get(t.profileId)) await this.repo.delete(t.profileId)
 					if (this.sessionManager.isActive(t.profileId)) await this.sessionManager.close()
+					// Idempotent, same as the live `deleteProfile` phase-1 block: a deletion that
+					// crashed before these clears must still drop the integrity records so a deleted
+					// profile can't leave an orphan block/stamp behind.
+					await this.integrityBlocked.clear(t.profileId)
+					await this.integrityStamps.clear(t.profileId)
 				})
 				await delegate.runFor(t.profileId, {
 					addresses: t.addresses,

@@ -14,6 +14,8 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
+import type { StorageArea } from "@nulo/wallet-core/ports"
+import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import type { AccountIntegrityBlocked, AccountRuntimeIntegrityDelegate } from "../account-integrity/types"
 import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
 
@@ -42,13 +44,18 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	private profileService: ProfileService = null!
 
-	/** Lazily injected by the last-started AccountIntegrityCoordinator — the operation-time
-	 *  mismatch sink. Never a topological dependency (would be a cycle). */
+	/** Lazily injected by the last-started AccountIntegrityCoordinator — closes the live session
+	 *  on a runtime mismatch. Never a topological dependency (would be a cycle). The DURABLE block
+	 *  does NOT depend on this: it is written directly below, so a mismatch during the startup
+	 *  window (before the coordinator injects the delegate) still persists fail-closed. */
 	private integrityDelegate: AccountRuntimeIntegrityDelegate | null = null
+	/** Owned so the durable block is written even when the delegate isn't ready yet. */
+	private readonly integrityBlocked: AccountIntegrityBlockedRepository
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
 		this.storage = new EntityStorage<Account>(ACCOUNT_STORAGE_ROOT, browserApi.storage.local, (raw) => AccountSchema.parse(raw))
+		this.integrityBlocked = new AccountIntegrityBlockedRepository(browserApi.storage.local as StorageArea)
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {
@@ -217,13 +224,22 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 				detectedAt: Date.now(),
 			}
-			// AWAITED so the blocking record + session close are durable BEFORE the error reaches the
-			// caller (an MV3 termination right after the throw must not lose the block). A report
-			// failure is logged but never masks the typed error.
+			// Write the DURABLE block FIRST and directly (not via the delegate): the delegate is
+			// injected in a later startup phase and may be null during the startup window, but the
+			// block — which drives the barrier + the next-boot session gate — must persist
+			// fail-closed regardless. AWAITED so it lands before the error reaches the caller (an
+			// MV3 termination right after the throw must not lose it).
 			try {
-				await this.integrityDelegate?.reportRuntimeMismatch(record)
-			} catch (reportError) {
-				this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity mismatch report failed", String(reportError))
+				await this.integrityBlocked.set(record)
+			} catch (writeError) {
+				this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity block persist failed", String(writeError))
+			}
+			// Best-effort session close (needs the profile service; absent during the startup
+			// window, but the durable block already blocks the next boot).
+			try {
+				await this.integrityDelegate?.closeSessionForMismatch(profileId)
+			} catch (closeError) {
+				this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity session close failed", String(closeError))
 			}
 			throw new AccountAddressInconsistencyError(undefined, { profileId, chainId, accountIndex: account.index })
 		}

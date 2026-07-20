@@ -47,9 +47,9 @@ export interface AccountIntegrityDelegate {
 /**
  * Injected into AccountService for the mid-session window (e.g. an extension update rehydrated a
  * live session under new derivation code): `getAccountContract` detects the mismatch at operation
- * time, reports here, and throws the typed error. The coordinator persists the record and closes
- * the session.
+ * time, writes the DURABLE block itself (fail-closed, delegate-independent), then asks the
+ * coordinator to close the live session for the mismatching profile.
  */
 export interface AccountRuntimeIntegrityDelegate {
-	reportRuntimeMismatch(record: AccountIntegrityBlocked): Promise<void>
+	closeSessionForMismatch(profileId: string): Promise<void>
 }

@@ -17,16 +17,32 @@ const blockedRecords = ref([])
 const lastActiveProfileId = ref(null)
 const routeHash = ref(window.location.hash)
 
-const isPreAuthRoute = computed(() => routeHash.value.includes("/popup/auth") || routeHash.value.includes("/popup/register"))
+// Exact PATH comparison, not substring: a protected route can carry an auth path in a query
+// param (e.g. `#/popup/general?return=/popup/auth`), which a substring test would wrongly treat
+// as pre-auth and suppress the barrier. Strip the leading `#` and any query/hash tail.
+const routePath = computed(() => routeHash.value.replace(/^#/, "").split(/[?#]/)[0])
+const isPreAuthRoute = computed(() => routePath.value === "/popup/auth" || routePath.value === "/popup/register")
+
 const isBlocked = computed(() => {
 	if (isPreAuthRoute.value) return false
+	if (blockedRecords.value.length === 0) return false
+	// FAIL CLOSED: a corrupt record (unknown profile) always blocks; a record for the presented
+	// (last-active) profile blocks; and if a block EXISTS but the presented-profile identity can't
+	// be resolved (missing/stale `lastActiveProfile` while the app fell back to profiles[0]), block
+	// rather than silently expose a possibly-mismatched profile.
+	if (lastActiveProfileId.value === null) return true
 	return blockedRecords.value.some((r) => r.profileId === null || r.profileId === lastActiveProfileId.value)
 })
 
 /** Handlers */
 const prefix = `${ACCOUNT_INTEGRITY_BLOCKED_ROOT}@`
+// Monotonic guard: two onChanged-driven refreshes can resolve out of order; only the newest
+// snapshot may commit, so a stale no-block read can't overwrite a fresh blocking read.
+let refreshGeneration = 0
 async function refresh() {
+	const generation = ++refreshGeneration
 	const all = await chrome.storage.local.get(null)
+	if (generation !== refreshGeneration) return
 	lastActiveProfileId.value = all["nulo:ui:lastActiveProfile"] ?? null
 	blockedRecords.value = Object.entries(all)
 		.filter(([k]) => k.startsWith(prefix))

@@ -19,9 +19,19 @@
   record still blocks — fail-closed, never auto-deleted). `ProfileService.init` gates the silent
   session rehydrate on it (the coordinator starts later, so init reads the repo directly).
 - **Runtime mismatch** (`account/service.ts` — the formerly untested bare throw): now emits the
-  typed `AccountAddressInconsistencyError` and fire-and-forgets `reportRuntimeMismatch` (persist
-  + `lockActiveProfile`) — covering the mid-session window where an extension update rehydrates a
-  live session under new derivation code without passing the pre-open verifier.
+  typed `AccountAddressInconsistencyError`. Post-audit (see `audit-codex.md` second pass) this was
+  hardened: AccountService writes the DURABLE block ITSELF (fail-closed, delegate-independent — so
+  a mismatch during the startup window before the coordinator injects its delegate still persists)
+  and AWAITS it before throwing; the delegate then closes the session for the MISMATCHING profile
+  (`lockProfileIfActive(profileId)`, not "the active one"). Covers the mid-session window where an
+  extension update rehydrates a live session under new derivation code without passing the pre-open
+  verifier.
+- **Boot re-verification** (post-audit): the silent SW rehydrate on the first boot of a NEW build
+  IS re-verified — `AccountIntegrityCoordinator.start()` runs `verifyRestoredSessionOnce`, guarded
+  by a durable per-(profile, walletVersion) verified-stamp so steady-state SW wakes stay free. It
+  is fire-and-forget by necessity (awaiting inside `services.start()` stalls all service RPCs past
+  the popup boot budget), but the verdict lands mid-flight and the stamp is invalidated on any
+  account-set change.
 - **Typed error**: `AccountAddressInconsistencyError` in `@nulo/extension-messaging/errors`
   (payload union + reconstruction switch), instanceof survives the RPC boundary.
 - **dApp sanitization**: `error-envelope.ts` maps it to a bare
@@ -54,10 +64,11 @@ Plus repo unit tests (3) and the envelope leak-test.
   every such component needs its `storage-facade-ban.test.ts` allowlist entry with a why-comment.
 - Cost note: the verify adds N-accounts × (poseidon + `NuloAccount.new`) to unlock (~hundreds of
   ms for typical 1–3 accounts) — same per-op cost the wallet already pays on `getAccountContract`;
-  accepted for an unlock-time security invariant. The silent SW-restart rehydrate deliberately
-  does NOT re-derive (cost on every wake); it is guarded by the durable record + the runtime
-  (operation-time) check — the mid-session window is closed by the typed-error path, not by
-  re-hashing on every boot.
+  accepted for an unlock-time security invariant. The silent SW-restart rehydrate IS re-verified on
+  the first boot of a NEW build (`verifyRestoredSessionOnce`), then a per-(profile, walletVersion)
+  stamp keeps every subsequent same-build wake free — so it is neither "re-hash on every boot" nor
+  "never re-derived", but "re-derive once per build change". The runtime operation-time check +
+  the version-keyed stamp + the durable fail-closed block are the three overlapping backstops.
 
 ## Validation gate
 

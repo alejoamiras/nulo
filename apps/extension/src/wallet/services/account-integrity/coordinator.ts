@@ -61,6 +61,12 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		this.accounts = services.get(AccountService.name)
 		this.profiles.setIntegrityDelegate(this)
 		this.accounts.setIntegrityDelegate(this)
+		// The green stamp is keyed by (profile, walletVersion) — it must NOT survive an account-set
+		// change on the same build, or a boot could skip re-verifying a row added/restored after the
+		// stamp was written. Any account mutation invalidates the profile's stamp, forcing a
+		// re-verify on the next boot.
+		this.accounts.onAccountAdded.add((account) => void this.stamps.clear(account.profileId).catch(() => {}))
+		this.accounts.onAccountDeleted.add((account) => void this.stamps.clear(account.profileId).catch(() => {}))
 		// The one activation the per-open chokepoint cannot see: an extension UPDATE rehydrates the
 		// previous session silently, so the first boot of a NEW build re-verifies it here (once per
 		// (profile, walletVersion) — the stamp keeps every later SW wake free). Fire-and-forget ON
@@ -92,7 +98,9 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 			await this.verifyProfile(active.id, master)
 		} catch (error) {
 			if (error instanceof AccountAddressInconsistencyError) {
-				await this.profiles.lockActiveProfile()
+				// Close ONLY the profile we verified — a different profile may have become active
+				// during the (slow, unlocked) verification.
+				await this.profiles.lockProfileIfActive(active.id)
 				return
 			}
 			throw error
@@ -145,17 +153,11 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		await this.stamps.set(profileId, { walletVersion: walletVersion() })
 	}
 
-	/** See `AccountRuntimeIntegrityDelegate.reportRuntimeMismatch`. */
-	public async reportRuntimeMismatch(record: AccountIntegrityBlocked): Promise<void> {
-		await this.blocked.set(record)
-		this.logger.log(
-			this.name,
-			LogLevel.Error,
-			"runtime account address mismatch — closing session",
-			`profile=${record.profileId} chain=${record.chainId} index=${record.accountIndex}`,
-		)
-		// Close the live session so nothing further operates on the mismatched profile; the
-		// persisted record keeps the profile blocked across SW restarts.
-		await this.profiles.lockActiveProfile()
+	/** See `AccountRuntimeIntegrityDelegate.closeSessionForMismatch`. The DURABLE block was already
+	 *  written by AccountService (fail-closed); this only closes the live session — and ONLY if the
+	 *  mismatching profile is still the active one. */
+	public async closeSessionForMismatch(profileId: string): Promise<void> {
+		this.logger.log(this.name, LogLevel.Error, "runtime account address mismatch — closing session", `profile=${profileId}`)
+		await this.profiles.lockProfileIfActive(profileId)
 	}
 }

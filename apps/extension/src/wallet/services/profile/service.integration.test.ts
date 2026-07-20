@@ -1353,6 +1353,38 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		expect(await service.getActiveProfile()).toBeUndefined()
 	}, 30_000)
 
+	test("STARTUP-WINDOW FAIL-CLOSED: unlock refuses on a durable block even with NO delegate injected yet", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+
+		// Simulate the coordinator having persisted a block on a prior boot, but not yet having
+		// injected its delegate this boot (the startup window). No `setIntegrityDelegate` call.
+		await new AccountIntegrityBlockedRepository(api.storage.local).set({
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		})
+
+		await expect(service.unlockProfile(profile.id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(await service.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("no delegate + NO block: unlock proceeds (the gate is targeted, not a blanket refusal)", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+		// No delegate, no block record.
+		const info = await service.unlockProfile(profile.id, "pass1234")
+		expect(info.id).toBe(profile.id)
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+	}, 30_000)
+
 	test("backup-import path: finalizeRestore runs the check AFTER restore, BEFORE the session opens", async () => {
 		const { service } = await makeService()
 		const events: unknown[] = []

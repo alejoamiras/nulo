@@ -6,6 +6,7 @@
  */
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { asMasterSecretBytes } from "@nulo/wallet-crypto"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { describe, expect, test } from "vitest"
@@ -15,9 +16,8 @@ import { LoggerStore } from "@/wallet/logger"
 import { AccountService, AccountType, type Account } from "@/wallet/services/account/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { svc } from "../composition-harness"
-import { AccountIntegrityBlockedRepository } from "./blocked-repository"
+import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "./blocked-repository"
 import { AccountIntegrityCoordinator, type DeriveAddress } from "./coordinator"
-import type { AccountIntegrityBlocked } from "./types"
 
 const MASTER = asMasterSecretBytes(new Uint8Array(32).fill(7) as Uint8Array<ArrayBuffer>)
 
@@ -48,20 +48,30 @@ async function build(opts: {
 	services.add(
 		svc(ProfileService.name, {
 			setIntegrityDelegate: () => {},
-			lockActiveProfile: async () => {
-				locks.push("locked")
+			lockProfileIfActive: async (id: string) => {
+				locks.push(id)
 			},
 			getActiveProfile: async () => (opts.activeProfileId ? { id: opts.activeProfileId, name: "P", type: "password" } : undefined),
 			getProfileSecret: async () => Fr.fromBuffer(Buffer.from(MASTER)),
 		}),
 	)
-	services.add(svc(AccountService.name, { setIntegrityDelegate: () => {}, getAccountsRaw: async () => opts.rows }))
+	const added = new EventHandler<Account>()
+	const deleted = new EventHandler<Account>()
+	services.add(
+		svc(AccountService.name, {
+			setIntegrityDelegate: () => {},
+			getAccountsRaw: async () => opts.rows,
+			onAccountAdded: added,
+			onAccountDeleted: deleted,
+		}),
+	)
 	const coordinator = new AccountIntegrityCoordinator(new LoggerStore(new ConfigStore()), api, opts.derive)
 	services.add(coordinator)
 	await services.start()
 	await coordinator.bootVerification
 	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
-	return { coordinator, repo, locks, api }
+	const stamps = new AccountIntegrityVerifiedStampRepository(api.storage.local)
+	return { coordinator, repo, stamps, locks, api, accountEvents: { added, deleted } }
 }
 
 describe("AccountIntegrityCoordinator", () => {
@@ -134,7 +144,7 @@ describe("AccountIntegrityCoordinator", () => {
 			activeProfileId: "p1",
 		})
 		expect(await repo.isBlocked("p1")).toBe(true)
-		expect(locks).toEqual(["locked"])
+		expect(locks).toEqual(["p1"])
 	})
 
 	test("boot verify: a green pass stamps the build so the NEXT boot skips re-deriving", async () => {
@@ -162,20 +172,45 @@ describe("AccountIntegrityCoordinator", () => {
 		expect(derives).toBe(0)
 	})
 
-	test("reportRuntimeMismatch persists the record and closes the session", async () => {
-		const { coordinator, repo, locks } = await build({ rows: [], derive: async () => "0x" })
-		const record: AccountIntegrityBlocked = {
-			profileId: "p9",
-			chainId: 1,
-			accountIndex: 0,
-			storedAddress: "0xstored",
-			derivedAddress: "0xderived",
-			regimeId: "nulo-v5",
-			walletVersion: "0.0.0",
-			detectedAt: 5,
-		}
-		await coordinator.reportRuntimeMismatch(record)
-		expect(await repo.isBlocked("p9")).toBe(true)
-		expect(locks).toEqual(["locked"])
+	test("closeSessionForMismatch closes ONLY the mismatching profile (never a different active one)", async () => {
+		// ProfileService.lockProfileIfActive is stubbed to record the id it was asked to lock; the
+		// coordinator must pass the mismatching profile id, not "the active one".
+		const askedToLock: string[] = []
+		const api = new FakeBrowserApi()
+		api.reset()
+		const services = new ServiceCollection()
+		services.add(
+			svc(ProfileService.name, {
+				setIntegrityDelegate: () => {},
+				lockProfileIfActive: async (id: string) => {
+					askedToLock.push(id)
+				},
+				getActiveProfile: async () => undefined,
+			}),
+		)
+		services.add(
+			svc(AccountService.name, {
+				setIntegrityDelegate: () => {},
+				getAccountsRaw: async () => [],
+				onAccountAdded: new EventHandler<Account>(),
+				onAccountDeleted: new EventHandler<Account>(),
+			}),
+		)
+		const coordinator = new AccountIntegrityCoordinator(new LoggerStore(new ConfigStore()), api, async () => "0x")
+		services.add(coordinator)
+		await services.start()
+		await coordinator.bootVerification
+
+		await coordinator.closeSessionForMismatch("p9")
+		expect(askedToLock).toEqual(["p9"])
+	})
+
+	test("stamp is CLEARED when the profile's account set changes (no skip-verify of a new row)", async () => {
+		const { stamps, accountEvents } = await build({ rows: [row()], derive: async () => "0xaaaa", activeProfileId: "p1" })
+		// A green boot stamped the build.
+		expect((await stamps.get("p1"))?.walletVersion).toBeDefined()
+		accountEvents.added.invoke(row({ profileId: "p1", address: "0xnew", index: 1 }))
+		await new Promise((r) => setTimeout(r, 0))
+		expect(await stamps.get("p1")).toBeUndefined()
 	})
 })

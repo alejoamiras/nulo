@@ -83,6 +83,23 @@ describe("AccountIntegrityBarrier", () => {
 		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
 	})
 
+	test("an auth path in a QUERY PARAM does not suppress the barrier (exact-path match, not substring)", async () => {
+		window.location.hash = "#/popup/general?return=/popup/auth"
+		installChromeStorage({ [KEY]: record("p1"), [LAST_ACTIVE]: "p1" })
+		const w = mountBarrier()
+		await flushPromises()
+		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
+	})
+
+	test("FAIL CLOSED: a block with unresolved (missing) lastActiveProfile still shows the barrier", async () => {
+		// App fell back to profiles[0] but the lastActive pointer is missing — we can't tell which
+		// profile is presented, so a block must not be silently ignored.
+		installChromeStorage({ [KEY]: record("p1") })
+		const w = mountBarrier()
+		await flushPromises()
+		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
+	})
+
 	test("live updates: appears on record write, disappears on heal", async () => {
 		const storage = installChromeStorage({ [LAST_ACTIVE]: "p1" })
 		const w = mountBarrier()

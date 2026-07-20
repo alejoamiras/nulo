@@ -218,3 +218,71 @@ Environmental note for posterity: three intervening canary failures were traced 
 exhaustion (12 GB of leftover `/tmp/nulo-aztec-*` sandbox dirs starving RAM — verified
 code-independent by a pre-audit-commit checkout failing identically); lesson routed to the
 e2e-testing skill.
+
+---
+
+## SECOND post-impl audit pass (two fresh codex xhigh sessions, 2026-07-20)
+
+Requested after implementation to de-risk a nervous merge. Two lenses, run independently.
+
+### Session B — freeze / tests / CI / docs (verdict: low-to-moderate, no CRITICAL/HIGH)
+
+Confirmed sound: lazy npm artifact unreachable from production account/PXE wiring; vendored-JSON
+checkout + class-id hashing deterministic; `as const satisfies` type-sound; the canary's
+pre-state/nullifier/mined sequence genuinely proves initialization execution; shard-exclusion ↔
+canary-inclusion ↔ path-filter ↔ timeout budget all align; fixture changes preserve intent.
+Findings + dispositions:
+- **[MEDIUM] `V5_REGIME` is a paper binding** — the factory imports the frozen artifact/descriptor
+  directly; the regime object only supplies labels. → FIXED (test-level binding): a new pin in
+  `address-freeze.test.ts` asserts the live-derived account's class id + descriptor digest equal
+  the `V5_REGIME` entry, converting the paper binding into a tested one without the larger
+  "regime-as-factory" refactor (out of plan scope).
+- **[MEDIUM] UPDATE.md self-contradiction** — old coupling-point 3 said "re-derive the account
+  fixture" + `bun run test` (excludes the KAT), contradicting the new never-repin freeze rule.
+  → FIXED: point 3 now excludes the frozen Nulo account artifact/addresses and points at
+  `test:all`.
+- **[LOW] native-prover command doesn't require the accelerator** — → FIXED: the skill/UPDATE
+  steps now say to start accelerator-server + assert a `/prove` request (WASM fallback would
+  otherwise masquerade as native validation).
+- **[LOW] phase-5 lessons stale** (said fire-and-forget / no-reverify) — → FIXED to describe the
+  awaited interactive check + bounded rehydration verify.
+
+### Session A — runtime correctness of the coordinator/services (verdict: do not merge until the 2 HIGH + stamp race fixed)
+
+RPC transport confirmed sound after enumerating 131 background methods + PXE + bridge dispatcher:
+every real mid-hole call benefits, no load-bearing arity/default/zod/prototype/DoS regression.
+Session zeroization, pending-secret consumption, TTL-lock direction sound; the export
+`console.error` additions don't alter control flow or leak secrets. Findings + dispositions:
+- **[HIGH] Startup fail-open window** — services accept RPCs from construction (`background/service.ts:34`
+  attaches `onConnect` in the ctor) but the coordinator injects its delegate in a later phase; an
+  unlock or a runtime mismatch in that window optional-chained to a no-op. → FIXED fail-closed:
+  AccountService now writes the DURABLE block via its OWN repo (delegate-independent) on a runtime
+  mismatch; `openSessionVerified` refuses the open when the delegate is absent AND a durable block
+  exists. (A never-before-seen drift in the window is still caught by the immediately-following
+  boot verify; the version-keyed stamp means a drift can't already carry a green stamp.)
+- **[HIGH] Barrier substring pre-auth detection** — `#/popup/general?return=/popup/auth` suppressed
+  the barrier. → FIXED: exact route-PATH comparison (strip `#`, split on `?`/`#`).
+- **[MEDIUM] Stamp bound only to walletVersion, not the account set** — a row added after the green
+  stamp could be skip-verified on a same-build boot. → FIXED: the coordinator clears the profile's
+  stamp on every `onAccountAdded`/`onAccountDeleted`.
+- **[MEDIUM] Mismatch closed whichever profile is active, not the mismatching one** — → FIXED:
+  `lockProfileIfActive(profileId)` (isActive-guarded close under the facade lock) replaces
+  `lockActiveProfile()`; the record's/verified profile id is passed through.
+- **[MEDIUM] Slow verify inside the facade lock could exceed the 5-min force-release → open a
+  deleted profile** — → FIXED (targeted): `openSessionVerified` re-checks `deletionState.isReserved`
+  AFTER the verify, right before `sessionManager.open`. The wallet-core Lock's force-release +
+  cross-holder-release is a PRE-EXISTING property left untouched (a redesign is out of scope; the
+  verify is PXE-free and bounded by account count, so >5min is not reachable in practice).
+- **[MEDIUM] Barrier fail-open on missing `lastActiveProfile`** — → FIXED: fail-closed — a block
+  with an unresolved presented-profile identity shows the barrier.
+- **[MEDIUM] Barrier `refresh()` out-of-order commit** — → FIXED: monotonic generation guard.
+- **[MEDIUM] Profile mutation commits/emits before verify** — ANALYZED, no code change:
+  create/import have ZERO accounts at open time (the default account is created later by the UI
+  bootstrap), so `verifyBeforeSessionOpen` is vacuously green and cannot fail there; changePassword's
+  verify runs over existing accounts but an address-drift block is orthogonal to the password change
+  (which legitimately succeeded), so withholding the session is the correct handled state.
+- **[LOW] Resume path cleared the tombstone but not block/stamp** — → FIXED: `resumePendingDeletions`
+  now clears both idempotently, matching the live `deleteProfile` phase-1 block.
+
+Post-fix gates: lint 0 · typecheck:all 0 · test:all 0 (incl. new coordinator/barrier/integration
+tests for every fix) · armed smoke + canary re-run below.
