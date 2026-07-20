@@ -10,6 +10,12 @@ explicitly choose address-derived delivery for unconstrained transfers.
 
 **Tier**: `light` (bounded, extension-app only, 0 high rubric dimensions).
 **Baseline**: `dev` @ `cff0ba2` (aztec 5.0.1 line, v0.25.0).
+**Status: APPROVED 2026-07-20** — user verdict `approve`. Ask resolutions: A1 confirmed (the
+replacement copy as written); A2 confirmed — and simplified by the user's clarification that
+there are NO prior users of this extension, so there is nothing to migrate and no compat
+consideration attaches to leaving sender rows alone; A3 confirmed (active-network-only import
+registration, documented + counted), with **cross-network import fan-out recorded as explicit
+FOLLOW-UP work** (a later plan, not this scope). No `/harden` pass scheduled for this plan.
 **Governing principle (post-audit)**: the contacts feature is **entirely non-mutating toward
 sender state, except import's explicit adds** — add/edit/delete of a contact never registers,
 unregisters, or migrates a sender. Import may only ADD senders (rows explicitly carrying
@@ -245,7 +251,7 @@ security` cadence covers the area.
 
 ## Seeds
 
-_Draft until the approval gate; finalized post-approval._
+_FINAL (post-approval, 2026-07-20; approved scope unchanged from the gate draft)._
 
 ```
 /goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/contacts-sender-decouple/lessons/phase-N.md` in the transcript; the Phase 5 no-registration receive e2e reported green (required gate, no .todo substitute); `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` and `bun run test:e2e` both report exit 0 in the transcript.
