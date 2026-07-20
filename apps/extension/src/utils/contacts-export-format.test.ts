@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { parseContactsExport } from "./contacts-export-format"
+import { MAX_CONTACT_IMPORT_ROWS, parseContactsExport } from "./contacts-export-format"
 
 describe("parseContactsExport", () => {
 	test("flat array is accepted as v1", () => {
@@ -76,6 +76,17 @@ describe("parseContactsExport", () => {
 
 	test("propagates JSON.parse SyntaxError on invalid JSON", () => {
 		expect(() => parseContactsExport("not json")).toThrow(SyntaxError)
+	})
+
+	test("accepts exactly MAX_CONTACT_IMPORT_ROWS rows", () => {
+		const contacts = Array.from({ length: MAX_CONTACT_IMPORT_ROWS }, (_, i) => ({ name: `c${i}`, address: `0x${i}` }))
+		expect(parseContactsExport(JSON.stringify({ version: 2, contacts })).contacts).toHaveLength(MAX_CONTACT_IMPORT_ROWS)
+	})
+
+	test("rejects a file exceeding MAX_CONTACT_IMPORT_ROWS (hostile-file bound)", () => {
+		const contacts = Array.from({ length: MAX_CONTACT_IMPORT_ROWS + 1 }, (_, i) => ({ name: `c${i}`, address: `0x${i}` }))
+		expect(() => parseContactsExport(JSON.stringify({ version: 2, contacts }))).toThrow(/Too many contacts/)
+		expect(() => parseContactsExport(JSON.stringify(contacts))).toThrow(/Too many contacts/)
 	})
 
 	test("v2 contacts entries are passed through without sanitization", () => {

@@ -1,7 +1,7 @@
 <script setup>
 /** Utils */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
-import { isValidHex } from "@/utils/string"
+import { isValidHex, trimAddress } from "@/utils/string"
 
 /** Composables */
 import { useToast } from "@/composables/toast"

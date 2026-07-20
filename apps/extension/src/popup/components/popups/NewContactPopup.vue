@@ -6,7 +6,8 @@ import { isValidHex } from "@/utils/string"
 import { ContactServiceClient } from "@/wallet/services/contact/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
 const { openToast } = useToast()
 
 /** Store */

@@ -111,7 +111,7 @@ Layers: lint/typecheck + full unit/component suite.
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test` + the grep
 sweep pasted with only allowlisted hits. Layers: lint/typecheck + unit + manual copy review.
 
-### Phase 3 — Focused component tests (new coverage)
+### Phase 3 ✓ — Focused component tests (new coverage)
 Add colocated component tests: `NewContactPopup.test.ts` (submit path calls addContact only —
 assert NO account-state client interaction; toast copy), `EditContactPopup.test.ts` (address edit
 does not touch sender plumbing), `ImportContactsPopup.test.ts` + a unit test for
