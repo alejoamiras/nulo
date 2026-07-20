@@ -133,7 +133,7 @@ Pass: new tests green and included in the run. Layers: lint/typecheck + unit/com
 file(s) via `bun run e2e:agent` (targeted). Pass: green against a live local node.
 Layers: lint/typecheck + network e2e.
 
-### Phase 5 — Behavioral pin: receive from an UNREGISTERED sender (REQUIRED ship gate)
+### Phase 5 ✓ — Behavioral pin: receive from an UNREGISTERED sender (REQUIRED ship gate)
 New network e2e, audit-hardened design:
 - Reuse the suite's already-deployed token (the bundled `@aztec-foundation/aztec-standards` token
   — constrained delivery) — no second deployment.

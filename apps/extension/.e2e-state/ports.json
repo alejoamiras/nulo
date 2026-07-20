@@ -1,13 +1,13 @@
 {
-  "anvil": 32825,
-  "aztec": 45179,
-  "aztecAdmin": 42599,
-  "aztecP2P": 36369,
-  "playground": 42341,
-  "faucet": 37771,
-  "anvilUrl": "http://127.0.0.1:32825",
-  "aztecUrl": "http://localhost:45179",
-  "playgroundUrl": "http://localhost:42341/",
-  "faucetUrl": "http://localhost:37771/",
-  "resolvedAt": "2026-07-14T17:23:56.408Z"
+  "anvil": 17359,
+  "aztec": 31457,
+  "aztecAdmin": 26675,
+  "aztecP2P": 17635,
+  "playground": 18107,
+  "faucet": 13026,
+  "anvilUrl": "http://127.0.0.1:17359",
+  "aztecUrl": "http://localhost:31457",
+  "playgroundUrl": "http://localhost:18107/",
+  "faucetUrl": "http://localhost:13026/",
+  "resolvedAt": "2026-07-20T19:48:47.298Z"
 }

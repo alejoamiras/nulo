@@ -1,6 +1,6 @@
 {
-  "nodeUrl": "http://localhost:29189",
-  "tokenAddress": "0x22ec93c3fa6050c233d8d8c2a6efb2fa4b9e4f1a0eee33b8a9b68aa555b9cdd0",
+  "nodeUrl": "http://localhost:31457",
+  "tokenAddress": "0x09089fca748ef06c14b4081b24088636dab472c65152e5f3f79f8d10eed4149f",
   "sponsoredFpcAddress": "0x1441491b59934ec64f8c98f17c91f23c01ca2a45dbb35caf123146ec76f9970c",
   "minterAddress": "0x201d3ae7ed4e9a8c15b29bc5b7c07d660c150b29d86f6317d4cc101885f722b8"
 }
