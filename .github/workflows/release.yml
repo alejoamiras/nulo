@@ -204,19 +204,19 @@ jobs:
 
   network-e2e:
     needs: resolve
-    # Network-e2e firing rules:
-    # - Stable push to main (auto-release): runs by default. The is_prerelease
-    #   guard never trips here since stable tags never carry a `-` suffix.
-    # - workflow_dispatch (any tag, stable or prerelease): runs only when
-    #   `run_network_e2e=true` is explicitly passed. Default is false so
-    #   prerelease republishes don't burn 30-45 min unless asked.
+    # Network-e2e firing rule: OPT-IN ONLY (workflow_dispatch with
+    # `run_network_e2e=true`). It no longer runs on the auto push:main publish —
+    # the promote dev→main PR already gates the exact code with the full network
+    # suite before it reaches main, so re-running the flaky 30-45 min suite on the
+    # publish only duplicated that gate AND could strand a release: a network-e2e
+    # cancellation/timeout on push:main took the whole run down mid-attach (leaving
+    # a tag + empty release). Dropped the `push` trigger 2026-07-20. The publish
+    # still gates on smoke-against-artifact (real built zip). Pass run_network_e2e=true
+    # on a manual republish if you want the extra network pass.
     if: |
       always() &&
       needs.resolve.result == 'success' &&
-      (
-        (needs.resolve.outputs.is_prerelease == 'false' && github.event_name == 'push') ||
-        github.event.inputs.run_network_e2e == 'true'
-      )
+      github.event.inputs.run_network_e2e == 'true'
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
