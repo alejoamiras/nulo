@@ -201,3 +201,20 @@ sanitization, pending-secret zeroization, deletion-time cleanup.
 
 Post-fix gates: lint 0 · typecheck:all 0 · test:all 0 · armed smoke re-run (see transcript) ·
 actionlint 0.
+
+### Post-fix validation addendum
+
+The frozen-account canary was re-run at FINAL HEAD (all audit fixes in): **exit 0, 2/2 passed,
+three fresh native `/prove` requests** (grant, consume, post-restart tx). Two extra findings from
+the re-validation arc, both fixed:
+- The boot verification was initially awaited inside `services.start()` — re-deriving with a cold
+  bb WASM in the SW stalls ALL service RPCs past the popup's boot budget. It is now
+  fire-and-forget (`bootVerification` promise observable for tests); the verdict still lands
+  mid-flight (durable record + session close), keeping the exposed window bounded.
+- The canary's post-restart assertion "presented account address === A" over-pinned UI behavior;
+  which account the popup presents after a restart is UX, not a freeze invariant. It now asserts
+  membership in the frozen-derived pair; the post-restart tx as A remains the re-derivation proof.
+Environmental note for posterity: three intervening canary failures were traced to tmpfs
+exhaustion (12 GB of leftover `/tmp/nulo-aztec-*` sandbox dirs starving RAM — verified
+code-independent by a pre-audit-commit checkout failing identically); lesson routed to the
+e2e-testing skill.

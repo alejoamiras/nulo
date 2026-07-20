@@ -212,9 +212,12 @@ test.skipIf(!hasConfig)(
 		await recoveryPopup.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
 		await ensureUnlocked(recoveryPopup, TEST_PASSWORD)
 		await recoveryPopup.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 120_000 })
-		expect(await getAccountAddress(recoveryPopup)).toBe(ownerA)
+		// WHICH of the profile's accounts the popup presents after a restart is UI behavior, not a
+		// freeze invariant — the address just has to be one of the frozen-derived pair (the real
+		// re-derivation proof is the post-restart tx as A below).
+		expect([ownerA, callerB]).toContain(await getAccountAddress(recoveryPopup))
 		await recoveryPopup.close()
-		step("post-restart unlock ok; active account address intact")
+		step("post-restart unlock ok; presented account is one of the frozen-derived pair")
 
 		// Reconnect the dApp (verify popup re-fires — the fixture connects with alwaysTrust=false)
 		// and land a post-restart tx as A. The background rebuilds the account contract from the

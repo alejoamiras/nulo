@@ -53,3 +53,12 @@ This prevents guessing at selectors and ensures tests assert on real observable 
 - [Puppeteer API](https://pptr.dev/api)
 - [Puppeteer Chrome Extensions guide](https://pptr.dev/guides/chrome-extensions)
 - [MetaMask e2e test setup](https://github.com/MetaMask/metamask-extension) — see `test/e2e/`
+
+- **tmpfs exhaustion after many network-e2e runs**: each run leaves a `/tmp/nulo-aztec-<pid>-<ts>`
+  sandbox data dir (~hundreds of MB); `/tmp` is RAM-backed tmpfs, so ~15 runs in a day ate 12 GB
+  of RAM and Chrome/extension pages started timing out at RANDOM early stages (popup boot, popup
+  windows) with healthy-looking load averages. If unrelated e2e stages start flaking rotationally
+  on a long-lived box, check `df -h /tmp` FIRST and `rm -rf /tmp/nulo-aztec-*` between sessions
+  (no run active). Diagnosed 2026-07-20 — a green suite at 20:00 degraded to rotating boot
+  timeouts by 22:00 with identical code (verified via a pre-change checkout that failed the same
+  way).

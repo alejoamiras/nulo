@@ -59,6 +59,7 @@ async function build(opts: {
 	const coordinator = new AccountIntegrityCoordinator(new LoggerStore(new ConfigStore()), api, opts.derive)
 	services.add(coordinator)
 	await services.start()
+	await coordinator.bootVerification
 	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
 	return { coordinator, repo, locks, api }
 }

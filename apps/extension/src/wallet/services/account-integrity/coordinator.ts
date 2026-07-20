@@ -63,9 +63,18 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		this.accounts.setIntegrityDelegate(this)
 		// The one activation the per-open chokepoint cannot see: an extension UPDATE rehydrates the
 		// previous session silently, so the first boot of a NEW build re-verifies it here (once per
-		// (profile, walletVersion) — the stamp keeps every later SW wake free).
-		await this.verifyRestoredSessionOnce()
+		// (profile, walletVersion) — the stamp keeps every later SW wake free). Fire-and-forget ON
+		// PURPOSE: re-deriving N accounts with a cold bb WASM can take tens of seconds, and doing it
+		// inside `services.start()` would stall EVERY service RPC past the popup's boot budget. The
+		// verdict still lands mid-flight (mismatch → durable record + session close), so the exposed
+		// window stays bounded to the verify's own duration.
+		this.bootVerification = this.verifyRestoredSessionOnce().catch((error) => {
+			this.logger.log(this.name, LogLevel.Error, "boot integrity verification failed", String(error))
+		})
 	}
+
+	/** The in-flight boot verification — observable (tests await it); startup never does. */
+	public bootVerification: Promise<void> = Promise.resolve()
 
 	private async verifyRestoredSessionOnce(): Promise<void> {
 		const active = await this.profiles.getActiveProfile()
