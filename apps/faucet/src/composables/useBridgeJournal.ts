@@ -443,6 +443,17 @@ export function flagRecordError(id: string, note: string): void {
 	setRuntime(id, { attention: "error", note })
 }
 
+/** WRITE-ONCE resume-attempt token (journal-ux plan L15). Returns false — refuse the resume —
+ *  when the record is missing or a token already exists; the token is NEVER cleared by flows
+ *  (only chain proof, i.e. a recorded depositTxHash, moves the record past it). Journal-first:
+ *  the caller latches BEFORE any wallet prompt so an ambiguous death lands review-only. */
+export function latchResumeAttempt(id: string): boolean {
+	const rec = records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined
+	if (!rec || rec.resumeAttemptAt !== undefined) return false
+	patchRecord(id, { resumeAttemptAt: deps.now() })
+	return true
+}
+
 /**
  * Foreground ownership (plan S13): UI-owned, compare-and-swap. While a record is foreground, the
  * journal list suppresses its card - the stepper/receipt is its only surface. In-memory only:

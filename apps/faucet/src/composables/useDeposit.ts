@@ -831,6 +831,15 @@ export function useDepositFlow() {
 					sepolia.id,
 				)
 				leg = "signing"
+				// Journal-first BEFORE the signature exists: a resume must reuse THIS nonce (Permit2
+				// bitmap gives at-most-once) — a fresh nonce would leave this signed permit executable
+				// alongside the new one.
+				{
+					const fresh = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
+					if (fresh?.fuel) {
+						updateRecord(id, { fuel: { ...fresh.fuel, permitNonce: nonce.toString(), permitDeadline: deadline.toString() } })
+					}
+				}
 				const signature = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...typed } as never))
 
 				log("bridgeWithFuel (confirm in your Ethereum wallet)")

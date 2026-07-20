@@ -44,6 +44,7 @@ import {
 	runDepositClaim,
 	runOnLane,
 	runWithdrawConsume,
+	latchResumeAttempt,
 	setRecordStep,
 	updateRecord,
 	useBridgeJournal,
@@ -156,6 +157,21 @@ describe("useBridgeJournal engine", () => {
 		await new Promise((r) => setTimeout(r, 10))
 		expect(claim).not.toHaveBeenCalled()
 		expect(deps.signL1).not.toHaveBeenCalled()
+	})
+
+	it("latchResumeAttempt is WRITE-ONCE: first latch true, second false, token persisted (L15)", () => {
+		connectJournalDeps({ ...baseDeps(kv) })
+		addRecord(mkDeposit("0xresume", { leafIndex: undefined }))
+		expect(latchResumeAttempt("0xresume")).toBe(true)
+		const { records } = useBridgeJournal()
+		const rec = records.value.find((r) => r.id === "0xresume") as DepositJournalRecord
+		expect(rec.resumeAttemptAt).toBe(999)
+		expect(latchResumeAttempt("0xresume")).toBe(false)
+	})
+
+	it("latchResumeAttempt refuses unknown ids", () => {
+		connectJournalDeps({ ...baseDeps(kv) })
+		expect(latchResumeAttempt("0xmissing")).toBe(false)
 	})
 
 	it("L1-timeout stranding: no leafIndex + a recorded depositTxHash recovers the leg, then claims to done", async () => {

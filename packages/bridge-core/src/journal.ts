@@ -77,6 +77,11 @@ export interface DepositFuelBlock {
 	 *  so a receipt stuck in "pending" limbo (vanished tx, node that never reports "dropped") can
 	 *  re-enter the retry path instead of waiting forever. */
 	claimAttemptAt?: number
+	/** Permit2 nonce/deadline of the FIRST witness signature, persisted journal-first BEFORE
+	 *  signing. A resume must REUSE this nonce (at-most-once by the Permit2 bitmap) — a fresh nonce
+	 *  would leave the old signed permit executable alongside the new one (double deposit). */
+	permitNonce?: string
+	permitDeadline?: string
 	/** Latched journal-first BEFORE any fjwc-embedded wallet call (L14 trigger 1 precondition). */
 	claimAttempt?: boolean
 	/** The fjwc attempt's tx hash, persisted as soon as the wallet returns it. */
@@ -147,6 +152,11 @@ export interface DepositJournalRecord extends JournalBase {
 	/** The L1 account that sent the approve — the trusted expected-owner for the receipt-identity
 	 *  check (the hash alone is not proof of the right approval). */
 	approveOwner?: string
+	/** WRITE-ONCE resume-attempt token (epoch ms), set journal-first BEFORE the resume's deposit
+	 *  prompt. Once present the record is never resumable again without chain proof: deposits have
+	 *  no protocol nullification, so an attempt that ends ambiguously must terminate resumability
+	 *  (permanent review-only + paste-hash). Never cleared by flows. */
+	resumeAttemptAt?: number
 }
 
 export type DepositFailedLeg = "sealing" | "signing" | "approving" | "depositing"
