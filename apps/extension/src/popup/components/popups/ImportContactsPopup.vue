@@ -163,10 +163,13 @@ watch(
 
 						<!-- Active-network banner. Only shown when at least one
 						     selected import will trigger registerSender on confirm. -->
-						<Text v-if="incomingSenderCount > 0" size="12" weight="600" color="secondary" align="center">
+						<Text v-if="incomingSenderCount > 0 && appStore.network" size="12" weight="600" color="secondary" align="center">
 							<Text color="primary" weight="700">{{ incomingSenderCount }}</Text>
 							{{ incomingSenderCount === 1 ? "sender" : "senders" }} will be registered on
-							<Text color="primary" weight="700">{{ appStore.network?.name ?? "no active network" }}</Text>.
+							<Text color="primary" weight="700">{{ appStore.network.name }}</Text>.
+						</Text>
+						<Text v-else-if="incomingSenderCount > 0" size="12" weight="600" color="secondary" align="center">
+							No active network — sender registrations will be skipped.
 						</Text>
 					</Flex>
 

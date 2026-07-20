@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, test } from "vitest"
-import { MAX_CONTACT_IMPORT_ROWS, parseContactsExport } from "./contacts-export-format"
+import { MAX_CONTACT_IMPORT_BYTES, MAX_CONTACT_IMPORT_ROWS, parseContactsExport } from "./contacts-export-format"
 
 describe("parseContactsExport", () => {
 	test("flat array is accepted as v1", () => {
@@ -87,6 +87,11 @@ describe("parseContactsExport", () => {
 		const contacts = Array.from({ length: MAX_CONTACT_IMPORT_ROWS + 1 }, (_, i) => ({ name: `c${i}`, address: `0x${i}` }))
 		expect(() => parseContactsExport(JSON.stringify({ version: 2, contacts }))).toThrow(/Too many contacts/)
 		expect(() => parseContactsExport(JSON.stringify(contacts))).toThrow(/Too many contacts/)
+	})
+
+	test("rejects an oversized file BEFORE parsing (byte bound)", () => {
+		const raw = `[${" ".repeat(MAX_CONTACT_IMPORT_BYTES)}]`
+		expect(() => parseContactsExport(raw)).toThrow(/too large/)
 	})
 
 	test("v2 contacts entries are passed through without sanitization", () => {

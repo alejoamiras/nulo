@@ -113,6 +113,11 @@ function handleFillFieldsWithDefaultValues() {
 
 const handleUpdateContact = async () => {
 	if (!isAvailableToUpdateContact.value) return
+	// Mirror the submit button's dirty gate: the Enter-key path calls this
+	// directly, and a clean submit would otherwise fire a no-op update with
+	// a misleading "updated" toast. (Import staging is exempt — its dirty
+	// state lives in the staging row, not this form.)
+	if (!cacheStore.importContact && !isStartedEditingName.value && !isStartedEditingAddress.value) return
 
 	isLoading.value = true
 	try {

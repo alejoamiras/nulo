@@ -30,8 +30,11 @@ vi.mock("@/wallet/services/contact/client", () => ({
 		return contactServiceMock
 	}),
 }))
+const appStoreState: { network: { id: string; name: string } | null } = {
+	network: { id: "net-1", name: "Testnet" },
+}
 vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ network: { id: "net-1", name: "Testnet" } }),
+	useAppStore: () => appStoreState,
 }))
 vi.mock("@/stores/cache.store", () => ({ useCacheStore: () => cacheStoreState }))
 vi.mock("@/stores/popup.store", () => ({
@@ -69,6 +72,7 @@ async function mountWithStaged(staged: Array<Record<string, unknown>>) {
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	appStoreState.network = { id: "net-1", name: "Testnet" }
 	cacheStoreState.importContacts = []
 	cacheStoreState.importPromise = null
 	cacheStoreState.importContact = null
@@ -99,6 +103,13 @@ describe("ImportContactsPopup — counted sender banner", () => {
 
 	test("no banner when nothing selected would register a sender", async () => {
 		const w = await mountWithStaged([{ name: "A", address: VALID_A, isSender: false }])
+		expect(w.text()).not.toContain("will be registered on")
+	})
+
+	test("no active network: states that registrations will be skipped (not a contradictory network name)", async () => {
+		appStoreState.network = null
+		const w = await mountWithStaged([{ name: "A", address: VALID_A, isSender: true }])
+		expect(w.text()).toContain("No active network — sender registrations will be skipped.")
 		expect(w.text()).not.toContain("will be registered on")
 	})
 })

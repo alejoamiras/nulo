@@ -37,10 +37,18 @@ export type ParsedExport = {
  *  for `isSender` rows). Reject oversized files at the boundary. */
 export const MAX_CONTACT_IMPORT_ROWS = 512
 
+/** Byte ceiling checked BEFORE JSON.parse, so an oversized file is
+ *  rejected without materializing its object graph. 512 maximal rows fit
+ *  in well under 100 KB; 1 MB leaves generous formatting headroom. */
+export const MAX_CONTACT_IMPORT_BYTES = 1_000_000
+
 /** Strict parser. Throws on any shape that isn't a v1 array or
- *  a v2 envelope, and on files exceeding `MAX_CONTACT_IMPORT_ROWS`.
+ *  a v2 envelope, and on files exceeding the byte or row bounds.
  *  Caller surfaces a generic import-failure toast. */
 export function parseContactsExport(raw: string): ParsedExport {
+	if (raw.length > MAX_CONTACT_IMPORT_BYTES) {
+		throw new Error(`Contacts file too large (max ${MAX_CONTACT_IMPORT_BYTES} bytes)`)
+	}
 	const parsed: unknown = JSON.parse(raw)
 	let result: ParsedExport | null = null
 	if (Array.isArray(parsed)) {

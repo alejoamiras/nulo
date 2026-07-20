@@ -97,11 +97,15 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			const data = await file.text()
 			const { contacts: rawContacts } = parseContactsExport(data) as { contacts: Array<Record<string, unknown>> }
 			const seenAddresses = new Set<string>()
+			// Construct MINIMAL rows — never spread the hostile input object
+			// (arbitrary extra properties would ride along into staging and
+			// storage). Addresses are lowercased: hex is case-insensitive and
+			// the wallet emits lowercase, so canonicalizing here keeps dedup
+			// and duplicate-contact matching sound against mixed-case files.
 			const importedContacts = rawContacts
 				.map((c) => ({
-					...c,
 					name: sanitizeString(c.name as string, 20),
-					address: sanitizeString(c.address as string, 66),
+					address: sanitizeString(c.address as string, 66).toLowerCase(),
 					isSender: c?.isSender === true,
 				}))
 				.filter((c) => !!c.name && !!c.address)
@@ -203,7 +207,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 				const detail = senderOk === 0 ? "sender registration failed" : `${senderOk} of ${senderTotal} senders registered`
 				openToast({ label: `Contacts imported · ${detail}`, icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (senderTotal > 0) {
-				openToast({ label: `Contacts imported · ${senderOk} senders registered`, icon: "info" })
+				openToast({ label: `Contacts imported · ${senderOk} ${senderOk === 1 ? "sender" : "senders"} registered`, icon: "info" })
 			} else {
 				openToast({ label: "Import completed successfully", icon: "info" })
 			}

@@ -59,7 +59,7 @@ const handleDelete = (sender) => {
 	cacheStore.confirm.confirm_text = "Yes, delete sender"
 	cacheStore.confirm.title = "Delete this sender?"
 	cacheStore.confirm.description =
-		"Only affects tokens using legacy address-derived delivery — standard transfers are still detected automatically"
+		"Most transfers are detected automatically; removing a sender only affects transfers delivered with address-derived tagging"
 	cacheStore.confirm.callback = async () => {
 		await accountStateClientService.deleteSender(appStore.network.id, sender)
 
@@ -144,7 +144,7 @@ onBeforeUnmount(() => {
 
 			<div v-else :class="$style.empty">
 				<span :class="$style.empty_headline">NO SENDERS YET</span>
-				<span :class="$style.empty_sub">Standard transfers are detected automatically. Add a sender only for tokens using legacy address-derived delivery.</span>
+				<span :class="$style.empty_sub">Most transfers are detected automatically. Add a sender only for transfers delivered with address-derived tagging.</span>
 			</div>
 
 			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large" data-testid="senders-add-btn">

@@ -89,3 +89,50 @@ Every checkable claim was verified in-tree before adoption:
 Disposition of each condition is recorded in plan.md § "Codex audit" (all five conditions
 adopted; the unconstrained-delivery e2e coverage partially adopted as a claim-narrowing; the
 phase collapse adopted in spirit).
+
+---
+
+# Codex post-implementation audit (session `019f8147-ee70-7783-a0c0-383e11cff692`)
+
+## Verdict
+
+`conditional approve (with conditions: harden import bounds/canonicalization, correct misleading
+sender copy, and strengthen the claimed behavior pins)`
+
+## Findings (verbatim)
+
+1. **Medium — hostile import remains allocation-amplifiable.** The 512-row check occurs after
+   `file.text()` and `JSON.parse()`, so a huge file is fully materialized first. Import then
+   spreads every unvalidated row, copying arbitrary extra properties. Add a file-byte limit,
+   validate minimal row shapes, and construct only `{name,address,isSender}`.
+2. **Medium — address dedup is not canonical.** Dedup uses the sanitized string verbatim, while
+   valid hex is case-insensitive. Mixed-case representations of one Aztec address can bypass
+   dedup and produce repeated contact/PXE operations. Popup edits can also recreate duplicates
+   after the initial dedup. Canonicalize before comparison and re-dedup immediately before
+   service calls.
+3. **Medium — Advanced copy overstates the guarantee.** senders/index.vue says deletion "only
+   affects" legacy tokens, omitting unconstrained transfers whose sender wallet deliberately
+   chooses address-derived delivery. This could induce deletion of a still-needed registration.
+4. **Low — consent copy/tests have holes.** The banner's singular/plural is correct, but "1
+   sender will be registered on no active network" is contradictory; the eventual toast also
+   says "1 senders registered." The banner tests neither deselection-driven count changes nor
+   no-network wording despite claiming selection tracking.
+5. **Low — behavior/test integrity gaps.** Edit's disabled-button dirty gate is bypassed by
+   Enter because `handleUpdateContact()` checks validity but not dirtiness. New/Edit component
+   tests do not actually spy on account-state construction or mutation. The add-contact network
+   pin checks the chip immediately after the contact row appears, leaving a race where a delayed
+   sender mutation could escape detection; inspect the settled Advanced sender list before
+   registering there.
+6. **Low — cleanup incomplete.** Runner-generated `.e2e-state/ports.json` remains changed, and
+   `deleteContact` still documents/accepts the removed unregister toggle. `git diff --check`
+   also reports a trailing blank line.
+
+Looks fine: no residual contact add/edit/delete sender writes; import is adds-only; the
+merge-by-name "never deletes" test genuinely pins `deleteSender`; Reset Changes restores both
+fields; the receive e2e strongly pins zero senders + exact 0→25 delta + post-transfer zero
+senders; all `addContact` callers migrated; dApp RPC/capability paths unchanged.
+
+## Disposition
+
+All six findings addressed (adopted or explicitly rejected with reason) — the full table lives
+in plan.md § "Post-implementation review round".

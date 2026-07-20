@@ -72,9 +72,16 @@ test.skipIf(!hasConfig)(
 		)
 		expect(chipBefore).toBe(false)
 
-		// Register the SAME address through the Advanced surface.
-		// (Hash hop: sub-pages have no bottom nav for navigateToSettings.)
+		// Register the SAME address through the Advanced surface. Before
+		// registering, assert the SETTLED sender list has no row for the
+		// address — a delayed add-contact-side mutation would surface here,
+		// not just as a missed chip in the instant after row render.
 		await gotoSenders(page)
+		const preRegRow = await page.evaluate(
+			(a: string) => !!document.querySelector(`[data-testid="sender-row"][data-sender-address="${a}"]`),
+			address,
+		)
+		expect(preRegRow).toBe(false)
 		await addSenderViaAdvanced(page, address)
 
 		// Back on contacts, the chip reflects the PXE registration.

@@ -153,6 +153,17 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		expect(openToastMock).toHaveBeenCalledWith({ label: "Something went wrong", icon: "warning" }, expect.anything())
 	})
 
+	test("Enter with a clean form is a no-op (dirty gate holds on the keyboard path)", async () => {
+		const w = await mountAndOpen()
+		const input = w.find('[data-testid="name-input"]').element as HTMLInputElement
+		input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+
+		expect(contactServiceMock.updateContact).not.toHaveBeenCalled()
+		expect(w.emitted("onClose")).toBeFalsy()
+		expect(openToastMock).not.toHaveBeenCalled()
+	})
+
 	test("import mode writes cacheStore.importContact and never calls the service", async () => {
 		cacheStoreState.importContact = { id: "", name: "Staged", address: OLD_ADDRESS }
 		const w = await mountAndOpen([], "")

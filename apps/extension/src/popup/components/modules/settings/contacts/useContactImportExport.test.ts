@@ -115,7 +115,7 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		expect(accountStateService.addSender).toHaveBeenCalledTimes(1)
 		expect(accountStateService.addSender).toHaveBeenCalledWith("net-1", ADDR_A)
 		expect(accountStateService.deleteSender).not.toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith({ label: "Contacts imported · 1 senders registered", icon: "info" })
+		expect(openToastMock).toHaveBeenCalledWith({ label: "Contacts imported · 1 sender registered", icon: "info" })
 	})
 
 	test("merge-by-name address swap NEVER unregisters the old address (adds-only pin)", async () => {
@@ -166,6 +166,46 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		expect(contactService.addContact).toHaveBeenCalledTimes(1)
 		expect(contactService.addContact).toHaveBeenCalledWith("First", ADDR_A)
 		expect(accountStateService.addSender).toHaveBeenCalledTimes(1)
+	})
+
+	test("mixed-case duplicates canonicalize to one lowercase row (hex is case-insensitive)", async () => {
+		const { contactService, accountStateService } = makeServices()
+		const api = useContactImportExport({ contacts: ref([]), contactService, accountStateService } as never)
+		fileWith({
+			version: 2,
+			contacts: [
+				{ name: "Lower", address: ADDR_A, isSender: true },
+				{ name: "Upper", address: ADDR_A.toUpperCase().replace("0X", "0x"), isSender: true },
+			],
+		})
+
+		await runImport(api)
+
+		expect(contactService.addContact).toHaveBeenCalledTimes(1)
+		expect(contactService.addContact).toHaveBeenCalledWith("Lower", ADDR_A)
+		expect(accountStateService.addSender).toHaveBeenCalledTimes(1)
+		expect(accountStateService.addSender).toHaveBeenCalledWith("net-1", ADDR_A)
+	})
+
+	test("hostile extra properties are stripped at the boundary (minimal rows only)", async () => {
+		const { contactService, accountStateService } = makeServices()
+		const api = useContactImportExport({ contacts: ref([]), contactService, accountStateService } as never)
+		fileWith({
+			version: 2,
+			contacts: [{ name: "A", address: ADDR_A, isSender: false, __proto__pollution: "x", selected: true, idx: 99 }],
+		})
+
+		const done = api.importContacts()
+		await vi.waitFor(() => {
+			if (!cacheStoreState.importPromise) throw new Error("selection gate not reached")
+		})
+		// Snapshot BEFORE resolving — the composable clears the staging
+		// array once the import completes.
+		const staged = { ...(cacheStoreState.importContacts[0] as Record<string, unknown>) }
+		cacheStoreState.importPromise?.resolve([...(cacheStoreState.importContacts as never[])])
+		await done
+
+		expect(Object.keys(staged).sort()).toEqual(["address", "isSender", "name"])
 	})
 
 	test("a sender-free import toasts plain success", async () => {

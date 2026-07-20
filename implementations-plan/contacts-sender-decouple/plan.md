@@ -244,6 +244,36 @@ Layers: typecheck/lint/unit/build + smoke e2e.
 8. Cold-PXE fresh-device catch-up test → **adopted as in-phase stretch** (non-blocking).
 9. Multi-device/dApp-amplification remarks → **acknowledged, out of scope** (pre-existing).
 
+## Post-implementation review round (completed)
+
+- **`/code-review max --fix`**: applied + committed separately (`chore(contacts): code-review
+  pass`) — dropped NewContactPopup's empty style block; reverted the runner-written
+  `.test-config.json`. Noted (not fixed, per the bug-pinning rule): EditContactPopup's
+  `onContactUpdated` compares `contact.id === contactToEdit.id` (missing `.value`) — preserved
+  verbatim from the original; pre-existing.
+- **Codex post-impl audit**: `conditional approve` (transcript appended to `audit-codex.md`).
+  Disposition of all findings:
+  1. (M) Import allocation amplification → ADOPTED: `MAX_CONTACT_IMPORT_BYTES` checked BEFORE
+     `JSON.parse`; staged rows constructed minimally (`{name,address,isSender}` — hostile extra
+     properties stripped); tests added for both.
+  2. (M) Non-canonical dedup → ADOPTED: addresses lowercased at the import boundary (hex is
+     case-insensitive; the wallet emits lowercase); mixed-case dedup test added. Post-staging
+     re-introduction via the edit popup lands on the merge-by-address update path (no
+     amplification) — accepted + documented.
+  3. (M) Advanced copy overstated ("only affects legacy tokens") → ADOPTED: both strings now say
+     "transfers delivered with address-derived tagging" (covers sender-wallet-chosen
+     unconstrained delivery too).
+  4. (L) Banner/toast wording → ADOPTED: dedicated no-network banner ("registrations will be
+     skipped"), toast singular/plural fixed, tests added. Deselection-count test REJECTED as
+     marginal (trivial computed already covered at 0/1/2).
+  5. (L) Enter bypasses the dirty gate → ADOPTED: dirty check inside `handleUpdateContact` +
+     keyboard-path test. Account-state-constructor spy REJECTED: the module is no longer
+     imported, so a mock factory can never evaluate — the network e2e pins the behavior
+     end-to-end instead. Chip-race → ADOPTED: settled Advanced-list pre-assert before
+     registration in the e2e.
+  6. (L) Cleanup → ADOPTED: `ports.json` reverted, `deleteContact`'s dead `unregisterSender`
+     option removed, EOF whitespace fixed.
+
 ## Post-implementation hardening
 
 Not warranted for this plan alone (surface-reducing UI change); the release-track `/harden
