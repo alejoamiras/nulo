@@ -144,6 +144,22 @@ describe("BridgeJournalCard", () => {
 		expect(junk.findAll(sel(TESTIDS.journalTxLink))).toHaveLength(0)
 	})
 
+	it("the approval tx gets its own per-leg link (J3), before the deposit link", () => {
+		const approve = `0x${"11".repeat(32)}`
+		const dtx = `0x${"22".repeat(32)}`
+		const w = mountCard(deposit({ approveTxHash: approve, depositTxHash: dtx, leafIndex: "7" }))
+		const links = w.findAll(sel(TESTIDS.journalTxLink))
+		expect(links[0].attributes("href")).toBe(`https://sepolia.etherscan.io/tx/${approve}`)
+		expect(links[0].text()).toMatch(/approval/i)
+		expect(links[1].attributes("href")).toBe(`https://sepolia.etherscan.io/tx/${dtx}`)
+	})
+
+	it("an approve-death record (persisted facts, no runtime) narrates the honest failed phase", () => {
+		// The exact reload shape from the smoke test: approve leg died, nothing else recorded.
+		const w = mountCard(deposit({ isPrivate: false, failedLeg: "approving", failedOutcome: "no-funds-moved" }))
+		expect(w.find(sel(TESTIDS.journalStep)).text().toLowerCase()).toContain("no funds moved")
+	})
+
 	it("deposit stage matrix renders exactly the right action", () => {
 		// depositing: no claim button.
 		expect(mountCard(deposit()).find(sel(TESTIDS.journalClaim)).exists()).toBe(false)

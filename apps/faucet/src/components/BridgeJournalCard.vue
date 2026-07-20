@@ -200,6 +200,7 @@ const txLinks = computed(() => {
 	const links: { label: string; href: string }[] = []
 	if (props.record.direction === "deposit") {
 		const rec = props.record as DepositJournalRecord
+		if (rec.approveTxHash) links.push({ label: "approval tx ↗", href: etherscanTxUrl(rec.approveTxHash) })
 		if (rec.depositTxHash) links.push({ label: "deposit tx ↗", href: etherscanTxUrl(rec.depositTxHash) })
 		if (rec.claimTxHash) links.push({ label: "claim tx ↗", href: explorerTxUrl(rec.claimTxHash) })
 	} else {

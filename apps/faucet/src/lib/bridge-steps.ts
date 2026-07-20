@@ -1,5 +1,12 @@
-import { type BridgeJournalRecord, type DepositJournalRecord, type WithdrawJournalRecord, assetKindOf } from "@nulo/bridge-core"
+import {
+	type BridgeJournalRecord,
+	type DepositFailedLeg,
+	type DepositJournalRecord,
+	type WithdrawJournalRecord,
+	assetKindOf,
+} from "@nulo/bridge-core"
 import type { RecordRuntime } from "@/composables/useBridgeJournal"
+import { describeDepositFailure } from "./describe-failure"
 
 /**
  * The ONE narration view-model (plan S3/S10): maps a record + its runtime onto the phase rail
@@ -32,6 +39,14 @@ export const SYNC_TARGET_MARGIN_BLOCKS = 3
 const FAILED_ATTENTIONS = new Set(["error", "unknown-outcome", "mismatch", "tampered", "unseal-failed", "stale", "stale-deployment"])
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
+
+/** A persisted failure leg → its rail phase key (post-reload fallback for the fact-bounded zone). */
+const FAILED_LEG_TO_KEY: Record<DepositFailedLeg, BridgePhase["key"]> = {
+	sealing: "seal",
+	signing: "sign",
+	approving: "approve",
+	depositing: "deposit",
+}
 
 export function stepperPhases(record: BridgeJournalRecord, runtime: RecordRuntime = {}): BridgePhase[] {
 	return record.direction === "deposit"
@@ -68,7 +83,14 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	else if (rt.step === "sealing") activeKey = "seal"
 	else if (rt.step === "signing") activeKey = "sign"
 	else if (rt.step === "approving") activeKey = "approve"
+	// Post-reload the live runtime step is gone; a persisted failure leg (J1) is the only truth
+	// about WHERE a pre-deposit death happened. Without this a reloaded approve-death fell through
+	// to "deposit" and the rail claimed the deposit failed — the misleading narration this fixes.
+	else if (rec.failedLeg) activeKey = FAILED_LEG_TO_KEY[rec.failedLeg]
 	else activeKey = "deposit"
+	// A leg not in this variant's phase list (legs are variant-consistent, so this is defensive)
+	// would make indexOf return -1 and blank the rail; fall back to the deposit anchor.
+	if (!keys.includes(activeKey)) activeKey = "deposit"
 
 	const labels: Record<string, string> = {
 		seal: "SEAL",
@@ -119,7 +141,10 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		}
 	}
 
-	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt)
+	// Persisted failure fallback: after a reload the runtime `attention`/`note` are gone, but the
+	// J1 facts survive — surface the honest consequence so the failed phase still reads true.
+	const persistedNote = rec.completedAt === undefined ? (describeDepositFailure(rec)?.consequence ?? undefined) : undefined
+	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt, persistedNote)
 }
 
 function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePhase[] {
@@ -171,9 +196,13 @@ function buildPhases(
 	activeKey: BridgePhase["key"],
 	completed: boolean,
 	rt: RecordRuntime,
+	/** Persisted-failure consequence copy: marks the active phase failed with this note when the
+	 *  live runtime carries no attention (the post-reload path). Runtime attention still wins. */
+	persistedNote?: string,
 ): BridgePhase[] {
 	const activeIndex = keys.indexOf(activeKey)
-	const failed = !!rt.attention && FAILED_ATTENTIONS.has(rt.attention)
+	const runtimeFailed = !!rt.attention && FAILED_ATTENTIONS.has(rt.attention)
+	const failed = runtimeFailed || (!rt.attention && persistedNote !== undefined)
 	return keys.map((key, i) => {
 		if (completed) return { key, label: labels[key], state: "done" as const }
 		if (i < activeIndex) {
@@ -187,7 +216,7 @@ function buildPhases(
 				key,
 				label: labels[key],
 				state: failed ? ("failed" as const) : ("active" as const),
-				detail: failed ? rt.note : (rt.stepDetail ?? prompts[key]),
+				detail: failed ? (rt.note ?? persistedNote) : (rt.stepDetail ?? prompts[key]),
 				progress: progress[key],
 				eta: failed ? undefined : etas[key],
 			}

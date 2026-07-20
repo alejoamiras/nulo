@@ -266,3 +266,48 @@ describe("fueled deposit rail", () => {
 		expect(phases.map((p) => p.key)).toEqual(["approve", "deposit", "sync", "claim", "confirm"])
 	})
 })
+
+describe("stepperPhases — persisted failure facts drive the rail post-reload (J3)", () => {
+	// Runtime empty (rt = {}) simulates a reload: only the persisted J1 facts remain.
+	const phase = (rec: DepositJournalRecord, key: string) => stepperPhases(rec, {}).find((p) => p.key === key)
+
+	it("an approve-death anchors the FAILED phase on APPROVE, not DEPOSIT (the post-reload bug)", () => {
+		const rec = dep({ isPrivate: false, failedLeg: "approving", failedOutcome: "no-funds-moved" })
+		expect(phase(rec, "approve")?.state).toBe("failed")
+		expect(phase(rec, "deposit")?.state).toBe("pending")
+		expect(phase(rec, "approve")?.detail).toMatch(/no funds moved/i)
+	})
+
+	it("a sealing-death anchors on SEAL (private)", () => {
+		const rec = dep({ isPrivate: true, failedLeg: "sealing", failedOutcome: "no-funds-moved" })
+		expect(phase(rec, "seal")?.state).toBe("failed")
+	})
+
+	it("a signing-death anchors on SIGN (fueled private)", () => {
+		const rec = dep({
+			isPrivate: true,
+			schema: 2,
+			fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" },
+			failedLeg: "signing",
+			failedOutcome: "no-funds-moved",
+		})
+		expect(phase(rec, "sign")?.state).toBe("failed")
+	})
+
+	it("unknown-outcome marks DEPOSIT failed with the hedged, do-not-resend copy", () => {
+		const rec = dep({ isPrivate: false, failedLeg: "depositing", failedOutcome: "unknown-outcome" })
+		expect(phase(rec, "deposit")?.state).toBe("failed")
+		expect(phase(rec, "deposit")?.detail).toMatch(/check your ethereum wallet activity/i)
+	})
+
+	it("live runtime attention still WINS over the persisted note (no double-narration)", () => {
+		const rec = dep({ isPrivate: false, failedLeg: "approving", failedOutcome: "no-funds-moved" })
+		const p = stepperPhases(rec, { attention: "error", note: "live note" }).find((x) => x.state === "failed")
+		expect(p?.detail).toBe("live note")
+	})
+
+	it("a persisted failure never fabricates a failed phase on a COMPLETED record", () => {
+		const rec = dep({ isPrivate: false, failedLeg: "approving", failedOutcome: "no-funds-moved", completedAt: 9 })
+		expect(stepperPhases(rec, {}).every((p) => p.state === "done")).toBe(true)
+	})
+})
