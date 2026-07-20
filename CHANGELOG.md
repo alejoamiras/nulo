@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.25.0](https://github.com/alejoamiras/nulo/compare/v0.24.0...v0.25.0) (2026-07-20)
+
+
+### Features
+
+* **aztec:** 5.0.1 line — client, standards+fee-payment swap, [#281](https://github.com/alejoamiras/nulo/issues/281) fence, live redeploy ([#282](https://github.com/alejoamiras/nulo/issues/282)) ([f9f28cf](https://github.com/alejoamiras/nulo/commit/f9f28cfd5af009ed312bfa0d09d5fb53628022a0))
+* **backup:** migrate imported full-backups forward through the migration engine ([#274](https://github.com/alejoamiras/nulo/issues/274)) ([87f6678](https://github.com/alejoamiras/nulo/commit/87f6678b529cbc32b3987d1dae3066d01632c9ae))
+* **backup:** security-harden backup import + profile deletion (A-H, D, audit fixes) ([#276](https://github.com/alejoamiras/nulo/issues/276)) ([fb61a63](https://github.com/alejoamiras/nulo/commit/fb61a6301b3a0147260ab6f4777a9f7211c2d48a))
+* **extension:** data-preserving storage-migration framework ([#246](https://github.com/alejoamiras/nulo/issues/246)) ([79333e6](https://github.com/alejoamiras/nulo/commit/79333e6da56344ab46c3efceb8d7cd02b0cf2d67))
+* **release:** require verify-live + faucet deploy-hook preflight ([#287](https://github.com/alejoamiras/nulo/issues/287)) ([f576ef6](https://github.com/alejoamiras/nulo/commit/f576ef612abe85e776c2423b14e71882ba324489))
+
+
+### Bug Fixes
+
+* **backup:** close the 3 backup-restore data-corruption bugs (P1–P3) + P6/P7 ([#275](https://github.com/alejoamiras/nulo/issues/275)) ([a1242ed](https://github.com/alejoamiras/nulo/commit/a1242ed8455e039cb77f68fdfb04739fae673211))
+* **backup:** d13-residual safe cleanups (coordinator test, tombstone telemetry, index) ([#277](https://github.com/alejoamiras/nulo/issues/277)) ([ac6c436](https://github.com/alejoamiras/nulo/commit/ac6c4360619e4a4231fa8304404336e6d197a83c))
+* **bridge:** L1-timeout deposit recovery + amount-error debounce + fee-juice notice ([#290](https://github.com/alejoamiras/nulo/issues/290)) ([0bda374](https://github.com/alejoamiras/nulo/commit/0bda374c825c49245a8cec3ed8e502a1ae4a0776))
+* **bridge:** reachable recovery — stranded-card claim + private-fuel limbo escape ([#291](https://github.com/alejoamiras/nulo/issues/291)) ([8aa488e](https://github.com/alejoamiras/nulo/commit/8aa488ec021548d340fe114c42824ae3eca77a88))
+* **bridge:** resilient receipt wait on approve, mint and consume legs ([#292](https://github.com/alejoamiras/nulo/issues/292)) ([c815551](https://github.com/alejoamiras/nulo/commit/c8155513912596eaab84935ff0595544808cea5f))
+* **release:** landing/faucet deploys skip on workflow_dispatch (missing always()) ([#256](https://github.com/alejoamiras/nulo/issues/256)) ([de03935](https://github.com/alejoamiras/nulo/commit/de0393503875b9f653036a75569022ac95f12508))
+* **security:** harden 14 audit findings (11 units) + gpt-5.6-sol post-merge audits ([#272](https://github.com/alejoamiras/nulo/issues/272)) ([cc0e7b2](https://github.com/alejoamiras/nulo/commit/cc0e7b22d5b4790b0a7c6b01e5e15fd998e6d706))
+* **wallet:** registerContract void conformance + authwit consent card ([#288](https://github.com/alejoamiras/nulo/issues/288)) ([3f4785f](https://github.com/alejoamiras/nulo/commit/3f4785f3f829ea3b8b8da17709e1c48d9eda3fcf))
+
+
+### Refactoring
+
+* harden-quality arc — 21/22 audit findings (Q-01..Q-22), behavior-preserving ([#220](https://github.com/alejoamiras/nulo/issues/220)) ([578861b](https://github.com/alejoamiras/nulo/commit/578861be629770f76dffc9a2129a7762ac586104))
+
+
+### Misc
+
+* re-baseline prerelease manifest to 0.24.0 (post-stable-release sync) ([e16c15b](https://github.com/alejoamiras/nulo/commit/e16c15b74f1aaca11f7d671ce68973ab8c21039e))
+* sync main → dev — v0.24.0 release + re-baseline prerelease manifest to 0.24.0 ([#254](https://github.com/alejoamiras/nulo/issues/254)) ([e511899](https://github.com/alejoamiras/nulo/commit/e511899edc1f7f40ea5b35a6c47d8252dc76e561))
+
+
+### Docs
+
+* aztec-update skill — the version-bump + network-reset runbook ([#257](https://github.com/alejoamiras/nulo/issues/257)) ([a439b63](https://github.com/alejoamiras/nulo/commit/a439b63aea0385d2da2edc7e9fcdb4256538e25d))
+* **aztec-update:** fpc version gate, fueled candidate smoke, rollback invariant ([#273](https://github.com/alejoamiras/nulo/issues/273)) ([32fd6e0](https://github.com/alejoamiras/nulo/commit/32fd6e0ad1553fe79c23e9a83ab510b06f6df03b))
+* **harden:** mark PROMOTE done — [#272](https://github.com/alejoamiras/nulo/issues/272) merged into dev ([#278](https://github.com/alejoamiras/nulo/issues/278)) ([3c45dc2](https://github.com/alejoamiras/nulo/commit/3c45dc23c849f59e1f66d6fd33fe1430bc120194))
+* **plan:** close p7 — aztec-5.0.1-line delivery merged ([#286](https://github.com/alejoamiras/nulo/issues/286)) ([cfc40b6](https://github.com/alejoamiras/nulo/commit/cfc40b65c07cde4aabb699625e06b8093ef4e973))
+* **plan:** log pre-release smoke findings ([#288](https://github.com/alejoamiras/nulo/issues/288) context) ([#289](https://github.com/alejoamiras/nulo/issues/289)) ([2a9c70f](https://github.com/alejoamiras/nulo/commit/2a9c70fa9dab4703d905fedb047e9aa141b584f7))
+* **release:** stable-release-0.24.0 plan + lessons (first stable on new pipeline) ([#255](https://github.com/alejoamiras/nulo/issues/255)) ([4692738](https://github.com/alejoamiras/nulo/commit/469273804a93389280b3992c763432a233235b15))
+* skill-lesson routing table in CLAUDE.md (update the owning skill, not this file) ([#258](https://github.com/alejoamiras/nulo/issues/258)) ([0f4c95c](https://github.com/alejoamiras/nulo/commit/0f4c95c9229c4b84e2278c9692c16f4fa896c175))
+
+
+### Reverts
+
+* **release:** drop faucet-hook-preflight + verify-live-required folds ([#295](https://github.com/alejoamiras/nulo/issues/295)) ([f6c0acd](https://github.com/alejoamiras/nulo/commit/f6c0acd0db2824e8ce9bb30740adc76c20f3d6a5))
+
 ## [0.24.0](https://github.com/alejoamiras/nulo/compare/v0.23.0...v0.24.0) (2026-07-02)
 
 
