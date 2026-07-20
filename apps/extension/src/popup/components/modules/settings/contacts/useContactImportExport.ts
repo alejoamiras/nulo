@@ -205,7 +205,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			} else if (senderTotal > 0) {
 				openToast({ label: `Contacts imported · ${senderOk} senders registered`, icon: "info" })
 			} else {
-				openToast({ label: "Import competed successfully", icon: "info" })
+				openToast({ label: "Import completed successfully", icon: "info" })
 			}
 		} catch (err) {
 			console.error("Error occurred during import", (err as Error)?.message || (err as Error)?.stack || err)

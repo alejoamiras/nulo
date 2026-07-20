@@ -50,11 +50,11 @@ const importContacts = ref([])
 const contactsByName = ref(null)
 const contactsByAddress = ref(null)
 
-/** True when at least one selected staged contact came in with
- *  `isSender: true`. Drives the active-network banner — we only
- *  surface it when the user's choice would actually trigger
- *  registerSender calls. */
-const hasIncomingSenders = computed(() => importContacts.value.some((c) => c?.isSender && c?.selected))
+/** Count of selected staged contacts that came in with `isSender: true`.
+ *  Drives the active-network banner — surfaced (with the explicit count)
+ *  only when the user's choice would actually trigger registerSender
+ *  calls, so sender additions are a stated, counted consequence. */
+const incomingSenderCount = computed(() => importContacts.value.filter((c) => c?.isSender && c?.selected).length)
 
 function handleSelectContact(contact) {
 	if (contact.isInvalidAddress) {
@@ -163,8 +163,9 @@ watch(
 
 						<!-- Active-network banner. Only shown when at least one
 						     selected import will trigger registerSender on confirm. -->
-						<Text v-if="hasIncomingSenders" size="12" weight="600" color="secondary" align="center">
-							Senders will be registered on
+						<Text v-if="incomingSenderCount > 0" size="12" weight="600" color="secondary" align="center">
+							<Text color="primary" weight="700">{{ incomingSenderCount }}</Text>
+							{{ incomingSenderCount === 1 ? "sender" : "senders" }} will be registered on
 							<Text color="primary" weight="700">{{ appStore.network?.name ?? "no active network" }}</Text>.
 						</Text>
 					</Flex>

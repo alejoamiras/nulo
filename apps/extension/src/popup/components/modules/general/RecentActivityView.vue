@@ -799,7 +799,7 @@ onBeforeUnmount(() => {
 
 		<div :class="$style.empty_state">
 			<span :class="$style.empty_headline">NOTHING HERE YET</span>
-			<span :class="$style.empty_sub">Add contacts to send and receive {{ token.symbol }}.</span>
+			<span :class="$style.empty_sub">Send or receive {{ token.symbol }} to see activity here.</span>
 		</div>
 	</Flex>
 </template>

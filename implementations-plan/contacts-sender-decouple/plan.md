@@ -97,7 +97,7 @@ PXE call, so a crafted file can't amplify scan state unboundedly.
 Pass: exit 0; no source or test references the removed testids outside e2e (reworked in Phase 4).
 Layers: lint/typecheck + full unit/component suite.
 
-### Phase 2 — Copy corrections (frontend addendum: copy is design surface)
+### Phase 2 ✓ — Copy corrections (frontend addendum: copy is design surface)
 - `RecentActivityView.vue:802`: `Add contacts to send and receive {{ token.symbol }}.` →
   **`Send or receive {{ token.symbol }} to see activity here.`** (headline stays).
 - `useContactImportExport.ts` toast: `Import competed successfully` → `Import completed successfully`.

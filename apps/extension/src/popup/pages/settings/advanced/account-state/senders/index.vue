@@ -58,7 +58,8 @@ const handleDelete = (sender) => {
 	cacheStore.confirm.confirm_color = "red"
 	cacheStore.confirm.confirm_text = "Yes, delete sender"
 	cacheStore.confirm.title = "Delete this sender?"
-	cacheStore.confirm.description = "If you delete a sender, further private transactions from that sender won’t appear in your wallet"
+	cacheStore.confirm.description =
+		"Only affects tokens using legacy address-derived delivery — standard transfers are still detected automatically"
 	cacheStore.confirm.callback = async () => {
 		await accountStateClientService.deleteSender(appStore.network.id, sender)
 
@@ -142,7 +143,7 @@ onBeforeUnmount(() => {
 
 			<div v-else :class="$style.empty">
 				<span :class="$style.empty_headline">NO SENDERS YET</span>
-				<span :class="$style.empty_sub">Add accounts you want to receive private transactions from.</span>
+				<span :class="$style.empty_sub">Standard transfers are detected automatically. Add a sender only for tokens using legacy address-derived delivery.</span>
 			</div>
 
 			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large">
