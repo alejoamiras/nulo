@@ -1,37 +1,61 @@
 <script setup>
 /** Utils */
-import { ACCOUNT_INTEGRITY_BLOCKED_ROOT } from "@/wallet/services/account-integrity/types"
+import { ACCOUNT_INTEGRITY_BLOCKED_ROOT, AccountIntegrityBlockedSchema } from "@/wallet/services/account-integrity/types"
 
 /** Reactive state */
 // Raw chrome.storage reads ON PURPOSE (allowlisted in storage-facade-ban, same as
 // MigrationBarrier): this component OBSERVES the background coordinator's durable blocking
-// records. Presence of ANY key under the root means blocked — even a corrupt payload
-// (fail-closed); the parsed record only enriches the copy. Deliberately profile-agnostic: a
-// record for ANY profile raises the barrier (a derivation mismatch is a property of the BUILD,
-// so other profiles on this device are almost certainly affected too); records are cleared by a
-// green re-verification or by deleting the offending profile, so the barrier cannot outlive its
-// cause.
-const blockedKeys = ref([])
-const isBlocked = computed(() => blockedKeys.value.length > 0)
+// records. Scope rules:
+//  - A record for the LAST-ACTIVE profile (the one this popup presents) raises the barrier.
+//    Records for other profiles don't brick the whole wallet — their profiles simply refuse to
+//    unlock, and they can be deleted from a healthy profile's settings.
+//  - A CORRUPT record (unparseable, so its profile is unknown) blocks regardless — fail-closed.
+//  - The barrier YIELDS on the pre-auth routes (auth/register): unlock is the safe retry vector —
+//    a compatible build's verification heals the record; an incompatible one re-withholds the
+//    session. Both screens are pre-session and never expose account data.
+const blockedRecords = ref([])
+const lastActiveProfileId = ref(null)
+const routeHash = ref(window.location.hash)
+
+const isPreAuthRoute = computed(() => routeHash.value.includes("/popup/auth") || routeHash.value.includes("/popup/register"))
+const isBlocked = computed(() => {
+	if (isPreAuthRoute.value) return false
+	return blockedRecords.value.some((r) => r.profileId === null || r.profileId === lastActiveProfileId.value)
+})
 
 /** Handlers */
 const prefix = `${ACCOUNT_INTEGRITY_BLOCKED_ROOT}@`
 async function refresh() {
 	const all = await chrome.storage.local.get(null)
-	blockedKeys.value = Object.keys(all).filter((k) => k.startsWith(prefix))
+	lastActiveProfileId.value = all["nulo:ui:lastActiveProfile"] ?? null
+	blockedRecords.value = Object.entries(all)
+		.filter(([k]) => k.startsWith(prefix))
+		.map(([, v]) => {
+			try {
+				const parsed = AccountIntegrityBlockedSchema.safeParse(JSON.parse(v))
+				return { profileId: parsed.success ? parsed.data.profileId : null }
+			} catch {
+				return { profileId: null }
+			}
+		})
 }
 function onStorageChanged(changes, area) {
 	if (area !== "local") return
-	if (Object.keys(changes).some((k) => k.startsWith(prefix))) void refresh()
+	if (Object.keys(changes).some((k) => k.startsWith(prefix) || k === "nulo:ui:lastActiveProfile")) void refresh()
+}
+function onHashChange() {
+	routeHash.value = window.location.hash
 }
 
 /** Service subscriptions (before the initial read, so no change is missed) */
 chrome.storage.onChanged.addListener(onStorageChanged)
+window.addEventListener("hashchange", onHashChange)
 void refresh()
 
 /** Lifecycle */
 onBeforeUnmount(() => {
 	chrome.storage.onChanged.removeListener(onStorageChanged)
+	window.removeEventListener("hashchange", onHashChange)
 })
 </script>
 
@@ -50,8 +74,8 @@ onBeforeUnmount(() => {
 					message — no legitimate screen will ask for it.
 				</span>
 				<span :class="$style.detail">
-					Install a compatible wallet version to unlock this profile again. Your data on this device
-					is untouched.
+					Install a compatible wallet version, then unlock from the lock screen to re-run
+					verification. Your data on this device is untouched.
 				</span>
 			</div>
 		</div>

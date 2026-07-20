@@ -1,5 +1,12 @@
 import type { StorageArea } from "@nulo/wallet-core/ports"
-import { ACCOUNT_INTEGRITY_BLOCKED_ROOT, AccountIntegrityBlockedSchema, type AccountIntegrityBlocked } from "./types"
+import {
+	ACCOUNT_INTEGRITY_BLOCKED_ROOT,
+	ACCOUNT_INTEGRITY_VERIFIED_ROOT,
+	AccountIntegrityBlockedSchema,
+	VerifiedStampSchema,
+	type AccountIntegrityBlocked,
+	type AccountIntegrityVerifiedStamp,
+} from "./types"
 
 /**
  * Durable integrity-blocked markers over RAW `storage.local` (TombstoneRepository pattern —
@@ -37,6 +44,38 @@ export class AccountIntegrityBlockedRepository {
 	}
 
 	/** Cleared ONLY by a green re-verification of the same profile. */
+	public async clear(profileId: string): Promise<void> {
+		await this.storage.remove(this.key(profileId))
+	}
+}
+
+/**
+ * Per-profile "last build that verified green" markers (same raw-storage discipline as the
+ * blocked repository — a corrupt stamp simply reads as absent, which fails toward RE-verifying).
+ */
+export class AccountIntegrityVerifiedStampRepository {
+	public constructor(private readonly storage: StorageArea) {}
+
+	private key(profileId: string): string {
+		return `${ACCOUNT_INTEGRITY_VERIFIED_ROOT}@${profileId}`
+	}
+
+	public async get(profileId: string): Promise<AccountIntegrityVerifiedStamp | undefined> {
+		const res = await this.storage.get(this.key(profileId))
+		const raw = res[this.key(profileId)]
+		if (typeof raw !== "string") return undefined
+		try {
+			const parsed = VerifiedStampSchema.safeParse(JSON.parse(raw))
+			return parsed.success ? parsed.data : undefined
+		} catch {
+			return undefined
+		}
+	}
+
+	public async set(profileId: string, stamp: AccountIntegrityVerifiedStamp): Promise<void> {
+		await this.storage.set({ [this.key(profileId)]: JSON.stringify(stamp) })
+	}
+
 	public async clear(profileId: string): Promise<void> {
 		await this.storage.remove(this.key(profileId))
 	}

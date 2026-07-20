@@ -151,3 +151,53 @@ drift; `typecheck:all` + `build:firefox` script names; raw `SchnorrAccount.json`
 finding is recorded in plan.md's Decision ledger; all r1 blocking findings and all six final-pass
 conditions are folded into v3 (append-only one-regime-per-major record, dedicated Phase 4 canary,
 background integrity coordinator, hardened consistency test, corrected gates).
+
+---
+
+## POST-IMPLEMENTATION audit (fresh codex session, gpt-5.6-sol xhigh, 2026-07-20)
+
+Scope: the full net diff `6181c0d..HEAD` (9 commits) + lessons, after all 7 phases, the
+code-review pass, and green gates. Verdict: **block** — 5 HIGH + 3 MEDIUM. Full response
+preserved verbatim in this session's transcript; findings + dispositions:
+
+- **[HIGH 1] Barrier bricks its own heal path** (overlay hides unlock; foreign-backup record
+  bricks the whole wallet). → FIXED: the barrier is now profile-scoped (a record only overlays
+  the profile the popup presents; corrupt records stay global fail-closed) and YIELDS on the
+  auth/register routes so unlock — the verification retry vector — stays reachable; copy now
+  says to unlock after installing a compatible build. Combined with HIGH-2's boot verify, a
+  fixed build heals automatically. Barrier tests rewritten for the scoping semantics.
+- **[HIGH 2] Silent SW rehydrate bypasses verification on the first boot of a drifted build.**
+  → FIXED: `AccountIntegrityCoordinator.start()` re-verifies a rehydrated session ONCE per
+  (profile, walletVersion) via a durable verified-stamp
+  (`nulo:core:account-integrity-verified@<id>`); green stamps, mismatch persists the block +
+  closes the session. Steady-state SW wakes stay free. 3 new coordinator tests.
+- **[HIGH 3] Password-change re-open: a mismatch left the OLD session live.** → FIXED:
+  `openSessionVerified` now closes a still-active session for the profile when verification
+  throws. Pinned indirectly by the chokepoint tests (the close path is the same
+  sessionManager.close the SW-restart test observes).
+- **[HIGH 4] Runtime blocking wasn't durable (fire-and-forget before throw).** → FIXED: the
+  mismatch report in `AccountService.getAccountContract` is now AWAITED before the typed error
+  propagates (failures logged, never masking the error).
+- **[HIGH 5] The canary wasn't in the prover-ON CI job** (PR CI could green it with fake
+  proofs). → FIXED: `frozen-account-canary.test.ts` added to `network-e2e-canary`'s
+  `test_files` and excluded from the proverless shard pool (`pr-network-e2e.yml`); actionlint
+  green.
+- **[MEDIUM 1] verify→open TOCTOU** (a row restored between snapshot and open escapes pre-open
+  verification). → ACCEPTED RESIDUAL: narrow race; caught by the runtime typed-error path and
+  the next unlock/boot verify. Documented here.
+- **[MEDIUM 2] Canary SW-restart leg could false-green** (absent-target pass-through + a stale
+  liveness stamp don't prove the worker actually restarted). → ACCEPTED RESIDUAL: the
+  post-restart unlock + real proven tx require a functioning SW either way; the leg proves
+  "operational after the kill attempt", which is the invariant the plan needs. Documented.
+- **[MEDIUM 3] Descriptor digest binds the symbolic args claim, not the marshalling code.**
+  → ACCEPTED RESIDUAL (explicit plan design: "values, not algorithms"); the
+  descriptor-consistency test binds the EMITTED call's selector+args to the derived
+  initializationHash for the KAT seeds, and the canary executes the real marshalling per bump.
+
+Codex "verified sound" list: vendored bytes/provenance; lazy-wrapper safety (no
+`getContractArtifact()` reachable); both frozen touchpoints; `unwrapParams` fix + bound;
+fixture intent preserved (duplicate-rejection, migration); error reconstruction, dApp
+sanitization, pending-secret zeroization, deletion-time cleanup.
+
+Post-fix gates: lint 0 · typecheck:all 0 · test:all 0 · armed smoke re-run (see transcript) ·
+actionlint 0.

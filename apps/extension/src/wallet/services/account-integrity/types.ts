@@ -2,6 +2,13 @@ import type { MasterSecretBytes } from "@nulo/wallet-crypto"
 import { z } from "zod"
 
 export const ACCOUNT_INTEGRITY_BLOCKED_ROOT = "nulo:core:account-integrity-blocked"
+export const ACCOUNT_INTEGRITY_VERIFIED_ROOT = "nulo:core:account-integrity-verified"
+
+/** Per-profile marker of the last wallet build whose derivation verified green. Lets the boot
+ *  path skip re-deriving on every SW wake: a silently-rehydrated session is re-verified ONLY on
+ *  the first boot of a new build (the update window the per-open chokepoint cannot see). */
+export const VerifiedStampSchema = z.object({ walletVersion: z.string() })
+export type AccountIntegrityVerifiedStamp = z.infer<typeof VerifiedStampSchema>
 
 /**
  * The persisted mismatch record — one per blocked profile. Written by the integrity coordinator

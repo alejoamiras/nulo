@@ -34,9 +34,15 @@ function row(overrides: Partial<Account> = {}): Account {
 	}
 }
 
-async function build(opts: { rows: Account[]; derive: DeriveAddress }) {
-	const api = new FakeBrowserApi()
-	api.reset()
+async function build(opts: {
+	rows: Account[]
+	derive: DeriveAddress
+	/** Simulates a silently-rehydrated session present at coordinator start. */
+	activeProfileId?: string
+	api?: FakeBrowserApi
+}) {
+	const api = opts.api ?? new FakeBrowserApi()
+	if (!opts.api) api.reset()
 	const locks: string[] = []
 	const services = new ServiceCollection()
 	services.add(
@@ -45,6 +51,8 @@ async function build(opts: { rows: Account[]; derive: DeriveAddress }) {
 			lockActiveProfile: async () => {
 				locks.push("locked")
 			},
+			getActiveProfile: async () => (opts.activeProfileId ? { id: opts.activeProfileId, name: "P", type: "password" } : undefined),
+			getProfileSecret: async () => Fr.fromBuffer(Buffer.from(MASTER)),
 		}),
 	)
 	services.add(svc(AccountService.name, { setIntegrityDelegate: () => {}, getAccountsRaw: async () => opts.rows }))
@@ -116,6 +124,41 @@ describe("AccountIntegrityCoordinator", () => {
 		})
 		await coordinator.verifyBeforeSessionOpen("p1", MASTER)
 		expect(seen).toEqual([0])
+	})
+
+	test("boot verify: a rehydrated session with a MISMATCHED account is blocked + locked at start", async () => {
+		const { repo, locks } = await build({
+			rows: [row({ address: "0xDRIFTED" })],
+			derive: async () => "0xreal",
+			activeProfileId: "p1",
+		})
+		expect(await repo.isBlocked("p1")).toBe(true)
+		expect(locks).toEqual(["locked"])
+	})
+
+	test("boot verify: a green pass stamps the build so the NEXT boot skips re-deriving", async () => {
+		let derives = 0
+		const derive: DeriveAddress = async () => {
+			derives++
+			return "0xaaaa"
+		}
+		const { api } = await build({ rows: [row()], derive, activeProfileId: "p1" })
+		expect(derives).toBe(1)
+		// Same persisted storage, fresh coordinator = the next SW boot on the SAME build.
+		await build({ rows: [row()], derive, activeProfileId: "p1", api })
+		expect(derives).toBe(1)
+	})
+
+	test("boot verify: no active session is a no-op", async () => {
+		let derives = 0
+		await build({
+			rows: [row()],
+			derive: async () => {
+				derives++
+				return "0xaaaa"
+			},
+		})
+		expect(derives).toBe(0)
 	})
 
 	test("reportRuntimeMismatch persists the record and closes the session", async () => {

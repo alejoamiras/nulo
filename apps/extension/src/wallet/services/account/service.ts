@@ -217,9 +217,14 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 				detectedAt: Date.now(),
 			}
-			void this.integrityDelegate?.reportRuntimeMismatch(record).catch((reportError) => {
+			// AWAITED so the blocking record + session close are durable BEFORE the error reaches the
+			// caller (an MV3 termination right after the throw must not lose the block). A report
+			// failure is logged but never masks the typed error.
+			try {
+				await this.integrityDelegate?.reportRuntimeMismatch(record)
+			} catch (reportError) {
 				this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity mismatch report failed", String(reportError))
-			})
+			}
 			throw new AccountAddressInconsistencyError(undefined, { profileId, chainId, accountIndex: account.index })
 		}
 		return accountContract

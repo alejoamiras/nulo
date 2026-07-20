@@ -36,7 +36,7 @@ import {
 import { TombstoneRepository } from "./tombstone-repository"
 import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
 import type { ProfileDeletionDelegate } from "../profile-deletion/types"
-import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
+import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "../account-integrity/blocked-repository"
 import type { AccountIntegrityDelegate } from "../account-integrity/types"
 
 export * from "./spec"
@@ -118,6 +118,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  blocked profile's session is never silently rehydrated after a SW restart (the coordinator
 	 *  itself starts later, in the last topological phase). */
 	private readonly integrityBlocked: AccountIntegrityBlockedRepository
+	/** Deletion-time cleanup of the coordinator's per-profile verified stamps. */
+	private readonly integrityStamps: AccountIntegrityVerifiedStampRepository
 
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
@@ -130,6 +132,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		this.repo = new ProfileRepository(browserApi)
 		this.tombstones = new TombstoneRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
 		this.integrityBlocked = new AccountIntegrityBlockedRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
+		this.integrityStamps = new AccountIntegrityVerifiedStampRepository(
+			(browserApi?.storage.local ?? chrome.storage.local) as StorageArea,
+		)
 		this.secretBox = new PasswordSecretBox()
 		this.sessionManager = new SessionManager(
 			config,
@@ -721,7 +726,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * (unit tests without the coordinator) the open proceeds unchecked.
 	 */
 	private async openSessionVerified(profile: Profile, secret: MasterSecretBytes, passhash?: Passhash): Promise<void> {
-		await this.integrityDelegate?.verifyBeforeSessionOpen(profile.id, secret)
+		try {
+			await this.integrityDelegate?.verifyBeforeSessionOpen(profile.id, secret)
+		} catch (error) {
+			// A freshly-flagged profile must not keep a PRIOR live session either (the password-change
+			// flow re-opens over one): withholding the new session while the old stays usable would
+			// leave the blocked profile operating.
+			if (this.sessionManager.isActive(profile.id)) {
+				await this.sessionManager.close()
+			}
+			throw error
+		}
 		await this.sessionManager.open(profile, secret, passhash)
 	}
 
@@ -782,9 +797,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.pendingRestoreSecrets.delete(id)
 				zeroize(pending)
 			}
-			// A deleted profile's integrity-blocking record must not outlive it — a stale record
-			// would keep the full-screen barrier up forever with nothing left to heal it.
+			// A deleted profile's integrity records must not outlive it: a stale blocking record
+			// would keep the barrier up forever, and a stale verified-stamp could let a future
+			// same-id re-import skip its first boot verification.
 			await this.integrityBlocked.clear(id)
+			await this.integrityStamps.clear(id)
 			this.emit("onProfileDeleted", this.getProfileInfo(profile))
 			return { profile, epoch, snapshot }
 		})

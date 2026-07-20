@@ -9,8 +9,11 @@ import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/erro
 import { NuloAccount, V5_REGIME } from "@nulo/aztec-runtime/account"
 import type { MasterSecretBytes } from "@nulo/wallet-crypto"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
-import { AccountIntegrityBlockedRepository } from "./blocked-repository"
+import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "./blocked-repository"
 import type { AccountIntegrityBlocked, AccountIntegrityDelegate, AccountRuntimeIntegrityDelegate } from "./types"
+
+declare const __VERSION__: string
+const walletVersion = (): string => (typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__)
 
 export const ACCOUNT_INTEGRITY_COORDINATOR_NAME = "account-integrity-coordinator"
 
@@ -37,6 +40,7 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 	private profiles!: ProfileService
 	private accounts!: AccountService
 	private readonly blocked: AccountIntegrityBlockedRepository
+	private readonly stamps: AccountIntegrityVerifiedStampRepository
 
 	public constructor(
 		private readonly logger: ILogger,
@@ -47,7 +51,9 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 			return (await NuloAccount.new(secret, logger)).address.toString()
 		},
 	) {
-		this.blocked = new AccountIntegrityBlockedRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
+		const storage = (browserApi?.storage.local ?? chrome.storage.local) as StorageArea
+		this.blocked = new AccountIntegrityBlockedRepository(storage)
+		this.stamps = new AccountIntegrityVerifiedStampRepository(storage)
 	}
 
 	public async start(services: ServiceCollection): Promise<void> {
@@ -55,12 +61,44 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		this.accounts = services.get(AccountService.name)
 		this.profiles.setIntegrityDelegate(this)
 		this.accounts.setIntegrityDelegate(this)
+		// The one activation the per-open chokepoint cannot see: an extension UPDATE rehydrates the
+		// previous session silently, so the first boot of a NEW build re-verifies it here (once per
+		// (profile, walletVersion) — the stamp keeps every later SW wake free).
+		await this.verifyRestoredSessionOnce()
+	}
+
+	private async verifyRestoredSessionOnce(): Promise<void> {
+		const active = await this.profiles.getActiveProfile()
+		if (!active) return
+		if ((await this.stamps.get(active.id))?.walletVersion === walletVersion()) return
+		let master: Fr
+		try {
+			master = await this.profiles.getProfileSecret(active.id)
+		} catch {
+			// Locked/raced away between the getActiveProfile read and here — nothing rehydrated to
+			// verify; the next real open goes through the chokepoint.
+			return
+		}
+		try {
+			await this.verifyProfile(active.id, master)
+		} catch (error) {
+			if (error instanceof AccountAddressInconsistencyError) {
+				await this.profiles.lockActiveProfile()
+				return
+			}
+			throw error
+		}
 	}
 
 	/** See `AccountIntegrityDelegate.verifyBeforeSessionOpen`. */
 	public async verifyBeforeSessionOpen(profileId: string, masterSecret: MasterSecretBytes): Promise<void> {
+		await this.verifyProfile(profileId, Fr.fromBuffer(Buffer.from(masterSecret)))
+	}
+
+	/** Re-derive every stored account for the profile and compare; persist + throw on mismatch,
+	 *  heal the block and stamp the build on green. */
+	private async verifyProfile(profileId: string, master: Fr): Promise<void> {
 		const rows = await this.accounts.getAccountsRaw(profileId)
-		const master = Fr.fromBuffer(Buffer.from(masterSecret))
 		for (const account of rows) {
 			// Only Nulo_v1 rows have a derivation to re-check; an unknown future type is skipped
 			// here and rejected at use by AccountService's own type guard.
@@ -74,7 +112,7 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 					storedAddress: account.address,
 					derivedAddress,
 					regimeId: V5_REGIME.id,
-					walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
+					walletVersion: walletVersion(),
 					detectedAt: Date.now(),
 				}
 				this.logger.log(
@@ -91,9 +129,11 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 				})
 			}
 		}
-		// A green pass heals a stale block: installing a build whose derivation matches again is
-		// exactly the documented recovery path.
+		// A green pass heals a stale block (installing a build whose derivation matches again is
+		// exactly the documented recovery path) and stamps the build so the boot path can skip
+		// re-deriving until the next update.
 		await this.blocked.clear(profileId)
+		await this.stamps.set(profileId, { walletVersion: walletVersion() })
 	}
 
 	/** See `AccountRuntimeIntegrityDelegate.reportRuntimeMismatch`. */
