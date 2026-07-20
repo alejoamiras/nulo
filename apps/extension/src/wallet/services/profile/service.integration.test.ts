@@ -1408,4 +1408,24 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		const { service: rebooted } = await makeServiceFromExistingApi(api)
 		expect((await rebooted.getActiveProfile())?.id).toBe(profile.id)
 	}, 30_000)
+
+	test("deleting a blocked profile clears its blocking record (no orphaned barrier)", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		const repo = new AccountIntegrityBlockedRepository(api.storage.local)
+		await repo.set({
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		})
+		expect(await repo.isBlocked(profile.id)).toBe(true)
+
+		await service.deleteProfile(profile.id)
+		expect(await repo.isBlocked(profile.id)).toBe(false)
+	}, 30_000)
 })

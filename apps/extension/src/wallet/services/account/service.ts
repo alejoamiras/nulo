@@ -1,7 +1,7 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
-import type { ILogger } from "@/wallet/logger"
+import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -217,7 +217,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 				detectedAt: Date.now(),
 			}
-			void this.integrityDelegate?.reportRuntimeMismatch(record).catch(() => {})
+			void this.integrityDelegate?.reportRuntimeMismatch(record).catch((reportError) => {
+				this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity mismatch report failed", String(reportError))
+			})
 			throw new AccountAddressInconsistencyError(undefined, { profileId, chainId, accountIndex: account.index })
 		}
 		return accountContract

@@ -782,6 +782,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.pendingRestoreSecrets.delete(id)
 				zeroize(pending)
 			}
+			// A deleted profile's integrity-blocking record must not outlive it — a stale record
+			// would keep the full-screen barrier up forever with nothing left to heal it.
+			await this.integrityBlocked.clear(id)
 			this.emit("onProfileDeleted", this.getProfileInfo(profile))
 			return { profile, epoch, snapshot }
 		})

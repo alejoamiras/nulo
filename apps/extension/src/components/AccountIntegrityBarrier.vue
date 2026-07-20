@@ -6,7 +6,11 @@ import { ACCOUNT_INTEGRITY_BLOCKED_ROOT } from "@/wallet/services/account-integr
 // Raw chrome.storage reads ON PURPOSE (allowlisted in storage-facade-ban, same as
 // MigrationBarrier): this component OBSERVES the background coordinator's durable blocking
 // records. Presence of ANY key under the root means blocked — even a corrupt payload
-// (fail-closed); the parsed record only enriches the copy.
+// (fail-closed); the parsed record only enriches the copy. Deliberately profile-agnostic: a
+// record for ANY profile raises the barrier (a derivation mismatch is a property of the BUILD,
+// so other profiles on this device are almost certainly affected too); records are cleared by a
+// green re-verification or by deleting the offending profile, so the barrier cannot outlive its
+// cause.
 const blockedKeys = ref([])
 const isBlocked = computed(() => blockedKeys.value.length > 0)
 

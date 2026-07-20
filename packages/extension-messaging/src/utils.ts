@@ -10,14 +10,13 @@ export const wrapParams = (params: unknown[]): Record<number, unknown> => {
 }
 
 /**
- * Reverse `wrapParams`: read the contiguous `0..n` prefix into an array.
+ * Reverse `wrapParams`: read indices `0..last-present` (within the arity cap) into an array.
  *
- * Hardened against hostile input. The previous implementation took
- * `max(keys)` and looped `0..max`, so a crafted `{999999999: "x"}` (which
- * passes the service's typeof-object guard) drove a ~10^9-iteration loop — a
- * trivial internal DoS. This reads only the contiguous prefix and stops at the
- * first gap, capped at `MAX_RPC_ARITY`, so sparse / oversized key sets degrade
- * to a short array instead of a runaway loop.
+ * Hardened against hostile input. An early implementation took `max(keys)` and looped `0..max`,
+ * so a crafted `{999999999: "x"}` (which passes the service's typeof-object guard) drove a
+ * ~10^9-iteration loop — a trivial internal DoS. The scan is now a FIXED `0..MAX_RPC_ARITY`
+ * window: sparse / oversized key sets degrade to a short array instead of a runaway loop, and
+ * the work is constant regardless of the key set.
  */
 export const unwrapParams = <T>(params: T): T => {
 	const obj = params as Record<number, unknown>
