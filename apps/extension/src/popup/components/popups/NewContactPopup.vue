@@ -59,7 +59,9 @@ const form = useFormState({
 		validate: (v) => {
 			if (!v) return null // empty: pre-input, not an error to display
 			if (!isValidHex(v)) return "Invalid address"
-			if (contacts.value.some((c) => c.address === v)) return "Already exist"
+			// Hex is case-insensitive — a mixed-case rendering of a saved
+			// address is the same contact, not a new one.
+			if (contacts.value.some((c) => c.address.toLowerCase() === v.toLowerCase())) return "Already exist"
 			return null
 		},
 	},
@@ -95,7 +97,10 @@ const handleAddContact = async () => {
 
 	isLoading.value = true
 	try {
-		await contactService.addContact(nameTerm.value.trim(), contactAddressTerm.value)
+		// Canonicalize to lowercase on save — the wallet emits lowercase hex
+		// everywhere else (PXE senders, derived addresses), and case-mixed
+		// stored rows break exact-match lookups downstream.
+		await contactService.addContact(nameTerm.value.trim(), contactAddressTerm.value.toLowerCase())
 
 		emit("onClose")
 		openToast({ label: "Contact is added" })

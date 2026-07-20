@@ -136,3 +136,53 @@ senders; all `addContact` callers migrated; dApp RPC/capability paths unchanged.
 
 All six findings addressed (adopted or explicitly rejected with reason) — the full table lives
 in plan.md § "Post-implementation review round".
+
+---
+
+# Codex bug-hunt + deflake round (user-requested, session `019f81a2-286e-7f02-9e6d-b3c762786880`)
+
+xhigh (codex's maximum effort tier), gpt-5.6-sol, fresh session, post-CI-green. Verdict: no
+Critical/High defects; 2 NEW Medium/Low + 5 PRE-EXISTING findings + deflake root causes.
+
+## Fixed in this round (commit `fix(contacts): codex bug-hunt round …`)
+- NEW (M): one-sided address canonicalization — existing-contact lookup maps now use lowercase
+  keys; New/Edit popups canonicalize to lowercase ON SAVE and their duplicate validation is
+  case-insensitive; the chip's sender-set membership + event handlers canonicalize too.
+- NEW (L): the 1 MB bound counted UTF-16 units — `file.size` is now checked BEFORE `text()`.
+- PRE-EXISTING (M): a single malformed row (non-string name/address) aborted the whole import —
+  rows are now shape-guarded and dropped individually; whitespace-only names filtered
+  (sanitizeString keeps spaces).
+- PRE-EXISTING (M): sender registration lived inside the contact-upsert try — an explicit
+  isSender intent was silently skipped and uncounted when the address-book write failed. Now
+  attempted and counted independently (decoupled outcomes).
+- PRE-EXISTING (M): contacts-page `syncSenders` had no sequence guard — a slow network-A
+  response could overwrite network-B's chip set. Guarded; failure branch guarded too.
+- DEFLAKE (accounts "switch between accounts", the CI failure on this PR): root cause confirmed
+  in-code — the fixture filters the benign "Client disconnected" SW-port-close cascade from
+  `consoleErrors` but NOT `pageErrors`, and the account-switch fires an unawaited
+  `syncTransactions()` whose rejection lands as a pageerror during MV3 SW restarts. The same
+  filter is now mirrored on both `pageerror` handlers (known-noise allowlist, not a broad
+  suppression — every other error still fails).
+- DEFLAKE (contacts "edit contact name"): the test typed before EditContactPopup's async prefill
+  resolved; the late load overwrote the typed value, leaving the form clean and submit disabled.
+  The test now waits for the prefill to settle (input === "Bob") before typing.
+- DEFLAKE (new files): `gotoSenders` waits for `loading-state` to clear before any zero-row
+  assertion (the add button renders during the fetch); the sender popup input is selected by its
+  testid, not placeholder.
+- 4 new unit pins + 1 component case (mixed-case merge; malformed-row resilience;
+  sender-attempted-despite-contact-failure; oversized-file pre-read rejection; uppercase-dup
+  validation).
+
+## Deferred (recorded as follow-ups, with reasons)
+- (M, pre-existing) Import loop's lookup maps are point-in-time snapshots — name/address
+  cross-collisions inside ONE file (two rows named Alice; Alice@A + import Alice@B while Bob@B
+  exists) produce surprising merge outcomes. Correct fix is per-row map maintenance or a batch
+  import service (codex's improvement #2) — a semantics redesign, not a patch; deferred.
+- (M, pre-existing) Popup show-watchers lack generation/cancellation guards (mount-time typing
+  window, late-listener leaks on fast close). Fix is a shared popup readiness/lifecycle helper
+  across all three popups — deferred as one coherent refactor.
+- (Deflake, product-side) accounts-test robustness (data-account-address/data-active testids,
+  awaiting or retrying the account-switch syncTransactions) and passkey-export staging
+  (`data-backup-stage`, progress-set-at-ceremony) — product changes beyond this PR's surface.
+- receive-unregistered refresh pacing (await a refresh cycle via an isUpdating signal) — current
+  bounded polling passed every run; tied to the same product-signal follow-up.

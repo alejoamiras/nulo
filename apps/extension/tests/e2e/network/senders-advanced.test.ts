@@ -34,6 +34,10 @@ async function freshIdentity(prefix: string): Promise<{ name: string; address: s
 async function gotoSenders(page: Awaited<ReturnType<typeof openPopup>>) {
 	await navigateByHash(page, SENDERS_HASH)
 	await page.waitForSelector('[data-testid="senders-add-btn"]', { visible: true, timeout: 10_000 })
+	// The add button renders while the list is still FETCHING — a zero-row
+	// assertion against the loading state would false-pass. Wait for the
+	// fetch to settle before any caller reads rows.
+	await page.waitForFunction(() => !document.querySelector('[data-testid="loading-state"]'), { timeout: 15_000, polling: 100 })
 }
 async function gotoContacts(page: Awaited<ReturnType<typeof openPopup>>) {
 	await navigateByHash(page, CONTACTS_HASH)
@@ -43,7 +47,7 @@ async function gotoContacts(page: Awaited<ReturnType<typeof openPopup>>) {
 async function addSenderViaAdvanced(page: Awaited<ReturnType<typeof openPopup>>, address: string) {
 	await clickByTestId(page, "senders-add-btn")
 	await page.waitForSelector('[data-testid="new-sender-submit"]', { visible: true, timeout: 5_000 })
-	await replaceInputValue(page, 'input[placeholder*="0x1744"]', address)
+	await replaceInputValue(page, '[data-testid="new-sender-address-input"]', address)
 	await clickByTestId(page, "new-sender-submit")
 	// The row renders from the onSenderAdded event only after the PXE
 	// registration resolves — this is the deterministic post-mutation signal.

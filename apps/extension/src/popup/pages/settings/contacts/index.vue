@@ -62,29 +62,38 @@ const sortedContacts = computed(() =>
  *  Network-scoped: switching networks reloads the set. */
 const senderAddresses = ref(new Set())
 function isContactSender(address) {
-	return senderAddresses.value.has(address)
+	// Canonical compare: PXE senders are lowercase hex; a stored contact
+	// address may predate canonical-on-save.
+	return senderAddresses.value.has(address.toLowerCase())
 }
+// Sequence guard: rapid network switches issue overlapping getSenders
+// calls with no ordering guarantee — only the LATEST request may write
+// the set, or a slow network-A response overwrites network-B's chips.
+let senderSyncSeq = 0
 async function syncSenders() {
+	const seq = ++senderSyncSeq
 	if (!appStore.network) {
 		senderAddresses.value = new Set()
 		return
 	}
 	try {
 		const list = await accountStateService.getSenders(appStore.network.id)
-		senderAddresses.value = new Set(list)
+		if (seq !== senderSyncSeq) return
+		senderAddresses.value = new Set(list.map((a) => a.toLowerCase()))
 	} catch (err) {
+		if (seq !== senderSyncSeq) return
 		console.warn("Failed to load senders for contacts list:", err)
 		senderAddresses.value = new Set()
 	}
 }
 function onSenderAdded(address) {
 	const next = new Set(senderAddresses.value)
-	next.add(address)
+	next.add(address.toLowerCase())
 	senderAddresses.value = next
 }
 function onSenderDeleted(address) {
 	const next = new Set(senderAddresses.value)
-	next.delete(address)
+	next.delete(address.toLowerCase())
 	senderAddresses.value = next
 }
 accountStateService.onSenderAdded.add(onSenderAdded)

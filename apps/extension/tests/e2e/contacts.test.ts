@@ -71,6 +71,18 @@ test("edit contact name", async ({ registeredExtension }) => {
 		edit?.click()
 	})
 
+	// Wait for the popup's PREFILL to settle before typing: the show-watcher
+	// fills the fields only after its async getContacts() resolves, and a
+	// value typed before that gets overwritten back to the loaded name —
+	// leaving the form clean and the submit disabled (the load-flake).
+	await page.waitForFunction(
+		() => {
+			const inputs = [...document.querySelectorAll<HTMLInputElement>('input[placeholder="New contact"]')]
+			return inputs.some((i) => i.offsetParent !== null && i.value === "Bob")
+		},
+		{ timeout: 10_000, polling: 100 },
+	)
+
 	// Replace the full name via the v-model-aware helper; triple-click +
 	// type is unreliable on the Input component wrapper.
 	await replaceInputValue(page, 'input[placeholder="New contact"]', "Bobby")

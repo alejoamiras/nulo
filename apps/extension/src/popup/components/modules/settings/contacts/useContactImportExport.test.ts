@@ -70,7 +70,8 @@ function makeServices() {
 }
 
 function fileWith(payload: unknown) {
-	pickFileMock.mockResolvedValueOnce({ text: async () => JSON.stringify(payload) })
+	const raw = JSON.stringify(payload)
+	pickFileMock.mockResolvedValueOnce({ size: raw.length, text: async () => raw })
 }
 
 /** Drives importContacts() to its selection gate, then confirms ALL
@@ -206,6 +207,60 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 		await done
 
 		expect(Object.keys(staged).sort()).toEqual(["address", "isSender", "name"])
+	})
+
+	test("a mixed-case existing contact MERGES with its lowercase import (no duplicate)", async () => {
+		const { contactService, accountStateService } = makeServices()
+		const existing = ref([{ id: "c1", name: "Alice", address: ADDR_A.toUpperCase().replace("0X", "0x") }])
+		const api = useContactImportExport({ contacts: existing, contactService, accountStateService } as never)
+		fileWith({ version: 2, contacts: [{ name: "Alice2", address: ADDR_A, isSender: false }] })
+
+		await runImport(api)
+
+		expect(contactService.addContact).not.toHaveBeenCalled()
+		expect(contactService.updateContact).toHaveBeenCalledWith("c1", "Alice2", ADDR_A)
+	})
+
+	test("a malformed row (non-string fields) is dropped without aborting the import", async () => {
+		const { contactService, accountStateService } = makeServices()
+		const api = useContactImportExport({ contacts: ref([]), contactService, accountStateService } as never)
+		fileWith({
+			version: 2,
+			contacts: [null, { name: 42, address: { evil: true } }, { name: "   ", address: ADDR_B }, { name: "Good", address: ADDR_A }],
+		})
+
+		await runImport(api)
+
+		expect(contactService.addContact).toHaveBeenCalledTimes(1)
+		expect(contactService.addContact).toHaveBeenCalledWith("Good", ADDR_A)
+	})
+
+	test("an explicit isSender intent is attempted and counted even when the contact upsert fails", async () => {
+		const { contactService, accountStateService } = makeServices()
+		contactService.addContact.mockRejectedValueOnce(new Error("storage down"))
+		const api = useContactImportExport({ contacts: ref([]), contactService, accountStateService } as never)
+		fileWith({ version: 2, contacts: [{ name: "A", address: ADDR_A, isSender: true }] })
+
+		await runImport(api)
+
+		expect(accountStateService.addSender).toHaveBeenCalledWith("net-1", ADDR_A)
+		expect(openToastMock).toHaveBeenCalledWith({ label: "Import ended with errors", icon: "warning" }, expect.anything())
+	})
+
+	test("an oversized file is rejected by byte size before it is read", async () => {
+		const { contactService, accountStateService } = makeServices()
+		const api = useContactImportExport({ contacts: ref([]), contactService, accountStateService } as never)
+		pickFileMock.mockResolvedValueOnce({
+			size: 2_000_000,
+			text: async () => {
+				throw new Error("text() must not be called on an oversized file")
+			},
+		})
+
+		await api.importContacts()
+
+		expect(contactService.addContact).not.toHaveBeenCalled()
+		expect(openToastMock).toHaveBeenCalledWith({ label: "Contacts file is too large", icon: "warning" }, expect.anything())
 	})
 
 	test("a sender-free import toasts plain success", async () => {

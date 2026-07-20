@@ -136,6 +136,11 @@ describe("NewContactPopup — decoupled from sender registration", () => {
 		await fill(w, "Bob", VALID_ADDRESS)
 		expect(w.find('[data-testid="form-popup"]').attributes("data-submit-disabled")).toBe("true")
 
+		// Hex is case-insensitive — an uppercase rendering of a saved address
+		// is the same contact.
+		await fill(w, "Bob", `0x${"A".repeat(64)}`)
+		expect(w.find('[data-testid="form-popup"]').attributes("data-submit-disabled")).toBe("true")
+
 		await fill(w, "Bob", `0x${"b".repeat(64)}`)
 		expect(w.find('[data-testid="form-popup"]').attributes("data-submit-disabled")).toBe("false")
 	})

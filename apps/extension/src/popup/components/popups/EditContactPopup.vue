@@ -71,7 +71,8 @@ const form = useFormState({
 		validate: (v) => {
 			if (!v) return null
 			if (!isValidHex(v)) return "Invalid address"
-			const conflicting = contacts.value.find((c) => c.address === v && c.id !== contactToEdit.value?.id)
+			// Case-insensitive: hex casing doesn't make a different address.
+			const conflicting = contacts.value.find((c) => c.address.toLowerCase() === v.toLowerCase() && c.id !== contactToEdit.value?.id)
 			if (conflicting) return "Already exist"
 			return null
 		},
@@ -130,7 +131,8 @@ const handleUpdateContact = async () => {
 			}
 			emit("onClose")
 		} else {
-			await contactService.updateContact(contactToEdit.value.id, nameTerm.value.trim(), contactAddressTerm.value)
+			// Canonical lowercase on save (matches NewContactPopup + wallet-wide hex convention).
+			await contactService.updateContact(contactToEdit.value.id, nameTerm.value.trim(), contactAddressTerm.value.toLowerCase())
 
 			emit("onClose")
 			openToast({ label: "Contact is updated" })
