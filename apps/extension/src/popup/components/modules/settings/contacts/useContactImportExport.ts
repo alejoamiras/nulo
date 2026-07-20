@@ -96,6 +96,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 
 			const data = await file.text()
 			const { contacts: rawContacts } = parseContactsExport(data) as { contacts: Array<Record<string, unknown>> }
+			const seenAddresses = new Set<string>()
 			const importedContacts = rawContacts
 				.map((c) => ({
 					...c,
@@ -104,6 +105,14 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 					isSender: c?.isSender === true,
 				}))
 				.filter((c) => !!c.name && !!c.address)
+				// Per-address dedup (first row wins): duplicate addresses in a
+				// hostile file would multiply storage upserts and PXE sender
+				// registrations for the same target.
+				.filter((c) => {
+					if (seenAddresses.has(c.address)) return false
+					seenAddresses.add(c.address)
+					return true
+				})
 
 			if (!importedContacts?.length) {
 				openToast({ label: "No contacts found in file", icon: "info" })
@@ -142,38 +151,21 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			// selected, isSender:true rows produce a per-row sender failure.
 			const activeNetworkId = appStore.network?.id ?? null
 
-			// Snapshot the active network's sender set ONCE before the loop.
-			// Used to detect merge-by-name flows where the existing contact's
-			// address was a registered sender — when the import replaces the
-			// address we need to unregister the old one to avoid orphaning.
-			let activeSenderSet = new Set<string>()
-			if (activeNetworkId) {
-				try {
-					const list = await accountStateService.getSenders(activeNetworkId)
-					activeSenderSet = new Set(list)
-				} catch (err) {
-					console.warn("Failed to read senders snapshot for import; merge-by-name will not migrate registrations:", err)
-				}
-			}
-
 			const errors: Array<{ name: string; address: string; operation: string; error: unknown }> = []
 			let senderTotal = 0
 			let senderOk = 0
 
+			// Import is adds-only toward sender state: rows explicitly carrying
+			// `isSender: true` (from a previous deliberate export) get registered
+			// on the active network. It never deletes or migrates registrations —
+			// those live in Settings → Advanced → Senders.
 			for (const _c of res) {
 				const existingByAddress = contactsByAddress.get(_c.address)
 				const existingByName = contactsByName.get(_c.name)
-				// Track the old address when merge-by-name swaps the address —
-				// we'll unregister its sender after applying the new one (add-
-				// then-delete order; matches EditContactPopup's applySenderDelta).
-				let oldSenderAddressToUnregister: string | null = null
 				try {
 					if (existingByAddress) {
 						await contactService.updateContact(existingByAddress.id, _c.name, _c.address)
 					} else if (existingByName) {
-						if (existingByName.address !== _c.address && activeSenderSet.has(existingByName.address)) {
-							oldSenderAddressToUnregister = existingByName.address
-						}
 						await contactService.updateContact(existingByName.id, _c.name, _c.address)
 					} else {
 						await contactService.addContact(_c.name, _c.address)
@@ -190,18 +182,6 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 							}
 						} else {
 							console.warn(`Skipping sender registration for ${_c.address}: no active network`)
-						}
-					}
-
-					// Unregister the orphan old-address sender after the new
-					// address has been processed. Best-effort; a failure here
-					// leaves the old sender registered (privacy leak surface)
-					// but doesn't block the rest of the import.
-					if (oldSenderAddressToUnregister && activeNetworkId) {
-						try {
-							await accountStateService.deleteSender(activeNetworkId, oldSenderAddressToUnregister)
-						} catch (err) {
-							console.warn(`Failed to unregister old sender ${oldSenderAddressToUnregister}`, err)
 						}
 					}
 				} catch (err) {

@@ -19,7 +19,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { stringCompare } from "@/utils"
 
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useEntityCrud } from "@/composables/useEntityCrud"
 import { useContactImportExport } from "@/popup/components/modules/settings/contacts/useContactImportExport"
 
@@ -110,35 +110,13 @@ function handleEditContact(contact) {
 	popupStore.open("edit_contact")
 }
 function handleDeleteContact(contact) {
-	const isSender = isContactSender(contact.address)
-	const networkId = appStore.network?.id
-	const networkName = appStore.network?.name ?? "this network"
-
-	// Caller-owned ref, closure-captured by the callback. Survives
-	// ConfirmPopup's clear-on-close so we can read it after the await.
-	const unregisterSender = ref(true)
-
+	// Deleting a contact never touches sender registration — sender rows are
+	// independent PXE state, managed only in Settings → Advanced → Senders.
 	cacheStore.confirm.confirm_color = "red"
 	cacheStore.confirm.confirm_text = "Yes, delete contact"
 	cacheStore.confirm.description = `Delete contact "${contact.name}"?`
-	if (isSender && networkId) {
-		cacheStore.confirm.toggle = {
-			label: `Also unregister as sender on ${networkName}`,
-			description: "Stops your wallet from detecting incoming private transfers from this address.",
-			model: unregisterSender,
-		}
-	}
 	cacheStore.confirm.callback = async () => {
 		await contactService.deleteContact(contact.id)
-		if (isSender && networkId && unregisterSender.value) {
-			try {
-				await accountStateService.deleteSender(networkId, contact.address)
-			} catch (err) {
-				console.warn("Sender unregister failed:", err)
-				openToast({ label: `Contact deleted · sender unregister failed on ${networkName}`, icon: "warning" }, TOAST_DURATION.LONG)
-				return
-			}
-		}
 		openToast({ label: "Contact deleted" })
 	}
 	popupStore.open("confirm")

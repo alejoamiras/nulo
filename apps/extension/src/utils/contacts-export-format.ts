@@ -32,20 +32,30 @@ export type ParsedExport = {
 	contacts: ImportedContactV2[]
 }
 
+/** Import files are hostile input: an unbounded row count would amplify
+ *  downstream work (per-row storage upserts, and PXE sender registrations
+ *  for `isSender` rows). Reject oversized files at the boundary. */
+export const MAX_CONTACT_IMPORT_ROWS = 512
+
 /** Strict parser. Throws on any shape that isn't a v1 array or
- *  a v2 envelope. Caller surfaces a generic import-failure toast. */
+ *  a v2 envelope, and on files exceeding `MAX_CONTACT_IMPORT_ROWS`.
+ *  Caller surfaces a generic import-failure toast. */
 export function parseContactsExport(raw: string): ParsedExport {
 	const parsed: unknown = JSON.parse(raw)
+	let result: ParsedExport | null = null
 	if (Array.isArray(parsed)) {
-		return { version: 1, contacts: parsed as ImportedContactV2[] }
-	}
-	if (
+		result = { version: 1, contacts: parsed as ImportedContactV2[] }
+	} else if (
 		parsed !== null &&
 		typeof parsed === "object" &&
 		(parsed as { version?: unknown }).version === 2 &&
 		Array.isArray((parsed as { contacts?: unknown }).contacts)
 	) {
-		return { version: 2, contacts: (parsed as { contacts: ImportedContactV2[] }).contacts }
+		result = { version: 2, contacts: (parsed as { contacts: ImportedContactV2[] }).contacts }
 	}
-	throw new Error("Unrecognized contacts export format")
+	if (!result) throw new Error("Unrecognized contacts export format")
+	if (result.contacts.length > MAX_CONTACT_IMPORT_ROWS) {
+		throw new Error(`Too many contacts in file (max ${MAX_CONTACT_IMPORT_ROWS})`)
+	}
+	return result
 }

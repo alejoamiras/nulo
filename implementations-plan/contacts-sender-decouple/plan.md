@@ -81,7 +81,7 @@ PXE call, so a crafted file can't amplify scan state unboundedly.
 
 ## Phases
 
-### Phase 1 — Decouple the contacts UI (New/Edit/Delete/Import)
+### Phase 1 ✓ — Decouple the contacts UI (New/Edit/Delete/Import)
 - `NewContactPopup.vue`: remove toggle row (`:245-261`, testid `new-contact-register-sender`),
   `registerAsSender` field (`:72,78`), the `addSender` branch + dual toast (`:101-147`) → single
   "Contact is added" toast. Drop the popup's `AccountStateServiceClient` usage.
