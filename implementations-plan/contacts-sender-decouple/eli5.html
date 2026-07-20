@@ -23,65 +23,61 @@
 </head>
 <body>
   <h1>contacts-sender-decouple</h1>
-  <p>Right now, when you add or edit a contact, the wallet also offers to "register them as a sender" — a technical step that used to be required for the wallet to notice tokens that contact sends you. The Aztec network changed: since v5, the very first transfer someone sends you automatically makes itself discoverable (a "handshake" published on-chain, keyed to <em>your</em> address). So the toggle now asks users to do something they don't need to do, and the empty token screen tells them to add contacts "to receive" — which is simply no longer true. This plan removes all of that from the contacts flow and leaves sender registration where it belongs: a niche tool in Advanced settings, for rare tokens that still use the old delivery style.</p>
+  <p>Right now, when you add or edit a contact, the wallet also offers to "register them as a sender" — a technical step that used to be required for the wallet to notice tokens that contact sends you. The Aztec network changed: since v5, the very first transfer someone sends you makes itself discoverable on-chain (a "handshake" keyed to <em>your</em> address). For the token this wallet ships, that's guaranteed — no registration needed. So the toggle asks users to do something unnecessary, and the empty token screen tells them to add contacts "to receive" — which is no longer true. This plan removes the coupling everywhere in contacts (after an adversarial audit, it goes further than toggles: contacts will <strong>never silently touch</strong> sender registrations — no hidden migrations on edit, no hidden deletes on import merges) and leaves sender registration where it belongs: a niche tool in Advanced settings.</p>
 
   <h2>Why this tier was chosen</h2>
-  <p><strong>light.</strong> Rubric: novelty low (removing UI, not building), blast radius low (extension app only, service layer untouched), irreversibility low (pre-production, pure UI), no migrations, no external coupling changes, security-positive (it <em>shrinks</em> what connected dApps can learn about your address book). Zero high dimensions → the lightest tier, with a single codex audit.</p>
+  <p><strong>light.</strong> Rubric: novelty low (removing UI, not building), blast radius low (extension app only, service layer untouched), irreversibility low (pre-production, pure UI), no migrations, no external-coupling change, security-positive (it <em>shrinks</em> what connected dApps can learn about your address book). Zero high dimensions. The single codex audit came back <strong>conditional approve</strong>; all five conditions are folded into the plan below.</p>
 
   <h2>Phases</h2>
   <div class="phase">
-    <h3>Phase 1: Add-contact popup</h3>
-    <p>Remove the "Register as sender" toggle and the behind-the-scenes registration when you save a new contact. Saving a contact just… saves a contact.</p>
-    <p class="muted">Proves itself by: lint + typecheck + component tests, all green.</p>
+    <h3>Phase 1: Decouple the contacts UI</h3>
+    <p>Remove the register-as-sender toggle from add-contact and edit-contact, the "also unregister" question when deleting, and two <em>hidden</em> behaviors the audit flagged: editing a registered contact's address no longer silently moves the registration, and importing contacts no longer silently deletes old registrations during name-merges. Import keeps its one sanctioned power: rows explicitly marked "sender" in a file you exported earlier still get registered — now with a visible count. The little read-only "sender" chip on contact rows stays.</p>
+    <p class="muted">Proves itself by: lint + typecheck + the full unit/component suite, all green.</p>
   </div>
   <div class="phase">
-    <h3>Phase 2: Edit-contact popup</h3>
-    <p>Same removal there. One invisible behavior stays: if a contact who IS registered gets their address corrected, the registration quietly follows the new address so no stale entry is left behind.</p>
-    <p class="muted">Proves itself by: lint + typecheck + component tests, all green.</p>
+    <h3>Phase 2: Fix the wording</h3>
+    <p>The empty token screen's "Add contacts to send and receive X" becomes "Send or receive X to see activity here." Plus a sweep for any other copy claiming registration is needed to receive, a small typo fix, and rewording the Advanced senders screen to say what it's actually for now (legacy-delivery tokens only).</p>
+    <p class="muted">Proves itself by: lint + typecheck + tests + a grep sweep showing no stray old copy.</p>
   </div>
   <div class="phase">
-    <h3>Phase 3: Delete flow + the little "sender" chip</h3>
-    <p>Deleting a contact stops asking about unregistering senders — it just deletes the contact. The small read-only "sender" chip on contact rows stays (your call), so power users can still see who's registered.</p>
-    <p class="muted">Proves itself by: lint + typecheck + component tests (chip tests unchanged).</p>
+    <h3>Phase 3: New focused tests</h3>
+    <p>The three contact popups have no component tests today. This phase adds them, pinning the new behavior: saving a contact touches contacts only, imports count their sender additions, merges never delete.</p>
+    <p class="muted">Proves itself by: the new tests green inside the full suite.</p>
   </div>
   <div class="phase">
-    <h3>Phase 4: Fix the wording</h3>
-    <p>The empty token screen currently says "Add contacts to send and receive X" — receiving needs nothing, so it becomes "Send or receive X to see activity here." Also sweep the app for any other copy claiming registration is needed to receive, and reword the Advanced senders screen to say what it's actually for now (legacy-delivery tokens only).</p>
-    <p class="muted">Proves itself by: lint + typecheck + component tests + a grep sweep showing no stray old copy.</p>
+    <h3>Phase 4: Update the browser tests</h3>
+    <p>The automated browser tests that click the removed toggles get reworked; sender add/remove coverage moves to the Advanced settings screen where the feature now lives.</p>
+    <p class="muted">Proves itself by: the reworked network e2e green against a live local node.</p>
   </div>
   <div class="phase">
-    <h3>Phase 5: Update the browser tests</h3>
-    <p>The automated browser tests that click the removed toggles get reworked: sender add/remove coverage moves to the Advanced settings screen where the feature now lives.</p>
-    <p class="muted">Proves itself by: the reworked network e2e tests green against a live local node.</p>
+    <h3>Phase 5: The proof test — REQUIRED</h3>
+    <p>A brand-new test doing the thing this plan claims is safe: a separate account (never seen by your wallet, provably not registered) sends you tokens — and the wallet finds them anyway, with the exact balance change asserted. The audit insisted (and the plan agrees): there is no soft fallback. If this can't be made to pass, the plan stops and comes back to you.</p>
+    <p class="muted">Proves itself by: the no-registration receive test green on a live local node.</p>
   </div>
   <div class="phase">
-    <h3>Phase 6: The proof test</h3>
-    <p>A brand-new test that does the thing this whole plan claims is safe: a separate account (not in your contacts, not registered as a sender) sends you tokens — and the wallet finds them anyway. This turns the plan's core claim from "verified by reading Aztec's source" into "proven in our own app, every CI run."</p>
-    <p class="muted">Proves itself by: the no-registration receive test green on a live local node (documented fallback if the harness fights us).</p>
-  </div>
-  <div class="phase">
-    <h3>Phase 7: Full quality gates + docs</h3>
+    <h3>Phase 6: Full quality gates + docs</h3>
     <p>Run the full pre-PR audit (typecheck, all tests, lint, build) plus the smoke browser suite, and update the docs that describe the old flow.</p>
     <p class="muted">Proves itself by: <code>bun run audit:vue</code> and the smoke e2e suite both green.</p>
   </div>
 
   <h2>Human context</h2>
-  <p>Private tokens on Aztec are like sealed envelopes scattered in a public pile — your wallet has to figure out which ones are addressed to you. It used to need a hint: "watch for envelopes from THIS person" (that's sender registration, and why adding a contact offered it). Aztec v5 added a smarter scheme: the first envelope anyone sends you comes with a public sticker derived from your own address, which your wallet always watches for. After that first envelope, everything from that sender is findable. A tiny privacy note: the sticker reveals that <em>someone</em> started sending to your address — not who, and not what — and that's a property of the network itself, not of this change. Removing the default-on registration is actually a privacy improvement on our side: registered senders were visible to connected dApps that query your private events.</p>
+  <p>Private tokens on Aztec are like sealed envelopes in a public pile — your wallet must figure out which are addressed to you. It used to need a hint: "watch for envelopes from THIS person" (sender registration — why adding a contact offered it). Aztec v5 added a smarter scheme: the first envelope anyone sends you comes with a public sticker derived from your own address, which your wallet always watches for. For the token this wallet bundles, the sticker is <em>enforced by the token's own rules</em>, so discovery is guaranteed. One honest nuance the audit sharpened: for OTHER tokens using a looser delivery mode, the sticker is the ecosystem default but ultimately the sender's wallet's choice — which is exactly why the Advanced senders tool survives as an escape hatch. And a small privacy note: the sticker reveals that <em>someone</em> started sending to your address — not who, not what; that's a network property, not ours. Removing default-on registration is a privacy improvement on our side: registered senders were visible to connected dApps.</p>
 
   <h2>Open questions</h2>
   <ul>
-    <li><strong>Replacement copy</strong>: "Send or receive {token} to see activity here." — approve or supply your own wording (A1 in the plan).</li>
-    <li><strong>Address-edit migration</strong>: when a registered contact's address is edited, should the registration silently follow (planned), or be left alone (A2 in the plan)?</li>
+    <li><strong>A1 — Replacement copy</strong>: "Send or receive {token} to see activity here." — approve or supply wording.</li>
+    <li><strong>A2 — No silent migration</strong>: the audit recommended (and the plan adopted) that editing a contact's address leaves the old sender registration alone — visible and deletable in Advanced — instead of silently moving it. Confirm.</li>
+    <li><strong>A3 — Import semantics</strong>: exported files record senders from all your networks; importing registers them on the <em>currently active network only</em> (existing behavior, now stated + counted in the UI; full backup remains the faithful path). Confirm this documented asymmetry.</li>
   </ul>
 
   <div class="approval">
     <h2>Approval decision needed from you</h2>
     <ul>
-      <li>Confirm scope: contacts UI fully decoupled; chip, export/import, Advanced surface, and dApp RPC all kept.</li>
-      <li>Confirm tier <code>light</code>.</li>
-      <li>Confirm validation: lint+typecheck+component tests per phase; network e2e in phases 5–6; audit:vue + smoke at the end.</li>
-      <li>Answer the two open questions (A1 copy, A2 address-edit migration).</li>
-      <li>No /harden pass scheduled for this plan (surface-reducing UI change; release-track hardening already covers the area).</li>
+      <li>Confirm scope: contacts fully non-mutating toward senders (import adds excepted); chip, export/import, Advanced surface, dApp RPC kept.</li>
+      <li>Confirm tier <code>light</code> (codex verdict: conditional approve — all conditions folded, disposition table in plan.md).</li>
+      <li>Confirm validation: full unit suite per phase; network e2e in phases 4–5 with Phase 5 as a REQUIRED gate; audit:vue + smoke at the end.</li>
+      <li>Answer A1, A2, A3 above.</li>
+      <li>No /harden pass scheduled for this plan (surface-reducing; release-track hardening covers the area).</li>
       <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
     </ul>
   </div>
@@ -93,20 +89,20 @@
 
     <div class="phase recommended">
       <h3>Recommended for this plan: /goal</h3>
-      <pre><code>/goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/contacts-sender-decouple/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` and `bun run test:e2e` both report exit 0 in the transcript.</code></pre>
+      <pre><code>/goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/contacts-sender-decouple/lessons/phase-N.md` in the transcript; the Phase 5 no-registration receive e2e reported green (required gate, no .todo substitute); `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` and `bun run test:e2e` both report exit 0 in the transcript.</code></pre>
     </div>
 
     <h3>Alternative: /loop</h3>
     <pre><code>/loop 15m Drive implementations-plan/contacts-sender-decouple forward. Never idle waiting for my input. Each firing:
 1. Reality check: read implementations-plan/contacts-sender-decouple/plan.md and lessons/ (authoritative state — not the chat); run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch).
 2. Waiting on CI is fine — confirm it's progressing (`gh run watch &lt;run-id&gt;` up to 10 minutes). Use the wait productively; don't start conflicting work.
-3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint &amp;&amp; bun run typecheck &amp;&amp; bun run test:components`. Then commit → push.
-4. Stuck, or facing a decision you'd normally bring to me? Call /codex xhigh with full context, reach a defensible decision, act on it, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never expand scope beyond plan.md.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint &amp;&amp; bun run typecheck &amp;&amp; bun run test`. Then commit → push.
+4. Stuck, or facing a decision you'd normally bring to me? Call /codex xhigh with full context, reach a defensible decision, act on it, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never expand scope beyond plan.md. Phase 5 blocked ≠ skippable: surface and stop.
 5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
 6. Phase green? "Green" = the phase's validation gate as written in plan.md. Run it, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=..., advance.
 7. All phases ✓? Post-impl sequence: /code-review max --fix → commit separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → wrap-up report. Surface and stop.</code></pre>
   </section>
 
-  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">Codex audit</a> · <a href="./lessons/">Lessons logs</a></p>
 </body>
 </html>
