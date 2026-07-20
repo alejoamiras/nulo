@@ -53,6 +53,9 @@ export default defineConfig({
 			// Same bb.js WASM limitation (poseidon2 in the class-id hash) plus node-only fs
 			// digest reads. Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/account/artifact-freeze.test.ts",
+			// Same bb.js WASM limitation (address derivation + init-hash poseidon2) + node crypto.
+			// Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/account/instantiation-descriptor.test.ts",
 			// Node-only (fs + import.meta.url file resolution — jsdom's URL isn't file-scheme).
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/pxe/opfs-store.test.ts",

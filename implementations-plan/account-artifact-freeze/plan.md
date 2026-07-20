@@ -80,7 +80,7 @@ from the artifact-bearing wrapper or record the accepted duplication size in les
 audit-corrected twice). Pass: exit 0, KAT green with zero vector edits.
 Layers: lint/typecheck(all)/unit(all workspaces).
 
-### Phase 2 — Frozen instantiation descriptor (revised Outline A)
+### Phase 2 ✓ — Frozen instantiation descriptor (revised Outline A)
 One small frozen descriptor module — constructor function name, args builder
 `[signingPublicKey.x, signingPublicKey.y]`, `salt: Fr.ZERO`, explicit `immutablesHash: Fr.ZERO`,
 `deployer: AztecAddress.ZERO`, plus a `descriptorVersion` + content digest (feeds the Phase 3
