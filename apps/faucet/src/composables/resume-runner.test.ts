@@ -1,5 +1,5 @@
 import type { DepositJournalRecord } from "@nulo/bridge-core"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import type { ResumeVerdict } from "@/lib/resume-validator"
 import { type ResumeRunnerDeps, runResume } from "./resume-runner"
 
@@ -18,7 +18,7 @@ function makeDeps(over: Partial<ResumeRunnerDeps> = {}, recOver: Partial<Deposit
 			events.push("lock-release")
 			return r
 		},
-		latch: (id) => {
+		latch: (_id) => {
 			events.push("latch")
 			if (latched) return false
 			latched = true
@@ -36,7 +36,7 @@ function makeDeps(over: Partial<ResumeRunnerDeps> = {}, recOver: Partial<Deposit
 			events.push("deposit")
 			return "0xdeposit"
 		},
-		onDepositHash: (id, hash) => {
+		onDepositHash: (_id, hash) => {
 			events.push(`hash:${hash}`)
 			rec = { ...(rec as DepositJournalRecord), depositTxHash: hash }
 		},
