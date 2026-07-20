@@ -16,6 +16,12 @@ centralized background-owned handled state, and writes the policy down.
 conditions folded into this v3). Verdicts inline below; transcripts in `audit-codex.md` /
 `audit-fable.md`.
 **Baseline**: `dev` @ `cff0ba2` (aztec 5.0.1 line, v0.25.0).
+**Status: APPROVED 2026-07-20** — user verdict `approve`. Ask resolutions: A1 confirmed
+(cross-major semantics as stated: V5 backups restore only in V5; V6 recovery = seed import
+deriving V6-regime accounts); A2 confirmed (canary failure ⇒ HOLD the `@aztec` line; cutting the
+next major stays a deliberate decision); A3 confirmed (revised Outline A — the shared frozen
+descriptor). `/harden security` at pre-production: recommended, user chose decide-later
+(unscheduled).
 
 ## The two failure modes this plan must separate (audit-adopted framing)
 
@@ -301,13 +307,13 @@ bun run build:firefox`. Pass: all exit 0. Layers: all fast + both builds + smoke
 
 ## Post-implementation hardening
 
-This plan touches account-identity invariants — recommend a `/harden security` pass at the
-pre-production release checkpoint with the freeze module, vendored artifact, and integrity
-coordinator explicitly in scope. Not scheduled inside this plan.
+This plan touches account-identity invariants — a `/harden security` pass at the pre-production
+release checkpoint with the freeze module, vendored artifact, and integrity coordinator in scope
+was recommended at the gate; the user chose **decide later** (recommended-but-unscheduled).
 
 ## Seeds
 
-_Draft until the approval gate; finalized post-approval._
+_FINAL (post-approval, 2026-07-20; approved scope unchanged from the gate draft)._
 
 ```
 /goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/account-artifact-freeze/lessons/phase-N.md` in the transcript; the Phase 4 dedicated frozen-account canary reported green via e2e:agent with native proving; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue`, `bun run test:all`, `bun run test:e2e`, and `bun run build:firefox` all report exit 0 in the transcript.
