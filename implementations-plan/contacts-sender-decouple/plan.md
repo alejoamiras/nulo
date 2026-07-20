@@ -151,7 +151,7 @@ external sender's strategy nor registry discovery; it is not an acceptable subst
 **Validation gate** — commands: targeted `bun run e2e:agent` run of the new file. Pass: the
 no-registration receive assertion green against a live node. Layers: network e2e.
 
-### Phase 6 — Full gates + docs + wrap-up
+### Phase 6 ✓ — Full gates + docs + wrap-up
 - `bun run audit:vue` (typecheck:all → test → lint → build) and `bun run test:e2e` (smoke).
 - Docs: service README notes describing the old contact→sender flow; the import/export asymmetry
   note; `implementations-plan/index.md`; lessons.
