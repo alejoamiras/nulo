@@ -24,9 +24,12 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import { PRIVATE_FPC_SALT } from "../src/private-fuel"
+import { runFpcGate } from "./check-fpc-version"
+import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
@@ -76,8 +79,18 @@ async function main() {
 	const t0 = Date.now()
 	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
 
+	// FUND-MOVING PREFLIGHT (codex ultra-audit HIGH): this canary deposits Fee Juice
+	// and pays fees THROUGH the PrivateFPC at PRIVATE_FPC_ADDRESS — an unrecoverable
+	// loss if that address isn't the deployed, class-correct, version-compatible
+	// contract. The gate runs INLINE here (not as a separate operator command) so it
+	// can never be skipped before the first broadcast.
+	await runFpcGate("require-deployed")
+
 	// ─── L1 (live contracts, viem) ───────────────────────────────────
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
+	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
+		throw new Error(`L1 sender ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
+	}
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const azlo = CONFIG.l1.usdc as `0x${string}`
@@ -111,7 +124,8 @@ async function main() {
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
 	const secret = Fr.random()
-	const manager = await ewallet.createSchnorrAccount(secret, Fr.random(), deriveSigningKey(secret))
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
+	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
 	const l2account = await manager.getAccount()
 	const from = l2account.getAddress()
 	console.log("L2 recipient", from.toString())
@@ -165,10 +179,10 @@ async function main() {
 	await registerLive("proxy", bridgeProxyArtifact, CONFIG.l2.proxy)
 	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 
-	// Register the Wonderland PrivateFPC locally (instance + class). It has no public functions / no
-	// init, so 5.0 needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both
-	// the instance + class preimages, so registerContract (not just the class). Salt 0 reproduces the
-	// pinned PRIVATE_FPC_ADDRESS from the 5.0 artifact.
+	// Register the PrivateFPC locally (instance + class). It has no public functions / no init, so 5.0
+	// needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both the instance +
+	// class preimages, so registerContract (not just the class). The canonical salt reproduces the pinned
+	// PRIVATE_FPC_ADDRESS from the 5.0.0 artifact.
 	const privateFpcArtifact = loadContractArtifact(
 		JSON.parse(
 			readFileSync(
@@ -190,7 +204,8 @@ async function main() {
 	const privateFpcInstance = await getContractInstanceFromInstantiationParams(
 		privateFpcArtifact as never,
 		{
-			salt: new Fr(0),
+			// The CANONICAL salt (fixed from 5.0.0 onward — see private-fuel.ts PRIVATE_FPC_SALT).
+			salt: Fr.fromHexString(PRIVATE_FPC_SALT),
 			publicKeys: PublicKeys.default(),
 			deployer: AztecAddress.ZERO,
 		} as never,

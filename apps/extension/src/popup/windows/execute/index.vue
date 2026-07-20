@@ -36,6 +36,7 @@ import { parseCaipAccount, parseCaipChain, resolveNetworkByChainId } from "@/wal
 /** Composables */
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
+import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
 import { useFeeEstimationMap } from "@/composables/useFeeEstimationMap"
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 
@@ -49,8 +50,6 @@ type UIDappMetadata = DappMetadata & {
 	loadingLogo?: boolean
 	logoBlobUrl?: string
 }
-
-type UIError = { title: string; tooltip: string; type: string }
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -66,7 +65,6 @@ const accounts = ref<Account[]>([])
 
 const isLoading = ref(false)
 const isWrongProfile = ref(false)
-const processingError = ref<UIError>()
 
 /**
  * True once `init()` has finished materializing the operations list. The
@@ -140,13 +138,35 @@ const {
 	},
 })
 
-function setError(title: string, tooltip: string = title, type: string = "error") {
-	processingError.value = { title, tooltip, type }
-}
-
-function clearError() {
-	processingError.value = undefined
-}
+// init/reject/services are referenced lazily (thunks): they are declared below
+// and only invoked by start()/dispose()/the guard at runtime.
+const {
+	start: startWindow,
+	dispose: disposeWindow,
+	closeWindow,
+	onActiveProfileChanged,
+	stripStatus,
+	processingError,
+	setError,
+	clearError,
+} = useDappApprovalWindow({
+	profile,
+	isInteractionCancelled,
+	isLoading,
+	connectServices: () => {
+		profileService.connect()
+		interactionService.connect()
+		tokenService.connect()
+	},
+	disconnectServices: () => {
+		profileService.disconnect()
+		interactionService.disconnect()
+		executionService.disconnect()
+		tokenService.disconnect()
+	},
+	init: () => init(),
+	reject: () => reject(),
+})
 
 const init = async () => {
 	try {
@@ -297,10 +317,6 @@ const init = async () => {
 	}
 }
 
-const onActiveProfileChanged = (_profile?: ProfileInfo) => {
-	if (!_profile || _profile.id !== profile.value?.id) reject()
-}
-
 const handleFeeUpdate = (index: number, value: FeeSettings | undefined) => {
 	const op = operations.value[index]
 	// `feeSettings` only exists on send-like draft kinds. Discriminant guard
@@ -373,21 +389,8 @@ const reject = async () => {
 	closeWindow(true)
 }
 
-const closeWindow = (interactionCompleted?: boolean) => {
-	if (interactionCompleted) window.removeEventListener("beforeunload", reject)
-	chrome.windows.getCurrent(undefined, (window) => {
-		if (window.id) chrome.windows.remove(window.id)
-	})
-}
-
 const signerAccounts = computed(() => uniqueSignerAccounts(operations.value))
 const signerNetworks = computed(() => uniqueSignerNetworks(operations.value))
-const stripStatus = computed<"ready" | "loading" | "cancelled">(() => {
-	if (isInteractionCancelled.value) return "cancelled"
-	if (isLoading.value) return "loading"
-	return "ready"
-})
-
 // Mirrors the `requiresFeeSelection` early-return inside approve(): a send-like op
 // with no chosen fee can't execute yet. Gating the Confirm button's disabled state
 // on it (not just approve()'s guard) makes the button authoritative — a click while
@@ -408,43 +411,9 @@ const showJson = () => {
 const profileService = new ProfileServiceClient()
 profileService.onActiveProfileChanged.add(onActiveProfileChanged)
 
-onMounted(async () => {
-	profileService.connect()
-	interactionService.connect()
-	tokenService.connect()
+onMounted(startWindow)
 
-	if (!appStore.isSessionChecked) {
-		await new Promise<void>((resolve) => {
-			const stop = watch(
-				() => appStore.isSessionChecked,
-				(checked) => {
-					if (checked) {
-						stop()
-						resolve()
-					}
-				},
-				{ immediate: true },
-			)
-		})
-	}
-
-	if (!appStore.isLogined) {
-		appStore.pageAwaitingAuth = router.currentRoute.value.fullPath
-		router.push({ path: "/popup/auth" })
-		return
-	}
-
-	await init()
-	window.addEventListener("beforeunload", reject)
-})
-
-onUnmounted(() => {
-	profileService.disconnect()
-	interactionService.disconnect()
-	executionService.disconnect()
-	tokenService.disconnect()
-	window.removeEventListener("beforeunload", reject)
-})
+onUnmounted(disposeWindow)
 </script>
 
 <template>

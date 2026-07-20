@@ -1,3 +1,7 @@
+import { bytesToHex } from "@nulo/wallet-core/utils"
+import { asPasshash, type Passhash } from "./secret-types"
+import { zeroize } from "./zeroize"
+
 /** OWASP-recommended minimum for PBKDF2-SHA256 (2023). */
 const PBKDF2_ITERATIONS = 600_000
 
@@ -76,7 +80,15 @@ export class EncryptionKey {
 	 */
 	public static async fromPassword(password: string): Promise<EncryptionKey> {
 		const passhash = await EncryptionKey.getPasshash(password)
-		return EncryptionKey.fromPasshash(passhash)
+		try {
+			return await EncryptionKey.fromPasshash(passhash)
+		} finally {
+			// Wipe the password-equivalent SHA-256 scratch once `importKey` has
+			// copied it into the non-extractable PBKDF2 base key. The `password`
+			// string itself and the CryptoKey internals are not wipeable (see
+			// zeroize caveats).
+			zeroize(passhash)
+		}
 	}
 
 	/**
@@ -84,7 +96,7 @@ export class EncryptionKey {
 	 * @param passhash - Hash of the password
 	 * @returns New instance of EncryptionKey
 	 */
-	public static async fromPasshash(passhash: ArrayBuffer): Promise<EncryptionKey> {
+	public static async fromPasshash(passhash: Passhash): Promise<EncryptionKey> {
 		const baseKey = await self.crypto.subtle.importKey("raw", passhash, "PBKDF2", false, ["deriveKey"])
 		return new EncryptionKey(baseKey)
 	}
@@ -94,9 +106,9 @@ export class EncryptionKey {
 	 * @param password User password
 	 * @returns Hash of the password
 	 */
-	public static async getPasshash(password: string): Promise<ArrayBuffer> {
+	public static async getPasshash(password: string): Promise<Passhash> {
 		const utf8 = new TextEncoder()
-		return await self.crypto.subtle.digest("SHA-256", utf8.encode(password))
+		return asPasshash(await self.crypto.subtle.digest("SHA-256", utf8.encode(password)))
 	}
 
 	/**
@@ -110,7 +122,6 @@ export class EncryptionKey {
 		const hashBuffer = await self.crypto.subtle.digest("SHA-256", data)
 		const hashArray = new Uint8Array(hashBuffer)
 
-		// Convert bytes to hex
-		return [...hashArray].map((b) => b.toString(16).padStart(2, "0")).join("")
+		return bytesToHex(hashArray)
 	}
 }

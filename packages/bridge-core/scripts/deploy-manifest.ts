@@ -18,6 +18,7 @@
 import { randomBytes } from "node:crypto"
 import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeSync } from "node:fs"
 import { dirname, join } from "node:path"
+import { parseCandidateManifest } from "../src/candidate-schema"
 
 export interface L2Record {
 	address: string
@@ -52,8 +53,10 @@ function fsyncDir(dir: string): void {
 	}
 }
 
-/** Write JSON to a same-dir sibling temp (0600) + fsync + atomic rename + parent-dir fsync. */
+/** Write JSON to a same-dir sibling temp (0600) + fsync + atomic rename + parent-dir fsync.
+ *  The manifest is STRICT-validated first — a malformed candidate never reaches disk. */
 export function writeCandidateAtomic(targetPath: string, manifest: CandidateManifest): void {
+	parseCandidateManifest(manifest)
 	const dir = dirname(targetPath)
 	const tmp = join(dir, `.${randomBytes(9).toString("hex")}.candidate.tmp`)
 	const fd = openSync(tmp, "wx", 0o600)

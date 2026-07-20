@@ -1,17 +1,19 @@
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
+import { restoreRows } from "@/wallet/services/restore-rows"
+import { nextRandomId } from "@/wallet/services/id-allocators"
+import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { getInitials, sanitizeString } from "@/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { type Contact, CONTACT_SERVICE_NAME, type Events, type Methods } from "./spec"
+import { type Contact, CONTACT_SERVICE_NAME, CONTACT_STORAGE_ROOT, ContactSchema, type Events, type Methods } from "./spec"
 
 export * from "./spec"
 
@@ -48,13 +50,13 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(CONTACT_SERVICE_NAME, logger)
 		this.storage = browserApi
-			? new EntityStorage<Contact>("nulo:core:contacts", browserApi.storage.local)
-			: new EntityStorage<Contact>("nulo:core:contacts", chrome.storage.local)
+			? new EntityStorage<Contact>(CONTACT_STORAGE_ROOT, browserApi.storage.local, (raw) => ContactSchema.parse(raw))
+			: new EntityStorage<Contact>(CONTACT_STORAGE_ROOT, chrome.storage.local, (raw) => ContactSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 	}
 
 	public async getContacts(): Promise<Contact[]> {
@@ -68,12 +70,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		const contact = await this.storage.get(contactId)
-		if (contact?.profileId !== profile.id) {
-			throw new Error("invalid id")
-		}
-
-		return contact
+		return requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 	}
 
 	public async getContactByAddress(contactAddress: string): Promise<Contact | undefined> {
@@ -94,10 +91,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 
-			let id: string
-			do {
-				id = getRandomHex(8)
-			} while (await this.storage.contains(id))
+			const id = await nextRandomId(this.storage)
 
 			const contact: Contact = {
 				id,
@@ -124,10 +118,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 
-			const contact = await this.storage.get(contactId)
-			if (contact?.profileId !== profile.id) {
-				throw new Error("invalid id")
-			}
+			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
 			const newContact = {
 				...contact,
@@ -153,10 +144,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 
-			const contact = await this.storage.get(contactId)
-			if (contact?.profileId !== profile.id) {
-				throw new Error("invalid id")
-			}
+			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
 			this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
 			await this.storage.delete(contactId)
@@ -245,11 +233,14 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	 * deleted profiles are cleaned up as a side-effect of the chain purge,
 	 * not by this listener.
 	 */
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related contacts`)
+	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
+	 *  from the removed fire-and-forget `onProfileDeleted` sub — finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related contacts`)
 		try {
 			await this.lock.enter()
-			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profile.id)
+			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profileId)
 			await purgeRows(
 				contacts,
 				(contact) => {
@@ -274,29 +265,20 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	public async restore(contacts: Contact[]): Promise<Restored<Contact>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<Contact>[] = []
 		try {
 			await this.lock.enter()
-
-			for (const contact of contacts) {
-				try {
-					let id = contact.id
-					while (await this.storage.contains(id)) {
-						id = getRandomHex(8)
-					}
-
-					await this.storage.set(id, { ...contact, id })
-
-					result.push({ ...contact, id })
-				} catch (err) {
-					result.push({
-						...contact,
-						restoreError: toRestoreError(err),
-					})
+			return await restoreRows(contacts, async (contact) => {
+				let id = contact.id
+				while (await this.storage.contains(id)) {
+					id = getRandomHex(8)
 				}
-			}
-
-			return result
+				const written = { ...contact, id }
+				// Parse the persisted shape so a malformed backup contact is recorded as
+				// restoreError, not silently written + codec-hidden on read.
+				ContactSchema.parse(written)
+				await this.storage.set(id, written)
+				return written
+			})
 		} finally {
 			this.lock.leave()
 		}

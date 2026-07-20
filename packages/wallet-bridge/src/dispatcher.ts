@@ -64,8 +64,9 @@ import type {
 	TransactionCapability,
 } from "./capabilities"
 import { getRequiredCapability, isCapabilityExempt } from "./capability-map"
-import { METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, METHOD_REGISTRY } from "./method-descriptors"
+import { METHOD_REGISTRY, METHOD_TO_KIND, NETWORK_ONLY_KINDS, ACCOUNT_KINDS, assertKnownMethod } from "./method-descriptors"
 import type {
+	AztecCreateAuthWitRequest,
 	AztecSendTxRequest,
 	CapabilityResult,
 	ExecutionResult,
@@ -86,6 +87,7 @@ import type {
 } from "./operation"
 import type { OperationResult } from "./operation-result"
 import { enforceScope, enforceScopeWithSession } from "./scope-enforcement"
+import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-checkers"
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
@@ -236,6 +238,65 @@ function accountsCapsEqual(a: AccountsCapability, b: AccountsCapability): boolea
 	return Boolean(a.canGet) === Boolean(b.canGet) && Boolean(a.canCreateAuthWit) === Boolean(b.canCreateAuthWit)
 }
 
+/** The known `Capability` discriminants, as an exhaustive record so adding a
+ *  `Capability` variant is a compile error until it's classified here (and in
+ *  `isCapabilityCovered` below). A wire capability whose `type` is NOT in this set
+ *  is an UNKNOWN-type cap: it flows through untouched to the popup, where it renders
+ *  default-off — do NOT drop or coerce it (that would hide the warning path). */
+const KNOWN_CAPABILITY_TYPES: Record<Capability["type"], true> = {
+	accounts: true,
+	contracts: true,
+	contractClasses: true,
+	simulation: true,
+	transaction: true,
+	data: true,
+}
+
+function isKnownCapabilityType(type: string): type is Capability["type"] {
+	return Object.hasOwn(KNOWN_CAPABILITY_TYPES, type)
+}
+
+/** Grants of one capability type, narrowed to that variant. The single typed cast
+ *  lives here instead of the `existing.capability as XCapability` casts scattered
+ *  across the coverage branches. */
+function grantsOfType<K extends Capability["type"]>(grants: GrantedCapabilityRecord[], type: K): Extract<Capability, { type: K }>[] {
+	return grants.filter((g) => g.capability.type === type).map((g) => g.capability as Extract<Capability, { type: K }>)
+}
+
+/** Is `requested` already covered by the existing grants of its type — i.e. NO
+ *  re-prompt needed? Field-aware for accounts/contracts/transaction/simulation/data;
+ *  TYPE-ONLY for `contractClasses` (the field-blind coverage drift filed as the
+ *  out-of-arc `wallet-sdk-capability-field-diff` finding, pinned in dispatcher.test.ts).
+ *  Exhaustive over `Capability["type"]`: a new variant forces a coverage decision here
+ *  rather than silently defaulting to covered (fail-open) or not (spurious re-prompt).
+ *  `cap` is the discriminated union, so the branches narrow WITHOUT per-branch casts. */
+function isCapabilityCovered(cap: Capability, existingGrants: GrantedCapabilityRecord[], grantedTypes: Set<string>): boolean {
+	switch (cap.type) {
+		case "accounts": {
+			const existing = grantsOfType(existingGrants, "accounts")[0]
+			return existing !== undefined && accountsCapsEqual(existing, cap)
+		}
+		case "contracts": {
+			const existing = grantsOfType(existingGrants, "contracts")
+			return existing.length > 0 && contractsRequestCovered(existing, cap)
+		}
+		case "transaction": {
+			const existing = grantsOfType(existingGrants, "transaction")
+			return existing.length > 0 && transactionRequestCovered(existing, cap)
+		}
+		case "simulation": {
+			const existing = grantsOfType(existingGrants, "simulation")
+			return existing.length > 0 && simulationRequestCovered(existing, cap)
+		}
+		case "data": {
+			const existing = grantsOfType(existingGrants, "data")
+			return existing.length > 0 && dataRequestCovered(existing, cap)
+		}
+		case "contractClasses":
+			return grantedTypes.has("contractClasses")
+	}
+}
+
 /** Shape of the capability manifest sent by the dApp via requestCapabilities(). */
 type CapabilityManifest = {
 	capabilities?: unknown[]
@@ -250,6 +311,59 @@ type CapabilityManifest = {
 // get_complete_address are fully retired (no descriptor → dispatch rejects them);
 // the batching logic that lived behind `simulate_views` now lives in
 // extension/.../execution/helpers/batched-view-simulation.ts.
+
+/**
+ * Structural arg-shape guard for authorization-sensitive dApp methods, run before
+ * capability/scope enforcement so the scope checkers + handlers dereference validated
+ * shapes rather than raw `unknown` (F-08). Deliberately dependency-free — wallet-bridge is
+ * transport-shaped and does NOT import `WalletSchema`; it validates only the
+ * authorization-relevant fields the scope/handler layer uses. Full Aztec-object parsing
+ * stays downstream (execution-layer Zod). Residual: this is not a complete WalletSchema parse;
+ * grantPublicAuthwit/registerToken rely on their handlers' own (String-coercion-tolerant) checks.
+ */
+function assertAuthRelevantArgShape(methodName: string, args: unknown[]): void {
+	const isObj = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null
+	const bad = (m: string): never => {
+		throw new Error(`Malformed ${methodName} request: ${m}`)
+	}
+	const assertCall = (c: unknown, where: string) => {
+		if (!isObj(c) || c.to === undefined || typeof c.name !== "string") {
+			bad(`${where} must have \`to\` and a string \`name\``)
+		}
+	}
+	const assertExecCalls = (exec: unknown) => {
+		if (!isObj(exec)) bad("exec payload must be an object")
+		const calls = (exec as Record<string, unknown>).calls
+		if (!Array.isArray(calls)) bad("exec.calls must be an array")
+		for (const c of calls as unknown[]) assertCall(c, "each call")
+	}
+
+	switch (methodName) {
+		case "sendTx":
+		case "profileTx":
+			// simulateTx is intentionally NOT guarded here: post-merge with dev's
+			// arg-guard refactor, its exec validation is owned by
+			// `checkSimulationTransactions` (optional-chains `exec?.calls`, requires
+			// an array, coerces `to`/tolerates missing `name`) plus the downstream
+			// execution-layer Zod — so a dispatcher-level shape guard is redundant and
+			// would preempt the capability error that path pins.
+			assertExecCalls(args[0])
+			break
+		case "executeUtility":
+			assertCall(args[0], "call")
+			break
+		case "createAuthWit":
+			// args[0] = from; args[1]'s CallIntent/IntentInnerHash shape is enforced by
+			// checkCreateAuthWit (structured-intent requirement + raw-Fr reject).
+			if (args[0] === undefined || args[0] === null) bad("`from` (args[0]) is required")
+			break
+		case "registerToken":
+			if (args[0] === undefined || args[0] === null || args[1] === undefined || args[1] === null) {
+				bad("both positional arguments are required")
+			}
+			break
+	}
+}
 
 export class WalletSdkDispatcher {
 	constructor(
@@ -290,9 +404,25 @@ export class WalletSdkDispatcher {
 		// `Object.hasOwn`, not a truthy index, so prototype names (`toString`,
 		// `constructor`, …) are rejected here rather than slipping into capability
 		// handling and failing with a misleading CapabilityNotGrantedError.
-		if (!Object.hasOwn(METHOD_REGISTRY, methodName)) {
-			throw new Error(`Unsupported wallet method: ${methodName}`)
+		// The guard lives in `assertKnownMethod` (the single typed choke point);
+		// on return `methodName` is narrowed to `MethodName`. Behavior is identical
+		// to the former inline `Object.hasOwn` check (same throw string).
+		assertKnownMethod(methodName)
+
+		// Arg-shape guard: a pure pass/fail predicate over the ORIGINAL
+		// args — runs BEFORE capability/scope enforcement and before any handler
+		// destructuring, and never replaces the array, so scope checkers and
+		// handlers keep seeing the exact wire values. Batch legs re-enter
+		// dispatch() and hit their own method's guard here. Methods without an
+		// argSchema keep their historical arg tolerance untouched.
+		const argSchema = METHOD_REGISTRY[methodName].argSchema
+		if (argSchema && !argSchema(args)) {
+			throw new Error(`Invalid arguments for wallet method: ${methodName}`)
 		}
+
+		// F-08: structural arg-shape guard for authorization-sensitive methods, before any
+		// capability/scope logic dereferences the args.
+		assertAuthRelevantArgShape(methodName, args)
 
 		// Enforce capability grants (type-level) then scope (per-operation +
 		// per-account allow-list).
@@ -360,6 +490,9 @@ export class WalletSdkDispatcher {
 		}
 		if (methodName === "grantPublicAuthwit") {
 			return this.handleGrantPublicAuthwit(args, ctx, dappSession)
+		}
+		if (methodName === "createAuthWit") {
+			return this.handleCreateAuthWit(args, ctx, dappSession, grants)
 		}
 
 		const kind = METHOD_TO_KIND[methodName]
@@ -565,6 +698,50 @@ export class WalletSdkDispatcher {
 	}
 
 	/**
+	 * Handle createAuthWit: resolve the signer from args[0] (not the session default),
+	 * then route by scope coverage. A CallIntent covered by a granted tx/sim scope is
+	 * within authority the dApp already holds → sign silently. An uncovered call, or any
+	 * IntentInnerHash (whose inner hash is fully attacker-chosen), → confirmation popup.
+	 * No sendTx FIFO hooks: the background's non-send safety-net releases the baton.
+	 */
+	private async handleCreateAuthWit(
+		args: unknown[],
+		ctx: SessionContext,
+		dappSession: IDappSessionRef | undefined,
+		grants: GrantedCapabilityRecord[],
+	): Promise<unknown> {
+		if (!dappSession) {
+			throw new Error(`No dApp session found for origin ${ctx.origin}`)
+		}
+		const requestedFrom = String(args[0])
+		const [network, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedFrom)
+		const messageHashOrIntent = args[1] as AztecCreateAuthWitOperation["messageHashOrIntent"]
+
+		if (isCreateAuthWitCoveredByTxOrSimulationScope(messageHashOrIntent, grants)) {
+			const operation: AztecCreateAuthWitOperation = {
+				kind: "aztec_createAuthWit",
+				networkId: network.id,
+				accountAddress: account.address,
+				messageHashOrIntent,
+			}
+			const origin: LocalTxOrigin = { type: OriginType.DAPP, name: ctx.origin }
+			const results = await this.executionService.executeOperations([operation], origin)
+			return this.unwrapResult(results[0])
+		}
+
+		const authwitReq: AztecCreateAuthWitRequest = {
+			kind: "aztec_createAuthWit",
+			account: formatCaipAccount(ctx.chainId, account.address),
+			messageHashOrIntent,
+		}
+		const results = await this.dappInteractionService.execute({
+			sessionId: dappSession.id,
+			operations: [authwitReq],
+		})
+		return this.unwrapResult(results[0])
+	}
+
+	/**
 	 * Handle registerToken by routing through DappInteractionService.
 	 *
 	 * Unlike straight-to-execution methods, registerToken needs the confirmation
@@ -713,7 +890,7 @@ export class WalletSdkDispatcher {
 		// Phase 1: Check existing grants and rejections
 		const existingGrants = dappSession.capabilityGrants ?? []
 		const existingRejections = dappSession.capabilityRejections ?? []
-		const grantedTypes = new Set(existingGrants.map((g) => g.capability.type))
+		const grantedTypes = new Set<string>(existingGrants.map((g) => g.capability.type))
 		const rejectedTypes = new Set(existingRejections.map((r) => r.capabilityType))
 
 		// Delta: capabilities not yet granted OR previously rejected (re-request).
@@ -725,39 +902,16 @@ export class WalletSdkDispatcher {
 		// silently authorising the upgrade. The breadth fix for other cap types
 		// is filed as `wallet-sdk-capability-field-diff`.
 		const delta = requestedCapabilities.filter((cap) => {
-			if (rejectedTypes.has(cap.type as string)) return true
-			if (cap.type === "accounts") {
-				const existing = existingGrants.find((g) => g.capability.type === "accounts")
-				return !existing || !accountsCapsEqual(existing.capability as AccountsCapability, cap as unknown as AccountsCapability)
-			}
-			if (cap.type === "contracts") {
-				// Field-level delta (closes wallet-sdk-capability-field-diff for contracts): a request
-				// listing addresses/flags beyond the stored grants re-prompts; approval APPENDS a new
-				// grant, and scope checkers union across grants - so coverage grows monotonically.
-				const existing = existingGrants
-					.filter((g) => g.capability.type === "contracts")
-					.map((g) => g.capability as ContractsCapability)
-				return existing.length === 0 || !contractsRequestCovered(existing, cap as unknown as ContractsCapability)
-			}
-			if (cap.type === "transaction") {
-				// Scope-list field diff (the rest of wallet-sdk-capability-field-diff): a request whose
-				// scope exceeds every stored grant re-prompts; approval REPLACES the stored grant.
-				const existing = existingGrants
-					.filter((g) => g.capability.type === "transaction")
-					.map((g) => g.capability as TransactionCapability)
-				return existing.length === 0 || !transactionRequestCovered(existing, cap as unknown as TransactionCapability)
-			}
-			if (cap.type === "simulation") {
-				const existing = existingGrants
-					.filter((g) => g.capability.type === "simulation")
-					.map((g) => g.capability as SimulationCapability)
-				return existing.length === 0 || !simulationRequestCovered(existing, cap as unknown as SimulationCapability)
-			}
-			if (cap.type === "data") {
-				const existing = existingGrants.filter((g) => g.capability.type === "data").map((g) => g.capability as DataCapability)
-				return existing.length === 0 || !dataRequestCovered(existing, cap as unknown as DataCapability)
-			}
-			return !grantedTypes.has(cap.type as Capability["type"])
+			const type = cap.type as string
+			if (rejectedTypes.has(type)) return true
+			// Unknown wire types keep the type-only default: they flow through to the
+			// popup and render default-off — do NOT drop or coerce them. Known types are
+			// trusted as their `Capability` variant (the same trust the removed per-branch
+			// `as unknown as XCapability` casts encoded) and checked field-aware via
+			// `isCapabilityCovered`. (Grant-path semantics unchanged: contracts APPENDS a
+			// grant, transaction REPLACES; scope checkers union across grants downstream.)
+			if (!isKnownCapabilityType(type)) return !grantedTypes.has(type)
+			return !isCapabilityCovered(cap as unknown as Capability, existingGrants, grantedTypes)
 		})
 		// Track which delta items are re-requests (previously rejected)
 		const reRequested = requestedCapabilities.filter((cap) => rejectedTypes.has(cap.type as string)).map((cap) => cap.type as string)

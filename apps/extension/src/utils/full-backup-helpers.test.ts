@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { collectRestoreErrors, detectBackupType, readBackupFile, remapIdInBackupData } from "./full-backup-helpers"
+import { collectRestoreErrors, detectBackupType, normalizeAllIds, readBackupFile, remapByMap } from "./full-backup-helpers"
 
 describe("detectBackupType", () => {
 	it("detects plain JSON object", () => {
@@ -108,7 +108,7 @@ describe("collectRestoreErrors", () => {
 	})
 })
 
-describe("remapIdInBackupData", () => {
+describe("normalizeAllIds + remapByMap", () => {
 	it("rewrites the given key in every array entry that has it", () => {
 		const data: Record<string, unknown> = {
 			account: [
@@ -119,7 +119,7 @@ describe("remapIdInBackupData", () => {
 			meta: { profileId: "old" }, // non-array left untouched
 			scalar: 42,
 		}
-		remapIdInBackupData(data, "profileId", "new")
+		normalizeAllIds(data, "profileId", "new")
 		expect(data.account).toEqual([
 			{ profileId: "new", id: "a1" },
 			{ profileId: "new", id: "a2" },
@@ -133,7 +133,67 @@ describe("remapIdInBackupData", () => {
 		const data: Record<string, unknown> = {
 			account: [{ id: "a1" }, { profileId: "old", id: "a2" }],
 		}
-		remapIdInBackupData(data, "profileId", "new")
+		normalizeAllIds(data, "profileId", "new")
 		expect(data.account).toEqual([{ id: "a1" }, { profileId: "new", id: "a2" }])
+	})
+
+	it("SCOPED form (oldId given): rewrites only rows matching oldId — no cross-graft across networks (P2)", () => {
+		// Two networks N1→M1, N2→M2. Each remap must touch ONLY its own rows.
+		const data: Record<string, unknown> = {
+			"account-state": [
+				{ networkId: "N1", x: 1 },
+				{ networkId: "N2", x: 2 },
+			],
+			fpc: [{ networkId: "N2", y: 1 }],
+		}
+		remapByMap(
+			data,
+			"networkId",
+			new Map([
+				["N1", "M1"],
+				["N2", "M2"],
+			]),
+		)
+		expect(data["account-state"]).toEqual([
+			{ networkId: "M1", x: 1 },
+			{ networkId: "M2", x: 2 },
+		])
+		expect(data.fpc).toEqual([{ networkId: "M2", y: 1 }])
+	})
+
+	it("SCOPED form: an unrelated networkId is left alone (no over-write)", () => {
+		const data: Record<string, unknown> = { fpc: [{ networkId: "N1" }, { networkId: "N9" }] }
+		remapByMap(data, "networkId", new Map([["N1", "M1"]]))
+		expect(data.fpc).toEqual([{ networkId: "M1" }, { networkId: "N9" }])
+	})
+
+	it("(E) single-pass: a new id equal to a LATER source id does NOT cascade-rewrite", () => {
+		// N1→R, and a second network's OLD id is also "R" (R→S). A sequential per-id
+		// remap would rewrite N1's already-remapped "R" rows again on the R→S pass →
+		// both alias to S. The single-pass map looks up each row's ORIGINAL value once.
+		const data: Record<string, unknown> = { fpc: [{ networkId: "N1" }, { networkId: "R" }] }
+		remapByMap(
+			data,
+			"networkId",
+			new Map([
+				["N1", "R"],
+				["R", "S"],
+			]),
+		)
+		expect(data.fpc).toEqual([{ networkId: "R" }, { networkId: "S" }])
+	})
+
+	it("ALL-ROWS form (oldId omitted): still normalizes a hostile row whose profileId differs (P2 guard)", () => {
+		const data: Record<string, unknown> = {
+			account: [
+				{ profileId: "real-old", id: "a1" },
+				{ profileId: "0xHOSTILE-FOREIGN", id: "a2" },
+			],
+		}
+		normalizeAllIds(data, "profileId", "new")
+		expect(data.account).toEqual([
+			{ profileId: "new", id: "a1" },
+			{ profileId: "new", id: "a2" },
+		])
 	})
 })

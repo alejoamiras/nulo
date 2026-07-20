@@ -125,11 +125,15 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.bridgeBalanceL2Public)).exists()).toBe(true)
 	})
 
-	it("no validation error on first render - only after the user touches the amount", async () => {
+	it("no validation error on first render - only after the user touches the amount AND it settles", async () => {
 		l1Balance.value = 50_000_000n // default "100" exceeds it
 		const w = mount(BridgeForm)
 		expect(w.find(sel(TESTIDS.bridgeFormError)).exists()).toBe(false)
-		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
+		const input = w.find(sel(TESTIDS.bridgeAmount))
+		await input.setValue("100")
+		// Display is settle-debounced: mid-typing shows nothing; blur settles instantly.
+		expect(w.find(sel(TESTIDS.bridgeFormError)).exists()).toBe(false)
+		await input.trigger("blur")
 		expect(w.find(sel(TESTIDS.bridgeFormError)).text()).toMatch(/exceeds/i)
 	})
 

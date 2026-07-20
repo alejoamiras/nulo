@@ -1,4 +1,10 @@
+import { z } from "zod"
+
 export const CONTACT_SERVICE_NAME = "contact"
+
+/** EntityStorage root for contact rows (keyed by `contact.id`). Frozen:
+ *  renaming detaches every existing row; the backup-migration registry pins it. */
+export const CONTACT_STORAGE_ROOT = "nulo:core:contacts"
 
 export type Contact = {
 	/** Randomly generated contact id. */
@@ -13,6 +19,16 @@ export type Contact = {
 	abbr: string
 	// TODO: add chainId
 }
+
+/** Storage codec row schema — mirrors `Contact` exactly (see wallet-core
+ *  `decodeRow`: validation-fail keeps the row + reads as undefined). */
+export const ContactSchema: z.ZodType<Contact> = z.object({
+	id: z.string(),
+	profileId: z.string(),
+	name: z.string(),
+	address: z.string(),
+	abbr: z.string(),
+})
 
 export type Methods = {
 	/**

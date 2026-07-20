@@ -19,12 +19,16 @@ import { getAuthRegistryAddress, isAuthRegistryEnabled, isAuthwitConsumable } fr
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
+	AUTH_REGISTRY_ENABLED_STORAGE_ROOT,
 	AUTH_REGISTRY_SERVICE_NAME,
+	AUTH_REGISTRY_STORAGE_ROOT,
 	type Authwit,
 	type Events,
 	MAX_REVOKES_PER_TX,
 	MAX_TRACKED_AUTHWITS_PER_ACCOUNT,
 	type Methods,
+	AuthwitSchema,
+	AuthwitStatusSchema,
 } from "./spec"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { TxHash } from "@aztec/stdlib/tx"
@@ -59,8 +63,10 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
-		this.authwits = new EntityStorage<Authwit>("nulo:core:auth-registry", browserApi.storage.local)
-		this.statuses = new EntityStorage<boolean>("nulo:core:auth-registry-enabled", browserApi.storage.local)
+		this.authwits = new EntityStorage<Authwit>(AUTH_REGISTRY_STORAGE_ROOT, browserApi.storage.local, (raw) => AuthwitSchema.parse(raw))
+		this.statuses = new EntityStorage<boolean>(AUTH_REGISTRY_ENABLED_STORAGE_ROOT, browserApi.storage.local, (raw) =>
+			AuthwitStatusSchema.parse(raw),
+		)
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -75,21 +81,8 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		// account is deleted (e.g. as part of a chain purge), wipe its
 		// records here so we don't leak stale state. Fire-and-forget against
 		// the EventHandler — best-effort cleanup.
-		this.accountService.onAccountDeleted.add(async (account) => {
-			try {
-				await this.lock.enter()
-				const authwits = (await this.authwits.getValues()).filter((a) => a.account === account.address)
-				await purgeRows(
-					authwits,
-					(authwit) => this.authwits.delete(`${authwit.id}`),
-					(authwit) => this.emit("onAuthwitDeleted", authwit),
-				)
-				if (await this.statuses.contains(account.address)) {
-					await this.statuses.delete(account.address)
-				}
-			} finally {
-				this.lock.leave()
-			}
+		this.accountService.onAccountDeleted.add((account) => {
+			void this.purgeForAccounts([account.address])
 		})
 
 		// Reconcile pending public-authwit rows by their tx's on-chain outcome: a row is
@@ -191,7 +184,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const authwits: Authwit[] = []
 		for (const id of ids) {
 			const authwit = await this.authwits.get(`${id}`)
-			if (!authwit) {
+			// Reject an authwit id owned by a DIFFERENT account: authwits are FK-scoped
+			// by account (no profileId), so without this a caller could revoke another
+			// account's authwits by supplying its ids. Treat a foreign id as "doesn't
+			// exist" — there is deliberately no cross-account existence oracle.
+			if (!authwit || authwit.account !== account) {
 				throw new Error(`Authwit #${id} doesn't exist`)
 			}
 			authwits.push(authwit)
@@ -418,6 +415,28 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		return authwits
 	}
 
+	/** Awaited authwit + status purge for a SET of accounts — called by the
+	 *  deletion coordinator with the tombstone's address snapshot (finding D).
+	 *  `onAccountDeleted` delegates here (single-account deleteNetwork path). */
+	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+		await this.ensureInitialized()
+		const set = new Set(addresses)
+		try {
+			await this.lock.enter()
+			const authwits = (await this.authwits.getValues()).filter((a) => set.has(a.account))
+			await purgeRows(
+				authwits,
+				(authwit) => this.authwits.delete(`${authwit.id}`),
+				(authwit) => this.emit("onAuthwitDeleted", authwit),
+			)
+			for (const addr of set) {
+				if (await this.statuses.contains(addr)) await this.statuses.delete(addr)
+			}
+		} finally {
+			this.lock.leave()
+		}
+	}
+
 	public async restore(authwits: Authwit[]): Promise<Restored<Authwit>[]> {
 		await this.ensureInitialized()
 
@@ -429,8 +448,11 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
 			for (const authwit of authwits) {
 				try {
-					await this.authwits.set(`${id}`, { ...authwit, id })
-					result.push({ ...authwit, id })
+					// Parse the persisted shape so a malformed backup authwit is recorded
+					// as restoreError, not silently written + codec-hidden on read.
+					const row = AuthwitSchema.parse({ ...authwit, id })
+					await this.authwits.set(`${id}`, row)
+					result.push(row)
 					id++
 				} catch (err) {
 					result.push({

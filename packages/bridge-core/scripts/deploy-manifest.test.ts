@@ -12,6 +12,11 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true })
 })
 
+// Schema-valid fixture: the atomic writer now STRICT-validates before writing (candidate-schema),
+// so the fixture carries full-width addresses and a complete fuel block, like a real candidate.
+const L2A = `0x${"aa".repeat(32)}`
+const L2B = `0x${"bb".repeat(32)}`
+const L2C = `0x${"cc".repeat(32)}`
 const manifest: CandidateManifest = {
 	network: "testnet",
 	l1: {
@@ -19,21 +24,39 @@ const manifest: CandidateManifest = {
 		portal: "0x0000000000000000000000000000000000000002",
 		portalSource: "forked-v1",
 		token: { name: "Aztec Nulo", symbol: "AZLO", decimals: 18, maxWholePerTx: 1000 },
-		fuel: { router: "0x0000000000000000000000000000000000000003", swapTarget: "0x0000000000000000000000000000000000000004" },
+		fuel: {
+			router: "0x0000000000000000000000000000000000000003",
+			swapTarget: "0x0000000000000000000000000000000000000004",
+			poolManager: "0x0000000000000000000000000000000000000005",
+			quoter: "0x0000000000000000000000000000000000000006",
+			permit2: "0x0000000000000000000000000000000000000007",
+			weth: "0x0000000000000000000000000000000000000008",
+			feeJuice: "0x0000000000000000000000000000000000000009",
+			feeJuicePortal: "0x000000000000000000000000000000000000000a",
+			pools: { azloWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
+			slippageBps: 100,
+			minFuelFj: "10000000000000000000",
+		},
+		feeJuice: {
+			portal: "0x000000000000000000000000000000000000000a",
+			asset: "0x0000000000000000000000000000000000000009",
+			feeAssetHandler: "0x000000000000000000000000000000000000000b",
+			minFj: "1000000000000000000",
+		},
 	},
 	l2: {
-		proxy: { address: "0xaa", salt: 111, constructorArtifact: "constructor", constructorArgs: [] },
+		proxy: { address: L2A, salt: 111, constructorArtifact: "constructor", constructorArgs: [] },
 		token: {
-			address: "0xbb",
+			address: L2B,
 			salt: 222,
 			constructorArtifact: "constructor_with_minter",
-			constructorArgs: ["Aztec Nulo", "AZLO", 18, "0xaa"],
+			constructorArgs: ["Aztec Nulo", "AZLO", 18, L2A],
 		},
 		bridge: {
-			address: "0xcc",
+			address: L2C,
 			salt: 333,
 			constructorArtifact: "constructor",
-			constructorArgs: ["0xaa", "0x0000000000000000000000000000000000000002"],
+			constructorArgs: [L2A, "0x0000000000000000000000000000000000000002"],
 		},
 	},
 }

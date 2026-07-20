@@ -1,3 +1,5 @@
+import { FEE_JUICE_ADDRESS } from "@aztec/constants"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { describe, expect, test } from "vitest"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import {
@@ -29,6 +31,16 @@ describe("getMethodLabel — exact-match lookup", () => {
 	test("unknown method → null (NOT title-cased; caller picks the fallback)", () => {
 		expect(getMethodLabel("drip_to_private")).toBeNull()
 		expect(getMethodLabel("anything_else")).toBeNull()
+	})
+	test("fee-juice `claim` label is protocol-scoped: suppressed on a third-party contract", () => {
+		// A third-party dApp's identically-named claim must NOT inherit fee-juice semantics on a
+		// trust surface. FEE_JUICE_ADDRESS = 5 → the L2 protocol address; anything else suppresses.
+		const feeJuice = AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS).toString()
+		expect(getMethodLabel("claim", feeJuice)).toBe("Claim Fee Juice")
+		expect(getMethodLabel("claim", "0x1234")).toBeNull()
+		expect(getMethodLabel("claim_and_end_setup", "0xabcd")).toBeNull()
+		// No contract given ⇒ legacy behavior (label applies) — non-trust-surface callers.
+		expect(getMethodLabel("claim")).toBe("Claim Fee Juice")
 	})
 })
 

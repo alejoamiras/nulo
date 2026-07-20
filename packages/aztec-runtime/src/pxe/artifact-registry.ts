@@ -10,7 +10,7 @@ import type { KnownArtifacts, KnownArtifactsLoader } from "./known-artifacts"
  * Minimal structural shape for the network-info argument; declared inline
  * so this file stays decoupled from the extension types.
  */
-export interface NetworkInfo {
+export interface ArtifactNetworkContext {
 	/** CAIP-like chain identifier; kept on the API for future per-chain
 	 *  policy hooks even though the current resolver doesn't read it. */
 	chainId: number
@@ -159,7 +159,7 @@ export class ArtifactRegistry {
 	public async resolve(
 		classId: Fr,
 		pxeLookup: (id: Fr) => Promise<ContractArtifact | undefined>,
-		_network: NetworkInfo,
+		_network: ArtifactNetworkContext,
 		opts?: { pxeOnly?: boolean },
 	): Promise<ContractArtifact | undefined> {
 		const pin = this.policy.byClassId?.[classId.toString()]

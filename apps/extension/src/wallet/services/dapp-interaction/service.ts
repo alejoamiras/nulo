@@ -291,7 +291,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			// send-like through, we want to know LOUDLY, not crash deep in
 			// the execution pipeline.
 			assertSilentExecutable(materialized)
-			operations.push(materialized as unknown as Operation)
+			operations.push(materialized)
 		}
 		await this.profileService.refreshSession()
 
@@ -509,7 +509,9 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			case "aztec_sendTx":
 				return AccessLevel.Transactions
 			case "aztec_createAuthWit":
-				return AccessLevel.PrivateData
+				// Transactions (not PrivateData): an authwit grants transaction-level authority,
+				// so a popup-routed authwit fires the confirmation gate (accessLevel >= confirmationLevel).
+				return AccessLevel.Transactions
 			default:
 				return AccessLevel.None
 		}

@@ -15,8 +15,27 @@
  * helpers, and pure bytes.
  */
 
+export { deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "./account-derivation"
+export { derivePxeStoreKey, PXE_STORE_KDF_LABEL } from "./pxe-store-key"
 export { EncryptionKey } from "./encryption-key"
 export { PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
+export { SessionSecretBox, type SessionWrappedSecret } from "./session-secret-box"
 export { PasskeyCredential, type PasskeyCredentialData } from "./passkey-credential"
 export { PASSKEY_PRF_LABEL } from "./constants"
 export { zeroize } from "./zeroize"
+export {
+	type Base64Ciphertext,
+	type Base64CredentialId,
+	type Base64MasterSecret,
+	type Base64SecretPrf,
+	type HexUserHandle,
+	type MasterSecretBytes,
+	type Passhash,
+	asBase64Ciphertext,
+	asBase64CredentialId,
+	asBase64MasterSecret,
+	asBase64SecretPrf,
+	asHexUserHandle,
+	asMasterSecretBytes,
+	asPasshash,
+} from "./secret-types"

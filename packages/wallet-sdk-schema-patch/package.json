@@ -1,0 +1,23 @@
+{
+	"name": "@nulo/wallet-sdk-schema-patch",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"exports": {
+		"./apply": "./src/apply.ts",
+		"./register": "./src/register.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@aztec/aztec.js": "5.0.1",
+		"@aztec/stdlib": "5.0.1",
+		"zod": "^4.4.3"
+	},
+	"devDependencies": {
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.9"
+	}
+}

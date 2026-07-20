@@ -7,8 +7,12 @@
  *   (a) encrypt the profile master secret at rest (`EncryptionKey`),
  *   (b) derive a passkey-wallet master secret from WebAuthn PRF +
  *       credentialId (`PasskeyCredential`),
- *   (c) derive the per-account signing key from that master secret
- *       (`deriveSigningKey` via `@aztec/stdlib/keys`).
+ *   (c) derive the per-account signing key from the account seed
+ *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v1 in
+ *       `@nulo/wallet-crypto`, the signing-key-root model adopted at
+ *       Aztec 5.0.0; upstream's `deriveSigningKey` was removed and its
+ *       construction vendored verbatim, reference-vectored in
+ *       `implementations-plan/aztec-5.0.0-stable/reference/`).
  *
  * Any accidental drift in a refactor here, or a silent upstream change
  * in `@aztec/foundation` or `@aztec/stdlib`, fails one of these tests
@@ -17,9 +21,9 @@
  * On upgrading `@aztec/*` — the ritual
  * ------------------------------------
  * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
- * V7a (`deriveSigningKey` = sha512-to-grumpkin-scalar + domain
- * separator). When you bump `@aztec/foundation`, `@aztec/stdlib`, or
- * `@aztec/accounts`:
+ * V7a (`deriveSigningKeyFromSeed` = sha512-to-grumpkin-scalar + the
+ * IVSK_M domain separator). When you bump `@aztec/foundation`,
+ * `@aztec/stdlib`, or `@aztec/accounts`:
  *
  *   1. Run `bun run test`.
  *   2. If any vector in this file fails, **do not blindly regenerate**.
@@ -52,22 +56,24 @@
  *
  * Deferred vectors
  * ----------------
- * V4 (poseidon2Hash account secret), V7b (NuloAccount.address), V10
- * (passkey → address full chain), and P2 (Barretenberg Poseidon2
- * cross-check) all require `@aztec/bb.js` WASM poseidon2, which crashes
- * in the vitest jsdom environment with
- * `BBApiException: std::bad_cast` on the WASM boundary. These belong in
- * an e2e-level fixture or a slow-test suite that spawns BB for real.
- * The unit-level locks V1–V9 still catch the bulk of regressions a
- * refactor in this area could introduce.
+ * V4 (poseidon2Hash account secret), V10 (passkey → address full chain),
+ * and P2 (Barretenberg Poseidon2 cross-check) require `@aztec/bb.js`
+ * WASM poseidon2, which crashes in the vitest jsdom environment with
+ * `BBApiException: std::bad_cast` on the WASM boundary. The downstream
+ * chain V7a feeds (signingKey → privacy secret → NuloAccount address —
+ * the old deferred V7b) IS now pinned end-to-end in a node environment:
+ * `packages/aztec-runtime/src/account/derivation-vectors.test.ts`
+ * against the committed regime-B reference vectors. The unit-level
+ * locks V1–V9 still catch the bulk of regressions a refactor in this
+ * area could introduce.
  */
 
 import { describe, expect, test } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { PasskeyCredential } from "@nulo/wallet-crypto"
-import { PASSKEY_PRF_LABEL } from "@nulo/wallet-crypto"
+import { PASSKEY_PRF_LABEL, PXE_STORE_KDF_LABEL, derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { AccountType } from "@/wallet/services/account/spec"
 
 /** Reusable hex helper — keeps fixture constants readable. */
@@ -158,18 +164,22 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 		expect(hex).toBe("f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7")
 	})
 
-	// ── V7a: deriveSigningKey(secret) ────────────────────────────────
+	// ── V7a: deriveSigningKeyFromSeed(seed) — NULO-ACCOUNT-KDF v1 ────
 	//
-	// The signing key is what actually signs transactions. This is the
-	// primary canary for upstream drift: `deriveSigningKey` resolves to
-	// `sha512ToGrumpkinScalar([secret, DomainSeparator.IVSK_M])`.
-	// Upstream has a TODO to replace IVSK_M with a dedicated signing
-	// separator (AztecProtocol/aztec-packages#5837). When that lands,
-	// this vector fails loudly — that's the signal to migrate.
+	// The signing key is the account's OWNERSHIP ROOT under the 5.0.0
+	// signing-key-root model (the privacy secret derives one-way from
+	// it). The construction is upstream's removed `deriveSigningKey`
+	// verbatim — `sha512ToGrumpkinScalar([seed, DomainSeparator.IVSK_M])`
+	// — vendored into `@nulo/wallet-crypto` and REFERENCE-VECTORED in
+	// `implementations-plan/aztec-5.0.0-stable/reference/` (the fixture
+	// value below is regime A/B agreed; it equals the pre-5.0.0 V7a
+	// value because the construction carried over byte-identically).
+	// If this fails, the signing key of every wallet on disk just
+	// changed: stop, never re-pin from this implementation.
 	// AZTEC-SENSITIVE.
-	test("V7a — deriveSigningKey(fixedSecret) matches fixture", () => {
-		const secret = Fr.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000042")
-		const signingKey = deriveSigningKey(secret)
+	test("V7a — deriveSigningKeyFromSeed(fixedSeed) matches fixture", () => {
+		const seed = Fr.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000042")
+		const signingKey = deriveSigningKeyFromSeed(seed)
 		expect(signingKey.toString()).toBe("0x14a31cb4d33a144675e70634830292153f78e8318e51f26a2f212783eb0a3cbc")
 	})
 
@@ -193,6 +203,27 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 	// catches a drive-by refactor before it breaks wallets.
 	test("V9 — AccountType.Nulo_v1 === 0", () => {
 		expect(AccountType.Nulo_v1).toBe(0)
+	})
+
+	// ── V11: derivePxeStoreKey(master, profileId) — NULO-PXE-STORE-KDF v1 ──
+	//
+	// The per-profile ChaCha20 key for the encrypted SQLite-OPFS PXE stores
+	// (HKDF-SHA256, label "nulo:pxe-store:v1", salt bound to the profileId).
+	// A Nulo-novel construction, so this is a DRIFT PIN (like V8): it locks
+	// what we ship — changing the label, salt shape, or HKDF params orphans
+	// every encrypted PXE store on disk (state resets, not data loss: the
+	// PXE re-syncs — but never change it casually).
+	test("V11 — derivePxeStoreKey(fixedMaster, fixture profileId) matches fixture + is not the master", async () => {
+		expect(PXE_STORE_KDF_LABEL).toBe("nulo:pxe-store:v1")
+		const master = new Uint8Array(32)
+		master[31] = 0x42
+		const key = await derivePxeStoreKey(master, "profile-fixture-1")
+		expect(key).toHaveLength(32)
+		expect(toHex(key)).toBe("7bc1e3d33de01d8650471666c8daa55436a18c77644bfcfd683aba02465018d4")
+		expect(toHex(key)).not.toBe(toHex(master))
+		// Distinct profiles derive distinct keys from the same master.
+		const other = await derivePxeStoreKey(master, "profile-fixture-2")
+		expect(toHex(other)).not.toBe(toHex(key))
 	})
 
 	// ── P1: HKDF-SHA256 RFC 5869 Appendix A.1 ────────────────────────

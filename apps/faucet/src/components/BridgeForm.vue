@@ -10,6 +10,7 @@ import { BRIDGE_FUEL, BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
 import BridgeStepper from "./BridgeStepper.vue"
+import FeeJuiceNotice from "./FeeJuiceNotice.vue"
 
 /** Composables */
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
@@ -18,6 +19,7 @@ import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { providerFingerprint, readClaimFee, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
 import { useL1Wallet } from "@/composables/useL1Wallet"
+import { useSettledError } from "@/composables/useSettledError"
 import { type UseTokenBalanceHandle, useTokenBalance } from "@/composables/useTokenBalance"
 import { useToast } from "@/composables/useToast"
 import { useWithdrawFlow } from "@/composables/useWithdraw"
@@ -79,7 +81,10 @@ watch(
 	},
 	{ immediate: true },
 )
-onBeforeUnmount(() => l2Handle.value?.dispose())
+onBeforeUnmount(() => {
+	l2Handle.value?.dispose()
+	settledAmount.dispose()
+})
 
 const l2Public = computed(() => l2Handle.value?.publicBalance.value ?? null)
 const l2Private = computed(() => l2Handle.value?.privateBalance.value ?? null)
@@ -93,8 +98,8 @@ const fromBalance = computed(() => (fromChain.value === "ethereum" ? usdc.balanc
 const amountUnits = computed(() => parseAmount(amount.value || "0", BRIDGE_TOKEN_DECIMALS))
 
 // Validation surfaces only after the user has engaged with the amount (or tried to submit) -
-// a freshly connected wallet must never open on an error it didn't cause.
-const amountTouched = ref(false)
+// a freshly connected wallet must never open on an error it didn't cause. Display is settle-
+// debounced so typing never flashes a transient error mid-entry.
 const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (fromBalance.value !== null && amountUnits.value > fromBalance.value) {
@@ -104,7 +109,8 @@ const validationError = computed(() => {
 	}
 	return null
 })
-const amountError = computed(() => (amountTouched.value ? validationError.value : null))
+const settledAmount = useSettledError(amount, validationError)
+const amountError = settledAmount.shown
 
 const fuelAvailable = computed(() => BRIDGE_FUEL !== undefined && direction.value === "l1-to-l2")
 const fuelSliceUnits = computed(() => parseAmount(fuelSlice.value || "0", BRIDGE_TOKEN_DECIMALS))
@@ -182,7 +188,7 @@ function flip() {
 }
 
 async function onSubmit() {
-	amountTouched.value = true
+	settledAmount.settleNow()
 	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
 	if (fuelBlocksSubmit.value) return
 	submitting.value = true
@@ -372,7 +378,7 @@ function fmt(b: bigint | null): string {
 				:disabled="submitting"
 				:data-testid="TESTIDS.bridgeAmount"
 				:data-invalid="!!amountError"
-				@input="amountTouched = true"
+				@blur="settledAmount.settleNow"
 			/>
 			<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
 		</Flex>
@@ -430,6 +436,8 @@ function fmt(b: bigint | null): string {
 			</div>
 			<p v-if="fuelError && fuelQuote.state !== 'error'" class="err-msg" :data-testid="TESTIDS.bridgeFuelError">{{ fuelError }}</p>
 		</div>
+
+		<FeeJuiceNotice />
 
 		<Button :loading="submitting" :disabled="!bothConnected || submitting" :data-testid="TESTIDS.bridgeSubmit" @click="onSubmit">
 			{{ !bothConnected ? "CONNECT BOTH WALLETS" : direction === "l1-to-l2" ? (isPrivate ? "BRIDGE PRIVATELY TO AZTEC" : "BRIDGE TO AZTEC") : "BRIDGE TO ETHEREUM" }}

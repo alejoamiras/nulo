@@ -22,7 +22,15 @@ import { ServiceCollection } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
-import type { PasskeyCredential } from "@nulo/wallet-crypto"
+import {
+	asBase64CredentialId,
+	asBase64MasterSecret,
+	asBase64SecretPrf,
+	asHexUserHandle,
+	type PasskeyCredential,
+	type PasskeyCredentialData,
+	type SessionWrappedSecret,
+} from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
@@ -115,8 +123,12 @@ class FakePasskeyService extends Service<Record<string, never>> {
  *  deterministic credential shape. `prf` is a placeholder — the fake
  *  ignores it because `materializeCredential` doesn't actually run HKDF;
  *  it just returns the canned credential object. */
-function fakeCredentialData(credentialId: string, userHandle?: string) {
-	return { id: credentialId, prf: "AAAA", userHandle }
+function fakeCredentialData(credentialId: string, userHandle?: string): PasskeyCredentialData {
+	return {
+		id: asBase64CredentialId(credentialId),
+		prf: asBase64SecretPrf("AAAA"),
+		userHandle: userHandle === undefined ? undefined : asHexUserHandle(userHandle),
+	}
 }
 
 async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: boolean } = 1_800_000): Promise<{
@@ -140,6 +152,9 @@ async function makeService(ttlOrInit: number | { sessionTtl?: number; strict?: b
 	services.add(service)
 
 	await services.start()
+	// deleteProfile now requires the coordinator delegate (finding D); these tests
+	// exercise the profile lifecycle, not the purge cascade → no-op delegate.
+	service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
 	return { api, config, logger, service, passkeys }
 }
 
@@ -167,6 +182,7 @@ async function makeServiceFromExistingApi(
 	services.add(service)
 
 	await services.start()
+	service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
 	return { config, logger, service }
 }
 
@@ -312,6 +328,25 @@ describe("ProfileService integration", () => {
 			const { service } = await makeService()
 			const profile = await service.createProfile("P", "pass1234")
 			await expect(service.exportPlain(profile.id, "wrong")).rejects.toThrow(/Invalid profile password/)
+		}, 30_000)
+
+		test("(audit C1) exportPlain + exportMnemonic REJECT a tombstoned profile — no secret exfil mid-delete", async () => {
+			const { service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+			// Simulate a delete beginning: the id is reserved (+ epoch bumped) while
+			// the row/session still linger (the SW-died-mid-delete window).
+			service.getDeletionState().beginDeletion(profile.id)
+			await expect(service.exportPlain(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+			await expect(service.exportMnemonic(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+		}, 30_000)
+
+		test("(audit D13) captureExecutionFence captures the current epoch, then rejects once reserved (atomic)", async () => {
+			const { service } = await makeService()
+			await service.createProfile("P", "pass1234")
+			const fence = await service.captureExecutionFence()
+			expect(fence.epoch).toBe(0)
+			service.getDeletionState().beginDeletion(fence.profileId)
+			await expect(service.captureExecutionFence()).rejects.toThrow(/Wallet locked/)
 		}, 30_000)
 
 		test("exportPlain for passkey profile returns credentialId", async () => {
@@ -548,42 +583,42 @@ describe("ProfileService integration", () => {
 		// 32-byte base64 secret used for importPlain.
 		const PLAIN_SECRET_B64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64")
 
-		async function readPersistedPasshash(api: FakeBrowserApi): Promise<string | undefined> {
+		async function readPersistedBearer(api: FakeBrowserApi): Promise<SessionWrappedSecret | undefined> {
 			const raw = await api.storage.session.get("nulo:core:session")
 			if (!raw["nulo:core:session"]) return undefined
-			const session = JSON.parse(raw["nulo:core:session"] as string) as { passhash?: string }
-			return session.passhash
+			const session = JSON.parse(raw["nulo:core:session"] as string) as { bearer?: SessionWrappedSecret }
+			return session.bearer
 		}
 
-		test("default unlock under strict ON: persisted Session has no passhash", async () => {
+		test("default unlock under strict ON: persisted Session has no bearer", async () => {
 			const { api, service } = await makeService({ strict: true })
 			const profile = await service.createProfile("P", "pass1234")
 			// createProfile already opens a session (no separate unlock needed).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 			expect(profile.id).toBeDefined()
 		}, 30_000)
 
 		test("opt-out unlock keeps bearer (legacy lenient behavior)", async () => {
 			const { api, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 		}, 30_000)
 
 		test("createProfile honors strict mode (gate applies even on profile creation, not just unlock)", async () => {
 			const { api, service } = await makeService({ strict: true })
 			await service.createProfile("P", "pass1234")
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("changeProfilePassword honors strict mode (gate applies on re-open after password change)", async () => {
 			const { api, service } = await makeService({ strict: true })
 			const profile = await service.createProfile("P", "oldpass1")
-			expect(await readPersistedPasshash(api)).toBeUndefined() // create was strict
+			expect(await readPersistedBearer(api)).toBeUndefined() // create was strict
 
 			await service.changeProfilePassword(profile.id, "oldpass1", "newpass1")
 			// changeProfilePassword reopens the session with the new credentials
 			// — still must respect strict mode (codex-flagged BLOCKER in v1).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("importPlain honors strict mode (gate applies on import-then-open)", async () => {
@@ -591,22 +626,22 @@ describe("ProfileService integration", () => {
 			await service.importPlain("Imported", PLAIN_SECRET_B64, "pass1234")
 			// importPasswordProfile reopens the session as part of the import flow
 			// — must respect strict mode (codex-flagged BLOCKER in v1).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("toggle ON during unlocked session: bearer cleared from persisted record + in-memory", async () => {
 			const { api, config, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 
 			config.set("strictSecurityMode", true)
-			// onConfigUpdated fires `void clearPasshash()` — flush microtasks.
+			// onConfigUpdated fires `void clearBearer()` — flush microtasks.
 			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 			await Promise.resolve()
 
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 			// Master secret survives toggle — wallet stays unlocked.
 			const active = await service.getActiveProfile()
 			expect(active).toBeDefined()
@@ -615,7 +650,7 @@ describe("ProfileService integration", () => {
 		test("toggle OFF during strict session: no immediate backfill", async () => {
 			const { api, config, service } = await makeService({ strict: true })
 			await service.createProfile("P", "pass1234")
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 
 			config.set("strictSecurityMode", false)
 			await Promise.resolve()
@@ -623,7 +658,7 @@ describe("ProfileService integration", () => {
 
 			// Session storage stays bearer-less; bearer reappears on the
 			// NEXT unlock (after the user manually locks + unlocks).
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
 		test("toggle OFF + relock + unlock: bearer is restored on the next unlock", async () => {
@@ -639,30 +674,44 @@ describe("ProfileService integration", () => {
 
 			// Now the bearer is back — confirms toggle OFF takes effect on
 			// next unlock.
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 		}, 30_000)
 
-		test("SW restart simulation: legacy passhash + strict ON → silentClose (upgrade-path safety)", async () => {
-			// Step 1: lenient unlock writes a bearer to storage.
+		test("SW restart simulation: legacy passhash record → silentClose + profile still unlockable (upgrade-path safety)", async () => {
+			// A pre-F-11 build persisted a password-equivalent `passhash` string.
+			// After upgrade, restore() must NEVER accept it (F-11) — the profile
+			// record is intact, so the user re-unlocks ONCE. This proves the
+			// no-re-registration invariant end-to-end: no wipe, no re-create.
 			const { api } = await makeService({ strict: false })
-			const s = await (async () => {
+			const profile = await (async () => {
 				const built = await makeServiceFromExistingApi(api, { strict: false })
-				const profile = await built.service.createProfile("P", "pass1234")
-				return { profile, service: built.service }
+				const p = await built.service.createProfile("P", "pass1234")
+				await built.service.lockActiveProfile() // clears the F-11 session
+				return p
 			})()
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
-			// Don't await any close — leave the persisted Session with passhash
-			// as if the user upgraded the build with an active lenient session.
 
-			// Step 2: simulate SW restart with strict ON. Construct a fresh
-			// ProfileService that observes the same FakeBrowserApi.
-			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: true })
-			// During init, restore() runs. With strict ON + persisted passhash,
-			// it must treat the bearer as untrusted → silentClose.
-			const active = await service2.getActiveProfile()
-			expect(active).toBeUndefined() // lock-screen state
-			expect(await readPersistedPasshash(api)).toBeUndefined() // record cleaned up
-			expect(s.profile.id).toBeDefined()
+			// Hand-seed a genuine legacy passhash session as an old build left it.
+			await api.storage.session.set({
+				[SESSION_STORAGE_ROOT]: JSON.stringify({
+					profile: profile.id,
+					passhash: Buffer.from(new ArrayBuffer(8)).toString("base64"),
+					since: Date.now(),
+					lockedAt: Date.now() + 1_800_000,
+				}),
+			})
+
+			// SW restart. restore() sees the legacy passhash → silentClose,
+			// regardless of strict mode (the legacy shape is never trusted).
+			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: false })
+			expect(await service2.getActiveProfile()).toBeUndefined() // lock-screen state
+			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
+			expect(SESSION_STORAGE_ROOT in raw).toBe(false) // legacy record cleaned up
+
+			// The profile is untouched: the SAME password unlocks it — no
+			// re-registration, no data loss (F-11 option (a)).
+			const reunlocked = await service2.unlockProfile(profile.id, "pass1234")
+			expect(reunlocked.id).toBe(profile.id)
+			expect((await readPersistedBearer(api))?.v).toBe(1) // fresh F-11 bearer on re-unlock
 		}, 30_000)
 
 		test("SW restart simulation: clean strict session + strict ON → no in-memory restore (passkey-equivalent)", async () => {
@@ -672,8 +721,8 @@ describe("ProfileService integration", () => {
 
 			// Fresh ProfileService against the same api with strict ON.
 			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: true })
-			// Persisted Session has no passhash (strict open never wrote one).
-			// restore() takes the `!session.passhash` branch → silentClose.
+			// Persisted Session has no bearer (strict open never wrote one).
+			// restore() takes the `!session.bearer` branch → silentClose.
 			expect(await service2.getActiveProfile()).toBeUndefined()
 		}, 30_000)
 
@@ -681,7 +730,7 @@ describe("ProfileService integration", () => {
 			const { api } = await makeService({ strict: false })
 			const built = await makeServiceFromExistingApi(api, { strict: false })
 			await built.service.createProfile("P", "pass1234")
-			expect(typeof (await readPersistedPasshash(api))).toBe("string")
+			expect((await readPersistedBearer(api))?.v).toBe(1)
 
 			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: false })
 			// Persisted bearer + strict OFF → silent restore.
@@ -693,7 +742,7 @@ describe("ProfileService integration", () => {
 			const { api, service } = await makeService({ strict: true })
 			const profile = await service.createPasskeyProfile("PK")
 			expect(profile.type).toBe("passkey")
-			expect(await readPersistedPasshash(api)).toBeUndefined()
+			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 	})
 
@@ -715,7 +764,11 @@ describe("ProfileService integration", () => {
 		test("restore() writes the profile but does NOT open a session", async () => {
 			const { service } = await makeService()
 
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 
 			expect("restoreError" in out && out.restoreError).toBeFalsy()
 			// Profile is in storage but no session.
@@ -729,7 +782,11 @@ describe("ProfileService integration", () => {
 			const events: Array<{ id: string } | undefined> = []
 			service.onActiveProfileChanged.add((p) => events.push(p))
 
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// No emit happened during restore — sanity-check before finalize.
@@ -744,7 +801,11 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() with wrong password throws InvalidPasswordError; profile stays in storage", async () => {
 			const { service } = await makeService()
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await expect(service.finalizeRestore(out.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
@@ -755,7 +816,11 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() is idempotent: a second call on an already-active session is a no-op", async () => {
 			const { service } = await makeService()
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await service.finalizeRestore(out.id, "pass1234")
@@ -769,7 +834,11 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() throws when the profile no longer exists (rollback case)", async () => {
 			const { service } = await makeService()
-			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, RESTORE_MASTER_KEY, "pass1234")
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await service.deleteProfile(out.id)
@@ -788,7 +857,12 @@ describe("ProfileService integration", () => {
 			await service.deleteProfile(original.id)
 
 			const credData = fakeCredentialData(credentialId, original.id)
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId, undefined, credData)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				credData,
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// Profile re-created, no session yet.
@@ -814,7 +888,10 @@ describe("ProfileService integration", () => {
 			await service.lockActiveProfile()
 			await service.deleteProfile(original.id)
 
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+			)
 			expect("restoreError" in out && out.restoreError).toBeTruthy()
 			expect(String((out as { restoreError?: unknown }).restoreError)).toMatch(/credentialData is required/)
 		}, 30_000)
@@ -832,7 +909,12 @@ describe("ProfileService integration", () => {
 			// and finalizeRestore would open a session bound to a master
 			// that doesn't match the imported address.
 			const wrongCred = fakeCredentialData("cred-WRONG", original.id)
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId, undefined, wrongCred)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				wrongCred,
+			)
 			expect("restoreError" in out && out.restoreError).toBeTruthy()
 			expect(String((out as { restoreError?: unknown }).restoreError)).toMatch(/credentialId mismatch/)
 		}, 30_000)
@@ -846,7 +928,12 @@ describe("ProfileService integration", () => {
 			await service.deleteProfile(original.id)
 
 			const credData = fakeCredentialData(credentialId, original.id)
-			const out = await service.restore({ id: "ignored", name: "PK", type: "passkey" }, credentialId, undefined, credData)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				credData,
+			)
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// Rollback before finalize — simulating the duplicate-address path
@@ -869,12 +956,87 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "ignored", name: "P", type: "password" },
-					Buffer.from(new Uint8Array(16)).toString("base64"), // 16 bytes, not 32
+					{ type: "password", masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(16)).toString("base64")) }, // 16 bytes, not 32
 					"pass1234",
 				),
 			).rejects.toThrow(/master key length/i)
 			expect(await service.getActiveProfile()).toBeUndefined()
 			expect(await service.getProfiles()).toEqual([])
+		}, 30_000)
+
+		test("restore() rejects a secret whose type does not match the profile type (split invariant)", async () => {
+			const { service } = await makeService()
+
+			// The RestoreSecret split's core guard: a passkey-shaped secret handed to a
+			// password profile (and the inverse) is rejected up front — the swap the old
+			// polymorphic `masterKey: string` slot silently allowed. Both throw (the check
+			// is before runExclusive), leaving no profile + no session.
+			await expect(
+				service.restore(
+					{ id: "ignored", name: "P", type: "password" },
+					{ type: "passkey", credentialId: asBase64CredentialId("cred-x") },
+					"pass1234",
+				),
+			).rejects.toThrow(/secret type does not match/i)
+			await expect(
+				service.restore(
+					{ id: "ignored", name: "PK", type: "passkey" },
+					{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+					undefined,
+					fakeCredentialData("cred-x"),
+				),
+			).rejects.toThrow(/secret type does not match/i)
+			expect(await service.getProfiles()).toEqual([])
+			expect(await service.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+
+		test("restore + finalize password profile survives a simulated SW restart via chrome.storage.session", async () => {
+			const { service, api } = await makeService()
+			const out = await service.restore(
+				{ id: "ignored", name: "P", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+				"pass1234",
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			await service.finalizeRestore(out.id, "pass1234")
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+
+			// Simulate an MV3 SW restart: a fresh ProfileService over the SAME persisted
+			// storage must rehydrate the password session from chrome.storage.session.
+			const { service: service2 } = await makeServiceFromExistingApi(api)
+			expect((await service2.getActiveProfile())?.id).toBe(out.id)
+		}, 30_000)
+
+		test("restore + finalize passkey profile round-trips across SW restart WITHOUT silent activation", async () => {
+			const { service, api } = await makeService()
+
+			// Seed the FakePasskeyService credential map, capture its deterministic
+			// credentialId + userHandle, then wipe to simulate a fresh import.
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			const userHandle = original.id
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+
+			const credData = fakeCredentialData(credentialId, userHandle)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				undefined,
+				credData,
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			await service.finalizeRestore(out.id)
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+
+			// SW restart: a fresh service does NOT auto-activate a passkey profile
+			// (WebAuthn needs a user gesture), but the persisted record survives and an
+			// explicit unlockPasskeyProfile re-opens it.
+			const { service: service2 } = await makeServiceFromExistingApi(api)
+			expect(await service2.getActiveProfile()).toBeUndefined()
+			const unlocked = await service2.unlockPasskeyProfile(out.id, fakeCredentialData(credentialId, userHandle))
+			expect(unlocked.id).toBe(out.id)
+			expect((await service2.getActiveProfile())?.id).toBe(out.id)
 		}, 30_000)
 	})
 
@@ -984,17 +1146,17 @@ describe("ProfileService integration", () => {
 	})
 
 	// Q10 TTL residual (C1): the CONFIG-driven session writebacks — applyTtlChange
-	// (sessionTtl change) and clearPasshash (strictSecurityMode toggle) — are now
+	// (sessionTtl change) and clearBearer (strictSecurityMode toggle) — are now
 	// ALSO routed through ProfileService.runExclusive, like the alarm close. Before,
 	// they ran lock-free and could interleave with a refreshSession() write-back:
-	// a TTL-shorten close could be resurrected (TTL bypass), and clearPasshash's
+	// a TTL-shorten close could be resurrected (TTL bypass), and clearBearer's
 	// stale-snapshot write could clobber a newer lockedAt (lost update).
 	describe("config-driven writeback vs refresh race (serialized)", () => {
 		const readRoot = async (api: FakeBrowserApi): Promise<string | undefined> => {
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			return raw[SESSION_STORAGE_ROOT] as string | undefined
 		}
-		const readSession = async (api: FakeBrowserApi): Promise<{ lockedAt?: number; passhash?: string }> => {
+		const readSession = async (api: FakeBrowserApi): Promise<{ lockedAt?: number; bearer?: SessionWrappedSecret }> => {
 			const raw = await api.storage.session.get(SESSION_STORAGE_ROOT)
 			return JSON.parse(raw[SESSION_STORAGE_ROOT] as string)
 		}
@@ -1057,7 +1219,7 @@ describe("ProfileService integration", () => {
 			const { api, config, service } = await makeService(60_000) // lenient → bearer persisted
 			const profile = await service.createProfile("P", "pass1234")
 			await service.unlockProfile(profile.id, "pass1234")
-			expect((await readSession(api)).passhash).toBeDefined() // lenient bearer cached
+			expect((await readSession(api)).bearer).toBeDefined() // lenient bearer cached
 			const lockedAtBeforeRefresh = (await readSession(api)).lockedAt as number
 
 			// Ensure refresh bumps `since` strictly past unlock so a stale-snapshot
@@ -1066,15 +1228,15 @@ describe("ProfileService integration", () => {
 
 			const releaseSet = blockNextSessionSet(api)
 			const refreshP = service.refreshSession()
-			await flushPromises() // refresh parks holding the lock (in-memory passhash still present)
+			await flushPromises() // refresh parks holding the lock (in-memory bearer still present)
 
-			// Toggle strict ON → clearPasshash() routed through runExclusive → BLOCKS
+			// Toggle strict ON → clearBearer() routed through runExclusive → BLOCKS
 			// behind the parked refresh.
 			config.set("strictSecurityMode", true)
 			await flushPromises()
 
-			// Release refresh → persists {bumped lockedAt, passhash present} + releases
-			// lock → queued clearPasshash runs, re-reads the bumped session, drops the
+			// Release refresh → persists {bumped lockedAt, bearer present} + releases
+			// lock → queued clearBearer runs, re-reads the bumped session, drops the
 			// bearer, persists THAT object (not a stale pre-refresh snapshot).
 			releaseSet()
 			await refreshP
@@ -1082,11 +1244,83 @@ describe("ProfileService integration", () => {
 
 			expect((await service.getActiveProfile()) !== undefined).toBe(true) // strict ≠ force-lock
 			const persisted = await readSession(api)
-			expect(persisted.passhash).toBeUndefined() // bearer dropped — strict enforced
+			expect(persisted.bearer).toBeUndefined() // bearer dropped — strict enforced
 			// The bumped lockedAt survived: a stale-snapshot write would have reverted it
 			// to the pre-refresh value. (Strict deliberately drops the cross-restart bearer,
 			// so a SW-restart agreement check does NOT apply here — that's expected, not a hybrid.)
 			expect(persisted.lockedAt).toBeGreaterThan(lockedAtBeforeRefresh)
 		}, 30_000)
+	})
+})
+
+describe("ProfileService — deletion coordinator integration (finding D)", () => {
+	test("a FAILED purge keeps the tombstone → the id stays reserved (no successor-clobber)", async () => {
+		const { service } = await makeService()
+		// A delegate whose purge fails, simulating a SW-kill / retryable failure.
+		service.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async () => {
+				throw new Error("purge interrupted")
+			},
+		})
+		const p = await service.createProfile("A", "password123")
+
+		await expect(service.deleteProfile(p.id)).rejects.toThrow(/purge interrupted/)
+
+		// The profile row is gone AND it's tombstoned → absent to every read.
+		expect((await service.getProfiles()).map((x) => x.id)).not.toContain(p.id)
+		// A new profile can NEVER be handed the tombstoned id (fail-closed reservation).
+		const q = await service.createProfile("B", "password123")
+		expect(q.id).not.toBe(p.id)
+	})
+
+	test("a SUCCESSFUL purge clears the tombstone + releases the id", async () => {
+		const { service } = await makeService() // default no-op (success) delegate
+		const p = await service.createProfile("A", "password123")
+		await service.deleteProfile(p.id)
+		expect(await service.getProfiles()).toHaveLength(0)
+	})
+
+	test("resumePendingDeletions finishes an interrupted delete on the next boot", async () => {
+		const { api } = await makeService()
+		// First boot: a delete whose purge fails leaves a tombstone behind.
+		const boot1 = new ProfileService(fakeConfig({}), new LoggerStore(fakeConfig({})), api)
+		const c1 = new ServiceCollection()
+		c1.add(new FakePasskeyService(new LoggerStore(fakeConfig({}))))
+		c1.add(boot1)
+		await c1.start()
+		boot1.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async () => {
+				throw new Error("interrupted")
+			},
+		})
+		const p = await boot1.createProfile("A", "password123")
+		await expect(boot1.deleteProfile(p.id)).rejects.toThrow()
+
+		// Second boot over the SAME storage: the tombstone is still there.
+		const boot2 = new ProfileService(fakeConfig({}), new LoggerStore(fakeConfig({})), api)
+		const c2 = new ServiceCollection()
+		c2.add(new FakePasskeyService(new LoggerStore(fakeConfig({}))))
+		c2.add(boot2)
+		await c2.start()
+		let resumed = false
+		boot2.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async () => {
+				resumed = true
+			},
+		})
+		// Until resume runs, the id is still reserved (deletion pending).
+		expect((await boot2.getProfiles()).map((x) => x.id)).not.toContain(p.id)
+
+		await boot2.resumePendingDeletions()
+
+		expect(resumed).toBe(true)
+		// A fresh profile can now reuse... no — the id was random; assert the tombstone
+		// cleared by confirming a NEW delete of a NEW profile still works cleanly.
+		const q = await boot2.createProfile("B", "password123")
+		await boot2.deleteProfile(q.id)
+		expect(await boot2.getProfiles()).toHaveLength(0)
 	})
 })

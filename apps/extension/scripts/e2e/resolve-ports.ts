@@ -15,16 +15,28 @@
  *   for minutes and turning the build/test sequence into its children,
  *   which is unnecessary infrastructure.
  *
- *   Instead we accept a small race window: ports are picked here and may
- *   be lost to a foreign process during the build. The vitest global-setup
- *   re-validates by attempting to bind each port at spawn time and FAILS
- *   FAST with a clear "port X moved between resolve and spawn" error. The
- *   user retries; resolve-ports picks fresh ports; build runs; success.
+ *   So there is an unavoidable resolve→build→bind gap. The danger is not a
+ *   foreign dev tool — it is the kernel itself: a listener bound via
+ *   `listen(0)` gets a port from the OS *dynamic/ephemeral* range
+ *   (`/proc/sys/net/ipv4/ip_local_port_range`, e.g. 32768–60999 on the CI
+ *   runner). That is the SAME range the kernel draws from for the source
+ *   port of every *outgoing* connection. The wallet build opens many
+ *   outgoing sockets; during the gap one of them can be assigned the port
+ *   we just released, and because the aztec-node port is baked into the
+ *   bundle a collision is unrecoverable — the node's `.listen()` throws
+ *   `Address already in use`, the boot classifier maps it to exit 86, and
+ *   the retry (fresh ports + rebuild) rolls the same dice again. Across the
+ *   ~7 parallel network-e2e jobs this made a fully-green run improbable
+ *   (the sticky Q-06/Q-07 boot flake).
  *
- *   The OS picks ephemeral ports (typically >= 49152), so collision with
- *   other dev tools is improbable in practice.
+ *   Fix: draw our listener ports from a STATIC window strictly *below* the
+ *   ephemeral floor. The kernel never assigns those as outgoing source
+ *   ports, so the resolve→build→bind gap is no longer a race for them. We
+ *   bind-test each candidate and, if the static path can't apply (floor
+ *   unreadable, window exhausted), fall back to `listen(0)` — never worse
+ *   than the prior behavior on any platform.
  */
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createServer } from "node:net"
@@ -34,10 +46,71 @@ interface PortReservation {
 	release: () => Promise<void>
 }
 
-async function reservePort(): Promise<PortReservation> {
-	return new Promise((resolveReservation, reject) => {
+const DEFAULT_EPHEMERAL_FLOOR = 32768
+/** Bottom of the static window. Above the privileged range, clear of common dev ports. */
+const STATIC_LO = 10000
+/** Guard band kept clear immediately below the ephemeral floor. */
+const FLOOR_GUARD = 512
+/** Bounded random probes before conceding to the `listen(0)` fallback. */
+const MAX_STATIC_TRIES = 256
+
+/**
+ * Read the bottom of the OS dynamic/ephemeral port range. Ports at or above
+ * this can be handed to outgoing connections; ports below it cannot, which is
+ * exactly the property we need for a collision-immune listener.
+ */
+export async function ephemeralFloor(): Promise<number> {
+	try {
+		const raw = await readFile("/proc/sys/net/ipv4/ip_local_port_range", "utf-8")
+		const lo = Number.parseInt(raw.trim().split(/\s+/)[0] ?? "", 10)
+		return Number.isFinite(lo) && lo > STATIC_LO + 256 ? lo : DEFAULT_EPHEMERAL_FLOOR
+	} catch {
+		return DEFAULT_EPHEMERAL_FLOOR
+	}
+}
+
+/**
+ * Attempt to bind (and hold) one specific port on loopback. Resolves to a
+ * reservation on success, or `null` on ANY failure (port taken, permission,
+ * teardown race) — never throws, so the caller's probe loop stays simple.
+ */
+function tryBind(port: number): Promise<PortReservation | null> {
+	return new Promise((res) => {
 		const srv = createServer()
 		srv.unref() // Don't keep the event loop alive on its own.
+		let settled = false
+		const settle = (v: PortReservation | null) => {
+			if (settled) return
+			settled = true
+			res(v)
+		}
+		srv.once("error", () => {
+			srv.close()
+			settle(null)
+		})
+		srv.listen(port, "127.0.0.1", () => {
+			const addr = srv.address()
+			if (!addr || typeof addr !== "object") {
+				srv.close()
+				settle(null)
+				return
+			}
+			settle({
+				port: addr.port,
+				release: () =>
+					new Promise<void>((rs) => {
+						srv.close(() => rs())
+					}),
+			})
+		})
+	})
+}
+
+/** Original OS-assigned ephemeral reservation — retained as the fallback. */
+function reserveEphemeral(): Promise<PortReservation> {
+	return new Promise((resolveReservation, reject) => {
+		const srv = createServer()
+		srv.unref()
 		srv.listen(0, "127.0.0.1", () => {
 			const addr = srv.address()
 			if (!addr || typeof addr !== "object") {
@@ -54,6 +127,26 @@ async function reservePort(): Promise<PortReservation> {
 		})
 		srv.once("error", reject)
 	})
+}
+
+/**
+ * Reserve one loopback port from the static window below the ephemeral floor,
+ * randomized to keep parallel local runs apart and bind-tested against
+ * already-held siblings so the pack stays distinct. Falls back to an
+ * OS-assigned ephemeral port when the static path can't apply.
+ */
+async function reservePort(): Promise<PortReservation> {
+	const floor = await ephemeralFloor()
+	const hi = Math.max(STATIC_LO + 256, floor - FLOOR_GUARD)
+	const span = hi - STATIC_LO
+	if (span >= 256) {
+		for (let i = 0; i < MAX_STATIC_TRIES; i++) {
+			const candidate = STATIC_LO + Math.floor(Math.random() * span)
+			const reservation = await tryBind(candidate)
+			if (reservation) return reservation
+		}
+	}
+	return reserveEphemeral()
 }
 
 export interface PortPack {

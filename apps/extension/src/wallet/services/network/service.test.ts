@@ -381,7 +381,7 @@ describe("NetworkService purgeChain coordinator (M4.10)", () => {
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
 	})
 
-	test("subscriber failure logs but doesn't abort the cascade", async () => {
+	test("subscriber failure runs the whole cascade then PROPAGATES (fail-fast, D)", async () => {
 		const { service } = harness({})
 		const pxeStub = vi.fn().mockResolvedValue(undefined)
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
@@ -396,18 +396,18 @@ describe("NetworkService purgeChain coordinator (M4.10)", () => {
 			calls.push("b")
 		})
 
-		await expect(service.purgeChain("p1", 1, "n1")).resolves.toBeUndefined()
-		expect(calls).toEqual(["a", "b"])
+		await expect(service.purgeChain("p1", 1, "n1")).rejects.toThrow(/boom/)
+		expect(calls).toEqual(["a", "b"]) // all subscribers still ran — fail-fast is at the END, not mid-cascade
 		expect(pxeStub).toHaveBeenCalledTimes(1)
 	})
 
-	test("PXE clear failure logs but doesn't throw", async () => {
+	test("PXE clear failure PROPAGATES (fail-fast, D)", async () => {
 		const { service } = harness({})
 		const pxeStub = vi.fn().mockRejectedValue(new Error("offscreen down"))
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		;(service as any).pxeServiceClient = { clearChainState: pxeStub }
 
-		await expect(service.purgeChain("p1", 1, "n1")).resolves.toBeUndefined()
+		await expect(service.purgeChain("p1", 1, "n1")).rejects.toThrow(/offscreen down/)
 		expect(pxeStub).toHaveBeenCalledTimes(1)
 	})
 
@@ -939,7 +939,7 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 		// Fire the private cascade handler directly (the EventHandler wiring is
 		// stubbed in the harness; we assert the handler's behavior in isolation).
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
-		await (service as any).onProfileDeleted({ id: "p1", name: "p1", type: "password" })
+		await service.purgeForProfile("p1")
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
 		expect(pxeStub).toHaveBeenCalledWith("p1", 99)
@@ -968,7 +968,7 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 		local.store.set("nulo:core:networks@n-p2", JSON.stringify(p2Network))
 
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
-		await (service as any).onProfileDeleted({ id: "p1", name: "p1", type: "password" })
+		await service.purgeForProfile("p1")
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
 		expect(pxeStub).not.toHaveBeenCalledWith("p2", 7)

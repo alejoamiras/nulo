@@ -47,6 +47,7 @@ declare module 'vue' {
     LogsToolbar: typeof import('./../components/JsonViewer/LogsToolbar.vue')['default']
     LogsViewer: typeof import('./../components/JsonViewer/LogsViewer.vue')['default']
     MaterialIcon: typeof import('@nulo/design')['MaterialIcon']
+    MigrationBarrier: typeof import('./../components/MigrationBarrier.vue')['default']
     NotificationManager: typeof import('./../components/NotificationManager.vue')['default']
     OnboardingPage: typeof import('./../onboarding/components/OnboardingPage.vue')['default']
     PasskeyCeremonyDialog: typeof import('./../components/passkey/PasskeyCeremonyDialog.vue')['default']

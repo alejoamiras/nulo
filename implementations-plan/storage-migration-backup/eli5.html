@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — backup-import migration</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>Backup-import migration</h1>
+  <p>When you export a full backup of the wallet and later re-import it, the file is stamped with the schema it was made under. Today, if that schema is even slightly old, the wallet <em>refuses</em> the import. This plan teaches the importer to <strong>upgrade an old backup on the fly</strong> — running it through the exact same numbered-migration engine we just shipped for live storage (#246) — so an old backup restores cleanly instead of bouncing. It stays dormant until the first real format change ships; today it's build-now, gate-ready plumbing.</p>
+
+  <h2>Why "deep" was chosen</h2>
+  <p>The rubric scored <strong>two clear HIGHs</strong> — migration-cost (it's a data-migration by definition) and security-sensitivity (the backup carries an encrypted master-key and a checksum trust boundary) — plus borderline-high irreversibility (a bad import writes real wallet data). Novelty was only moderate (we have direct #246 experience), so it's <code>deep</code>, not <code>mega-deep</code>. Deep bought three independent plans, a double adversarial audit, and a final fresh pass — which paid off: the audit caught two mis-classifications and a hollow test that would have shipped a false "green" on the very first real migration.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: The mapping registry (slice ↔ storage)</h3>
+    <p>A backup stores each service's data as a flat array; live storage stores keyed rows. This is the translation table between them — one entry per service, with the messy cases pinned down (transactions keyed by hash not id; fpc is a plain row; config is <em>lossy</em> and must not drop keys; account-state can't be migrated at all).</p>
+    <p class="muted">Proves itself by: round-trip unit tests (translate there and back = identity) + a test that each entry matches the service's own storage constant, so a service moving its data fails CI.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: The backup migrator (reuse the real engine)</h3>
+    <p>Pour the backup's translated data into a throwaway in-memory store, run the <em>real</em> migration engine over it (unchanged — zero risk to the audited code), read the upgraded rows back out, translate to the new format. Plus the safety rails: a rule that migrations must be "row-local" (safe on a partial backup) and a guardrail test that blocks anything unsafe.</p>
+    <p class="muted">Proves itself by: a parity test (a real migration on a multi-profile live store vs a one-profile backup produces matching results) + fail-closed tests (bad/unknown/missing data rejects) + the engine's own tests still green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: New format fields + smarter reject (clean break)</h3>
+    <p>Stamp two new fields on export — one for "which account-contract generation" (never migratable, the real reason to reject) and one for "which schema version" (migratable). Rewire the importer to reject only genuinely-incompatible backups, and to verify the checksum <em>before</em> anything else.</p>
+    <p class="muted">Proves itself by: component tests — incompatible rejects, too-new rejects, a current backup still restores, checksum is checked first.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Wire it into the import flow + fix a rollback bug</h3>
+    <p>Insert one migrate step between "checksum verified" and "restore begins." Because migration happens on the throwaway store before any real write, a failed migration touches nothing — the import just aborts cleanly. <strong>Also folded in (a pre-existing bug you asked to bug-bash):</strong> today, if a restore fails partway, the half-created profile is only cleaned up for two specific errors; any other failure leaves a broken ghost profile behind. This hardens the catch-all to delete the orphan — while keeping the one intentional case (a "finish opening" failure) where the profile is deliberately kept because your data is already saved and you can unlock it later.</p>
+    <p class="muted">Proves itself by: a test that a failed migration aborts before any restore runs; a pre-finish restore failure now deletes the orphan profile; a finish-step failure keeps it.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Real-browser smoke test + docs</h3>
+    <p>Load an old-format backup file through the actual import screen in a real Chrome and confirm the restored data is in the new shape. Update the docs.</p>
+    <p class="muted">Proves itself by: a smoke e2e that fails (not skips) if the fixture is missing, plus the full pre-PR gate green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 6: Network round-trip test</h3>
+    <p>On a live sandbox, import an old-format backup, let it upgrade, restore it, and confirm the restored wallet actually <em>works on-chain</em> (the account signs, the network syncs). The real value: this harness means every <em>future</em> upgrade automatically gets on-chain coverage — no manual human check needed at each new migration.</p>
+    <p class="muted">Proves itself by: a network e2e (owns its own anvil+aztec+playground, parallel-safe) proving a migrated wallet transacts, run on a quiet machine.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>Two facts the audit surfaced that shape everything: (1) a backup slice is <em>not</em> a clean copy of stored rows — some are filtered to one profile, some are aggregated summaries that can drop data, two were even mislabeled in the first draft. (2) The migration engine was originally audited assuming it only ever reads <em>our own</em> data; a backup file is <em>attacker-controllable</em>, so every future migration must treat its input as hostile. Both are now baked into the plan as enforced rules, not hopes.</p>
+
+  <h2>Decisions (all resolved)</h2>
+  <ul>
+    <li><strong>Clean slate.</strong> First-time users, no backward compatibility — the current format is the only format, no grace code for old blobs.</li>
+    <li><strong>Network e2e: added.</strong> Rather than a manual human check at each future migration, we build the on-chain round-trip harness now so every future upgrade is auto-covered.</li>
+    <li><strong>Rollback bug: folded into Phase 4</strong> (one bug-bashed change, not a follow-up PR).</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope + the clean-break baseline (old <code>schema-version:2</code>-only backups reject with a re-export message).</li>
+      <li>Confirm tier <code>deep</code>.</li>
+      <li>Confirm the validation plan: typecheck/lint + unit + component + smoke e2e + <strong>network-e2e round-trip</strong> (Phase 6).</li>
+      <li>Confirm the pre-existing restore-rollback bug is <strong>folded into this plan</strong> (Phase 4) — landing one bug-bashed change rather than a follow-up PR.</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> works turn-after-turn until a condition holds and survives <code>--resume</code>; <code>/loop</code> fires on an interval. This plan's completion is fully transcript-observable (phases ✓ + gates + audit), so <code>/goal</code> is the better fit.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 5 phases marked ✓ in implementations-plan/storage-migration-backup/plan.md, each ✓ backed by its phase's Validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/storage-migration-backup/lessons/phase-N.md; /code-review max --fix complete with fixes applied + committed separately; codex post-impl audit complete with high/critical addressed; bun run typecheck and bun run lint both exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/storage-migration-backup forward. Never idle. Each firing: reality-check plan.md + lessons/ + git status; pick the next pending phase; after each edit run bun run typecheck + the touched test file; a phase is green ONLY when its plan.md Validation gate passes — then mark ✓, file the lessons entry, print LESSONS_FILE=..., advance. Stuck or facing a decision? consult /codex xhigh and act on the stronger argument (log it), never wait for me. All phases ✓? run /code-review max --fix (commit separately) → codex post-impl audit → address high/critical → wrap-up report. Hard limits: never merge to main/release, never publish, never expand scope beyond plan.md.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">codex audit</a> · <a href="audit-fable.md">fable audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

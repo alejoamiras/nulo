@@ -24,8 +24,8 @@
  */
 
 // Patch WalletSchema before wallet-sdk reads it (Nulo-custom `registerToken`).
-// Must be the first import in this module — see nulo-schema-patch.ts header.
-import "./nulo-schema-patch"
+// Must be the first import in this module — see @nulo/wallet-sdk-schema-patch.
+import "@nulo/wallet-sdk-schema-patch/register"
 
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
@@ -448,6 +448,13 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	return handler
 }
 
+// F-04: caps on concurrent connect popups — the unlocked-path analog of the
+// locked-queue caps in `DiscoveryQueue`. Same values: a legitimate dApp needs
+// at most a handful of concurrent discoveries; past this, a flooding dApp's
+// requests are rejected before any popup work.
+const DISCOVERY_PENDING_GLOBAL_CAP = 32
+const DISCOVERY_PENDING_PER_ORIGIN_CAP = 4
+
 /**
  * Handle a new discovery request from a dApp.
  *
@@ -470,15 +477,25 @@ async function handleDiscovery(
 	logger: ILogger,
 ): Promise<void> {
 	try {
+		// F-04: resolve chainId up-front — the locked-queue coalesce/cap and the
+		// popup caps below all key on `(origin,chainId)`, not just the
+		// auto-approve lookup and new-session creation.
+		const chainId = String(chainInfoToChainId(discovery))
+
 		const profile = await profileService.getActiveProfile()
 		if (!profile) {
-			discoveryQueue.enqueue(discovery.requestId, discovery.origin)
+			// F-04: `enqueue` returns false when it coalesces a duplicate or hits a
+			// cap. The upstream `pendingDiscoveries` map (keyed by the dApp-controlled
+			// requestId) is NOT bounded, so a dropped request must be rejected there
+			// or it leaks one pending entry per requestId — a flood of distinct
+			// requestIds under a single (origin,chainId) would grow it without limit,
+			// defeating the queue cap. The still-queued first entry has a different
+			// requestId and is untouched; it drains on unlock.
+			if (!discoveryQueue.enqueue(discovery.requestId, discovery.origin, chainId)) {
+				handler.rejectDiscovery(discovery.requestId)
+			}
 			return
 		}
-
-		// Resolve discovery → chainId once: needed for the auto-approve lookup,
-		// the new-session creation, AND the pending-chainId stash below.
-		const chainId = String(chainInfoToChainId(discovery))
 
 		// Check for existing valid session (returning user on this chain → auto-approve).
 		// Lookup is by `(origin, chainId)` so a session remembered on testnet does
@@ -526,6 +543,21 @@ async function handleDiscovery(
 					`Discovery rejected (pending popup resolved without session): ${discovery.origin} chain=${chainId}`,
 				)
 			}
+			return
+		}
+
+		// F-04: cap concurrent connect popups per-origin and globally. The
+		// `(origin,chainId)` dedupe above collapses exact duplicates; this bounds
+		// the distinct-key fan-out so a dApp can't spawn unbounded popup work via
+		// many chainIds (or a botnet of origins).
+		const originPopups = [...pendingDiscoveryPromises.keys()].filter((k) => k.startsWith(`${discovery.origin}|`)).length
+		if (originPopups >= DISCOVERY_PENDING_PER_ORIGIN_CAP || pendingDiscoveryPromises.size >= DISCOVERY_PENDING_GLOBAL_CAP) {
+			handler.rejectDiscovery(discovery.requestId)
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Warn,
+				`Discovery rejected (popup cap): ${discovery.origin} [origin=${originPopups}, global=${pendingDiscoveryPromises.size}]`,
+			)
 			return
 		}
 

@@ -211,11 +211,9 @@ describe("ContactService (port-migrated)", () => {
 			profile.setActiveProfile(profileB)
 			await contactService.addContact("Bob", "0xb")
 
-			// Fire the event ContactService subscribes to in init().
-			profile.onProfileDeleted.invoke(profileA)
-
-			// Allow the async handler to run.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			// Profile-delete cleanup is now the coordinator's AWAITED call, not a
+			// fire-and-forget onProfileDeleted subscriber (finding D).
+			await contactService.purgeForProfile(profileA.id)
 
 			profile.setActiveProfile(profileA)
 			expect(await contactService.getContacts()).toEqual([])
@@ -259,6 +257,23 @@ describe("ContactService (port-migrated)", () => {
 			expect(restored).toHaveLength(1)
 			expect(restored[0].restoreError).toBe("disk full")
 			expect(typeof restored[0].restoreError).toBe("string")
+		})
+
+		test("(P1) a schema-malformed contact row is recorded as restoreError and NEVER written to raw storage", async () => {
+			// A hostile backup row that fails the read-codec would otherwise be
+			// written by the pre-fix `restore` and then KEPT-but-hidden by
+			// EntityStorage.decodeRow — codec-hidden private data that survives a
+			// later cleanup's getValues(). Parse-before-write records it instead.
+			const bad = [{ id: "bad-1", profileId: "p1", name: 123, address: "0xa", abbr: "AL" }] as unknown as Parameters<
+				typeof contactService.restore
+			>[0]
+
+			const restored = await contactService.restore(bad)
+			expect(restored).toHaveLength(1)
+			expect(restored[0].restoreError).toBeDefined()
+
+			const raw = await api.storage.local.get(null)
+			expect(Object.keys(raw).some((k) => k.includes("bad-1"))).toBe(false)
 		})
 	})
 })

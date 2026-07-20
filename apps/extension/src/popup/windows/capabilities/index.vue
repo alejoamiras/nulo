@@ -12,7 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
-import { buildCapabilityItems, type UICapabilityItem } from "./build-items"
+import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -23,10 +23,10 @@ import type { Capability } from "@nulo/wallet-bridge"
 /** Composables */
 import { useDappInteractionPayload } from "@/composables/useDappInteractionPayload"
 import { useDappHostname } from "@/composables/useDappHostname"
+import { useDappApprovalWindow } from "@/composables/useDappApprovalWindow"
 
 type UIDappMetadata = DappMetadata & { loadingLogo?: boolean; logoBlobUrl?: string }
 type UIAccount = { address: string; name: string; chainId: number }
-type UIError = { title: string; tooltip: string; type: string }
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -39,6 +39,7 @@ const capabilities = ref<UICapabilityItem[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
+
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
@@ -53,7 +54,6 @@ const accountAliases = ref<Record<string, string>>({})
 const noAccountsAvailable = ref(false)
 
 const isLoading = ref(false)
-const processingError = ref<UIError>()
 const expandedCards = ref(new Set<number>())
 
 // initComplete flips after init() resolves the dApp interaction payload
@@ -81,18 +81,32 @@ const {
 
 const { hostname: dappHostname, isSuspicious: hostnameHasNonAscii } = useDappHostname(dapp)
 
-const stripStatus = computed<"ready" | "loading" | "cancelled">(() => {
-	if (isInteractionCancelled.value) return "cancelled"
-	if (isLoading.value) return "loading"
-	return "ready"
+// init/reject/services are referenced lazily (thunks): they are declared below
+// and only invoked by start()/dispose()/the guard at runtime.
+const {
+	start: startWindow,
+	dispose: disposeWindow,
+	closeWindow,
+	onActiveProfileChanged,
+	stripStatus,
+	processingError,
+	setError,
+	clearError,
+} = useDappApprovalWindow({
+	profile,
+	isInteractionCancelled,
+	isLoading,
+	connectServices: () => {
+		profileService.connect()
+		interactionService.connect()
+	},
+	disconnectServices: () => {
+		profileService.disconnect()
+		interactionService.disconnect()
+	},
+	init: () => init(),
+	reject: () => reject(),
 })
-
-function setError(title: string, tooltip: string = title, type: string = "error") {
-	processingError.value = { title, tooltip, type }
-}
-function clearError() {
-	processingError.value = undefined
-}
 
 const toggleExpand = (index: number) => {
 	if (expandedCards.value.has(index)) expandedCards.value.delete(index)
@@ -164,10 +178,6 @@ const selectAccount = (account: UIAccount) => {
 
 const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((acc) => acc.address === account.address)
 
-const onActiveProfileChanged = (_profile?: ProfileInfo) => {
-	if (!_profile || _profile.id !== profile.value?.id) reject()
-}
-
 const approve = async () => {
 	// Defense in depth: template's `:disabled="!initComplete"` should already
 	// block this, but if Enter / programmatic click slips through during init,
@@ -187,14 +197,18 @@ const approve = async () => {
 	}
 	try {
 		isLoading.value = true
-		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected).map((c) => c.capability)
+		// Riders are excluded here: the authwit rider's `capability` IS the
+		// accounts cap, which is pushed separately below — including riders
+		// would grant accounts twice (and bypass the account picker's own
+		// selected-accounts gate).
+		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
 		const existing = capabilities.value.filter((c) => !c.isNew).map((c) => c.capability)
 
 		const granted: Capability[] = [...approvedNew, ...existing]
 		if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
 			const delta = payload.value!.params.delta as Capability[]
 			const accountsCap = delta.find((cap) => cap.type === "accounts")
-			if (accountsCap) granted.push(accountsCap)
+			if (accountsCap) granted.push(buildGrantedAccountsCap(accountsCap, capabilities.value))
 		}
 
 		let resultSelectedAccounts: string[] | undefined
@@ -228,50 +242,12 @@ const reject = async () => {
 	closeWindow(true)
 }
 
-const closeWindow = (interactionCompleted?: boolean) => {
-	if (interactionCompleted) window.removeEventListener("beforeunload", reject)
-	chrome.windows.getCurrent(undefined, (window) => {
-		if (window.id) chrome.windows.remove(window.id)
-	})
-}
-
 const profileService = new ProfileServiceClient()
 profileService.onActiveProfileChanged.add(onActiveProfileChanged)
 
-onMounted(async () => {
-	profileService.connect()
-	interactionService.connect()
+onMounted(startWindow)
 
-	if (!appStore.isSessionChecked) {
-		await new Promise<void>((resolve) => {
-			const stop = watch(
-				() => appStore.isSessionChecked,
-				(checked) => {
-					if (checked) {
-						stop()
-						resolve()
-					}
-				},
-				{ immediate: true },
-			)
-		})
-	}
-
-	if (!appStore.isLogined) {
-		appStore.pageAwaitingAuth = router.currentRoute.value.fullPath
-		router.push({ path: "/popup/auth" })
-		return
-	}
-
-	await init()
-	window.addEventListener("beforeunload", reject)
-})
-
-onUnmounted(() => {
-	profileService.disconnect()
-	interactionService.disconnect()
-	window.removeEventListener("beforeunload", reject)
-})
+onUnmounted(disposeWindow)
 </script>
 
 <template>

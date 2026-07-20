@@ -19,7 +19,14 @@ import type { BackgroundTickerPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { BalanceJobQueue } from "./balance-job-queue"
 import { BalanceProjector } from "./balance-projector"
 import { BalanceRepository } from "./balance-repository"
-import { TOKEN_BALANCE_SERVICE_NAME, type TokenBalanceRaw, type TokenBalanceInfo, type Methods, type Events } from "./spec"
+import {
+	TOKEN_BALANCE_SERVICE_NAME,
+	type TokenBalanceRaw,
+	TokenBalanceRawSchema,
+	type TokenBalanceInfo,
+	type Methods,
+	type Events,
+} from "./spec"
 
 export * from "./spec"
 
@@ -119,10 +126,17 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async getTokenBalances(tokenId?: number, accountAddress?: string): Promise<TokenBalanceInfo[]> {
 		await this.ensureInitialized()
-		return (await this.repo.getAll())
-			.filter((x) => tokenId === undefined || x.token === tokenId)
-			.filter((x) => accountAddress === undefined || x.account === accountAddress)
-			.map((x) => this.getTokenBalanceInfo(x), this)
+		return (
+			(await this.repo.getAll())
+				.filter((x) => tokenId === undefined || x.token === tokenId)
+				.filter((x) => accountAddress === undefined || x.account === accountAddress)
+				// Skip a balance whose token the active profile doesn't own (the map is
+				// active-profile-only): a lingering foreign-profile balance (balances carry
+				// no profileId) or a codec-hidden token row must not throw and white-screen
+				// the whole list — mirrors the balance projector's same-reason skip.
+				.filter((x) => this.tokens.has(x.token))
+				.map((x) => this.getTokenBalanceInfo(x), this)
+		)
 	}
 
 	public async refreshTokenBalance(id: number): Promise<void> {
@@ -210,6 +224,18 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 	}
 
+	/** Awaited balance purge for a SET of token ids — called by the deletion
+	 *  coordinator with the tombstone's token snapshot (finding D). Idempotent. */
+	public async purgeForTokens(tokenIds: readonly number[]): Promise<void> {
+		await this.ensureInitialized()
+		const set = new Set(tokenIds)
+		for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
+			if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+			await this.repo.delete(tb.id)
+		}
+		for (const id of set) this.tokens.delete(id)
+	}
+
 	private readonly onTransactionUpdated = async (tx: Tx) => {
 		if (tx.status !== TxStatus.Pending) {
 			if (tx.origin.type === OriginType.UI) {
@@ -258,7 +284,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async backup(): Promise<TokenBalanceRaw[]> {
 		const profile = await requireActiveProfile(this.profileService)
-		return await this.repo.getAll()
+		// Export-scope guard: balances carry no profileId, so scope the export to the
+		// active profile via its token ids. Token ids are a single global sequence, so
+		// `balance.token ∈ active-profile-token-ids` is an exact partition. Use the
+		// AUTHORITATIVE token service (not the in-memory `this.tokens`, which is cleared
+		// mid-profile-switch → would export nothing).
+		const ownedTokenIds = new Set((await this.tokenService.getTokensRaw(profile.id)).map((t) => t.id))
+		return (await this.repo.getAll()).filter((b) => ownedTokenIds.has(b.token))
 	}
 
 	public async restore(tokenBalances: TokenBalanceRaw[]): Promise<Restored<TokenBalanceRaw>[]> {
@@ -267,8 +299,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		for (const tb of tokenBalances) {
 			try {
 				const id = await this.repo.allocateId()
-				await this.repo.set({ ...tb, id })
-				result.push({ ...tb, id })
+				// Parse the exact persisted shape: an unvalidated restore row that fails
+				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
+				// on read AND to a later getValues() cleanup). Parse here so a malformed
+				// backup row is recorded as restoreError, never written.
+				const row = TokenBalanceRawSchema.parse({ ...tb, id })
+				await this.repo.set(row)
+				result.push(row)
 			} catch (err) {
 				result.push({
 					...tb,

@@ -1,4 +1,5 @@
-import type { AccessLevel, DappPermissions, GrantedCapabilityRecord, RejectedCapabilityRecord } from "@nulo/wallet-bridge"
+import { z } from "zod"
+import { AccessLevel, type DappPermissions, type GrantedCapabilityRecord, type RejectedCapabilityRecord } from "@nulo/wallet-bridge"
 
 export const DAPP_SESSION_SERVICE_NAME = "dapp-session"
 
@@ -49,7 +50,43 @@ export type DappSession = {
 	accountAliases?: Record<string, string>
 	capabilityGrants?: GrantedCapabilityRecord[]
 	capabilityRejections?: RejectedCapabilityRecord[]
+	/** F-12: HMAC-SHA256 (base64) over the canonical row minus this field.
+	 *  Written on persist, verified on read; a row that fails (or lacks it) is
+	 *  dropped so a storage-tampered row can't mint grants. */
+	mac?: string
 }
+
+const tolerantRecord = (v: unknown) => typeof v === "object" && v !== null
+
+/** Storage codec row schema. Exact on the access-gating fields (permissions,
+ *  accounts, confirmationLevel, chain/profile scoping — a drifted session row
+ *  is HIDDEN, so the dApp must re-request: fail-closed); tolerant on the deep
+ *  wallet-bridge capability records (display + re-grant bookkeeping). */
+export const DappSessionSchema: z.ZodType<DappSession> = z.object({
+	id: z.string(),
+	profileId: z.string(),
+	chainId: z.string(),
+	dappMetadata: z.object({
+		name: z.string().optional(),
+		description: z.string().optional(),
+		logo: z.string().optional(),
+		url: z.string().optional(),
+	}),
+	permissions: z.array(z.object({ methods: z.array(z.string()).optional(), events: z.array(z.string()).optional() })),
+	accounts: z.array(z.string()),
+	confirmationLevel: z.nativeEnum(AccessLevel),
+	expiry: z.number(),
+	verificationHash: z.string().optional(),
+	trustedVerification: z.boolean().optional(),
+	accountAliases: z.record(z.string(), z.string()).optional(),
+	capabilityGrants: z.array(z.custom<GrantedCapabilityRecord>(tolerantRecord)).optional(),
+	capabilityRejections: z.array(z.custom<RejectedCapabilityRecord>(tolerantRecord)).optional(),
+	// F-12: the per-row integrity tag. Written by `DappSessionMacStorage`, which
+	// wraps this store — the schema MUST carry it so the boundary codec doesn't
+	// strip the `mac` before the MAC layer can verify it (zod object-parse drops
+	// unknown keys). Mirrors the `mac?: string` field on the DappSession type.
+	mac: z.string().optional(),
+})
 
 export type Methods = {
 	getDappSessions(): DappSession[]

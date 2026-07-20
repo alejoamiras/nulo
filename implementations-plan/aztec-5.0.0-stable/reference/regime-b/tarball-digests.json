@@ -1,0 +1,42 @@
+{
+	"capturedAt": "2026-07-17",
+	"note": "regenerated for the 5.0.1 client bump (aztec-5.0.1-line P1)",
+	"packages": [
+		{
+			"name": "@aztec/accounts",
+			"version": "5.0.1",
+			"dist.shasum": "bf41787c43ca4c4ffbe63f676bafc1e2b94fa2de",
+			"dist.integrity": "sha512-IeHbWmvXtus4D6LoMLhkahkxdPGf42tUGVY8Qs4gpFvcPhoHwkfDRie/RlBKAkhiGjMJytkZLnq7rqxkNEMzYQ=="
+		},
+		{
+			"name": "@aztec/aztec.js",
+			"version": "5.0.1",
+			"dist.shasum": "f2bfa2ec10c97bcd2b048fc9c01a0a625d58f2a4",
+			"dist.integrity": "sha512-aEAhMDhfYwLmpht1AlWuXrYUbgwZgSrXoTsT0NIVb3ACM3ksTJvhy1WFkdaNe2odgkU8nBGxWYnWQxX4WACZ7g=="
+		},
+		{
+			"name": "@aztec/constants",
+			"version": "5.0.1",
+			"dist.shasum": "9deb1271af66e3ed537def14a417853d4f474fb4",
+			"dist.integrity": "sha512-wJEuQ3LQ9vXy4fmvr502Cu+BK38Lrlc8NnoQxwW0NPcdYtQAkriJVvJRhlPDjZc9zhFz2XuzCPlWMedfbbvwqQ=="
+		},
+		{
+			"name": "@aztec/foundation",
+			"version": "5.0.1",
+			"dist.shasum": "e053edd7d30aaa40bf2cb948b4dea3b8f5b091aa",
+			"dist.integrity": "sha512-5CIc3JMTEjODf9gHu19wij5KOV3yn3iU5CtDfQR7CPXhzE6HfVbgSJIA57opgOd46K/82uQ0EVnLszpo//3bPw=="
+		},
+		{
+			"name": "@aztec/pxe",
+			"version": "5.0.1",
+			"dist.shasum": "0f9b99527624310fabb6d53a64ca257ef2b11c85",
+			"dist.integrity": "sha512-bMnkRKeh7sjmfWKxoZ2TM0DynyrIOY5zLXGVL201FC+Uae36URRtFUR5wjZeVq7GAfKilGE8EflYLklm1xyzkA=="
+		},
+		{
+			"name": "@aztec/stdlib",
+			"version": "5.0.1",
+			"dist.shasum": "c8a07da903d8df7afa9602212a0f9fe1950b8424",
+			"dist.integrity": "sha512-CSwsM65EzmSmcL+xot+b/DF1W3OrmVfpy/QvYVE9NPj2q3KE5vUCcJqzfVW04Imq/43ctHRg3vBs3qZf5Qd6kQ=="
+		}
+	]
+}

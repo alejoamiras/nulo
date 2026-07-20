@@ -31,6 +31,21 @@ export interface CapabilityInfo {
  * the user sees for a given capability — keep them in sync with the
  * `Capability` union in `@nulo/wallet-bridge`.
  */
+/**
+ * Display info for the accounts `canCreateAuthWit` sub-permission, rendered as
+ * its own card in the capabilities popup. Deliberately NOT a CAPABILITY_LABELS
+ * key: that record is looked up by the dApp-controlled `cap.type` string, and a
+ * pseudo-key would let a dApp-sent capability with that fake type render as a
+ * recognized (default-ON) permission instead of "Unknown permission".
+ */
+export const AUTHWIT_RIDER_INFO: CapabilityInfo = {
+	label: "Act on your behalf",
+	shortLabel: "Auth-witnesses",
+	description:
+		"This app can create auth-witnesses — request your signature to authorize actions on your behalf — for the account(s) you share.",
+	risk: "high",
+}
+
 export const CAPABILITY_LABELS: Record<string, CapabilityInfo> = {
 	accounts: {
 		label: "Account access",

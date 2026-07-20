@@ -157,33 +157,52 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			return true
 		})
 		for (const n of uniqueNetworks) {
-			if ((await this.networkService.getNodeStatus(n.id)) === NodeStatus.Active) {
-				const senders = await this.getSenders(n.id)
-				const contracts = await this.getContracts(n.id)
-				const contractsFull: BackupContract[] = []
-				const nInfo = networkInfoFrom(n)
-				for (const c of contracts) {
-					const instance = await this.pxeService.getContractInstance(nInfo, AztecAddress.fromStringUnsafe(c))
-					if (!instance) continue
-
-					if (!instance.currentContractClassId) continue
-
-					const artifact = await this.pxeService.getContractArtifact(nInfo, instance.currentContractClassId)
-					if (!artifact) continue
-
-					contractsFull.push({
-						address: c,
-						instance,
-						artifact,
-					})
+			if ((await this.networkService.getNodeStatus(n.id)) !== NodeStatus.Active) {
+				// A backup captures PXE recovery material (contracts/senders) ONLY for networks
+				// whose node is reachable at export time. A down endpoint silently drops a
+				// network's custom-contract artifacts from an otherwise-successful backup, so a
+				// later fresh restore can't rediscover those private notes (codex audit MED).
+				// Surface the omission rather than dropping it silently.
+				this.logWarn(
+					`backup: network ${n.id} (chain ${n.chainId}) is not Active — its contract/sender state is OMITTED from this backup`,
+				)
+				continue
+			}
+			const senders = await this.getSenders(n.id)
+			const contracts = await this.getContracts(n.id)
+			const contractsFull: BackupContract[] = []
+			const nInfo = networkInfoFrom(n)
+			let skipped = 0
+			for (const c of contracts) {
+				const instance = await this.pxeService.getContractInstance(nInfo, AztecAddress.fromStringUnsafe(c))
+				if (!instance || !instance.currentContractClassId) {
+					skipped++
+					continue
 				}
 
-				result.push({
-					networkId: n.id,
-					senders: senders.map((address) => ({ address })),
-					contracts: contractsFull,
+				const artifact = await this.pxeService.getContractArtifact(nInfo, instance.currentContractClassId)
+				if (!artifact) {
+					skipped++
+					continue
+				}
+
+				contractsFull.push({
+					address: c,
+					instance,
+					artifact,
 				})
 			}
+			if (skipped > 0) {
+				this.logWarn(
+					`backup: network ${n.id} — ${skipped} contract(s) OMITTED (no resolvable instance/artifact); their notes may not survive a fresh restore`,
+				)
+			}
+
+			result.push({
+				networkId: n.id,
+				senders: senders.map((address) => ({ address })),
+				contracts: contractsFull,
+			})
 		}
 
 		return result
@@ -197,8 +216,24 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		for (const item of backupAccountState) {
 			const senders: Restored<BackupSender>[] = []
 			const contracts: Restored<BackupContract>[] = []
+			// A checksum-valid but shape-malformed slice (e.g. `senders: null`) must NOT throw
+			// an uncaught TypeError mid-iteration — this runs AFTER finalizeRestore, where rollback
+			// is suppressed, so an uncaught throw leaves a post-commit partial restore (codex audit
+			// MED). Coerce non-array senders/contracts to empty + record a per-item error so it
+			// surfaces (and blocks auto-completion) without stranding the loop.
+			const itemSenders = Array.isArray(item.senders) ? item.senders : []
+			const itemContracts = Array.isArray(item.contracts) ? item.contracts : []
 			const network = networks.find((n) => n.id === item.networkId)
-			for (const sender of item.senders) {
+			if (!Array.isArray(item.senders) || !Array.isArray(item.contracts)) {
+				result.push({
+					...item,
+					senders,
+					contracts,
+					restoreError: toRestoreError(new Error("malformed account-state item (senders/contracts not arrays)")),
+				})
+				continue
+			}
+			for (const sender of itemSenders) {
 				try {
 					if (!network) throw new Error("Network not found")
 
@@ -212,7 +247,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				}
 			}
 
-			for (const contract of item.contracts) {
+			for (const contract of itemContracts) {
 				try {
 					if (!network) throw new Error("Network not found")
 

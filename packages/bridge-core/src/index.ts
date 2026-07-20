@@ -3,12 +3,14 @@
  * No React, no Vue, no server. Consumed by the bridge frontend's composables.
  */
 
+export * from "./candidate-schema"
 export * from "./content-hash"
 export * from "./fee-juice"
 export * from "./flows"
 export * from "./private-fuel"
 export * from "./fuel"
 export * from "./l1"
+export * from "./l1-receipt"
 export * from "./l2"
 export * from "./journal"
 export * from "./progress"

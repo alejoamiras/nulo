@@ -155,15 +155,148 @@ describe("PxeService.getContractInstance cascade", () => {
 		expect(f.nodeCalls).toBe(1)
 	})
 
-	test("PXE hit short-circuits — node is never called", async () => {
-		const pxeInstance = { address: { toString: () => "pxe-local" } } as unknown as ContractInstanceWithAddress
+	test("PXE hit short-circuits — node is never called; preimage hydrates current := original", async () => {
+		// 5.0.0: the PXE returns the address PREIMAGE. The seam hydrates it through
+		// `hydratePreimage`, filling `currentContractClassId` from the original (the documented
+		// no-upgrades assumption) — so the returned value is a new object, not the mock itself.
+		const originalClassId = { toString: () => "class-original", equals: () => true }
+		const pxeInstance = {
+			address: { toString: () => "pxe-local" },
+			originalContractClassId: originalClassId,
+		} as unknown as ContractInstanceWithAddress
 		const f = makeFactory({ pxeInstance, nodeBehavior: "throws" })
 		const service = makeService(f.factory)
 
 		const result = await service.getContractInstance(network, address)
 
-		expect(result).toBe(pxeInstance)
+		expect(result).toEqual({ ...pxeInstance, currentContractClassId: originalClassId })
+		expect(result?.currentContractClassId).toBe(originalClassId)
 		expect(f.pxeCalls).toBe(1)
 		expect(f.nodeCalls).toBe(0)
+	})
+
+	test("node hit with an IMMUTABLE contract (current == original) passes through", async () => {
+		const classId = { toString: () => "class-a", equals: (o: { toString(): string }) => o.toString() === "class-a" }
+		const nodeInstance = {
+			address: { toString: () => "node-hit" },
+			originalContractClassId: classId,
+			currentContractClassId: classId,
+		} as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ nodeBehavior: "returns-instance", nodeInstance })
+		const service = makeService(f.factory)
+
+		const result = await service.getContractInstance(network, address)
+
+		expect(result).toBe(nodeInstance)
+		expect(f.nodeCalls).toBe(1)
+	})
+
+	test("node hit with an UPGRADED contract (current != original) fails explicitly", async () => {
+		// The wallet does not support upgraded contracts: executing against the ORIGINAL
+		// artifact would be silently wrong, so the seam rejects at entry (effective-class.ts).
+		const original = { toString: () => "class-original", equals: () => false }
+		const current = { toString: () => "class-upgraded", equals: (o: { toString(): string }) => o.toString() === "class-upgraded" }
+		const nodeInstance = {
+			address: { toString: () => "0xupgraded" },
+			originalContractClassId: original,
+			currentContractClassId: current,
+		} as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ nodeBehavior: "returns-instance", nodeInstance })
+		const service = makeService(f.factory)
+
+		await expect(service.getContractInstance(network, address)).rejects.toThrow(/upgraded/)
+		expect(f.nodeCalls).toBe(1)
+	})
+
+	test("nodeBestEffort: true does NOT swallow the upgrade rejection into the known-bundle fallback", async () => {
+		// The upgrade rejection is a DEFINITIVE node answer, not a hiccup — best-effort must re-throw it
+		// (ContractUpgradedError) rather than degrade to a stale known-bundle instance (finding #5).
+		const original = { toString: () => "class-original", equals: () => false }
+		const current = { toString: () => "class-upgraded", equals: (o: { toString(): string }) => o.toString() === "class-upgraded" }
+		const nodeInstance = {
+			address: { toString: () => "0xupgraded" },
+			originalContractClassId: original,
+			currentContractClassId: current,
+		} as unknown as ContractInstanceWithAddress
+		const f = makeFactory({ nodeBehavior: "returns-instance", nodeInstance })
+		const service = makeService(f.factory)
+		// A known-bundle hit is available — the bug would serve THIS instead of throwing.
+		const knownInstance = { address: { toString: () => "known" } } as unknown as ContractInstanceWithAddress
+		;(
+			service as unknown as {
+				artifacts: { ensureKnown: () => Promise<void>; getKnownInstance: (a: string) => ContractInstanceWithAddress }
+			}
+		).artifacts = { ensureKnown: async () => {}, getKnownInstance: () => knownInstance }
+
+		await expect(service.getContractInstance(network, address, { nodeBestEffort: true })).rejects.toThrow(/upgraded/)
+	})
+})
+
+describe("PxeService deletion honesty (finding D)", () => {
+	beforeEach(() => {
+		vi.stubGlobal("chrome", {
+			runtime: { onMessage: { addListener: () => {}, removeListener: () => {} }, sendMessage: () => Promise.resolve() },
+		})
+	})
+	afterEach(() => vi.unstubAllGlobals())
+
+	// A fake IDBOpenDBRequest that fires the chosen lifecycle callback async.
+	function fireReq(kind: "success" | "error"): unknown {
+		const req: Record<string, unknown> = {}
+		queueMicrotask(() => {
+			if (kind === "success") (req.onsuccess as () => void)?.()
+			else {
+				req.error = new Error("boom")
+				;(req.onerror as () => void)?.()
+			}
+		})
+		return req
+	}
+
+	test("clearChainState REJECTS when deleteDatabase errors — no false 'deleted'", async () => {
+		const service = makeService(makeFactory({ nodeBehavior: "throws" }).factory)
+		;(service as unknown as { registry: unknown }).registry = { dispose: async () => {} }
+		vi.stubGlobal("indexedDB", { deleteDatabase: () => fireReq("error") })
+		await expect(service.clearChainState("p1", 1)).rejects.toThrow()
+	})
+
+	test("clearProfileState deletes the profile's DBs by prefix but KEEPS keyval-store while another profile survives", async () => {
+		const service = makeService(makeFactory({ nodeBehavior: "throws" }).factory)
+		;(service as unknown as { registry: unknown }).registry = { disposeProfile: async () => {} }
+		const deleted: string[] = []
+		let dbs = [{ name: "pxe/p1/1" }, { name: "pxe/p2/1" }, { name: "keyval-store" }]
+		vi.stubGlobal("indexedDB", {
+			databases: async () => dbs,
+			deleteDatabase: (name: string) => {
+				deleted.push(name)
+				dbs = dbs.filter((d) => d.name !== name)
+				return fireReq("success")
+			},
+		})
+		await service.clearProfileState("p1", "gen-1")
+		expect(deleted).toContain("pxe/p1/1")
+		expect(deleted).not.toContain("pxe/p2/1") // another profile's DB — untouched
+		expect(deleted).not.toContain("keyval-store") // shared — kept while p2 survives
+	})
+
+	test("clearProfileState RETAINS the profile barrier on erase failure, then drops it on a successful retry", async () => {
+		const service = makeService(makeFactory({ nodeBehavior: "throws" }).factory)
+		const barriers = (service as unknown as { profileBarriers: Map<string, unknown> }).profileBarriers
+		let disposeShouldFail = true
+		;(service as unknown as { registry: unknown }).registry = {
+			disposeProfile: async () => {
+				if (disposeShouldFail) throw new AggregateError([new Error("close failed")], "dispose failed")
+			},
+		}
+		vi.stubGlobal("indexedDB", { databases: async () => [], deleteDatabase: () => fireReq("success") })
+
+		// Failed erase: rejects AND keeps the barrier entry so the profile stays fenced for a retry.
+		await expect(service.clearProfileState("p1", "gen-1")).rejects.toBeInstanceOf(AggregateError)
+		expect(barriers.has("p1")).toBe(true)
+
+		// Same-gen retry now succeeds → the barrier is dropped (the profile is gone).
+		disposeShouldFail = false
+		await service.clearProfileState("p1", "gen-1")
+		expect(barriers.has("p1")).toBe(false)
 	})
 })

@@ -8,6 +8,8 @@ import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
+import { requireOwnedRow } from "@/wallet/services/require-owned-row"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -29,9 +31,11 @@ import {
 	type NetworkEndpoint,
 	type NetworkInfo,
 	NETWORK_SERVICE_NAME,
+	NETWORK_STORAGE_ROOT,
 	NetworkMethodSchemas,
 	NetworkSchema,
 	NodeStatus,
+	NetworkRowSchema,
 } from "./spec"
 
 export * from "./spec"
@@ -77,7 +81,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
 		name: "Testnet",
 		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
-		chainId: 2793892258, // (11155111 ^ 2787991301) >>> 0 — V5 testnet rollup version
+		chainId: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet rollup version
 		kind: "testnet",
 		isPrimaryActive: true,
 	},
@@ -174,7 +178,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		nodeFactory?: NodeFactory,
 	) {
 		super(NETWORK_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<Network>("nulo:core:networks", browserApi.storage.local)
+		this.storage = new EntityStorage<Network>(NETWORK_STORAGE_ROOT, browserApi.storage.local, (raw) => NetworkRowSchema.parse(raw))
 		this.lock = new Lock("network", logger)
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 	}
@@ -182,7 +186,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.pxeServiceClient = new PxeServiceClient(this.logger)
 	}
 
@@ -230,12 +234,23 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		)
 	}
 
+	/**
+	 * Lock-free, profileId-parameterized network read. Does NOT go through
+	 * `requireActiveProfile`, so it's safe to call under the profile facade lock
+	 * (the deletion coordinator's snapshot) AND from profile-scoped cleanup
+	 * consumers (e.g. `IncomingTransfer.onTokenDeleted`) that must scope to the
+	 * DELETED token's profile, never the active one (finding C).
+	 */
+	public async getNetworksRaw(profileId: string, chainId?: number): Promise<Network[]> {
+		await this.ensureInitialized()
+		return (await this.storage.getValues()).filter((n) => n.profileId === profileId && (chainId === undefined || n.chainId === chainId))
+	}
+
 	public async getNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.getNetwork.params, [id], "getNetwork")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const network = await this.storage.get(id)
-		if (network?.profileId !== profile.id) throw new Error("Invalid id")
+		const network = requireOwnedRow(await this.storage.get(id), profile.id)
 		return network
 	}
 
@@ -282,8 +297,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(id)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			if (network.name === name) return network
 			const collision = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.id !== id && n.name === name)
 			if (collision) throw new Error(`Name '${name}' already in use.`)
@@ -302,8 +316,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(id)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			const activeId = await this._readActive(profile.id)
 			if (activeId === id) {
 				throw new Error(`${ERR_ACTIVE_NETWORK}: Cannot delete the active network. Switch to another chain first.`)
@@ -325,8 +338,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(id)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			await this._writeActive(profile.id, id)
 			const primaryEndpoint = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 			if (primaryEndpoint) {
@@ -348,13 +360,11 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// Peek the network's kind unlocked so the chainId probe can short-circuit
 		// for `kind === "local"` regardless of how the URL was edited. The lock-
 		// guarded re-read below handles the (rare) deletion race.
-		const peek = await this.storage.get(networkId)
-		if (peek?.profileId !== profile.id) throw new Error("Invalid id")
+		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		const probedChainId = await this._getChainId(rpcUrl, peek.kind)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (probedChainId !== network.chainId) {
 				throw new Error(
 					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probedChainId}, but this network is chain ${network.chainId}.`,
@@ -390,16 +400,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const normalized = normalizeRpcUrl(rpcUrl)
 		// Peek the network's kind so the chainId probe can short-circuit for
 		// `kind === "local"` regardless of how the URL was edited.
-		const peek = await this.storage.get(networkId)
-		if (peek?.profileId !== profile.id) throw new Error("Invalid id")
+		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		// Probe outside the lock when URL changes (network call).
 		let probedChainId: number | undefined
 		// We probe regardless to keep semantics simple — chainId could have shifted on the same URL.
 		probedChainId = await this._getChainId(rpcUrl, peek.kind)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (probedChainId !== undefined && probedChainId !== network.chainId) {
 				throw new Error(
 					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probedChainId}, but this network is chain ${network.chainId}.`,
@@ -436,8 +444,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			const idx = network.endpoints.findIndex((e) => e.id === endpointId)
 			if (idx < 0) throw new Error("Invalid endpoint id")
 			if (network.endpoints.length === 1) {
@@ -462,8 +469,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const network = await this.storage.get(networkId)
-			if (network?.profileId !== profile.id) throw new Error("Invalid id")
+			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (!network.endpoints.some((e) => e.id === endpointId)) throw new Error("Invalid endpoint id")
 			if (network.primaryEndpointId === endpointId) return network
 			network.primaryEndpointId = endpointId
@@ -483,8 +489,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		validateParams(NetworkMethodSchemas.getNodeStatus.params, [networkId], "getNodeStatus")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const network = await this.storage.get(networkId)
-		if (network?.profileId !== profile.id) throw new Error("Invalid id")
+		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 		if (!primary) return NodeStatus.Inactive
 		try {
@@ -594,19 +599,29 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 * only after this method resolves.
 	 */
 	public async purgeChain(profileId: string, chainId: number, networkId: string): Promise<void> {
+		// FAIL-FAST (finding D, codex blocker): run every step best-effort so a
+		// single failure doesn't strand the others, but PROPAGATE if ANY failed —
+		// the deletion coordinator must keep the tombstone + retry (idempotent), not
+		// treat a swallowed subscriber/PXE failure as "chain erased".
+		const errors: unknown[] = []
 		for (const subscriber of this.chainPurgeSubscribers) {
 			try {
 				await subscriber(profileId, chainId, networkId)
 			} catch (error) {
 				this.logError(`purgeChain subscriber failed for (${profileId}, ${chainId})`, getErrorMessage(error))
+				errors.push(error)
 			}
 		}
 		try {
 			await this.pxeServiceClient.clearChainState(profileId, chainId)
 		} catch (error) {
 			this.logError(`PxeServiceClient.clearChainState failed`, getErrorMessage(error))
+			errors.push(error)
 		}
 		this.emit("onChainPurged", { profileId, chainId })
+		if (errors.length) {
+			throw new Error(`purgeChain failed for (${profileId}, ${chainId}): ${errors.map(getErrorMessage).join("; ")}`)
+		}
 	}
 
 	private readonly chainPurgeSubscribers: Array<(profileId: string, chainId: number, networkId: string) => Promise<void>> = []
@@ -637,6 +652,15 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		try {
 			await this.lock.enter()
 			const existing = await this.storage.getValues()
+			// A collision re-roll must avoid every SOURCE id in this batch too, not
+			// just stored ids — a fresh id equal to a LATER source id would alias that
+			// network's remapped child rows (finding E; belt-and-suspenders with the
+			// composable's single-pass map).
+			const sourceIds = new Set<string>()
+			for (const n of networks) {
+				const nid = (n as { id?: unknown } | null)?.id
+				if (typeof nid === "string") sourceIds.add(nid)
+			}
 			for (const raw of networks) {
 				try {
 					if (!isNewShapeNetwork(raw)) {
@@ -658,7 +682,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 						throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
 					}
 					let id = candidate.id
-					while (await this.storage.contains(id)) id = getRandomHex(8)
+					while ((await this.storage.contains(id)) || (id !== candidate.id && sourceIds.has(id))) id = getRandomHex(8)
 					const stored: Network = { ...candidate, id }
 					await this.storage.set(id, stored)
 					existing.push(stored)
@@ -688,23 +712,25 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, purging chains + removing networks`)
+	/** Awaited profile-scoped network purge, called by the deletion coordinator
+	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
+	 *  FAIL-FAST: a `purgeChain`/PXE failure now PROPAGATES (was log-and-continue)
+	 *  so the coordinator keeps the tombstone + retries rather than reporting a
+	 *  false "deleted". */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: purge chains + remove networks`)
 		try {
 			await this.lock.enter()
 			this.nodes.clear()
 			this.transientNodes.clear()
-			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profileId)
 			for (const network of networks) {
-				try {
-					await this.purgeChain(profile.id, network.chainId, network.id)
-				} catch (error) {
-					this.logError(`purgeChain failed during onProfileDeleted`, getErrorMessage(error))
-				}
+				await this.purgeChain(profileId, network.chainId, network.id)
 				await this.storage.delete(network.id)
 				this.emit("onNetworkDeleted", network)
 			}
-			await this.browserApi.storage.local.remove(activeKey(profile.id))
+			await this.browserApi.storage.local.remove(activeKey(profileId))
 		} finally {
 			this.lock.leave()
 		}
@@ -731,11 +757,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private async _freshStored8(): Promise<string> {
-		let id: string
-		do {
-			id = getRandomHex(8)
-		} while (await this.storage.contains(id))
-		return id
+		return nextRandomId(this.storage)
 	}
 
 	private _fresh8(taken: string[]): string {

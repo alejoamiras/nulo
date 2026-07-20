@@ -46,7 +46,6 @@ export type Methods = {
 	getRegisteredAccounts(network: NetworkInfo): CompleteAddress[]
 	registerContractClass(network: NetworkInfo, artifact: ContractArtifact): void
 	registerContract(network: NetworkInfo, contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }): void
-	updateContract(network: NetworkInfo, contractAddress: AztecAddress, artifact: ContractArtifact): void
 	getContracts(network: NetworkInfo): AztecAddress[]
 	getNotes(network: NetworkInfo, filter: NotesFilter): NoteDao[]
 	proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): TxProvingResult
@@ -78,4 +77,19 @@ export type Methods = {
 	 * NetworkService.purgeChain coordinator when a chain is removed.
 	 */
 	clearChainState(profileId: string, chainId: number): void
+	/** Profile-wide PXE erase: deletes ALL of a profile's PXE databases by
+	 *  prefix (catches orphan/network-less DBs a per-chain clear misses) and
+	 *  the shared keyval-store only when no PXE DB survives. Awaited +
+	 *  failure-propagating — the deletion coordinator treats a rejection as a
+	 *  critical, retryable erasure failure. `generation` is the incarnation
+	 *  being erased (from the tombstone carry): a late clear carrying a
+	 *  superseded generation can never erase a live successor (#281 D4). */
+	clearProfileState(profileId: string, generation: string): void
+	/** Provision the per-profile 32-byte PXE store encryption key (base64). Derived SW-side
+	 *  from the profile master; in-memory only offscreen-side; a chain runtime fail-closes
+	 *  without it. Idempotent — re-provisioned after an offscreen restart. `generation` is
+	 *  the profile row's incarnation generation, derived FRESH under the facade lock at
+	 *  send time; the offscreen lifecycle fence rejects it for deleting/erased
+	 *  incarnations (#281 D4). */
+	provisionChainStoreKey(profileId: string, storeKeyBase64: string, generation: string): void
 }

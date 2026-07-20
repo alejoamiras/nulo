@@ -37,7 +37,10 @@ import { OperationJournalService } from "./services/operation-journal/service"
 import { JournalGC } from "./services/operation-journal/gc"
 import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
+import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
 import { ProfileService } from "./services/profile/service"
+import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
+import { derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
 import { TokenBalanceService } from "./services/token-balance/service"
@@ -45,7 +48,15 @@ import { TransactionService } from "./services/transaction/service"
 import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
-import { runStorageMigration } from "./storage/migrate"
+import { type MigrationResult, Migrator } from "@nulo/wallet-core/migration"
+import {
+	BASELINE_VERSION,
+	migrations,
+	SCHEMA_BLOCKED_KEY,
+	SCHEMA_DEGRADED_KEY,
+	type MigrationBlockedStatus,
+	type MigrationDegradedStatus,
+} from "./storage/migrations"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 /** Shell-supplied dependencies. All I/O goes through ports on this object. */
@@ -92,6 +103,54 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			logger.log("wallet", LogLevel.Warn, "Failed to set uninstall URL", getErrorMessage(error))
 		}
 
+		// Data-preserving storage migration runs FIRST — before config.load() (a
+		// config-reshaping migration must not be shadowed by an already-loaded
+		// config) and before any service reads storage.
+		// The engine contractually never throws (a throw becomes a retryable
+		// needs-recovery result) — this catch is belt-and-braces so even an
+		// engine BUG still lands on the blocked-status recovery UX instead of a
+		// bare boot crash. It deliberately clears NOTHING: an armed backup may
+		// be load-bearing, and the engine's next-boot resume owns journal
+		// cleanup for every stranded shape.
+		const migration = await new Migrator({
+			store: browserApi.storage.local,
+			migrations,
+			baselineVersion: BASELINE_VERSION,
+		})
+			.run()
+			.catch(
+				(err): MigrationResult => ({
+					kind: "needs-recovery",
+					reason: `migration engine threw: ${getErrorMessage(err)}`,
+					retryable: true,
+				}),
+			)
+		logger.log("wallet", LogLevel.Info, `Storage migration: ${migration.kind}`)
+		if (migration.kind === "needs-recovery" || (migration.kind === "failed" && migration.breaking)) {
+			logger.log("wallet", LogLevel.Error, `Storage migration blocked boot (${migration.kind}): ${migration.reason}`)
+			// Persist the blocked status so the UI shells render the recovery
+			// screen (MigrationBarrier) instead of a dead popup, then fail
+			// closed: never start services on un-migrated / incompatible data.
+			const blocked: MigrationBlockedStatus = {
+				kind: migration.kind,
+				detail: migration.reason,
+				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
+			}
+			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
+			throw new Error(`storage migration blocked: ${migration.kind}`)
+		}
+		if (migration.kind === "failed") {
+			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.reason}`)
+			const degraded: MigrationDegradedStatus = { version: migration.version, error: migration.reason }
+			// A stale blocked status from an EARLIER boot must not outrank the
+			// degraded banner over a wallet that just booted.
+			await browserApi.storage.local.set({ [SCHEMA_DEGRADED_KEY]: degraded })
+			await browserApi.storage.local.remove(SCHEMA_BLOCKED_KEY)
+		} else {
+			// Healthy boot clears any stale status from a prior failed run.
+			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])
+		}
+
 		// Config + Barretenberg can load in parallel — neither depends on the other.
 		await Promise.all([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
@@ -99,10 +158,6 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				logger.log("wallet", LogLevel.Info, "Barretenberg initialized"),
 			),
 		])
-
-		// Destructive storage migration (version-gated) must run before any
-		// service reads storage. Older shapes get wiped; profiles/passkeys preserved.
-		await runStorageMigration((msg) => logger.log("wallet", LogLevel.Info, msg))
 
 		// Service graph. Services migrated to ports accept `browserApi`;
 		// remaining services still reach into `chrome.*` directly until
@@ -138,16 +193,53 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the
 		// composition root wires browserApi"). Accepted behavior change; seam-pinned in
 		// service.integration.test.ts "Q10 composition seam".
-		services.add(new ProfileService(config, logger, browserApi))
+		const profileService = new ProfileService(config, logger, browserApi)
+		services.add(profileService)
+		// The per-profile PXE store encryption key: derived on demand from the in-memory master
+		// (HKDF, wallet-crypto) and provisioned to the offscreen by the PXE clients' missing-key
+		// retry path. The master never crosses the seam; a locked profile yields undefined and
+		// the PXE op fails as it should. The provision pairs the key with the row's CURRENT
+		// pxeGeneration — read fresh under the facade lock (row-exists + not-tombstoned), so a
+		// provider that captured the master before a deletion cannot re-provision the erased
+		// incarnation afterwards (#281 D4).
+		registerPxeStoreKeyProvider(async (profileId) => {
+			const generation = await profileService.getPxeGeneration(profileId)
+			if (!generation) return undefined
+			const master = await profileService.getProfileSecret(profileId).catch(() => undefined)
+			if (!master) return undefined
+			const key = await derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId)
+			// Re-read the generation AFTER the slow HKDF and require it unchanged: a deletion
+			// (+ possible same-id re-import) can land during derivation, and the offscreen's
+			// in-memory `deleted(gen)` fence does NOT survive an offscreen restart — a stale
+			// provision that crosses a restart would otherwise be accepted by a fresh `unseen`
+			// offscreen and resurrect the erased store (concurrency audit HIGH #1). This SW-side
+			// re-check closes the read→HKDF→send gap regardless of offscreen reincarnation.
+			const generationNow = await profileService.getPxeGeneration(profileId)
+			if (generationNow !== generation) return undefined
+			return { key, generation }
+		})
+		// Generation-only capture for outgoing ops (no HKDF per op) — stamps
+		// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.
+		registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
 		services.add(new IncomingTransferService(logger, browserApi))
 		services.add(new PasskeyService(logger, windowManager))
+		// Started LAST (declares dependencies on every service it purges) — finding D.
+		const deletionCoordinator = new ProfileDeletionCoordinator(logger)
+		services.add(deletionCoordinator)
 
 		await services.start()
 		logger.log("wallet", LogLevel.Info, "Services started")
+
+		// Resume any profile deletion a prior SW left tombstoned (crashed
+		// mid-cleanup). Fire-and-forget so it never blocks startup; idempotent +
+		// single-flight; a corrupt tombstone stays reserved ("deletion pending").
+		void deletionCoordinator
+			.resumePending()
+			.catch((error) => logger.log("wallet", LogLevel.Error, "resumePendingDeletions failed", getErrorMessage(error)))
 
 		// Phase 2 Week 4: durable-job reaper. Runs a chrome.alarms-driven
 		// sweep + a boot sweep against the operation journal; transitions

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { buildCapabilityItems } from "./build-items"
+import { buildCapabilityItems, buildGrantedAccountsCap } from "./build-items"
 
 const transactionCap = { type: "transaction" as const, scope: "*" as const }
 const contractsCap = { type: "contracts" as const, contracts: "*" as const, canRegister: true }
@@ -35,6 +35,50 @@ describe("capabilities/build-items", () => {
 	test("accounts capability in the delta is filtered out (popup renders its picker section instead)", () => {
 		const items = buildCapabilityItems([transactionCap, accountsCap, contractsCap], [], new Set())
 		expect(items.map((i) => i.capability.type)).toEqual(["transaction", "contracts"])
+	})
+
+	test("accounts with canCreateAuthWit emits the rider card (selected ON, risk high)", () => {
+		const cap = { ...(accountsCap as object), canCreateAuthWit: true } as typeof accountsCap
+		const items = buildCapabilityItems([cap], [], new Set())
+		expect(items).toHaveLength(1)
+		expect(items[0].authwitRider).toBe(true)
+		expect(items[0].capability).toBe(cap)
+		expect(items[0].isNew).toBe(true)
+		expect(items[0].selected).toBe(true)
+		expect(items[0].risk).toBe("high")
+	})
+
+	test("accounts WITHOUT canCreateAuthWit emits no rider", () => {
+		const items = buildCapabilityItems([accountsCap], [], new Set())
+		expect(items).toHaveLength(0)
+	})
+
+	test("truthy non-boolean canCreateAuthWit still emits the rider (Boolean coercion, mirrors enforcement)", () => {
+		// A dApp sending `canCreateAuthWit: 1` is still granted+enforced truthy by
+		// the dispatcher/scope-checkers — it must not dodge the consent card.
+		const cap = { ...(accountsCap as object), canCreateAuthWit: 1 } as unknown as typeof accountsCap
+		const items = buildCapabilityItems([cap], [], new Set())
+		expect(items).toHaveLength(1)
+		expect(items[0].authwitRider).toBe(true)
+	})
+
+	test("buildGrantedAccountsCap: deselected rider strips canCreateAuthWit from the grant", () => {
+		const cap = { ...(accountsCap as object), canCreateAuthWit: true } as typeof accountsCap
+		const items = buildCapabilityItems([cap], [], new Set())
+		items[0].selected = false
+		const granted = buildGrantedAccountsCap(cap, items) as { canCreateAuthWit?: unknown }
+		expect(granted.canCreateAuthWit).toBe(false)
+	})
+
+	test("buildGrantedAccountsCap: selected rider passes the accounts cap through untouched", () => {
+		const cap = { ...(accountsCap as object), canCreateAuthWit: true } as typeof accountsCap
+		const items = buildCapabilityItems([cap], [], new Set())
+		expect(buildGrantedAccountsCap(cap, items)).toBe(cap)
+	})
+
+	test("buildGrantedAccountsCap: no rider card (flag never requested) passes through untouched", () => {
+		const items = buildCapabilityItems([accountsCap, transactionCap], [], new Set())
+		expect(buildGrantedAccountsCap(accountsCap, items)).toBe(accountsCap)
 	})
 
 	test("reRequested set propagates to items by type", () => {

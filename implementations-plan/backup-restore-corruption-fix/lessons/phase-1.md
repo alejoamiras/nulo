@@ -1,0 +1,15 @@
+# Phase 1 — P1: remove redundant tx subscriber + provenance filter — lessons
+
+**Status: ✓ complete.** Gate: `cross-profile-isolation.test.ts` + `useFullBackupImport.test.ts` — 48 pass (16 + 32); typecheck 0; lint 0. Regression: network + storage-codecs 75 pass.
+
+## What was built
+- `transaction/service.ts`: removed the `registerChainPurgeSubscriber(...)` line + the dead `clearChainState` method. Tx cleanup on profile/network deletion now flows through `onAccountDeleted` ONLY (account-scoped = profile-accurate). Left a comment explaining WHY (the removed subscriber over-purged every profile's txs on a shared chain + was redundant with the account cascade).
+- `useFullBackupImport.ts`: tx-restore provenance filter right after account restore — `importedAddresses = new Set(newAccounts.filter(a => !a.restoreError).map(a => a.address))`; `data.transaction` filtered to keep only txs whose `account` ∈ that set; dropped txs are `console.warn`-recorded (count). **(Refined in Phase 4:** originally recorded into `restoreErrorLog`, but that flips a clean import into the "finished with errors" UX — which the Phase-4 network e2e caught as a `waitForHash(successHash)` timeout. A provenance-dropped tx is a security FILTER action, not a user-actionable restore failure, so it's console-recorded — auditable, satisfies codex's "not silent" — matching how `EntityStorage` silently drops malformed rows. A failed-account tx is already surfaced by its own account `restoreError`.)
+- Tests: P1 integration in `cross-profile-isolation.test.ts` (real Account+Transaction wired via ServiceCollection + a capturing network stub; deleting P2 leaves P1's txs; the buggy subscriber is asserted GONE; single-network delete stays profile-scoped). Composable: 3 provenance tests (foreign tx dropped+recorded; all-imported keeps all; failed-account tx dropped).
+
+## Key decisions / gotchas
+- **The allow-set MUST be "imported by THIS restore," not "account exists in storage."** A crafted backup can name a PRE-EXISTING foreign-profile account; after account restore that account is in storage, so an "exists" check would ACCEPT the foreign tx. Filtering by `newAccounts` (the just-restored set, minus failures) is the correct gate. (codex final-pass condition.)
+- **The real NetworkService isn't needed for the integration test** — `purgeChain` just forwards to the captured chain-purge subscribers, so a stub capturing them + the real Account→Transaction cascade faithfully exercises the fix without pulling in PXE/node deps.
+- **Seed fixtures AFTER `services.start()`** so the tx init's pending-scan doesn't ingest them; use a NON-Pending status (1) so the sync worker never touches them; tx fixtures must be TxSchema-valid or the #220 read-codec drops them invisible (contract/method/args on calls, object origin, numeric feePaymentMethod).
+- Phase-1 gate command updated to the actual test locations (`cross-profile-isolation.test.ts`, not a `transaction/` dir — the integration test's natural home is the cross-profile standing gate).
+- `purgeRows` + `networkService` field stay used (onAccountDeleted; backup/updateTx) — no orphaned imports.

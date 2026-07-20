@@ -11,14 +11,15 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.0.0-rc.2",
-		"@aztec/foundation": "5.0.0-rc.2",
-		"@aztec/stdlib": "5.0.0-rc.2",
-		"@aztec/wallet-sdk": "5.0.0-rc.2",
+		"@aztec/aztec.js": "5.0.1",
+		"@aztec/foundation": "5.0.1",
+		"@aztec/stdlib": "5.0.1",
+		"@aztec/wallet-sdk": "5.0.1",
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-core": "workspace:*"
 	},
 	"devDependencies": {
+		"@nulo/wallet-sdk-schema-patch": "workspace:*",
 		"chrome-types": "^0.1.429",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.9"

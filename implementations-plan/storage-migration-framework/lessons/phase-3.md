@@ -1,0 +1,19 @@
+# Phase 3 — UI barrier + static facade ban + fail/degrade UX
+
+## Work
+- **Facade** `apps/extension/src/utils/storage.ts`: `migrationIdle()` + `storageLocalGet/Set/Remove`. Waits on the durable `nulo:schema:running` marker via `chrome.storage.onChanged`, with a **re-check after subscribing** (closes the check-then-subscribe race where the marker clears between the first read and the listener attach). Deliberately NO timeout — proceeding mid-migration is the corruption being prevented; a dead SW's stale marker is cleared by the next boot's journal resume.
+- **Routing sweep**: all 11 UI-context files off raw `chrome.storage.local` → the facade: `notification.js`, `syncedRef.js` (callback-form `get` rewritten to promise), `BalanceView.vue`, `FeeSettingsCard.vue` (3 sites), `NewAccountPopup.vue`, `new-profile-helpers.ts`, `settings/fpcs/index.vue`, `reset.vue`, `app.store.ts` (5 sites), `utils/core.ts` (sentinel), `lastActiveProfile.ts`. (`onboarding/app.vue` touches `chrome.storage.session` only — out of scope, session isn't migrated.)
+- **Static ban** `apps/extension/src/utils/storage-facade-ban.test.ts`: fs-walks `apps/extension/src`, fails the unit gate (→ CI) listing `file:line` for any raw `chrome.storage.local` outside the allowlist (facade, `chrome-browser-api.ts` adapter, `src/wallet/**` SW context, `MigrationBarrier.vue`, `src/e2e/**`, `*.test.*`, `types/`). Skips comment lines. Includes a violation self-test + allowlist test (the "prove the ban fires" gate criterion, without touching real files).
+- **Status plumbing**: `SCHEMA_BLOCKED_KEY`/`SCHEMA_DEGRADED_KEY` (+ typed statuses) in `migrations/index.ts`; `runtime.ts` persists `blocked` (with `terminal`) before failing closed, `degraded` on an additive failure, and clears both on a healthy boot.
+- **`MigrationBarrier.vue`** (`src/components/`, cross-shell per layer rules; mounted in popup + onboarding shells next to `GlobalLoader`): observes `running`/`blocked`/`degraded` via raw reads of the reserved keys (allowlisted — the facade would deadlock on the very marker it displays). States: blocked→recovery screen (terminal: "UPDATE FAILED … funds are safe … reinstall"; non-terminal: "UPDATE INTERRUPTED … reopen to retry" + detail), running→"UPDATING" overlay, degraded→dismissible banner. Blocked > running precedence.
+
+## Decisions / deviations
+- **Plan said "biome noRestrictedGlobals/noRestrictedImports static ban" — implemented as a guard TEST instead.** biome can only ban the whole `chrome` global (UI legitimately uses `chrome.runtime`/`chrome.tabs`); it cannot ban a member path. The fs-scanning guard test is the repo's own precedent (`scripts/ci-cd/behavior-gating.test.ts`) and satisfies the gate's real requirement ("fails the build on a raw access") via the unit gate CI runs.
+- The ban's first run caught a **comment** in `app.store.ts` mentioning the API → scanner skips comment lines (with a covering test).
+- `vi.waitFor` used in facade tests to deterministically wait for listener attachment instead of sleeps.
+
+## Gate
+- 19 new tests green first-run (facade 6 · barrier 9 · ban 4).
+- biome errors-only on `apps/extension/src` + `packages/wallet-core/src`: clean (2 self-caused errors fixed: `noExportsInTest` + format).
+- `typecheck:all` ✓ 12/12 packages · `bun run build` ✓ · `test:components` ✓ 365/365.
+- Full extension suite ✓ **2679 passed | 7 todo (223 files)** — after fixing 2 test stubs the facade broke: `app.store.test.ts` stubbed the CALLBACK-form `chrome.storage.local.get(keys, cb)` (syncedRef now uses the promise form → "cb is not a function" unhandled rejections) and `new-profile-helpers.test.ts` stubbed only `set` (facade barrier needs `get` + `onChanged`). Both flipped to promise-form stubs. Swept for other callback-form storage stubs: none (the one remaining `cb(` is `windows.getCurrent`).

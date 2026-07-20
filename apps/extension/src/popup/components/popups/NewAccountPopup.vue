@@ -2,6 +2,7 @@
 /** Utils */
 import { AccountType } from "@/wallet/services/account/client"
 import { managers } from "@/utils/core"
+import { storageLocalSet } from "@/utils/storage"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -53,40 +54,26 @@ const handleCreateAccount = async () => {
 	appStore.account = account
 	appStore.accounts.push(account)
 
-	await chrome.storage.local.set({
+	await storageLocalSet({
 		"nulo:ui:activeAccount": account.address,
 	})
 
 	emit("onClose")
 }
 
-watch(
-	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
+usePopupEntity(() => props.show, {
+	submit: handleCreateAccount,
+	onHide: () => form.reset(),
+	onShow: async () => {
+		// Can't use account.index for naming - indexes are per account type, not global
+		let n = 1
+		while (appStore.accounts.some((a) => a.name === `Account ${n}`)) n++
+		name.value = `Account ${n}`
 
-			form.reset()
-		} else {
-			document.addEventListener("keydown", onKeydown)
-
-			// Can't use account.index for naming - indexes are per account type, not global
-			let n = 1
-			while (appStore.accounts.some((a) => a.name === `Account ${n}`)) n++
-			name.value = `Account ${n}`
-
-			await nextTick()
-			inputEl.value.inputEl.focus()
-		}
+		await nextTick()
+		inputEl.value.inputEl.focus()
 	},
-)
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleCreateAccount()
-}
+})
 </script>
 
 <template>

@@ -31,8 +31,19 @@ async function makeHarness() {
 	const logger = new LoggerStore(new ConfigStore())
 	const onProfileDeleted = new EventHandler<ProfileInfo>()
 
+	// F-12: DappSessionService now signs/verifies rows with a per-profile MAC
+	// key from ProfileService. Provide a stable HMAC key so persisted rows
+	// verify on read-back.
+	const macKey = await crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"])
+
 	const collection = new ServiceCollection()
-	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }), onProfileDeleted }))
+	collection.add(
+		svc(ProfileService.name, {
+			getActiveProfile: async () => ({ id: "p1" }),
+			onProfileDeleted,
+			deriveDappSessionMacKey: async () => macKey,
+		}),
+	)
 	const service = new DappSessionService(logger, api)
 	collection.add(service)
 	await collection.start()
@@ -88,8 +99,9 @@ describe("DappSessionService composition — in-process, no sandbox", () => {
 		await service.addDappSession({ url: "https://b.xyz" }, [], [], AccessLevel.Transactions, "0xA")
 		expect(await service.getDappSessions()).toHaveLength(2)
 
-		onProfileDeleted.invoke({ id: "p1" } as ProfileInfo)
-		await waitFor(async () => (await service.getDappSessions()).length === 0)
+		// Profile-delete cleanup is now the coordinator's AWAITED call (finding D).
+		void onProfileDeleted
+		await service.purgeForProfile("p1")
 		expect(await service.getDappSessions()).toHaveLength(0)
 	})
 })

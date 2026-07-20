@@ -1,5 +1,4 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -8,6 +7,9 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { purgeRows } from "@/wallet/services/purge-rows"
+import { restoreRows } from "@/wallet/services/restore-rows"
+import { nextRandomId } from "@/wallet/services/id-allocators"
+import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -16,7 +18,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { Fpc } from "./fpc"
 import { getFpcHandler } from "./handlers"
-import { type Events, FPC_SERVICE_NAME, type FpcInfo, FpcType, type Methods } from "./spec"
+import { type Events, FPC_SERVICE_NAME, FPC_STORAGE_ROOT, type FpcInfo, FpcType, type Methods, StoredFpcSchema } from "./spec"
 import { getContractInstanceFromInstantiationParams, type ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { loadContractArtifact, type ContractArtifact } from "@aztec/stdlib/abi"
 import { SponsoredFPCContractArtifact } from "@aztec/noir-contracts.js/SponsoredFPC"
@@ -28,6 +30,17 @@ const PrivateFPCContractArtifact = loadContractArtifact(PrivateFPCJson)
 
 export * from "./fpc"
 export * from "./spec"
+
+/** The instantiation params for each protocol FPC — the SINGLE source both the canonical-address
+ * derivation and the PXE-discovery registration read, so the two can never derive different
+ * addresses. The PrivateFPC canonical salt is a FIXED project constant from 5.0.0 onward (the
+ * fee-payment package's canonical-deployment contract; rc-era used salt 0). It must equal
+ * bridge-core's PRIVATE_FPC_SALT / private-fpc-canonical.json — the derivation from
+ * (artifact, salt, deployer) is machine-asserted there (layering bars the import here). Depositing
+ * to a wrong PrivateFPC address is an UNRECOVERABLE loss, so a salt drift between the two sites was
+ * a fund-loss hazard, not just a re-discovery bug. */
+const SPONSORED_FPC_PARAMS = () => ({ constructorArgs: [], salt: Fr.zero() })
+const PRIVATE_FPC_PARAMS = () => ({ constructorArgs: [], salt: new Fr(1n), deployer: AztecAddress.ZERO })
 
 /** Names seeded onto auto-discovered protocol FPCs. */
 const SPONSORED_FPC_DEFAULT_NAME = "Sponsored Fee Juice"
@@ -60,14 +73,14 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(FPC_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<StoredFpc>("nulo:core:fpcs", browserApi.storage.local)
+		this.storage = new EntityStorage<StoredFpc>(FPC_STORAGE_ROOT, browserApi.storage.local, (raw) => StoredFpcSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection) {
 		this.pxeService = new PxeServiceClient(this.logger)
 		this.profileService = services.get(ProfileService.name)
 		this.networkService = services.get(NetworkService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
 
@@ -91,15 +104,8 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const cached = this.protocolAddresses.get(chainId)
 		if (cached) return cached
 
-		const sponsoredInstance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, {
-			constructorArgs: [],
-			salt: Fr.zero(),
-		})
-		const privateInstance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, {
-			constructorArgs: [],
-			salt: Fr.zero(),
-			deployer: AztecAddress.ZERO,
-		})
+		const sponsoredInstance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
+		const privateInstance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
 		const addresses: ProtocolAddresses = {
 			sponsored: sponsoredInstance.address.toString(),
 			private: privateInstance.address.toString(),
@@ -167,19 +173,18 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			const toDiscover: { instance: ContractInstanceWithAddress; artifact: ContractArtifact }[] = []
 
 			if (!hasSponsoredFpc) {
-				const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, {
-					constructorArgs: [],
-					salt: Fr.zero(),
-				})
+				// Same params as getOrComputeProtocolAddresses — the shared const is what guarantees the
+				// discovered/registered instance equals `protocols.sponsored`.
+				const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
 				this.logDebug(`getFpcs: SponsoredFPC instance address=${instance.address.toString()}`)
 				toDiscover.push({ instance, artifact: SponsoredFPCContractArtifact })
 			}
 			if (!hasPrivateFpc) {
-				const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, {
-					constructorArgs: [],
-					salt: Fr.zero(),
-					deployer: AztecAddress.ZERO,
-				})
+				// Same params as getOrComputeProtocolAddresses — a divergence here would register/store a
+				// DIFFERENT PrivateFPC than `protocols.private`, so hasPrivateFpc never matches (endless
+				// re-discovery) and the private-fuel path keys off the wrong address (unrecoverable-deposit
+				// hazard — see this file's header). The shared const structurally prevents that drift.
+				const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
 				this.logDebug(`getFpcs: PrivateFPC instance address=${instance.address.toString()}`)
 				toDiscover.push({ instance, artifact: PrivateFPCContractArtifact })
 			}
@@ -193,10 +198,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					const fpcHandler = getFpcHandler(type)
 					fpcHandler.validateArtifact(contractArtifact)
 
-					let id: string
-					do {
-						id = getRandomHex(8)
-					} while (await this.storage.contains(id))
+					const id = await nextRandomId(this.storage)
 					const fpc: StoredFpc = {
 						id,
 						profileId: profile.id,
@@ -221,10 +223,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public async getFpc(id: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const fpcInfo = await this.storage.get(id)
-		if (fpcInfo?.profileId !== profile.id) {
-			throw new Error("Invalid id")
-		}
+		const fpcInfo = requireOwnedRow(await this.storage.get(id), profile.id)
 		const protocols = this.protocolAddresses.get(fpcInfo.chainId)
 		return this.decorate(fpcInfo, protocols)
 	}
@@ -260,10 +259,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 		try {
 			await this.lock.enter()
-			let id: string
-			do {
-				id = getRandomHex(8)
-			} while (await this.storage.contains(id))
+			const id = await nextRandomId(this.storage)
 			const fpc: StoredFpc = {
 				id,
 				profileId: profile.id,
@@ -286,10 +282,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const fpc = await this.storage.get(id)
-			if (fpc?.profileId !== profile.id) {
-				throw new Error("Invalid id")
-			}
+			const fpc = requireOwnedRow(await this.storage.get(id), profile.id)
 			const protocols = await this.getOrComputeProtocolAddresses(fpc.chainId)
 			if (this.decorate(fpc, protocols).isProtocol) {
 				throw new Error("Cannot rename protocol FPC")
@@ -308,10 +301,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 		// Snapshot the row first so we know which network's PXE to query.
-		const existing = await this.storage.get(id)
-		if (existing?.profileId !== profile.id) {
-			throw new Error("Invalid id")
-		}
+		const existing = requireOwnedRow(await this.storage.get(id), profile.id)
 		if (existing.address === address) {
 			// No-op. Preserve the existing entry without going to PXE.
 			const protocols = await this.getOrComputeProtocolAddresses(existing.chainId)
@@ -373,10 +363,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const profile = await requireActiveProfile(this.profileService)
 		try {
 			await this.lock.enter()
-			const fpc = await this.storage.get(id)
-			if (fpc?.profileId !== profile.id) {
-				throw new Error("Invalid id")
-			}
+			const fpc = requireOwnedRow(await this.storage.get(id), profile.id)
 			const protocols = await this.getOrComputeProtocolAddresses(fpc.chainId)
 			const decorated = this.decorate(fpc, protocols)
 			if (decorated.isProtocol) {
@@ -393,10 +380,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public async getFpcImpl(id: string): Promise<Fpc> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const fpcInfo = await this.storage.get(id)
-		if (fpcInfo?.profileId !== profile.id) {
-			throw new Error("Invalid id")
-		}
+		const fpcInfo = requireOwnedRow(await this.storage.get(id), profile.id)
 		const fpcHandler = getFpcHandler(fpcInfo.type)
 		const protocols = this.protocolAddresses.get(fpcInfo.chainId)
 		return new Fpc(this.decorate(fpcInfo, protocols), fpcHandler)
@@ -422,11 +406,14 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		throw new Error("Unsupported FPC artifact")
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related FPCs`)
+	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
+	 *  from the removed fire-and-forget `onProfileDeleted` sub — finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related FPCs`)
 		try {
 			await this.lock.enter()
-			const fpcs = (await this.storage.getValues()).filter((fpc) => fpc.profileId === profile.id)
+			const fpcs = (await this.storage.getValues()).filter((fpc) => fpc.profileId === profileId)
 			await purgeRows(
 				fpcs,
 				(fpc) => {
@@ -450,50 +437,40 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public async restore(fpcs: FpcInfo[]): Promise<Restored<FpcInfo>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<FpcInfo>[] = []
 		try {
 			await this.lock.enter()
 
-			for (const fpc of fpcs) {
-				try {
-					// Reject legacy DefaultFpc (Token FPC) entries explicitly —
-					// post-deprecation they have no handler and would crash the
-					// wallet on next read. Also reject any unknown numeric type.
-					if (fpc.type !== FpcType.DefaultSponsoredFpc && fpc.type !== FpcType.PrivateFpc) {
-						result.push({
-							...fpc,
-							restoreError: "Token FPC deprecated and no longer supported",
-						})
-						continue
-					}
-
-					let id = fpc.id
-					while (await this.storage.contains(id)) {
-						id = getRandomHex(8)
-					}
-
-					// Strip `isProtocol` (recomputed at read time) and any
-					// legacy decoration fields a v3 backup might carry.
-					const { isProtocol: _isProtocol, ...rest } = fpc as FpcInfo & { [k: string]: unknown }
-					const stored: StoredFpc = {
-						id,
-						profileId: rest.profileId,
-						chainId: rest.chainId,
-						type: rest.type,
-						address: rest.address,
-						name: rest.name,
-					}
-					await this.storage.set(id, stored)
-					result.push({ ...stored, isProtocol: false })
-				} catch (err) {
-					result.push({
-						...fpc,
-						restoreError: toRestoreError(err),
-					})
+			return await restoreRows(fpcs, async (fpc) => {
+				// Reject legacy DefaultFpc (Token FPC) entries explicitly —
+				// post-deprecation they have no handler and would crash the
+				// wallet on next read. Also reject any unknown numeric type. The
+				// throw is caught by restoreRows into the same `restoreError` row.
+				if (fpc.type !== FpcType.DefaultSponsoredFpc && fpc.type !== FpcType.PrivateFpc) {
+					throw new Error("Token FPC deprecated and no longer supported")
 				}
-			}
 
-			return result
+				let id = fpc.id
+				while (await this.storage.contains(id)) {
+					id = getRandomHex(8)
+				}
+
+				// Strip `isProtocol` (recomputed at read time) and any
+				// legacy decoration fields a v3 backup might carry.
+				const { isProtocol: _isProtocol, ...rest } = fpc as FpcInfo & { [k: string]: unknown }
+				const stored: StoredFpc = {
+					id,
+					profileId: rest.profileId,
+					chainId: rest.chainId,
+					type: rest.type,
+					address: rest.address,
+					name: rest.name,
+				}
+				// Parse the persisted shape so a malformed backup fpc is recorded as
+				// restoreError, not silently written + codec-hidden on read.
+				StoredFpcSchema.parse(stored)
+				await this.storage.set(id, stored)
+				return { ...stored, isProtocol: false }
+			})
 		} finally {
 			this.lock.leave()
 		}

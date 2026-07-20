@@ -151,7 +151,9 @@ The plan must add a **`sanitizeTelemetry(t: RequestTelemetry): RequestTelemetry`
 
 ---
 
-### M4.7 — Per-collection schema migrations ✱ DEFERRED
+### M4.7 — Per-collection schema migrations ✱ SUPERSEDED (2026-07-01)
+
+> **Superseded by [`storage-migration-framework`](../storage-migration-framework/plan.md)**: a data-preserving versioned migrator shipped BEFORE production (user decision — the transform machinery, not a wipe, is the product). The re-opened design resolved this entry's 3 blockers differently than sketched: a single global version with backend-aware, footprint-declaring migrations (per-collection version vectors were evaluated against MetaMask/Rabby and rejected); the "shared lock" became boot-position single-flight + a statically-enforced UI storage facade; the wipe model is deleted outright (launch shape = schema v1, fresh installs stamp max). The original deferral text is preserved below for the record.
 
 **User context**: "Not entirely sure what you mean 'per-collection' but maybe I just trust you? Still no user has this app so upgrade path for storage is not needed... once we do have users, I'll appreciate this task."
 

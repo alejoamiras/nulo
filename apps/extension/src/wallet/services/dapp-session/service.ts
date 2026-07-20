@@ -1,10 +1,11 @@
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
-import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
+import { DappSessionMacStorage } from "./mac-storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -18,6 +19,7 @@ import {
 	type AccessLevel,
 	type Methods,
 	type Events,
+	DappSessionSchema,
 } from "./spec"
 
 export * from "./spec"
@@ -43,19 +45,28 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public readonly onDappSessionUpdated = new EventHandler<DappSession>()
 	public readonly onDappSessionDeleted = new EventHandler<DappSession>()
 
-	private readonly storage: EntityStorage<DappSession>
+	private readonly storage: DappSessionMacStorage
 	private readonly lock = new Lock()
 
 	private profileService: ProfileService = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(DAPP_SESSION_SERVICE_NAME, logger)
-		this.storage = new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local)
+		// F-12: wrap the raw store with the row-integrity (MAC) layer. The key
+		// provider reads `this.profileService` lazily — it is set in `init`,
+		// before any storage operation runs. The inner EntityStorage validates
+		// each row via `DappSessionSchema` (dev's boundary codec) BEFORE the MAC
+		// layer verifies row integrity — both defenses run.
+		this.storage = new DappSessionMacStorage(
+			new EntityStorage<DappSession>("nulo:core:dappSessions", browserApi.storage.local, (raw) => DappSessionSchema.parse(raw)),
+			(profileId) => this.profileService.deriveDappSessionMacKey(profileId),
+			logger,
+		)
 	}
 
 	protected async init(services: ServiceCollection) {
 		this.profileService = services.get(ProfileService.name)
-		this.profileService.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 	}
 
 	public async getDappSessions(): Promise<DappSession[]> {
@@ -337,18 +348,27 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		}
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related dapp sessions`)
+	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
+	 *  from the removed fire-and-forget `onProfileDeleted` sub — finding D). */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related dapp sessions`)
 		try {
 			await this.lock.enter()
-			const sessions = (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
+			// MAC-free, key-aware raw purge: a DELETED profile may be INACTIVE (MAC
+			// key underivable → `getValues()` HIDES its rows) or hold a schema-invalid
+			// / key-aliased row; all must be removed or they revive on a same-secret
+			// re-import. `rowsForProfile` returns the true `storageId` per row; delete
+			// by it (not the self-reported id) and emit per successful delete so a
+			// live wallet-SDK channel is torn down even on a partial failure.
+			const rows = await this.storage.rowsForProfile(profileId)
 			await purgeRows(
-				sessions,
-				(session) => {
-					this.logDebug(`Remove session #${session.id}`)
-					return this.storage.delete(session.id)
+				rows,
+				({ storageId }) => {
+					this.logDebug(`Remove session @${storageId}`)
+					return this.storage.delete(storageId)
 				},
-				(session) => this.emit("onDappSessionDeleted", session),
+				({ row }) => this.emit("onDappSessionDeleted", row),
 			)
 		} finally {
 			this.lock.leave()

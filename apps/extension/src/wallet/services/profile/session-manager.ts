@@ -20,7 +20,7 @@
  *
  * ## Restore semantics (init-only, silent)
  *
- * `restore(lookup, unseal)` is called exactly once during service init.
+ * `restore(lookup)` is called exactly once during service init.
  * It re-hydrates `activeSession` from disk without emitting
  * `onActiveProfileChanged`. Emitting at init would fire before any
  * subscriber has attached; subscribers pull the current value via
@@ -30,12 +30,15 @@
  * is silently dropped (storage cleaned, no emit — matches the "session
  * expired on reload" UX).
  *
- * ## Wrong-credential / corrupted-ciphertext policy
+ * ## Bearer / corrupted-ciphertext policy (F-11)
  *
- * `restore` passes a `unseal` callback that returns `null` on any
- * wrong-credential / corrupted-ciphertext condition. The manager maps
- * that to a silent close, same as TTL expiry. The facade does NOT see
- * an error — there is no UI to surface one to during init.
+ * The silent-restore bearer is a random-token-wrapped master secret
+ * (`SessionSecretBox`), not the old password-equivalent passhash. On any
+ * wrong-profile / tampered-bearer / bad-tag condition `unwrap` returns
+ * `null` and the manager maps that to a silent close, same as TTL expiry.
+ * A legacy `passhash`-shaped session is never accepted (one-time re-unlock).
+ * The facade does NOT see an error — there is no UI to surface one to
+ * during init.
  *
  * ## Lock-agnostic
  *
@@ -52,7 +55,7 @@ import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
-import { zeroize } from "@nulo/wallet-crypto"
+import { SessionSecretBox, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -72,15 +75,6 @@ export const SESSION_TTL_ALARM_NAME = "nulo:core:session:ttl"
  *  (facade → manager, not manager → repo). */
 export type SessionProfileLookup = (profileId: string) => Promise<Profile | undefined>
 
-/** Callback the facade passes to `restore()` so SessionManager can
- *  decrypt the master secret for a password profile. Returns `null` on
- *  wrong-credential / corrupted-ciphertext — same contract as
- *  `PasswordSecretBox.unsealWithPasshash`. */
-export type SessionSecretUnsealer = (
-	passhash: ArrayBuffer,
-	profile: Profile & { type: "password" },
-) => Promise<Uint8Array<ArrayBuffer> | null>
-
 /** Hook the facade registers at construction so SessionManager can
  *  surface open / close transitions as `onActiveProfileChanged`
  *  events. `undefined` means the active profile cleared. */
@@ -88,6 +82,9 @@ export type SessionChangeListener = (profile: ProfileInfo | undefined) => void
 
 export class SessionManager {
 	private readonly session: ValueStorage<Session>
+	/** F-11: wraps the master secret under a fresh random token for the
+	 *  silent-restore bearer (replaces the password-equivalent passhash). */
+	private readonly sessionSecretBox = new SessionSecretBox()
 	private readonly onChange: SessionChangeListener
 	private activeSession?: ActiveSession
 	private sessionTtl: number
@@ -183,9 +180,11 @@ export class SessionManager {
 		return session.secret
 	}
 
-	/** Persists + enters the session for `profile`. `passhash` is optional
-	 *  (only password profiles persist it, to enable silent restore after
-	 *  SW suspension). Emits `onChange(ProfileInfo)` on success.
+	/** Persists + enters the session for `profile`. `passhash` is now only
+	 *  a PRESENCE signal (a password unlock/create where a silent-restore
+	 *  bearer is appropriate) — its VALUE is never persisted (F-11). Only
+	 *  non-strict password profiles persist a bearer. Emits
+	 *  `onChange(ProfileInfo)` on success.
 	 *
 	 *  Failures are logged but swallowed — historically `_openSession`
 	 *  did the same because a broken chrome.storage write at unlock time
@@ -196,22 +195,26 @@ export class SessionManager {
 	 *  ## Buffer ownership
 	 *
 	 *  `secretBuffer` and `passhash` are **caller-owned**. This method
-	 *  copies what it needs (`Fr.fromBuffer` makes its own copy; passhash
-	 *  is base64-encoded into `Session`). The caller is responsible for
-	 *  calling `zeroize(...)` on these buffers after `open` returns. */
-	public async open(profile: Profile, secretBuffer: Uint8Array<ArrayBuffer>, passhash?: ArrayBuffer): Promise<void> {
+	 *  copies what it needs (`Fr.fromBuffer` copies; the bearer wraps a
+	 *  COPY of `secretBuffer` under a fresh random token). The caller is
+	 *  responsible for calling `zeroize(...)` on these buffers after `open`
+	 *  returns. */
+	public async open(profile: Profile, secretBuffer: MasterSecretBytes, passhash?: Passhash): Promise<void> {
 		try {
 			const since = Date.now()
-			// In strict mode the bearer is never persisted, regardless of
-			// which caller passed it. Reading `strictSecurityMode` here
-			// (instead of at the `ProfileService` call sites) keeps the
-			// decision race-free with concurrent strict-toggle: a toggle
-			// flipping ON mid-unlock cannot create a session that already
-			// carries the bearer.
-			const persistPasshash = passhash !== undefined && !this.strictSecurityMode
+			// F-11: `passhash` is now only a PRESENCE signal — "a password
+			// unlock/create where the user authenticated, so a silent-restore
+			// bearer is appropriate." Its value is no longer persisted; the
+			// bearer wraps the master secret under a fresh RANDOM token
+			// (AAD-bound to the profile id). In strict mode NO bearer is
+			// persisted. Reading `strictSecurityMode` here (not at the call
+			// sites) keeps the gate race-free with a concurrent strict-toggle ON
+			// mid-unlock — it cannot create a session that already carries a bearer.
+			const persistBearer = passhash !== undefined && !this.strictSecurityMode && profile.type === "password"
+			const bearer = persistBearer ? await this.sessionSecretBox.wrap(secretBuffer, profile.id) : undefined
 			const session: Session = {
 				profile: profile.id,
-				passhash: persistPasshash ? Buffer.from(passhash).toString("base64") : undefined,
+				bearer,
 				since,
 				lockedAt: this.sessionTtl > 0 ? since + this.sessionTtl : undefined,
 			}
@@ -274,18 +277,19 @@ export class SessionManager {
 		}
 	}
 
-	/** Drops the persisted `passhash` bearer from the session record. Called
-	 *  by `onConfigUpdated` when strict mode is enabled mid-session.
+	/** Drops the persisted silent-restore `bearer` (F-11; and any legacy
+	 *  `passhash`) from the session record. Called by `onConfigUpdated` when
+	 *  strict mode is enabled mid-session.
 	 *
 	 *  Why it matters: `refresh()` (and TTL updates) re-persist the in-memory
-	 *  `activeSession.session` object, so leaving the in-memory passhash
-	 *  present would silently re-write the bearer to storage on the next
-	 *  refresh — strict ON would be quietly undone.
+	 *  `activeSession.session` object, so leaving the in-memory bearer present
+	 *  would silently re-write it to storage on the next refresh — strict ON
+	 *  would be quietly undone. So we mutate the shared in-memory object too.
 	 *
 	 *  The Fr master secret keeps living: enabling strict mid-session is
 	 *  not a force-lock — the user stays unlocked until SW death OR
 	 *  auto-lock OR manual lock. Idempotent. */
-	public async clearPasshash(): Promise<void> {
+	public async clearBearer(): Promise<void> {
 		try {
 			// Serialize against the facade-locked session writers (refresh/open/
 			// unlock), applyTtlChange, and the alarm close, via the injected
@@ -302,7 +306,8 @@ export class SessionManager {
 					// THAT object — it carries the authoritative latest since/lockedAt.
 					// Persisting a fresh storage snapshot instead (`{...persisted}`)
 					// would be the lost-update vector against a serialized writer.
-					if (active.session.passhash) {
+					if (active.session.bearer || active.session.passhash) {
+						active.session.bearer = undefined
 						active.session.passhash = undefined
 						await this.session.set(active.session)
 					}
@@ -310,8 +315,8 @@ export class SessionManager {
 				}
 				// No in-memory session (locked): scrub a persisted bearer directly.
 				const persisted = await this.session.get()
-				if (persisted?.passhash) {
-					await this.session.set({ ...persisted, passhash: undefined })
+				if (persisted?.bearer || persisted?.passhash) {
+					await this.session.set({ ...persisted, bearer: undefined, passhash: undefined })
 				}
 			})
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Cleared passhash bearer (strict mode)")
@@ -329,11 +334,23 @@ export class SessionManager {
 	 *
 	 *  TTL expiry → silent close.
 	 *  Profile no longer exists on disk → silent close.
-	 *  Password profile + unseal returns null → silent close.
+	 *  Password profile + bearer fails to unwrap (tampered / wrong profile /
+	 *  legacy passhash / missing) → silent close.
 	 *  Passkey profile → skipped (requires user interaction; lock-screen
 	 *  prompts for passkey the next time the popup opens). */
-	public async restore(lookup: SessionProfileLookup, unseal: SessionSecretUnsealer): Promise<void> {
-		const session = await this.session.get()
+	public async restore(lookup: SessionProfileLookup): Promise<void> {
+		let session: Session | undefined
+		try {
+			session = await this.session.get()
+		} catch (error) {
+			// F-13: `ValueStorage.get()` is fail-closed (throws on a malformed /
+			// undecodable value, preserving it for repair). A corrupt
+			// `nulo:core:session` must NOT abort service init (this runs under
+			// `ServiceCollection.start()`) — treat it as "no restorable session"
+			// so the user simply re-unlocks. The bad record stays for diagnosis.
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "Undecodable persisted session; skipping restore", getErrorMessage(error))
+			return
+		}
 		if (!session) {
 			return
 		}
@@ -354,60 +371,62 @@ export class SessionManager {
 			// record in place; the popup's lock screen will handle it.
 			return
 		}
-		if (this.strictSecurityMode && session.passhash) {
-			// A persisted passhash bearer under strict mode is either
-			// (a) a leftover from a prior lenient session before the user
-			// enabled strict, or (b) a race where a toggle ON landed
-			// mid-restore. Either way, treat as untrusted —
-			// `silentClose` so the popup shows the lock screen and the
-			// user re-auths fresh. Pairs with `open()`'s gate so a
-			// brand-new strict session has no passhash to begin with.
-			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Strict mode + persisted passhash → silentClose")
+		// F-11 shape gate — fail closed. `silentClose` (never throw) if:
+		//  - a LEGACY `passhash`-shaped session (pre-F-11) is present — NEVER
+		//    accepted, even non-strict → one-time re-unlock (profile intact);
+		//  - strict mode + any bearer — untrusted (open() never persists a
+		//    bearer under strict; this is a leftover or a mid-toggle race);
+		//  - a password session with NO bearer — nothing to restore.
+		if (session.passhash || (this.strictSecurityMode && session.bearer) || !session.bearer) {
+			this.logger.log(LOG_SOURCE, LogLevel.Debug, "No restorable bearer (legacy passhash / strict+bearer / missing) → silentClose")
 			await this.silentClose()
 			return
 		}
-		if (!session.passhash) {
-			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Password session missing passhash")
-			await this.silentClose()
-			return
-		}
-		const passhash = Buffer.from(session.passhash, "base64")
-		// `Buffer.from(string, "base64")` may allocate from Node's pooled
-		// buffer (poolSize ~8 KiB), so `passhash.buffer` is the FULL pool
-		// `ArrayBuffer`, not the 32-byte slice we want. Slicing yields a
-		// detached `ArrayBuffer` of exactly `passhash.byteLength` bytes —
-		// safe to pass to `crypto.subtle.importKey("raw", ...)` which
-		// would otherwise derive PBKDF2 from the wrong input. This latent
-		// bug rarely surfaces in normal use because the SW stays warm via
-		// popup ports + alarms; the strict-mode restore tests exercise
-		// the cold-restore path explicitly.
-		const passhashBuffer = passhash.buffer.slice(passhash.byteOffset, passhash.byteOffset + passhash.byteLength)
-		let secretBytes: Uint8Array<ArrayBuffer> | null = null
+		let secretBytes: MasterSecretBytes | null = null
 		try {
-			secretBytes = await unseal(passhashBuffer, profile)
+			// AAD = profile id: a bearer minted for one profile can't unwrap
+			// under another. `unwrap` returns null (never throws) on a tampered
+			// bearer / bad GCM tag / wrong version.
+			secretBytes = await this.sessionSecretBox.unwrap(session.bearer, profile.id)
 			if (!secretBytes) {
-				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session contains wrong credentials or corrupted ciphertext")
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session bearer failed to unwrap (tampered / wrong profile) → silentClose")
+				await this.silentClose()
+				return
+			}
+			// F-11 race: re-check strict AFTER the async unwrap, immediately
+			// before committing `activeSession`. A strict-toggle ON that landed
+			// mid-restore already cleared storage; do not resurrect an in-memory
+			// bearer session past it.
+			if (this.strictSecurityMode) {
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Strict toggled ON mid-restore → silentClose")
+				await this.silentClose()
+				return
+			}
+			// `unwrap` already enforces the 32-byte length, but a 32-byte value ≥ the
+			// BN254 field modulus still throws in `Fr.fromBuffer`. A crafted/corrupt
+			// bearer must `silentClose`, not crash service init.
+			let secret: Fr
+			try {
+				// Fr.fromBuffer copies into Fr's internal field-element rep
+				// (verified by zeroize.test.ts). Safe to zero `secretBytes` after.
+				secret = Fr.fromBuffer(Buffer.from(secretBytes))
+			} catch (err) {
+				this.logger.log(
+					LOG_SOURCE,
+					LogLevel.Debug,
+					"Bearer decrypted to an out-of-range secret → silentClose",
+					getErrorMessage(err),
+				)
 				await this.silentClose()
 				return
 			}
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session restored")
-			this.activeSession = {
-				profile,
-				session,
-				// Fr.fromBuffer copies into Fr's internal field-element rep
-				// (verified by zeroize.test.ts). Safe to zero `secretBytes`
-				// after this line.
-				secret: Fr.fromBuffer(Buffer.from(secretBytes)),
-			}
+			this.activeSession = { profile, session, secret }
 			// Re-schedule the alarm against the persisted `lockedAt`. If
-			// `lockedAt` is absent (records written before the field was
-			// added), fall back to `since + sessionTtl`.
+			// `lockedAt` is absent (older records), fall back to
+			// `since + sessionTtl`.
 			await this.scheduleLockAlarm(this.deriveLockedAt(session))
 		} finally {
-			zeroize(passhash)
-			// passhashBuffer is a fresh slice owned by us — zero it too
-			// so the bearer doesn't linger in the GC heap longer than needed.
-			zeroize(passhashBuffer)
 			zeroize(secretBytes)
 		}
 	}
@@ -487,8 +506,8 @@ export class SessionManager {
 				// Toggle ON: drop any persisted bearer from a prior lenient
 				// unlock so subsequent `refresh()` / TTL bumps don't re-write
 				// it. The Fr secret keeps living — strict toggle is not a
-				// force-lock. `clearPasshash` mutates the in-memory copy too.
-				void this.clearPasshash()
+				// force-lock. `clearBearer` mutates the in-memory copy too.
+				void this.clearBearer()
 			}
 			// Toggle OFF: no immediate effect. Bearer is restored on next
 			// unlock via `open()`'s gate.

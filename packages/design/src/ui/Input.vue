@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Vendor */
-import { computed, nextTick, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onMounted, ref, watch, type PropType } from "vue"
 
 /** Components */
 import Flex from "../core/Flex.vue"
@@ -14,7 +14,7 @@ import { sanitizeString } from "../internal/sanitize"
 const emit = defineEmits(["update:modelValue", "focus", "blur", "maxLengthReached", "clear"])
 const props = defineProps({
 	size: {
-		type: String,
+		type: String as PropType<"medium" | "small" | "mini">,
 		default: "medium",
 	},
 	error: {

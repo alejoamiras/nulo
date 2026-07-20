@@ -1,0 +1,13 @@
+CLUSTER: ext-popup-sensitive
+
+## Findings
+_No findings meeting the bar._
+
+## Notes
+Checked the dApp approval flows for discover/capabilities/execute: payloads enter via `useDappInteractionPayload` and are loaded by random interaction id, then rendered through Vue interpolation and approval buttons gated on loaded state (`apps/extension/src/composables/useDappInteractionPayload.ts:78`, `apps/extension/src/popup/windows/discover/index.vue:94`, `apps/extension/src/popup/windows/capabilities/index.vue:171`, `apps/extension/src/popup/windows/execute/index.vue:317`). I did not find a concrete clickjacking path: approval UI is opened as extension popup windows, and only the logo asset is web-accessible (`apps/extension/src/wallet/services/window-manager/window-manager.ts:83`, `apps/extension/manifest/manifest.config.ts:56`).
+
+Checked dApp-controlled strings and JSON surfaces. dApp names and capability/method strings render through Vue text bindings, with explicit wire-string sanitization on identity and capability detail surfaces (`apps/extension/src/components/composite/DappIdentityBlock.vue:33`, `apps/extension/src/components/composite/DappIdentityBlock.vue:56`, `apps/extension/src/components/composite/capabilities/CapabilityDetailPanel.vue:36`, `apps/extension/src/popup/windows/execute/OperationCard.vue:29`). The JSON viewer feeds CodeMirror from `JSON.stringify`, not HTML (`apps/extension/src/components/JsonViewer/JsonViewer.vue:46`).
+
+Checked external navigation. The user-clickable external links I found are fixed Nulo/Aztec URLs or explorer URLs assembled from a constant allowlist, all opened with `noopener noreferrer` (`apps/extension/src/popup/pages/settings/security/export/seed.vue:116`, `apps/extension/src/onboarding/pages/accelerator.vue:53`, `apps/extension/src/wallet/constants/explorers.ts:28`, `apps/extension/src/popup/pages/tx/[id].vue:159`).
+
+Checked secret reveal/export flows. Seed and plain-key export require the authenticated route plus password unlock, clear in-memory refs on close/unmount, and only write secrets to clipboard on explicit user copy (`apps/extension/src/popup/pages/settings/security/export/seed.vue:52`, `apps/extension/src/popup/pages/settings/security/export/seed.vue:67`, `apps/extension/src/popup/pages/settings/security/export/seed.vue:87`, `apps/extension/src/popup/pages/settings/security/export/key.vue:63`, `apps/extension/src/popup/pages/settings/security/export/key.vue:76`, `apps/extension/src/popup/pages/settings/security/export/key.vue:97`).

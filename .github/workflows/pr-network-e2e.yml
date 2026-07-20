@@ -33,6 +33,13 @@ jobs:
       extension-network: ${{ steps.override.outputs.full || steps.filter.outputs.extension-network }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Full history: paths-filter needs the merge-base with the comparison
+          # branch. On a shallow clone it falls back to a `fetch --deepen` loop,
+          # which hits git's "shallow file has changed since we read it" race
+          # whenever the merge-base sits beyond the initial depth (structural on
+          # long-running branches ~100+ commits from the base).
+          fetch-depth: 0
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -59,6 +66,8 @@ jobs:
               - 'packages/wallet-core/package.json'
               - 'packages/wallet-crypto/src/**'
               - 'packages/wallet-crypto/package.json'
+              - 'packages/wallet-sdk-schema-patch/src/**'
+              - 'packages/wallet-sdk-schema-patch/package.json'
               # Repo-wide build inputs:
               - 'package.json'
               - 'bun.lock'

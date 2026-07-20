@@ -39,7 +39,7 @@ export default {
 	permissions: ["alarms", "offscreen", "storage", "sidePanel", "unlimitedStorage"],
 	optional_permissions: ["downloads"],
 	content_security_policy: {
-		extension_pages: "script-src 'self' 'wasm-unsafe-eval'",
+		extension_pages: "script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:",
 	},
 	cross_origin_embedder_policy: {
 		value: "require-corp",

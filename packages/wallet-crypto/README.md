@@ -14,7 +14,7 @@ Depends only on `wallet-core` for the `ILogger` interface and `Web Crypto` (avai
 
 | Path | Purpose |
 |---|---|
-| `src/encryption-key.ts` | `EncryptionKey` — PBKDF2 (SHA-256, 250k iterations) + AES-GCM framed ciphertext. The 1-byte version frame lets future formats coexist. |
+| `src/encryption-key.ts` | `EncryptionKey` — PBKDF2 (SHA-256, 600k iterations) + AES-GCM framed ciphertext. The 1-byte version frame lets future formats coexist. |
 | `src/password-secret-box.ts` | `PasswordSecretBox` — password-based wrap around `EncryptionKey`. Stores `passhash` (a deterministic public hash of the password's KDF output) so a session can be silently re-derived without re-prompting. |
 | `src/passkey-credential.ts` | `PasskeyCredential` — WebAuthn PRF → HKDF master-secret. Exposes `recoverFromCredentialData()` for the in-page modal Path A flow. |
 | `src/constants.ts` | `ENCRYPTION_GUARD` (frozen by the V8 vector), `PASSKEY_PRF_LABEL`. |
@@ -34,7 +34,7 @@ Colocated `*.test.ts`. The cryptographic derivation chain is **additionally lock
 
 - `apps/extension/src/wallet/crypto/key-vectors.test.ts` exercises the full chain end-to-end and must pass byte-identically after any change here.
 
-Treat that file as a contract. If a change is intentional (rotating a label, bumping a KDF cost), it requires a storage-version bump and a destructive-migration row in `apps/extension/src/wallet/storage/migrate.ts`.
+Treat that file as a contract. **A vector/KDF change is NOT an ordinary storage migration.** The boot migrator (`@nulo/wallet-core/migration`) runs BEFORE unlock, so it has no password and cannot decrypt + re-encrypt the stored secret. An intentional change (rotating a label, bumping a KDF cost) therefore requires either a **re-encrypt-on-next-unlock** step (once the password is available) or a **documented reset** — never a plain numbered migration. The data-preserving migration framework at `apps/extension/src/wallet/storage/migrations/` handles persisted-JSON shape changes only, not crypto.
 
 ## Key invariants
 

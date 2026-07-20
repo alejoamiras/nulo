@@ -76,24 +76,10 @@ const handleSave = async () => {
 	}
 }
 
-watch(
-	() => props.show,
-	() => {
-		if (props.show) {
-			fillFromEndpoint()
-			document.addEventListener("keydown", onKeydown)
-		} else {
-			document.removeEventListener("keydown", onKeydown)
-		}
-	},
-)
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleSave()
-}
+usePopupEntity(() => props.show, {
+	submit: handleSave,
+	onShow: fillFromEndpoint,
+})
 </script>
 
 <template>

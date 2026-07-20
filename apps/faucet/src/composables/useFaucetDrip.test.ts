@@ -28,7 +28,7 @@ vi.mock("@aztec/aztec.js/fee", () => ({
 	},
 }))
 
-vi.mock("@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js", () => ({
+vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({
 	DripperContractArtifact: { name: "Dripper" },
 }))
 

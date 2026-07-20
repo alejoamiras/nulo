@@ -40,7 +40,7 @@
  */
 
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { type AbiType, encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
+import { encodeArguments, FunctionCall, FunctionSelector, FunctionType } from "@aztec/stdlib/abi"
 import { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { Gas, GasSettings } from "@aztec/stdlib/gas"
@@ -51,7 +51,7 @@ import { LogLevel } from "@/wallet/logger"
 import type { AccountService } from "@/wallet/services/account/service"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract, PartialGasSettingsRPC } from "@nulo/aztec-runtime/account"
-import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
+import { assertLiveChainIdentity, chainInfoFrom } from "@nulo/aztec-runtime/utils"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { networkInfoFrom, type NetworkService, type Network } from "@/wallet/services/network/service"
 import type { ProfileService } from "@/wallet/services/profile/service"
@@ -292,37 +292,44 @@ export class TxRequestBuilder {
 						break
 					}
 					case "encoded_call": {
-						if (action.type === undefined || action.isStatic === undefined) {
-							const instance = instances.get(action.to)
-							if (!instance) {
-								throw new Error("Contract not found")
-							}
-							const artifact = artifacts.get(instance.currentContractClassId.toString())
-							if (!artifact) {
-								throw new Error("Contract artifact not found")
-							}
-							const fn = await findFunctionBySelector(artifact, action.selector)
-							if (!fn) {
-								throw new Error("Method not found")
-							}
-							action.type = fn.functionType
-							action.isStatic = fn.isStatic
+						// Resolve the ABI UNCONDITIONALLY and bind the dApp-supplied `name` to the
+						// selector's real function. Resolving only when `action.type`/`isStatic`
+						// were absent let a dApp supply them to skip the lookup and execute a
+						// selector that did not match the authorized `name` — scope authorizes the
+						// name, execution ran the selector. Build the call from ABI truth; never
+						// trust dApp-supplied type/isStatic/returnTypes for execution metadata.
+						const instance = instances.get(action.to)
+						if (!instance) {
+							throw new Error("Contract not found")
 						}
-						const fnName = action.name || action.selector
-						const fnReturnTypes: AbiType[] = []
+						const artifact = artifacts.get(instance.currentContractClassId.toString())
+						if (!artifact) {
+							throw new Error("Contract artifact not found")
+						}
+						const fn = await findFunctionBySelector(artifact, action.selector)
+						if (!fn) {
+							throw new Error("Method not found")
+						}
+						if (action.name !== undefined && action.name !== fn.name) {
+							throw new Error(
+								`Scope violation: call name "${action.name}" does not match selector's function "${fn.name}" on ${action.to}`,
+							)
+						}
+						action.type = fn.functionType
+						action.isStatic = fn.isStatic
 						calls.push(
 							new FunctionCall(
-								fnName,
+								fn.name,
 								AztecAddress.fromStringUnsafe(action.to),
 								FunctionSelector.fromString(action.selector),
-								action.type as FunctionType,
+								fn.functionType,
 								action.hideMsgSender === true,
-								action.isStatic ?? false,
+								fn.isStatic,
 								action.args.map((x) => Fr.fromString(x)),
-								fnReturnTypes,
+								fn.returnTypes ?? [],
 							),
 						)
-						txCalls.push({ contract: action.to, method: fnName, args: action.args })
+						txCalls.push({ contract: action.to, method: fn.name, args: action.args })
 						this.log("EncodedCall enqueued.")
 						break
 					}
@@ -349,6 +356,7 @@ export class TxRequestBuilder {
 					txNonce: nonce,
 					feePaymentMethodOptions: feePaymentMethod,
 				},
+				chainInfoFrom(nodeInfo),
 				gasSettings,
 			)
 
@@ -405,7 +413,28 @@ export class TxRequestBuilder {
 				throw new Error(`DefaultEntrypoint requires exactly 1 call, got ${rawCalls.length}`)
 			}
 			const call = await FunctionCall.schema.parseAsync(rawCalls[0])
-			if (call.type !== FunctionType.PRIVATE) {
+			// Bind the dApp-supplied name to the selector's real ABI function, and derive
+			// the function type from the ABI — never trust call.name/type. The NO_FROM path
+			// resolved no artifact, so a dApp could name a benign function while running a
+			// different selector.
+			const noFromInstance = instances.get(call.to.toString())
+			if (!noFromInstance) {
+				throw new Error("Contract not found")
+			}
+			const noFromArtifact = artifacts.get(noFromInstance.currentContractClassId.toString())
+			if (!noFromArtifact) {
+				throw new Error("Contract artifact not found")
+			}
+			const noFromFn = await findFunctionBySelector(noFromArtifact, call.selector.toString())
+			if (!noFromFn) {
+				throw new Error("Method not found")
+			}
+			if (call.name !== undefined && call.name !== noFromFn.name) {
+				throw new Error(
+					`Scope violation: call name "${call.name}" does not match selector's function "${noFromFn.name}" on ${call.to.toString()}`,
+				)
+			}
+			if (noFromFn.functionType !== FunctionType.PRIVATE) {
 				throw new Error("DefaultEntrypoint only supports private functions")
 			}
 

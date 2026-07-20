@@ -1,11 +1,10 @@
 import { type IntentInnerHash, type CallIntent, computeAuthWitMessageHash } from "@aztec/aztec.js/authorization"
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { AbiTypeSchema, type ContractArtifact, ContractArtifactSchema, FunctionSelector, FunctionCall } from "@aztec/stdlib/abi"
+import { type ContractArtifact, ContractArtifactSchema, FunctionSelector, FunctionCall } from "@aztec/stdlib/abi"
 import type { AuthWitness } from "@aztec/stdlib/auth-witness"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
 	computeContractAddressFromInstance,
-	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
 	getContractClassFromArtifact,
 	computePartialAddress,
@@ -16,6 +15,7 @@ import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { ProfileService } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import { TokenService } from "@/wallet/services/token/service"
@@ -57,7 +57,7 @@ import { DappSendExecutor } from "./dapp-send-executor"
 import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
-import { ContractResolver } from "./contract-resolver"
+import { ContractResolver, findFunctionBySelector } from "./contract-resolver"
 import { getViewSimulationDeps } from "./helpers/get-view-simulation-deps"
 import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
@@ -300,6 +300,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
 	}
 
+	/** Capture the {profileId, epoch} fence at execution AUTHORIZATION (before the
+	 *  slow prove) so `addTransaction` can reject a completing prove whose profile
+	 *  was deleted meanwhile (D13). Delegates to ProfileService so the active-read +
+	 *  reserved-check + epoch-capture are ATOMIC under the facade lock — composing
+	 *  requireActiveProfile + capture here would leave a TOCTOU (codex verify). */
+	private async captureFence(): Promise<ExecutionFence> {
+		return this.profileService.captureExecutionFence()
+	}
+
 	public async executeTransfer(
 		networkId: string,
 		accountAddress: string,
@@ -312,9 +321,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	): Promise<string> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
+		const fence = await this.captureFence()
 		return this.transferExecutor.execute(
 			{ networkId, accountAddress, tokenId, transferType, recipientAddress, amount, feeSettings },
 			precomputedEstimateId,
+			fence,
 		)
 	}
 
@@ -442,7 +453,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					}
 					case "aztec_sendTx": {
 						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
-						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks)
+						// Capture the deletion fence HERE (a send op that writes a tx),
+						// not at the batch top — read-only ops must not trip the
+						// unlock check, and this is still before the prove (D13).
+						const fence = await this.captureFence()
+						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence)
 						break
 					}
 					case "aztec_createAuthWit": {
@@ -568,7 +583,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 
 	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
 		await this.ensureInitialized()
-		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask)
+		const fence = await this.captureFence()
+		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence)
 	}
 
 	/**
@@ -593,13 +609,17 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		return this.pxeService.registerSender(networkInfoFrom(network), op.address)
 	}
 
-	private async executeAztecRegisterContract(op: AztecRegisterContractOperation): Promise<ContractInstanceWithAddress> {
+	// Resolves to void: the 5.0.1 wallet-sdk WalletSchema declares
+	// `registerContract(): Promise<void>`, and the dApp-side proxy validates the
+	// response with z.void() — any non-undefined result rejects the whole call
+	// on the dApp even though registration succeeded wallet-side.
+	private async executeAztecRegisterContract(op: AztecRegisterContractOperation): Promise<void> {
 		const instance = await ContractInstanceWithAddressSchema.parseAsync(op.instance)
 		const network = await this.networkService.getNetwork(op.networkId)
 
 		const addressNum = instance.address.toBigInt()
 		if (addressNum >= 0 && addressNum <= 6) {
-			return instance
+			return
 		}
 
 		let providedArtifact: ContractArtifact | undefined
@@ -634,8 +654,6 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		if (op.secretKey) {
 			await this.pxeService.registerAccount(networkInfoFrom(network), op.secretKey, await computePartialAddress(instance))
 		}
-
-		return instance
 	}
 
 	public async executeAztecCreateAuthWit(op: AztecCreateAuthWitOperation): Promise<AuthWitness> {
@@ -656,17 +674,42 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		let messageHash: Fr
 		if (typeof op.messageHashOrIntent === "object" && "caller" in op.messageHashOrIntent) {
 			const { caller, call } = op.messageHashOrIntent
+			// Bind the dApp-supplied name to the selector's real ABI function before
+			// signing an authwit over it. No artifact was resolved here pre-fix, so a dApp
+			// could obtain an authwit for a selector that did not match the claimed name.
+			// Fail closed if the contract/artifact is unregistered — the dApp registers it
+			// first. Build the call from ABI truth; never trust dApp name/type/isStatic.
+			const authwitInstance = await this.pxeService.getContractInstance(networkInfoFrom(network), call.to)
+			if (!authwitInstance) {
+				throw new Error("Contract not found")
+			}
+			const authwitArtifact = await this.pxeService.getContractArtifact(
+				networkInfoFrom(network),
+				authwitInstance.currentContractClassId,
+			)
+			if (!authwitArtifact) {
+				throw new Error("Contract artifact not found")
+			}
+			const authwitFn = await findFunctionBySelector(authwitArtifact, call.selector.toString())
+			if (!authwitFn) {
+				throw new Error("Method not found")
+			}
+			if (call.name !== undefined && call.name !== authwitFn.name) {
+				throw new Error(
+					`Scope violation: authwit call name "${call.name}" does not match selector's function "${authwitFn.name}" on ${call.to}`,
+				)
+			}
 			const intentAction: CallIntent = {
 				caller: await AztecAddress.schema.parseAsync(caller),
 				call: new FunctionCall(
-					call.name,
+					authwitFn.name,
 					await AztecAddress.schema.parseAsync(call.to),
 					await FunctionSelector.schema.parseAsync(call.selector),
-					call.type,
+					authwitFn.functionType,
 					call.hideMsgSender,
-					call.isStatic,
+					authwitFn.isStatic,
 					await z.array(Fr.schema).parseAsync(call.args),
-					await z.array(AbiTypeSchema).parseAsync(call.returnTypes),
+					authwitFn.returnTypes,
 				),
 			}
 			messageHash = await computeAuthWitMessageHash(intentAction, metadata)

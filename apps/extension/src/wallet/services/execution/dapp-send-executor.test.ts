@@ -424,3 +424,126 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 		expect("estimateId" in result && result.estimateId).toBeFalsy()
 	})
 })
+
+/**
+ * P17 slot-scaffold oracle — pins the EXACT choreography the future
+ * `runInSlot` extraction must preserve byte-for-byte. Added BEFORE the
+ * refactor against the current inline scaffold; kept UNEDITED across it.
+ * Complements the real-lane FIFO/cancel pins in `execution-lane.test.ts`
+ * (the mutex concurrency `runInSlot` delegates to, not reimplements).
+ * The invariant under guard: on EVERY post-acquire exit the slot is
+ * released and the controller cleaned — a missed release wedges the
+ * (profileId, chainId) lane until SW restart.
+ */
+describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on every throw)", () => {
+	const order = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+
+	function makeNoFromOp(overrides: Record<string, unknown> = {}) {
+		return makeAztecOp({ executionMode: "default_entrypoint", feeSettings: { paymentMethod: { kind: "embedded" } }, ...overrides })
+	}
+
+	test("standard path order: acquireSlot < claim < markJournal(simulating) < proveAndSend < deleteController < releaseSlot", async () => {
+		const { executor, deps, releaseSlot, proveAndSend } = makeHarness()
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		expect(order(deps.lane.acquireSlot)).toBeLessThan(order(deps.lane.claimOrCreateJournal))
+		expect(order(deps.lane.claimOrCreateJournal)).toBeLessThan(order(deps.lane.markJournal))
+		expect(order(deps.lane.markJournal)).toBeLessThan(order(proveAndSend))
+		expect(order(proveAndSend)).toBeLessThan(order(deps.lane.deleteController))
+		expect(order(deps.lane.deleteController)).toBeLessThan(order(releaseSlot))
+		// The FIRST markJournal is the simulating checkpoint — it must NOT precede the claim.
+		expect((deps.lane.markJournal as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]).toEqual({ stage: "simulating" })
+	})
+
+	test("NO_FROM path order: acquireSlot < claim < markJournal(simulating) < proveAndSend < deleteController < releaseSlot", async () => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const { executor, deps, releaseSlot, proveAndSend } = makeHarness()
+		await executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)
+		expect(order(deps.lane.acquireSlot)).toBeLessThan(order(deps.lane.claimOrCreateJournal))
+		expect(order(deps.lane.claimOrCreateJournal)).toBeLessThan(order(deps.lane.markJournal))
+		expect(order(deps.lane.markJournal)).toBeLessThan(order(proveAndSend))
+		expect(order(proveAndSend)).toBeLessThan(order(deps.lane.deleteController))
+		expect(order(deps.lane.deleteController)).toBeLessThan(order(releaseSlot))
+		expect((deps.lane.markJournal as ReturnType<typeof vi.fn>).mock.calls[0]?.[1]).toEqual({ stage: "simulating" })
+	})
+
+	test("standard path: proveAndSend throws → failed journal + deleteController + releaseSlot (no leak)", async () => {
+		const { executor, deps, releaseSlot } = makeHarness({
+			coordinator: {
+				proveAndSend: vi.fn(async () => {
+					throw new Error("prove broke")
+				}),
+				simulateTxTask: vi.fn(async () => ({})),
+			} as never,
+		})
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("prove broke")
+		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.anything())
+		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
+
+	test("standard path: recordTransaction throws (post-send) → deleteController + releaseSlot (no leak)", async () => {
+		// The real coordinator awaits recordTransaction inside proveAndSend, so a throw
+		// there rejects the send — the finally must STILL release the slot.
+		const { executor, deps, releaseSlot } = makeHarness({
+			addTransaction: vi.fn(async () => {
+				throw new Error("record broke")
+			}) as never,
+		})
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("record broke")
+		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
+
+	test("standard path: claim throws (no journalId yet) → releaseSlot still fires, deleteController NOT called", async () => {
+		const releaseLocal = vi.fn()
+		const { executor, deps } = makeHarness({
+			lane: {
+				registerController: vi.fn(),
+				deleteController: vi.fn(),
+				acquireSlot: vi.fn(async () => ({ release: releaseLocal, preController: undefined })),
+				claimOrCreateJournal: vi.fn(async () => {
+					throw new Error("claim broke")
+				}),
+				beginJournal: vi.fn(),
+				markJournal: vi.fn(async () => {}),
+			},
+		})
+		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("claim broke")
+		expect(releaseLocal).toHaveBeenCalledTimes(1)
+		expect(deps.lane.deleteController).not.toHaveBeenCalled()
+	})
+
+	test("NO_FROM path: proveAndSend throws → failed journal + deleteController + releaseSlot (no leak)", async () => {
+		collectOffchainEffectsMock.mockReturnValue([])
+		const { executor, deps, releaseSlot } = makeHarness({
+			coordinator: {
+				proveAndSend: vi.fn(async () => {
+					throw new Error("prove broke")
+				}),
+				simulateTxTask: vi.fn(async () => ({})),
+			} as never,
+		})
+		await expect(executor.executeAztecSendTx(makeNoFromOp(), ORIGIN)).rejects.toThrow("prove broke")
+		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "failed" }, expect.anything())
+		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
+
+	test("primaryMethod extraction runs AFTER acquireSlot (inside the protected region)", async () => {
+		// A throwing `exec.calls` getter stands in for large/adversarial calls: the
+		// extraction must run inside runInSlot's try — AFTER acquireSlot — so the FIFO
+		// enqueue isn't delayed by it and a throw is caught + the slot released. If it
+		// moved back before acquire, acquireSlot would never be called (0 vs 1).
+		const { executor, deps, releaseSlot } = makeHarness()
+		const op = makeAztecOp() as { exec: { calls?: unknown } }
+		Object.defineProperty(op.exec, "calls", {
+			configurable: true,
+			get() {
+				throw new Error("calls boom")
+			},
+		})
+		await expect(executor.executeAztecSendTx(op as never, ORIGIN)).rejects.toThrow("calls boom")
+		expect(deps.lane.acquireSlot).toHaveBeenCalledTimes(1)
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
+})

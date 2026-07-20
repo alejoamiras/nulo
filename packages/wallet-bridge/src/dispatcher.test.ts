@@ -533,6 +533,53 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		expect(accountsResult?.canGet).toBe(true)
 	})
 
+	// ── P15.0 coverage-side DRIFT PINS (Q-04+Q-05 refactor equivalence oracle) ──
+	// Phase 1.5 above closed the field-blind coverage gap for `accounts` only.
+	// `contractClasses` (type-only fallback, dispatcher.ts:760) and `data.addressBook`
+	// (`dataRequestCovered` keys only on `privateEvents`) are STILL field-blind — the
+	// residual `wallet-sdk-capability-field-diff` follow-up finding, which is OUTSIDE
+	// the 22 quality-arc findings. These pins lock the CURRENT (drift) coverage verdict
+	// so the OperationPolicy / CapabilityStrategy refactor cannot silently move it; they
+	// flip to `popupCalls === 1` when that follow-up lands its fail-CLOSED fix. Enforcement
+	// still denies the over-broad use (scope-enforcement.test.ts), so this is a re-prompt
+	// gap, not a scope-escape.
+	test("(DRIFT PIN) contractClasses widening after a grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
+		let popupCalls = 0
+		const existing: Capability = { type: "contractClasses", classes: [`0x${"aa".repeat(32)}`], canGetMetadata: false }
+		const session = makeSession({ capabilityGrants: [{ capability: existing, grantedAt: 1 }] })
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			popupCalls++
+			return { granted: [{ type: "contractClasses" }] } as CapabilityResult
+		})
+		// Wider `classes` + `canGetMetadata:true` after a narrower grant: coverage at
+		// dispatcher.ts:760 is type-only (`grantedTypes.has`), so it reads as covered →
+		// delta empty → early return, no popup.
+		const manifest = {
+			capabilities: [{ type: "contractClasses", classes: [`0x${"aa".repeat(32)}`, `0x${"bb".repeat(32)}`], canGetMetadata: true }],
+		}
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(popupCalls).toBe(0)
+	})
+
+	test("(DRIFT PIN) data.addressBook re-request with an existing data grant does NOT re-prompt (field-blind coverage; wallet-sdk-capability-field-diff)", async () => {
+		let popupCalls = 0
+		const existing: Capability = { type: "data", privateEvents: { contracts: "*" } }
+		const session = makeSession({ capabilityGrants: [{ capability: existing, grantedAt: 1 }] })
+		const { writer } = makeSessionWriter(session)
+		const dispatcher = makePhase15Dispatcher(writer, async () => {
+			popupCalls++
+			return { granted: [{ type: "data" }] } as CapabilityResult
+		})
+		// `addressBook:true` (no `privateEvents`): `dataRequestCovered` sets `rc = undefined`
+		// → `if (!rc) return existing.length > 0` → covered → delta empty → no popup.
+		// Enforcement (F-004, scope-enforcement.test.ts:60-73) still denies getAddressBook
+		// without an `addressBook:true` grant.
+		const manifest = { capabilities: [{ type: "data", addressBook: true }] }
+		await dispatcher.dispatch("requestCapabilities", [manifest], ctx)
+		expect(popupCalls).toBe(0)
+	})
+
 	// Q11: the grant-response path projects via the shared `projectSessionAccounts`
 	// helper. These pin the `accounts` ARRAY contents on the enrich path (previously
 	// only the canGet/canCreateAuthWit flags were tested here), so the helper
@@ -846,7 +893,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		// reachability assertion: if the side-effect import drifts (renamed,
 		// moved, or accidentally tree-shaken by a future bundler), this test
 		// fails.
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("registerToken" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
@@ -1163,32 +1210,13 @@ describe("dispatcher — isTokenRegistered reachability + gating", () => {
 	}
 
 	test("schema patch extends WalletSchema with a 1-arg boolean `isTokenRegistered` entry", async () => {
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("isTokenRegistered" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
 		const entry = (WalletSchema as any).isTokenRegistered
 		expect(entry?.def?.input?.def?.items?.length).toBe(1)
 		expect(entry?.def?.output?.def?.type).toBe("boolean")
-	})
-
-	test("the three schema-patch copies are content-identical (drift pin)", async () => {
-		const { readFileSync } = await import("node:fs")
-		const { resolve } = await import("node:path")
-		const root = resolve(__dirname, "../../..")
-		const read = (p: string) => readFileSync(resolve(root, p), "utf8")
-		const ext = read("apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch.ts")
-		const faucet = read("apps/faucet/src/lib/nulo-schema-patch.ts")
-		const playground = read("apps/playground/src/lib/nulo-schema-patch.ts")
-		// Identical Zod surface: compare with the per-file header comments stripped (comments may
-		// name their own mirror paths) - every CODE line must match.
-		const code = (s: string) =>
-			s
-				.split("\n")
-				.filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//") && !l.trim().startsWith("/*"))
-				.join("\n")
-		expect(code(faucet)).toBe(code(ext))
-		expect(code(playground)).toBe(code(ext))
 	})
 
 	test("granted address ⇒ boolean from the reader, NO interaction service involved", async () => {
@@ -1510,7 +1538,7 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 
 describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 	test("schema patch extends WalletSchema with a 2-arg `grantPublicAuthwit` entry", async () => {
-		await import("../../../apps/extension/src/wallet/services/wallet-sdk/nulo-schema-patch")
+		await import("@nulo/wallet-sdk-schema-patch/register")
 		const { WalletSchema } = await import("@aztec/aztec.js/wallet")
 		expect("grantPublicAuthwit" in WalletSchema).toBe(true)
 		// biome-ignore lint/suspicious/noExplicitAny: WalletSchema entry shape is upstream-typed but per-key access is opaque
@@ -1708,5 +1736,116 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 				ctx,
 			),
 		).rejects.toThrow(/[Ss]cope/)
+	})
+})
+
+describe("F-08 authorization-relevant arg-shape guard", () => {
+	const dispatcher = makeDispatcher(makeSessionWriter(makeSession()).writer, async () => ({}) as CapabilityResult)
+
+	test("sendTx with non-array exec.calls is rejected before authz", async () => {
+		await expect(dispatcher.dispatch("sendTx", [{ calls: "nope" }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("sendTx with a call missing a string name is rejected", async () => {
+		await expect(dispatcher.dispatch("sendTx", [{ calls: [{ to: "0xabc" }] }], ctx)).rejects.toThrow(/Malformed sendTx/)
+	})
+	test("executeUtility with a non-object call is rejected", async () => {
+		await expect(dispatcher.dispatch("executeUtility", ["nope"], ctx)).rejects.toThrow(/Malformed executeUtility/)
+	})
+	test("createAuthWit with a missing `from` is rejected before authz", async () => {
+		// Post-merge, dev's registry `argSchema` (argsCreateAuthWit) owns this
+		// rejection and fires FIRST — so the message is the generic arg-guard one,
+		// not F-08's "Malformed". The security property (rejected pre-authz) holds.
+		await expect(dispatcher.dispatch("createAuthWit", [], ctx)).rejects.toThrow(/Invalid arguments for wallet method: createAuthWit/)
+	})
+	test("registerToken with a null positional arg is rejected", async () => {
+		await expect(dispatcher.dispatch("registerToken", ["0xtok", null], ctx)).rejects.toThrow(/Malformed registerToken/)
+	})
+})
+
+describe("dispatcher — arg guards: order, tolerance, batch-leg validation", () => {
+	function makeBareDispatcher(session: IDappSessionRef | undefined) {
+		const writer: IDappSessionWriter = {
+			tryGetDappSessionByOriginAndChain: async () => session,
+			getDappSession: async () => session as IDappSessionRef,
+			updateDappSession: async () => session as IDappSessionRef,
+			setAccountAliases: async () => session as IDappSessionRef,
+			setCapabilityGrants: async () => session as IDappSessionRef,
+			setCapabilityRejections: async () => session as IDappSessionRef,
+		}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({})) as never,
+		}
+		return new WalletSdkDispatcher(stubNetwork, stubAccount, stubExecution, interaction, writer, noopLogger)
+	}
+
+	test("guard rejects BEFORE capability enforcement — arity garbage on an ungranted method", async () => {
+		// Order pin (mandate 5a): the schema runs pre-enforcement, so a missing-args
+		// call fails on arguments even when the capability would ALSO be missing.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("getContractMetadata", [], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: getContractMetadata",
+		)
+	})
+
+	test("unguarded methods keep their exact pre-guard behavior — capability error, never an args error", async () => {
+		// simulateTx deliberately has NO argSchema (its exec validation is owned by
+		// checkSimulateTx with a pinned error string). With no grants + garbage args,
+		// the observable stays the capability rejection — proving no guard preempts it.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("simulateTx", [], ctx)).rejects.toThrow(CapabilityNotGrantedError)
+	})
+
+	test("optional trailing args pass the guard — registerSender with 1 arg reaches enforcement", async () => {
+		// The rejection is the CAPABILITY one (no data grant) — i.e. the call got PAST
+		// the arg guard with the alias omitted, pinning optional-trailing tolerance.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("registerSender", ["0xaddr"], ctx)).rejects.toThrow(CapabilityNotGrantedError)
+	})
+
+	test("extra args beyond the read positions pass the guard (no max arity)", async () => {
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("getContractMetadata", ["0xaddr", "spurious", 42], ctx)).rejects.toThrow(CapabilityNotGrantedError)
+	})
+
+	test("batch legs are validated by their OWN method's guard on re-entry", async () => {
+		// batch itself is exempt + its legs are well-formed, so dispatch recurses;
+		// the inner getContractMetadata leg then fails ITS arg guard.
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("batch", [[{ name: "getContractMetadata", args: [] }]], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: getContractMetadata",
+		)
+	})
+
+	test("malformed batch envelopes are rejected by batch's own guard", async () => {
+		const dispatcher = makeBareDispatcher(makeSession())
+		await expect(dispatcher.dispatch("batch", ["not-legs"], ctx)).rejects.toThrow("Invalid arguments for wallet method: batch")
+		await expect(dispatcher.dispatch("batch", [[{ name: 42, args: [] }]], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: batch",
+		)
+	})
+
+	test("requestCapabilities guard: nullish manifest reaches the empty-envelope path; crash-inducing shapes reject", async () => {
+		const dispatcher = makeBareDispatcher(makeSession())
+		// The valid "no capabilities" call, in every wire shape. `[null]` is the JSON
+		// encoding of `requestCapabilities(undefined)` — it MUST reach the handler's
+		// empty-envelope path, not reject (the bug this pins was rejecting it).
+		await expect(dispatcher.dispatch("requestCapabilities", [], ctx)).resolves.toMatchObject({ granted: [] })
+		await expect(dispatcher.dispatch("requestCapabilities", [null], ctx)).resolves.toMatchObject({ granted: [] })
+		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: null }], ctx)).resolves.toMatchObject({
+			granted: [],
+		})
+		// Shapes the handler cannot process become a calibrated reject instead of an
+		// uncalibrated TypeError: non-array `capabilities` (no `.filter`), a nullish
+		// ENTRY (`null.type` throws), and a non-object manifest.
+		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: {} }], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: requestCapabilities",
+		)
+		await expect(dispatcher.dispatch("requestCapabilities", [{ capabilities: [null] }], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: requestCapabilities",
+		)
+		await expect(dispatcher.dispatch("requestCapabilities", [[]], ctx)).rejects.toThrow(
+			"Invalid arguments for wallet method: requestCapabilities",
+		)
 	})
 })

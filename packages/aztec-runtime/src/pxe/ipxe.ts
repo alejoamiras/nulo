@@ -25,7 +25,10 @@ import type {
 import type { PrivateEventFilter } from "@aztec/aztec.js/wallet"
 
 export interface IPXE {
-	getContractInstance(address: AztecAddress): Promise<ContractInstanceWithAddress | undefined>
+	getContractInstance(
+		address: AztecAddress,
+		opts?: { pxeOnly?: boolean; nodeBestEffort?: boolean },
+	): Promise<ContractInstanceWithAddress | undefined>
 	getContractArtifact(id: Fr): Promise<ContractArtifact | undefined>
 	registerAccount(secretKey: Fr, partialAddress: PartialAddress): Promise<CompleteAddress>
 	registerSender(address: AztecAddress): Promise<AztecAddress>
@@ -34,7 +37,6 @@ export interface IPXE {
 	getRegisteredAccounts(): Promise<CompleteAddress[]>
 	registerContractClass(artifact: ContractArtifact): Promise<void>
 	registerContract(contract: { instance: ContractInstanceWithAddress; artifact?: ContractArtifact }): Promise<void>
-	updateContract(contractAddress: AztecAddress, artifact: ContractArtifact): Promise<void>
 	getContracts(): Promise<AztecAddress[]>
 	getNotes(filter: NotesFilter): Promise<NoteDao[]>
 	proveTx(txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult>

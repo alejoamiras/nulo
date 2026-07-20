@@ -2,11 +2,12 @@
 import { computed, type PropType, useCssModule } from "vue"
 import Icon from "../core/Icon.vue"
 import Spinner from "./Spinner.vue"
+import type { TextColorName } from "../color-names"
 
 defineEmits(["onKeybind"])
 const props = defineProps({
 	size: {
-		type: String,
+		type: String as PropType<"large" | "medium" | "small" | "mini" | "dynamic" | "micro">,
 		default: "medium",
 	},
 	/**
@@ -21,7 +22,9 @@ const props = defineProps({
 	 *   cta_destructive     — red-bg CTA (destructive action confirmation)
 	 */
 	variant: {
-		type: String,
+		type: String as PropType<
+			"primary" | "primary_outline" | "secondary" | "ghost" | "text" | "cta" | "cta_outline" | "cta_destructive"
+		>,
 		default: "primary",
 	},
 	wide: {
@@ -54,7 +57,7 @@ const props = defineProps({
 		required: false,
 	},
 	leftIconColor: {
-		type: String,
+		type: String as PropType<TextColorName>,
 		required: false,
 	},
 	rightIcon: {
@@ -62,7 +65,7 @@ const props = defineProps({
 		required: false,
 	},
 	rightIconColor: {
-		type: String,
+		type: String as PropType<TextColorName>,
 		required: false,
 	},
 })

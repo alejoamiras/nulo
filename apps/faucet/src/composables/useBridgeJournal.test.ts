@@ -33,6 +33,8 @@ import {
 	connectJournalDeps,
 	deploymentMatches,
 	discard,
+	isMsgConsumed,
+	isMsgNotReady,
 	markApproveOutcome,
 	hideCompleted,
 	markSessionLive,
@@ -43,6 +45,7 @@ import {
 	runOnLane,
 	runWithdrawConsume,
 	setRecordStep,
+	updateRecord,
 	useBridgeJournal,
 } from "./useBridgeJournal"
 
@@ -153,6 +156,61 @@ describe("useBridgeJournal engine", () => {
 		await new Promise((r) => setTimeout(r, 10))
 		expect(claim).not.toHaveBeenCalled()
 		expect(deps.signL1).not.toHaveBeenCalled()
+	})
+
+	it("L1-timeout stranding: no leafIndex + a recorded depositTxHash recovers the leg, then claims to done", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const recoverDepositLeg = vi.fn(async (rec: DepositJournalRecord) => {
+			// Mirrors the production dep: patch the record from the mined L1 receipt.
+			updateRecord(rec.id, { leafIndex: "42" })
+			return "recovered" as const
+		})
+		connectJournalDeps({ ...deps, claim, recoverDepositLeg })
+		addRecord(mkDeposit("0xstranded", { leafIndex: undefined, depositTxHash: "0xdeadbeef" }))
+		await runDepositClaim("0xstranded")
+		expect(recoverDepositLeg).toHaveBeenCalledTimes(1)
+		expect(claim).toHaveBeenCalled()
+		const { records } = useBridgeJournal()
+		expect(records.value.find((r) => r.id === "0xstranded")?.completedAt).toBe(999)
+	})
+
+	it("recovery 'pending' (L1 not mined yet) bails softly with a retry note - no claim attempt", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const recoverDepositLeg = vi.fn(async () => "pending" as const)
+		connectJournalDeps({ ...deps, claim, recoverDepositLeg })
+		addRecord(mkDeposit("0xunmined", { leafIndex: undefined, depositTxHash: "0xdeadbeef" }))
+		await runDepositClaim("0xunmined")
+		expect(claim).not.toHaveBeenCalled()
+		const { runtime } = useBridgeJournal()
+		expect(runtime.value["0xunmined"]?.note).toMatch(/isn't confirmed yet/)
+	})
+
+	it("recovery throw (reverted deposit) lands as an error note - no claim attempt", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const recoverDepositLeg = vi.fn(async () => {
+			throw new Error("The Ethereum deposit transaction reverted")
+		})
+		connectJournalDeps({ ...deps, claim, recoverDepositLeg })
+		addRecord(mkDeposit("0xreverted", { leafIndex: undefined, depositTxHash: "0xdeadbeef" }))
+		await runDepositClaim("0xreverted")
+		expect(claim).not.toHaveBeenCalled()
+		const { runtime } = useBridgeJournal()
+		expect(runtime.value["0xreverted"]?.attention).toBe("error")
+		expect(runtime.value["0xreverted"]?.note).toMatch(/reverted/)
+	})
+
+	it("no depositTxHash keeps the old bail (the flow is genuinely pre-send) - recovery never fires", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const recoverDepositLeg = vi.fn(async () => "recovered" as const)
+		connectJournalDeps({ ...deps, claim, recoverDepositLeg })
+		addRecord(mkDeposit("0xpresend", { leafIndex: undefined }))
+		await runDepositClaim("0xpresend")
+		expect(recoverDepositLeg).not.toHaveBeenCalled()
+		expect(claim).not.toHaveBeenCalled()
 	})
 
 	it("③ sessionLive deposit auto-continues through gate → send → receipt → done", async () => {
@@ -893,6 +951,27 @@ describe("useBridgeJournal engine", () => {
 		releaseA()
 		await Promise.all([a, b])
 		expect(order).toEqual(["a-start", "c-start", "a-end", "b-start"])
+	})
+})
+
+describe("isMsgNotReady / isMsgConsumed — the 5.0.0 L1→L2 message-state split", () => {
+	// The two upstream (@aztec/stdlib) shapes must map to OPPOSITE conditions: not-anchored keeps
+	// polling; nullified settles. Conflating them strands funds either way.
+	const NOT_READY = "No L1 to L2 message found for message hash 0xabc"
+	const CONSUMED = "No non-nullified L1 to L2 message found for message hash 0xabc"
+
+	it("not-ready shape ⇒ isMsgNotReady only", () => {
+		expect(isMsgNotReady(NOT_READY)).toBe(true)
+		expect(isMsgConsumed(NOT_READY)).toBe(false)
+	})
+	it("consumed (nullified) shape ⇒ isMsgConsumed only (NOT isMsgNotReady)", () => {
+		expect(isMsgConsumed(CONSUMED)).toBe(true)
+		expect(isMsgNotReady(CONSUMED)).toBe(false)
+	})
+	it("kernel/pxe not-ready wordings stay in isMsgNotReady", () => {
+		expect(isMsgNotReady("l1_to_l2_msg_exists returned false")).toBe(true)
+		expect(isMsgNotReady("message not in state")).toBe(true)
+		expect(isMsgConsumed("l1_to_l2_msg_exists returned false")).toBe(false)
 	})
 })
 

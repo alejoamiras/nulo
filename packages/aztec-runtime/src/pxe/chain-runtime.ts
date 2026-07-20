@@ -1,43 +1,48 @@
 import { getPXEConfig, type PXEConfig } from "@aztec/pxe/config"
 import { createPXE, type PXE } from "@aztec/pxe/client/bundle"
+import { createLogger } from "@aztec/foundation/log"
+import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
 import { WASMSimulator } from "@aztec/simulator/client"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { AcceleratorProver, type AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
+import { chainDataDir, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
+import { openChainStore } from "./opfs-store"
 
-/**
- * Optional accelerator-server policy for `ProductionPxeFactory`.
- *
- * Defaults (all fields omitted): silent-fallback behavior preserved
- * — the wallet constructs `AcceleratorProver` with no callback and no
- * preflight, so if the accelerator isn't reachable the SDK falls back to
- * WASM proving as it does in production today.
- *
- * `required: true` is CI-only. Set from the extension shell when
- * `VITE_NULO_ACCELERATOR_REQUIRED=1` is baked into the build. In this
- * mode `createChainRuntime` performs an eager `checkAcceleratorStatus()`
- * preflight and the prover's `onPhase` callback throws synchronously
- * whenever the SDK is about to fall back ("fallback"/"denied" phases).
- *
- * Fields stay primitive (no `accelerator/config` import here) so that
- * `@nulo/aztec-runtime` remains decoupled from the extension's `@/` alias.
- */
-export interface ProductionPxeFactoryOptions {
-	required?: boolean
+/** Typed marker for "the per-profile store key was never provisioned to this offscreen" — the
+ *  SW-side client recognizes it, re-provisions via its key provider, and retries once (covers
+ *  offscreen-document restarts, which drop all in-memory state including the key map). */
+export const PXE_STORE_KEY_MISSING = "PXE_STORE_KEY_MISSING"
+
+/** Optional accelerator-server endpoint. Orthogonal to the proving mode —
+ *  meaningful only in non-proverless modes; ignored under `proverless`. Stays
+ *  primitive (no `accelerator/config` import) so `@nulo/aztec-runtime` remains
+ *  decoupled from the extension's `@/` alias. */
+export interface AcceleratorEndpoint {
 	host?: string
 	port?: number
-	/**
-	 * E2E-only: build the PXE with `proverEnabled: false` so the BB SNARK is
-	 * never generated (kernel simulation + on-chain submission stay real; the
-	 * default bundle prover's fakeProofs path emits a random chonk proof the
-	 * local network accepts). No `AcceleratorProver` is constructed in this
-	 * mode. Set ONLY from the extension shell behind the double-opt-in
-	 * `VITE_NULO_E2E_PROVERLESS` build flag; mutually exclusive with
-	 * `required`. NEVER reaches a production build.
-	 */
-	proverless?: boolean
 }
+
+/**
+ * PXE factory options as a discriminated union over the proving mode, so the
+ * previously-illegal `required` + `proverless` combination is unrepresentable
+ * (it used to be a runtime throw in the constructor).
+ *
+ * - `default` (or `provingMode` omitted) — production: real BB proving via
+ *   `AcceleratorProver`, silent WASM fallback preserved, no preflight/onPhase.
+ * - `required` — CI-only (`VITE_NULO_ACCELERATOR_REQUIRED=1`): same proving
+ *   plus an eager `checkAcceleratorStatus()` preflight and an `onPhase` guard
+ *   that throws synchronously on a silent fallback ("fallback"/"denied").
+ * - `proverless` — E2E-only (double-opt-in `VITE_NULO_E2E_PROVERLESS`): builds
+ *   the PXE with `proverEnabled: false` (no `AcceleratorProver`; the bundle
+ *   prover's fakeProofs path emits a chonk proof the local network accepts).
+ *   NEVER reaches a production build. `host`/`port` are ignored in this mode.
+ */
+export type ProductionPxeFactoryOptions =
+	| (AcceleratorEndpoint & { provingMode?: "default" })
+	| (AcceleratorEndpoint & { provingMode: "required" })
+	| (AcceleratorEndpoint & { provingMode: "proverless" })
 
 /**
  * Minimal structural shape of the network info required to bootstrap a
@@ -53,6 +58,13 @@ export interface NetworkInfo {
 	profileId: string
 	chainId: number
 	rpcUrl: string
+	/** The profile row's persisted 128-bit incarnation generation (#281 D4),
+	 *  captured SW-side under the facade lock when the request is built and
+	 *  verified offscreen-side inside the profile barrier. A retry reuses its
+	 *  original capture, so an op that outlived a delete + same-id re-import is
+	 *  rejected instead of running against the successor's store. Optional at
+	 *  the type level (test fakes; the production client always attaches it). */
+	pxeGeneration?: string
 }
 
 /**
@@ -69,14 +81,21 @@ export class ChainRuntime {
 		public readonly node: AztecNode,
 		public readonly pxe: PXE,
 		public readonly rpcUrl: string,
+		/** The injected per-(profile, chain) encrypted store. The runtime OWNS the handle:
+		 *  dispose() closes it (releasing the SAH-pool directory lock), deleteStore() erases it.
+		 *  Undefined only for test fakes. */
+		private readonly store?: AztecSQLiteOPFSStore,
 	) {}
 
 	/**
-	 * Shut down the PXE. `pxe.stop()` drains the job queue rather than
-	 * aborting in-flight work (verified against upstream @aztec/pxe); so
-	 * correctness across profile switch comes from the ReadWriteGuard's
-	 * drain-on-write semantics, not teardown. This method just releases
-	 * handles after the guard has ensured no readers remain.
+	 * Shut down the PXE, then close the owned store. `pxe.stop()` drains the
+	 * job queue rather than aborting in-flight work (verified against
+	 * upstream @aztec/pxe); so correctness across profile switch comes from
+	 * the ReadWriteGuard's drain-on-write semantics, not teardown. Closing
+	 * the store releases the SAH-pool's exclusive directory lock — REQUIRED
+	 * before the same (profile, chain) can be reopened or its directory
+	 * removed. A failed close is rethrown (fail-closed): a silently-leaked
+	 * lock would wedge every future open of this chain.
 	 */
 	public async dispose(): Promise<void> {
 		const stoppable = this.pxe as unknown as { stop?: () => Promise<void> }
@@ -88,14 +107,16 @@ export class ChainRuntime {
 				// is not actionable here.
 			}
 		}
+		await this.store?.close()
 	}
 }
 
 /** Seam for unit tests: swap this out with a fake that returns a
  *  fixture `ChainRuntime` (e.g. with mock PXE / node) instead of
- *  running real PXE init. */
+ *  running real PXE init. `storeKey` is the per-profile 32-byte store
+ *  encryption key (required by the production factory; fakes ignore it). */
 export interface PxeFactory {
-	createChainRuntime(network: NetworkInfo): Promise<ChainRuntime>
+	createChainRuntime(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime>
 }
 
 export class ProductionPxeFactory implements PxeFactory {
@@ -107,22 +128,57 @@ export class ProductionPxeFactory implements PxeFactory {
 
 	public constructor(nodeFactory?: NodeFactory, options?: ProductionPxeFactoryOptions) {
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
-		this.required = options?.required ?? false
+		const provingMode = options?.provingMode ?? "default"
+		// `required` + `proverless` is unrepresentable in the union, so the old
+		// runtime mutual-exclusion throw is no longer reachable.
+		this.required = provingMode === "required"
+		this.proverless = provingMode === "proverless"
 		this.host = options?.host
 		this.port = options?.port
-		this.proverless = options?.proverless ?? false
-		if (this.proverless && this.required) {
-			throw new Error("ProductionPxeFactory: `proverless` and `required` are mutually exclusive.")
-		}
 	}
 
-	public async createChainRuntime(network: NetworkInfo): Promise<ChainRuntime> {
+	public async createChainRuntime(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
+		// Fail-closed: PXE state is encrypted at rest, so a chain runtime cannot boot without the
+		// profile's store key (provisioned by the SW after unlock; re-provisioned on demand when
+		// the offscreen restarts — the client recognizes this marker and retries once).
+		if (!storeKey) {
+			throw new Error(`${PXE_STORE_KEY_MISSING}: no store key provisioned for profile ${network.profileId}`)
+		}
 		const node = this.nodeFactory.createNode(network.rpcUrl)
 		const config = {
 			...getPXEConfig(),
-			dataDirectory: `pxe/${network.profileId}/${network.chainId}`,
+			dataDirectory: chainDataDir(network),
 			proverEnabled: !this.proverless,
 		} as PXEConfig
+
+		// The injected per-(profile, chain) ENCRYPTED store (see opfs-store.ts for why the
+		// upstream default path must never ship). The rollup address scopes the wipe-on-reset
+		// stamp to exactly this chain's store.
+		const rollupAddress = (await node.getL1ContractAddresses()).rollupAddress?.toString()
+		const store = await openChainStore({
+			network,
+			rollupAddress,
+			storeKey,
+			log: createLogger("pxe:data", { actor: chainDataDir(network) }),
+		})
+		// Once the store is open it holds the pool dir's EXCLUSIVE SAH lock, so ANY throw before a
+		// ChainRuntime takes ownership (createPXE failure, the required-mode preflight) must close it
+		// — otherwise the leaked lock permanently wedges every later open of this dir AND blocks the
+		// purge's removeEntry. ChainRuntime.dispose() owns close() on the success path.
+		try {
+			return await this.buildRuntime(network, node, config, store)
+		} catch (err) {
+			await store.close().catch(() => {})
+			throw err
+		}
+	}
+
+	private async buildRuntime(
+		network: NetworkInfo,
+		node: AztecNode,
+		config: PXEConfig,
+		store: AztecSQLiteOPFSStore,
+	): Promise<ChainRuntime> {
 		// Pass an explicit WASMSimulator into both the prover AND the PXE
 		// config so neither falls back to dynamic-import
 		// `@aztec/simulator/client` at runtime. The dynamic-import fallback
@@ -140,8 +196,8 @@ export class ProductionPxeFactory implements PxeFactory {
 		// preflight. The `simulator` is still passed so kernel sim stays on
 		// the bundled WASM path (same MV3 reason as above).
 		if (this.proverless) {
-			const pxe = await createPXE(node, config, { simulator })
-			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
+			const pxe = await createPXE(node, config, { simulator, store })
+			return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
 		}
 
 		// Required-mode (CI only): the onPhase callback throws synchronously
@@ -189,30 +245,29 @@ export class ProductionPxeFactory implements PxeFactory {
 			}
 		}
 
-		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator })
-		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl)
+		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator, store })
+		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
 	}
 }
 
 /**
- * Per-(profileId, chainId) registry of `ChainRuntime` instances. Owns
- * the dedup-on-concurrent-init promise map so two callers asking for
- * the same chain at once share the init, not double-init.
+ * Per-(profileId, chainId) registry of `ChainRuntime` instances.
  *
- * The registry is intended to be called from INSIDE the PxeService
- * ReadWriteGuard's read lock. Under that contract, `clear()` (called
- * from the write lock on profile switch / delete) never runs
- * concurrently with `getOrInit`, so there is no separate stale-init
- * race to handle here — the guard serializes it.
+ * Locking contract (enforced by the PxeService callers, not here):
+ * `peek`/`peekMatching` are safe under the chain READ guard; `ensure`
+ * (init or endpoint rebind — it may DISPOSE a live runtime) requires the
+ * chain WRITE guard; `clear`/`dispose*` run under the profile write
+ * barrier. Write exclusivity replaces the old shared-init-promise dedup:
+ * two readers that both miss simply serialize through `ensure`, and the
+ * second finds the runtime already bound.
  */
 export class ChainRuntimeRegistry {
 	private readonly runtimes = new Map<string, ChainRuntime>()
-	private readonly initPromises = new Map<string, Promise<ChainRuntime>>()
 
 	public constructor(private readonly factory: PxeFactory) {}
 
 	private key(profileId: string, chainId: number): string {
-		return `${profileId}:${chainId}`
+		return chainRegistryKey({ profileId, chainId })
 	}
 
 	/** Returns the initialized runtime for `(profileId, chainId)` or
@@ -222,47 +277,77 @@ export class ChainRuntimeRegistry {
 		return this.runtimes.get(this.key(profileId, chainId))
 	}
 
-	/** Lazy-init for `(network.profileId, network.chainId)`. Concurrent
-	 *  callers share the same init promise. If the runtime exists but
-	 *  its rpcUrl no longer matches (network re-bound), the existing
-	 *  runtime is disposed and re-initialized under the new URL. */
-	public async getOrInit(network: NetworkInfo): Promise<ChainRuntime> {
+	/** URL-checked peek: the runtime for `network`'s coordinates, but only if it
+	 *  is already bound to `network.rpcUrl`. `undefined` on a miss OR an endpoint
+	 *  mismatch — the caller escalates to `ensure` under the chain WRITE guard.
+	 *  Never mutates registry state, so it is safe under a chain READ. */
+	public peekMatching(network: NetworkInfo): ChainRuntime | undefined {
+		const existing = this.runtimes.get(this.key(network.profileId, network.chainId))
+		return existing && existing.rpcUrl === network.rpcUrl ? existing : undefined
+	}
+
+	/** Init-or-rebind for `(network.profileId, network.chainId)`.
+	 *
+	 *  MUST be called under the chain WRITE guard (and the profile barrier read):
+	 *  an endpoint rebind disposes the live runtime, which under a mere read lock
+	 *  raced concurrent readers of the same chain and a third caller against the
+	 *  not-yet-released SAH-pool lock (#281 D3). Write exclusivity also makes the
+	 *  old shared-init-promise dedup unnecessary — and that map was itself a
+	 *  hazard, keyed only by chain so a new-URL caller could inherit a stale-URL
+	 *  init in flight.
+	 *
+	 *  Dispose-failure semantics mirror `settleDisposals`: the runtime reference
+	 *  is dropped only AFTER a successful dispose — a failed `store.close()`
+	 *  leaks the SAH lock, and the kept reference is the only retry handle.
+	 *  `storeKey` is only consumed on an actual init (the production factory
+	 *  fail-closes without it). */
+	public async ensure(network: NetworkInfo, storeKey?: Uint8Array): Promise<ChainRuntime> {
 		const k = this.key(network.profileId, network.chainId)
 		const existing = this.runtimes.get(k)
-		if (existing && existing.rpcUrl === network.rpcUrl) {
-			return existing
-		}
-		if (existing && existing.rpcUrl !== network.rpcUrl) {
-			this.runtimes.delete(k)
+		if (existing) {
+			if (existing.rpcUrl === network.rpcUrl) return existing
 			await existing.dispose()
+			this.runtimes.delete(k)
 		}
+		const runtime = await this.factory.createChainRuntime(network, storeKey)
+		this.runtimes.set(k, runtime)
+		return runtime
+	}
 
-		let promise = this.initPromises.get(k)
-		if (!promise) {
-			promise = this.factory
-				.createChainRuntime(network)
-				.then((runtime) => {
-					this.runtimes.set(k, runtime)
-					this.initPromises.delete(k)
-					return runtime
-				})
-				.catch((err) => {
-					this.initPromises.delete(k)
-					throw err
-				})
-			this.initPromises.set(k, promise)
+	/**
+	 * Dispose the given (key, runtime) pairs, tolerating individual failures:
+	 *  - settle ALL (a failed close on one chain must not skip disposing the rest — `Promise.all`
+	 *    would abandon the siblings on the first rejection, leaking their locks);
+	 *  - RE-ADD any runtime whose `dispose()` threw (its `store.close()` failed → the SAH-pool lock
+	 *    is leaked; keeping the reference is the ONLY retry handle — dropping it wedges every future
+	 *    open of that chain forever, silently);
+	 *  - propagate the collected failures as an `AggregateError` so the deletion coordinator treats
+	 *    the erasure as INCOMPLETE + retryable, never falsely successful.
+	 * Callers hold the PxeService write barrier, so a re-added poisoned entry can't be observed by a
+	 * concurrent read.
+	 */
+	private async settleDisposals(entries: Array<[string, ChainRuntime]>): Promise<void> {
+		const results = await Promise.allSettled(entries.map(([, r]) => r.dispose()))
+		const errors: unknown[] = []
+		results.forEach((res, i) => {
+			if (res.status === "rejected") {
+				errors.push(res.reason)
+				const [k, runtime] = entries[i]
+				this.runtimes.set(k, runtime)
+			}
+		})
+		if (errors.length) {
+			throw new AggregateError(errors, `${errors.length} PXE runtime(s) failed to dispose (store close failed — lock may be leaked)`)
 		}
-		return promise
 	}
 
 	/** Dispose every runtime this registry owns. Must be called under
 	 *  the PxeService write lock — otherwise concurrent reads may
 	 *  observe a torn-down runtime. */
 	public async clear(): Promise<void> {
-		const runtimes = Array.from(this.runtimes.values())
+		const entries = Array.from(this.runtimes.entries())
 		this.runtimes.clear()
-		this.initPromises.clear()
-		await Promise.all(runtimes.map((r) => r.dispose()))
+		await this.settleDisposals(entries)
 	}
 
 	/** Dispose the single runtime (if any) for `(profileId, chainId)`. Must
@@ -271,9 +356,13 @@ export class ChainRuntimeRegistry {
 	public async dispose(profileId: string, chainId: number): Promise<void> {
 		const k = this.key(profileId, chainId)
 		const runtime = this.runtimes.get(k)
+		if (!runtime) return
+		// Dispose BEFORE dropping the reference (mirrors `ensure` + `settleDisposals`):
+		// a failed store.close() leaks the SAH-pool lock, and the kept entry is the
+		// only retry handle — deleting first left the chain purge permanently wedged
+		// with no recovery path (review finding).
+		await runtime.dispose()
 		this.runtimes.delete(k)
-		this.initPromises.delete(k)
-		if (runtime) await runtime.dispose()
 	}
 
 	/**
@@ -288,17 +377,14 @@ export class ChainRuntimeRegistry {
 	 * per-profile cascade vs. the global `clear()`.
 	 */
 	public async disposeProfile(profileId: string): Promise<void> {
-		const prefix = `${profileId}:`
-		const victims: ChainRuntime[] = []
+		const prefix = chainRegistryKeyPrefix(profileId)
+		const victims: Array<[string, ChainRuntime]> = []
 		for (const [k, runtime] of this.runtimes) {
 			if (k.startsWith(prefix)) {
-				victims.push(runtime)
+				victims.push([k, runtime])
 				this.runtimes.delete(k)
 			}
 		}
-		for (const k of Array.from(this.initPromises.keys())) {
-			if (k.startsWith(prefix)) this.initPromises.delete(k)
-		}
-		await Promise.all(victims.map((r) => r.dispose()))
+		await this.settleDisposals(victims)
 	}
 }

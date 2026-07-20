@@ -169,4 +169,20 @@ describe("AccountStateService.restore (nested restoreError normalization)", () =
 		expect(restored[0]!.contracts[0]!.restoreError).toBe("Network not found")
 		expect(typeof restored[0]!.senders[0]!.restoreError).toBe("string")
 	})
+
+	test("a shape-malformed item (senders: null) is a recorded per-item error, NOT an uncaught throw", async () => {
+		// This runs AFTER finalizeRestore where rollback is suppressed — a checksum-valid but
+		// malformed slice must not throw uncaught mid-iteration and strand a partial restore
+		// (codex audit MED). It becomes a per-item restoreError instead.
+		const backup = [
+			{ networkId: "n1", senders: null, contracts: [] },
+			{ networkId: "n2", senders: [], contracts: undefined },
+		] as unknown as Parameters<typeof accountStateService.restore>[0]
+
+		const restored = await accountStateService.restore(backup, [])
+		expect(restored).toHaveLength(2)
+		expect(typeof restored[0]!.restoreError).toBe("string")
+		expect(restored[0]!.restoreError).toMatch(/malformed account-state item/)
+		expect(typeof restored[1]!.restoreError).toBe("string")
+	})
 })

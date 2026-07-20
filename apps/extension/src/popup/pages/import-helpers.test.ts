@@ -25,14 +25,16 @@ describe("resolveFullBackupEnterAction (popup full-backup Enter shortcut)", () =
 		).toBe("restore")
 	})
 
-	test("restore in progress → restore (still not finished)", () => {
+	test("restore IN PROGRESS → null (Enter must not resubmit mid-import)", () => {
+		// Re-entrancy: firing "restore" again while a restore is in flight would
+		// race a second profile creation into the un-locked account restore.
 		expect(
 			resolveFullBackupEnterAction({
 				selectedBackup: sel({ type: "plain", profileType: "passkey" }),
 				restoreStatus: "progress",
 				isRestoreHasErrors: false,
 			}),
-		).toBe("restore")
+		).toBe(null)
 	})
 
 	test("finished with errors → continue", () => {

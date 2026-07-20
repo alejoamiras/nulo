@@ -1,10 +1,19 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
+import type { Base64CredentialId, Base64MasterSecret, PasskeyCredentialData, SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { Restored } from "@/wallet/base"
 
 export const PROFILE_SERVICE_NAME = "profile"
 
 export type ProfileType = "password" | "passkey"
+
+/**
+ * The secret half of a full-backup `restore()`, discriminated by profile type.
+ * Replaces the old polymorphic `masterKey: string` slot, where a password profile
+ * passed a base64 32-byte plain master key and a passkey profile passed a credential
+ * id in the SAME parameter — a swap that type-checked and only failed at restore.
+ * `ProfileService.restore` asserts `secret.type === profile.type` before branching.
+ */
+export type RestoreSecret = { type: "password"; masterKey: Base64MasterSecret } | { type: "passkey"; credentialId: Base64CredentialId }
 
 export type ProfileInfo = {
 	/** Randomly generated id. */
@@ -15,8 +24,14 @@ export type ProfileInfo = {
 	type: ProfileType
 }
 
-export type Profile = ProfileInfo &
-	(
+export type Profile = ProfileInfo & {
+	/** 128-bit random incarnation generation (hex), minted fresh at EVERY row
+	 *  creation — including a same-id backup re-import. The PXE layer fences
+	 *  provisions/ops/clears on it so a deleted incarnation can never be
+	 *  resurrected in the offscreen document (#281 D4). Never reused, never
+	 *  derived from the id. */
+	pxeGeneration: string
+} & (
 		| {
 				type: "password"
 				guard: string
@@ -28,10 +43,23 @@ export type Profile = ProfileInfo &
 		  }
 	)
 
+/** Mint a fresh 128-bit Web-Crypto incarnation generation (32 hex chars). */
+export function mintPxeGeneration(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(16))
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
 export type Session = {
 	/** Profile id. */
 	profile: string
-	/** Profile passhash. */
+	/** F-11: random-token wrapped-secret silent-restore bearer (non-strict
+	 *  password profiles only). Replaces `passhash` — see `SessionSecretBox`.
+	 *  The token is random, not password-derived, so a session-store leak no
+	 *  longer exposes a password-equivalent value. */
+	bearer?: SessionWrappedSecret
+	/** @deprecated F-11: legacy password-equivalent bearer (unsalted
+	 *  `SHA-256(password)`). Written only by pre-F-11 code; the new `restore()`
+	 *  NEVER accepts it — such a session is `silentClose`d (one-time re-unlock). */
 	passhash?: string
 	/** Creation time */
 	since: number
@@ -247,11 +275,13 @@ export type Methods = {
 	 * have to run a second WebAuthn ceremony.
 	 *
 	 * @param profile Source profile descriptor (id, name, type) from the backup.
-	 * @param masterKey For password profiles: base64 32-byte plain master key.
-	 *                  For passkey profiles: the original credentialId used to
-	 *                  drive recovery. The service rejects (with
-	 *                  `credentialId mismatch`) if `credentialData.id` does
-	 *                  not match.
+	 * @param secret Profile-type-discriminated: `{ type: "password", masterKey }`
+	 *                  carries the base64 32-byte plain master key; `{ type:
+	 *                  "passkey", credentialId }` carries the original credentialId
+	 *                  used to drive recovery. `secret.type` must equal
+	 *                  `profile.type` (asserted first). For passkey, the service
+	 *                  rejects (with `credentialId mismatch`) if `credentialData.id`
+	 *                  does not match `secret.credentialId`.
 	 * @param password New password (password profiles only).
 	 * @param credentialData PATH A — required for passkey profiles. The
 	 *   caller (popup) has already collected the WebAuthn credential via
@@ -259,7 +289,7 @@ export type Methods = {
 	 *   `{...profile, restoreError}` if missing for a passkey profile (no
 	 *   SW-driven window fallback).
 	 */
-	restore(profile: ProfileInfo, masterKey: string, password?: string, credentialData?: PasskeyCredentialData): Restored<ProfileInfo>
+	restore(profile: ProfileInfo, secret: RestoreSecret, password?: string, credentialData?: PasskeyCredentialData): Restored<ProfileInfo>
 
 	/**
 	 * Opens the session for a profile previously created by `restore()`.

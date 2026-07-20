@@ -1,5 +1,4 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
-import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { normalizeError } from "@nulo/wallet-core/jobs"
@@ -9,29 +8,32 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import type { OperationContext } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
+import { requireOwnedRow } from "@/wallet/services/require-owned-row"
+import { nextNumericId } from "@/wallet/services/id-allocators"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
-import { array_max, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
-import { type Token, type TokenInfo, TOKEN_SERVICE_NAME, type TokenInterface, type Methods, type Events } from "./spec"
 import {
-	BalanceOfPrivateFn,
-	BalanceOfPublicFn,
-	GetDecimalsFn,
-	GetNameFn,
-	GetSymbolFn,
-	TransferPrivateFn,
-	TransferPrivateToPublicFn,
-	TransferPublicFn,
-	TransferPublicToPrivateFn,
-} from "./functions"
+	type Token,
+	type TokenInfo,
+	type TokenDeleted,
+	TOKEN_SERVICE_NAME,
+	TOKEN_STORAGE_ROOT,
+	TokenSchema,
+	type TokenInterface,
+	type Methods,
+	type Events,
+} from "./spec"
+import { createViewTokenFn, getDefaultTokenFn, getTokenFnCandidates, TOKEN_FN_DESCRIPTORS } from "./functions"
 import { getTokenInfo, isTokenComplete } from "./utils"
 
 export * from "./functions"
@@ -52,7 +54,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public readonly onTokenAdded = new EventHandler<TokenInfo>()
 	public readonly onTokenUpdated = new EventHandler<TokenInfo>()
-	public readonly onTokenDeleted = new EventHandler<TokenInfo>()
+	public readonly onTokenDeleted = new EventHandler<TokenDeleted>()
 
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
@@ -70,7 +72,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
 	) {
 		super(TOKEN_SERVICE_NAME, logger)
-		this.tokens = new EntityStorage<Token>("nulo:core:tokens", browserApi.storage.local)
+		this.tokens = new EntityStorage<Token>(TOKEN_STORAGE_ROOT, browserApi.storage.local, (raw) => TokenSchema.parse(raw))
 	}
 
 	protected async init(services: ServiceCollection) {
@@ -80,7 +82,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.accounts = services.get(AccountService.name)
 		this.tasks = services.get(TaskService.name)
 		this.journal = services.get(OperationJournalService.name)
-		this.profiles.onProfileDeleted.add(this.onProfileDeleted)
+		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.networks.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
 
@@ -95,7 +97,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		await purgeRows(
 			tokens,
 			(token) => this.tokens.delete(`${token.id}`),
-			(token) => this.emit("onTokenDeleted", getTokenInfo(token)),
+			(token) => this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId }),
 		)
 	}
 
@@ -115,19 +117,16 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	public async getToken(id: number): Promise<TokenInfo> {
-		const token = await this.tokens.get(`${id}`)
-		if (!token) {
-			throw new Error("unknown token id")
-		}
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profiles)
+		const token = requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
 		return getTokenInfo(token)
 	}
 
 	public async getTokenRaw(id: number): Promise<Token> {
-		const token = await this.tokens.get(`${id}`)
-		if (!token) {
-			throw new Error("unknown token id")
-		}
-		return token
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profiles)
+		return requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
 	}
 
 	public async addToken(
@@ -183,7 +182,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				// (setOperationMeta tolerates terminal records).
 				await this.journal.setOperationMeta(journalOp.id, { title: symbol })
 				token = {
-					id: array_max((await this.tokens.getKeys()).map((x) => +x)) + 1,
+					id: await nextNumericId(this.tokens),
 					profileId,
 					chainId: tokenInterface.chainId,
 					contract: tokenInterface.contract,
@@ -279,6 +278,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	public async deleteToken(id: number): Promise<TokenInfo> {
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profiles)
+		requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
+		return this._deleteTokenById(id)
+	}
+
+	/**
+	 * Delete a token row by id with NO active-profile ownership guard — the
+	 * profile-delete cascade calls this for an explicit, possibly-INACTIVE
+	 * profile's tokens (an active-profile guard here would throw and orphan
+	 * them). The public `deleteToken` RPC does the ownership check first.
+	 */
+	private async _deleteTokenById(id: number, emit = true): Promise<TokenInfo> {
 		try {
 			await this.lock.enter()
 			const token = await this.tokens.get(`${id}`)
@@ -286,7 +298,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				throw new Error("unknown token id")
 			}
 			await this.tokens.delete(`${id}`)
-			this.emit("onTokenDeleted", getTokenInfo(token))
+			if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
 			return getTokenInfo(token)
 		} finally {
 			this.lock.leave()
@@ -295,10 +307,8 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public async getTokenInterface(networkId: string, tokenId: number): Promise<TokenInterface> {
 		await this.ensureInitialized()
-		const token = await this.tokens.get(`${tokenId}`)
-		if (!token) {
-			throw new Error("unknown token id")
-		}
+		const profile = await requireActiveProfile(this.profiles)
+		const token = requireOwnedRow(await this.tokens.get(`${tokenId}`), profile.id, "unknown token id")
 
 		const network = await this.networks.getNetwork(networkId)
 		if (!network) {
@@ -319,31 +329,35 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 		await ensureRegistered(pxe, token.contract, instance, artifact)
 
-		const getNameFnCandidates = GetNameFn.getCandidates(artifact).map((x) => x.getImpl())
+		const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact).map((x) => x.getImpl())
 		const getNameFn = token.getNameFn
 
-		const getSymbolFnCandidates = GetSymbolFn.getCandidates(artifact).map((x) => x.getImpl())
+		const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact).map((x) => x.getImpl())
 		const getSymbolFn = token.getSymbolFn
 
-		const getDecimalsFnCandidates = GetDecimalsFn.getCandidates(artifact).map((x) => x.getImpl())
+		const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact).map((x) => x.getImpl())
 		const getDecimalsFn = token.getDecimalsFn
 
-		const balanceOfPrivateFnCandidates = BalanceOfPrivateFn.getCandidates(artifact).map((x) => x.getImpl())
+		const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact).map((x) => x.getImpl())
 		const balanceOfPrivateFn = token.balanceOfPrivateFn
 
-		const balanceOfPublicFnCandidates = BalanceOfPublicFn.getCandidates(artifact).map((x) => x.getImpl())
+		const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact).map((x) => x.getImpl())
 		const balanceOfPublicFn = token.balanceOfPublicFn
 
-		const transferPublicFnCandidates = TransferPublicFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact).map((x) => x.getImpl())
 		const transferPublicFn = token.transferPublicFn
 
-		const transferPrivateFnCandidates = TransferPrivateFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact).map((x) => x.getImpl())
 		const transferPrivateFn = token.transferPrivateFn
 
-		const transferPrivateToPublicFnCandidates = TransferPrivateToPublicFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact).map((x) =>
+			x.getImpl(),
+		)
 		const transferPrivateToPublicFn = token.transferPrivateToPublicFn
 
-		const transferPublicToPrivateFnCandidates = TransferPublicToPrivateFn.getCandidates(artifact).map((x) => x.getImpl())
+		const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact).map((x) =>
+			x.getImpl(),
+		)
 		const transferPublicToPrivateFn = token.transferPublicToPrivateFn
 
 		const ti: TokenInterface = {
@@ -398,32 +412,38 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 			await ensureRegistered(pxe, contract, instance, artifact)
 
-			const getNameFnCandidates = GetNameFn.getCandidates(artifact)
-			const getNameFn = GetNameFn.getDefault(getNameFnCandidates)
+			const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact)
+			const getNameFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getName, getNameFnCandidates)
 
-			const getSymbolFnCandidates = GetSymbolFn.getCandidates(artifact)
-			const getSymbolFn = GetSymbolFn.getDefault(getSymbolFnCandidates)
+			const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact)
+			const getSymbolFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getSymbol, getSymbolFnCandidates)
 
-			const getDecimalsFnCandidates = GetDecimalsFn.getCandidates(artifact)
-			const getDecimalsFn = GetDecimalsFn.getDefault(getDecimalsFnCandidates)
+			const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact)
+			const getDecimalsFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.getDecimals, getDecimalsFnCandidates)
 
-			const balanceOfPrivateFnCandidates = BalanceOfPrivateFn.getCandidates(artifact)
-			const balanceOfPrivateFn = BalanceOfPrivateFn.getDefault(balanceOfPrivateFnCandidates)
+			const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact)
+			const balanceOfPrivateFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, balanceOfPrivateFnCandidates)
 
-			const balanceOfPublicFnCandidates = BalanceOfPublicFn.getCandidates(artifact)
-			const balanceOfPublicFn = BalanceOfPublicFn.getDefault(balanceOfPublicFnCandidates)
+			const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact)
+			const balanceOfPublicFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.balanceOfPublic, balanceOfPublicFnCandidates)
 
-			const transferPublicFnCandidates = TransferPublicFn.getCandidates(artifact)
-			const transferPublicFn = TransferPublicFn.getDefault(transferPublicFnCandidates)
+			const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact)
+			const transferPublicFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.transferPublic, transferPublicFnCandidates)
 
-			const transferPrivateFnCandidates = TransferPrivateFn.getCandidates(artifact)
-			const transferPrivateFn = TransferPrivateFn.getDefault(transferPrivateFnCandidates)
+			const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact)
+			const transferPrivateFn = getDefaultTokenFn(TOKEN_FN_DESCRIPTORS.transferPrivate, transferPrivateFnCandidates)
 
-			const transferPrivateToPublicFnCandidates = TransferPrivateToPublicFn.getCandidates(artifact)
-			const transferPrivateToPublicFn = TransferPrivateToPublicFn.getDefault(transferPrivateToPublicFnCandidates)
+			const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact)
+			const transferPrivateToPublicFn = getDefaultTokenFn(
+				TOKEN_FN_DESCRIPTORS.transferPrivateToPublic,
+				transferPrivateToPublicFnCandidates,
+			)
 
-			const transferPublicToPrivateFnCandidates = TransferPublicToPrivateFn.getCandidates(artifact)
-			const transferPublicToPrivateFn = TransferPublicToPrivateFn.getDefault(transferPublicToPrivateFnCandidates)
+			const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact)
+			const transferPublicToPrivateFn = getDefaultTokenFn(
+				TOKEN_FN_DESCRIPTORS.transferPublicToPrivate,
+				transferPublicToPrivateFnCandidates,
+			)
 
 			const result: TokenInterface = {
 				chainId: network.chainId,
@@ -494,9 +514,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		const node = await this.networks.getNode(network.chainId)
 		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
 
-		const getNameFn = ti.getNameFn ? GetNameFn.new(ti.getNameFn.name, ti.getNameFn.impl) : undefined
-		const getSymbolFn = ti.getSymbolFn ? GetSymbolFn.new(ti.getSymbolFn.name, ti.getSymbolFn.impl) : undefined
-		const getDecimalsFn = ti.getDecimalsFn ? GetDecimalsFn.new(ti.getDecimalsFn.name, ti.getDecimalsFn.impl) : undefined
+		const getNameFn = ti.getNameFn ? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getName, ti.getNameFn.name, ti.getNameFn.impl) : undefined
+		const getSymbolFn = ti.getSymbolFn
+			? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getSymbol, ti.getSymbolFn.name, ti.getSymbolFn.impl)
+			: undefined
+		const getDecimalsFn = ti.getDecimalsFn
+			? createViewTokenFn(TOKEN_FN_DESCRIPTORS.getDecimals, ti.getDecimalsFn.name, ti.getDecimalsFn.impl)
+			: undefined
 
 		return [
 			getNameFn
@@ -518,11 +542,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return tokens.find((token) => token.profileId === profileId && token.chainId === chainId && token.contract === contract)
 	}
 
-	private readonly onProfileDeleted = async (profile: ProfileInfo) => {
-		this.logDebug(`Profile ${profile.id} deleted, remove related tokens`)
-		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profile.id)) {
-			this.logDebug(`Remove token ${token.id}`)
-			await this.deleteToken(token.id)
+	/** Awaited profile-scoped token purge, called by the deletion coordinator
+	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
+	 *  Idempotent. `_deleteTokenById` emits `onTokenDeleted` with the authoritative
+	 *  profileId (P6), so token-balance/incoming cleanup stays profile-accurate. */
+	public async purgeForProfile(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		this.logDebug(`purgeForProfile ${profileId}: remove related tokens`)
+		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
+			// SILENT (emit=false): the deletion coordinator awaits token-balance +
+			// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
+			// redundant and its fire-and-forget consumer could clobber a successor
+			// that reuses the highest token id (audit H3).
+			await this._deleteTokenById(token.id, false)
 		}
 	}
 
@@ -535,26 +567,21 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public async restore(tokens: Token[]): Promise<Restored<Token>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<Token>[] = []
-
 		try {
 			await this.lock.enter()
-
-			let id = array_max((await this.tokens.getKeys()).map((x) => +x)) + 1
-			for (const token of tokens) {
-				try {
-					await this.tokens.set(`${id}`, { ...token, id })
-					result.push({ ...token, id })
-					id++
-				} catch (err) {
-					result.push({
-						...token,
-						restoreError: toRestoreError(err),
-					})
-				}
-			}
-
-			return result
+			// Shared numeric cursor across the batch: ids are one global sequence,
+			// so a single write consumes an id and the next row picks up after it.
+			let id = await nextNumericId(this.tokens)
+			return await restoreRows(tokens, async (token) => {
+				// Validate the persisted shape BEFORE consuming an id/writing: a token
+				// with e.g. `chainId: "1:"` would otherwise "succeed", have a balance
+				// relinked to it, then be rejected by the read codec — leaving an
+				// orphaned balance. Parsing here records it as a restoreError instead.
+				const row = TokenSchema.parse({ ...token, id })
+				await this.tokens.set(`${id}`, row)
+				id++
+				return row
+			})
 		} finally {
 			this.lock.leave()
 		}
