@@ -139,6 +139,8 @@ export const TESTIDS = {
 	journalCard: "fa-journal-card",
 	journalStage: "fa-journal-stage",
 	journalClaim: "fa-journal-claim",
+	journalResume: "fa-journal-resume",
+	journalResumeReview: "fa-journal-resume-review",
 	journalFinish: "fa-journal-finish",
 	journalDiscard: "fa-journal-discard",
 	journalDiscardConfirm: "fa-journal-discard-confirm",

@@ -13,6 +13,10 @@ const clearDone = vi.fn()
 vi.mock("@/composables/useBridgeJournal", () => ({
 	useBridgeJournal: () => ({ runtime, runDepositClaim, runWithdrawConsume, discard, clearDone }),
 }))
+const fuelResume = vi.fn(async () => {})
+vi.mock("@/composables/useFuel", () => ({
+	useFuelFlow: () => ({ resume: fuelResume, busy: ref(false), error: ref(null) }),
+}))
 const claimFuelStandalone = vi.fn(async () => {})
 vi.mock("@/composables/useDeposit", () => ({
 	claimFuelStandalone: (...a: unknown[]) => claimFuelStandalone(...(a as [])),
@@ -310,5 +314,52 @@ describe("BridgeJournalCard", () => {
 		const w = mountCard(deposit({ schema: 2, fuel, completedAt: Date.now(), claimTxHash: "0xc" }))
 		await w.find(sel(TESTIDS.journalClaimGas)).trigger("click")
 		expect(claimFuelStandalone).toHaveBeenCalledWith("0xdep")
+	})
+})
+
+describe("RESUME affordance (J4 — fee-juice)", () => {
+	const fuelDep = (over: Partial<DepositJournalRecord> = {}) =>
+		deposit({
+			schema: 2,
+			assetKind: "fee-juice",
+			isPrivate: false,
+			fuel: { amount: "1", secret: "0x1", secretHashHex: "0xdep", minOutput: "0" },
+			...over,
+		})
+
+	beforeEach(() => fuelResume.mockClear())
+
+	it("shows RESUME on a pre-deposit, proven-safe, not-yet-attempted fuel record", () => {
+		const w = mountCard(fuelDep({ failedLeg: "approving", failedOutcome: "no-funds-moved" }))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(true)
+	})
+
+	it("hides RESUME once a resume was attempted (one-shot)", () => {
+		const w = mountCard(fuelDep({ failedLeg: "approving", failedOutcome: "no-funds-moved", resumeAttemptAt: 1 }))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(false)
+	})
+
+	it("hides RESUME for unknown-outcome (never resumable)", () => {
+		const w = mountCard(fuelDep({ failedLeg: "depositing", failedOutcome: "unknown-outcome" }))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(false)
+	})
+
+	it("hides RESUME once a deposit tx exists (recovery owns it)", () => {
+		const w = mountCard(fuelDep({ failedLeg: "depositing", failedOutcome: "no-funds-moved", depositTxHash: "0xd" }))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(false)
+	})
+
+	it("arms review-consent on first click, resumes on the second", async () => {
+		const w = mountCard(fuelDep({ failedLeg: "approving", failedOutcome: "no-funds-moved" }))
+		await w.find(sel(TESTIDS.journalResume)).trigger("click")
+		expect(w.find(sel(TESTIDS.journalResumeReview)).exists()).toBe(true)
+		expect(fuelResume).not.toHaveBeenCalled()
+		await w.find(sel(TESTIDS.journalResume)).trigger("click")
+		expect(fuelResume).toHaveBeenCalledWith("0xdep")
+	})
+
+	it("a legacy fuel record (no persisted facts) shows no RESUME", () => {
+		const w = mountCard(fuelDep({}))
+		expect(w.find(sel(TESTIDS.journalResume)).exists()).toBe(false)
 	})
 })

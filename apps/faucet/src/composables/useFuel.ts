@@ -1,4 +1,6 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { computeSecretHash } from "@aztec/aztec.js/crypto"
+import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import {
@@ -13,6 +15,7 @@ import {
 	markSealTrusted,
 	parseFeeJuiceDeposit,
 	planPrivateFuelDeposit,
+	privateFuelSecretHash,
 	planPublicFuelDeposit,
 	sealDepositRecord,
 } from "@nulo/bridge-core"
@@ -25,6 +28,7 @@ import {
 	cacheSecret,
 	discard,
 	flagRecordError,
+	latchResumeAttempt,
 	markSessionLive,
 	runDepositClaim,
 	runOnLane,
@@ -35,6 +39,9 @@ import {
 import { ensureDepositJournalDeps, providerFingerprint } from "./useDeposit"
 import { useBridgeWallet } from "./useBridgeWallet"
 import { useL1FeeAsset } from "./useL1FeeAsset"
+import { withOriginLock } from "@/lib/origin-lock"
+import { type ResumeHashers, type ResumeVariant, validateResume } from "@/lib/resume-validator"
+import { runResume } from "./resume-runner"
 import { useL1Wallet } from "./useL1Wallet"
 
 const log = (...args: unknown[]) => console.log("[bridge:fuel]", ...args)
@@ -52,6 +59,17 @@ const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.
  * also sets the TOP-LEVEL `secret` so the engine's public-claim gate passes (it requires `rec.secret`);
  * the claim builder reads `fuel.secret`. PRIVATE seals the salt (the sole recovery input).
  */
+/** Real crypto for the resume validator's secret-binding checks (bb-backed; the validator's own
+ *  tests inject fakes to stay bb-free). */
+const RESUME_HASHERS: ResumeHashers = {
+	computeSecretHashHex: async (secretHex) => (await computeSecretHash(Fr.fromString(secretHex))).toString(),
+	privateFuelSecretHashHex: async (saltHex, claimerHex) =>
+		(await privateFuelSecretHash(Fr.fromString(saltHex), AztecAddress.fromStringUnsafe(claimerHex))).toString(),
+}
+
+/** Direct-fuel variants the fuel flow's resume runner can drive (J4). */
+const FUEL_RESUME_VARIANTS: ReadonlySet<ResumeVariant> = new Set(["direct-fuel-public", "direct-fuel-private"])
+
 export function useFuelFlow() {
 	ensureDepositJournalDeps() // wire the journal engine WITHOUT useDepositFlow's resumeSessionWork watch.
 	const l1 = useL1Wallet()
@@ -232,5 +250,91 @@ export function useFuelFlow() {
 		return id
 	}
 
-	return { busy, error, deposit, journal }
+	/** Re-enter a pre-deposit fuel record's flow on the SAME record (journal-ux J4). Click-only;
+	 *  gated by the resume validator + origin lock + write-once latch (see resume-runner). */
+	async function resume(recordId: string): Promise<void> {
+		error.value = null
+		const wallet = l1.ensureWalletClient()
+		const from = l1.address.value
+		const recipient = bridgeWallet.selectedAccount.value
+		if (!wallet || !from) {
+			error.value = "Connect your Ethereum wallet first."
+			return
+		}
+		if (!bridgeWallet.wallet.value || !recipient) {
+			error.value = "Connect your Aztec wallet first."
+			return
+		}
+		if (!FUEL_PORTAL || !FUEL_ASSET) {
+			error.value = "Fuel is not configured for this deployment."
+			return
+		}
+		const portal = FUEL_PORTAL // capture the narrowed value for the closures below.
+		busy.value = true
+		try {
+			await feeAsset.verifyPortalAsset()
+			const result = await runResume(recordId, {
+				getRecord: (id) =>
+					journal.records.value.find((r) => r.id === id && r.direction === "deposit") as DepositJournalRecord | undefined,
+				validate: (rec) =>
+					validateResume(
+						rec,
+						{
+							connectedAztec: recipient,
+							deployment: { chainId: sepolia.id, portal, bridge: feeJuiceAddress },
+							enabledVariants: FUEL_RESUME_VARIANTS,
+						},
+						RESUME_HASHERS,
+					),
+				withLock: (name, fn) => withOriginLock(name, fn),
+				latch: (id) => latchResumeAttempt(id),
+				allowanceSufficient: async () =>
+					(await feeAsset.allowance()) >=
+					BigInt((journal.records.value.find((r) => r.id === recordId) as DepositJournalRecord).amount),
+				approve: async (rec) => {
+					setRecordStep(rec.id, "approving", "confirm the allowance in your Ethereum wallet")
+					await feeAsset.approve(BigInt(rec.amount), {
+						onSubmitted: (hash, owner) => updateRecord(rec.id, { approveTxHash: hash, approveOwner: owner }),
+					})
+					if (feeAsset.error.value) throw new Error(feeAsset.error.value)
+				},
+				deposit: async (rec) => {
+					const to = rec.isPrivate
+						? (PRIVATE_FPC_ADDRESS as `0x${string}`)
+						: (AztecAddress.fromStringUnsafe(rec.recipient).toString() as `0x${string}`)
+					const hash = await runOnLane("l1", () =>
+						wallet.writeContract({
+							address: FUEL_PORTAL,
+							abi: FeeJuicePortalAbi,
+							functionName: "depositToAztecPublic",
+							args: [to, BigInt(rec.amount), rec.id as `0x${string}`],
+							chain: sepolia,
+							account: from,
+						} as never),
+					)
+					return hash as string
+				},
+				onDepositHash: (id, hash) => updateRecord(id, { depositTxHash: hash, ...CLEAR_FAILURE_FACTS }),
+				reclassifyUnknownOutcome: (rec) =>
+					updateRecord(rec.id, {
+						...classifyDepositFailure({ leg: "depositing", depositPromptIssued: true, hasDepositTxHash: false }),
+						failedAt: Date.now(),
+					}),
+				runClaim: (id) => runDepositClaim(id),
+				setStep: (id, step, detail) => setRecordStep(id, step as never, detail),
+				flagError: (id, note) => flagRecordError(id, note),
+				lockName: (id) => `bridge-resume:${id}`,
+			})
+			if (result.status === "refused") error.value = result.verdict.reason
+			else if (result.status === "error") error.value = humanizeWalletError(result.message)
+			else if (result.status === "already-attempted")
+				error.value = "A resume was already attempted for this bridge - check your wallet activity."
+		} catch (e) {
+			error.value = humanizeWalletError(e instanceof Error ? e.message : "Resume failed")
+		} finally {
+			busy.value = false
+		}
+	}
+
+	return { busy, error, deposit, resume, journal }
 }

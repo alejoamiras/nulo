@@ -44,10 +44,11 @@ export interface ResumeContext {
 }
 
 export interface ResumeHashers {
-	/** computeSecretHash over a journaled secret hex → secret-hash hex. */
+	/** computeSecretHash over a journaled secret hex → secret-hash hex (public / plain-token). */
 	computeSecretHashHex(secretHex: string): Promise<string>
-	/** deriveBridgeSecret(salt, claimer) → secret hex (private direct fuel). */
-	deriveBridgeSecretHex(saltHex: string, claimerAddressHex: string): Promise<string>
+	/** privateFuelSecretHash(salt, claimer) → secret-hash hex — the PRIVATE direct-fuel id derivation
+	 *  (NOT computeSecretHash(deriveBridgeSecret): the private path uses a distinct hash). */
+	privateFuelSecretHashHex(saltHex: string, claimerAddressHex: string): Promise<string>
 }
 
 const HEX = /^0x[0-9a-fA-F]+$/
@@ -55,6 +56,26 @@ const MAX_AMOUNT = 2n ** 120n // generous ceiling; a journal claiming more is ta
 
 function reject(affordance: "redo" | "review-only" | "none", reason: string): ResumeVerdict {
 	return { ok: false, affordance, reason }
+}
+
+/**
+ * Cheap SYNC predicate for the card: does this record have the pre-deposit, proven-safe,
+ * not-yet-attempted shape a RESUME button should show for? It is the eligibility half of
+ * `validateResume` without the async secret recompute — the click still runs the full
+ * authoritative `validateResume` (via the resume runner), so this only decides button VISIBILITY,
+ * never authorizes a spend.
+ */
+export function resumeEligibleShape(rec: DepositJournalRecord): boolean {
+	return (
+		rec.direction === "deposit" &&
+		!rec.completedAt &&
+		!rec.depositTxHash &&
+		!rec.leafIndex &&
+		!rec.claimTxHash &&
+		rec.resumeAttemptAt === undefined &&
+		rec.failedOutcome === "no-funds-moved" &&
+		rec.failedLeg !== undefined
+	)
 }
 
 export function resumeVariantOf(rec: DepositJournalRecord): ResumeVariant {
@@ -125,8 +146,7 @@ export async function validateResume(rec: DepositJournalRecord, ctx: ResumeConte
 	if (variant === "direct-fuel-private") {
 		const salt = rec.fuel?.bridgeSecretSalt
 		if (!salt || !HEX.test(salt)) return reject("none", "private fuel record is missing its bridge-secret salt")
-		const derived = await hashers.deriveBridgeSecretHex(salt, rec.recipient)
-		const recomputed = await hashers.computeSecretHashHex(derived)
+		const recomputed = await hashers.privateFuelSecretHashHex(salt, rec.recipient)
 		if (recomputed.toLowerCase() !== rec.id.toLowerCase())
 			return reject("none", "the journaled salt does not produce this record's secret hash")
 	} else {

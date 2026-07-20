@@ -1,11 +1,11 @@
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import { describe, expect, it } from "vitest"
-import { type ResumeContext, type ResumeHashers, resumeVariantOf, validateResume } from "./resume-validator"
+import { type ResumeContext, type ResumeHashers, resumeEligibleShape, resumeVariantOf, validateResume } from "./resume-validator"
 
 /** Fake hashers (hex-preserving): secretHash(secret) = secret + "beef"; derive = salt + claimer-tail. */
 const hashers: ResumeHashers = {
 	computeSecretHashHex: async (secret) => `${secret}beef`,
-	deriveBridgeSecretHex: async (salt, claimer) => `${salt}${claimer.slice(-4)}`,
+	privateFuelSecretHashHex: async (salt, claimer) => `${salt}${claimer.slice(-4)}beef`,
 }
 
 const RECIPIENT = `0x${"ab".repeat(32)}`
@@ -114,15 +114,14 @@ describe("validateResume — hostile-field fuzz (every tampered field must rejec
 describe("validateResume — private records", () => {
 	function privateFuelRecord(): DepositJournalRecord {
 		const salt = `0x${"22".repeat(20)}`
-		const derived = `${salt}${RECIPIENT.slice(-4)}`
-		const id = `${derived}beef`
+		const id = `${salt}${RECIPIENT.slice(-4)}beef`
 		return fuelRecord({
 			isPrivate: true,
 			id,
 			secretHashHex: id,
 			secret: undefined,
 			sealedEnvelope: "blob",
-			fuel: { amount: "1", secret: derived, secretHashHex: id, minOutput: "0", bridgeSecretSalt: salt },
+			fuel: { amount: "1", secret: "0xunused", secretHashHex: id, minOutput: "0", bridgeSecretSalt: salt },
 		})
 	}
 
@@ -151,5 +150,19 @@ describe("validateResume — plain token", () => {
 		const id = `${secret}beef`
 		const rec = fuelRecord({ assetKind: undefined, fuel: undefined, secret, id, secretHashHex: id })
 		expect(await validateResume(rec, ctx(), hashers)).toEqual({ ok: true, variant: "plain-token" })
+	})
+})
+
+describe("resumeEligibleShape — the sync button-visibility predicate", () => {
+	it("true for a pre-deposit, proven-safe, not-yet-attempted record", () => {
+		expect(resumeEligibleShape(fuelRecord())).toBe(true)
+	})
+	it("false once attempted / has a hash / unknown-outcome / completed / legacy", () => {
+		expect(resumeEligibleShape(fuelRecord({ resumeAttemptAt: 1 }))).toBe(false)
+		expect(resumeEligibleShape(fuelRecord({ depositTxHash: "0xd" }))).toBe(false)
+		expect(resumeEligibleShape(fuelRecord({ leafIndex: "7" }))).toBe(false)
+		expect(resumeEligibleShape(fuelRecord({ completedAt: 9 }))).toBe(false)
+		expect(resumeEligibleShape(fuelRecord({ failedOutcome: "unknown-outcome" }))).toBe(false)
+		expect(resumeEligibleShape(fuelRecord({ failedLeg: undefined, failedOutcome: undefined }))).toBe(false)
 	})
 })

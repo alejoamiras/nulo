@@ -13,6 +13,7 @@ import { computed, ref, watch } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useFuelFlow } from "@/composables/useFuel"
 
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
@@ -21,6 +22,7 @@ import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
 import { claimFuelStandalone, overrideFuelClaim, reconcileFuelConsumed } from "@/composables/useDeposit"
+import { resumeEligibleShape } from "@/lib/resume-validator"
 
 /** Components */
 import BridgePhaseRail from "./BridgePhaseRail.vue"
@@ -38,6 +40,8 @@ const exportable = computed(() => {
 })
 
 const discardArmed = ref(false)
+const resumeArmed = ref(false)
+const fuelFlow = useFuelFlow()
 // An armed CONFIRM DISCARD that never fires must disarm - a stale armed state turns a later
 // stray click into destroying a private deposit's only sealed secret.
 let disarmTimer: ReturnType<typeof setTimeout> | undefined
@@ -192,6 +196,30 @@ const showFinish = computed(
 	() => props.record.direction === "withdraw" && stage.value !== "done" && stage.value !== "exiting" && actionable.value && idle.value,
 )
 
+// RESUME shows for a pre-deposit, proven-safe, not-yet-attempted fee-juice record (J4). The button
+// is gated by a cheap sync shape check; the click runs the full authoritative validation inside the
+// fuel flow's resume() (validator + origin lock + one-shot latch), so visibility never authorizes a
+// spend. Direct-fuel only this phase (token/fueled variants land later).
+const showResume = computed(
+	() =>
+		props.record.direction === "deposit" &&
+		assetKindOf(props.record) === "fee-juice" &&
+		resumeEligibleShape(props.record as DepositJournalRecord) &&
+		idle.value,
+)
+const resumeReview = computed(
+	() => `Resume: send ${amountDisplay.value} ${amountSymbol.value} to ${(props.record as DepositJournalRecord).recipient.slice(0, 10)}…`,
+)
+
+async function onResume() {
+	if (!resumeArmed.value) {
+		resumeArmed.value = true
+		return
+	}
+	resumeArmed.value = false
+	await fuelFlow.resume(props.record.id)
+}
+
 /** Soft notes only (e.g. the 30-min "still confirming"): ANY attention's note renders in the
  *  rail's failed phase - a parallel line here would double it. */
 const note = computed(() => (attention.value ? null : rt.value.note))
@@ -308,7 +336,17 @@ function onDiscard() {
 			>{{ link.label }}</a>
 		</div>
 
+		<p v-if="resumeArmed" class="resume-review" :data-testid="TESTIDS.journalResumeReview">{{ resumeReview }}</p>
 		<div class="actions">
+			<button
+				v-if="showResume"
+				type="button"
+				class="action"
+				:data-testid="TESTIDS.journalResume"
+				@click="onResume"
+			>
+				{{ resumeArmed ? "CONFIRM RESUME" : "RESUME" }}
+			</button>
 			<button
 				v-if="showClaim"
 				type="button"
@@ -551,5 +589,11 @@ function onDiscard() {
 	100% {
 		background: transparent;
 	}
+}
+
+.resume-review {
+	margin: 0 0 6px;
+	font: 500 12px/1.4 var(--font-mono);
+	color: var(--txt-secondary);
 }
 </style>
