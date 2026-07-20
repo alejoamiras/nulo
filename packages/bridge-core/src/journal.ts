@@ -129,7 +129,66 @@ export interface DepositJournalRecord extends JournalBase {
 	depositL2Block?: number
 	/** Present ⟺ schema 2: the deposit bought fuel on the way in. */
 	fuel?: DepositFuelBlock
+	/** Persisted failure facts — which flow leg died and with what consequence. Runtime narration
+	 *  evaporates on reload; these survive, so a rediscovered card can tell the truth ("the approve
+	 *  timed out — no funds moved") instead of deriving a misleading stage from outputs alone.
+	 *  Cleared whenever a later leg completes (a fresh depositTxHash write, a recovered leg). */
+	failedLeg?: DepositFailedLeg
+	/** The consequence classification the card narrates from. "no-funds-moved" is PROVEN (the death
+	 *  preceded any value-moving broadcast); "unknown-outcome" means a deposit prompt was issued and
+	 *  no hash returned — the tx MAY have been broadcast (permanent review-only; see the journal-ux
+	 *  plan L6/L15); "recoverable" means a depositTxHash exists and the engine can re-derive the leg. */
+	failedOutcome?: DepositFailedOutcome
+	failedAt?: number
+	/** The allowance-approval tx, persisted the moment the wallet returns (pre-receipt) so an
+	 *  approve-stage death stays inspectable. Narration as "approval confirmed" additionally
+	 *  requires the receipt-identity check (owner/token/spender/amount/status). */
+	approveTxHash?: string
+	/** The L1 account that sent the approve — the trusted expected-owner for the receipt-identity
+	 *  check (the hash alone is not proof of the right approval). */
+	approveOwner?: string
 }
+
+export type DepositFailedLeg = "sealing" | "signing" | "approving" | "depositing"
+export type DepositFailedOutcome = "no-funds-moved" | "unknown-outcome" | "recoverable"
+
+export interface DepositFailureEvidence {
+	/** The leg the flow was narrating when it threw. */
+	leg: DepositFailedLeg
+	/** A deposit wallet prompt was dispatched (writeContract issued) before the throw. */
+	depositPromptIssued: boolean
+	/** The record holds a persisted deposit tx hash. */
+	hasDepositTxHash: boolean
+}
+
+/**
+ * The (leg × evidence) → consequence table the flows persist from and the card narrates from.
+ * The ordering is load-bearing:
+ * - a persisted hash dominates everything — the leg is chain-recoverable regardless of where the
+ *   throw surfaced;
+ * - a dispatched-but-hashless deposit prompt is UNKNOWN — the tx may have been broadcast (the
+ *   wallet/RPC accepted it and the flow died before persistence), so it must never be narrated as
+ *   fund-safe nor made resumable (plan L6/L15);
+ * - everything earlier (seal, permit sign, approve, or pre-prompt deposit setup) provably moved
+ *   no funds — approvals only grant allowance, signatures only authorize.
+ */
+export function classifyDepositFailure(e: DepositFailureEvidence): {
+	failedLeg: DepositFailedLeg
+	failedOutcome: DepositFailedOutcome
+} {
+	if (e.hasDepositTxHash) return { failedLeg: "depositing", failedOutcome: "recoverable" }
+	if (e.leg === "depositing" && e.depositPromptIssued) return { failedLeg: "depositing", failedOutcome: "unknown-outcome" }
+	return { failedLeg: e.leg, failedOutcome: "no-funds-moved" }
+}
+
+/** Patch that clears the persisted failure facts — applied whenever a later leg completes
+ *  (a fresh depositTxHash write, a chain-recovered leg). `patchRecord`'s spread + JSON write
+ *  drops undefined keys, so this genuinely removes the fields. */
+export const CLEAR_FAILURE_FACTS = {
+	failedLeg: undefined,
+	failedOutcome: undefined,
+	failedAt: undefined,
+} as const
 
 export interface WithdrawJournalRecord extends JournalBase {
 	direction: "withdraw"

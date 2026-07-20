@@ -12,6 +12,9 @@ import {
 	type EncryptionKey,
 	assetKindOf,
 	awaitL1Receipt,
+	CLEAR_FAILURE_FACTS,
+	classifyDepositFailure,
+	type DepositFailedLeg,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
@@ -284,6 +287,7 @@ export function ensureDepositJournalDeps(): void {
 				updateRecord(rec.id, {
 					leafIndex: ev.leafIndex.toString(),
 					fuel: { ...fuel, received: ev.amount.toString(), leafIndex: ev.leafIndex.toString() },
+					...CLEAR_FAILURE_FACTS,
 				})
 				return "recovered"
 			}
@@ -312,6 +316,7 @@ export function ensureDepositJournalDeps(): void {
 						messageHash: fe.args.fuelKey,
 						received: fe.args.fuelAmount.toString(),
 					},
+					...CLEAR_FAILURE_FACTS,
 				})
 				return "recovered"
 			}
@@ -320,7 +325,7 @@ export function ensureDepositJournalDeps(): void {
 			if (event?.args?.index === undefined) {
 				throw new Error("The confirmed Ethereum transaction has no recognizable deposit event - contact support before retrying.")
 			}
-			updateRecord(rec.id, { leafIndex: event.args.index.toString() })
+			updateRecord(rec.id, { leafIndex: event.args.index.toString(), ...CLEAR_FAILURE_FACTS })
 			return "recovered"
 		},
 		claim: async (rec, secretHex, envelope) => {
@@ -644,6 +649,9 @@ export function useDepositFlow() {
 		}
 		busy.value = true
 		let id: string | null = null
+		// Failure-fact evidence for the catch: which leg is live + whether a deposit prompt went out.
+		let leg: DepositFailedLeg = "sealing"
+		let depositPromptIssued = false
 		try {
 			// Fuel pre-flight BEFORE any record exists: quote-required (a missing quote must never
 			// sign away the slice with a junk floor), floor from config slippage.
@@ -822,10 +830,13 @@ export function useDepositFlow() {
 					fuelCfg.permit2,
 					sepolia.id,
 				)
+				leg = "signing"
 				const signature = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...typed } as never))
 
 				log("bridgeWithFuel (confirm in your Ethereum wallet)")
+				leg = "depositing"
 				setRecordStep(id, "depositing", "confirm the fueled deposit in your Ethereum wallet")
+				depositPromptIssued = true
 				const fuelTxHash = await runOnLane("l1", () =>
 					wallet.writeContract({
 						address: fuelCfg.router,
@@ -852,7 +863,7 @@ export function useDepositFlow() {
 						account: from,
 					} as never),
 				)
-				updateRecord(id, { depositTxHash: fuelTxHash as string })
+				updateRecord(id, { depositTxHash: fuelTxHash as string, ...CLEAR_FAILURE_FACTS })
 				setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 				const fuelRecId = id
 				const fuelReceipt = await awaitL1Receipt(l1.publicClient, fuelTxHash as `0x${string}`, {
@@ -922,6 +933,7 @@ export function useDepositFlow() {
 			}
 
 			// Allowance-skip: approve only when the portal's allowance is short.
+			leg = "approving"
 			setRecordStep(id, "approving", "checking the portal allowance")
 			const allowance = (await l1.publicClient.readContract({
 				address: L1_USDC,
@@ -942,6 +954,7 @@ export function useDepositFlow() {
 						account: from,
 					}),
 				)
+				updateRecord(id, { approveTxHash: approveHash as string, approveOwner: from })
 				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`)
 				markApproveOutcome(id, "done")
 			} else {
@@ -952,7 +965,9 @@ export function useDepositFlow() {
 			const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
 			const depositArgs = isPrivate ? [tokenAmount, id] : [recipient as `0x${string}`, tokenAmount, id as `0x${string}`]
 			log(`${depositFn} (confirm in your Ethereum wallet)`)
+			leg = "depositing"
 			setRecordStep(id, "depositing", "confirm the deposit in your Ethereum wallet")
+			depositPromptIssued = true
 			const depositTxHash = await runOnLane("l1", () =>
 				wallet.writeContract({
 					address: L1_PORTAL,
@@ -964,7 +979,7 @@ export function useDepositFlow() {
 				} as never),
 			)
 			// Persisted the moment the hash exists - leafIndex stays chain-recoverable from here on.
-			updateRecord(id, { depositTxHash: depositTxHash as string })
+			updateRecord(id, { depositTxHash: depositTxHash as string, ...CLEAR_FAILURE_FACTS })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 			const recId = id
 			const receipt = await awaitL1Receipt(l1.publicClient, depositTxHash as `0x${string}`, {
@@ -1016,6 +1031,8 @@ export function useDepositFlow() {
 					discard(id)
 					error.value = "Rejected in your wallet - nothing was sent."
 				} else if (rec) {
+					const cls = classifyDepositFailure({ leg, depositPromptIssued, hasDepositTxHash: !!rec.depositTxHash })
+					updateRecord(id, { ...cls, failedAt: Date.now() })
 					flagRecordError(id, `${msg}. Your funds are not lost - this bridge stays in Pending.`)
 				}
 			}

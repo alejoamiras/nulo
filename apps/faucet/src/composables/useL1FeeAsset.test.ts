@@ -5,12 +5,13 @@ const addressRef = ref<string | null>(null)
 const readContract = vi.fn(async (_a?: { functionName?: string }): Promise<unknown> => 0n)
 const writeContract = vi.fn(async () => "0xapprovetx")
 const waitForTransactionReceipt = vi.fn(async () => ({ status: "success" }))
+const getTransactionReceipt = vi.fn(async () => ({ status: "success" }))
 const ensureWalletClient = vi.fn(() => ({ writeContract }))
 
 vi.mock("@/composables/useL1Wallet", () => ({
 	useL1Wallet: () => ({
 		address: addressRef,
-		publicClient: { readContract, waitForTransactionReceipt },
+		publicClient: { readContract, waitForTransactionReceipt, getTransactionReceipt },
 		ensureWalletClient,
 	}),
 }))
@@ -83,6 +84,25 @@ describe("useL1FeeAsset", () => {
 		)
 		expect(waitForTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: "0xapprovetx" }))
 		expect(fa.approving.value).toBe(false)
+	})
+
+	it("approve onSubmitted fires with (hash, owner) BEFORE the receipt wait — and still fires when the wait fails", async () => {
+		const { useL1FeeAsset } = await freshModule()
+		const fa = useL1FeeAsset()
+		addressRef.value = OWNER
+		const order: string[] = []
+		waitForTransactionReceipt.mockImplementationOnce(async () => {
+			order.push("wait")
+			throw new Error("Timed out while waiting for transaction")
+		})
+		const onSubmitted = vi.fn(() => order.push("submitted"))
+		await fa.approve(1000n, { onSubmitted })
+		expect(onSubmitted).toHaveBeenCalledWith("0xapprovetx", OWNER)
+		// The whole point: the journal write happens BEFORE the wait, so it survives the timeout
+		// path the smoke test hit. (The resilient wait then recovers via the direct receipt read.)
+		expect(order).toEqual(["submitted", "wait"])
+		expect(getTransactionReceipt).toHaveBeenCalledWith(expect.objectContaining({ hash: "0xapprovetx" }))
+		expect(fa.error.value).toBeNull()
 	})
 
 	it("approve without a wallet surfaces the connect error and never writes", async () => {

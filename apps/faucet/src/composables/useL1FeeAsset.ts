@@ -86,8 +86,14 @@ export function useL1FeeAsset() {
 		portalAssetVerified = true
 	}
 
-	/** Approve the FeeJuicePortal to pull `amount` of the fee asset (one wallet prompt). */
-	async function approve(amount: bigint): Promise<void> {
+	/** Approve the FeeJuicePortal to pull `amount` of the fee asset (one wallet prompt).
+	 *  `onSubmitted` fires the moment the wallet returns the hash — BEFORE the receipt wait — so the
+	 *  caller can journal the approval even when the wait later times out or this function's catch
+	 *  swallows the failure into `error.value` (a plain return value is lost on exactly that path). */
+	async function approve(
+		amount: bigint,
+		opts: { onSubmitted?: (hash: `0x${string}`, owner: `0x${string}`) => void } = {},
+	): Promise<void> {
 		const wallet = l1.ensureWalletClient()
 		const owner = l1.address.value
 		if (!wallet || !owner) {
@@ -109,6 +115,7 @@ export function useL1FeeAsset() {
 				chain: sepolia,
 				account: owner,
 			})
+			opts.onSubmitted?.(hash, owner)
 			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces as
 			// an error, never a false "approved" the deposit's transferFrom then fails behind (mirrors mint()).
 			const receipt = await awaitL1Receipt(l1.publicClient, hash)

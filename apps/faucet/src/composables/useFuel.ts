@@ -3,6 +3,9 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import {
 	awaitL1Receipt,
+	CLEAR_FAILURE_FACTS,
+	classifyDepositFailure,
+	type DepositFailedLeg,
 	FeeJuicePortalAbi,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
@@ -79,6 +82,9 @@ export function useFuelFlow() {
 		}
 		busy.value = true
 		let id: string | null = null
+		// Failure-fact evidence for the catch: which leg is live + whether the deposit prompt went out.
+		let leg: DepositFailedLeg = "sealing"
+		let depositPromptIssued = false
 		try {
 			// Fail-closed portal/asset cross-check BEFORE any record, signature, approve or deposit: the bundled
 			// FeeJuicePortal must actually accept the configured fee asset (its on-chain UNDERLYING()).
@@ -150,14 +156,20 @@ export function useFuelFlow() {
 			}
 
 			// Allowance-skip: approve the FeeJuicePortal only when its allowance is short.
+			leg = "approving"
 			setRecordStep(id, "approving", "checking the FeeJuicePortal allowance")
 			if ((await feeAsset.allowance()) < amount) {
 				setRecordStep(id, "approving", "confirm the allowance in your Ethereum wallet")
-				await feeAsset.approve(amount)
+				const recId = id
+				await feeAsset.approve(amount, {
+					onSubmitted: (hash, owner) => updateRecord(recId, { approveTxHash: hash, approveOwner: owner }),
+				})
 				if (feeAsset.error.value) throw new Error(feeAsset.error.value)
 			}
 
+			leg = "depositing"
 			setRecordStep(id, "depositing", "confirm the Fuel deposit in your Ethereum wallet")
+			depositPromptIssued = true
 			const depositTxHash = await runOnLane("l1", () =>
 				wallet.writeContract({
 					address: FUEL_PORTAL,
@@ -168,7 +180,7 @@ export function useFuelFlow() {
 					account: from,
 				} as never),
 			)
-			updateRecord(id, { depositTxHash: depositTxHash as string })
+			updateRecord(id, { depositTxHash: depositTxHash as string, ...CLEAR_FAILURE_FACTS })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
 			const recId = id
 			const receipt = await awaitL1Receipt(l1.publicClient, depositTxHash as `0x${string}`, {
@@ -209,6 +221,8 @@ export function useFuelFlow() {
 					discard(id)
 					error.value = "Rejected in your wallet - nothing was sent."
 				} else if (rec) {
+					const cls = classifyDepositFailure({ leg, depositPromptIssued, hasDepositTxHash: !!rec.depositTxHash })
+					updateRecord(id, { ...cls, failedAt: Date.now() })
 					flagRecordError(id, `${msg}. Your funds are not lost - this bridge stays in Pending.`)
 				}
 			}
