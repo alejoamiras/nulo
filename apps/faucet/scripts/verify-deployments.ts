@@ -1,9 +1,16 @@
 /**
- * Verify that deployments.json's committed addresses match what
+ * Verify that a deployments json's committed addresses match what
  * `getContractInstanceFromInstantiationParams` derives from the
  * stored constructor params + salts. If the constants drift from the
  * deploy script's output, wallet scope enforcement will reject every
  * `registerContract` call at connect time — failing here is cheaper.
+ *
+ *   bun apps/faucet/scripts/verify-deployments.ts [--config <path>]
+ *
+ * Default target is the committed LIVE src/contracts/deployments.json;
+ * `--config` points it at a candidate (candidate-first: the P6 redeploy
+ * verifies deployments.candidate.json through the SAME derivation the app
+ * will later trust, before `promote` touches the live file).
  *
  * Lives outside vitest because bb.js's sync poseidon hash relies on a
  * WASM runtime init that jsdom doesn't provide. As a bun-run script
@@ -17,9 +24,36 @@ import { getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/cont
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { EthAddress } from "@aztec/foundation/eth-address"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
-import { DRIPPER, OLUN, rebuildDripperInstance, rebuildOlunInstance, rebuildNuloInstance, NULO } from "../src/contracts/deployments.js"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
+import {
+	type DeploymentsJson,
+	rebuildDripperInstanceFrom,
+	rebuildTokenInstanceFrom,
+	type TokenDeployment,
+} from "../src/contracts/deployments.js"
+
+const here = dirname(fileURLToPath(import.meta.url))
+const DEFAULT_CONFIG = join(here, "..", "src", "contracts", "deployments.json")
+
+function parseConfigPath(argv: string[]): string {
+	const i = argv.indexOf("--config")
+	if (i < 0) return DEFAULT_CONFIG
+	const p = argv[i + 1]
+	if (!p) {
+		console.error("--config requires a path")
+		process.exit(1)
+	}
+	return p
+}
+
+function findToken(data: DeploymentsJson, symbol: "NULO" | "OLUN"): TokenDeployment {
+	const t = data.tokens.find((t) => t.constructorArgs.symbol === symbol)
+	if (!t) throw new Error(`deployments json missing token: ${symbol}`)
+	return t
+}
 
 /**
  * Bridge-manifest verifier (L10 / fresh-audit F1): OPT-IN via `BRIDGE_MANIFEST`. Rebuilds the L2
@@ -49,7 +83,8 @@ async function verifyBridgeManifest(path: string): Promise<boolean> {
 	const [name, symbol, decimals] = m.l2.token.constructorArgs
 	const token = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
 		...common,
-		constructorArgs: [name, symbol, decimals, proxy.address],
+		// 5.0.1 standards Token: constructor_with_minter's 5th param is auth_contract (ZERO = none).
+		constructorArgs: [name, symbol, decimals, proxy.address, AztecAddress.ZERO],
 		salt: new Fr(BigInt(m.l2.token.salt)),
 		constructorArtifact: m.l2.token.constructorArtifact,
 	})
@@ -82,34 +117,29 @@ async function verifyBridgeManifest(path: string): Promise<boolean> {
 }
 
 async function main(): Promise<void> {
-	const [dripper, usdc, eth] = await Promise.all([rebuildDripperInstance(), rebuildNuloInstance(), rebuildOlunInstance()])
+	const configPath = parseConfigPath(process.argv.slice(2))
+	const data = JSON.parse(readFileSync(configPath, "utf8")) as DeploymentsJson
+	console.log(`verifying ${configPath}`)
 
-	const checks: Array<{ name: string; computed: string; committed: string; ok: boolean }> = [
-		{
-			name: "dripper",
-			computed: dripper.address.toString(),
-			committed: DRIPPER.toString(),
-			ok: dripper.address.equals(DRIPPER),
-		},
-		{
-			name: "usdc",
-			computed: usdc.address.toString(),
-			committed: NULO.toString(),
-			ok: usdc.address.equals(NULO),
-		},
-		{
-			name: "eth",
-			computed: eth.address.toString(),
-			committed: OLUN.toString(),
-			ok: eth.address.equals(OLUN),
-		},
+	const nuloRecord = findToken(data, "NULO")
+	const olunRecord = findToken(data, "OLUN")
+	const [dripper, nulo, olun] = await Promise.all([
+		rebuildDripperInstanceFrom(data.dripper),
+		rebuildTokenInstanceFrom(nuloRecord),
+		rebuildTokenInstanceFrom(olunRecord),
+	])
+
+	const checks: Array<{ name: string; computed: string; committed: string }> = [
+		{ name: "dripper", computed: dripper.address.toString(), committed: data.dripper.address },
+		{ name: "nulo", computed: nulo.address.toString(), committed: nuloRecord.address },
+		{ name: "olun", computed: olun.address.toString(), committed: olunRecord.address },
 	]
 
 	let allOk = true
 	for (const c of checks) {
-		const status = c.ok ? "OK" : "DRIFT"
-		console.log(`[${status}] ${c.name.padEnd(8)} computed=${c.computed} committed=${c.committed}`)
-		if (!c.ok) allOk = false
+		const ok = c.computed.toLowerCase() === c.committed.toLowerCase()
+		console.log(`[${ok ? "OK" : "DRIFT"}] ${c.name.padEnd(8)} computed=${c.computed} committed=${c.committed}`)
+		if (!ok) allOk = false
 	}
 
 	// L10 / F1: opt-in bridge-manifest verification (Phase 6 candidate). Unset ⇒ skipped.
@@ -122,7 +152,7 @@ async function main(): Promise<void> {
 	if (!allOk) {
 		console.error(
 			"\nFAIL: a manifest is out of sync with rebuild logic (or missing required bridge config).\n" +
-				"Re-run the deploy and commit the regenerated JSON.\n",
+				"Re-run `bun run deploy:testnet[:dry]` and re-verify the regenerated candidate.\n",
 		)
 		process.exit(1)
 	}

@@ -12,7 +12,7 @@ import AccountSelectRow from "./AccountSelectRow.vue"
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { formatCaipAccount } from "@/wallet/utils/caip"
-import { buildCapabilityItems, type UICapabilityItem } from "./build-items"
+import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -39,6 +39,7 @@ const capabilities = ref<UICapabilityItem[]>([])
 
 const needsAccountSelection = ref(false)
 const availableAccounts = ref<UIAccount[]>([])
+
 const selectedAccounts = ref<UIAccount[]>([])
 const accountAliases = ref<Record<string, string>>({})
 
@@ -196,14 +197,18 @@ const approve = async () => {
 	}
 	try {
 		isLoading.value = true
-		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected).map((c) => c.capability)
+		// Riders are excluded here: the authwit rider's `capability` IS the
+		// accounts cap, which is pushed separately below — including riders
+		// would grant accounts twice (and bypass the account picker's own
+		// selected-accounts gate).
+		const approvedNew = capabilities.value.filter((c) => c.isNew && c.selected && !c.authwitRider).map((c) => c.capability)
 		const existing = capabilities.value.filter((c) => !c.isNew).map((c) => c.capability)
 
 		const granted: Capability[] = [...approvedNew, ...existing]
 		if (needsAccountSelection.value && selectedAccounts.value.length > 0) {
 			const delta = payload.value!.params.delta as Capability[]
 			const accountsCap = delta.find((cap) => cap.type === "accounts")
-			if (accountsCap) granted.push(accountsCap)
+			if (accountsCap) granted.push(buildGrantedAccountsCap(accountsCap, capabilities.value))
 		}
 
 		let resultSelectedAccounts: string[] | undefined

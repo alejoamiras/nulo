@@ -19,9 +19,9 @@ describe("PXE_METHOD_DESCRIPTORS", () => {
 		}
 	})
 
-	test("derives the 18-method in-process subset with no duplicates", () => {
-		expect(PXE_IPXE_METHODS).toHaveLength(18)
-		expect(new Set(PXE_IPXE_METHODS).size).toBe(18)
+	test("derives the 17-method in-process subset with no duplicates", () => {
+		expect(PXE_IPXE_METHODS).toHaveLength(17)
+		expect(new Set(PXE_IPXE_METHODS).size).toBe(17)
 	})
 
 	test("excludes the SW-only methods from the in-process subset", () => {

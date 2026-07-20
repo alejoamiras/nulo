@@ -59,10 +59,14 @@ export const COMPAT_EPOCH_FIELD = "compat-epoch"
  *  have migrated the live store. */
 export const BACKUP_SCHEMA_VERSION_FIELD = "backup-schema-version"
 
-/** The account-contract generation this build produces and accepts. The
- *  legacy conflated `schema-version: 2` really guarded this — the value 2 is
- *  kept so the epoch semantics stay continuous. */
-export const CURRENT_COMPAT_EPOCH = 2
+/** The account-contract generation this build produces and accepts.
+ *  Epoch 3 = the Aztec 5.0.0 signing-key-root account model (NULO-ACCOUNT-KDF v1): the
+ *  seed→address derivation changed, so every epoch-2 backup's stored account addresses are
+ *  stale — restoring them would create accounts that fail `getAccountContract`'s
+ *  address-consistency assert at first load. The epoch gate is the designed NON-migratable
+ *  hard reject for exactly this class of change (crypto/derivation rotations are never
+ *  storage-migratable). Epoch 2 was the rc-era secret-root generation. */
+export const CURRENT_COMPAT_EPOCH = 3
 
 const SUPPORTED_COMPAT_EPOCHS: ReadonlySet<number> = new Set([CURRENT_COMPAT_EPOCH])
 

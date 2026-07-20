@@ -32,9 +32,9 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { bridgeAt, submitPrivateClaim } from "../src/l2"
 import { assertSaltV2, parseClaimDescriptor, redactDescriptorForLog, requireRelayerSecret } from "../src/relay-claim"
@@ -70,7 +70,10 @@ async function main(): Promise<void> {
 	//    use, via the sponsored FPC (getContract(addr) skips the deploy when it already exists).
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
-	const manager = await ewallet.createSchnorrAccount(relayerSecret, Fr.ZERO, deriveSigningKey(relayerSecret))
+	// 5.0.1: the account secret + signing key are BOTH derived from the seed via the Nulo KDF
+	// (deriveSigningKey was removed from @aztec/stdlib/keys). Mirrors every other testnet script.
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(relayerSecret)
+	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
 	const relayerAddr = (await manager.getAccount()).getAddress()
 	const fpc = await getContractInstanceFromInstantiationParams(SponsoredFPCContract.artifact, {
 		salt: new Fr(SPONSORED_FPC_SALT),
@@ -100,7 +103,8 @@ async function main(): Promise<void> {
 	const token = await getContractInstanceFromInstantiationParams(TokenContractArtifact, {
 		publicKeys: PublicKeys.default(),
 		deployer: AztecAddress.ZERO,
-		constructorArgs: [tokenName, tokenSymbol, tokenDecimals, proxy.address],
+		// 5.0.1 standards Token: constructor_with_minter's 5th param is auth_contract (ZERO = none).
+		constructorArgs: [tokenName, tokenSymbol, tokenDecimals, proxy.address, AztecAddress.ZERO],
 		salt: new Fr(BigInt(manifest.l2.token.salt)),
 		constructorArtifact: manifest.l2.token.constructorArtifact,
 	})

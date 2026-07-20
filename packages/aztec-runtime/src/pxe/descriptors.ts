@@ -51,7 +51,6 @@ export const PXE_METHOD_DESCRIPTORS = {
 	getRegisteredAccounts: { rpc: true, ipxe: true, requiresNetwork: true },
 	registerContractClass: { rpc: true, ipxe: true, requiresNetwork: true },
 	registerContract: { rpc: true, ipxe: true, requiresNetwork: true },
-	updateContract: { rpc: true, ipxe: true, requiresNetwork: true },
 	getContracts: { rpc: true, ipxe: true, requiresNetwork: true },
 	getNotes: { rpc: true, ipxe: true, requiresNetwork: true },
 	proveTx: { rpc: true, ipxe: true, requiresNetwork: true },
@@ -63,6 +62,7 @@ export const PXE_METHOD_DESCRIPTORS = {
 	getBlockTimestamp: { rpc: true, ipxe: false, requiresNetwork: true },
 	clearChainState: { rpc: true, ipxe: false, requiresNetwork: false },
 	clearProfileState: { rpc: true, ipxe: false, requiresNetwork: false },
+	provisionChainStoreKey: { rpc: true, ipxe: false, requiresNetwork: false },
 } as const satisfies Record<keyof Methods, PxeMethodDescriptor>
 
 type Descriptors = typeof PXE_METHOD_DESCRIPTORS

@@ -60,6 +60,7 @@ export const TESTIDS = {
 	fuelPresetPrivate: "fa-fuel-preset-private",
 	fuelPresetPublic: "fa-fuel-preset-public",
 	fuelSubmit: "fa-fuel-submit",
+	feeJuiceNotice: "fa-fee-juice-notice",
 	fuelFormError: "fa-fuel-form-error",
 	fuelFlowError: "fa-fuel-flow-error",
 	fuelMintCard: "fa-fuel-mint-card",

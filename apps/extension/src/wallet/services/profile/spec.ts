@@ -1,5 +1,5 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { Base64CredentialId, Base64MasterSecret, PasskeyCredentialData } from "@nulo/wallet-crypto"
+import type { Base64CredentialId, Base64MasterSecret, PasskeyCredentialData, SessionWrappedSecret } from "@nulo/wallet-crypto"
 import type { Restored } from "@/wallet/base"
 
 export const PROFILE_SERVICE_NAME = "profile"
@@ -24,8 +24,14 @@ export type ProfileInfo = {
 	type: ProfileType
 }
 
-export type Profile = ProfileInfo &
-	(
+export type Profile = ProfileInfo & {
+	/** 128-bit random incarnation generation (hex), minted fresh at EVERY row
+	 *  creation — including a same-id backup re-import. The PXE layer fences
+	 *  provisions/ops/clears on it so a deleted incarnation can never be
+	 *  resurrected in the offscreen document (#281 D4). Never reused, never
+	 *  derived from the id. */
+	pxeGeneration: string
+} & (
 		| {
 				type: "password"
 				guard: string
@@ -37,10 +43,23 @@ export type Profile = ProfileInfo &
 		  }
 	)
 
+/** Mint a fresh 128-bit Web-Crypto incarnation generation (32 hex chars). */
+export function mintPxeGeneration(): string {
+	const bytes = crypto.getRandomValues(new Uint8Array(16))
+	return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
 export type Session = {
 	/** Profile id. */
 	profile: string
-	/** Profile passhash. */
+	/** F-11: random-token wrapped-secret silent-restore bearer (non-strict
+	 *  password profiles only). Replaces `passhash` — see `SessionSecretBox`.
+	 *  The token is random, not password-derived, so a session-store leak no
+	 *  longer exposes a password-equivalent value. */
+	bearer?: SessionWrappedSecret
+	/** @deprecated F-11: legacy password-equivalent bearer (unsalted
+	 *  `SHA-256(password)`). Written only by pre-F-11 code; the new `restore()`
+	 *  NEVER accepts it — such a session is `silentClose`d (one-time re-unlock). */
 	passhash?: string
 	/** Creation time */
 	since: number

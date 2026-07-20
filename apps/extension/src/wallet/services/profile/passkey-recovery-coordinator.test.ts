@@ -200,6 +200,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: "pid",
 				name: "P",
 				type: "passkey",
+				pxeGeneration: "gen-test",
 				credentialId: "stored-credential",
 			}
 
@@ -215,6 +216,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: "pid",
 				name: "P",
 				type: "passkey",
+				pxeGeneration: "gen-test",
 				credentialId: "",
 			} as Profile & { type: "passkey" }
 
@@ -233,6 +235,7 @@ describe("PasskeyRecoveryCoordinator", () => {
 				id: "pid",
 				name: "P",
 				type: "passkey",
+				pxeGeneration: "gen-test",
 				credentialId: "stored-credential",
 			}
 

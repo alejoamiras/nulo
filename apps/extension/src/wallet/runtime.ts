@@ -39,6 +39,8 @@ import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
 import { ProfileService } from "./services/profile/service"
+import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
+import { derivePxeStoreKey } from "@nulo/wallet-crypto"
 import { TaskService } from "./services/task/service"
 import { TokenService } from "./services/token/service"
 import { TokenBalanceService } from "./services/token-balance/service"
@@ -191,7 +193,34 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the
 		// composition root wires browserApi"). Accepted behavior change; seam-pinned in
 		// service.integration.test.ts "Q10 composition seam".
-		services.add(new ProfileService(config, logger, browserApi))
+		const profileService = new ProfileService(config, logger, browserApi)
+		services.add(profileService)
+		// The per-profile PXE store encryption key: derived on demand from the in-memory master
+		// (HKDF, wallet-crypto) and provisioned to the offscreen by the PXE clients' missing-key
+		// retry path. The master never crosses the seam; a locked profile yields undefined and
+		// the PXE op fails as it should. The provision pairs the key with the row's CURRENT
+		// pxeGeneration — read fresh under the facade lock (row-exists + not-tombstoned), so a
+		// provider that captured the master before a deletion cannot re-provision the erased
+		// incarnation afterwards (#281 D4).
+		registerPxeStoreKeyProvider(async (profileId) => {
+			const generation = await profileService.getPxeGeneration(profileId)
+			if (!generation) return undefined
+			const master = await profileService.getProfileSecret(profileId).catch(() => undefined)
+			if (!master) return undefined
+			const key = await derivePxeStoreKey(new Uint8Array(master.toBuffer()), profileId)
+			// Re-read the generation AFTER the slow HKDF and require it unchanged: a deletion
+			// (+ possible same-id re-import) can land during derivation, and the offscreen's
+			// in-memory `deleted(gen)` fence does NOT survive an offscreen restart — a stale
+			// provision that crosses a restart would otherwise be accepted by a fresh `unseen`
+			// offscreen and resurrect the erased store (concurrency audit HIGH #1). This SW-side
+			// re-check closes the read→HKDF→send gap regardless of offscreen reincarnation.
+			const generationNow = await profileService.getPxeGeneration(profileId)
+			if (generationNow !== generation) return undefined
+			return { key, generation }
+		})
+		// Generation-only capture for outgoing ops (no HKDF per op) — stamps
+		// pxeGeneration onto each op's NetworkInfo; a retry reuses its capture.
+		registerPxeGenerationProvider((profileId) => profileService.getPxeGeneration(profileId))
 		services.add(new TaskService(logger))
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))

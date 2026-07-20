@@ -36,17 +36,17 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "2.5.1",
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2"
   },
   "packageManager": "bun@1.3.14",
-  "version": "0.24.0",
+  "version": "0.25.0",
   "overrides": {
     "vite": "^8.0.0"
   },
   "patchedDependencies": {
-    "@aztec/noir-noirc_abi@5.0.0-rc.2": "patches/@aztec%2Fnoir-noirc_abi@5.0.0-rc.2.patch",
-    "@aztec/noir-acvm_js@5.0.0-rc.2": "patches/@aztec%2Fnoir-acvm_js@5.0.0-rc.2.patch"
+    "@aztec/noir-noirc_abi@5.0.1": "patches/@aztec%2Fnoir-noirc_abi@5.0.1.patch",
+    "@aztec/noir-acvm_js@5.0.1": "patches/@aztec%2Fnoir-acvm_js@5.0.1.patch"
   }
 }

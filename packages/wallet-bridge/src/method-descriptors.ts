@@ -56,7 +56,7 @@ export type NetworkOperationKind =
 	| "aztec_registerContract"
 
 /** Operation kinds routed via `buildAccountOperation` (network + account context). */
-export type AccountOperationKind = "aztec_simulateTx" | "aztec_executeUtility" | "aztec_profileTx" | "aztec_createAuthWit"
+export type AccountOperationKind = "aztec_simulateTx" | "aztec_executeUtility" | "aztec_profileTx"
 
 // Compile-time proof the route-narrowed kinds stay subsets of Operation["kind"].
 // If a kind is renamed in operation.ts and not here, this stops compiling.
@@ -190,7 +190,10 @@ const METHOD_REGISTRY_SOURCE = {
 	// ── accounts ──
 	createAuthWit: {
 		capability: "accounts",
-		routing: { via: "account-operation", kind: "aztec_createAuthWit" },
+		// Routed via a dispatcher handler (not the generic account-operation path) so it
+		// can resolve the signer from args[0], bind name↔selector in execution, and route
+		// uncovered/inner-hash intents to a confirmation popup instead of silent signing.
+		routing: { via: "handler" },
 		scopeCheck: checkCreateAuthWit,
 		argSchema: argsCreateAuthWit,
 	},

@@ -37,13 +37,15 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { RegistryAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { deriveSigningKey } from "@aztec/stdlib/keys"
+import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
+import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 const TOKEN_NAME = "Aztec Nulo"
@@ -57,6 +59,9 @@ const MNEMONIC = process.env.MNEMONIC
 if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
 
 const fromJournalMode = process.argv.includes("--from-journal")
+// `--reuse-token <address>`: keep the EXISTING AZLO L1 ERC20 (readback-verified below)
+// and deploy only a NEW portal + L2 set against it. Malformed input hard-stops.
+const reuseTokenAddress = parseReuseTokenArg(process.argv)
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -131,6 +136,12 @@ async function main() {
 
 	// ─── L1 (Sepolia) ────────────────────────────────────────────────
 	const account = PRIVATE_KEY ? privateKeyToAccount(PRIVATE_KEY) : mnemonicToAccount(MNEMONIC as string)
+	// Signer pin (codex ultra-audit HIGH): the broadcast script itself asserts the
+	// deployer == the plan-pinned signer, so sourcing a WRONG key/mnemonic before this
+	// script can't spend from an unexpected account (verify runs in a separate shell).
+	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
+		throw new Error(`L1 deployer ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
+	}
 	console.log("L1 deployer", account.address)
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
@@ -168,27 +179,41 @@ async function main() {
 	if (!recorded) appendJournal(JOURNAL_PATH, { phase: "generation", salts })
 
 	const usdcArt = evmArtifact("MintableERC20")
-	// WIPE cutover reuses the LIVE L1 token (EXISTING_L1_TOKEN) — the WIPE is of L2 STATE, not the L1
-	// token/pools. A fresh L1 token would orphan the AZLO/WETH pool, the quoter, and every user's L1
-	// balance (fresh-audit R4). Read-back the identity so a wrong address fails closed.
-	const EXISTING_L1_TOKEN = process.env.EXISTING_L1_TOKEN as `0x${string}` | undefined
 	let usdc: `0x${string}`
-	if (EXISTING_L1_TOKEN) {
-		const readTok = (fn: string) =>
-			pub.readContract({ address: EXISTING_L1_TOKEN, abi: usdcArt.abi as never, functionName: fn } as never)
-		const [sym, dec, cap] = (await Promise.all([readTok("symbol"), readTok("decimals"), readTok("maxMintPerTx")])) as [
-			string,
-			number,
-			bigint,
-		]
-		const expectedCap = 1000n * 10n ** BigInt(TOKEN_DECIMALS)
-		if (sym !== TOKEN_SYMBOL || Number(dec) !== TOKEN_DECIMALS || BigInt(cap) !== expectedCap) {
-			throw new Error(
-				`EXISTING_L1_TOKEN ${EXISTING_L1_TOKEN} identity mismatch: symbol=${sym} decimals=${dec} maxMintPerTx=${cap} (want ${TOKEN_SYMBOL}/${TOKEN_DECIMALS}/${expectedCap})`,
-			)
+	if (reuseTokenAddress) {
+		// --from-journal resume: the flag must agree with the journal's recorded usdc —
+		// journaling the flag value unchecked would poison later resumes (codex audit).
+		if (fromJournalMode) {
+			const recordedUsdc = recorded?.confirmed["usdc"]
+			if (recordedUsdc && recordedUsdc.toLowerCase() !== reuseTokenAddress.toLowerCase()) {
+				throw new Error(`--reuse-token ${reuseTokenAddress} != journal-recorded usdc ${recordedUsdc} — STOP`)
+			}
 		}
-		console.log("reusing existing L1 token", EXISTING_L1_TOKEN, `(${sym}/${dec}) — no fresh deploy, pools preserved`)
-		usdc = EXISTING_L1_TOKEN
+		// Reuse mode: the reused address must BE the manifest's token when a live
+		// manifest exists (metadata alone accepts any same-shaped ERC20), and the
+		// live contract's metadata must match the expected identity.
+		let manifestUsdc: string | undefined
+		try {
+			manifestUsdc = (
+				JSON.parse(readFileSync(join(PUBLIC_DIR, "testnet-bridge.json"), "utf8")) as {
+					l1?: { usdc?: string }
+				}
+			).l1?.usdc
+		} catch {
+			manifestUsdc = undefined
+		}
+		if (manifestUsdc === undefined) console.log("no live manifest l1.usdc — metadata-only reuse verification")
+		assertReuseMatchesManifest(reuseTokenAddress, manifestUsdc)
+		const tokenR = getContract({ address: reuseTokenAddress, abi: usdcArt.abi as Abi, client: pub })
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const tr = tokenR.read as any
+		assertReusedTokenMetadata(
+			{ name: String(await tr.name()), symbol: String(await tr.symbol()), decimals: Number(await tr.decimals()) },
+			{ name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS },
+		)
+		usdc = reuseTokenAddress
+		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: usdc })
+		console.log(`reusing L1 token ${usdc} (readback-verified ${TOKEN_SYMBOL}/${TOKEN_DECIMALS})`)
 	} else {
 		usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
 	}
@@ -198,7 +223,8 @@ async function main() {
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
 	const secret = Fr.random()
-	const manager = await ewallet.createSchnorrAccount(secret, Fr.random(), deriveSigningKey(secret))
+	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
+	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
 	const deployer = await manager.getAccount()
 	const from = deployer.getAddress()
 	console.log("L2 deployer", from.toString())
@@ -282,7 +308,8 @@ async function main() {
 		"token",
 		"Token",
 		TokenContractArtifact,
-		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address],
+		// 5.0.1 standards Token: 5th constructor param auth_contract (ZERO = none).
+		[TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address, AztecAddress.ZERO],
 		"constructor_with_minter",
 		salts.token,
 	)
@@ -307,6 +334,13 @@ async function main() {
 		console.log(`proxy wired (${mins()})`)
 
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
+		// Preflight (P5): the portal we are about to initialize must still be
+		// UNINITIALIZED — a non-zero l2Bridge() means this address is an
+		// already-bound portal and reusing it is forbidden (the one-shot
+		// initialize binding to the NEW L2 bridge is the security anchor).
+		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		assertPortalUninitialized(String(await (portalPre.read as any).l2Bridge()))
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, usdc, bridge.address.toString()])
 		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
@@ -430,7 +464,7 @@ async function main() {
 				address: token.address.toString(),
 				salt: salts.token,
 				constructorArtifact: "constructor_with_minter",
-				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString()],
+				constructorArgs: [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, proxy.address.toString(), AztecAddress.ZERO.toString()],
 			},
 			bridge: {
 				address: bridge.address.toString(),

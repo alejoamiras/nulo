@@ -47,7 +47,7 @@ export const ONBOARDING_IMPORT_SHELL: ImportShell = {
 
 /** Set a batch of `<Input>` values in page context (native setter + input event
  *  so Vue's v-model picks them up). Keys are CSS selectors. */
-async function setInputs(page: Page, fields: Record<string, string>): Promise<void> {
+export async function setInputs(page: Page, fields: Record<string, string>): Promise<void> {
 	await page.evaluate((entries: Array<[string, string]>) => {
 		const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
 		for (const [sel, v] of entries) {
@@ -60,7 +60,7 @@ async function setInputs(page: Page, fields: Record<string, string>): Promise<vo
 }
 
 /** Wait for a testid'd button to be enabled, then click it. */
-async function submitWhenEnabled(page: Page, testId: string): Promise<void> {
+export async function submitWhenEnabled(page: Page, testId: string): Promise<void> {
 	await page.waitForFunction(
 		(id: string) => {
 			const btn = document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
@@ -256,7 +256,7 @@ export function buildSyntheticBackup({
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 2,
+		"compat-epoch": 3,
 		"backup-schema-version": 1,
 		"master-key": masterBase64,
 		data: {

@@ -115,7 +115,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 						>
 							<template v-if="action.kind === 'call' || action.kind === 'encoded_call'">
 								<Text weight="600">
-									{{ humanizeMethodName(action.kind === "call" ? action.method : (action.name ?? action.selector)) }}
+									{{ humanizeMethodName(safe(action.kind === "call" ? action.method : (action.name ?? action.selector), 64)) }}
 								</Text>
 								<Text color="secondary"> on </Text>
 								<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
@@ -130,12 +130,12 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 									<Text color="secondary"> — spender </Text>
 									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />
 									<Text color="secondary"> for </Text>
-									<Text weight="600">{{ humanizeMethodName(action.content.method) }}</Text>
+									<Text weight="600">{{ humanizeMethodName(safe(action.content.method, 64)) }}</Text>
 									<Text color="secondary"> on </Text>
 									<AddressDisplay :address="action.content.contract" />
 									<template v-if="action.content.args?.length">
 										<Text color="secondary"> args </Text>
-										<Text data-testid="execute-authwit-args">{{ action.content.args.map((a) => String(a)).join(", ") }}</Text>
+										<Text data-testid="execute-authwit-args">{{ action.content.args.map((a) => safe(String(a), 48)).join(", ") }}</Text>
 									</template>
 								</template>
 								<!-- Non-`call` authwit content kinds: unreachable from the current
@@ -146,7 +146,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 									<Text color="secondary"> — spender </Text>
 									<AddressDisplay data-testid="execute-authwit-spender" :address="action.content.caller" />
 									<Text color="secondary"> for </Text>
-									<Text weight="600">{{ humanizeMethodName(action.content.name ?? action.content.selector) }}</Text>
+									<Text weight="600">{{ humanizeMethodName(safe(action.content.name ?? action.content.selector, 64)) }}</Text>
 									<Text color="secondary"> on </Text>
 									<AddressDisplay :address="action.content.to" />
 								</template>
@@ -180,7 +180,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 								size="12"
 								color="primary"
 							>
-								<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+								<Text weight="600">{{ humanizeMethodName(safe(call.name ?? call.selector, 64)) }}</Text>
 								<Text color="secondary"> on </Text>
 								<AddressDisplay :address="call.to" />
 							</Text>
@@ -339,7 +339,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 					>
 						<template v-if="action.kind === 'call' || action.kind === 'encoded_call'">
 							<Text weight="600">
-								{{ humanizeMethodName(action.kind === "call" ? action.method : (action.name ?? action.selector)) }}
+								{{ humanizeMethodName(safe(action.kind === "call" ? action.method : (action.name ?? action.selector), 64)) }}
 							</Text>
 							<Text color="secondary"> on </Text>
 							<AddressDisplay :address="action.kind === 'call' ? action.contract : action.to" />
@@ -358,7 +358,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 			</Flex>
 			<Flex :class="$style.prop">
 				<Text size="12" color="secondary">Function:</Text>
-				<Text size="12" weight="600" color="primary">{{ humanizeMethodName(op.method) }}</Text>
+				<Text size="12" weight="600" color="primary">{{ humanizeMethodName(safe(op.method, 64)) }}</Text>
 			</Flex>
 		</template>
 		<template v-else-if="op.kind === 'aztec_getContractClassMetadata'">
@@ -398,7 +398,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 						size="12"
 						color="primary"
 					>
-						<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+						<Text weight="600">{{ humanizeMethodName(safe(call.name ?? call.selector, 64)) }}</Text>
 						<Text color="secondary"> on </Text>
 						<AddressDisplay :address="call.to" />
 					</Text>
@@ -413,7 +413,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 			<Flex :class="$style.prop">
 				<Text size="12" color="secondary">Function:</Text>
 				<Text size="12" weight="600" color="primary">
-					{{ humanizeMethodName(op.call.name ?? op.call.selector.toString()) }}
+					{{ humanizeMethodName(safe(op.call.name ?? op.call.selector.toString(), 64)) }}
 				</Text>
 			</Flex>
 		</template>
@@ -430,7 +430,7 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 						size="12"
 						color="primary"
 					>
-						<Text weight="600">{{ humanizeMethodName(call.name ?? call.selector) }}</Text>
+						<Text weight="600">{{ humanizeMethodName(safe(call.name ?? call.selector, 64)) }}</Text>
 						<Text color="secondary"> on </Text>
 						<AddressDisplay :address="call.to" />
 					</Text>
@@ -468,14 +468,21 @@ const hasEmbeddedFee = (op: SendLikeUIOp): boolean => {
 					<Text size="12" weight="600" color="primary">
 						{{
 							humanizeMethodName(
-								(op.messageHashOrIntent as { call: { name?: string; selector?: { toString(): string } } }).call.name ??
-									(op.messageHashOrIntent as { call: { selector?: { toString(): string } } }).call.selector?.toString() ??
-									"",
+								safe(
+									(op.messageHashOrIntent as { call: { name?: string; selector?: { toString(): string } } }).call.name ??
+										(op.messageHashOrIntent as { call: { selector?: { toString(): string } } }).call.selector?.toString() ??
+										"",
+									64,
+								),
 							)
 						}}
 					</Text>
 				</Flex>
 			</template>
+			<Flex v-else :class="$style.prop">
+				<Text size="12" color="secondary">Consumer contract:</Text>
+				<AddressDisplay :address="String((op.messageHashOrIntent as { consumer: { toString(): string } }).consumer)" />
+			</Flex>
 		</template>
 	</Flex>
 </template>

@@ -1,5 +1,5 @@
 import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
-import { FeeJuicePortalAbi } from "@nulo/bridge-core"
+import { awaitL1Receipt, FeeJuicePortalAbi } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
 import { FUEL_ASSET, FUEL_ASSET_HANDLER, FUEL_PORTAL } from "@/contracts/bridge-deployments"
@@ -111,7 +111,7 @@ export function useL1FeeAsset() {
 			})
 			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces as
 			// an error, never a false "approved" the deposit's transferFrom then fails behind (mirrors mint()).
-			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash })
+			const receipt = await awaitL1Receipt(l1.publicClient, hash)
 			if (receipt.status !== "success") throw new Error("Approve transaction reverted on-chain.")
 		} catch (err) {
 			error.value = errorMessage(err, "Approve failed")
@@ -168,7 +168,7 @@ export function useL1FeeAsset() {
 			})
 			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces
 			// as mintError, never a false "minted" + refresh (codex post-impl MED).
-			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash })
+			const receipt = await awaitL1Receipt(l1.publicClient, hash)
 			if (receipt.status !== "success") throw new Error("Mint transaction reverted on-chain.")
 			await refresh()
 		} catch (err) {

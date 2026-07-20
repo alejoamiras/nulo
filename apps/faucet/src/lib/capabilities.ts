@@ -165,6 +165,9 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 					scope: [
 						{ contract: tokenAddress, function: "balance_of_public" },
 						{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
+						// The standalone/sponsored gas claim uses plain `claim` (an app-phase call may not
+						// end setup — the sponsored fee payment already does).
+						{ contract: FEE_JUICE_L2, function: "claim" },
 					],
 				},
 			},
@@ -180,6 +183,8 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 					{ contract: sponsoredFpcAddress, function: "sponsor_unconditionally" },
 					// The gas claim riding inside a fueled deposit's claim tx (fjwc embedded payment).
 					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
+					// The standalone/sponsored gas claim (app-phase — see the simulation scope note).
+					{ contract: FEE_JUICE_L2, function: "claim" },
 				],
 			},
 		],

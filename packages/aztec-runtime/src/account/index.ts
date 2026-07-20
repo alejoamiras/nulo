@@ -5,6 +5,7 @@ import type { CompleteAddress } from "@aztec/stdlib/contract"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { ExecutionPayload, TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { DefaultAccountEntrypointOptions } from "@aztec/entrypoints/account"
+import type { ChainInfo } from "@aztec/entrypoints/interfaces"
 import type { IPXE } from "../pxe/ipxe"
 import type { PartialGasSettingsRPC } from "./fee-options"
 
@@ -27,6 +28,7 @@ export interface IAccountContract {
 		pxe: IPXE,
 		payload: ExecutionPayload,
 		options: DefaultAccountEntrypointOptions,
+		chainInfo: ChainInfo,
 		gasSettings?: PartialGasSettingsRPC,
 	): Promise<TxExecutionRequest>
 

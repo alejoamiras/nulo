@@ -44,7 +44,7 @@ export const sharedDefine: Record<string, string> = {
  *  build + unit configs. */
 export const artifactAliases: Record<string, string> = {
 	"@private-fpc-artifact": resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"),
-	"@wonderland-token-artifact": resolvePackageFile("@alejoamiras/aztec-standards", "artifacts/target/token_contract-Token.json"),
+	"@wonderland-token-artifact": resolvePackageFile("@aztec-foundation/aztec-standards", "artifacts/target/token_contract-Token.json"),
 }
 
 /**

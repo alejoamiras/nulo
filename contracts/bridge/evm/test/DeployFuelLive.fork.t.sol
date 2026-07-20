@@ -31,9 +31,9 @@ contract DeployFuelLiveForkTest is Test {
     address constant WETH = 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14;
     address constant FEE_JUICE = 0x762C132040fdA6183066Fa3B14d985ee55aA3C18;
     address constant FEE_ASSET_HANDLER = 0x5602c39A6E9C5AcE589F64F754927bcDa4f4BFc9;
-    address constant FEE_JUICE_PORTAL = 0xB06AC8156Af9C4b369A7ae3E11708bAAa1990a3A;
+    address constant FEE_JUICE_PORTAL = 0xb4A9F8EAdC8CA944729D61E59A9f491fAFf237A3;
     address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
-    address constant LIVE_AZLO = 0x457F9CDB972E036B07f49C23cee78D0c689CD389;
+    address constant LIVE_AZLO = 0xB8ebd156dC94cdE08ec9E7EF0501232B2DbedEcE;
     address constant LIVE_TOKEN_PORTAL = 0x9c41d1DD627ed53E25702590ab974d9DfA0c11Ea;
 
     bytes32 constant TOKEN_PERMISSIONS_TYPEHASH = keccak256("TokenPermissions(address token,uint256 amount)");

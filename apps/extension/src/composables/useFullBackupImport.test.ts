@@ -168,7 +168,7 @@ import { useFullBackupImport } from "./useFullBackupImport"
 async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
-		"compat-epoch": 2,
+		"compat-epoch": 3,
 		"backup-schema-version": 1,
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
 		data: {
@@ -298,6 +298,36 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		expect(networkClient.disconnect).toHaveBeenCalled()
 	})
 
+	it("restores account-state AFTER finalizeRestore (store key needs an open session; 5.0.1 regression fix)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [{ id: "N1", name: "A", chainId: 1 }],
+				"account-state": [{ networkId: "N1", contracts: [], senders: [] }],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		// The crux: account-state's registerContract needs the PXE store key, which is
+		// only provisionable once finalizeRestore has opened the session. So account-state
+		// restore MUST run strictly after finalizeRestore (running it before hit
+		// PXE_STORE_KEY_MISSING under 5.0.1 → "completed with errors").
+		expect(accountStateClient.restore).toHaveBeenCalledOnce()
+		expect(profileClient.finalizeRestore).toHaveBeenCalledOnce()
+		expect(accountStateClient.restore.mock.invocationCallOrder[0]).toBeGreaterThan(
+			profileClient.finalizeRestore.mock.invocationCallOrder[0],
+		)
+		expect(accountStateClient.disconnect).toHaveBeenCalled()
+		expect(c.isRestoreHasErrors.value).toBe(false)
+	})
+
 	it("does NOT auto-call completeImport when partial errors exist (Continue button shows)", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
@@ -331,8 +361,9 @@ describe("useFullBackupImport — guards before any writes", () => {
 		expect(profileClient.restore).not.toHaveBeenCalled()
 	}
 
-	it("rejects an unsupported compat-epoch", async () => {
-		await expectRejected(await buildBackup({ "compat-epoch": 3 }), "Incompatible backup")
+	it("rejects an unsupported compat-epoch (incl. the rc-era epoch 2 — pre-signing-key-root addresses)", async () => {
+		await expectRejected(await buildBackup({ "compat-epoch": 2 }), "Incompatible backup")
+		await expectRejected(await buildBackup({ "compat-epoch": 4 }), "Incompatible backup")
 	})
 
 	it("rejects a pre-baseline blob (legacy schema-version only, no new fields) with the re-export copy", async () => {
@@ -360,7 +391,7 @@ describe("useFullBackupImport — guards before any writes", () => {
 	it("verifies the checksum BEFORE any version field is interpreted", async () => {
 		// Bad epoch AND bad checksum: the integrity error must win — the
 		// trust-gate order is checksum → epoch → schema-version.
-		const backup = await buildBackup({ "compat-epoch": 3 })
+		const backup = await buildBackup({ "compat-epoch": 2 })
 		;(backup as { checksum: string }).checksum = "deadbeef"
 		await expectRejected(backup, "Backup Integrity Check Failed")
 	})
@@ -898,15 +929,18 @@ describe("useFullBackupImport — completeImport + client hygiene (P7)", () => {
 
 		await c.restoreBackup()
 
-		// The whole-loop finally must disconnect every constructed client — the
+		// The whole-loop finally must disconnect every constructed LOOP client — the
 		// one that threw AND all the ones after it that never ran.
 		expect(transactionClient.disconnect).toHaveBeenCalled()
 		expect(tokenBalanceClient.disconnect).toHaveBeenCalled()
-		expect(accountStateClient.disconnect).toHaveBeenCalled()
 		expect(authRegistryClient.disconnect).toHaveBeenCalled()
 		expect(fpcClient.disconnect).toHaveBeenCalled()
 		expect(contactClient.disconnect).toHaveBeenCalled()
 		expect(configClient.disconnect).toHaveBeenCalled()
+		// account-state is NOT in the loop — it is restored AFTER finalizeRestore, which
+		// a mid-loop throw never reaches, so its client is never even constructed (nothing
+		// to leak). Its own restore step owns its disconnect (see the happy-path test).
+		expect(accountStateClient.disconnect).not.toHaveBeenCalled()
 	})
 })
 

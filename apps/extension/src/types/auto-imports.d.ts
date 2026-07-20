@@ -12,6 +12,7 @@ declare global {
   const FEE_JUICE_PRICING: typeof import('../utils/fee-estimation').FEE_JUICE_PRICING
   const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
+  const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
@@ -26,6 +27,7 @@ declare global {
   const clampDecimals: typeof import('../utils/amount').clampDecimals
   const collectRestoreErrors: typeof import('../utils/full-backup-helpers').collectRestoreErrors
   const comma: typeof import('../utils/amount').comma
+  const completeImportWithRecovery: typeof import('../composables/completeImportWithRecovery').completeImportWithRecovery
   const compressData: typeof import('../utils/files').compressData
   const computeMaxFee: typeof import('../utils/fee-estimation').computeMaxFee
   const computed: typeof import('vue').computed
@@ -115,7 +117,6 @@ declare global {
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
   const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
-  const remapIdInBackupData: typeof import('../utils/full-backup-helpers').remapIdInBackupData
   const requireAccount: typeof import('../utils/core').requireAccount
   const requireNetwork: typeof import('../utils/core').requireNetwork
   const requireTransaction: typeof import('../utils/core').requireTransaction
@@ -188,6 +189,9 @@ declare global {
   // @ts-ignore
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
+  // @ts-ignore
+  export type { ImportCompletionDeps, ImportCompletionOutcome } from '../composables/completeImportWithRecovery'
+  import('../composables/completeImportWithRecovery')
   // @ts-ignore
   export type { DappWindowError, UseDappApprovalWindowOptions, UseDappApprovalWindowResult } from '../composables/useDappApprovalWindow'
   import('../composables/useDappApprovalWindow')
@@ -279,6 +283,7 @@ declare module 'vue' {
     readonly FEE_JUICE_PRICING: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_PRICING']>
     readonly FEE_JUICE_USD_RATE: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_USD_RATE']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
+    readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
@@ -293,6 +298,7 @@ declare module 'vue' {
     readonly clampDecimals: UnwrapRef<typeof import('../utils/amount')['clampDecimals']>
     readonly collectRestoreErrors: UnwrapRef<typeof import('../utils/full-backup-helpers')['collectRestoreErrors']>
     readonly comma: UnwrapRef<typeof import('../utils/amount')['comma']>
+    readonly completeImportWithRecovery: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['completeImportWithRecovery']>
     readonly compressData: UnwrapRef<typeof import('../utils/files')['compressData']>
     readonly computeMaxFee: UnwrapRef<typeof import('../utils/fee-estimation')['computeMaxFee']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>

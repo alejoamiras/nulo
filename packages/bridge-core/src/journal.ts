@@ -73,6 +73,10 @@ export interface DepositFuelBlock {
 	messageHash?: string
 	/** fuelReceived from the event - the EXACT content-hash amount; the claim MUST use this, never a quote. */
 	received?: string
+	/** Epoch-ms of the LAST claim attempt latch. Missing on pre-fix records ⇒ treated as aged out,
+	 *  so a receipt stuck in "pending" limbo (vanished tx, node that never reports "dropped") can
+	 *  re-enter the retry path instead of waiting forever. */
+	claimAttemptAt?: number
 	/** Latched journal-first BEFORE any fjwc-embedded wallet call (L14 trigger 1 precondition). */
 	claimAttempt?: boolean
 	/** The fjwc attempt's tx hash, persisted as soon as the wallet returns it. */

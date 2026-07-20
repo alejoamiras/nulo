@@ -4,6 +4,7 @@ import type { DepositJournalRecord } from "@nulo/bridge-core"
 import {
 	type BridgeWitness,
 	SWAP_BRIDGE_ROUTER_ABI,
+	awaitL1Receipt,
 	bridgeWitnessPermitTypedData,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
@@ -183,7 +184,12 @@ export function useFuelFlow() {
 						account: from,
 					}),
 				)
-				await l1.publicClient.waitForTransactionReceipt({ hash: approveHash })
+				// #292: resilient wait — checks reverted status + survives a post-mining RPC timeout, so a
+				// mined-but-slow approval doesn't strand the record without a depositTxHash / recovery path.
+				const apprId = id
+				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
+					onStillWaiting: (attempt) => setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
+				})
 			}
 
 			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")
@@ -234,7 +240,11 @@ export function useFuelFlow() {
 			)
 			updateRecord(id, { depositTxHash: depositTxHash as string })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
-			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: depositTxHash as `0x${string}` })
+			const recId = id
+			const receipt = await awaitL1Receipt(l1.publicClient, depositTxHash as `0x${string}`, {
+				onStillWaiting: (attempt) =>
+					setRecordStep(recId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
+			})
 
 			// `received` comes from the portal's DepositToAztecPublic event - the content-hash law.
 			const ev = parseFeeJuiceDeposit(receipt.logs as never)

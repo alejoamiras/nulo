@@ -35,6 +35,15 @@ vi.mock("./fee/fee-strategy", async (importOriginal) => ({
 }))
 vi.mock("./fee/embedded-fpc-cap", () => ({ applyEmbeddedFpcGasCap: vi.fn(async () => {}) }))
 
+// Mock ONLY `findFunctionBySelector` — the F-02 name↔selector bind added to
+// executeAztecExecuteUtility. `findFunctionByName` (executeSimulateUtility) and
+// everything else in the module stay real.
+const contractResolverMocks = vi.hoisted(() => ({ findFunctionBySelector: vi.fn() }))
+vi.mock("./contract-resolver", async (importOriginal) => ({
+	...(await importOriginal<object>()),
+	findFunctionBySelector: contractResolverMocks.findFunctionBySelector,
+}))
+
 function addr(hex: string) {
 	return { toString: () => hex } as never
 }
@@ -223,6 +232,68 @@ describe("ViewExecutor.executeSimulateUtility / executeAztecExecuteUtility", () 
 			"Wallet locked",
 		)
 		expect(deps.networkService.getNetwork).not.toHaveBeenCalled()
+	})
+
+	function utilityHarness() {
+		return makeHarness({
+			resolver: {
+				resolveInstance: vi.fn(async () => [null, { currentContractClassId: { toString: () => "class-1" } }]),
+				resolveArtifact: vi.fn(async () => [null, {}]),
+			} as never,
+		})
+	}
+
+	function utilityOp(name: string) {
+		return {
+			kind: "aztec_executeUtility",
+			networkId: "net-1",
+			accountAddress: VALID_ADDR,
+			call: { to: addr("0xtoken"), selector: addr("0xsel"), name, args: [], hideMsgSender: false },
+			opts: { scopes: [] },
+		} as never
+	}
+
+	test("(F-02) rejects when call.name does not match the selector's real function — before PXE runs it", async () => {
+		// dApp scoped for `symbol` sends the balance_of_private selector under
+		// name "symbol". The bind must reject; the private read never happens.
+		contractResolverMocks.findFunctionBySelector.mockResolvedValue({
+			name: "balance_of_private",
+			functionType: 1,
+			isStatic: true,
+			returnTypes: [],
+		})
+		const { executor, pxe } = utilityHarness()
+		await expect(executor.executeAztecExecuteUtility(utilityOp("symbol"))).rejects.toThrow(/Scope violation/)
+		expect(pxe.executeUtility).not.toHaveBeenCalled()
+	})
+
+	test("(F-02) executes the SELECTOR's function rebuilt from ABI truth when the name matches", async () => {
+		contractResolverMocks.findFunctionBySelector.mockResolvedValue({
+			name: "symbol",
+			functionType: 1,
+			isStatic: true,
+			returnTypes: [],
+		})
+		const { executor, pxe } = utilityHarness()
+		await executor.executeAztecExecuteUtility(utilityOp("symbol"))
+		expect(pxe.executeUtility).toHaveBeenCalledTimes(1)
+		const boundCall = (pxe.executeUtility as ReturnType<typeof vi.fn>).mock.calls[0][0]
+		expect(boundCall.name).toBe("symbol")
+		expect(boundCall.isStatic).toBe(true)
+	})
+
+	test("(F-02) an empty call.name is REJECTED — NOT treated as absent (closes the {function:''} silent-authwit bypass)", async () => {
+		contractResolverMocks.findFunctionBySelector.mockResolvedValue({
+			name: "transfer",
+			functionType: 1,
+			isStatic: false,
+			returnTypes: [],
+		})
+		const { executor, pxe } = utilityHarness()
+		// name "" !== "transfer" → reject. Treating "" as "no name" would let a dApp
+		// scope `{function:""}` and run any selector without a per-call popup.
+		await expect(executor.executeAztecExecuteUtility(utilityOp(""))).rejects.toThrow(/Scope violation/)
+		expect(pxe.executeUtility).not.toHaveBeenCalled()
 	})
 })
 

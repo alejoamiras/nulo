@@ -27,21 +27,28 @@ import { computeSecretHash } from "@aztec/stdlib/hash"
 export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
 
 /**
- * The PrivateFPC L2 address — deterministic from the INSTALLED Wonderland artifact
- * (`@alejoamiras/aztec-fee-payment` 4.2.0-prerelease.215fd08) at `salt=0, deployer=ZERO`, the exact
- * instance the wallet auto-registers (`extension/src/wallet/services/fpc/service.ts:90-94`).
+ * The CANONICAL PrivateFPC identity — from 5.0.0 onward the salt is a fixed project constant of the
+ * fee-payment package (ecosystem-tooling `canonical-deployment.json`; rc-era pins used
+ * operator-local salts and are dead). The address is deterministic from the INSTALLED
+ * `@alejoamiras/aztec-fee-payment@5.0.1` artifact at `salt=PRIVATE_FPC_SALT, deployer=ZERO` — the
+ * exact instance the wallet auto-registers (`extension/src/wallet/services/fpc/service.ts`, which
+ * MUST use the same salt).
  *
- * Pinned, NOT runtime-derived: the 2.2 MB artifact never enters the browser bundle, and a Wonderland
- * bump that changes the bytecode fails the bridge-core address tripwire (`private-fuel.test.ts`)
- * until this is consciously re-pinned AND re-canaried on the live network. This is strictly
- * fail-closed — the runtime can never deposit to a silently-drifted address.
+ * Pinned, NOT runtime-derived: the 2.2 MB artifact never enters the browser bundle, and an artifact
+ * bump that changes the bytecode fails the bridge-core address tripwire (`private-fuel.test.ts`,
+ * which also digest-asserts the artifact against `private-fpc-canonical.json`) until this is
+ * consciously re-pinned AND re-canaried on the live network. This is strictly fail-closed — the
+ * runtime can never deposit to a silently-drifted address.
  *
  * INVARIANT: never deposit private Fee Juice to any address other than this for the pinned version.
- * The address is `@aztec`-version + bytecode specific. Re-derived from the
- * `@alejoamiras/aztec-fee-payment` 5.0.0-rc.2 artifact via the test tripwire; the live re-canary
- * (a private fueled claim settling against this instance) is the rc.2 redeploy's promotion gate.
+ * The address is `@aztec`-version + bytecode specific. `check-fpc-version.ts` gates any live deploy
+ * on exact-version + artifact-digest + live-class agreement; the live re-canary (a private fueled
+ * claim settling against this instance, pre-promotion) is the redeploy's gate.
  */
-export const PRIVATE_FPC_ADDRESS = "0x0d4b2c28d6ef19603e15b1a58294cbd5340a207eeec6d11f65627040260065f6"
+export const PRIVATE_FPC_ADDRESS = "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0"
+
+/** The canonical instance salt (fixed from 5.0.0 onward — see PRIVATE_FPC_ADDRESS). */
+export const PRIVATE_FPC_SALT = "0x0000000000000000000000000000000000000000000000000000000000000001"
 
 /**
  * The bridge secret a private-fuel L1 deposit binds to: `poseidon2([salt, claimer], DOM_SEP)`.

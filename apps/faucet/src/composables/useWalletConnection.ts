@@ -1,6 +1,6 @@
 import type { Wallet } from "@aztec/aztec.js/wallet"
-import { DripperContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Dripper.js"
-import { TokenContractArtifact } from "@alejoamiras/aztec-standards/dist/src/artifacts/Token.js"
+import { DripperContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js"
+import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import {
 	BRIDGE,

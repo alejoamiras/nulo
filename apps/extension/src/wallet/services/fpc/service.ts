@@ -31,6 +31,17 @@ const PrivateFPCContractArtifact = loadContractArtifact(PrivateFPCJson)
 export * from "./fpc"
 export * from "./spec"
 
+/** The instantiation params for each protocol FPC — the SINGLE source both the canonical-address
+ * derivation and the PXE-discovery registration read, so the two can never derive different
+ * addresses. The PrivateFPC canonical salt is a FIXED project constant from 5.0.0 onward (the
+ * fee-payment package's canonical-deployment contract; rc-era used salt 0). It must equal
+ * bridge-core's PRIVATE_FPC_SALT / private-fpc-canonical.json — the derivation from
+ * (artifact, salt, deployer) is machine-asserted there (layering bars the import here). Depositing
+ * to a wrong PrivateFPC address is an UNRECOVERABLE loss, so a salt drift between the two sites was
+ * a fund-loss hazard, not just a re-discovery bug. */
+const SPONSORED_FPC_PARAMS = () => ({ constructorArgs: [], salt: Fr.zero() })
+const PRIVATE_FPC_PARAMS = () => ({ constructorArgs: [], salt: new Fr(1n), deployer: AztecAddress.ZERO })
+
 /** Names seeded onto auto-discovered protocol FPCs. */
 const SPONSORED_FPC_DEFAULT_NAME = "Sponsored Fee Juice"
 const PRIVATE_FPC_DEFAULT_NAME = "Private Fee Juice"
@@ -93,15 +104,8 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const cached = this.protocolAddresses.get(chainId)
 		if (cached) return cached
 
-		const sponsoredInstance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, {
-			constructorArgs: [],
-			salt: Fr.zero(),
-		})
-		const privateInstance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, {
-			constructorArgs: [],
-			salt: Fr.zero(),
-			deployer: AztecAddress.ZERO,
-		})
+		const sponsoredInstance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
+		const privateInstance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
 		const addresses: ProtocolAddresses = {
 			sponsored: sponsoredInstance.address.toString(),
 			private: privateInstance.address.toString(),
@@ -169,19 +173,18 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			const toDiscover: { instance: ContractInstanceWithAddress; artifact: ContractArtifact }[] = []
 
 			if (!hasSponsoredFpc) {
-				const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, {
-					constructorArgs: [],
-					salt: Fr.zero(),
-				})
+				// Same params as getOrComputeProtocolAddresses — the shared const is what guarantees the
+				// discovered/registered instance equals `protocols.sponsored`.
+				const instance = await getContractInstanceFromInstantiationParams(SponsoredFPCContractArtifact, SPONSORED_FPC_PARAMS())
 				this.logDebug(`getFpcs: SponsoredFPC instance address=${instance.address.toString()}`)
 				toDiscover.push({ instance, artifact: SponsoredFPCContractArtifact })
 			}
 			if (!hasPrivateFpc) {
-				const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, {
-					constructorArgs: [],
-					salt: Fr.zero(),
-					deployer: AztecAddress.ZERO,
-				})
+				// Same params as getOrComputeProtocolAddresses — a divergence here would register/store a
+				// DIFFERENT PrivateFPC than `protocols.private`, so hasPrivateFpc never matches (endless
+				// re-discovery) and the private-fuel path keys off the wrong address (unrecoverable-deposit
+				// hazard — see this file's header). The shared const structurally prevents that drift.
+				const instance = await getContractInstanceFromInstantiationParams(PrivateFPCContractArtifact, PRIVATE_FPC_PARAMS())
 				this.logDebug(`getFpcs: PrivateFPC instance address=${instance.address.toString()}`)
 				toDiscover.push({ instance, artifact: PrivateFPCContractArtifact })
 			}

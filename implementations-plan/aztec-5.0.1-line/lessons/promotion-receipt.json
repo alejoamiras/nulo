@@ -1,0 +1,14 @@
+{
+	"promotedAt": "2026-07-18T22:10:13.979Z",
+	"intent": "implementations-plan/aztec-5.0.1-line/lessons/intent.json",
+	"commitAtPromotion": "3783f89c7b9ecdffff144567584dad69f69e3319",
+	"bridge": {
+		"candidateSha256": "910421983e65a316009982b0f9fd9781a1d3ed5ff37a3e7d40ae0c24d67a9649",
+		"live": "apps/faucet/public/testnet-bridge.json"
+	},
+	"faucet": {
+		"candidateSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
+		"live": "apps/faucet/src/contracts/deployments.json"
+	},
+	"zeroSeed": "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc"
+}

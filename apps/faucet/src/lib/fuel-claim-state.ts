@@ -116,20 +116,34 @@ export interface PrivateFuelClaimEvidence {
 	/** The last send threw the exact `mint_and_pay_fee` insufficiency assert (pre-inclusion, no hash).
 	 *  This is the ONLY retryable no-hash signal - the narrow allow-list (string-matched, no typed selector). */
 	setupInsufficiency: boolean
+	/** The last attempt latch is older than PRIVATE_ATTEMPT_STALE_MS (or has no timestamp — every
+	 *  pre-fix record). Unstales the "wait" limbo: a vanished tx whose receipt reads "pending"
+	 *  forever (node never reports "dropped") would otherwise deadlock the claim with no escape.
+	 *  Safe because the retry is SIMULATE-gated: a claim whose FJ message was actually consumed
+	 *  fails the engine's simulate authority and is never re-sent — aging out can only re-attempt
+	 *  provably-unconsumed messages (or surface the consumed state via the simulate error). */
+	attemptAgedOut: boolean
 }
+
+/** How long a private claim attempt may sit in receipt limbo before the retry path re-opens. */
+export const PRIVATE_ATTEMPT_STALE_MS = 15 * 60_000
 
 export function decidePrivateFuelClaim(e: PrivateFuelClaimEvidence): { action: PrivateFuelClaimAction } {
 	if (e.attempt && e.txHashKnown) {
 		if (e.receiptStatus === "included" || e.consumed) return { action: "consumed" }
 		if (e.receiptStatus === "dropped") return { action: "private-fpc" } // not included ⇒ FJ unconsumed ⇒ retry
-		return { action: "wait" } // pending / unprobed / unreachable node - never guess
+		// Pending / unprobed / unreachable node: a FRESH attempt may still land - wait, never guess.
+		// An AGED-OUT attempt re-opens the retry (the engine's simulate gate is the double-spend
+		// authority; see attemptAgedOut).
+		return e.attemptAgedOut ? { action: "private-fpc" } : { action: "wait" }
 	}
 	if (e.attempt) {
 		// Attempt latched but NO tx hash. Durable consumption still settles it; the setup-insufficiency
-		// assert is the one retryable case; anything else is unknowable ⇒ wait. NEVER public/Sponsored.
+		// assert is the one retryable case; anything else waits until the latch ages out (the wallet
+		// may still return / the tx may still land within the stale window). NEVER public/Sponsored.
 		if (e.consumed) return { action: "consumed" }
 		if (e.setupInsufficiency) return { action: "private-fpc" }
-		return { action: "wait" }
+		return e.attemptAgedOut ? { action: "private-fpc" } : { action: "wait" }
 	}
 	return { action: "private-fpc" } // fresh record ⇒ first private claim attempt
 }

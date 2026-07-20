@@ -26,7 +26,7 @@ describe("fee-juice", () => {
 		expect((await method.getFeePayer()).toString()).toBe(fpc.toString())
 	})
 
-	test("feeJuiceClaimArgs builds the claim_and_end_setup tuple verbatim", () => {
+	test("feeJuiceClaimArgs builds the FeeJuice claim tuple verbatim", () => {
 		const to = AztecAddress.fromNumberUnsafe(0xbeef).toString()
 		expect(feeJuiceClaimArgs(to, 1000n, "0x2a", 7n)).toEqual([to, 1000n, "0x2a", 7n])
 	})

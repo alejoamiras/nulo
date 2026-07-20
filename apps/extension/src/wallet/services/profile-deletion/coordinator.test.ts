@@ -26,7 +26,7 @@ import { TransactionService } from "@/wallet/services/transaction/service"
 import { svc } from "../composition-harness"
 import { ProfileDeletionCoordinator } from "./coordinator"
 
-const SNAP = { addresses: ["0xa"], tokenIds: [1], networkIds: ["n1"] }
+const SNAP = { addresses: ["0xa"], tokenIds: [1], networkIds: ["n1"], pxeGeneration: "gen-1" }
 
 const build = async (order: string[]) => {
 	const rec = (name: string) => async () => {

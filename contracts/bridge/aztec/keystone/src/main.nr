@@ -3,7 +3,7 @@
 // (test/ContentHash.t.sol) against the SAME constants. Equality across both
 // toolchains is the one cross-chain boundary guard the TXE can't provide: if a
 // selector or arg order ever drifts, a deposit's L1->L2 message becomes
-// unconsumable and funds strand. Run: nargo test (with the rc.2 nargo).
+// unconsumable and funds strand. Run: nargo test (with the 5.0.0 nargo).
 
 use aztec::hash::compute_secret_hash;
 use aztec::protocol::address::{AztecAddress, EthAddress};
@@ -63,12 +63,15 @@ fn claim_secret_vectors_match_ts() {
 
 #[test]
 fn claim_secret_hash_vectors_match_ts() {
-    // compute_secret_hash(derive_claim_secret(...)) — the value L1 commits into the message.
-    let h0 = compute_secret_hash(derive_claim_secret(0, AztecAddress::from_field(0)));
+    // compute_secret_hash([derive_claim_secret(...)]) — the value L1 commits into the message. 5.0.1's
+    // compute_secret_hash is generic over the array length (`[Field; N]`); a single secret is `[secret]`.
+    // For N=1 it is still `poseidon2_hash_with_separator([secret], DOM_SEP__SECRET_HASH)`, so the pinned
+    // values are unchanged from rc.2 — the version bump only made the array explicit in the signature.
+    let h0 = compute_secret_hash([derive_claim_secret(0, AztecAddress::from_field(0))]);
     assert(h0 == 0x087647b3c1976bde1cf12bfa5213c1d619f4f0b9a0bae6e1000d7030fcb9d5fc);
-    let h1 = compute_secret_hash(derive_claim_secret(1, AztecAddress::from_field(2)));
+    let h1 = compute_secret_hash([derive_claim_secret(1, AztecAddress::from_field(2))]);
     assert(h1 == 0x23d9fa16980e66c10886f09780ea412bd1c942a0a6e588d838ea05d7228c6754);
     let h2 =
-        compute_secret_hash(derive_claim_secret(0x1234567890abcdef, AztecAddress::from_field(0xdeadbeef)));
+        compute_secret_hash([derive_claim_secret(0x1234567890abcdef, AztecAddress::from_field(0xdeadbeef))]);
     assert(h2 == 0x2a636f84225eec69e412ed5dffd735f1ac8ff6d28b24dac5d796f0c2a648ac1c);
 }

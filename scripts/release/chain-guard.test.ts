@@ -8,12 +8,12 @@ import {
 } from "./chain-guard"
 
 describe("walletChainId (the XOR the wallet uses)", () => {
-	test("canonical V5 alpha-testnet — single-sourced from chain-constants → 2793892258", () => {
+	test("canonical 5.0.0 testnet — single-sourced from chain-constants → 1816023401", () => {
 		// Canary: chain-guard now imports the pair from apps/faucet/src/lib/chain-constants.ts,
 		// so a testnet redeploy that bumps that file surfaces HERE too (no silent drift).
 		expect(TESTNET_L1_CHAIN_ID).toBe(11155111)
-		expect(TESTNET_ROLLUP_VERSION).toBe(2787991301)
-		expect(TESTNET_WALLET_CHAIN_ID).toBe(2793892258)
+		expect(TESTNET_ROLLUP_VERSION).toBe(1821665230)
+		expect(TESTNET_WALLET_CHAIN_ID).toBe(1816023401)
 		expect(walletChainId(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION)).toBe(TESTNET_WALLET_CHAIN_ID)
 	})
 
@@ -53,7 +53,11 @@ describe("assertTestnetIdentity", () => {
 	})
 
 	test("the error names both the got + expected wallet chainId", () => {
-		expect(() => assertTestnetIdentity({ l1ChainId: 11155111, rollupVersion: 4127419662 })).toThrow(/4138294185|2793892258/)
+		// Assert BOTH the got (4138294185) AND the current expected (1816023401) appear, so a stale
+		// expected in the message can't be masked by matching only the supplied bad value.
+		const run = () => assertTestnetIdentity({ l1ChainId: 11155111, rollupVersion: 4127419662 })
+		expect(run).toThrow(/4138294185/)
+		expect(run).toThrow(/1816023401/)
 	})
 
 	test("wrong L1 chain id is rejected", () => {

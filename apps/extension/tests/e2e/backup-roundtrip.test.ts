@@ -17,7 +17,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect } from "vitest"
 import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "./fixtures/extension"
-import { navigateByHash } from "./fixtures/helpers"
+import { ensureUnlocked, navigateByHash, reopenAndRecoverAfterImport } from "./fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { gotoPopupImport, readActiveAccount, TEST_PASSWORD } from "./helpers/import-drivers"
 
@@ -110,11 +110,37 @@ test("encrypted full backup: export → wrong password rejects → decrypt → r
 			{ timeout: 10_000 },
 		)
 		await clickByTestId(page2, "import-full-backup-submit-btn")
-		await waitForHash(page2, "#/popup/general", 60_000)
 
-		// Same profile id + master key ⇒ identical derived account.
+		// REALISTIC settle: the MV3 worker can restart mid-import (P0-proven), so a
+		// straight assertion of `/popup/general` is wrong — the honest post-import
+		// state is an ACTIONABLE screen, either `/popup/general` (session survived)
+		// or `/popup/auth` (strict mode + worker restart dropped the master → unlock
+		// to finish). What must NEVER happen is a silent dead-end on "Finishing…".
+		// Wait for whichever actionable screen the recovery lands on.
+		await page2.waitForFunction(
+			() => {
+				const h = window.location.hash
+				return h.includes("/popup/general") || h.includes("/popup/auth")
+			},
+			{ timeout: 90_000, polling: 250 },
+		)
+		// If the recovery routed to auth (locked), unlock to finish — this is the
+		// documented strict-mode recovery, not a failure.
+		if (await page2.evaluate(() => window.location.hash.includes("/popup/auth"))) await ensureUnlocked(page2)
+		await waitForHash(page2, "#/popup/general", 30_000)
+
+		// Same profile id + master key ⇒ identical derived account. Proves the
+		// imported profile is usable (store re-opened under the derived key), never
+		// stranded on a dead-end "Finishing…" screen.
 		const addressAfter = await readActiveAccount(page2)
 		expect(addressAfter).toBe(addressBefore)
+
+		// Store-reopen cycle: lock (drop the in-memory master, as a worker restart
+		// would) → unlock (re-derive → re-provision the store key → re-open the OPFS
+		// store) → general. Re-read the account to prove the store RE-OPENED under the
+		// re-derived key (refuse-and-preserve — never wiped).
+		await reopenAndRecoverAfterImport(page2)
+		expect(await readActiveAccount(page2)).toBe(addressBefore)
 		await page2.close()
 	} finally {
 		await ctx2.browser.close()

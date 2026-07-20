@@ -204,19 +204,19 @@ jobs:
 
   network-e2e:
     needs: resolve
-    # Network-e2e firing rules:
-    # - Stable push to main (auto-release): runs by default. The is_prerelease
-    #   guard never trips here since stable tags never carry a `-` suffix.
-    # - workflow_dispatch (any tag, stable or prerelease): runs only when
-    #   `run_network_e2e=true` is explicitly passed. Default is false so
-    #   prerelease republishes don't burn 30-45 min unless asked.
+    # Network-e2e firing rule: OPT-IN ONLY (workflow_dispatch with
+    # `run_network_e2e=true`). It no longer runs on the auto push:main publish —
+    # the promote dev→main PR already gates the exact code with the full network
+    # suite before it reaches main, so re-running the flaky 30-45 min suite on the
+    # publish only duplicated that gate AND could strand a release: a network-e2e
+    # cancellation/timeout on push:main took the whole run down mid-attach (leaving
+    # a tag + empty release). Dropped the `push` trigger 2026-07-20. The publish
+    # still gates on smoke-against-artifact (real built zip). Pass run_network_e2e=true
+    # on a manual republish if you want the extra network pass.
     if: |
       always() &&
       needs.resolve.result == 'success' &&
-      (
-        (needs.resolve.outputs.is_prerelease == 'false' && github.event_name == 'push') ||
-        github.event.inputs.run_network_e2e == 'true'
-      )
+      github.event.inputs.run_network_e2e == 'true'
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
@@ -374,6 +374,12 @@ jobs:
           fi
           echo "deploy-hook triggered (HTTP $code)"
 
+  # Fails a stable publish EARLY (right after resolve, before the ~20-min build
+  # chain) when the faucet deploy hook secret is not wired — an unwired hook used
+  # to fall back silently to the CF dashboard Git-integration, which strands the
+  # faucet on workflow_dispatch republishes (those don't push to main, so the
+  # Git-integration never fires). `environment: production` so an env-scoped
+  # secret is visible here exactly as it is in deploy-faucet.
   deploy-faucet:
     name: deploy faucet (Cloudflare Pages deploy hook)
     needs: [resolve, attach-assets]
@@ -393,10 +399,9 @@ jobs:
           DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            # Not yet wired (A5: the faucet's CF dashboard Git-integration still
-            # deploys it on push:main — double-deploy accepted until the cutover).
-            # Skip, don't fail, so an unwired secret never blocks a release.
-            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping CI faucet deploy (dashboard Git-integration still deploys it)."
+            # Not wired: skip, don't fail. The faucet's Cloudflare dashboard Git-integration
+            # deploys it on push, so an unwired hook never blocks a release.
+            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping the CI faucet deploy (dashboard Git-integration still deploys it)."
             exit 0
           fi
           code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
@@ -412,11 +417,9 @@ jobs:
   verify-live:
     name: verify live deploys (advisory)
     needs: [resolve, attach-assets, refresh-landing, deploy-faucet]
-    # ADVISORY for now — deliberately NOT in the `status` aggregator. This
-    # fail-closed check ships unrehearsed (no test repo), so it reports red
-    # without blocking the required check until it's proven on the first clean
-    # real release; a follow-up then adds it to `status`'s needs (staged, like
-    # vars.AUTO_UNSTICK_ENABLED).
+    # ADVISORY — deliberately NOT in the `status` aggregator. It reports red
+    # without blocking the release; open nulo.sh / faucet.nulo.sh and re-fire the
+    # deploy (refresh-landing.yml break-glass) if it flags a stale site.
     if: |
       always() &&
       needs.resolve.outputs.is_prerelease == 'false' &&

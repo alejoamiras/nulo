@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { InboxAbi } from "@aztec/l1-artifacts"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
@@ -10,6 +11,7 @@ import {
 	type DepositJournalRecord,
 	type EncryptionKey,
 	assetKindOf,
+	awaitL1Receipt,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
@@ -22,6 +24,7 @@ import {
 	minOutputForSlippage,
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
+	parseFeeJuiceDeposit,
 	privateMintAndPayFee,
 	publicFeeJuicePayment,
 	quoteFuelPath,
@@ -46,6 +49,7 @@ import {
 } from "@/contracts/bridge-deployments"
 import {
 	FUEL_FEE_MARGIN,
+	PRIVATE_ATTEMPT_STALE_MS,
 	decideFuelClaim,
 	decideNoFuelClaimGate,
 	decidePrivateFuelClaim,
@@ -60,7 +64,7 @@ import {
 	flagRecordError,
 	markApproveOutcome,
 	markSessionLive,
-	isMsgNotReady,
+	isMsgConsumed,
 	resumeSessionWork,
 	runDepositClaim,
 	runOnLane,
@@ -182,22 +186,20 @@ async function sendStandaloneFjClaim(
 	const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, aztec as never)
 	let receiptTxHash: string
 	try {
+		// Plain `claim`, NOT `claim_and_end_setup`: the sponsored fee payment already ends setup, so
+		// the end-setup variant asserts as an app-phase call (see fuelClaim.ts — same live-caught bug).
 		const { receipt } = (await fj.methods
-			.claim_and_end_setup(
-				recipientAddr,
-				BigInt(fuel.received ?? "0"),
-				Fr.fromString(fuel.secret),
-				new Fr(BigInt(fuel.leafIndex ?? "0")),
-			)
+			.claim(recipientAddr, BigInt(fuel.received ?? "0"), Fr.fromString(fuel.secret), new Fr(BigInt(fuel.leafIndex ?? "0")))
 			.send({ from: recipientAddr, fee: sponsored, wait: { waitForStatus: TxStatus.PROPOSED } } as never)) as {
 			receipt: { txHash: unknown }
 		}
 		receiptTxHash = String(receipt.txHash)
 	} catch (e) {
-		// The FJ message is already gone ⇒ the gas is already in the wallet. Self-correct: settle
-		// rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly (the affordance
-		// becomes exact, not just safe - the post-impl audit's residual false-positive).
-		if (isMsgNotReady(e instanceof Error ? e.message : String(e))) {
+		// The FJ message is already CONSUMED (nullified) ⇒ the gas is already in the wallet. Self-correct:
+		// settle rather than error, so a false-positive CLAIM YOUR GAS click resolves cleanly. Must be the
+		// consumed shape, NOT not-ready: latching standaloneClaimed on a not-yet-anchored message would
+		// permanently hide the recovery affordance for FJ that was never claimed (fund-stranding).
+		if (isMsgConsumed(e instanceof Error ? e.message : String(e))) {
 			updateRecord(id, { fuel: { ...fuel, standaloneClaimed: true } })
 			log("standalone FJ claim: message already consumed - gas already in wallet", id)
 			return
@@ -274,6 +276,64 @@ export function ensureDepositJournalDeps(): void {
 			if (!wallet || !account) throw new Error("Connect your Ethereum wallet first.")
 			return wallet.signMessage({ account, message } as never) as Promise<string>
 		},
+		// Deposit-leg recovery: the leg is chain-recoverable from the recorded depositTxHash alone
+		// (every flow persists the hash BEFORE waiting), so a flow that died mid-wait — L1 timeout,
+		// closed tab — completes here on Retry instead of stranding a confirmed deposit. Patches the
+		// same fields the live flows write post-receipt; depositL2Block stays unset so the engine
+		// skips the display countdown and goes straight to the claim-simulate gate (the recovered
+		// deposit is old — its message is likely already consumable).
+		recoverDepositLeg: async (rec) => {
+			const hash = rec.depositTxHash as `0x${string}`
+			const receipt = await l1.publicClient.getTransactionReceipt({ hash }).catch(() => null)
+			if (!receipt) return "pending"
+			if (receipt.status !== "success") {
+				throw new Error("The Ethereum deposit transaction reverted - there is nothing to claim. You can discard this record.")
+			}
+			if (assetKindOf(rec) === "fee-juice") {
+				const ev = parseFeeJuiceDeposit(receipt.logs as never)
+				const fuel = rec.fuel as NonNullable<DepositJournalRecord["fuel"]>
+				updateRecord(rec.id, {
+					leafIndex: ev.leafIndex.toString(),
+					fuel: { ...fuel, received: ev.amount.toString(), leafIndex: ev.leafIndex.toString() },
+				})
+				return "recovered"
+			}
+			// Fueled token deposit (router) carries a BridgeWithFuel event; the plain portal deposit
+			// carries the Inbox MessageSent. Try the richer one first.
+			const fuelEvents = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "BridgeWithFuel", logs: receipt.logs })
+			const fe = fuelEvents[0] as
+				| {
+						args?: {
+							tokenKey?: `0x${string}`
+							tokenIndex?: bigint
+							fuelKey?: `0x${string}`
+							fuelIndex?: bigint
+							fuelAmount?: bigint
+						}
+				  }
+				| undefined
+			if (fe?.args?.tokenIndex !== undefined && fe.args.fuelIndex !== undefined && fe.args.fuelAmount !== undefined) {
+				const fuel = rec.fuel as NonNullable<DepositJournalRecord["fuel"]>
+				updateRecord(rec.id, {
+					leafIndex: fe.args.tokenIndex.toString(),
+					messageHash: fe.args.tokenKey,
+					fuel: {
+						...fuel,
+						leafIndex: fe.args.fuelIndex.toString(),
+						messageHash: fe.args.fuelKey,
+						received: fe.args.fuelAmount.toString(),
+					},
+				})
+				return "recovered"
+			}
+			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
+			const event = sent[0] as { args?: { index?: bigint } } | undefined
+			if (event?.args?.index === undefined) {
+				throw new Error("The confirmed Ethereum transaction has no recognizable deposit event - contact support before retrying.")
+			}
+			updateRecord(rec.id, { leafIndex: event.args.index.toString() })
+			return "recovered"
+		},
 		claim: async (rec, secretHex, envelope) => {
 			const aztec = bridgeWallet.wallet.value
 			if (!aztec) throw new Error("Connect your Aztec wallet first.")
@@ -305,8 +365,8 @@ export function ensureDepositJournalDeps(): void {
 					// the gated top-level secret (public) — never the plaintext journal copy (codex HIGH/LOW).
 					resolvedSalt: rec.isPrivate ? envelope?.salt : undefined,
 					resolvedSecret: rec.isPrivate ? undefined : secretHex,
-					onAttempt: () => latchFuel({ claimAttempt: true, setupInsufficiency: false }),
-					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimTxHash: txHash }),
+					onAttempt: () => latchFuel({ claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false }),
+					onTxHash: (txHash) => latchFuel({ claimAttempt: true, claimAttemptAt: Date.now(), claimTxHash: txHash }),
 					onSetupInsufficiency: () => latchFuel({ setupInsufficiency: true }),
 				})
 			}
@@ -359,6 +419,8 @@ export function ensureDepositJournalDeps(): void {
 					receiptStatus,
 					consumed: fb.consumed === true || receiptStatus === "included",
 					setupInsufficiency: fb.setupInsufficiency === true,
+					// Missing timestamp = every pre-fix record ⇒ aged out (their limbo is exactly the bug).
+					attemptAgedOut: fb.claimAttemptAt === undefined || Date.now() - fb.claimAttemptAt > PRIVATE_ATTEMPT_STALE_MS,
 				})
 				log("private fuel claim decision", { id: rec.id, action: decision.action })
 				if (decision.action !== "private-fpc") {
@@ -393,7 +455,7 @@ export function ensureDepositJournalDeps(): void {
 					simulate: () => claimPriv().simulate({ from: recipientAddr, fee: privateFee } as never),
 					send: async () => {
 						// Latch the attempt JOURNAL-FIRST (before the wallet call), clearing any stale insufficiency.
-						updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: false } })
+						updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: false } })
 						try {
 							const { receipt } = (await claimPriv().send({
 								from: recipientAddr,
@@ -402,7 +464,15 @@ export function ensureDepositJournalDeps(): void {
 							} as never)) as { receipt: { txHash: unknown } }
 							const txHash = String(receipt.txHash)
 							// PROPOSED is NOT inclusion; `consumed` is set inclusion-grade later from the receipt probe.
-							updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, claimTxHash: txHash, setupInsufficiency: false } })
+							updateRecord(rec.id, {
+								fuel: {
+									...fb,
+									claimAttempt: true,
+									claimAttemptAt: Date.now(),
+									claimTxHash: txHash,
+									setupInsufficiency: false,
+								},
+							})
 							return { txHash }
 						} catch (e) {
 							const msg = e instanceof Error ? e.message : String(e)
@@ -410,7 +480,9 @@ export function ensureDepositJournalDeps(): void {
 							// Any OTHER throw leaves setupInsufficiency unset ⇒ the next decision WAITS (fail-closed).
 							// NEVER fall back to public/Sponsored on the private path (L11).
 							if (isPrivateFuelInsufficiency(msg)) {
-								updateRecord(rec.id, { fuel: { ...fb, claimAttempt: true, setupInsufficiency: true } })
+								updateRecord(rec.id, {
+									fuel: { ...fb, claimAttempt: true, claimAttemptAt: Date.now(), setupInsufficiency: true },
+								})
 							}
 							throw e
 						}
@@ -489,7 +561,7 @@ export function ensureDepositJournalDeps(): void {
 				simulate: () => interaction().simulate({ from: recipientAddr, ...(fee ? { fee } : {}) } as never),
 				send: async () => {
 					// L14 trigger-1 precondition: latch the attempt JOURNAL-FIRST, before the wallet call.
-					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true } })
+					if (fjwcAttempt && fuel) updateRecord(rec.id, { fuel: { ...fuel, claimAttempt: true, claimAttemptAt: Date.now() } })
 					const { receipt } = (await interaction().send({
 						from: recipientAddr,
 						...(fee ? { fee } : {}),
@@ -817,7 +889,11 @@ export function useDepositFlow() {
 				)
 				updateRecord(id, { depositTxHash: fuelTxHash as string })
 				setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
-				const fuelReceipt = await l1.publicClient.waitForTransactionReceipt({ hash: fuelTxHash as `0x${string}` })
+				const fuelRecId = id
+				const fuelReceipt = await awaitL1Receipt(l1.publicClient, fuelTxHash as `0x${string}`, {
+					onStillWaiting: (attempt) =>
+						setRecordStep(fuelRecId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
+				})
 				const fuelEvents = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "BridgeWithFuel", logs: fuelReceipt.logs })
 				const fe = fuelEvents[0] as
 					| {
@@ -949,7 +1025,11 @@ export function useDepositFlow() {
 			// Persisted the moment the hash exists - leafIndex stays chain-recoverable from here on.
 			updateRecord(id, { depositTxHash: depositTxHash as string })
 			setRecordStep(id, "depositing", "waiting for the Ethereum confirmation")
-			const receipt = await l1.publicClient.waitForTransactionReceipt({ hash: depositTxHash as `0x${string}` })
+			const recId = id
+			const receipt = await awaitL1Receipt(l1.publicClient, depositTxHash as `0x${string}`, {
+				onStillWaiting: (attempt) =>
+					setRecordStep(recId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
+			})
 
 			// Leaf index + message key from the router's Bridge event (not the Inbox — the router re-emits them).
 			const bridged = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "Bridge", logs: receipt.logs })

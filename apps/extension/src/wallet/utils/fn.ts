@@ -6,6 +6,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { IPXE } from "@nulo/aztec-runtime/pxe"
+import { chainInfoFrom } from "@nulo/aztec-runtime/utils"
 
 export class FnImpl {
 	constructor(
@@ -91,11 +92,17 @@ export async function simulate(
 	)
 
 	const payload = new ExecutionPayload([call], [], [], [])
-	const txRequest = await account.buildTxExecutionRequest(node, pxe, payload, {
-		cancellable: false,
-		txNonce: Fr.random(),
-		feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
-	})
+	const txRequest = await account.buildTxExecutionRequest(
+		node,
+		pxe,
+		payload,
+		{
+			cancellable: false,
+			txNonce: Fr.random(),
+			feePaymentMethodOptions: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		},
+		chainInfoFrom(await node.getNodeInfo()),
+	)
 
 	const tx = await pxe.simulateTx(txRequest, {
 		simulatePublic: true,

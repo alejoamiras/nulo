@@ -67,13 +67,16 @@ check_file() {
 	#     derive_claim_secret, not a raw param. Catches "derive then ignore it" (`let _ = derive(...);
 	#     consume(.., claim_salt, ..)`) and "consume with the raw salt". Extract the var bound to
 	#     derive_claim_secret and require claim_private's consume use THAT var as its secret (2nd) arg.
+	#     (aztec 5.0.1+: consume_l1_to_l2_message takes the secret as a one-element array `[secret]`, so
+	#     accept EITHER `[secret]` or bare `secret` — but NOT a multi-element `[secret, X]` (the extra
+	#     element would change the committed hash while a lax `\[?…\]?` regex still matched — codex Low).)
 	local derived_var
 	derived_var=$(printf '%s' "$body" | sed -nE 's/.*let[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=[[:space:]]*derive_claim_secret[[:space:]]*\(.*/\1/p' | head -1)
 	if [ -z "$derived_var" ] || [ "$derived_var" = "_" ]; then
 		echo "SOLE-CONSUMER VIOLATION: claim_private does not bind the derived secret to a real variable (let X = derive_claim_secret(...))" >&2
 		return 1
 	fi
-	if ! printf '%s' "$body" | grep -qE "consume_l1_to_l2_message[[:space:]]*\([^,]*,[[:space:]]*${derived_var}[[:space:]]*,"; then
+	if ! printf '%s' "$body" | grep -qE "consume_l1_to_l2_message[[:space:]]*\([^,]*,[[:space:]]*(\[${derived_var}\]|${derived_var})[[:space:]]*,"; then
 		echo "SOLE-CONSUMER VIOLATION: claim_private consume does not use the derived secret ($derived_var) as its secret arg — bearer/dataflow bypass" >&2
 		return 1
 	fi
