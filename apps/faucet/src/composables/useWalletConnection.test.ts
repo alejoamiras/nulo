@@ -92,6 +92,12 @@ vi.mock("@/contracts/sponsored-fpc", () => ({
 		address: { toString: () => "0xfpc" },
 	}),
 }))
+vi.mock("@/contracts/private-fpc", () => ({
+	getPrivateFpc: async () => ({
+		instance: { address: { toString: () => "0xprivatefpc" } },
+		artifact: {},
+	}),
+}))
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
 
@@ -168,8 +174,9 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("connected")
 		expect(c.selectedAccount.value).toBe("0xa1b2c3")
 		expect(c.accounts.value).toEqual([{ address: "0xa1b2c3", alias: "Main" }])
-		// 6 = the combined faucet + bridge set: dripper, usdc, eth, proxy, token, bridge.
-		expect(wallet.registerContract).toHaveBeenCalledTimes(6)
+		// 7 = the combined faucet + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
+		// (pre-registered so the no-fuel-claim private Fee-Juice balance read works under 5.0.1).
+		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
 	})
 
 	it("capability rejection lands in 'error' state with the capability-rejected category", async () => {
