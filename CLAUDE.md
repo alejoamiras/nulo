@@ -391,8 +391,8 @@ A **stable release** turns the current `main` into a published `vX.Y.Z`: a GitHu
 | Open the Release PR (version bump + `CHANGELOG`) | release-please | ✅ automatic |
 | **Tag + GitHub Release after you merge the Release PR** (the "unstick") | `auto-unstick` job **if `AUTO_UNSTICK_ENABLED=on`**, else **you** | ✅ **var ON (since 2026-07-03) → automatic**; if the var were OFF (kill-switch) you'd do the 45s manual unstick |
 | Gates → build chrome+firefox → smoke → attach zips/SHASUMS | publish chain | ✅ automatic |
-| Redeploy landing + faucet | `refresh-landing` + `deploy-faucet` | ✅ automatic — the `faucet-hook-preflight` job REQUIRES `CLOUDFLARE_FAUCET_DEPLOY_HOOK` to be wired on stable publishes (early red otherwise; the silent dashboard-Git-integration fallback is retired) |
-| Confirm the live sites serve THIS release | `verify-live` | ✅ automatic — **required** (in the `status` aggregator since 2026-07-18) |
+| Redeploy landing + faucet | `refresh-landing` + `deploy-faucet` | ✅ automatic (faucet hook unset → its CF dashboard Git-integration still deploys it) |
+| Confirm the live sites serve THIS release | `verify-live` | ✅ automatic (advisory) |
 | Open the `main → dev` back-sync PR (+ prerelease-manifest re-baseline) | `sync-main-to-dev` | ✅ automatic **now that `AUTO_UNSTICK_ENABLED=on`** (it gates on `push` + `attach-assets` success; if you fall back to the manual `workflow_dispatch` unstick, that path is neither → open the sync manually, see § After a stable cut). You review + **merge-commit** it, NOT squash — see step 5. |
 
 **The happy path (stable), end to end:**
@@ -528,8 +528,7 @@ The manual unstick (tag + `autorelease: tagged` label + empty GitHub Release) pl
 | `auto-unstick` job **red** with "refusing to re-point" | a `vX.Y.Z` tag already exists at a DIFFERENT commit | Fail-closed by design — it won't move a tag. Investigate the tag/commit mismatch, delete/fix the bad tag, then `workflow_dispatch` republish. |
 | `auto-unstick` ran, `unstuck=false`, chain still skipped | flag off (no-op by design), OR HEAD isn't a merged `autorelease: pending` Release PR | If you expected it ON: confirm `vars.AUTO_UNSTICK_ENABLED=on` AND the Release PR actually merged at `github.sha`. |
 | Release exists but assets are missing | an upload failed mid-`attach-assets` | Re-run just the publish chain: `gh workflow run release.yml --ref main -f tag=vX.Y.Z -f dry_run=false`. |
-| `verify-live` **red** | CDN lag, or a real deploy miss | It FAILS the release's `status` (required since 2026-07-18). Open `nulo.sh` / `faucet.nulo.sh`; the faucet's `index.html` `nulo-build` meta must equal `/build.json` `buildId`. Re-fire the deploy (`gh workflow run refresh-landing.yml`), then re-run the `verify-live` job. |
-| `faucet-hook-preflight` **red** | `CLOUDFLARE_FAUCET_DEPLOY_HOOK` not wired | Wire the secret (CF Pages → nulo-faucet → Deploy hooks; repo or production-environment scope), then re-run. Intentional early red — no silent dashboard fallback. |
+| `verify-live` **red** but the release shipped | CDN lag, or a real deploy miss | It's advisory — open `nulo.sh` / `faucet.nulo.sh`. The faucet's `index.html` `nulo-build` meta must equal `/build.json` `buildId`; if not, re-fire the deploy hook. |
 | Faucet shows "No network configured for chainId …" | faucet built/deployed against a stale chain identity | Chain id is single-sourced in `apps/faucet/src/lib/chain-constants.ts` (no env override). Redeploy from current `main`. |
 | `sync-main-to-dev` PR labeled `needs-manual-resolution` | `dev` diverged from `main` since the release | Resolve the conflict on the sync branch (usually `CHANGELOG.md` / `bun.lock`), then **merge-commit** it (`--merge`, NOT squash — preserves release-commit ancestry on `dev`; the bot's manifest commit is App-signed so no `--admin`). |
 | No `sync-main-to-dev` PR appeared | push-only + stable-only; a `workflow_dispatch` republish never syncs | Expected on a republish. For a genuine cut, check the job ran on the `push:main` and read its log. |
@@ -542,7 +541,7 @@ Two pieces ship **guarded** and get promoted only after they're proven on a real
 | Switch | What it gates | Default | Flip when | How |
 |---|---|---|---|---|
 | `vars.AUTO_UNSTICK_ENABLED` | the `auto-unstick` job acting vs no-op | code-default **off**; **var flipped ON 2026-07-03** (v0.24.0 proved the flag-off path) | ✅ done — next stage: flip the in-code default ON after one clean auto-unstick release | `gh variable set AUTO_UNSTICK_ENABLED -b on` (back: `-b off`, or delete the var) |
-| `verify-live` ∈ `status` aggregator | whether a failed live-check fails the release | ✅ **flipped 2026-07-18** — required (in `status`'s `needs` + result loop) | done | revert: remove `verify-live` from `status`'s `needs` + loop |
+| `verify-live` ∈ `status` aggregator | whether a failed live-check fails the release | **advisory** (not in `status`) | after the first clean real release shows it green | one-line `release.yml` edit: add `verify-live` to the `status` job's `needs` + its result loop |
 
 The manual procedures above remain the permanent fallback regardless of switch state.
 

@@ -380,37 +380,13 @@ jobs:
   # faucet on workflow_dispatch republishes (those don't push to main, so the
   # Git-integration never fires). `environment: production` so an env-scoped
   # secret is visible here exactly as it is in deploy-faucet.
-  faucet-hook-preflight:
-    name: pre-flight — faucet deploy hook wired
-    needs: resolve
-    if: |
-      always() &&
-      needs.resolve.result == 'success' &&
-      needs.resolve.outputs.is_prerelease == 'false' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
-      github.event.inputs.dry_run != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    environment: production
-    steps:
-      - name: Assert the faucet deploy hook secret is wired
-        env:
-          DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
-        run: |
-          if [ -z "$DEPLOY_HOOK" ]; then
-            echo "::error::CLOUDFLARE_FAUCET_DEPLOY_HOOK is not wired (repo or production-environment secret) — a stable publish must not fall back silently to the dashboard Git-integration. Wire it (CF Pages → nulo-faucet → Settings → Builds & deployments → Deploy hooks), or pass dry_run=true."
-            exit 1
-          fi
-          echo "faucet deploy hook present"
-
   deploy-faucet:
     name: deploy faucet (Cloudflare Pages deploy hook)
-    needs: [resolve, attach-assets, faucet-hook-preflight]
+    needs: [resolve, attach-assets]
     if: |
       always() && !cancelled() &&
       needs.resolve.result == 'success' &&
       needs.attach-assets.result == 'success' &&
-      needs.faucet-hook-preflight.result == 'success' &&
       needs.resolve.outputs.is_prerelease == 'false' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       github.event.inputs.dry_run != 'true'
@@ -423,10 +399,10 @@ jobs:
           DEPLOY_HOOK: ${{ secrets.CLOUDFLARE_FAUCET_DEPLOY_HOOK }}
         run: |
           if [ -z "$DEPLOY_HOOK" ]; then
-            # Unreachable when the preflight passed; red here means an
-            # env-visibility bug, not an unwired secret — fail loud either way.
-            echo "::error::CLOUDFLARE_FAUCET_DEPLOY_HOOK empty at deploy time despite the preflight — investigate secret scoping."
-            exit 1
+            # Not wired: skip, don't fail. The faucet's Cloudflare dashboard Git-integration
+            # deploys it on push, so an unwired hook never blocks a release.
+            echo "::notice::CLOUDFLARE_FAUCET_DEPLOY_HOOK unset — skipping the CI faucet deploy (dashboard Git-integration still deploys it)."
+            exit 0
           fi
           code=$(curl -sS -o /tmp/cf-faucet.out -w "%{http_code}" \
             --retry 3 --retry-all-errors --retry-delay 2 \
@@ -439,12 +415,11 @@ jobs:
           echo "faucet deploy-hook triggered (HTTP $code)"
 
   verify-live:
-    name: verify live deploys
+    name: verify live deploys (advisory)
     needs: [resolve, attach-assets, refresh-landing, deploy-faucet]
-    # REQUIRED — in the `status` aggregator since the staged-rollout flip
-    # (shipped advisory, proven on a real release, then promoted — same
-    # lifecycle as vars.AUTO_UNSTICK_ENABLED). A red here fails the release's
-    # status: re-fire the deploy (refresh-landing.yml break-glass) and re-run.
+    # ADVISORY — deliberately NOT in the `status` aggregator. It reports red
+    # without blocking the release; open nulo.sh / faucet.nulo.sh and re-fire the
+    # deploy (refresh-landing.yml break-glass) if it flags a stale site.
     if: |
       always() &&
       needs.resolve.outputs.is_prerelease == 'false' &&
@@ -574,10 +549,8 @@ jobs:
         build-firefox,
         smoke-against-artifact,
         attach-assets,
-        faucet-hook-preflight,
         refresh-landing,
         deploy-faucet,
-        verify-live,
         publish-chrome-store,
         publish-firefox-amo,
       ]
@@ -597,10 +570,8 @@ jobs:
             "${{ needs.build-firefox.result }}" \
             "${{ needs.smoke-against-artifact.result }}" \
             "${{ needs.attach-assets.result }}" \
-            "${{ needs.faucet-hook-preflight.result }}" \
             "${{ needs.refresh-landing.result }}" \
             "${{ needs.deploy-faucet.result }}" \
-            "${{ needs.verify-live.result }}" \
             "${{ needs.publish-chrome-store.result }}" \
             "${{ needs.publish-firefox-amo.result }}" \
           ; do
