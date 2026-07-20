@@ -182,7 +182,7 @@ bun run test`. Layers: lint/typecheck(all)/unit(all)/component.
 **Validation gate** — commands: `bun run lint && bun run typecheck:all` + docs read at PR review.
 Layers: lint/typecheck + human review.
 
-### Phase 7 — Full gates
+### Phase 7 ✓ — Full gates
 `bun run audit:vue` (noting it does NOT cover the KAT — `test:all` is the KAT carrier) +
 `bun run test:all` + `bun run test:e2e` (smoke) + `bun run build:firefox` (final-pass gate fix —
 Chrome rides audit:vue's build, Firefox needs the explicit command) + record final bundle-size

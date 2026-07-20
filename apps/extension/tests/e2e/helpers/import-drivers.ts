@@ -195,6 +195,23 @@ export async function makeRandomMasterBase64(): Promise<string> {
 	return Buffer.from(Fr.random().toBuffer()).toString("base64")
 }
 
+/** Derive the REAL Nulo account address for (master, chainId, index) through the frozen
+ *  derivation path. Synthetic backups must carry derivation-consistent account rows: the
+ *  background integrity coordinator re-derives every account before activating an imported
+ *  profile and withholds the session on mismatch — a fabricated address IS a foreign backup. */
+export async function deriveNuloAccountAddress(masterBase64: string, chainId: number, index = 0): Promise<string> {
+	const { Fr } = await import("@aztec/aztec.js/fields")
+	const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
+	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
+	const { createLogger } = await import("@aztec/foundation/log")
+	const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
+	// Same formula as the wallet's account service: poseidon2Hash([master, chainId, type, index])
+	// with AccountType.Nulo_v1 = 0.
+	const seed = poseidon2Hash([master, new Fr(chainId), new Fr(0), new Fr(index)])
+	const account = await NuloAccount.new(seed, createLogger("import-drivers"))
+	return account.address.toString()
+}
+
 /** Encrypt a base64 master with the test password, returning the base64
  *  ciphertext `importEncrypted` accepts. Runs in the page's browser context so
  *  `self.crypto.subtle` is available. */
