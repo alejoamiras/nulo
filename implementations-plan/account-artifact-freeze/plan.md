@@ -164,7 +164,7 @@ and a dApp execution window):
 **Validation gate** — commands: `bun run lint && bun run typecheck:all && bun run test:all &&
 bun run test`. Layers: lint/typecheck(all)/unit(all)/component.
 
-### Phase 6 — Policy docs + skill routing + provenance-drift fixes
+### Phase 6 ✓ — Policy docs + skill routing + provenance-drift fixes
 - CLAUDE.md: "Account-address freeze (production invariant)" section — the regime record,
   one-regime-per-major + append-only rotation, the per-bump canary requirement, and the
   extension-major strategy: a protocol break ships as a NEW extension ("Nulo V6": separate
