@@ -137,7 +137,7 @@ Two parts:
 current pins. Pass: every stage assertion green against a live node with native proving.
 Layers: network e2e (real prove).
 
-### Phase 5 — Centralized mismatch state via a background integrity coordinator
+### Phase 5 ✓ — Centralized mismatch state via a background integrity coordinator
 Final-pass-corrected design (unlock opens the session before popup bootstrap, and
 `AccountService` depends on `ProfileService` — a naive unlock-time call creates layering cycles
 and a dApp execution window):

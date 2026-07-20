@@ -12,7 +12,9 @@ import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { NuloAccount, type IAccountContract } from "@nulo/aztec-runtime/account"
+import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
+import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
+import type { AccountIntegrityBlocked, AccountRuntimeIntegrityDelegate } from "../account-integrity/types"
 import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
 
 export * from "./spec"
@@ -39,6 +41,10 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	private readonly restoreLock = new Lock()
 
 	private profileService: ProfileService = null!
+
+	/** Lazily injected by the last-started AccountIntegrityCoordinator — the operation-time
+	 *  mismatch sink. Never a topological dependency (would be a cycle). */
+	private integrityDelegate: AccountRuntimeIntegrityDelegate | null = null
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
@@ -197,9 +203,29 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const secret = await this.deriveAccountSecret(profileId, chainId, account.type, account.index)
 		const accountContract: IAccountContract = await NuloAccount.new(secret, this.logger)
 		if (accountContract.address.toString() !== address) {
-			throw new Error("account address inconsistency")
+			// The mid-session escape hatch: an extension update can rehydrate a live session under
+			// new derivation code without passing the pre-open verifier. Report fire-and-forget —
+			// the coordinator persists the blocking record and closes the session — and throw the
+			// typed error so consumers route to the blocking state, not a generic failure.
+			const record: AccountIntegrityBlocked = {
+				profileId,
+				chainId,
+				accountIndex: account.index,
+				storedAddress: address,
+				derivedAddress: accountContract.address.toString(),
+				regimeId: V5_REGIME.id,
+				walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
+				detectedAt: Date.now(),
+			}
+			void this.integrityDelegate?.reportRuntimeMismatch(record).catch(() => {})
+			throw new AccountAddressInconsistencyError(undefined, { profileId, chainId, accountIndex: account.index })
 		}
 		return accountContract
+	}
+
+	/** Injected by the last-started AccountIntegrityCoordinator. */
+	public setIntegrityDelegate(delegate: AccountRuntimeIntegrityDelegate): void {
+		this.integrityDelegate = delegate
 	}
 
 	private async deriveAccountSecret(profileId: string, chainId: number, type: number, index: number): Promise<Fr> {

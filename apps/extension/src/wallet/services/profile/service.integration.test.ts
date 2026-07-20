@@ -21,7 +21,8 @@ import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import { AccountAddressInconsistencyError, InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import {
 	asBase64CredentialId,
 	asBase64MasterSecret,
@@ -1323,4 +1324,88 @@ describe("ProfileService — deletion coordinator integration (finding D)", () =
 		await boot2.deleteProfile(q.id)
 		expect(await boot2.getProfiles()).toHaveLength(0)
 	})
+})
+
+describe("account-integrity delegate — the session-open chokepoint", () => {
+	const throwingDelegate = () => {
+		const calls: Array<{ profileId: string }> = []
+		return {
+			calls,
+			delegate: {
+				verifyBeforeSessionOpen: async (profileId: string) => {
+					calls.push({ profileId })
+					throw new AccountAddressInconsistencyError()
+				},
+			},
+		}
+	}
+
+	test("unlock with a mismatching profile is WITHHELD: typed error, no session", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+
+		const { calls, delegate } = throwingDelegate()
+		service.setIntegrityDelegate(delegate)
+
+		await expect(service.unlockProfile(profile.id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(calls).toEqual([{ profileId: profile.id }])
+		expect(await service.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("backup-import path: finalizeRestore runs the check AFTER restore, BEFORE the session opens", async () => {
+		const { service } = await makeService()
+		const events: unknown[] = []
+		service.onActiveProfileChanged.add((p) => events.push(p))
+
+		const out = await service.restore(
+			{ id: "ignored", name: "P", type: "password" },
+			{ type: "password", masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(32).fill(11)).toString("base64")) },
+			"pass1234",
+		)
+		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+
+		// Accounts are restored by the caller between restore() and finalizeRestore() — the
+		// delegate registered here stands in for the coordinator seeing a mismatched row.
+		const { calls, delegate } = throwingDelegate()
+		service.setIntegrityDelegate(delegate)
+
+		await expect(service.finalizeRestore(out.id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(calls).toEqual([{ profileId: out.id }])
+		// The mismatched import never activated: no session, no emit.
+		expect(await service.getActiveProfile()).toBeUndefined()
+		expect(events).toEqual([])
+	}, 30_000)
+
+	test("SW-restart persistence: a blocked profile's session is NOT silently rehydrated", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+
+		// The coordinator persisted a blocking record (simulated directly), then the SW died.
+		const repo = new AccountIntegrityBlockedRepository(api.storage.local)
+		await repo.set({
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		})
+
+		// Fresh service over the same persisted state = the SW restart.
+		const { service: rebooted } = await makeServiceFromExistingApi(api)
+		expect(await rebooted.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("SW-restart control: WITHOUT a blocking record the session rehydrates (gate is targeted)", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+
+		const { service: rebooted } = await makeServiceFromExistingApi(api)
+		expect((await rebooted.getActiveProfile())?.id).toBe(profile.id)
+	}, 30_000)
 })
