@@ -16,7 +16,7 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { PrivateFPCContract } from "@alejoamiras/aztec-fee-payment/artifacts/private"
+import { PrivateFPCContract } from "@alejoamiras/private-fee-juice/artifacts/private"
 import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"

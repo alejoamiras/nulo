@@ -9,4 +9,4 @@
  * This is the only place the faucet reaches the Wonderland artifact; the address + payment-method
  * coupling stays in `private-fuel.ts`.
  */
-export { PrivateFPCContractArtifact } from "@alejoamiras/aztec-fee-payment/artifacts/private"
+export { PrivateFPCContractArtifact } from "@alejoamiras/private-fee-juice/artifacts/private"

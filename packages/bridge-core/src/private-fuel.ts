@@ -11,7 +11,7 @@
  * (`private-fuel.test.ts`) pins both against fixed vectors so an `@aztec` crypto change
  * can never silently strand funds.
  */
-import { FPCFeePaymentMethod, PrivateMintAndPayFeePaymentMethod } from "@alejoamiras/aztec-fee-payment/fee-payment-methods"
+import { FPCFeePaymentMethod, PrivateMintAndPayFeePaymentMethod } from "@alejoamiras/private-fee-juice/fee-payment-methods"
 import { poseidon2HashWithSeparator } from "@aztec/foundation/crypto/sync"
 import type { Fr } from "@aztec/aztec.js/fields"
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -30,7 +30,7 @@ export const DOM_SEP__FPC_BRIDGE_SECRET = 3952304070
  * The CANONICAL PrivateFPC identity — from 5.0.0 onward the salt is a fixed project constant of the
  * fee-payment package (ecosystem-tooling `canonical-deployment.json`; rc-era pins used
  * operator-local salts and are dead). The address is deterministic from the INSTALLED
- * `@alejoamiras/aztec-fee-payment@5.0.1` artifact at `salt=PRIVATE_FPC_SALT, deployer=ZERO` — the
+ * `@alejoamiras/private-fee-juice@5.0.1` artifact at `salt=PRIVATE_FPC_SALT, deployer=ZERO` — the
  * exact instance the wallet auto-registers (`extension/src/wallet/services/fpc/service.ts`, which
  * MUST use the same salt).
  *

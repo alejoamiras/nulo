@@ -422,10 +422,10 @@ export async function setupPreFundedAccount(
 	logger.info(`Public FJ claimed: amount=${publicAmount}`)
 
 	// Step 5 — Private FJ via PrivateFPC.
-	// Top-level import of @alejoamiras/aztec-fee-payment fails on
+	// Top-level import of @alejoamiras/private-fee-juice fails on
 	// `Export named 'DEFAULT_TEARDOWN_DA_GAS_LIMIT'` (Aztec version drift between
 	// @wonderland's pinned deps and Nulo's). Sub-path imports work.
-	const { PrivateFPCContract } = await import("@alejoamiras/aztec-fee-payment/artifacts/private")
+	const { PrivateFPCContract } = await import("@alejoamiras/private-fee-juice/artifacts/private")
 	const { bridgeForMint } = await import("./aztec-private-fpc-bridge")
 
 	// PrivateFPC instance salt MUST match Nulo's auto-discovery (fpc/service.ts: the CANONICAL

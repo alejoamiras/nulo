@@ -82,7 +82,7 @@ describe("private-fuel keystone", () => {
 	})
 
 	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact at the CANONICAL salt matches PRIVATE_FPC_ADDRESS", async () => {
-		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
 		const artifact = loadContractArtifact(JSON.parse(rawBytes.toString("utf8")))
 		const instance = await getContractInstanceFromInstantiationParams(artifact, {
 			constructorArgs: [],
@@ -104,7 +104,7 @@ describe("private-fuel keystone", () => {
 		expect(descriptor.salt).toBe(PRIVATE_FPC_SALT)
 		expect(descriptor.deployer).toBe(AztecAddress.ZERO.toString())
 
-		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
 		const digest = createHash("sha256").update(rawBytes).digest("hex")
 		expect(digest).toBe(descriptor.artifactSha256)
 
@@ -129,11 +129,11 @@ describe("private-fuel keystone", () => {
 				.update(JSON.stringify(canonicalize(parsed)))
 				.digest("hex")
 		}
-		const distBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "dist/target/private_contract-PrivateFPC.json"))
+		const distBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "dist/target/private_contract-PrivateFPC.json"))
 		expect(core(distBytes)).toBe(core(rawBytes))
 
 		const installedVersion = JSON.parse(
-			readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"),
+			readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "package.json"), "utf8"),
 		).version
 		expect(installedVersion).toBe(descriptor.aztecVersion)
 

@@ -58,7 +58,7 @@ minimumReleaseAgeExcludes = [
 	"@alejoamiras/aztec-accelerator",
 	"@aztec-foundation/aztec-standards",
 	"@alejoamiras/aztec-standards",
-	"@alejoamiras/aztec-fee-payment",
+	"@alejoamiras/private-fee-juice",
 	"@aztec/accounts",
 	"@aztec/aztec.js",
 	"@aztec/bb-prover",
