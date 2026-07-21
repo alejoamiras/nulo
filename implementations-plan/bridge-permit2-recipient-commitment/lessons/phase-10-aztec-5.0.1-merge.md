@@ -111,3 +111,39 @@ SAME defect wearing a test costume; production reached it through v-show instead
 
 Gates: faucet 461 + bridge-core 185 (vitest — bare `bun test` has a pre-existing harness mismatch,
 `expect.addEqualityTesters`) + extension 662 (utils/execution) + typechecks + lint.
+
+## `[✓ 2026-07-21]` Round-2 audits (codex verify + codex fresh + FABLE fresh): 1 High-class race, 1 unmeasured-shape gap, 6 more fixes
+
+Three parallel passes on the UX/fee arc per owner ask. Codex-verify confirmed the cross-form High
+fixed + caught the paired-claim filter over-filtering (presence → ADJACENCY rule; the FPC payload
+provably emits `[claim, mint_and_pay_fee]` adjacent). Codex-fresh found the completion/usurp
+microtask race (a fuel submit can re-point `activeFlowId` between a completion WRITE and the Vue
+flush → receipt lost AND toast suppressed) — root-fixed by giving each form an `ownedId` (the record
+IT started): receipts key off the owned record, foreground stays display-only, the fail-open guard
+re-adopts the withdraw rekey and stands down on usurp without releasing a live foreign takeover.
+Also from codex-fresh: the rail ran BACKWARD pre-narration (fallback activeKey was "deposit", so
+AUTHORIZE rendered pre-done before anything signed; now seal/sign first-prompt + an explicit
+"depositing" mapping), `awaitL1Receipt` NEVER checked `status` (a REVERTED approve/deposit read as
+success — now throws non-retryably; #292's comment claimed a check that didn't exist), and the
+details view rendered an EMPTY call list for all-infra txs (falls back to the full list).
+
+**FABLE H1 — the calibration's hidden assumption.** The public self-pay gas limits were measured on
+a canary that sponsor-deploys the account first; the extension defers account init to the FIRST tx
+(`nulo-account.buildWithInitialization` wraps `[ctor, entrypoint]` when the init nullifier is
+absent), so a fresh wallet fueling first carries an unmeasured shape. The new `--fresh-selfpay`
+canary run settled the question differently than expected: the EMBEDDED wallet has NO init wrap —
+the undeployed account's entrypoint dies on its signing-key note (`Failed to get a note`) before gas
+even matters — so the embedded canary CANNOT model the extension shape, and the extension-shape cost
+stays unmeasured (documented on `PUBLIC_CLAIM_GAS`). Bounded, not stranding: any other tx
+initializes the account and RETRY then claims normally; testnet's drip-first flow shields it.
+Measure via an extension-driven e2e before mainnet.
+
+Accepted (documented, unfixed): the >100-unfinished-records completion eviction (capRecords'
+flood-protection is deliberate); the all-fee title fallback (BUG-PINNED; public-withdraw
+authorization tx titles "Sponsor Unconditionally"); consent-surface `humanizeMethodName` labels not
+contract-gated [pre-existing]; name-based FEE_METHODS spoofability on post-hoc surfaces
+[pre-existing class]; hidden-tab completions rely on the receipt-on-return cue.
+
+Test-hygiene rhyme: FuelForm.test needed the same `enableAutoUnmount` as BridgeForm.test — a stale
+mounted form's fail-open guard fired across tests. Gates: faucet 462, bridge-core 187 (+2 reverted
+pins), extension 3180 (+index/adjacency pins), typechecks, biome.

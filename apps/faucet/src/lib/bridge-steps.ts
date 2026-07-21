@@ -79,7 +79,12 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	else if (rt.step === "sealing") activeKey = "seal"
 	else if (rt.step === "signing") activeKey = "sign"
 	else if (rt.step === "approving") activeKey = "approve"
-	else activeKey = "deposit"
+	else if (rt.step === "depositing") activeKey = "deposit"
+	// No deposit tx and no live step (preflight before the first narration, or a reload): the run is at
+	// its FIRST prompt, not at DEPOSIT - the old "deposit" fallback rendered AUTHORIZE as already done
+	// before anything was signed, then jumped BACKWARD when approving/signing narrated in, and pinned a
+	// preflight failure's ✕ on a DEPOSIT that never happened.
+	else activeKey = rec.isPrivate ? "seal" : "sign"
 
 	const labels: Record<string, string> = {
 		seal: "SEAL",

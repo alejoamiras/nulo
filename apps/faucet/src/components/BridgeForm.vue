@@ -59,15 +59,21 @@ const bothConnected = computed(() => l1.isConnected.value && bridge.status.value
 // The takeover machine (plan S2/S7): ALL form gating keys off formStage - never the flows' busy,
 // which spans the whole bridge and would make RUN IN BACKGROUND a no-op.
 const formStage = ref<"form" | "stepper" | "receipt">("form")
-// The ENGINE's foreground ref is the single owner (plan S13) - the form must not keep its own
-// copy, or the withdraw provisional→exit rekey (which transfers ownership engine-side) would
-// orphan the form's stale id and hide a live record from BOTH surfaces.
+// The ENGINE's foreground ref (plan S13) stays the single DISPLAY owner - but the form ALSO tracks
+// the id of the record IT started (`ownedId`). Both forms are permanently mounted (App.vue v-show)
+// sharing activeFlowId, so a foreground-derived "my record" is racy: the other form's submit can
+// re-point the foreground in the same flush a completion lands, and the receipt would silently
+// vanish (foreground-suppressed toast AND no receipt). The completion path keys off ownedId; the
+// stepper/journal one-surface split still keys off the foreground. The withdraw provisional→exit
+// rekey (which re-points the ENGINE's foreground) is covered by re-adoption in the fail-open guard.
 const activeId = journal.activeFlowId
+const ownedId = ref<string | null>(null)
 const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
 // Double-click guard for the submit→onRecord window only (cleared the moment the record exists).
 const submitting = ref(false)
 
 const activeRecord = computed(() => (activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined))
+const ownedRecord = computed(() => (ownedId.value ? journal.records.value.find((r) => r.id === ownedId.value) : undefined))
 
 // The L2 balance reader lives only while the Aztec wallet is connected; this component owns its
 // lifecycle (create on connect, dispose on change/unmount).
@@ -196,6 +202,7 @@ async function onSubmit() {
 	if (fuelBlocksSubmit.value) return
 	submitting.value = true
 	const onRecord = (id: string) => {
+		ownedId.value = id
 		journal.claimForeground(id)
 		formStage.value = "stepper"
 		submitting.value = false
@@ -214,8 +221,9 @@ async function onSubmit() {
 	// keeps the stepper or already moved to the receipt. (Read through a local: TS keeps the
 	// pre-await narrowing on `.value` otherwise.)
 	const stageNow: string = formStage.value
-	if (stageNow === "stepper" && activeId.value && !journal.records.value.some((r) => r.id === activeId.value)) {
-		journal.releaseForeground(activeId.value)
+	if (stageNow === "stepper" && ownedId.value && !journal.records.value.some((r) => r.id === ownedId.value)) {
+		journal.releaseForeground(ownedId.value)
+		ownedId.value = null
 		formStage.value = "form"
 	}
 	void usdc.refresh()
@@ -225,14 +233,14 @@ async function onSubmit() {
 // The stepper→receipt transition keys off the RECORD's completion (never the flow promise - the
 // engine detaches receipt rounds), snapshotting everything the receipt shows (plan S11).
 watch(
-	() => activeRecord.value?.completedAt,
+	() => ownedRecord.value?.completedAt,
 	(done) => {
 		if (!done || formStage.value !== "stepper") return
-		const rec = activeRecord.value
+		const rec = ownedRecord.value
 		if (!rec) return
-		// Both forms stay MOUNTED (App.vue v-show) and share ONE activeFlowId: a Fuel submit from the
-		// other tab re-points it while this form is mid-stepper. Never snapshot a fee-juice record as a
-		// token receipt (and never release the other form's takeover) - FuelForm owns those.
+		// Belt-and-braces: ownedId is only ever set by THIS form's onRecord, so a fee-juice record here
+		// is impossible - but a wrong-kind snapshot (a fuel amount rendered as a token receipt) is bad
+		// enough to guard structurally. FuelForm owns those.
 		if (assetKindOf(rec) === "fee-juice") return
 		receiptSnapshot.value =
 			rec.direction === "deposit"
@@ -275,19 +283,32 @@ watch(
 	},
 )
 
-// Fail-open guard: a stepper whose record VANISHED (cross-tab discard, rejection cleanup) or whose
-// foreground was USURPED by the other, permanently-mounted form (App.vue v-show + the shared
-// activeFlowId) resets to the form - otherwise formStage sticks in "stepper" and blocks every future
-// submit. Release only a DEAD id this form still holds; a live fee-juice record belongs to FuelForm.
+// Fail-open guard on the OWNED record. Three broken states while the stepper is up:
+// - VANISHED + the engine's foreground moved to a NEW record of OUR kind: the withdraw
+//   provisional→exit rekey re-pointed ownership engine-side - RE-ADOPT the new id (plan S13's
+//   "no stale copy" rule, kept alive under the ownedId model).
+// - VANISHED otherwise (cross-tab discard, rejection cleanup): release the dead id, reset.
+// - USURPED while NOT completed (the other permanently-mounted form took the foreground): stand
+//   down to the form WITHOUT releasing the other form's live takeover. A COMPLETED own record is
+//   deliberately not broken - the completion watcher receipts it regardless of watcher order.
 watch(
 	() => {
 		if (formStage.value !== "stepper") return false
-		const rec = activeRecord.value
-		return rec === undefined || assetKindOf(rec) === "fee-juice"
+		const rec = ownedRecord.value
+		if (rec === undefined) return true
+		return activeId.value !== ownedId.value && !rec.completedAt
 	},
 	(broken) => {
 		if (!broken) return
-		if (activeId.value && activeRecord.value === undefined) journal.releaseForeground(activeId.value)
+		if (ownedRecord.value === undefined) {
+			const adoptable = activeRecord.value
+			if (adoptable && assetKindOf(adoptable) !== "fee-juice") {
+				ownedId.value = adoptable.id
+				return
+			}
+			if (ownedId.value) journal.releaseForeground(ownedId.value)
+		}
+		ownedId.value = null
 		formStage.value = "form"
 	},
 )
@@ -300,7 +321,8 @@ function clearFlowErrors() {
 const onBackup = backup.exportBridgeWithToast
 
 function onBackground() {
-	if (activeId.value) journal.releaseForeground(activeId.value)
+	if (ownedId.value) journal.releaseForeground(ownedId.value)
+	ownedId.value = null
 	clearFlowErrors()
 	formStage.value = "form"
 }
@@ -324,8 +346,8 @@ function fmt(b: bigint | null): string {
 <template>
 	<section class="bridge-form" :data-testid="TESTIDS.bridgeForm" :data-stage="formStage">
 		<BridgeStepper
-			v-if="formStage === 'stepper' && activeRecord"
-			:record="activeRecord"
+			v-if="formStage === 'stepper' && ownedRecord"
+			:record="ownedRecord"
 			@background="onBackground"
 			@backup="onBackup"
 		/>

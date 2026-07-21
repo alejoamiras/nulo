@@ -78,7 +78,13 @@ const stop = (why: string): FuelClaimInteraction => ({
  *  ALSO drive {@link clearsFeeLimit}. PUBLIC is CALIBRATED from the live fee-juice-canary (a landed
  *  claim_and_end_setup billed l2Gas 659_123 / daGas 224 → a ~2.3x margin); it sits far below the private
  *  2-call limit so an oversized limit can't shrink the fee-spike headroom under the FUEL_MIN_FJ floor (a 2x
- *  spike at 4M would graze the 16e18 floor — codex). PRIVATE covers FeeJuice.claim + mint_and_pay_fee. */
+ *  spike at 4M would graze the 16e18 floor — codex). PRIVATE covers FeeJuice.claim + mint_and_pay_fee.
+ *  KNOWN GAP (fable audit H1, bounded): a wallet whose FIRST-EVER tx is this claim carries account
+ *  initialization on top (the extension wraps [ctor, entrypoint] when the init nullifier is absent) —
+ *  a shape neither limit was measured against. The fresh-selfpay canary proved the EMBEDDED wallet
+ *  can't model it (no init wrap: the undeployed entrypoint fails on its key note before gas matters),
+ *  so the extension-shape cost stays unmeasured. Recoverable, not stranding: after ANY other tx
+ *  initializes the account, RETRY claims normally. Measure via an extension-driven e2e before mainnet. */
 const PUBLIC_CLAIM_GAS = { daGas: 3_000, l2Gas: 1_500_000 } as const
 const PRIVATE_CLAIM_GAS = { daGas: 100_000, l2Gas: 4_000_000 } as const
 

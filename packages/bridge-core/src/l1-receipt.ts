@@ -26,6 +26,16 @@ export interface AwaitL1ReceiptOptions {
 	waitMs?: (ms: number) => Promise<void>
 }
 
+/** A mined receipt is NOT success: a reverted tx also gets one. Every leg using this helper treats a
+ *  returned receipt as "the leg landed" (the fuel flow marks APPROVE done; deposit legs parse events),
+ *  so a reverted receipt must THROW here - immediately and non-retryably (reverted is final). */
+function assertNotReverted<R>(receipt: R, hash: `0x${string}`): R {
+	if ((receipt as { status?: unknown })?.status === "reverted") {
+		throw new Error(`The Ethereum transaction ${hash} reverted on-chain. Nothing was transferred - check the transaction and retry.`)
+	}
+	return receipt
+}
+
 export async function awaitL1Receipt<R>(client: L1ReceiptClient<R>, hash: `0x${string}`, opts: AwaitL1ReceiptOptions = {}): Promise<R> {
 	const attempts = opts.attempts ?? 8
 	const attemptTimeoutMs = opts.attemptTimeoutMs ?? 90_000
@@ -33,14 +43,17 @@ export async function awaitL1Receipt<R>(client: L1ReceiptClient<R>, hash: `0x${s
 	let lastError: unknown
 	for (let attempt = 1; attempt <= attempts; attempt++) {
 		try {
-			return await client.waitForTransactionReceipt({ hash, timeout: attemptTimeoutMs })
+			return assertNotReverted(await client.waitForTransactionReceipt({ hash, timeout: attemptTimeoutMs }), hash)
 		} catch (e) {
+			if (e instanceof Error && /reverted on-chain/.test(e.message)) throw e
 			lastError = e
+			let mined: R | undefined
 			try {
-				return await client.getTransactionReceipt({ hash })
+				mined = await client.getTransactionReceipt({ hash })
 			} catch {
 				// Genuinely not mined yet (or the RPC is still flaky) — next round.
 			}
+			if (mined !== undefined) return assertNotReverted(mined, hash)
 			opts.onStillWaiting?.(attempt)
 			await wait(2_000)
 		}

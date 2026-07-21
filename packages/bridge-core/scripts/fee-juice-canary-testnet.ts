@@ -137,7 +137,13 @@ async function main() {
 		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
 	} catch {}
 	const sponsoredFee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-	if (!(await node.getContract(from))) {
+	// --fresh-selfpay: SKIP the sponsored account deploy so the self-pay claim is the account's FIRST
+	// tx and carries initialization (ctor + instance publication) - the mainnet persona (no sponsor
+	// exists there). Measures the gas shape the steady-state calibration excludes (fable audit H1).
+	const freshSelfPay = process.argv.includes("--fresh-selfpay")
+	if (freshSelfPay) {
+		console.log("FRESH-SELFPAY mode: skipping the sponsored account deploy - the claim must carry init")
+	} else if (!(await node.getContract(from))) {
 		console.log(`deploying L2 account via sponsored FPC (real proof)… (${mins()})`)
 		const deployMethod = await manager.getDeployMethod()
 		await deployMethod.send({ fee: sponsoredFee, from: "NO_FROM" as never } as never)

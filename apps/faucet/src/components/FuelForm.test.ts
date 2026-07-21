@@ -1,7 +1,11 @@
 import type { BridgeJournalRecord } from "@nulo/bridge-core"
-import { mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { enableAutoUnmount, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
+
+// A stale mounted form from a prior test still watches the SHARED journal refs and its fail-open
+// guard would fire (and count a releaseForeground call) during the next test - unmount between tests.
+enableAutoUnmount(afterEach)
 
 const isConnected = ref(true)
 const bridgeStatus = ref<string>("connected")
@@ -13,8 +17,8 @@ const feeRefresh = vi.fn()
 const claimForeground = vi.fn((id: string) => {
 	activeFlowId.value = id
 })
-const releaseForeground = vi.fn(() => {
-	activeFlowId.value = null
+const releaseForeground = vi.fn((id: string) => {
+	if (activeFlowId.value === id) activeFlowId.value = null
 })
 function fuelRecord(over: Partial<BridgeJournalRecord> = {}): BridgeJournalRecord {
 	return {
@@ -121,13 +125,35 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		await w.vm.$nextTick()
 		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
 		// Both forms stay mounted (App.vue v-show); a bridge submit overwrites the shared foreground.
-		records.value = [fuelRecord({ id: "rec-2", assetKind: "bridge-token" } as Partial<BridgeJournalRecord>)]
+		// Our record STAYS in the journal - only the foreground moved.
+		records.value = [fuelRecord(), fuelRecord({ id: "rec-2", assetKind: "bridge-token" } as Partial<BridgeJournalRecord>)]
 		activeFlowId.value = "rec-2"
 		await w.vm.$nextTick()
 		await w.vm.$nextTick()
 		// This form resets but must NOT release the OTHER form's live takeover.
 		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
 		expect(releaseForeground).not.toHaveBeenCalled()
+		expect(activeFlowId.value).toBe("rec-2")
+	})
+
+	it("RACE: a completion and a foreground usurp in the same flush still produce the receipt", async () => {
+		// The fresh-eyes audit's Medium: the other form's onRecord can re-point activeFlowId between the
+		// completion WRITE and the Vue flush. A foreground-derived watcher would follow the usurper and
+		// silently drop the receipt (with the toast suppressed by the synchronous foreground capture).
+		// The ownedId-keyed watcher receipts our record regardless.
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+		// Same tick, no flush between: our record completes AND the Bridge form takes the foreground.
+		records.value = [
+			fuelRecord({ completedAt: 5000 } as Partial<BridgeJournalRecord>),
+			fuelRecord({ id: "rec-2", assetKind: "bridge-token" } as Partial<BridgeJournalRecord>),
+		]
+		activeFlowId.value = "rec-2"
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-receipt"]').exists()).toBe(true)
 	})
 })
 

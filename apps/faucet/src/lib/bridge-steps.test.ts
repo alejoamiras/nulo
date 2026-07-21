@@ -219,11 +219,17 @@ describe("fueled deposit rail", () => {
 	const fuel = { amount: "250000000000000000", secret: "0xs", secretHashHex: "0xsh", minOutput: "450" }
 
 	it("fueled rail merges the swap into DEPOSIT: SIGN replaces APPROVE, no separate FUEL phase", () => {
+		// Fresh record, no narration yet: the run is at its FIRST prompt (AUTHORIZE), never a
+		// pre-done AUTHORIZE with DEPOSIT active (the backward-rail bug).
 		const phases = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }))
 		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
+		expect(phases.find((p) => p.key === "sign")?.state).toBe("active")
 		const deposit = phases.find((p) => p.key === "deposit")
 		expect(deposit?.label).toBe("DEPOSIT + FUEL")
-		expect(deposit?.detail).toMatch(/fuel swap rides along/i)
+		expect(deposit?.state).toBe("pending")
+		// Mid-deposit (the wallet prompt is up) the merged prompt narrates the swap riding along.
+		const active = stepperPhases(dep({ schema: 2, fuel, isPrivate: false }), { step: "depositing" })
+		expect(active.find((p) => p.key === "deposit")?.detail).toMatch(/fuel swap rides along/i)
 	})
 
 	it("private fueled rail keeps SEAL first, still no FUEL phase", () => {
