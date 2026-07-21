@@ -170,3 +170,45 @@ If a push to a PR branch triggers NO workflows at all (not even Quality; only Cl
 appear), check `gh pr view <n> --json mergeStateStatus` — a `DIRTY` (conflicted) PR gets no
 `pull_request` merge-ref, so ALL pull_request-triggered workflows silently skip. Fix = merge the
 base branch in and push; the run fires immediately. Don't debug the workflows.
+
+## Local resource leaks: the sandbox datadir is on tmpfs (RAM)
+
+`global-setup.ts` puts `AZTEC_DATA_DIR` under `tmpdir()` — i.e. **tmpfs, which is RAM-backed**.
+Each run's aztec LMDB store can be multiple GB. The reaper (owned.json lock, liveness-checked
+orphan reap, kill-by-process-group) only runs at the START of the NEXT e2e run, so when you STOP
+running e2e the last run's orphans are never reaped. An orphaned aztec process holds its datadir
+open even after the dir is `rm`'d → the space stays pinned **in RAM as a deleted-but-open file** →
+swap fills → the box thrashes.
+
+### Symptom you'll hit first (it doesn't look like an e2e problem)
+
+Under this pressure your OWN tooling breaks before any test does:
+- The agent shell's stdout capture fails — commands that print output return "exit 1" with no
+  output, while no-output commands (`true`, `rm`) still succeed. (Redirect to a REAL-disk file and
+  `Read` it — `df -h /tmp; free -h > ~/x.txt` — to see through the broken capture.)
+- In-page e2e operations time out spuriously (e.g. `backup-roundtrip`'s 30s `DecompressionStream`
+  capture). A test that is GREEN on CI but RED locally with a timeout is very likely this, not code.
+
+### Diagnose
+
+`df -h /tmp` shows high "used" but `du -sh /tmp/*` sums to far less → the gap is deleted-open files
+held by LIVE processes. `ps -eo pid,rss,etimes,cmd | grep -E 'aztec|anvil'` finds the holders.
+
+### Recover (order matters)
+
+1. Kill the HOLDERS first — `rm` alone won't reclaim RAM while a process holds the fd open. Prefer
+   killing by process-group from the run's `owned.json` (kill `-pgid`). `pkill -f nulo-aztec` /
+   `pkill -f anvil` is the orphan-recovery LAST resort — it can hit ANOTHER agent's live run
+   (kill by owned pgid, not by name; see the run-isolation rule).
+2. Then `rm -rf /tmp/nulo-aztec-* /tmp/nulo-e2e-*` and `sync`.
+3. Confirm recovery: a plain `echo` through the shell works again.
+
+### Avoid
+
+- **Reap your own runs at session end**, not just implicitly at next-run-start. After a burst of
+  `e2e:agent` runs, kill the owned pgids + clear the datadirs before walking away.
+- Don't spin up e2e in a throwaway worktree (e.g. an A/B baseline) and then `git worktree remove`
+  it without reaping its sandbox first — that orphans its holders.
+- **Best fix (infra, separate PR): move `AZTEC_DATA_DIR` off tmpfs onto real disk** (`~/.cache/…`
+  or the gitignored `.e2e-state/…`). Then a leaked run wastes cheap disk you reap later instead of
+  RAM that breaks the machine.
