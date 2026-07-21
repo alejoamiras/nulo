@@ -84,7 +84,6 @@ async function onClick() {
 			<Button v-else class="waiting" loading @click="retryCapabilities">
 				Approve in your wallet
 			</Button>
-			<span class="morph-sub">one grant covers faucet + bridge: drips, claims/exits, balance reads — no wildcard scopes</span>
 		</div>
 
 		<div v-else class="connect">
@@ -103,6 +102,7 @@ async function onClick() {
 			</div>
 			<Button
 				v-else
+				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
 				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.bridgeL2Connect"
@@ -110,7 +110,6 @@ async function onClick() {
 			>
 				{{ connectLabel }}
 			</Button>
-			<p v-if="status === 'error' && error" class="error-hint">{{ error.message }}</p>
 		</div>
 
 		<VerificationModal :emojis="verificationEmojis" @confirm="confirmVerification" @cancel="cancelVerification" />
@@ -172,12 +171,6 @@ async function onClick() {
 	align-items: flex-start;
 }
 
-.morph-sub {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.02em;
-}
-
 .waiting {
 	animation: pulse 1.6s ease-in-out infinite;
 }
@@ -205,12 +198,9 @@ async function onClick() {
 }
 
 .denied:hover {
-	background: color-mix(in srgb, var(--red) 10%, transparent);
-}
-
-.error-hint {
-	color: var(--red);
-	font-size: 13px;
-	margin-top: 8px;
+	/* !important: the design Button's module rule `.primary:hover:not(...)`
+	 * outranks this scoped selector and would restore the accent fill. */
+	background: color-mix(in srgb, var(--red) 10%, transparent) !important;
+	color: var(--red) !important;
 }
 </style>

@@ -103,7 +103,6 @@ function openInstall() {
 			>
 				Approve in your wallet
 			</Button>
-			<span class="morph-sub">one grant covers faucet + bridge: drips, claims/exits, balance reads — no wildcard scopes</span>
 		</div>
 
 		<Flex v-else-if="showNoWalletCta" direction="column" gap="12" align="start" class="no-wallet">
@@ -133,6 +132,7 @@ function openInstall() {
 			</div>
 			<Button
 				v-else-if="showConnectButton"
+				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
 				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.btnConnect"
@@ -140,9 +140,6 @@ function openInstall() {
 			>
 				{{ connectLabel }}
 			</Button>
-			<p v-if="status === 'error' && error?.category !== 'no-wallet' && error?.category !== 'capability-rejected'" class="error-hint">
-				{{ error?.message }}
-			</p>
 		</div>
 
 		<VerificationModal
@@ -211,12 +208,6 @@ function openInstall() {
 	align-items: flex-start;
 }
 
-.morph-sub {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.02em;
-}
-
 .waiting {
 	animation: pulse 1.6s ease-in-out infinite;
 }
@@ -244,7 +235,10 @@ function openInstall() {
 }
 
 .denied:hover {
-	background: color-mix(in srgb, var(--red) 10%, transparent);
+	/* !important: the design Button's module rule `.primary:hover:not(...)`
+	 * outranks this scoped selector and would restore the accent fill. */
+	background: color-mix(in srgb, var(--red) 10%, transparent) !important;
+	color: var(--red) !important;
 }
 
 .split {
@@ -258,11 +252,5 @@ function openInstall() {
 .split .caret {
 	min-width: 44px;
 	padding: 0 12px;
-}
-
-.error-hint {
-	color: var(--red);
-	font-size: 13px;
-	margin-top: 8px;
 }
 </style>
