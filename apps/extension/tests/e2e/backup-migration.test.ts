@@ -26,7 +26,9 @@ import {
 } from "./helpers/import-drivers"
 
 const HAS_FIXTURE = process.env.NULO_E2E_MIGRATION_FIXTURE === "1"
-const IS_RELEASE_ARTIFACT_RUN = !!process.env.EXTENSION_PATH
+// Explicit workflow-set artifact-mode flag (was bare EXTENSION_PATH — too broad: any custom
+// local build path would have satisfied the arming contract's artifact carve-out).
+const IS_RELEASE_ARTIFACT_RUN = process.env.NULO_E2E_ARTIFACT_RUN === "1"
 
 test("fixture-arming contract: unarmed runs are allowed ONLY against a release artifact", () => {
 	if (!HAS_FIXTURE) {
