@@ -152,7 +152,7 @@ modal on open, switch affordance visibility rules, collision rows both render.
 **Validation gate** — commands: `bun run lint && bun run --cwd apps/faucet typecheck &&
 bun run test:faucet`. Pass: exit 0. Layers: lint/typecheck/unit/component.
 
-### Phase 3 — Faucet e2e + full gates + docs
+### Phase 3 ✓ — Faucet e2e + full gates + docs
 - Faucet e2e (jsdom-style smoke with the mocked wallet yielding one provider — audit-verified
   harness shape): add the picker click to the connect path, CLEAR localStorage per test (the
   remembered path would otherwise skip the picker for test 2+), scope all selectors beneath the
