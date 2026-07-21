@@ -178,6 +178,7 @@ declare global {
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
+  const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
   const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
   const watch: typeof import('vue').watch
   const watchEffect: typeof import('vue').watchEffect
@@ -449,6 +450,7 @@ declare module 'vue' {
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
+    readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
     readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
     readonly watchEffect: UnwrapRef<typeof import('vue')['watchEffect']>

@@ -449,6 +449,11 @@ async function main() {
 			usdc,
 			portal,
 			portalSource: "forked-v1",
+			// L9 runtime interlock: the recipient-committed deposit code REFUSES to build a private deposit
+			// unless the active manifest declares this. Written ONLY into the candidate (this file is never
+			// the live manifest before promotion), so a stray preview/static deploy of new code against an
+			// OLD (bearer-bridge) manifest fails closed instead of stranding funds.
+			privateClaimMode: "salt-v2",
 			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
 			...(fuel ? { fuel } : {}),
 			feeJuice,

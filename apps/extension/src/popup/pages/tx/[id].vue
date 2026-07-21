@@ -127,10 +127,13 @@ const explorerUrl = computed(() => {
 })
 const explorerName = computed(() => BLOCK_EXPLORERS.find((e) => e.id === appStore.defaultExplorer)?.name ?? "explorer")
 
-/** User-facing calls list — excludes fee/entrypoint infrastructure. */
+/** User-facing calls list — excludes fee/entrypoint infrastructure. An ALL-infra tx (e.g. a
+ *  sponsored authorization: [sponsor_unconditionally, set_authorized]) falls back to the full list —
+ *  an empty details view would hide what the tx actually did. */
 const userCalls = computed(() => {
 	if (!tx.value?.calls) return []
-	return tx.value.calls.filter((c) => !FEE_METHODS.has(c.method))
+	const filtered = tx.value.calls.filter((c) => !FEE_METHODS.has(c.method))
+	return filtered.length ? filtered : tx.value.calls
 })
 
 onMounted(async () => {

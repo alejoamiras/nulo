@@ -251,6 +251,7 @@
     "useTemplateRef": true,
     "useTicker": true,
     "useToast": true,
+    "userMethodsOf": true,
     "waitForProfileActive": true,
     "watch": true,
     "watchEffect": true,

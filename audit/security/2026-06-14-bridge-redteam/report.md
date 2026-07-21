@@ -127,7 +127,9 @@ F-001 CONFIRMED: live portal is permissionlessly re-initializable
 
 ---
 
-### [LOW — CVSS 2.6] F-007: bearer-secret private claim (recipient omitted) — accepted-risk; off-chain custody is the only guard
+### [LOW — CVSS 2.6] F-007: bearer-secret private claim (recipient omitted) — ✅ FIXED on the recipient-committed deployment (`bridge-permit2-recipient-commitment`)
+**STATUS 2026-07-06 — FIXED (recipient-commitment landed).** `claim_private` now takes a `claim_salt` and re-derives the consumption secret from `(claim_salt, recipient)` in-circuit (`claim_secret` Noir lib ↔ TS `deriveTokenClaimSecret`, keystone-pinned both toolchains), so a leaked salt can only claim to the ORIGINALLY-BOUND recipient — a relayer can finish a claim, never redirect. Portal bytecode + content hashes unchanged (the salt is committed via the message's secret_hash, not the content hash). Requires a fresh L2 stack (the deployment migration — plan `bridge-permit2-recipient-commitment`). The **real driver was the new relayer capability**, not this Low-2.6 finding. The old bearer deployment retains bearer semantics for in-flight claims. Below is the original finding for the record.
+
 **Impact:** Low today (accepted design; no on-chain leak path found). **Confidence:** high. **Mapping:** cross-chain/Aztec-specific. **Found by:** Claude + Codex.
 **Instances:** `token_bridge/main.nr:104-122` (`claim_private` content hash omits recipient); `TokenPortal.sol:90-112` (private deposit carries only `Poseidon(secret)`).
 **Description.** Whoever holds the private claim secret can claim to any recipient. Inherited verbatim from canonical Aztec; recipient-commitment is the documented end-state but legitimately deferred (it requires forking portal + bridge + redeploy + re-audit). It stays a finding because the only guard is off-chain custody: the secret never leaks on-chain (L1 carries only the hash; claim runs in private execution; the faucet seals it at rest). The one seam: `RecoveryHooks.onSecret(s)` hands the plaintext to the integrator (`flows.ts:46-64,263-268`) — any integrator who logs/stores it unsealed makes the deposit→claim window front-runnable.

@@ -23,6 +23,8 @@ use token_portal_content_hash_lib::{
 get_mint_to_private_content_hash, get_mint_to_public_content_hash, get_withdraw_content_hash,
 };
 
+use claim_secret_lib::derive_claim_secret;
+
 use token_minter_proxy::TokenMinterProxy;
 
 #[storage]
@@ -99,22 +101,31 @@ self.context.consume_l1_to_l2_message(content_hash, [secret], config.portal, mes
 self.call(TokenMinterProxy::at(config.token_minter_proxy).mint_to_public(to, amount));
 }
 
-// Consumes an L1->L2 message and mints the bridged amount privately. The
-// recipient is not revealed (the private content hash omits it); the amount is.
+// Consumes an L1->L2 message and mints the bridged amount privately. The private content
+// hash omits the recipient (amount only), but the consumption secret is DERIVED from the
+// recipient in-circuit: `derive_claim_secret(claim_salt, recipient)`. So the recipient is
+// committed via the message's secret_hash (fixed at deposit), not via the content hash — a
+// claim naming a different recipient derives a different secret and can't consume the
+// message. This lets a relayer submit the claim FOR the user without being able to redirect
+// funds. INVARIANT: this is the ONLY path that consumes a `mint_to_private` message; adding
+// any entrypoint that takes a raw secret would reintroduce the bearer property (F-007).
+// Guarded by the sole-consumer static check (scripts/check-sole-consumer.sh) + the Phase 9 audit.
 #[external("private")]
 fn claim_private(
 recipient: AztecAddress,
 amount: u128,
-secret_for_L1_to_L2_message_consumption: Field,
+claim_salt: Field,
 message_leaf_index: Field,
 ) {
 self.enqueue_self._assert_not_paused();
 assert(amount > 0, "Amount must be greater than zero");
+assert(!recipient.is_zero(), "Recipient cannot be zero");
 let config = self.storage.config.read();
 let content_hash = get_mint_to_private_content_hash(amount);
+let secret = derive_claim_secret(claim_salt, recipient);
 self.context.consume_l1_to_l2_message(
 content_hash,
-[secret_for_L1_to_L2_message_consumption],
+[secret],
 config.portal,
 message_leaf_index,
 );

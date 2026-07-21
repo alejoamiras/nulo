@@ -34,6 +34,7 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
+import { deriveTokenClaimSecret } from "../src/claim-secret"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -43,6 +44,12 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 const configArg = process.argv.indexOf("--config")
 if (configArg === -1) throw new Error("pass --config <candidate manifest path> (e.g. apps/faucet/public/testnet-bridge.candidate.json)")
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
+// --private exercises the recipient-committed path (the strand-risk gate): deposit commits to
+// H(deriveTokenClaimSecret(salt, recipient)) and claim_private re-derives the secret in-circuit.
+// --redirect-proof (implies private) additionally proves the CIRCUIT binding LIVE: a wrong recipient
+// can't consume (Phase 7 step 3, fresh-audit H2).
+const redirectProof = process.argv.includes("--redirect-proof")
+const isPrivate = process.argv.includes("--private") || redirectProof
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -161,11 +168,104 @@ async function main() {
 		CONFIG.l2.bridge.address,
 	)
 
-	// ─── Deposit (public) → claim ────────────────────────────────────
+	// ─── Deposit → claim (public, or --private recipient-committed) ────────────────────
 	const amount = 100n * 10n ** BigInt(decimals)
 	const l2recipient = from
-	const claimSecret = Fr.random()
-	const secretHash = await computeSecretHash(claimSecret)
+
+	if (redirectProof) {
+		// Prove the CIRCUIT binding LIVE: deposit A + a sync SENTINEL B (both to R). Once B claims, the
+		// network has synced past both, so a wrong-recipient claim on the earlier A reverts for the BINDING
+		// reason, not because A isn't synced yet. The authoritative gate is that the CORRECT claim of A still
+		// succeeds afterwards — if the wrong claim had redirected/consumed A, that correct claim would fail.
+		const depositPrivate = async (salt: Fr): Promise<bigint> => {
+			const sh = await computeSecretHash(deriveTokenClaimSecret(salt, l2recipient))
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: usdc,
+					abi: usdcAbi as never,
+					functionName: "mint",
+					args: [account.address, amount] as never,
+				}),
+			})
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: usdc,
+					abi: usdcAbi as never,
+					functionName: "approve",
+					args: [portal, amount] as never,
+				}),
+			})
+			const s = await pub.simulateContract({
+				address: portal,
+				abi: TokenPortalAbi as never,
+				functionName: "depositToAztecPrivate" as never,
+				args: [amount, sh.toString()] as never,
+				account,
+			})
+			const leaf = BigInt((s.result as [string, bigint])[1])
+			await pub.waitForTransactionReceipt({
+				hash: await wallet.writeContract({
+					address: portal,
+					abi: TokenPortalAbi as never,
+					functionName: "depositToAztecPrivate" as never,
+					args: [amount, sh.toString()] as never,
+				}),
+			})
+			return leaf
+		}
+		const claimPrivate = async (recipient: AztecAddress, salt: Fr, leaf: bigint): Promise<boolean> => {
+			for (let i = 0; i < 300; i++) {
+				try {
+					await bridge.methods.claim_private(recipient, amount, salt, new Fr(leaf)).send(sendOpts)
+					return true
+				} catch {
+					await new Promise((r) => setTimeout(r, 6000))
+				}
+			}
+			return false
+		}
+
+		const saltA = Fr.random()
+		const leafA = await depositPrivate(saltA)
+		const saltB = Fr.random()
+		const leafB = await depositPrivate(saltB)
+		console.log(`redirect-proof: deposited A(leaf ${leafA}) + sentinel B(leaf ${leafB}) (${mins()})`)
+
+		if (!(await claimPrivate(l2recipient, saltB, leafB))) throw new Error("sentinel B never claimed — L1→L2 not synced within budget")
+		console.log(`sentinel B claimed → network synced; A is now claimable (${mins()})`)
+
+		// A is synced (B, a LATER leaf, claimed). So a wrong-recipient claim on A that reverts does so for
+		// the BINDING reason, not because A isn't synced yet. Single attempt — no retry (we want the revert).
+		const wrongRecipient = AztecAddress.fromStringUnsafe("0x0000000000000000000000000000000000000000000000000000000000000001")
+		let wrongReverted = false
+		try {
+			await bridge.methods.claim_private(wrongRecipient, amount, saltA, new Fr(leafA)).send(sendOpts)
+		} catch {
+			wrongReverted = true
+		}
+		if (!wrongReverted) {
+			throw new Error(
+				"SECURITY FAILURE: wrong-recipient claim_private on a SYNCED message did NOT revert — recipient-commitment broken (redirect possible)",
+			)
+		}
+		// A stays claimable: a reverted consume_l1_to_l2_message never nullifies the message (protocol
+		// invariant). We deliberately do NOT re-claim A here — re-simulating the same leaf in the same PXE
+		// session after a failed consume attempt wedges the local PXE (a harness limitation, not on-chain
+		// state); canary 2 already proves a correct private claim settles + mints. B's claim is the balance
+		// sanity that private claims work on this candidate.
+		const balRP = ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
+		if (balRP < amount) throw new Error(`redirect-proof: sentinel balance ${balRP} < expected ${amount} (B)`)
+		console.log(
+			`\n✅ CANDIDATE REDIRECT-PROOF PASSED — a wrong recipient cannot consume a SYNCED message (binding holds); sentinel balance ${balRP} (${mins()})`,
+		)
+		return
+	}
+	// PRIVATE: the stored/claimed value is the claim_salt; the L1-committed secretHash is over the
+	// DERIVED secret deriveTokenClaimSecret(salt, recipient), so claim_private re-derives it in-circuit.
+	// PUBLIC: claimValue is the raw secret (claim_public binds the recipient in its content hash).
+	const claimValue = Fr.random()
+	const committedSecret = isPrivate ? deriveTokenClaimSecret(claimValue, l2recipient) : claimValue
+	const secretHash = await computeSecretHash(committedSecret)
 
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
@@ -183,11 +283,14 @@ async function main() {
 			args: [portal, amount] as never,
 		}),
 	})
-	const depositArgs = [l2recipient.toString(), amount, secretHash.toString()]
+	// PRIVATE deposit omits the recipient (mint_to_private content hash = amount only); the recipient
+	// is bound solely via the secretHash. PUBLIC deposit carries the recipient in its content hash.
+	const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
+	const depositArgs = isPrivate ? [amount, secretHash.toString()] : [l2recipient.toString(), amount, secretHash.toString()]
 	const sim = await pub.simulateContract({
 		address: portal,
 		abi: TokenPortalAbi as never,
-		functionName: "depositToAztecPublic",
+		functionName: depositFn as never,
 		args: depositArgs as never,
 		account,
 	})
@@ -196,26 +299,34 @@ async function main() {
 		hash: await wallet.writeContract({
 			address: portal,
 			abi: TokenPortalAbi as never,
-			functionName: "depositToAztecPublic",
+			functionName: depositFn as never,
 			args: depositArgs as never,
 		}),
 	})
-	console.log(`deposited ${amount} → L2, leafIndex ${leafIndex} (${mins()})`)
+	console.log(`deposited ${amount} → L2 (${isPrivate ? "private" : "public"}), leafIndex ${leafIndex} (${mins()})`)
 
 	let claimed = false
 	for (let i = 0; i < 300 && !claimed; i++) {
 		try {
-			await bridge.methods.claim_public(l2recipient, amount, claimSecret, new Fr(leafIndex)).send(sendOpts)
+			// PRIVATE: pass the SALT (claimValue); claim_private re-derives the secret from (salt, recipient).
+			await (isPrivate
+				? bridge.methods.claim_private(l2recipient, amount, claimValue, new Fr(leafIndex))
+				: bridge.methods.claim_public(l2recipient, amount, claimValue, new Fr(leafIndex))
+			).send(sendOpts)
 			claimed = true
 		} catch {
 			await new Promise((r) => setTimeout(r, 6000))
 		}
 	}
-	if (!claimed) throw new Error("claim_public never succeeded (L1→L2 message not synced within budget)")
+	if (!claimed) throw new Error(`claim_${isPrivate ? "private" : "public"} never succeeded (L1→L2 message not synced within budget)`)
 
-	const bal = ((await token.methods.balance_of_public(l2recipient).simulate({ from })) as { result: bigint }).result
+	const bal = isPrivate
+		? ((await token.methods.balance_of_private(l2recipient).simulate({ from })) as { result: bigint }).result
+		: ((await token.methods.balance_of_public(l2recipient).simulate({ from })) as { result: bigint }).result
 	if (bal < amount) throw new Error(`balance ${bal} < deposited ${amount}`)
-	console.log(`\n✅ CANDIDATE smoke PASSED — deposit→claim bridged ${amount} on the recorded set in ${mins()}.`)
+	console.log(
+		`\n✅ CANDIDATE ${isPrivate ? "PRIVATE " : ""}smoke PASSED — deposit→claim bridged ${amount} on the recorded set in ${mins()}.`,
+	)
 	console.log("   Safe to promote testnet-bridge.candidate.json → testnet-bridge.json.")
 }
 

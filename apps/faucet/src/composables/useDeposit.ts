@@ -1,11 +1,11 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { InboxAbi } from "@aztec/l1-artifacts"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
 import { Gas } from "@aztec/stdlib/gas"
-import { InboxAbi, TokenPortalAbi } from "@aztec/l1-artifacts"
 import {
 	type BridgeWitness,
 	type DepositJournalRecord,
@@ -16,6 +16,7 @@ import {
 	bridgeWitnessPermitTypedData,
 	buildFuelRoute,
 	deriveBridgeSecret,
+	deriveTokenClaimSecret,
 	feeJuiceAddress,
 	hashRoute,
 	isSealTrusted,
@@ -35,7 +36,17 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
 import { sepolia } from "viem/chains"
 import { ref, watch } from "vue"
-import { BRIDGE, BRIDGE_FUEL, FUEL_MIN_FJ, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import {
+	BRIDGE,
+	BRIDGE_FUEL,
+	BRIDGE_PERMIT2,
+	BRIDGE_ROUTER,
+	BRIDGE_SWAP_TARGET,
+	FUEL_MIN_FJ,
+	L1_PORTAL,
+	L1_USDC,
+	SUPPORTS_SALT_V2,
+} from "@/contracts/bridge-deployments"
 import {
 	FUEL_FEE_MARGIN,
 	PRIVATE_ATTEMPT_STALE_MS,
@@ -51,7 +62,6 @@ import {
 	connectJournalDeps,
 	discard,
 	flagRecordError,
-	markApproveOutcome,
 	markSessionLive,
 	isMsgConsumed,
 	resumeSessionWork,
@@ -329,27 +339,23 @@ export function ensureDepositJournalDeps(): void {
 			// Fee-juice (Fuel) records claim via a different, no-token-leg path — dispatch to the dedicated
 			// builder; the token claim below never runs for them (codex Option C, lessons/phase-3.md).
 			if (assetKindOf(rec) === "fee-juice") {
-				const fpcInst = await getSponsoredFpcInstance()
 				const latchFuel = (patch: Record<string, unknown>) => {
 					const f = rec.fuel
 					if (f) updateRecord(rec.id, { fuel: { ...f, ...patch } })
 				}
-				// V5: pin the private claim's maxFeesPerGas to predicted-worst — NO extra padding. This is a
-				// SELF-PAY claim: the bridged amount is the whole budget and the FPC asserts
-				// amount >= gasLimits*maxFeesPerGas with no refund, so any fee headroom inflates max_gas_cost
-				// past the bridged amount and reverts "Amount too low to cover gas cost". (The wallet's x1.5
-				// minFeePadding is for refundable txs, not this.) predicted-worst is already a forward-looking
-				// ceiling so it still covers base-fee drift through the proving window; a rare spike beyond it
-				// fails recoverably and the engine reprices on retry. Public uses the Sponsored FPC (no cap).
-				const claimMaxFees = rec.isPrivate ? await predictedWorstMinFees(createAztecNodeClient(NODE_URL)) : undefined
+				// V5: pin the claim's maxFeesPerGas to predicted-worst — NO extra padding. BOTH paths now
+				// SELF-PAY (public via FeeJuicePaymentMethodWithClaim, private via the embedded FPC): the bridged
+				// amount is the whole budget and the setup asserts amount >= gasLimits*maxFeesPerGas with no
+				// refund, so any fee headroom inflates max_gas_cost past the bridged amount and reverts "Amount
+				// too low to cover gas cost". (The wallet's x1.5 minFeePadding is for refundable txs, not this.)
+				// predicted-worst is already a forward-looking ceiling so it still covers base-fee drift through
+				// the proving window; a rare spike beyond it fails recoverably (the engine reprices on retry).
+				const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
 				return buildFuelClaimInteraction(rec, {
 					aztec,
 					recipient: AztecAddress.fromStringUnsafe(rec.recipient),
-					sponsoredFpc: fpcInst.address,
 					minFloorFj: FUEL_MIN_FJ,
-					maxFeesPerGas: claimMaxFees
-						? { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas }
-						: undefined,
+					maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
 					// Authoritative claim material from the engine: the unsealed `envelope.salt` (private) and
 					// the gated top-level secret (public) — never the plaintext journal copy (codex HIGH/LOW).
 					resolvedSalt: rec.isPrivate ? envelope?.salt : undefined,
@@ -705,8 +711,26 @@ export function useDepositFlow() {
 				}
 			}
 
+			// L9 runtime interlock: recipient-committed private deposits require a salt-v2 manifest. Refuse
+			// otherwise — a derived-secret deposit against an old bearer-bridge manifest would strand funds.
+			if (isPrivate && !SUPPORTS_SALT_V2) {
+				throw new Error(
+					"This deployment predates recipient-committed private claims (manifest lacks privateClaimMode: salt-v2). Private bridging is unavailable here — use a public bridge or wait for the cutover.",
+				)
+			}
+			// Defense-in-depth (codex ultra Low): a nonzero-but-invalid recipient (not a Grumpkin point)
+			// would be committed and then mint an undecryptable, unrecoverable note. The wallet-connected
+			// address is always valid, but fail closed here too before the irreversible L1 tx.
+			if (!(await AztecAddress.fromStringUnsafe(recipient).isValid())) {
+				throw new Error("Selected account is not a valid Aztec address — refusing to bridge.")
+			}
+			// `secret` is the value stored + claimed-with: for PRIVATE it's the recipient-committed claim_salt
+			// (claim_private re-derives the consumption secret from it + the recipient); for PUBLIC it's the raw
+			// secret (claim_public binds the recipient in its content hash). The L1-committed secretHash is over
+			// the DERIVED secret for private, so a claim naming a different recipient can't consume the message.
 			const secret = Fr.random()
-			const secretHash = await computeSecretHash(secret)
+			const committedSecret = isPrivate ? deriveTokenClaimSecret(secret, AztecAddress.fromStringUnsafe(recipient)) : secret
+			const secretHash = await computeSecretHash(committedSecret)
 			id = secretHash.toString()
 			const now = Date.now()
 			// record.amount is the TOKEN CLAIM amount (total minus fuel) - the claim machinery and
@@ -736,7 +760,11 @@ export function useDepositFlow() {
 								secretHashHex: fuelPre.secretHashHex,
 								minOutput: fuelPre.minOutput.toString(),
 								// PRIVATE fuel: persist the bridge-secret salt + the FPC the FJ lands at, so the
-								// claim can rebuild the Wonderland method. (Sealing parity follow-up: TODO seal salt.)
+								// claim can rebuild the Wonderland method. Plaintext-safe by design: the fuel secret is
+								// CLAIMER-COMMITTED (deriveBridgeSecret(salt, claimer); PrivateFPC.mint_and_pay_fee
+								// re-derives it from msg_sender), so a localStorage read is a privacy-linkage, not a
+								// theft/consume path. Recovery rides the whole-record backup seal (backup.ts); the
+								// sealedEnvelope deliberately carries only the recipient-committed TOKEN salt.
 								...(isPrivate ? { bridgeSecretSalt: fuelPre.salt?.toString(), fpc: PRIVATE_FPC_ADDRESS } : {}),
 							},
 						}
@@ -804,7 +832,9 @@ export function useDepositFlow() {
 					bridgeToken: L1_USDC,
 					totalAmount: amount,
 					fuelAmount: fuelSlice,
-					aztecRecipient: recipient as `0x${string}`,
+					// PRIVATE: recipient is committed via tokenSecretHash, NOT published — the router ignores it on
+					// the private path but EMITS it indexed, so a real value here leaks R. Zero it for private.
+					aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
 					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
 					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
 					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
@@ -921,44 +951,67 @@ export function useDepositFlow() {
 				return id
 			}
 
-			// Allowance-skip: approve only when the portal's allowance is short.
-			setRecordStep(id, "approving", "checking the portal allowance")
-			const allowance = (await l1.publicClient.readContract({
+			// Single deposit path: bridge-only through the router's Permit2 `bridge()` (fuel fields zeroed).
+			// No approve tx — the live token pre-approves canonical Permit2 (asserted, fail-closed). The
+			// witness pins tokenPortal/token/amount/recipient/secretHash/isPrivate + the router's swapTarget.
+			if (!BRIDGE_ROUTER || !BRIDGE_PERMIT2 || !BRIDGE_SWAP_TARGET) {
+				throw new Error("Bridge router/permit2 not configured (required for the deposit path).")
+			}
+			const permit2Allowance = (await l1.publicClient.readContract({
 				address: L1_USDC,
 				abi: ERC20_ABI,
 				functionName: "allowance",
-				args: [from, L1_PORTAL],
+				args: [from, BRIDGE_PERMIT2],
 			})) as bigint
-			if (allowance < amount) {
-				log("approving the portal (confirm in your Ethereum wallet)")
-				setRecordStep(id, "approving", "confirm the allowance in your Ethereum wallet")
-				const approveHash = await runOnLane("l1", () =>
-					wallet.writeContract({
-						address: L1_USDC,
-						abi: ERC20_ABI,
-						functionName: "approve",
-						args: [L1_PORTAL, amount],
-						chain: sepolia,
-						account: from,
-					}),
-				)
-				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`)
-				markApproveOutcome(id, "done")
-			} else {
-				log("allowance sufficient - skipping approve")
-				markApproveOutcome(id, "skipped")
+			if (permit2Allowance < tokenAmount) {
+				throw new Error("This token does not pre-approve Permit2 - bridging is unavailable for it.")
 			}
 
-			const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
-			const depositArgs = isPrivate ? [tokenAmount, id] : [recipient as `0x${string}`, tokenAmount, id as `0x${string}`]
-			log(`${depositFn} (confirm in your Ethereum wallet)`)
+			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
+			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
+			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const bridgeWitness: BridgeWitness = {
+				tokenPortal: L1_PORTAL,
+				bridgeToken: L1_USDC,
+				totalAmount: tokenAmount,
+				fuelAmount: 0n,
+				// PRIVATE recipient is committed via secretHash, never published — zero it so the router's
+				// indexed Bridge event can't leak R (privacy). PUBLIC binds R in the portal content hash.
+				aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
+				fuelRecipient: `0x${"0".repeat(64)}`,
+				tokenSecretHash: id as `0x${string}`,
+				fuelSecretHash: `0x${"0".repeat(64)}`,
+				minFuelOutput: 0n,
+				routeHash: `0x${"0".repeat(64)}`,
+				isPrivate,
+				swapTarget: BRIDGE_SWAP_TARGET,
+			}
+			const bridgeTyped = bridgeWitnessPermitTypedData(
+				{ permitted: { token: L1_USDC, amount: tokenAmount }, spender: BRIDGE_ROUTER, nonce, deadline },
+				bridgeWitness,
+				BRIDGE_PERMIT2,
+				sepolia.id,
+			)
+			const bridgeSig = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...bridgeTyped } as never))
+
+			log("bridge (confirm in your Ethereum wallet)")
 			setRecordStep(id, "depositing", "confirm the deposit in your Ethereum wallet")
 			const depositTxHash = await runOnLane("l1", () =>
 				wallet.writeContract({
-					address: L1_PORTAL,
-					abi: TokenPortalAbi,
-					functionName: depositFn,
-					args: depositArgs,
+					address: BRIDGE_ROUTER,
+					abi: SWAP_BRIDGE_ROUTER_ABI,
+					functionName: "bridge",
+					args: [
+						{
+							tokenPortal: L1_PORTAL,
+							bridgeToken: L1_USDC,
+							amount: tokenAmount,
+							aztecRecipient: bridgeWitness.aztecRecipient,
+							secretHash: id as `0x${string}`,
+							isPrivate,
+						},
+						{ nonce, deadline, signature: bridgeSig },
+					],
 					chain: sepolia,
 					account: from,
 				} as never),
@@ -972,10 +1025,12 @@ export function useDepositFlow() {
 					setRecordStep(recId, "depositing", `still waiting for the Ethereum confirmation (round ${attempt})`),
 			})
 
-			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
-			const event = sent[0] as { args?: { index?: bigint } } | undefined
-			if (event?.args?.index === undefined) throw new Error("deposit emitted no Inbox MessageSent event")
-			const leafIndex = event.args.index.toString()
+			// Leaf index + message key from the router's Bridge event (not the Inbox — the router re-emits them).
+			const bridged = parseEventLogs({ abi: SWAP_BRIDGE_ROUTER_ABI, eventName: "Bridge", logs: receipt.logs })
+			const bev = bridged[0] as { args?: { index?: bigint; key?: `0x${string}` } } | undefined
+			if (bev?.args?.index === undefined) throw new Error("bridge() emitted no Bridge event")
+			const leafIndex = bev.args.index.toString()
+			if (bev.args.key) updateRecord(id, { messageHash: bev.args.key })
 			// Snapshot the L2 height at deposit-confirm time - anchors the sync countdown. Best-effort:
 			// a dead node just means the gate narrates without the block countdown.
 			let depositL2Block: number | undefined

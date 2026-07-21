@@ -1,7 +1,11 @@
 import type { BridgeJournalRecord } from "@nulo/bridge-core"
-import { mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { enableAutoUnmount, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
+
+// A stale mounted form from a prior test still watches the SHARED journal refs and its fail-open
+// guard would fire (and count a releaseForeground call) during the next test - unmount between tests.
+enableAutoUnmount(afterEach)
 
 const isConnected = ref(true)
 const bridgeStatus = ref<string>("connected")
@@ -13,13 +17,9 @@ const feeRefresh = vi.fn()
 const claimForeground = vi.fn((id: string) => {
 	activeFlowId.value = id
 })
-const releaseForeground = vi.fn(() => {
-	activeFlowId.value = null
+const releaseForeground = vi.fn((id: string) => {
+	if (activeFlowId.value === id) activeFlowId.value = null
 })
-// `hideCompleted` is a NAMED export referenced eagerly in the mock's return object (not inside a lazy
-// factory arrow like the refs), so it must be hoisted above the vi.mock call.
-const hideCompleted = vi.hoisted(() => vi.fn())
-
 function fuelRecord(over: Partial<BridgeJournalRecord> = {}): BridgeJournalRecord {
 	return {
 		id: "rec-1",
@@ -45,7 +45,6 @@ vi.mock("@/composables/useL1FeeAsset", () => ({ FUEL_ASSET_DECIMALS: 18, useL1Fe
 vi.mock("@/composables/useFuel", () => ({ useFuelFlow: () => ({ error: fuelError, deposit }) }))
 vi.mock("@/composables/useBridgeBackup", () => ({ useBridgeBackup: () => ({ exportBridgeWithToast: vi.fn() }) }))
 vi.mock("@/composables/useBridgeJournal", () => ({
-	hideCompleted,
 	useBridgeJournal: () => ({ activeFlowId, records, claimForeground, releaseForeground }),
 }))
 // Deterministic minimum for the debounce cases (the real constant is deployment-derived).
@@ -73,7 +72,7 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		records.value = []
 		fuelError.value = null
 		deposit.mockClear()
-		hideCompleted.mockClear()
+		releaseForeground.mockClear()
 	})
 
 	it("submit → stepper; the record completes → receipt (NEW FUEL, fee-juice); NEW FUEL resets to the form", async () => {
@@ -95,12 +94,66 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		expect(receipt.attributes("data-cta")).toBe("NEW FUEL")
 		expect(receipt.attributes("data-kind")).toBe("fee-juice")
 		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(false)
+		// Completion released the takeover so the finished record surfaces in "Your fuels".
+		expect(releaseForeground).toHaveBeenCalledWith("rec-1")
 
-		// NEW FUEL → hide the completed card + reset to the form
+		// NEW FUEL → reset to the form (the record stays in the journal history)
 		await w.find('[data-testid="stub-newfuel"]').trigger("click")
 		await w.vm.$nextTick()
-		expect(hideCompleted).toHaveBeenCalledWith("rec-1")
 		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+	})
+
+	it("a rejected fuel (record discarded pre-deposit) self-heals to the form instead of soft-bricking", async () => {
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+		// The rejection path discards the record; the foreground id keeps pointing at the dead id.
+		records.value = []
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(releaseForeground).toHaveBeenCalledWith("rec-1")
+		// The form is back AND submittable (formStage reset - the old bug left it stuck in "stepper").
+		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		expect(deposit).toHaveBeenCalledTimes(2)
+	})
+
+	it("a Bridge-tab takeover (foreground re-pointed at a token record) stands this form down without releasing", async () => {
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+		// Both forms stay mounted (App.vue v-show); a bridge submit overwrites the shared foreground.
+		// Our record STAYS in the journal - only the foreground moved.
+		records.value = [fuelRecord(), fuelRecord({ id: "rec-2", assetKind: "bridge-token" } as Partial<BridgeJournalRecord>)]
+		activeFlowId.value = "rec-2"
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		// This form resets but must NOT release the OTHER form's live takeover.
+		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+		expect(releaseForeground).not.toHaveBeenCalled()
+		expect(activeFlowId.value).toBe("rec-2")
+	})
+
+	it("RACE: a completion and a foreground usurp in the same flush still produce the receipt", async () => {
+		// The fresh-eyes audit's Medium: the other form's onRecord can re-point activeFlowId between the
+		// completion WRITE and the Vue flush. A foreground-derived watcher would follow the usurper and
+		// silently drop the receipt (with the toast suppressed by the synchronous foreground capture).
+		// The ownedId-keyed watcher receipts our record regardless.
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+		// Same tick, no flush between: our record completes AND the Bridge form takes the foreground.
+		records.value = [
+			fuelRecord({ completedAt: 5000 } as Partial<BridgeJournalRecord>),
+			fuelRecord({ id: "rec-2", assetKind: "bridge-token" } as Partial<BridgeJournalRecord>),
+		]
+		activeFlowId.value = "rec-2"
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-receipt"]').exists()).toBe(true)
 	})
 })
 

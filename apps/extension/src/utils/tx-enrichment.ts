@@ -3,7 +3,7 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
 import { trimAddress } from "@/utils/string"
-import { FEE_METHODS, pickPrimaryMethod } from "./primary-method"
+import { FEE_METHODS, pickPrimaryIndex, pickPrimaryMethod, userMethodsOf } from "./primary-method"
 
 export { FEE_METHODS, pickPrimaryMethod }
 
@@ -96,9 +96,10 @@ export function humanizeMethodName(method: string): string {
  */
 export function getPrimaryCall<T extends { method: string }>(calls: T[]): T | undefined {
 	if (!calls?.length) return undefined
-	const primary = pickPrimaryMethod(calls)
-	if (!primary) return calls[0]
-	return calls.find((c) => c.method === primary) ?? calls[0]
+	// Index-based, not find-by-name: when the primary's NAME also appears in the fee payload (the
+	// paired FeeJuice claim), a name find would return the fee call's object - wrong contract/transfers.
+	const idx = pickPrimaryIndex(calls)
+	return idx === undefined ? calls[0] : calls[idx]
 }
 
 /**
@@ -131,7 +132,9 @@ export function getTxTitle(calls: TxCall[]): string {
  */
 export function getCallCountLabel(calls: TxCall[]): string | null {
 	if (!calls) return null
-	const userCalls = calls.filter((c) => !FEE_METHODS.has(c.method))
+	// Same infra rule as the primary picker (incl. the paired-claim case) so the count never says
+	// "2 calls" for a claim whose second call is just its own fee payload.
+	const userCalls = userMethodsOf(calls.map((c) => c.method))
 	if (userCalls.length <= 1) return null
 	return `${userCalls.length} calls`
 }

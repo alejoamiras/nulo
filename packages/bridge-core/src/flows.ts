@@ -13,11 +13,14 @@ import { Fr } from "@aztec/aztec.js/fields"
 import type { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
-import { InboxAbi } from "@aztec/l1-artifacts"
 import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
+import { deriveTokenClaimSecret } from "./claim-secret"
 import { type BridgeWitness, bridgeWitnessPermitTypedData, hashRoute, type PoolKey } from "./l1"
 import type { SendOpts } from "./l2"
 import { PRIVATE_FPC_ADDRESS } from "./private-fuel"
+
+/** bytes32 zero — the fuel fields a bridge-only witness (and the router's bridge()) leave unset. */
+const ZERO_BYTES32 = `0x${"0".repeat(64)}` as Hex
 
 /** The connected L1 surface the flows need (a viem wallet + public client + account). */
 export interface L1Ctx {
@@ -26,30 +29,18 @@ export interface L1Ctx {
 	account: Account
 }
 
-export interface DepositParams {
-	usdc: Address
-	portal: Address
-	usdcAbi: Abi
-	portalAbi: Abi
-	/** L2 recipient (AztecAddress hex). */
-	recipient: string
-	amount: bigint
-}
-
-/** Bridge-flow stages, surfaced to the UI for the loading bar + step labels. */
-export type DepositFlowStage = "approving" | "depositing" | "syncing" | "claiming" | "done"
-
 /**
  * Persistence hooks so a crash/refresh between the (irreversible) deposit and the
  * claim can't strand funds: the secret is saved BEFORE broadcast, the leaf index
  * once the deposit lands, and the record cleared on a successful claim. The caller
  * (the app) owns the storage + encryption via `recovery.ts`/`recovery-crypto.ts`.
  *
- * SECURITY (F-007): a PRIVATE claim is BEARER — whoever holds `secretHex` can claim the deposit
- * to any recipient (the private content hash omits the recipient). Integrators MUST seal `secretHex`
- * at rest and MUST NEVER log it, place it in a URL, or persist it in plaintext; a leak makes the
- * deposit→claim window front-runnable. (Recipient-commitment, which would bind the recipient on-chain
- * and remove the bearer property, is backlog.)
+ * SECURITY (recipient-committed, F-007 closed): a PRIVATE claim is NO LONGER bearer — `secretHex`
+ * carries the per-deposit `claim_salt`, and `claim_private` re-derives the consumption secret from
+ * `(claim_salt, recipient)`, so a leaked salt only lets someone claim to the ORIGINALLY-BOUND recipient
+ * (a relayer can finish the deposit, never redirect it). Still seal `secretHex` at rest and NEVER log
+ * it: losing it strands the deposit (it's the sole recovery input), and leaking it reveals the
+ * recipient↔amount↔leaf linkage (a privacy loss, not a theft vector).
  */
 export interface RecoveryHooks {
 	onSecret?: (r: { secretHex: string; secretHashHex: string; isPrivate: boolean }) => void
@@ -57,102 +48,137 @@ export interface RecoveryHooks {
 	onClaimed?: () => void
 }
 
-async function runDeposit(
-	l1: L1Ctx,
-	bridge: ContractBase,
-	p: DepositParams,
-	sendOpts: SendOpts,
-	isPrivate: boolean,
-	onStage?: (s: DepositFlowStage) => void,
-	recovery?: RecoveryHooks,
-): Promise<bigint> {
-	const secret = Fr.random()
-	const secretHash = await computeSecretHash(secret)
-	// Persist the secret BEFORE any irreversible L1 tx — a lost preimage strands the deposit.
-	recovery?.onSecret?.({ secretHex: secret.toString(), secretHashHex: secretHash.toString(), isPrivate })
-	// Private deposits hash mint_to_private(amount) — no recipient in the deposit args.
-	const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
-	const depositArgs = isPrivate ? [p.amount, secretHash.toString()] : [p.recipient, p.amount, secretHash.toString()]
-	const claimFn = isPrivate ? "claim_private" : "claim_public"
-	const claim = (bridge.methods as Record<string, (...a: unknown[]) => { send: (o: unknown) => Promise<unknown> }>)[claimFn]
+// ─── Bridge-only via the router's Permit2 bridge() entrypoint (Phase 3) ───
+// The single deposit path after this plan: bridge-only ERC20 AND fuel-only (tokenPortal =
+// FeeJuicePortal) both go through bridge(). Signs a Permit2 witness (fuel fields zeroed) and
+// calls bridge(); returns the L1 result. The L2 claim runs separately (claimPublic/claimPrivate),
+// mirroring runSwapBridge. The direct approve+portal path (runDeposit/depositPublic/depositPrivate)
+// is DELETED — bridge-only now goes through bridge() everywhere (faucet inlines the same witness).
 
-	onStage?.("approving")
-	await l1.pub.waitForTransactionReceipt({
-		hash: await l1.wallet.writeContract({
-			address: p.usdc,
-			abi: p.usdcAbi,
-			functionName: "mint",
-			args: [l1.account.address, p.amount],
-			account: l1.account,
-			chain: l1.wallet.chain,
-		} as never),
-	})
-	await l1.pub.waitForTransactionReceipt({
-		hash: await l1.wallet.writeContract({
-			address: p.usdc,
-			abi: p.usdcAbi,
-			functionName: "approve",
-			args: [p.portal, p.amount],
-			account: l1.account,
-			chain: l1.wallet.chain,
-		} as never),
-	})
+/** L1 stages for a router deposit, surfaced to the UI. */
+export type RouterDepositStage = "signing" | "depositing" | "syncing" | "done"
 
-	onStage?.("depositing")
-	const depositReceipt = await l1.pub.waitForTransactionReceipt({
-		hash: await l1.wallet.writeContract({
-			address: p.portal,
-			abi: p.portalAbi,
-			functionName: depositFn,
-			args: depositArgs,
-			account: l1.account,
-			chain: l1.wallet.chain,
-		} as never),
-	})
-	// The actual leaf index comes from the mined Inbox `MessageSent` event — never a
-	// preflight simulate, which races with any concurrent deposit and yields an index
-	// the L2 message won't match (claim then retries forever against the wrong leaf).
-	const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: depositReceipt.logs })
-	const event = sent[0] as { args?: { index?: bigint } } | undefined
-	if (event?.args?.index === undefined) throw new Error("deposit tx emitted no Inbox MessageSent event")
-	const leafIndex = event.args.index
-	recovery?.onDeposited?.(leafIndex)
-
-	onStage?.("syncing")
-	// Generous: a fresh PXE re-syncing a long-lived sandbox (many blocks) can lag.
-	for (let i = 0; i < 200; i++) {
-		try {
-			await claim(AztecAddress.fromStringUnsafe(p.recipient), p.amount, secret, new Fr(leafIndex)).send(sendOpts as never)
-			recovery?.onClaimed?.()
-			onStage?.("done")
-			return leafIndex
-		} catch {
-			onStage?.("claiming")
-			await new Promise((r) => setTimeout(r, 3000))
-		}
-	}
-	throw new Error(`${claimFn} never succeeded (L1→L2 message not synced)`)
+export interface RouterDepositParams {
+	router: Address
+	routerAbi: Abi
+	permit2: Address
+	/** For fuel-only this is the canonical FeeJuicePortal; for bridge-only, the token portal. */
+	tokenPortal: Address
+	bridgeToken: Address
+	amount: bigint
+	aztecRecipient: Hex
+	isPrivate: boolean
+	/** The router's current swap target — witness-bound even for bridge-only (F-004). */
+	swapTarget: Address
+	/** PRIVATE only — the recipient-committed `claim_salt` (required; fail-closed if absent). */
+	claimSalt?: Fr
+	nonce: bigint
+	deadline: bigint
+	chainId: number
 }
 
-/** L1→L2 public deposit: mint → approve → depositToAztecPublic → poll-and-claim_public. */
-export const depositPublic = (
-	l1: L1Ctx,
-	bridge: ContractBase,
-	p: DepositParams,
-	sendOpts: SendOpts,
-	onStage?: (s: DepositFlowStage) => void,
-	recovery?: RecoveryHooks,
-): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, false, onStage, recovery)
+export interface RouterDepositResult {
+	/** PRIVATE: the `claim_salt` (claim_private re-derives the secret). PUBLIC: the raw secret. */
+	claimValueHex: string
+	secretHashHex: string
+	leafIndex: bigint
+	/** The L1→L2 message hash (the router `Bridge` event `key`) — for waiting on L2 claimability. */
+	messageHashHex: string
+}
 
-/** L1→L2 private deposit: depositToAztecPrivate (no recipient in the content hash) → claim_private. */
-export const depositPrivate = (
+/**
+ * Bridge-only deposit through the router's witness-bound Permit2 `bridge()`. Private deposits derive
+ * the token secret from `(claimSalt, recipient)` so `claim_private` can re-derive it — the persisted +
+ * returned value is the SALT, not the secret. The token pre-approves canonical Permit2 (AZLO) so there's
+ * no approve tx; the canonical fee asset (fuel-only) needs a one-time `approve(Permit2)` done by the caller.
+ */
+export async function runRouterDeposit(
 	l1: L1Ctx,
-	bridge: ContractBase,
-	p: DepositParams,
-	sendOpts: SendOpts,
-	onStage?: (s: DepositFlowStage) => void,
+	p: RouterDepositParams,
+	onStage?: (s: RouterDepositStage) => void,
 	recovery?: RecoveryHooks,
-): Promise<bigint> => runDeposit(l1, bridge, p, sendOpts, true, onStage, recovery)
+): Promise<RouterDepositResult> {
+	if (p.isPrivate && !p.claimSalt) {
+		throw new Error(
+			"runRouterDeposit: private deposit requires claimSalt (recipient-committed) — a random secret strands the deposit against claim_private",
+		)
+	}
+	// A nonzero-but-invalid recipient (a field that isn't a point on Grumpkin) would be committed into
+	// the deposit and then mint an undecryptable, unspendable note — the commitment makes it
+	// unrecoverable. Fail closed before the irreversible L1 tx. (The Noir claim_private wants a matching
+	// is_valid() assert on the next redeploy; today the faucet's wallet-sourced recipient is always valid.)
+	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {
+		throw new Error("runRouterDeposit: aztecRecipient is not a valid Aztec address (not a Grumpkin point) — refusing to deposit")
+	}
+	// PRIVATE: derive from (salt, recipient); the value to persist/claim is the SALT. PUBLIC: raw random secret.
+	const claimValue = p.isPrivate ? (p.claimSalt as Fr) : Fr.random()
+	const secret = p.isPrivate ? deriveTokenClaimSecret(p.claimSalt as Fr, AztecAddress.fromStringUnsafe(p.aztecRecipient)) : claimValue
+	const secretHash = await computeSecretHash(secret)
+	// Persist the claim value BEFORE the irreversible L1 tx — a lost salt/secret strands the deposit.
+	recovery?.onSecret?.({ secretHex: claimValue.toString(), secretHashHex: secretHash.toString(), isPrivate: p.isPrivate })
+
+	const witness: BridgeWitness = {
+		tokenPortal: p.tokenPortal,
+		bridgeToken: p.bridgeToken,
+		totalAmount: p.amount,
+		fuelAmount: 0n,
+		// PRIVATE: recipient is committed via tokenSecretHash (H(derive(salt, recipient))) and is NOT
+		// published — the router ignores it on the private path but EMITS it as an indexed event, so a
+		// real value here would leak R and defeat recipient privacy. Zero on-chain; the claim re-derives
+		// the secret from R (which stays only in the local recovery record).
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
+		fuelRecipient: ZERO_BYTES32,
+		tokenSecretHash: secretHash.toString() as Hex,
+		fuelSecretHash: ZERO_BYTES32,
+		minFuelOutput: 0n,
+		routeHash: ZERO_BYTES32,
+		isPrivate: p.isPrivate,
+		swapTarget: p.swapTarget,
+	}
+	const typedData = bridgeWitnessPermitTypedData(
+		{ permitted: { token: p.bridgeToken, amount: p.amount }, spender: p.router, nonce: p.nonce, deadline: p.deadline },
+		witness,
+		p.permit2,
+		p.chainId,
+	)
+
+	onStage?.("signing")
+	const signature = await l1.wallet.signTypedData({ account: l1.account, ...typedData } as never)
+
+	onStage?.("depositing")
+	const bridgeParams = {
+		tokenPortal: p.tokenPortal,
+		bridgeToken: p.bridgeToken,
+		amount: p.amount,
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
+		secretHash: secretHash.toString(),
+		isPrivate: p.isPrivate,
+	}
+	const receipt = await l1.pub.waitForTransactionReceipt({
+		hash: await l1.wallet.writeContract({
+			address: p.router,
+			abi: p.routerAbi,
+			functionName: "bridge",
+			args: [bridgeParams, { nonce: p.nonce, deadline: p.deadline, signature }],
+			account: l1.account,
+			chain: l1.wallet.chain,
+		} as never),
+	})
+
+	onStage?.("syncing")
+	// Leaf index + message key from the router's Bridge event (never a preflight simulate — see runDeposit's note).
+	const events = parseEventLogs({ abi: p.routerAbi, eventName: "Bridge", logs: receipt.logs })
+	const ev = events[0] as { args?: { index?: bigint; key?: Hex } } | undefined
+	if (ev?.args?.index === undefined || ev.args.key === undefined) throw new Error("bridge() emitted no Bridge event")
+	recovery?.onDeposited?.(ev.args.index)
+	onStage?.("done")
+	return {
+		claimValueHex: claimValue.toString(),
+		secretHashHex: secretHash.toString(),
+		leafIndex: ev.args.index,
+		messageHashHex: ev.args.key,
+	}
+}
 
 type AztecNodeClient = ReturnType<typeof createAztecNodeClient>
 
@@ -234,6 +260,11 @@ export interface SwapBridgeParams {
 	 *  would strand the Fee Juice forever: the claimer must reconstruct it from `msg_sender` inside
 	 *  `PrivateFPC.mint_and_pay_fee`. The caller derives it (it owns the salt + claimer + persistence). */
 	fuelSecret?: Fr
+	/** PRIVATE token leg only — the recipient-committed `claim_salt` for the bridged TOKEN. Required when
+	 *  isPrivate: the token leg's secret is `deriveTokenClaimSecret(tokenClaimSalt, aztecRecipient)` (NOT
+	 *  Fr.random() — a random one would strand the token deposit against the recipient-committed
+	 *  claim_private). Distinct from `fuelSecret` (the FPC gas leg). Public token leg ignores it. */
+	tokenClaimSalt?: Fr
 	nonce: bigint
 	deadline: bigint
 	chainId: number
@@ -251,8 +282,9 @@ export interface SwapBridgeResult {
 /**
  * Persist BOTH claim secrets BEFORE the irreversible bridgeWithFuel; record leaf indices once it lands.
  *
- * SECURITY (F-007): same bearer contract as {@link RecoveryHooks} — `tokenSecretHex`/`fuelSecretHex`
- * are bearer for the PRIVATE path. Seal at rest; NEVER log/URL/plaintext-persist them.
+ * SECURITY (recipient-committed): same contract as {@link RecoveryHooks}. For the PRIVATE path
+ * `tokenSecretHex` is the token `claim_salt` (recipient-committed, not bearer); `fuelSecretHex` is the
+ * FPC-bound fuel secret. Seal both at rest — losing either strands its leg; NEVER log/URL/plaintext them.
  */
 export interface SwapRecoveryHooks {
 	onSecrets?: (r: { tokenSecretHex: string; fuelSecretHex: string; aztecRecipient: Hex; isPrivate: boolean }) => void
@@ -285,13 +317,29 @@ export async function runSwapBridge(
 				"runSwapBridge: private fuel requires an injected fuelSecret (deriveBridgeSecret(salt, claimer)) — a random secret strands the Fee Juice",
 			)
 		}
+		if (!p.tokenClaimSalt) {
+			throw new Error(
+				"runSwapBridge: private token leg requires an injected tokenClaimSalt — a random token secret strands the deposit against the recipient-committed claim_private (F2)",
+			)
+		}
 		if (p.fuelRecipient.toLowerCase() !== PRIVATE_FPC_ADDRESS.toLowerCase()) {
 			throw new Error(
 				`runSwapBridge: private fuel must target the PrivateFPC (${PRIVATE_FPC_ADDRESS}); got fuelRecipient=${p.fuelRecipient}`,
 			)
 		}
 	}
-	const tokenSecret = Fr.random()
+	// A nonzero-but-invalid recipient (not a Grumpkin point) strands the deposit — it would mint an
+	// undecryptable note, and the commitment makes it unrecoverable. Fail closed before the L1 tx.
+	if (!(await AztecAddress.fromStringUnsafe(p.aztecRecipient).isValid())) {
+		throw new Error("runSwapBridge: aztecRecipient is not a valid Aztec address (not a Grumpkin point) — refusing to deposit")
+	}
+	// PRIVATE token leg: the secret is derived from (tokenClaimSalt, recipient) so claim_private can
+	// re-derive it — the VALUE the L2 claim passes is the SALT (returned as tokenSecretHex). PUBLIC token
+	// leg: claim_public binds the recipient in its content hash, so a random secret is correct.
+	const tokenClaimValue = p.isPrivate ? (p.tokenClaimSalt as Fr) : Fr.random()
+	const tokenSecret = p.isPrivate
+		? deriveTokenClaimSecret(p.tokenClaimSalt as Fr, AztecAddress.fromStringUnsafe(p.aztecRecipient))
+		: tokenClaimValue
 	// PUBLIC fuel: recipient-bound, random is correct. PRIVATE fuel: the caller injects the derived
 	// bridge secret so the FPC claimer can reconstruct it (a random one would strand the FJ — L3).
 	const fuelSecret = p.fuelSecret ?? Fr.random()
@@ -299,7 +347,7 @@ export async function runSwapBridge(
 	const fuelSecretHash = (await computeSecretHash(fuelSecret)).toString() as Hex
 	// Persist BOTH secrets before the irreversible swap+bridge — a lost preimage strands the claim.
 	recovery?.onSecrets?.({
-		tokenSecretHex: tokenSecret.toString(),
+		tokenSecretHex: tokenClaimValue.toString(),
 		fuelSecretHex: fuelSecret.toString(),
 		aztecRecipient: p.aztecRecipient,
 		isPrivate: p.isPrivate,
@@ -310,7 +358,9 @@ export async function runSwapBridge(
 		bridgeToken: p.bridgeToken,
 		totalAmount: p.totalAmount,
 		fuelAmount: p.fuelAmount,
-		aztecRecipient: p.aztecRecipient,
+		// PRIVATE recipient is committed via tokenSecretHash, never published — zero the on-chain field so
+		// the router's indexed BridgeWithFuel event can't leak R (privacy); the private path ignores it.
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
 		fuelRecipient: p.fuelRecipient,
 		tokenSecretHash,
 		fuelSecretHash,
@@ -335,7 +385,7 @@ export async function runSwapBridge(
 		bridgeToken: p.bridgeToken,
 		totalAmount: p.totalAmount,
 		fuelAmount: p.fuelAmount,
-		aztecRecipient: p.aztecRecipient,
+		aztecRecipient: p.isPrivate ? ZERO_BYTES32 : p.aztecRecipient,
 		fuelRecipient: p.fuelRecipient,
 		tokenSecretHash,
 		fuelSecretHash,
@@ -364,7 +414,8 @@ export async function runSwapBridge(
 	recovery?.onBridged?.({ tokenLeafIndex: ev.args.tokenIndex, fuelLeafIndex: ev.args.fuelIndex })
 	onStage?.("done")
 	return {
-		tokenSecretHex: tokenSecret.toString(),
+		// PRIVATE: the claim_salt (claim_private re-derives the secret). PUBLIC: the raw secret.
+		tokenSecretHex: tokenClaimValue.toString(),
 		fuelSecretHex: fuelSecret.toString(),
 		tokenLeafIndex: ev.args.tokenIndex,
 		fuelLeafIndex: ev.args.fuelIndex,
