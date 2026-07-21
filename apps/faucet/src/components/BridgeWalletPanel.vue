@@ -20,7 +20,9 @@ const {
 const connectLabel = computed(() => {
 	switch (status.value) {
 		case "discovering":
-			return "Searching for wallet…"
+			return "Searching for wallets…"
+		case "choosing":
+			return "Choose a wallet"
 		case "verifying":
 			return "Verify in wallet"
 		case "capability-approval":

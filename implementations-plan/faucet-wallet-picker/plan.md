@@ -140,7 +140,7 @@ subscribed after `confirm()` (test that the pre-confirm registration bug stays f
 bun run test:faucet`. Pass: exit 0, all required cases present + green.
 Layers: lint/typecheck/unit.
 
-### Phase 2 — Picker modal + wiring + testids
+### Phase 2 ✓ — Picker modal + wiring + testids
 `WalletPickerModal.vue` (app-root overlay per the approved Option B mockup), both switch
 affordances (idle link + connected chip menu), `TESTIDS` additions. Component tests: rows render
 (name as text — HTML-bearing name inert; 48-char cap enforced on the STRING), icon protocol

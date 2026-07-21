@@ -10,11 +10,13 @@ const {
 	verificationEmojis,
 	selectedAccount,
 	error,
+	preferredWalletName,
 	connect,
 	confirmVerification,
 	cancelVerification,
 	retryCapabilities,
 	disconnect,
+	forgetPreferredWallet,
 } = useWalletConnection()
 
 const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://nulo.sh"
@@ -24,7 +26,9 @@ const connectLabel = computed(() => {
 		case "idle":
 			return "Connect wallet"
 		case "discovering":
-			return "Searching for wallet…"
+			return "Searching for wallets…"
+		case "choosing":
+			return "Choose a wallet"
 		case "verifying":
 			return "Verify in wallet"
 		case "capability-approval":
@@ -55,6 +59,16 @@ async function onClick() {
 function openInstall() {
 	window.open(NULO_INSTALL_URL, "_blank", "noopener")
 }
+
+/** A2: switching never requires a manual disconnect — forget + disconnect in
+ *  one action; the next Connect runs a fresh pick. */
+async function switchWallet() {
+	forgetPreferredWallet()
+	if (status.value === "connected") {
+		await disconnect()
+	}
+	await connect()
+}
 </script>
 
 <template>
@@ -62,6 +76,14 @@ function openInstall() {
 		<div v-if="status === 'connected' && selectedAccount" class="chip">
 			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.account" />
+			<button
+				class="switch-link in-chip"
+				type="button"
+				:data-testid="TESTIDS.btnSwitchWallet"
+				@click="switchWallet"
+			>
+				switch
+			</button>
 			<button
 				class="disconnect"
 				type="button"
@@ -105,12 +127,18 @@ function openInstall() {
 			<Button
 				v-if="showConnectButton"
 				:loading="status === 'discovering'"
-				:disabled="status === 'discovering'"
+				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.btnConnect"
 				@click="onClick"
 			>
 				{{ connectLabel }}
 			</Button>
+			<p v-if="status === 'idle' && preferredWalletName" class="preferred-hint" :data-testid="TESTIDS.preferredWalletHint">
+				Reconnects to {{ preferredWalletName }} ·
+				<button type="button" class="switch-link" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">
+					use a different wallet
+				</button>
+			</p>
 			<p v-if="status === 'error' && error?.category !== 'no-wallet' && error?.category !== 'capability-rejected'" class="error-hint">
 				{{ error?.message }}
 			</p>
@@ -189,6 +217,33 @@ function openInstall() {
 
 .capability .hint {
 	color: var(--yellow);
+}
+
+.preferred-hint {
+	color: var(--txt-secondary);
+	font-size: 11px;
+}
+
+.switch-link {
+	background: none;
+	border: none;
+	color: var(--txt-secondary);
+	font: 600 11px/1 var(--font-mono);
+	cursor: pointer;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+	padding: 2px 0;
+}
+
+.switch-link:hover {
+	color: var(--txt-primary);
+}
+
+.switch-link.in-chip {
+	text-decoration: none;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	font-size: 10px;
 }
 
 .error-hint {
