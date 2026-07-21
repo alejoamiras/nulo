@@ -79,7 +79,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	const labels: Record<string, string> = {
 		seal: "SEAL",
 		approve: "APPROVE",
-		sign: "SIGN",
+		sign: "AUTHORIZE",
 		deposit: fueled ? "DEPOSIT + FUEL" : "DEPOSIT",
 		sync: "CROSSING",
 		claim: isFuel ? "CLAIM GAS" : "CLAIM",

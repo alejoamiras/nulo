@@ -23,6 +23,9 @@ import { useSettledError } from "@/composables/useSettledError"
 import { formatBigInt, parseAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
+/** Emitted when a fuel bridge completes so the parent view can surface "Your fuels" (scroll the list in). */
+const emit = defineEmits<{ completed: [] }>()
+
 const l1 = useL1Wallet()
 const feeAsset = useL1FeeAsset()
 const bridge = useBridgeWallet()
@@ -111,6 +114,8 @@ watch(
 			completedAt: rec.completedAt,
 		}
 		formStage.value = "receipt"
+		// A finished fuel bridge now lives in "Your fuels" below - nudge the parent to scroll it into view.
+		emit("completed")
 	},
 )
 

@@ -29,6 +29,9 @@ import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-c
 import { formatBigInt, parseAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
 
+/** Emitted when a bridge completes so the parent view can surface "Your bridges" (scroll the list in). */
+const emit = defineEmits<{ completed: [] }>()
+
 const l1 = useL1Wallet()
 const bridge = useBridgeWallet()
 const usdc = useL1Usdc()
@@ -249,6 +252,9 @@ watch(
 						completedAt: rec.completedAt,
 					}
 		formStage.value = "receipt"
+		// A finished bridge now lives in "Your bridges" below - nudge the parent to scroll it into view so
+		// the completion is where the user expects to find it (the receipt stays above, still reachable).
+		emit("completed")
 		// Fueled deposits: read the claim tx fee (gas used) post-completion + patch the snapshot so the
 		// receipt's "gas used / available" ledger fills in. Claim flow untouched; best-effort (a failed
 		// read just leaves the used row hidden + available = bought).
