@@ -102,6 +102,7 @@ async function onClick() {
 			</div>
 			<Button
 				v-else
+				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
 				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.bridgeL2Connect"
@@ -109,7 +110,6 @@ async function onClick() {
 			>
 				{{ connectLabel }}
 			</Button>
-			<p v-if="status === 'error' && error" class="error-hint">{{ error.message }}</p>
 		</div>
 
 		<VerificationModal :emojis="verificationEmojis" @confirm="confirmVerification" @cancel="cancelVerification" />
@@ -199,11 +199,5 @@ async function onClick() {
 
 .denied:hover {
 	background: color-mix(in srgb, var(--red) 10%, transparent);
-}
-
-.error-hint {
-	color: var(--red);
-	font-size: 13px;
-	margin-top: 8px;
 }
 </style>

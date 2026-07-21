@@ -24,6 +24,8 @@ export const TESTIDS = {
 	walletPickerCancel: "fa-wallet-picker-cancel",
 	walletPickerScanning: "fa-wallet-picker-scanning",
 	walletPickerWaiting: "fa-wallet-picker-waiting",
+	errorStrip: "fa-error-strip",
+	errorStripDismiss: "fa-error-strip-dismiss",
 	walletPickerWarning: "fa-wallet-picker-warning",
 	btnSwitchWallet: "fa-btn-switch-wallet",
 	bridgeL2SwitchWallet: "fa-bridge-l2-switch-wallet",

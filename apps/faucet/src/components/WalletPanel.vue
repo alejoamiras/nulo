@@ -132,6 +132,7 @@ function openInstall() {
 			</div>
 			<Button
 				v-else-if="showConnectButton"
+				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
 				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.btnConnect"
@@ -139,9 +140,6 @@ function openInstall() {
 			>
 				{{ connectLabel }}
 			</Button>
-			<p v-if="status === 'error' && error?.category !== 'no-wallet' && error?.category !== 'capability-rejected'" class="error-hint">
-				{{ error?.message }}
-			</p>
 		</div>
 
 		<VerificationModal
@@ -251,11 +249,5 @@ function openInstall() {
 .split .caret {
 	min-width: 44px;
 	padding: 0 12px;
-}
-
-.error-hint {
-	color: var(--red);
-	font-size: 13px;
-	margin-top: 8px;
 }
 </style>

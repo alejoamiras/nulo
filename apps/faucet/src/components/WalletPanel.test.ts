@@ -106,11 +106,15 @@ describe("WalletPanel", () => {
 		expect(w.find(`[data-testid="${TESTIDS.btnDisconnect}"]`).exists()).toBe(true)
 	})
 
-	it("error (generic, non-capability, non-no-wallet): shows the error toast text", async () => {
+	it("error (generic, non-capability, non-no-wallet): red retry button, message delegated to the strip", async () => {
 		const c = useWalletConnection()
 		c.status.value = "error"
 		c.error.value = { category: "network", message: "Alpha-testnet is not responding. Try again.", raw: null }
 		const w = mount(WalletPanel)
-		expect(w.text()).toContain("Alpha-testnet is not responding")
+		const btn = w.get(`[data-testid="${TESTIDS.btnConnect}"]`)
+		expect(btn.text()).toBe("Retry connection")
+		expect(btn.classes()).toContain("denied")
+		// The message itself now lives in ConnectionErrorStrip, above the panel row.
+		expect(w.text()).not.toContain("Alpha-testnet is not responding")
 	})
 })

@@ -5,6 +5,7 @@ import BridgeAddToken from "@/components/BridgeAddToken.vue"
 import BridgeForm from "@/components/BridgeForm.vue"
 import BridgeJournal from "@/components/BridgeJournal.vue"
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
+import ConnectionErrorStrip from "@/components/ConnectionErrorStrip.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import MintTestUsdc from "@/components/MintTestUsdc.vue"
 import { TESTIDS } from "@/lib/testids"
@@ -29,6 +30,8 @@ async function onBridgeCompleted() {
 				both wallets, pick a direction, bridge. In-flight transfers persist in this browser.
 			</p>
 		</Flex>
+
+		<ConnectionErrorStrip :exclude="['capability-rejected']" />
 
 		<section class="wallets">
 			<L1WalletPanel />
