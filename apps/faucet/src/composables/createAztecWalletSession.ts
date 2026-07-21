@@ -122,7 +122,9 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 
 	// Collision handling: once two announcements claim the remembered id, auto-reconnect stays
 	// off until the page reloads — re-running discovery cannot un-ambiguate a spoofed identity.
-	let autoReconnectDisabled = false
+	/** Sticky for the session after a remembered-id collision: reactive so the
+	 *  UI can stop promising "Connect <name>" once auto-reconnect is off. */
+	const autoReconnectDisabled = ref(false)
 	// True while the in-flight connect chain was entered via the remembered path — its failures
 	// clear the stored preference so one bad auto-path can't lock the user out of the picker.
 	let connectingViaRemembered = false
@@ -234,7 +236,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		status.value = "discovering"
 		scanning.value = true
 
-		const preferred = forcePicker || autoReconnectDisabled ? null : readPreferred()
+		const preferred = forcePicker || autoReconnectDisabled.value ? null : readPreferred()
 		pickerOpen.value = preferred === null
 
 		try {
@@ -264,7 +266,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 						// kill the window, disable auto-reconnect for the session,
 						// force the picker.
 						clearAmbiguityTimer()
-						autoReconnectDisabled = true
+						autoReconnectDisabled.value = true
 						if (status.value === "discovering") status.value = "choosing"
 						pickerOpen.value = true
 					} else if (ambiguityTimer === null && status.value === "discovering") {
@@ -585,6 +587,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	 *  same best-effort teardown as the production paths — a hard reset must
 	 *  not leak a pending channel or a connected provider session. */
 	function reset(): void {
+		autoReconnectDisabled.value = false
 		const stalePending = pending
 		const staleProvider = provider
 		wipeToIdle()
@@ -613,6 +616,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		scanning,
 		pickerOpen,
 		preferredWalletName,
+		autoReconnectDisabled,
 		connect,
 		connectWithPicker,
 		selectWallet,

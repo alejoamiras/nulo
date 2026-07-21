@@ -18,6 +18,7 @@ const {
 	retryCapabilities,
 	disconnect,
 	switchWallet,
+	autoReconnectDisabled,
 } = useBridgeWallet()
 
 const connectLabel = computed(() => {
@@ -37,7 +38,7 @@ const connectLabel = computed(() => {
 	}
 })
 
-const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null)
+const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null && !autoReconnectDisabled.value)
 const shortPreferredName = computed(() => (preferredWalletName.value ? truncateName(preferredWalletName.value, 20) : null))
 
 async function onClick() {
@@ -83,7 +84,7 @@ async function onClick() {
 			<Button v-else class="waiting" loading @click="retryCapabilities">
 				Approve in your wallet
 			</Button>
-			<span class="morph-sub">claim, exit + balance reads — nothing else</span>
+			<span class="morph-sub">one grant covers faucet + bridge: drips, claims/exits, balance reads — no wildcard scopes</span>
 		</div>
 
 		<div v-else class="connect">

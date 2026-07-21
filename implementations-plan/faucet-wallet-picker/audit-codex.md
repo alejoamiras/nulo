@@ -174,6 +174,24 @@ C improvements/UI/security/copy. Each read the five prior rounds' dispositions f
 
 Post-fix gates: lint 0, typecheck:all 0, faucet units 495, faucet e2e 15, build 0.
 
+## Round 9 — post-UX-iteration audit (gpt-5.6-sol, xhigh; scoped to the last 4 commits)
+
+Scope: `a1f6650..23ba54d` only (immediate picker-on-connect, split connect button +
+preference-keeping switch, in-chip switch removal, button-morph setup states).
+
+Verdict: race-sensitive paths sound — no reachable `selectWallet` during the hidden remembered
+window, cancel invalidates timer/stream/natural-end continuations, picker cleanup complete,
+switch/capability re-clicks guarded, no testid/aria regressions. Two findings, both fixed:
+
+1. (MED) The new capability sublines under-claimed the grant ("nothing else") while both tabs
+   share ONE combined manifest (faucet drips + bridge claims/exits + burns + balance reads).
+   Fixed: one honest shared subline — "one grant covers faucet + bridge: drips, claims/exits,
+   balance reads — no wildcard scopes".
+2. (LOW) After a remembered-id collision, `autoReconnectDisabled` (sticky, non-reactive) left the
+   split button promising "Connect <name>" while `connectImpl` would force the picker. Fixed:
+   the flag is now a reactive ref exported by the session; the split button renders only while
+   auto-reconnect will actually be attempted; `reset()` clears it. Collision pin extended.
+
 ## Recorded follow-ups (not fixed)
 - Reducer-style extraction of the discovery/remembered-window policy (leg C #4's larger half).
 - Integration-level "scanning persists + cancel-mid-scan" e2e (jsdom smoke's ending-stream gap).

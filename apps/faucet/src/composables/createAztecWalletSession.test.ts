@@ -556,6 +556,7 @@ describe("remembered path (bounded ambiguity window)", () => {
 		await flush()
 		expect(s.status.value).toBe("choosing")
 		expect(s.pickerOpen.value).toBe(true) // forced open on the collision
+		expect(s.autoReconnectDisabled.value).toBe(true) // reactive: the split button must stop promising the name
 		expect(s.discoveredWallets.value).toHaveLength(2)
 
 		await vi.advanceTimersByTimeAsync(2_000)

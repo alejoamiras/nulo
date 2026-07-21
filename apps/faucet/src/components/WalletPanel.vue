@@ -18,6 +18,7 @@ const {
 	retryCapabilities,
 	disconnect,
 	switchWallet,
+	autoReconnectDisabled,
 } = useWalletConnection()
 
 const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://nulo.sh"
@@ -48,7 +49,7 @@ const showCapabilityApproval = computed(
 const showCapabilityError = computed(() => status.value === "error" && error.value?.category === "capability-rejected")
 const showNoWalletCta = computed(() => status.value === "error" && error.value?.category === "no-wallet")
 const showSettingUp = computed(() => status.value === "setting-up")
-const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null)
+const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null && !autoReconnectDisabled.value)
 const shortPreferredName = computed(() => (preferredWalletName.value ? truncateName(preferredWalletName.value, 20) : null))
 
 async function onClick() {
@@ -102,7 +103,7 @@ function openInstall() {
 			>
 				Approve in your wallet
 			</Button>
-			<span class="morph-sub">balance reads + drip txs — nothing else</span>
+			<span class="morph-sub">one grant covers faucet + bridge: drips, claims/exits, balance reads — no wildcard scopes</span>
 		</div>
 
 		<Flex v-else-if="showNoWalletCta" direction="column" gap="12" align="start" class="no-wallet">

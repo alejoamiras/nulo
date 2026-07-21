@@ -7,6 +7,7 @@ const verificationEmojis = ref<string | null>(null)
 const selectedAccount = ref<string | null>(null)
 const error = ref<{ message: string } | null>(null)
 const preferredWalletName = ref<string | null>(null)
+const autoReconnectDisabled = ref(false)
 const connect = vi.fn()
 const switchWallet = vi.fn()
 const confirmVerification = vi.fn()
@@ -21,6 +22,7 @@ vi.mock("@/composables/useBridgeWallet", () => ({
 		selectedAccount,
 		error,
 		preferredWalletName,
+		autoReconnectDisabled,
 		connect,
 		switchWallet,
 		confirmVerification,
@@ -41,6 +43,7 @@ describe("BridgeWalletPanel", () => {
 		selectedAccount.value = null
 		error.value = null
 		preferredWalletName.value = null
+		autoReconnectDisabled.value = false
 		verificationEmojis.value = null
 		disconnect.mockClear()
 		connect.mockClear()
@@ -67,6 +70,6 @@ describe("BridgeWalletPanel", () => {
 		status.value = "capability-approval"
 		const w = mount(BridgeWalletPanel)
 		expect(w.text()).toContain("Approve in your wallet")
-		expect(w.text()).toContain("claim, exit + balance reads")
+		expect(w.text()).toContain("one grant covers faucet + bridge")
 	})
 })
