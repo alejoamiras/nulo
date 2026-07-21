@@ -19,7 +19,7 @@ import { expect } from "vitest"
 import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import { ensureUnlocked, navigateByHash, reopenAndRecoverAfterImport } from "./fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
-import { gotoPopupImport, readActiveAccount, TEST_PASSWORD } from "./helpers/import-drivers"
+import { gotoPopupImport, readActiveAccount, TEST_PASSWORD, waitForActiveAccount } from "./helpers/import-drivers"
 
 test("encrypted full backup: export → wrong password rejects → decrypt → restore in a fresh extension", { timeout: 240_000 }, async ({
 	registeredExtension,
@@ -132,15 +132,16 @@ test("encrypted full backup: export → wrong password rejects → decrypt → r
 		// Same profile id + master key ⇒ identical derived account. Proves the
 		// imported profile is usable (store re-opened under the derived key), never
 		// stranded on a dead-end "Finishing…" screen.
-		const addressAfter = await readActiveAccount(page2)
-		expect(addressAfter).toBe(addressBefore)
+		// CONVERGENCE wait, not a snapshot read: post-import account setup races against the active
+		// network's RPC latency (Alpha mainnet's public RPC is slow; the old Testnet default masked it).
+		await waitForActiveAccount(page2, addressBefore)
 
 		// Store-reopen cycle: lock (drop the in-memory master, as a worker restart
 		// would) → unlock (re-derive → re-provision the store key → re-open the OPFS
 		// store) → general. Re-read the account to prove the store RE-OPENED under the
 		// re-derived key (refuse-and-preserve — never wiped).
 		await reopenAndRecoverAfterImport(page2)
-		expect(await readActiveAccount(page2)).toBe(addressBefore)
+		await waitForActiveAccount(page2, addressBefore)
 		await page2.close()
 	} finally {
 		await ctx2.browser.close()

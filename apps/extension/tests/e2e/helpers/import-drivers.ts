@@ -188,6 +188,21 @@ export async function readActiveAccount(page: Page): Promise<string> {
 	})
 }
 
+/** Wait until the active-account pointer CONVERGES to `expected`. Post-import account setup runs
+ *  against the active network's RPC, so the pointer can transit intermediate states first — a
+ *  single-shot read races it (surfaced when the default network became Alpha mainnet, whose public
+ *  RPC is far slower than the testnet one). Polls storage; throws with both values on timeout. */
+export async function waitForActiveAccount(page: Page, expected: string, timeoutMs = 60_000): Promise<void> {
+	await page.waitForFunction(
+		async (want: string) => {
+			const r = await chrome.storage.local.get("nulo:ui:activeAccount")
+			return r["nulo:ui:activeAccount"] === want
+		},
+		{ timeout: timeoutMs, polling: 500 },
+		expected,
+	)
+}
+
 /** Generate an Fr-valid 32-byte master, base64-encoded (the form `importPlain`
  *  accepts). Lazy-imports `Fr` to avoid loading the heavy aztec wasm. */
 export async function makeRandomMasterBase64(): Promise<string> {
