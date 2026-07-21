@@ -83,3 +83,31 @@ interaction options through the SDK's own `toSimulateOptions` (exactly what a no
 `BatchCall.simulate` does), unit-pinned for both branches' explicit gasLimits + predicted fees.
 
 Gates: faucet typecheck + 459 (7 new), extension 3176 (+5 primary-method pins), biome; canary ×2 live.
+
+## `[✓ 2026-07-21]` Codex-ultra UX/fee audit of the feedback arc → 1 High + 5 more, all fixed
+
+Scoped audit (`22bb588..HEAD`, NOT the commitment work) after the history-vanishing fix. The High
+invalidated a standing assumption: **App.vue mounts ALL views with `v-show`** (deliberate — per-tab
+wallet sessions), so BridgeForm AND FuelForm are permanently mounted sharing ONE `activeFlowId` with
+per-component `formStage`. A Fuel submit while a Bridge stepper was up (or vice versa) could snapshot
+the foreign record as the wrong receipt, release the other form's takeover, and strand it in
+"stepper" where the submit guard blocks forever. Fixed with kind-guards on the completion watchers +
+a broadened fail-open guard in both forms (reset on vanished OR usurped; release ONLY a dead id,
+never a live foreign takeover) + `discard()` releasing foreground at the source (`b743d52`).
+
+Also fixed: fuel-rejection soft-brick (same guard); `predictedWorstMinFees` now requests
+`ManaUsageEstimate.Limit` (argless defaulted the node to Target — under-priced cap under rising
+congestion); toast double-announce (the suppression keyed off the LIVE activeFlowId, which the form
+releases before the toast watcher runs — `lastCompleted.foreground` is now captured synchronously);
+completed direct-fuel cards falsely offering CLAIM YOUR GAS; the extension's private-fueled-claim
+mislabel ("Claim Fee Juice · 2 calls" — the embedded FPC payload pairs `claim` with
+`mint_and_pay_fee`, so `userMethodsOf()` filters the PAIRED claim while a lone claim stays
+user-facing) and the send-executor's raw-first-call fallback title (`b113e63`).
+
+Lesson: "only one form is mounted" was an UNVERIFIED inference that survived four commits — the
+audit's assumption-attack ask (verify against App.vue) is what caught it. Test-hygiene corollary:
+BridgeForm.test's earlier full-file-only failure (stale mounted forms watching shared refs) was the
+SAME defect wearing a test costume; production reached it through v-show instead of missing unmounts.
+
+Gates: faucet 461 + bridge-core 185 (vitest — bare `bun test` has a pre-existing harness mismatch,
+`expect.addEqualityTesters`) + extension 662 (utils/execution) + typechecks + lint.
