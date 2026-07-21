@@ -34,6 +34,9 @@ PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 FAUCET_URL=$(jq -r .faucetUrl "$PORTS_JSON")
 
 echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
+# VITE_NULO_E2E_DEFAULT_NET=testnet pins the SEEDED-ACTIVE network: fresh-extension import flows
+# bootstrap on the default before any fixture can switch, and CI cannot reliably reach the Alpha
+# mainnet RPC (each blocked call eats the node client's 60s-abort x retry envelope).
 # NULO_E2E_PROVERLESS=1 builds a proverless wallet (skips BB-SNARK generation;
 # kernel simulation + on-chain submission stay real). Arms the double-opt-in
 # flags so apps/extension/src/e2e/config.ts enables the proverless PXE +
@@ -51,6 +54,7 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   fi
   echo "[e2e:agent] PROVERLESS build — BB-SNARK generation skipped (double opt-in)"
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
   VITE_NULO_E2E_PROVERLESS=1 \
   VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
@@ -62,6 +66,7 @@ else
   # (codex post-impl audit).
   unset VITE_NULO_E2E_PROVERLESS VITE_NULO_E2E_PROVERLESS_CONFIRM
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
     bun run build:chrome
 fi

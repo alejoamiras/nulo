@@ -47,6 +47,34 @@ This prevents guessing at selectors and ensures tests assert on real observable 
 - **Vitest orders files by mtime, not alphabetically** — don't rely on file execution order. Design tests to be order-independent via fixtures.
 - **`Button.vue` doesn't set HTML `disabled` attribute** — it uses CSS `pointer-events: none` instead. `btn.disabled` is always `false`. To check if a Button is enabled, use `getComputedStyle(btn).pointerEvents !== "none"`. If you skip this, click handlers like `handleMint` silently return early via their own `if (!isAllowed) return` guard.
 
+## CI-log + flake forensics (learned the hard way, THREE sessions running)
+
+- **`gh run view --log` interleaves the STEP'S SOURCE SCRIPT with runtime output.** Every line of the
+  workflow's `run:` block is echoed with near-identical timestamps before execution — grepping the log
+  for strings like `exit 86` or `retrying` will match the SOURCE and fake a runtime event. Two separate
+  sessions "confirmed" a boot-retry/port-collision story from source echoes. Discipline: match on
+  timestamps advancing, count actual invocation markers (`[e2e:agent] resolving ports...` appears once
+  per real attempt), and pull logs via `gh api .../jobs/<id>/logs` when the CLI view returns empty.
+- **`[aztec-node] Error: Address already in use` during sandbox boot is COSMETIC on aztec 5.0.1.** The
+  `aztec start --local-network` wrapper (`~/.aztec/versions/<v>/…/scripts/aztec.sh`) launches its OWN
+  `anvil --port "$ANVIL_PORT"` even though global-setup already started ours on that port; the inner
+  bind fails, the wrapper continues, the node boots fine (~30s). Do not diagnose port collisions from
+  this line alone — check whether the node reached ready + deployments after it.
+- **Full-backup import has a bounded two-stage clock**: restore (slow on hosted runners) THEN possibly
+  the app's own 30s recovery wait before it routes (`import.vue` completeImportWithRecovery). Any
+  navigation wait below restore+30s+margin fails STRUCTURALLY whenever the recovery leg runs — it looks
+  like flake because fast bootstraps skip the leg. Import-driver nav waits are sized 300s; affected
+  spec budgets 900s.
+- **The seeded-ACTIVE network is baked at build time and fresh-extension flows bootstrap on it** before
+  any fixture can switch. CI egress to the public Alpha mainnet RPC blackholes, and each blocked call
+  eats the node client's full 60s-abort × retry envelope — so e2e builds pin
+  `VITE_NULO_E2E_DEFAULT_NET=testnet` (smoke workflow + agent.sh; never ships, prod default unaffected).
+- **Known debt (queued, not fixed)**: vitest ignores `global-setup.ts`'s named teardown export while a
+  default setup export exists, and `agent.sh` has no trap — a mid-boot death can leak the sandbox
+  process group. Fix shape: default-export setup returning teardown + `kill(-pgid)` TERM→KILL + faucet
+  included + lock cleared. Also queued: release-chain artifact-smoke uses prod-shaped builds (Alpha
+  default) and will hit the mainnet-RPC wall at the next stable cut.
+
 ## References
 
 - [Chrome Extension Testing with Puppeteer (official)](https://developer.chrome.com/docs/extensions/how-to/test/puppeteer)
