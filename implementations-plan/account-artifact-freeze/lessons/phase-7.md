@@ -66,3 +66,16 @@ both export catches (user copy stays generic). Tracked + closed as issue #301. S
 5. `full.vue` is a plain-JS SFC — no TS casts in TEMP instrumentation.
 6. The repo rule held up: the red gate was neither flake nor neutralizable — it was a shipping
    bug. Skipping it (disposition B) would have shipped broken passkey exports.
+
+## Post-PR triage: the red shard-3 arc (2026-07-21)
+
+`backup-restore-sw-restart` red 5/5 on this branch's network runs (three different waits), green on
+a sibling branch running the identical shard set, green locally (incl. the true mid-restore leg;
+constrained-CPU local repro proved non-discriminating — baseline reds too, at earlier stages).
+Derivation cost ruled out by measurement (146ms cold / 17ms warm). Codex trace (session A) found
+the two mechanisms now recorded in the e2e-testing skill: the escaped rollback-delete racing the
+recovery unlock (this branch's longer unlock lock-hold shifts the race odds) and the
+partial-network seeding suppression (pre-existing product gap — follow-up, not this plan). Test
+now self-instruments on failure. Sixth run (post dev-merge + instrumentation): green; all three
+required gates pass on head. Separately: two pushes fired NO workflows — the PR had gone DIRTY
+after three dev merges (only conflict: plan index). Lesson routed to the e2e skill.

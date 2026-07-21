@@ -62,3 +62,29 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   (no run active). Diagnosed 2026-07-20 — a green suite at 20:00 degraded to rotating boot
   timeouts by 22:00 with identical code (verified via a pre-change checkout that failed the same
   way).
+
+## Known-marginal: backup-restore-sw-restart (mid-restore recovery leg)
+
+The "SW restart mid-restore" case is built on TWO inherent races; small timing shifts anywhere in
+the SW boot/unlock path change which branch CI takes (observed: 5 consecutive CI reds on a branch
+whose diff only added ~seconds of unlock-path work, then green; sibling branches green all along):
+
+1. **Rollback vs page-close.** Killing the SW rejects the import page's pending restore RPC; its
+   catch RECONNECTS and calls `deleteProfile` on the pre-finalize profile (rollback). The test
+   closes that page right after the kill — close usually wins locally (no rollback), but on a slow
+   runner the rollback can escape and race the recovery unlock, closing the just-opened session
+   (page bounces auth→general→auth; the 240s general-wait then times out).
+2. **Partial network rows suppress seeding.** Restore writes profile → networks (Local LAST) →
+   accounts; recovery seeds default networks ONLY when zero network rows exist. A kill landing
+   mid-network-writes leaves the profile permanently without "Local" — the switchToLocalNetwork
+   row wait then fails on ABSENCE, not slowness. (Product gap, tracked outside the test.)
+
+The test self-instruments on failure (hash-change history + page text + storage keys + SW
+liveness dumped to stdout) — read the CI log's `[sw-restart-restore]` lines before re-running.
+
+## PR-workflow silence — check mergeability first
+
+If a push to a PR branch triggers NO workflows at all (not even Quality; only Cloudflare checks
+appear), check `gh pr view <n> --json mergeStateStatus` — a `DIRTY` (conflicted) PR gets no
+`pull_request` merge-ref, so ALL pull_request-triggered workflows silently skip. Fix = merge the
+base branch in and push; the run fires immediately. Don't debug the workflows.
