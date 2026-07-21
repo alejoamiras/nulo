@@ -52,7 +52,27 @@ const hasCollision = computed(() => {
 })
 
 function onKey(evt: KeyboardEvent) {
-	if (evt.key === "Escape") cancelChoice()
+	if (evt.key === "Escape") {
+		cancelChoice()
+		return
+	}
+	// Minimal focus trap: Tab cycles within the dialog, so focus (and the
+	// Escape handler with it) can't drift to the inert page behind.
+	if (evt.key === "Tab" && dialogEl.value) {
+		const focusables = [
+			...dialogEl.value.querySelectorAll<HTMLElement>("button, [href], input, [tabindex]:not([tabindex='-1'])"),
+		].filter((el) => !el.hasAttribute("disabled"))
+		if (focusables.length === 0) return
+		const first = focusables[0]
+		const last = focusables[focusables.length - 1]
+		if (evt.shiftKey && document.activeElement === first) {
+			evt.preventDefault()
+			last.focus()
+		} else if (!evt.shiftKey && document.activeElement === last) {
+			evt.preventDefault()
+			first.focus()
+		}
+	}
 }
 
 // Focus management: move focus into the dialog on open so Escape works

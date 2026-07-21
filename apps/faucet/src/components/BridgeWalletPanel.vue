@@ -10,11 +10,13 @@ const {
 	verificationEmojis,
 	selectedAccount,
 	error,
+	preferredWalletName,
 	connect,
 	confirmVerification,
 	cancelVerification,
 	retryCapabilities,
 	disconnect,
+	forgetPreferredWallet,
 } = useBridgeWallet()
 
 const connectLabel = computed(() => {
@@ -41,6 +43,15 @@ async function onClick() {
 		await connect()
 	}
 }
+
+/** A2 parity with WalletPanel: forget + disconnect + fresh pick in one action. */
+async function switchWallet() {
+	forgetPreferredWallet()
+	if (status.value === "connected") {
+		await disconnect()
+	}
+	await connect()
+}
 </script>
 
 <template>
@@ -48,6 +59,7 @@ async function onClick() {
 		<div v-if="status === 'connected' && selectedAccount" class="chip">
 			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.bridgeL2Account" />
+			<button class="switch-link" type="button" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">switch</button>
 			<button
 				class="disconnect"
 				type="button"
@@ -64,15 +76,32 @@ async function onClick() {
 			<span>Setting up the bridge session…</span>
 		</div>
 
-		<Flex v-else-if="status === 'capability-approval'" direction="column" gap="12" align="start" class="capability">
+		<Flex
+			v-else-if="status === 'capability-approval' || (status === 'error' && error?.category === 'capability-rejected')"
+			direction="column"
+			gap="12"
+			align="start"
+			class="capability"
+		>
 			<p>Approve the bridge's permissions in your wallet - claim, exit, and balance reads on the bridge contracts.</p>
 			<Button @click="retryCapabilities">Approve permissions</Button>
 		</Flex>
 
 		<div v-else class="connect">
-			<Button :loading="status === 'discovering'" :disabled="status === 'discovering'" :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
+			<Button
+				:loading="status === 'discovering'"
+				:disabled="status === 'discovering' || status === 'choosing'"
+				:data-testid="TESTIDS.bridgeL2Connect"
+				@click="onClick"
+			>
 				{{ connectLabel }}
 			</Button>
+			<p v-if="status === 'idle' && preferredWalletName" class="preferred-hint">
+				Reconnects to {{ preferredWalletName }} ·
+				<button type="button" class="switch-link" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">
+					use a different wallet
+				</button>
+			</p>
 			<p v-if="status === 'error' && error" class="error-hint">{{ error.message }}</p>
 		</div>
 
@@ -100,6 +129,26 @@ async function onClick() {
 	font: 500 11px/1 var(--font-mono);
 	letter-spacing: 0.12em;
 	text-transform: uppercase;
+}
+
+.preferred-hint {
+	color: var(--txt-secondary);
+	font-size: 11px;
+}
+
+.switch-link {
+	background: none;
+	border: none;
+	color: var(--txt-secondary);
+	font: 600 10px/1 var(--font-mono);
+	cursor: pointer;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	padding: 2px 0;
+}
+
+.switch-link:hover {
+	color: var(--txt-primary);
 }
 
 .disconnect {

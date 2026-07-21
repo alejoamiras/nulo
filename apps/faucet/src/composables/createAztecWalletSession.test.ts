@@ -254,6 +254,115 @@ describe("selection", () => {
 	})
 })
 
+describe("audit round: flow-ownership + interruption hardening", () => {
+	it("retryCapabilities is a no-op while the initial capability request is in flight", async () => {
+		const { provider, walletHandle } = makeProvider()
+		type CapsResult = Awaited<ReturnType<typeof walletHandle.requestCapabilities>>
+		let resolveCaps: (v: CapsResult) => void = () => {}
+		walletHandle.requestCapabilities.mockImplementation(() => new Promise<CapsResult>((res) => (resolveCaps = res)))
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		const confirming = s.confirmVerification()
+		await flush()
+		expect(s.status.value).toBe("capability-approval")
+
+		await s.retryCapabilities() // flow is owned — must not start a second request
+		expect(walletHandle.requestCapabilities).toHaveBeenCalledTimes(1)
+
+		resolveCaps({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: "0xa1" }] }] })
+		await confirming
+		expect(s.status.value).toBe("connected")
+	})
+
+	it("a wallet-side disconnect DURING setup wipes the flow — the late continuation cannot set connected", async () => {
+		const { provider } = makeProvider()
+		let firedDisconnect: (() => void) | null = null
+		provider.onDisconnect = vi.fn((handler: () => void) => {
+			firedDisconnect = handler
+			return () => {}
+		}) as typeof provider.onDisconnect
+		let resolveRegister: () => void = () => {}
+		const registerContracts = vi.fn(() => new Promise<void>((res) => (resolveRegister = res)))
+		const s = createAztecWalletSession({ appId: "test-app", buildManifest: async () => ({}), registerContracts })
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		const confirming = s.confirmVerification()
+		await flush(8)
+		expect(s.status.value).toBe("setting-up")
+
+		;(firedDisconnect as (() => void) | null)?.() // remote interruption mid-registerContracts
+		expect(s.status.value).toBe("idle")
+		resolveRegister()
+		await confirming
+		expect(s.status.value).toBe("idle") // NOT "connected" over wiped state
+		expect(s.wallet.value).toBeNull()
+		expect(localStorage.getItem("test-app:preferred-wallet")).toBeNull()
+	})
+
+	it("connect() after a capability failure sweeps the retained provider session", async () => {
+		const { provider, walletHandle } = makeProvider()
+		walletHandle.requestCapabilities.mockRejectedValueOnce(new Error("boom"))
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		await s.confirmVerification()
+		expect(s.status.value).toBe("error")
+		expect(provider.disconnect).not.toHaveBeenCalled()
+
+		stream = makeStream()
+		mockGetAvailableWallets.mockImplementation(() => ({ wallets: stream.wallets, cancel: stream.cancel }))
+		void s.connect() // "Retry connection" — must disconnect the retained session first
+		await flush()
+		expect(provider.disconnect).toHaveBeenCalledTimes(1)
+	})
+
+	it("buffered yields after selectWallet do NOT grow the list during verification", async () => {
+		const { provider } = makeProvider()
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		expect(s.status.value).toBe("verifying")
+		// The cancel-emulating stream still delivers a buffered straggler:
+		stream.push(makeProvider({ id: "straggler", name: "Straggler" }).provider)
+		await flush()
+		expect(s.discoveredWallets.value).toHaveLength(1)
+	})
+
+	it("remembered id ABSENT: non-claimant wallets show in the picker after the window, not after 60s", async () => {
+		vi.useFakeTimers()
+		localStorage.setItem("test-app:preferred-wallet", JSON.stringify({ id: "gone-wallet", name: "Gone" }))
+		const other = makeProvider({ id: "acme", name: "Acme", type: "web" })
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		stream.push(other.provider) // non-claimant — opens the window anyway
+		await flush()
+		expect(s.status.value).toBe("discovering")
+
+		await vi.advanceTimersByTimeAsync(1_000)
+		await flush()
+		expect(s.status.value).toBe("choosing") // picker, not a 60s black hole
+		expect(s.discoveredWallets.value).toHaveLength(1)
+	})
+})
+
 describe("stale-epoch SDK cleanup (results discarded AND side effects undone)", () => {
 	it("a stale establish resolution cancels the pending connection", async () => {
 		const { provider, pending } = makeProvider()
@@ -301,9 +410,13 @@ describe("stale-epoch SDK cleanup (results discarded AND side effects undone)", 
 		await flush()
 		expect(s.status.value).toBe("choosing")
 
+		const disconnectsBefore = first.provider.disconnect.mock.calls.length
 		resolveConfirm(first.walletHandle)
 		await confirming
-		expect(first.provider.disconnect).toHaveBeenCalled()
+		// The stale confirm's cleanup targets its CAPTURED provider (a fresh
+		// call beyond disconnect()'s own), never the newer flow's provider.
+		expect(first.provider.disconnect.mock.calls.length).toBe(disconnectsBefore + 1)
+		expect(second.provider.disconnect).not.toHaveBeenCalled()
 		expect(s.status.value).toBe("choosing") // newer flow untouched
 		expect(s.wallet.value).toBeNull()
 		expect(localStorage.getItem("test-app:preferred-wallet")).toBeNull() // never persisted

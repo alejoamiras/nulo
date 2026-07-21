@@ -40,6 +40,10 @@ interface PreferredWallet {
 /** Bounded collision-detection window for the remembered path (best-effort — see plan). */
 const REMEMBERED_AMBIGUITY_WINDOW_MS = 1_000
 
+/** The stored name is rendered in the idle hint — cap it at WRITE time so a
+ *  multi-megabyte claimed name can't defeat the picker's render capping. */
+const PREFERRED_NAME_MAX = 48
+
 /**
  * Per-feature config for an Aztec wallet session. The faucet and the bridge each create ONE
  * session (a module-level singleton) with their own appId, capability manifest, and contract
@@ -60,11 +64,12 @@ export interface AztecWalletSessionConfig {
  * methods. Call ONCE per feature at module scope (singleton) - `useWalletConnection` /
  * `useBridgeWallet` wrap it.
  *
- * Concurrency model: a single flow epoch. Every async continuation captures the epoch it belongs
- * to; cancel/disconnect/dismiss bump it. A stale continuation discards its result AND cleans up
- * its SDK side effects (a resolved-but-stale secure channel is cancelled; a resolved-but-stale
- * wallet is disconnected) — the SDK buffers discovery yields past `cancel()`, so staleness
- * checks, not cancellation, are the correctness boundary.
+ * Concurrency model: a single flow epoch. Every async continuation captures the epoch AND the
+ * session handles (provider/pending/wallet) it operates on; cancel/disconnect/dismiss bump the
+ * epoch and wipe state SYNCHRONOUSLY before any awaited SDK teardown, so a newer flow can never
+ * be clobbered by an older one's cleanup. A stale continuation discards its result AND undoes
+ * its own SDK side effects via its CAPTURED handles (never the mutable session fields — those
+ * may already belong to a newer flow).
  */
 export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	// Declared before the reactive state: `preferredWalletName`'s initializer
@@ -117,18 +122,19 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			if (typeof parsed !== "object" || parsed === null) return null
 			const { id, name } = parsed as { id?: unknown; name?: unknown }
 			if (typeof id !== "string" || typeof name !== "string") return null
-			return { id, name }
+			return { id, name: name.slice(0, PREFERRED_NAME_MAX) }
 		} catch {
 			return null
 		}
 	}
 	function writePreferred(value: PreferredWallet): void {
+		const capped = { id: value.id, name: value.name.slice(0, PREFERRED_NAME_MAX) }
 		try {
-			localStorage.setItem(storageKey, JSON.stringify(value))
+			localStorage.setItem(storageKey, JSON.stringify(capped))
 		} catch {
 			// Best-effort: a throwing storage must never affect an established session.
 		}
-		preferredWalletName.value = value.name
+		preferredWalletName.value = capped.name
 	}
 	function clearPreferred(): void {
 		try {
@@ -164,8 +170,35 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		return discoveredWallets.value.filter((w) => w.id === id)
 	}
 
+	/** Synchronous state wipe + terminal transition. SDK teardown of CAPTURED
+	 *  handles happens AFTER this, so an overlapping newer flow is never
+	 *  clobbered by an older teardown's awaits. */
+	function wipeToIdle(): void {
+		epoch++
+		clearAmbiguityTimer()
+		stopDiscovery()
+		cleanupSession()
+		status.value = "idle"
+		error.value = null
+		activeFlowEpoch = null
+	}
+
 	async function connect(): Promise<void> {
 		if (activeFlowEpoch !== null || status.value === "connected") return
+
+		// Sweep any session residue from a previous ERRORED flow (retained
+		// provider/wallet/subscription): wipe synchronously, then best-effort
+		// disconnect the captured handle. Without this, "Retry connection"
+		// discovery runs over a live wallet session whose stale onDisconnect
+		// could later tear down the replacement.
+		const staleProvider = provider
+		if (provider || wallet.value || pending) {
+			cleanupSession()
+			if (staleProvider) {
+				void staleProvider.disconnect().catch(() => {})
+			}
+		}
+
 		const flowEpoch = ++epoch
 		activeFlowEpoch = flowEpoch
 
@@ -188,34 +221,44 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			cancelDiscovery = discovery.cancel
 
 			for await (const p of discovery.wallets) {
-				// The SDK buffers yields past cancel() — the epoch check, not cancellation, is
-				// what keeps a dismissed/superseded flow from repopulating state.
-				if (isStale(flowEpoch)) return
+				// The SDK buffers yields past cancel() — the epoch check, not
+				// cancellation, keeps a dismissed/superseded flow from
+				// repopulating state. The status check stops the SAME flow's
+				// buffered stragglers once a wallet has been selected
+				// (verifying and beyond must not grow the list).
+				if (isStale(flowEpoch) || (status.value !== "discovering" && status.value !== "choosing")) return
 				const row: DiscoveredWallet = { key: nextKey++, id: p.id, name: p.name, type: p.type, icon: p.icon }
 				providersByKey.set(row.key, p)
 				discoveredWallets.value = [...discoveredWallets.value, row]
 
 				if (preferred) {
 					const claimants = claimantsOf(preferred.id)
-					if (claimants.length === 1 && ambiguityTimer === null && status.value === "discovering") {
-						// First claimant of the remembered id: open the bounded ambiguity window.
-						// Discovery stays LIVE during it so buffered + late announcements are seen;
-						// best-effort detection only — a claimant after the window is not caught
-						// (the emoji verification remains the actual trust anchor).
-						const claimantKey = claimants[0].key
-						ambiguityTimer = setTimeout(() => {
-							ambiguityTimer = null
-							if (isStale(flowEpoch) || status.value !== "discovering") return
-							if (claimantsOf(preferred.id).length !== 1) return // collision raced the timer
-							connectingViaRemembered = true
-							void proceedWith(claimantKey, flowEpoch)
-						}, REMEMBERED_AMBIGUITY_WINDOW_MS)
-					} else if (claimants.length >= 2) {
-						// A second claimant to the remembered identity: fail closed — kill the
-						// window, disable auto-reconnect for this session, force the picker.
+					if (claimants.length >= 2) {
+						// A second claimant to the remembered identity: fail closed —
+						// kill the window, disable auto-reconnect for the session,
+						// force the picker.
 						clearAmbiguityTimer()
 						autoReconnectDisabled = true
 						if (status.value === "discovering") status.value = "choosing"
+					} else if (ambiguityTimer === null && status.value === "discovering") {
+						// FIRST announcement (claimant or not) opens the bounded
+						// window. Discovery stays LIVE during it so buffered + late
+						// announcements are seen. At fire: a sole claimant of the
+						// remembered id auto-connects; otherwise the picker shows —
+						// non-claimant wallets must never sit hidden for the full
+						// 60s discovery timeout. Best-effort detection only — the
+						// emoji verification remains the actual trust anchor.
+						ambiguityTimer = setTimeout(() => {
+							ambiguityTimer = null
+							if (isStale(flowEpoch) || status.value !== "discovering") return
+							const cs = claimantsOf(preferred.id)
+							if (cs.length === 1) {
+								connectingViaRemembered = true
+								void proceedWith(cs[0].key, flowEpoch)
+							} else if (discoveredWallets.value.length > 0) {
+								status.value = "choosing"
+							}
+						}, REMEMBERED_AMBIGUITY_WINDOW_MS)
 					}
 				} else if (status.value === "discovering") {
 					// Fresh path: the picker shows from the first announcement, waitless.
@@ -230,8 +273,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			clearAmbiguityTimer()
 
 			if (status.value === "discovering") {
-				// Still no transition: either zero announcements, or a sole remembered claimant
-				// whose window hadn't fired yet — resolve it now.
+				// Still no transition: either zero announcements, or the window
+				// hadn't fired yet — resolve now.
 				const soleClaimant = preferred ? claimantsOf(preferred.id) : []
 				if (soleClaimant.length === 1) {
 					connectingViaRemembered = true
@@ -282,7 +325,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		try {
 			const p = await chosen.establishSecureChannel(config.appId)
 			if (isStale(flowEpoch)) {
-				// Stale resolution: discard AND undo the SDK side effect.
+				// Stale resolution: discard AND undo the SDK side effect on the
+				// CAPTURED handle (the session fields may belong to a newer flow).
 				try {
 					await p.cancel()
 				} catch {
@@ -307,12 +351,16 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	async function confirmVerification(): Promise<void> {
 		if (!pending) return
 		const flowEpoch = epoch
+		// Capture the flow's own handles: stale-cleanup must never dereference
+		// the mutable session fields (a newer flow may own them by then).
+		const flowPending = pending
+		const flowProvider = provider
 		try {
-			const w = await pending.confirm()
+			const w = await flowPending.confirm()
 			if (isStale(flowEpoch)) {
 				// Confirmed-but-stale: the wallet-side session exists — disconnect it.
 				try {
-					await provider?.disconnect()
+					await flowProvider?.disconnect()
 				} catch {
 					// best-effort
 				}
@@ -321,12 +369,16 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			wallet.value = w
 			pending = null
 			verificationEmojis.value = null
-			// Subscribe AFTER confirm: before the wallet exists the SDK returns a no-op
-			// unsubscriber and the callback never fires (the pre-existing silent bug).
+			// Subscribe AFTER confirm: before the wallet exists the SDK returns a
+			// no-op unsubscriber and the callback never fires (the pre-existing
+			// silent bug). The handler is a REMOTE interruption: it must bump the
+			// epoch (stale-ify in-flight continuations like registerContracts)
+			// and release the flow, or a late continuation could set "connected"
+			// over the wiped state.
 			unsubscribeDisconnect =
-				provider?.onDisconnect(() => {
-					cleanupSession()
-					status.value = "idle"
+				flowProvider?.onDisconnect(() => {
+					if (connectingViaRemembered) clearPreferred()
+					wipeToIdle()
 				}) ?? null
 			status.value = "capability-approval"
 			await requestCapabilities(flowEpoch)
@@ -342,57 +394,49 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	}
 
 	async function cancelVerification(): Promise<void> {
-		epoch++ // render any in-flight continuation stale
-		if (pending) {
+		const stalePending = pending
+		if (connectingViaRemembered) clearPreferred()
+		wipeToIdle()
+		// SDK teardown AFTER the synchronous wipe, on the captured handle — an
+		// overlapping new flow can no longer be wiped by this await's tail.
+		if (stalePending) {
 			try {
-				await pending.cancel()
+				await stalePending.cancel()
 			} catch {
 				// best-effort
 			}
-			pending = null
 		}
-		if (connectingViaRemembered) clearPreferred()
-		verificationEmojis.value = null
-		cleanupSession()
-		status.value = "idle"
-		error.value = null
-		activeFlowEpoch = null
 	}
 
 	async function retryCapabilities(): Promise<void> {
 		if (!wallet.value) return
+		// Flow ownership: while the INITIAL capability request (or any other
+		// flow) is live, retry is a no-op — concurrent requestCapabilities runs
+		// could interleave grants/contract setup.
+		if (activeFlowEpoch !== null) return
+		const flowEpoch = epoch
+		activeFlowEpoch = flowEpoch
 		error.value = null
 		status.value = "capability-approval"
-		await requestCapabilities(epoch)
+		await requestCapabilities(flowEpoch)
 	}
 
 	/** Dismiss the picker: back to idle. An intentional cancel is never a `no-wallet` error. */
 	function cancelChoice(): void {
 		if (status.value !== "choosing") return
-		epoch++
-		clearAmbiguityTimer()
-		stopDiscovery()
-		cleanupSession()
-		status.value = "idle"
-		error.value = null
-		activeFlowEpoch = null
+		wipeToIdle()
 	}
 
 	async function disconnect(): Promise<void> {
-		epoch++
-		clearAmbiguityTimer()
-		stopDiscovery()
-		if (provider) {
+		const staleProvider = provider
+		wipeToIdle()
+		if (staleProvider) {
 			try {
-				await provider.disconnect()
+				await staleProvider.disconnect()
 			} catch {
 				// best-effort
 			}
 		}
-		cleanupSession()
-		status.value = "idle"
-		error.value = null
-		activeFlowEpoch = null
 	}
 
 	/** Forget the remembered wallet (the "use a different wallet" affordances). */
@@ -401,16 +445,26 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	}
 
 	async function requestCapabilities(flowEpoch: number): Promise<void> {
-		if (!wallet.value) return
+		const flowWallet = wallet.value
+		const flowProvider = provider
+		if (!flowWallet) return
 		try {
 			const manifest = await config.buildManifest()
+			if (isStale(flowEpoch)) {
+				try {
+					await flowProvider?.disconnect()
+				} catch {
+					// best-effort
+				}
+				return
+			}
 			// SDK uses zod-inferred AppCapabilities; the manifest shape is structurally compatible
 			// but the public type is not exported in a usable form. Single typed-boundary cast.
 			// biome-ignore lint/suspicious/noExplicitAny: SDK manifest type is zod-inferred
-			const result = await wallet.value.requestCapabilities(manifest as any)
+			const result = await flowWallet.requestCapabilities(manifest as any)
 			if (isStale(flowEpoch)) {
 				try {
-					await provider?.disconnect()
+					await flowProvider?.disconnect()
 				} catch {
 					// best-effort
 				}
@@ -428,10 +482,10 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			// contracts with the wallet's PXE). This can take 2-4s, so a dedicated state keeps the
 			// UI from saying "Awaiting permissions".
 			status.value = "setting-up"
-			await config.registerContracts(wallet.value)
+			await config.registerContracts(flowWallet)
 			if (isStale(flowEpoch)) {
 				try {
-					await provider?.disconnect()
+					await flowProvider?.disconnect()
 				} catch {
 					// best-effort
 				}
@@ -441,8 +495,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			status.value = "connected"
 			// Persist ONLY on full success, and never re-persist on the remembered path (the
 			// stored value is already this wallet).
-			if (!connectingViaRemembered && provider) {
-				writePreferred({ id: provider.id, name: provider.name })
+			if (!connectingViaRemembered && flowProvider) {
+				writePreferred({ id: flowProvider.id, name: flowProvider.name })
 			}
 			connectingViaRemembered = false
 			releaseFlowIfOwner(flowEpoch)
@@ -481,11 +535,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 
 	/** Reset all state (test helper + hard reset). */
 	function reset(): void {
-		epoch++
-		cleanupSession()
-		status.value = "idle"
-		error.value = null
-		activeFlowEpoch = null
+		wipeToIdle()
 	}
 
 	return {

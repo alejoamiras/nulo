@@ -61,3 +61,50 @@ detection, not proof of uniqueness)`
 
 Both conditions are folded into plan.md (Threat framing, remembered-path design, Phase 1
 required tests, and the inline verdict section).
+
+---
+
+# Codex post-implementation audit (session `019f84d1-ef87-7160-98d6-50e61f7b3bf9`)
+
+## Verdict
+
+`reject (flow-ownership and retry races can corrupt or leak wallet sessions)` — 4 High, 4 Medium,
+2 Low + test-integrity findings. Disposition (fix round committed as
+`fix(faucet): post-impl audit round …`):
+
+1. (H) `retryCapabilities` acquired no flow token → concurrent capability requests. FIXED:
+   no-ops while any flow is live; acquires/releases the token for its own run. Pinned.
+2. (H) The wallet-side `onDisconnect` handler wiped state without bumping the epoch → a late
+   `registerContracts` continuation could set `connected` over the wipe. FIXED: the handler runs
+   `wipeToIdle()` (epoch bump + flow release + sync wipe) and clears the preference when the
+   remembered path was in flight. Pinned (disconnect-mid-setup test).
+3. (H) Capability/build/setup failures retained provider/wallet/subscription; "Retry connection"
+   discovered over a live session. FIXED: `connect()` sweeps residue at entry (sync cleanup +
+   best-effort disconnect of the captured stale provider). Pinned.
+4. (H) Stale-continuation cleanup dereferenced the MUTABLE session fields → an old continuation
+   could disconnect the NEW flow's provider; no staleness check after `buildManifest`. FIXED:
+   every continuation captures its own handles (`flowPending`/`flowProvider`/`flowWallet`) and
+   cleans up via those; staleness checked after `buildManifest`. Pinned (call-count-delta on the
+   captured provider; the newer flow's provider asserted untouched).
+5. (M) `cancelVerification`/`disconnect` awaited SDK teardown before wiping → an overlapping new
+   flow could be clobbered and its lock released. FIXED: `wipeToIdle()` wipes synchronously
+   (epoch bump, cleanup, terminal transition, lock release) BEFORE any awaited teardown on
+   captured handles.
+6. (M) Remembered path starved the picker: a non-claimant announcing first sat hidden until the
+   60s natural end. FIXED: the ambiguity window opens on the FIRST announcement of any kind;
+   at fire, a sole claimant auto-connects, otherwise the picker shows. Pinned (absent-remembered
+   test: picker at ~1s, not 60s).
+7. (M) Post-selection buffered yields still appended rows during verification. FIXED: the
+   discovery loop stops once status leaves discovering/choosing. Pinned.
+8. (M) Test-integrity: stale-confirm test strengthened (call-count delta on the captured
+   provider + newer provider untouched); disconnect-mid-setup and retry-noop cases added; the
+   post-abort stream emulation is retained deliberately (it is the SDK's observable behavior —
+   buffered yields ARE delivered post-cancel; the epoch guard is the defense either way);
+   e2e 2b's natural-end path kept (the fake-timer window variants live in the unit suite).
+9. (M) `BridgeWalletPanel` parity: switch affordance (chip + idle hint), choosing-disable, and
+   capability-rejected → retry routing added.
+10. (L) The persisted wallet NAME is now capped at write (and defensively at read), so the idle
+    hint can't render a multi-megabyte claimed name.
+11. (L) The modal got a minimal Tab focus trap (cycling within the dialog).
+
+Post-fix gates: lint 0, typecheck:all 0, faucet units 492, faucet e2e 15, faucet build 0.
