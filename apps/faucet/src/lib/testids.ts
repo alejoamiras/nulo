@@ -25,6 +25,7 @@ export const TESTIDS = {
 	walletPickerScanning: "fa-wallet-picker-scanning",
 	walletPickerWarning: "fa-wallet-picker-warning",
 	btnSwitchWallet: "fa-btn-switch-wallet",
+	bridgeL2SwitchWallet: "fa-bridge-l2-switch-wallet",
 	preferredWalletHint: "fa-preferred-wallet-hint",
 
 	// Verification modal - 3×3 emoji grid + match/cancel

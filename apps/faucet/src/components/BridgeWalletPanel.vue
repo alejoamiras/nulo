@@ -16,7 +16,7 @@ const {
 	cancelVerification,
 	retryCapabilities,
 	disconnect,
-	forgetPreferredWallet,
+	switchWallet,
 } = useBridgeWallet()
 
 const connectLabel = computed(() => {
@@ -43,15 +43,6 @@ async function onClick() {
 		await connect()
 	}
 }
-
-/** A2 parity with WalletPanel: forget + disconnect + fresh pick in one action. */
-async function switchWallet() {
-	forgetPreferredWallet()
-	if (status.value === "connected") {
-		await disconnect()
-	}
-	await connect()
-}
 </script>
 
 <template>
@@ -59,7 +50,7 @@ async function switchWallet() {
 		<div v-if="status === 'connected' && selectedAccount" class="chip">
 			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.bridgeL2Account" />
-			<button class="switch-link" type="button" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">switch</button>
+			<button class="switch-link" type="button" :data-testid="TESTIDS.bridgeL2SwitchWallet" @click="switchWallet">switch</button>
 			<button
 				class="disconnect"
 				type="button"
@@ -97,8 +88,8 @@ async function switchWallet() {
 				{{ connectLabel }}
 			</Button>
 			<p v-if="status === 'idle' && preferredWalletName" class="preferred-hint">
-				Reconnects to {{ preferredWalletName }} ·
-				<button type="button" class="switch-link" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">
+				Next connect will try {{ preferredWalletName }} ·
+				<button type="button" class="switch-link" :data-testid="TESTIDS.bridgeL2SwitchWallet" @click="switchWallet">
 					use a different wallet
 				</button>
 			</p>

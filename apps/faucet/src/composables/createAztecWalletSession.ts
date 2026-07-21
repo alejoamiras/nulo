@@ -44,6 +44,14 @@ const REMEMBERED_AMBIGUITY_WINDOW_MS = 1_000
  *  multi-megabyte claimed name can't defeat the picker's render capping. */
 const PREFERRED_NAME_MAX = 48
 
+/** Code-point-safe bounded truncation: a UTF-16 `slice` can split an emoji
+ *  surrogate pair in a claimed wallet name. Shared by the picker's display
+ *  capping and the persisted-name capping. */
+export function truncateName(name: string, max: number): string {
+	const points = Array.from(name)
+	return points.length > max ? `${points.slice(0, max).join("")}…` : name
+}
+
 /**
  * Per-feature config for an Aztec wallet session. The faucet and the bridge each create ONE
  * session (a module-level singleton) with their own appId, capability manifest, and contract
@@ -122,13 +130,13 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			if (typeof parsed !== "object" || parsed === null) return null
 			const { id, name } = parsed as { id?: unknown; name?: unknown }
 			if (typeof id !== "string" || typeof name !== "string") return null
-			return { id, name: name.slice(0, PREFERRED_NAME_MAX) }
+			return { id, name: truncateName(name, PREFERRED_NAME_MAX) }
 		} catch {
 			return null
 		}
 	}
 	function writePreferred(value: PreferredWallet): void {
-		const capped = { id: value.id, name: value.name.slice(0, PREFERRED_NAME_MAX) }
+		const capped = { id: value.id, name: truncateName(value.name, PREFERRED_NAME_MAX) }
 		try {
 			localStorage.setItem(storageKey, JSON.stringify(capped))
 		} catch {
@@ -353,8 +361,13 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		const flowEpoch = epoch
 		// Capture the flow's own handles: stale-cleanup must never dereference
 		// the mutable session fields (a newer flow may own them by then).
+		// `pending` is CLAIMED synchronously — the verification dialog renders
+		// in multiple always-mounted panels, and two same-tick confirms would
+		// otherwise both call confirm() and race competing wallet wrappers
+		// over one MessagePort.
 		const flowPending = pending
 		const flowProvider = provider
+		pending = null
 		try {
 			const w = await flowPending.confirm()
 			if (isStale(flowEpoch)) {
@@ -367,7 +380,6 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 				return
 			}
 			wallet.value = w
-			pending = null
 			verificationEmojis.value = null
 			// Subscribe AFTER confirm: before the wallet exists the SDK returns a
 			// no-op unsubscriber and the callback never fires (the pre-existing
@@ -442,6 +454,16 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	/** Forget the remembered wallet (the "use a different wallet" affordances). */
 	function forgetPreferredWallet(): void {
 		clearPreferred()
+	}
+
+	/** The switch affordances (A2): forget + disconnect + fresh pick in ONE
+	 *  action — switching never requires a manual disconnect first. */
+	async function switchWallet(): Promise<void> {
+		forgetPreferredWallet()
+		if (status.value === "connected") {
+			await disconnect()
+		}
+		await connect()
 	}
 
 	async function requestCapabilities(flowEpoch: number): Promise<void> {
@@ -568,6 +590,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		selectWallet,
 		cancelChoice,
 		forgetPreferredWallet,
+		switchWallet,
 		confirmVerification,
 		cancelVerification,
 		retryCapabilities,

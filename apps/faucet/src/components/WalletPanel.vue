@@ -16,7 +16,7 @@ const {
 	cancelVerification,
 	retryCapabilities,
 	disconnect,
-	forgetPreferredWallet,
+	switchWallet,
 } = useWalletConnection()
 
 const NULO_INSTALL_URL = import.meta.env.VITE_NULO_INSTALL_URL ?? "https://nulo.sh"
@@ -58,16 +58,6 @@ async function onClick() {
 
 function openInstall() {
 	window.open(NULO_INSTALL_URL, "_blank", "noopener")
-}
-
-/** A2: switching never requires a manual disconnect — forget + disconnect in
- *  one action; the next Connect runs a fresh pick. */
-async function switchWallet() {
-	forgetPreferredWallet()
-	if (status.value === "connected") {
-		await disconnect()
-	}
-	await connect()
 }
 </script>
 
@@ -134,7 +124,7 @@ async function switchWallet() {
 				{{ connectLabel }}
 			</Button>
 			<p v-if="status === 'idle' && preferredWalletName" class="preferred-hint" :data-testid="TESTIDS.preferredWalletHint">
-				Reconnects to {{ preferredWalletName }} ·
+				Next connect will try {{ preferredWalletName }} ·
 				<button type="button" class="switch-link" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">
 					use a different wallet
 				</button>

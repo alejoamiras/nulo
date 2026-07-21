@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button } from "@nulo/design"
 import { computed, nextTick, ref, watch } from "vue"
+import { truncateName } from "@/composables/createAztecWalletSession"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
 
@@ -16,11 +17,11 @@ const { status, discoveredWallets, scanning, selectWallet, cancelChoice } = useW
 
 const open = computed(() => status.value === "choosing")
 
-/** Provider-supplied name, hard-capped by STRING length (CSS ellipsis is
- *  presentation, not input capping). */
+/** Provider-supplied name, hard-capped by CODE POINTS (a UTF-16 slice can
+ *  split an emoji surrogate pair; CSS ellipsis is presentation, not capping). */
 const NAME_MAX = 48
 function displayName(name: string): string {
-	return name.length > NAME_MAX ? `${name.slice(0, NAME_MAX)}…` : name
+	return truncateName(name, NAME_MAX)
 }
 
 /** Provider-supplied icon URL: protocol allowlist + source-length cap.
@@ -28,6 +29,15 @@ function displayName(name: string): string {
  *  included) serve their icon from their own extension origin. Anything else
  *  (javascript:, http:, oversized data blobs) falls back to a glyph. */
 const ICON_MAX_LENGTH = 4096
+/** Icons that passed the allowlist but FAILED to load (e.g. the deployed
+ *  faucet's CSP is `img-src 'self' data:`, which blocks https and
+ *  chrome-extension sources) degrade to the glyph via @error. */
+const failedIcons = ref(new Set<number>())
+function onIconError(key: number) {
+	const next = new Set(failedIcons.value)
+	next.add(key)
+	failedIcons.value = next
+}
 function safeIcon(icon: string | undefined): string | null {
 	if (!icon || icon.length > ICON_MAX_LENGTH) return null
 	try {
@@ -105,11 +115,11 @@ watch(open, async (isOpen) => {
 			<div ref="dialogEl" class="modal" role="dialog" aria-modal="true" aria-label="Choose a wallet" tabindex="-1" @keydown="onKey">
 				<h2 class="title">CHOOSE A WALLET</h2>
 
-				<p v-if="hasCollision" class="warning" :data-testid="TESTIDS.walletPickerWarning">
-					⚠ Two wallets claim the same identity. Pick deliberately — the emoji check on the next step is what proves the connection.
+				<p v-if="hasCollision" class="warning" role="alert" :data-testid="TESTIDS.walletPickerWarning">
+					⚠ Multiple wallets claim the same identity. Names and icons are self-reported — pick deliberately. The emoji check on the next step verifies only the connection to the wallet you select.
 				</p>
 
-				<ul class="rows">
+				<ul class="rows" aria-live="polite">
 					<li
 						v-for="w in discoveredWallets"
 						:key="w.key"
@@ -118,13 +128,14 @@ watch(open, async (isOpen) => {
 						:data-wallet-key="w.key"
 					>
 						<img
-							v-if="safeIcon(w.icon)"
+							v-if="safeIcon(w.icon) && !failedIcons.has(w.key)"
 							class="icon"
 							:src="safeIcon(w.icon) ?? undefined"
 							alt=""
 							width="28"
 							height="28"
 							referrerpolicy="no-referrer"
+							@error="onIconError(w.key)"
 						/>
 						<span v-else class="icon fallback" aria-hidden="true">◆</span>
 						<span class="name">{{ displayName(w.name) }}</span>
@@ -133,6 +144,7 @@ watch(open, async (isOpen) => {
 							class="connect"
 							variant="primary_outline"
 							size="small"
+							:aria-label="`Connect ${displayName(w.name)} (${w.type})`"
 							:data-testid="TESTIDS.walletPickerConnect"
 							@click="selectWallet(w.key)"
 						>

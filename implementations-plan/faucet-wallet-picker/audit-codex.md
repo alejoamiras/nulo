@@ -124,3 +124,56 @@ Operational note: this re-verification ran via DIRECT `codex exec` with per-run 
 files — a deliberate, documented deviation from the run-codex.sh helper, which crashes on this
 host since the /tmp wipe (empty-heredoc prompts + lost session dirs). No fixed shared paths were
 used.
+
+
+---
+
+# Tri-audit round (user-requested): 3× codex xhigh, disjoint lenses, PR #306
+
+Run via direct `codex exec` (per-run home-scratch files; the run-codex.sh helper remains broken
+on this host after the /tmp wipe). Legs: A regression, B concurrency + test integrity,
+C improvements/UI/security/copy. Each read the five prior rounds' dispositions first.
+
+## Verdicts
+- **Leg A (regression): `approve` — no new findings**, with a verified-unchanged ledger: session
+  return shape, error-category routing, every panel status, all faucet/bridge/fuel consumers
+  gated on `connected` ("choosing" reaches no transaction branch), sibling smoke mocks still
+  faithful.
+- **Leg B (concurrency): `reject`** — 1 High + 1 Medium (below), everything else verified sound
+  (retry-noop/disconnect-mid-setup/captured-handle/M6/M7 pins genuinely fail on regressions;
+  switch-wallet races sound; concurrent panel connects serialize; jsdom e2e's ending-stream gap
+  acceptable given unit coverage).
+- **Leg C (quality): `conditional approve`** — 4 Medium + 2 Low (below), "well-built" on the
+  selection/ownership/cleanup core and the icon allowlist (no executable bypass found).
+
+## Fixed in this round (commit `fix(faucet): tri-audit round …`)
+1. (H, leg B) **`confirmVerification` was re-entrant**: `pending` was cleared only after the
+   await — two same-tick confirms (the verification dialog renders in multiple always-mounted
+   panels) would both call `confirm()` and race competing wallet wrappers over one MessagePort.
+   `pending` is now CLAIMED synchronously before the first await. Pinned (double-confirm → one
+   `confirm()`).
+2. (M, leg B) Entry-sweep pin strengthened: the swept session's captured `onDisconnect` callback
+   firing after re-entry is asserted inert (replacement flow untouched), not just
+   `disconnect()`-was-called.
+3. (M, leg C) **Production CSP blocks the allowlisted icon schemes** (`public/_headers`:
+   `img-src 'self' data:` — https and chrome-extension icons would render broken). Decision:
+   keep the CSP tight; the modal now degrades via `@error` → glyph fallback (tracked per key).
+   Under prod CSP only `data:image/*` icons render; everything else falls back gracefully.
+4. (M, leg C) a11y: per-row accessible names (`Connect <name> (<type>)`), `aria-live="polite"`
+   on the rows list, `role="alert"` on the collision warning.
+5. (M, leg C) Security-sensitive copy corrected: collision warning now says "Multiple wallets…
+   names and icons are self-reported… the emoji check verifies only the connection to the wallet
+   you select"; the idle hint says "Next connect will try X" (no page-load-reconnect
+   implication); README describes collision detection as best-effort within the scan window.
+6. (M-value, leg C) `switchWallet` moved INTO the session (single implementation; both panels
+   consume it). The larger reducer-extraction refactor is recorded as a follow-up, not done.
+7. (L, leg C) Code-point-safe `truncateName` shared by the picker display cap and the persisted
+   name cap (no split surrogate pairs). Pinned.
+8. (L, leg C) `bridgeL2SwitchWallet` testid added — the bridge panel no longer reuses the
+   faucet panel's switch testid (registry scoping convention).
+
+Post-fix gates: lint 0, typecheck:all 0, faucet units 495, faucet e2e 15, build 0.
+
+## Recorded follow-ups (not fixed)
+- Reducer-style extraction of the discovery/remembered-window policy (leg C #4's larger half).
+- Integration-level "scanning persists + cancel-mid-scan" e2e (jsdom smoke's ending-stream gap).

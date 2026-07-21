@@ -363,6 +363,70 @@ describe("audit round: flow-ownership + interruption hardening", () => {
 	})
 })
 
+describe("tri-audit round pins", () => {
+	it("double confirmVerification is ONE confirm (pending claimed synchronously)", async () => {
+		const { provider, pending } = makeProvider()
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		stream.push(provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+
+		const a = s.confirmVerification()
+		const b = s.confirmVerification() // same tick — must observe the claimed pending and no-op
+		await Promise.all([a, b])
+		expect(pending.confirm).toHaveBeenCalledTimes(1)
+		expect(s.status.value).toBe("connected")
+	})
+
+	it("the swept-away session's onDisconnect firing later cannot wipe the replacement flow", async () => {
+		const first = makeProvider()
+		let firstDisconnectHandler: (() => void) | null = null
+		first.provider.onDisconnect = vi.fn((handler: () => void) => {
+			firstDisconnectHandler = handler
+			return () => {
+				firstDisconnectHandler = null
+			}
+		}) as typeof first.provider.onDisconnect
+		first.walletHandle.requestCapabilities.mockRejectedValueOnce(new Error("boom"))
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		stream.push(first.provider)
+		await flush()
+		s.selectWallet(s.discoveredWallets.value[0].key)
+		await flush()
+		await s.confirmVerification()
+		expect(s.status.value).toBe("error")
+
+		// Re-entry sweeps the residue AND unsubscribes — the captured old
+		// callback must already be dead (or, if the SDK still fires it, inert).
+		stream = makeStream()
+		mockGetAvailableWallets.mockImplementation(() => ({ wallets: stream.wallets, cancel: stream.cancel }))
+		void s.connect()
+		await flush()
+		stream.push(makeProvider({ id: "second", name: "Second" }).provider)
+		await flush()
+		expect(s.status.value).toBe("choosing")
+
+		;(firstDisconnectHandler as (() => void) | null)?.()
+		expect(s.status.value).toBe("choosing") // replacement flow untouched
+		expect(s.discoveredWallets.value).toHaveLength(1)
+	})
+
+	it("truncateName is code-point-safe (no split surrogate pairs)", async () => {
+		const { truncateName } = await import("./createAztecWalletSession")
+		const emojiName = "🦊".repeat(50)
+		const out = truncateName(emojiName, 48)
+		expect(out.endsWith("…")).toBe(true)
+		expect(Array.from(out)).toHaveLength(49) // 48 points + ellipsis
+		expect(out.includes("\uFFFD")).toBe(false)
+		expect(truncateName("short", 48)).toBe("short")
+	})
+})
+
 describe("stale-epoch SDK cleanup (results discarded AND side effects undone)", () => {
 	it("a stale establish resolution cancels the pending connection", async () => {
 		const { provider, pending } = makeProvider()
