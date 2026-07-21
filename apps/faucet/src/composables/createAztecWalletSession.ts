@@ -197,7 +197,18 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		activeFlowEpoch = null
 	}
 
-	async function connect(): Promise<void> {
+	function connect(): Promise<void> {
+		return connectImpl(false)
+	}
+
+	/** The split-button caret: a fresh scan that goes straight to the picker,
+	 *  IGNORING the remembered wallet for this flow only. The stored preference
+	 *  survives a cancel and is overwritten by whichever wallet next connects. */
+	function connectWithPicker(): Promise<void> {
+		return connectImpl(true)
+	}
+
+	async function connectImpl(forcePicker: boolean): Promise<void> {
 		if (activeFlowEpoch !== null || status.value === "connected") return
 
 		// Sweep any session residue from a previous ERRORED flow (retained
@@ -223,7 +234,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		status.value = "discovering"
 		scanning.value = true
 
-		const preferred = autoReconnectDisabled ? null : readPreferred()
+		const preferred = forcePicker || autoReconnectDisabled ? null : readPreferred()
 		pickerOpen.value = preferred === null
 
 		try {
@@ -469,14 +480,15 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		clearPreferred()
 	}
 
-	/** The switch affordances (A2): forget + disconnect + fresh pick in ONE
-	 *  action — switching never requires a manual disconnect first. */
+	/** The switch affordances: disconnect (if connected) + a forced-picker scan
+	 *  in ONE action. The stored preference is KEPT — cancelling the picker
+	 *  must not cost the user their remembered wallet; completing a connection
+	 *  overwrites it anyway. */
 	async function switchWallet(): Promise<void> {
-		forgetPreferredWallet()
 		if (status.value === "connected") {
 			await disconnect()
 		}
-		await connect()
+		await connectWithPicker()
 	}
 
 	async function requestCapabilities(flowEpoch: number): Promise<void> {
@@ -602,6 +614,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		pickerOpen,
 		preferredWalletName,
 		connect,
+		connectWithPicker,
 		selectWallet,
 		cancelChoice,
 		forgetPreferredWallet,

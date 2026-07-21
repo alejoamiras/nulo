@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { AddressDisplay, Button, Spinner } from "@nulo/design"
 import { computed } from "vue"
+import { truncateName } from "@/composables/createAztecWalletSession"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { TESTIDS } from "@/lib/testids"
 import VerificationModal from "./VerificationModal.vue"
@@ -35,6 +36,9 @@ const connectLabel = computed(() => {
 			return "Connect Aztec"
 	}
 })
+
+const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null)
+const shortPreferredName = computed(() => (preferredWalletName.value ? truncateName(preferredWalletName.value, 20) : null))
 
 async function onClick() {
 	if (status.value === "connected") {
@@ -79,7 +83,21 @@ async function onClick() {
 		</Flex>
 
 		<div v-else class="connect">
+			<div v-if="showSplitConnect" class="split">
+				<Button :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
+					Connect {{ shortPreferredName }}
+				</Button>
+				<Button
+					class="caret"
+					aria-label="Choose a different wallet"
+					:data-testid="TESTIDS.bridgeL2SwitchWallet"
+					@click="switchWallet"
+				>
+					▾
+				</Button>
+			</div>
 			<Button
+				v-else
 				:loading="status === 'discovering'"
 				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.bridgeL2Connect"
@@ -87,12 +105,6 @@ async function onClick() {
 			>
 				{{ connectLabel }}
 			</Button>
-			<p v-if="status === 'idle' && preferredWalletName" class="preferred-hint">
-				Next connect will try {{ preferredWalletName }} ·
-				<button type="button" class="switch-link" :data-testid="TESTIDS.bridgeL2SwitchWallet" @click="switchWallet">
-					use a different wallet
-				</button>
-			</p>
 			<p v-if="status === 'error' && error" class="error-hint">{{ error.message }}</p>
 		</div>
 
@@ -122,9 +134,17 @@ async function onClick() {
 	text-transform: uppercase;
 }
 
-.preferred-hint {
-	color: var(--txt-secondary);
-	font-size: 11px;
+.split {
+	display: inline-flex;
+}
+
+.split > :first-child {
+	border-right: 1px solid color-mix(in srgb, var(--txt-inverse) 25%, transparent);
+}
+
+.split .caret {
+	min-width: 44px;
+	padding: 0 12px;
 }
 
 .switch-link {

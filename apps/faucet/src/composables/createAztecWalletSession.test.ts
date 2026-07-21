@@ -507,6 +507,24 @@ describe("remembered path (bounded ambiguity window)", () => {
 		localStorage.setItem("test-app:preferred-wallet", JSON.stringify({ id, name }))
 	}
 
+	it("switchWallet forces the picker and KEEPS the stored preference on cancel", async () => {
+		remember()
+		const s = makeSession()
+		void s.switchWallet()
+		await flush()
+		expect(s.status.value).toBe("discovering")
+		expect(s.pickerOpen.value).toBe(true) // forced: the remembered id is ignored for this flow
+
+		stream.push(makeProvider({ id: "acmewallet", name: "Acme", type: "web" }).provider)
+		await flush()
+		expect(s.status.value).toBe("choosing") // no ambiguity window on the forced path
+
+		s.cancelChoice()
+		// Cancelling the forced picker must not cost the user their remembered wallet.
+		expect(localStorage.getItem("test-app:preferred-wallet")).toContain("nulo")
+		expect(s.preferredWalletName.value).toBe("Nulo")
+	})
+
 	it("a sole claimant surviving the 1s window auto-connects (discovery cancelled, no picker)", async () => {
 		vi.useFakeTimers()
 		remember()

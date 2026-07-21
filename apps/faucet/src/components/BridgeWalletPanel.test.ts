@@ -6,7 +6,9 @@ const status = ref("idle")
 const verificationEmojis = ref<string | null>(null)
 const selectedAccount = ref<string | null>(null)
 const error = ref<{ message: string } | null>(null)
+const preferredWalletName = ref<string | null>(null)
 const connect = vi.fn()
+const switchWallet = vi.fn()
 const confirmVerification = vi.fn()
 const cancelVerification = vi.fn()
 const retryCapabilities = vi.fn()
@@ -18,7 +20,9 @@ vi.mock("@/composables/useBridgeWallet", () => ({
 		verificationEmojis,
 		selectedAccount,
 		error,
+		preferredWalletName,
 		connect,
+		switchWallet,
 		confirmVerification,
 		cancelVerification,
 		retryCapabilities,
@@ -36,6 +40,7 @@ describe("BridgeWalletPanel", () => {
 		status.value = "idle"
 		selectedAccount.value = null
 		error.value = null
+		preferredWalletName.value = null
 		verificationEmojis.value = null
 		disconnect.mockClear()
 		connect.mockClear()

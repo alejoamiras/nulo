@@ -37,6 +37,16 @@ describe("WalletPanel", () => {
 		expect(btn.text()).toBe("Connect wallet")
 	})
 
+	it("idle with a remembered wallet: split button — 'Connect <name>' + picker caret", () => {
+		const c = useWalletConnection()
+		c.preferredWalletName.value = "Nulo"
+		const w = mount(WalletPanel)
+		const btn = w.get(`[data-testid="${TESTIDS.btnConnect}"]`)
+		expect(btn.text()).toBe("Connect Nulo")
+		const caret = w.get(`[data-testid="${TESTIDS.btnSwitchWallet}"]`)
+		expect(caret.attributes("aria-label")).toBe("Choose a different wallet")
+	})
+
 	it("discovering: button label becomes 'Searching for wallet…' and is loading", async () => {
 		const c = useWalletConnection()
 		c.status.value = "discovering"

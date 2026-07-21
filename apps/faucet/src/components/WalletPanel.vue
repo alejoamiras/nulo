@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
+import { truncateName } from "@/composables/createAztecWalletSession"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
 import { AddressDisplay, Button, Spinner } from "@nulo/design"
@@ -47,6 +48,8 @@ const showCapabilityApproval = computed(
 const showCapabilityError = computed(() => status.value === "error" && error.value?.category === "capability-rejected")
 const showNoWalletCta = computed(() => status.value === "error" && error.value?.category === "no-wallet")
 const showSettingUp = computed(() => status.value === "setting-up")
+const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null)
+const shortPreferredName = computed(() => (preferredWalletName.value ? truncateName(preferredWalletName.value, 20) : null))
 
 async function onClick() {
 	if (status.value === "connected") {
@@ -114,8 +117,21 @@ function openInstall() {
 		</Flex>
 
 		<div v-else class="connect">
+			<div v-if="showConnectButton && showSplitConnect" class="split">
+				<Button :data-testid="TESTIDS.btnConnect" @click="onClick">
+					Connect {{ shortPreferredName }}
+				</Button>
+				<Button
+					class="caret"
+					aria-label="Choose a different wallet"
+					:data-testid="TESTIDS.btnSwitchWallet"
+					@click="switchWallet"
+				>
+					▾
+				</Button>
+			</div>
 			<Button
-				v-if="showConnectButton"
+				v-else-if="showConnectButton"
 				:loading="status === 'discovering'"
 				:disabled="status === 'discovering' || status === 'choosing'"
 				:data-testid="TESTIDS.btnConnect"
@@ -123,12 +139,6 @@ function openInstall() {
 			>
 				{{ connectLabel }}
 			</Button>
-			<p v-if="status === 'idle' && preferredWalletName" class="preferred-hint" :data-testid="TESTIDS.preferredWalletHint">
-				Next connect will try {{ preferredWalletName }} ·
-				<button type="button" class="switch-link" :data-testid="TESTIDS.btnSwitchWallet" @click="switchWallet">
-					use a different wallet
-				</button>
-			</p>
 			<p v-if="status === 'error' && error?.category !== 'no-wallet' && error?.category !== 'capability-rejected'" class="error-hint">
 				{{ error?.message }}
 			</p>
@@ -209,9 +219,17 @@ function openInstall() {
 	color: var(--yellow);
 }
 
-.preferred-hint {
-	color: var(--txt-secondary);
-	font-size: 11px;
+.split {
+	display: inline-flex;
+}
+
+.split > :first-child {
+	border-right: 1px solid color-mix(in srgb, var(--txt-inverse) 25%, transparent);
+}
+
+.split .caret {
+	min-width: 44px;
+	padding: 0 12px;
 }
 
 .switch-link {
