@@ -158,9 +158,38 @@ test.skipIf(!hasConfig)(
 			// re-provisions the encrypted store key, re-boots the chain runtime, and re-registers
 			// contracts — all behind real proving on a loaded runner.
 			const page3 = await openPopup(ctx2)
+			const swAlive = () => ctx2.browser.targets().some((t) => t.type() === "service_worker" && t.url().includes(ctx2.extensionId))
 			await page3.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
+			// Route history capture: hash-only navigation keeps the same document, so this listener
+			// (and its log) survives the whole recovery. Dumped only when the recovery times out.
+			await page3.evaluate(() => {
+				const w = window as unknown as { __dbgHashLog: [number, string][] }
+				w.__dbgHashLog = [[Date.now(), window.location.hash]]
+				window.addEventListener("hashchange", () => w.__dbgHashLog.push([Date.now(), window.location.hash]))
+			})
+			console.log(`[sw-restart-restore] recovery: popup up, sw=${swAlive()}`)
 			await ensureUnlocked(page3, TEST_PASSWORD)
-			await page3.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 240_000 })
+			console.log(`[sw-restart-restore] recovery: left auth, sw=${swAlive()}`)
+			await page3
+				.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 240_000 })
+				.catch(async (error) => {
+					const hashLog = await page3
+						.evaluate(() => JSON.stringify((window as unknown as { __dbgHashLog: unknown }).__dbgHashLog))
+						.catch(() => "unreadable")
+					const bodyText = await page3.evaluate(() => document.body.innerText.slice(0, 500)).catch(() => "unreadable")
+					const storageKeys = await page3
+						.evaluate(async () =>
+							Object.keys(await chrome.storage.local.get())
+								.sort()
+								.join("|"),
+						)
+						.catch(() => "unreadable")
+					console.log(`[sw-restart-restore] recovery TIMEOUT sw=${swAlive()}`)
+					console.log(`[sw-restart-restore] hashLog=${hashLog}`)
+					console.log(`[sw-restart-restore] bodyText=${JSON.stringify(bodyText)}`)
+					console.log(`[sw-restart-restore] storageKeys=${storageKeys}`)
+					throw error
+				})
 
 			// ── 4. Contracts survived: the imported account syncs its REAL balance ──
 			await switchToLocalNetwork(page3)
