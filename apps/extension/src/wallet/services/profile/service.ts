@@ -632,7 +632,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const secret = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
 			try {
 				if (secret) {
-					await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
+					// Pre-persist verify: on drift, nothing is committed (honest failure — the password
+					// is NOT changed). But a drift here means the CURRENT session is on a mismatched
+					// build, so close it too — a rejected change must not leave the blocked profile
+					// operating (matches openSessionVerified's close-on-throw).
+					try {
+						await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
+					} catch (precheckError) {
+						if (precheckError instanceof AccountAddressInconsistencyError && this.sessionManager.isActive(id)) {
+							await this.sessionManager.close()
+						}
+						throw precheckError
+					}
 				}
 
 				profile.guard = resealed.encrypted.guard

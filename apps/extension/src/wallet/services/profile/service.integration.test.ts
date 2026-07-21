@@ -1481,6 +1481,29 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		expect(await service.getActiveProfile()).toBeUndefined()
 	}, 30_000)
 
+	test("changePassword: a PRE-CHECK integrity block fails honestly — password unchanged + active session closed", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "oldpass12")
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+
+		// Drift present BEFORE the change → the pre-persist verify throws.
+		service.setIntegrityDelegate({
+			verifyBeforeSessionOpen: async () => {
+				throw new AccountAddressInconsistencyError()
+			},
+		})
+
+		await expect(service.changeProfilePassword(profile.id, "oldpass12", "newpass12")).rejects.toBeInstanceOf(
+			AccountAddressInconsistencyError,
+		)
+		// The blocked profile's live session was closed (must not keep operating), and nothing was
+		// persisted — the OLD password still unlocks (with the delegate healed).
+		expect(await service.getActiveProfile()).toBeUndefined()
+		await service.setIntegrityDelegate({ verifyBeforeSessionOpen: async () => {} })
+		const reunlocked = await service.unlockProfile(profile.id, "oldpass12")
+		expect(reunlocked.id).toBe(profile.id)
+	}, 30_000)
+
 	test("changePassword: an integrity block on RE-OPEN commits the password but withholds the session", async () => {
 		const { service } = await makeService()
 		const profile = await service.createProfile("P", "oldpass12")
