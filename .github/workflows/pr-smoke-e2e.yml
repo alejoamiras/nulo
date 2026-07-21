@@ -103,29 +103,24 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-  build:
-    name: Build
-    needs: decide
-    if: needs.decide.outputs.run == 'true'
-    uses: ./.github/workflows/_build-extension.yml
-    with:
-      ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      target: chrome
-      upload_artifacts: true
-
+  # PR smoke builds IN-JOB (no artifact): the in-job build arms the migration fixture (artifact
+  # runs skip those e2es by the arming contract - they were silently skipped on PRs before) and
+  # carries the VITE_NULO_E2E_DEFAULT_NET=testnet pin (CI cannot reach the Alpha mainnet RPC, and
+  # the seeded-ACTIVE default is baked at build time). Prod-shaped build coverage on PRs stays with
+  # the quality lane's `Build / vite build (chrome)`; the RELEASE chain still smokes the real
+  # artifact (prod-shaped by design - its chain-adjacent legs are the known queued follow-up).
   smoke:
     name: Run
-    needs: [decide, build]
+    needs: [decide]
     if: needs.decide.outputs.run == 'true'
     uses: ./.github/workflows/_smoke-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
-      artifact_name: extension-chrome
 
   status:
     name: smoke-e2e-status
     if: always()
-    needs: [changes, decide, build, smoke]
+    needs: [changes, decide, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -134,7 +129,6 @@ jobs:
           for r in \
             "${{ needs.changes.result }}" \
             "${{ needs.decide.result }}" \
-            "${{ needs.build.result }}" \
             "${{ needs.smoke.result }}" \
           ; do
             if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
