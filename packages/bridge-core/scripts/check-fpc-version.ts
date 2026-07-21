@@ -124,8 +124,8 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 		network: { l1ChainId: number; rollupVersion: number }
 		compatibleNodeVersions: Record<string, string[] | string>
 	}
-	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "package.json"), "utf8"))
-	const artifactBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "target/private_contract-PrivateFPC.json"))
+	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "package.json"), "utf8"))
+	const artifactBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
 
 	const info = await rpc<{ nodeVersion: string; l1ChainId: number; rollupVersion: number }>("node_getNodeInfo", [])
 
@@ -156,7 +156,7 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 
 	// 1. Installed package must EXACTLY match the descriptor (the artifact side never widens).
 	if (String(pkg.version) !== descriptor.aztecVersion) {
-		fail(`installed @alejoamiras/aztec-fee-payment ${pkg.version} != descriptor aztecVersion ${descriptor.aztecVersion}.`)
+		fail(`installed @alejoamiras/private-fee-juice ${pkg.version} != descriptor aztecVersion ${descriptor.aztecVersion}.`)
 	}
 
 	// 2. Artifact digest — checked BEFORE the compat lookup, which is keyed by this digest.
@@ -187,7 +187,7 @@ export async function runFpcGate(mode: GateMode): Promise<void> {
 			.update(JSON.stringify(canonicalize(parsed)))
 			.digest("hex")
 	}
-	const distBytes = readFileSync(resolvePackageFile("@alejoamiras/aztec-fee-payment", "dist/target/private_contract-PrivateFPC.json"))
+	const distBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "dist/target/private_contract-PrivateFPC.json"))
 	if (coreDigest(distBytes) !== coreDigest(artifactBytes)) {
 		fail(
 			"dist/target PrivateFPC artifact diverges from the gated target artifact (beyond file_map) — the runtime would use unchecked bytes.",

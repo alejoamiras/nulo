@@ -1,5 +1,5 @@
 /**
- * `bridgeForMint` ported from @alejoamiras/aztec-fee-payment's test harness
+ * `bridgeForMint` ported from @alejoamiras/private-fee-juice's test harness
  * (`src/ts/test/harness.ts:140-300`). The function is test-internal in the
  * canonical package (NOT in `dist/.../index.d.ts`) so we maintain a copy here.
  *

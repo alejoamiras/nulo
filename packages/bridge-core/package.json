@@ -27,7 +27,7 @@
 		"@aztec/stdlib": "5.0.1",
 		"@aztec/wallets": "5.0.1",
 		"@aztec-foundation/aztec-standards": "5.0.1",
-		"@alejoamiras/aztec-fee-payment": "5.0.1",
+		"@alejoamiras/private-fee-juice": "5.0.1",
 		"viem": "npm:@aztec/viem@2.38.2"
 	},
 	"devDependencies": {
