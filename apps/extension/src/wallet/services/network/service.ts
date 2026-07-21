@@ -71,20 +71,28 @@ interface DefaultSeed {
  */
 export const LOCAL_NETWORK_RPC_URL: string = (import.meta.env.VITE_LOCAL_NETWORK_RPC_URL as string | undefined) ?? "http://localhost:8080"
 
+// E2E-ONLY default-active override: CI smoke has NO local chain and its runners cannot reliably
+// reach the public Alpha mainnet RPC (requests blackhole → every chain-adjacent flow eats the node
+// client's full 60s-abort×retry envelope, blowing any test budget). Smoke builds pin the seeded
+// ACTIVE network to Testnet (reachable from CI, the pre-Alpha test envelope); prod builds omit the
+// env, so real installs keep Alpha. Same never-ships pattern as the migration-fixture stamp
+// (_build-extension.yml greps release bundles).
+const E2E_DEFAULT_ACTIVE_TESTNET: boolean = (import.meta.env.VITE_NULO_E2E_DEFAULT_NET as string | undefined) === "testnet"
+
 const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
 		name: "Alpha Mainnet",
 		rpcUrl: "https://aztec-mainnet.drpc.org",
 		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		kind: "mainnet",
-		isPrimaryActive: true,
+		isPrimaryActive: !E2E_DEFAULT_ACTIVE_TESTNET,
 	},
 	{
 		name: "Testnet",
 		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
 		chainId: CHAIN_IDS.TESTNET,
 		kind: "testnet",
-		isPrimaryActive: false,
+		isPrimaryActive: E2E_DEFAULT_ACTIVE_TESTNET,
 	},
 	{
 		name: "Local Network",
