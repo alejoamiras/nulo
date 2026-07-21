@@ -21,9 +21,9 @@ import { ensureUnlocked, navigateByHash, reopenAndRecoverAfterImport } from "./f
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { gotoPopupImport, readActiveAccount, TEST_PASSWORD, waitForActiveAccount } from "./helpers/import-drivers"
 
-// 360s: the export chain's 120s budget + the import side's 240s convergence envelope (sized to the
-// node client's 60s-abort × retry stall behavior) must BOTH fit with headroom.
-test("encrypted full backup: export → wrong password rejects → decrypt → restore in a fresh extension", { timeout: 360_000 }, async ({
+// 900s: export chain (120s) + import navigation incl. the app's bounded recovery leg (300s) +
+// active-account convergence (240s) must ALL fit with headroom on slow runners.
+test("encrypted full backup: export → wrong password rejects → decrypt → restore in a fresh extension", { timeout: 900_000 }, async ({
 	registeredExtension,
 }) => {
 	// ── Export + encrypt from the registered wallet ────────────────────

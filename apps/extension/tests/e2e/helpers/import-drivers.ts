@@ -176,7 +176,10 @@ export async function importFullBackup(
 			expectedText,
 		)
 	} else {
-		await waitForHash(page, shell.successHash, 30_000)
+		// The import flow is restore + (possibly) the app's OWN bounded 30s recovery wait before it
+		// routes (import.vue completeImportWithRecovery) - a 30s clock expired structurally whenever
+		// the recovery leg ran. Sized to the recovery envelope + slow-runner restore + margin.
+		await waitForHash(page, shell.successHash, 300_000)
 	}
 }
 

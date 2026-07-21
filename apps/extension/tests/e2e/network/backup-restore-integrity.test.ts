@@ -63,7 +63,7 @@ test("agent-runner contract: a live sandbox must be configured (no false skip)",
 
 test.skipIf(!hasConfig)(
 	"import drops a foreign-account tx and keeps the funded-account tx (P1 provenance) + stays on-chain functional",
-	{ timeout: 600_000 },
+	{ timeout: 900_000 },
 	async ({ tokenReadyExtension }) => {
 		// ── 1. Export a REAL backup from the funded wallet ────────────────
 		const page = await openPopup(tokenReadyExtension)
