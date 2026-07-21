@@ -1461,6 +1461,31 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		expect(await repo.isBlocked(profile.id)).toBe(false)
 	}, 30_000)
 
+	test("persistIntegrityBlockIfLive: writes for a live profile, SKIPS a deleted one (no orphan)", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		const repo = new AccountIntegrityBlockedRepository(api.storage.local)
+		const record = {
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		}
+		// Live profile → persisted.
+		await service.persistIntegrityBlockIfLive(record)
+		expect(await repo.isBlocked(profile.id)).toBe(true)
+		await repo.clear(profile.id)
+
+		// Delete it, then a late off-lock writer tries to persist for the gone profile → SKIPPED.
+		await service.deleteProfile(profile.id)
+		await service.persistIntegrityBlockIfLive(record)
+		expect(await repo.isBlocked(profile.id)).toBe(false)
+	}, 30_000)
+
 	test("EPOCH FENCE: a deletion that completes (reserve→release) DURING verify aborts the open", async () => {
 		const { service } = await makeService()
 		const profile = await service.createProfile("P", "pass1234")

@@ -117,4 +117,36 @@ describe("CI behavior-gating guard", () => {
       }
     }
   })
+
+  // The network-e2e suite is split across a PROVERLESS shard pool and several PROVER-ON dedicated
+  // jobs. The shard pool's `exclude_files` must be EXACTLY the union of every dedicated job's
+  // `test_files`, or a file silently runs in both pools (wasted) or in NEITHER (never run). The
+  // latter is the real danger for the mandatory `frozen-account-canary` bump gate: a bad edit could
+  // drop it out of both pools and it would silently stop running. This pins the partition
+  // mechanically (the workflow's own "keep in sync" comment can't).
+  test("network-e2e proverless-exclusions == the union of the dedicated jobs' test_files", () => {
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    const wf = Bun.YAML.parse(readFileSync(join(ROOT, ".github/workflows/pr-network-e2e.yml"), "utf8")) as any
+    const words = (v: unknown): string[] => (typeof v === "string" ? v.split(/\s+/).filter(Boolean) : [])
+
+    let excluded: string[] = []
+    const dedicated: string[] = []
+    // biome-ignore lint/suspicious/noExplicitAny: parsed-YAML shape is dynamic.
+    for (const job of Object.values(wf.jobs) as any[]) {
+      if (job.with?.exclude_files) excluded = words(job.with.exclude_files)
+      if (job.with?.test_files) dedicated.push(...words(job.with.test_files))
+    }
+
+    expect(excluded.length, "the proverless pool must exclude the dedicated files").toBeGreaterThan(0)
+    expect(dedicated.length, "there must be dedicated test_files jobs").toBeGreaterThan(0)
+    // The two sets are EQUAL: every dedicated file is excluded from the shard pool, and nothing
+    // extra is excluded (no file runs in both pools; none is left in neither).
+    expect([...excluded].sort(), "proverless exclude_files must equal the union of dedicated test_files").toEqual(
+      [...new Set(dedicated)].sort(),
+    )
+    // The canary specifically must live in a dedicated (prover-ON) job — never only proverless.
+    expect(dedicated, "frozen-account-canary must run in a dedicated prover-ON job").toContain(
+      "tests/e2e/network/frozen-account-canary.test.ts",
+    )
+  })
 })

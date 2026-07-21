@@ -36,6 +36,15 @@ export function frozenConstructorArgs(signingPublicKey: Point): Fr[] {
 /**
  * Canonical serialization the descriptor digest pins (the args builder is represented by the
  * symbolic shape of what it marshals). Feeds the regime record; recomputed by the paired test.
+ *
+ * IMPORTANT: this digest is SYMBOLIC w.r.t. constructor-arg MARSHALLING — it hashes the string
+ * `["signingPublicKey.x", "signingPublicKey.y"]`, not the `frozenConstructorArgs` implementation.
+ * A tamper swapping the order to `[y, x]` would keep this digest (and the class-id + artifact
+ * digests) green while rotating every derived address. The actual arg-marshalling pin is the
+ * external-reference KAT (`derivation-vectors.test.ts`), whose addresses come from upstream's own
+ * oracle and run in CI via `test:all` — NEVER skip/remove it. The paired
+ * `instantiation-descriptor.test.ts` init-hash check does NOT catch an args tamper (both sides use
+ * the same tampered builder), so the KAT is the load-bearing control here.
  */
 export function canonicalDescriptorContent(): string {
 	return JSON.stringify({

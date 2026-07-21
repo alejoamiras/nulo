@@ -91,7 +91,15 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		const rows = await this.accounts.getAccountsRaw(active.id)
 		const stamp = await this.stamps.get(active.id)
 		// Skip re-derivation ONLY when the build AND the account set both match the last green stamp.
-		if (stamp?.walletVersion === walletVersion() && stamp.accountSetDigest === accountSetDigest(rows)) return
+		// A "unknown" version (dev/test builds with no injected __VERSION__) NEVER matches — two
+		// different dev builds would otherwise share the "unknown" key and skip a real re-derivation.
+		if (
+			stamp?.walletVersion === walletVersion() &&
+			walletVersion() !== "unknown" &&
+			stamp.accountSetDigest === accountSetDigest(rows)
+		) {
+			return
+		}
 		let master: Fr
 		try {
 			master = await this.profiles.getProfileSecret(active.id)
@@ -101,7 +109,11 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 			return
 		}
 		try {
-			await this.verifyProfile(active.id, master, rows)
+			// OFF-LOCK path: persist the block through ProfileService's locked, still-exists-guarded
+			// writer, so a `deleteProfile` racing this unlocked re-derivation can't be followed by an
+			// orphan block write (its under-lock block-clear would otherwise be undone, leaving an
+			// unclearable record for a deleted profile).
+			await this.verifyProfile(active.id, master, (r) => this.profiles.persistIntegrityBlockIfLive(r), rows)
 		} catch (error) {
 			if (error instanceof AccountAddressInconsistencyError) {
 				// Close ONLY the profile we verified — a different profile may have become active
@@ -113,18 +125,22 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		}
 	}
 
-	/** See `AccountIntegrityDelegate.verifyBeforeSessionOpen`. */
+	/** See `AccountIntegrityDelegate.verifyBeforeSessionOpen`. Runs INSIDE ProfileService's facade
+	 *  lock (called from `openSessionVerified`), so a concurrent delete can't interleave — the block
+	 *  is written directly. */
 	public async verifyBeforeSessionOpen(profileId: string, masterSecret: MasterSecretBytes): Promise<void> {
-		await this.verifyProfile(profileId, Fr.fromBuffer(Buffer.from(masterSecret)))
+		await this.verifyProfile(profileId, Fr.fromBuffer(Buffer.from(masterSecret)), (r) => this.blocked.set(r))
 	}
 
-	/** Re-derive every stored account for the profile and compare; persist + throw on mismatch,
-	 *  heal the block and stamp (walletVersion + the digest of the EXACT rows verified) on green.
-	 *  `rows` may be passed to reuse the boot-path read (the stamp then binds precisely what was
-	 *  verified). */
+	/** Re-derive every stored account for the profile and compare; on mismatch persist the block
+	 *  (via `persistBlock` — a direct write when the caller already holds the facade lock, or the
+	 *  locked still-exists-guarded write on the off-lock boot path) and throw. On green: heal the
+	 *  block and stamp (walletVersion + the digest of the EXACT rows verified). `rows` may be passed
+	 *  to reuse the boot-path read (the stamp then binds precisely what was verified). */
 	private async verifyProfile(
 		profileId: string,
 		master: Fr,
+		persistBlock: (record: AccountIntegrityBlocked) => Promise<void>,
 		rows?: Awaited<ReturnType<AccountService["getAccountsRaw"]>>,
 	): Promise<void> {
 		const verifiedRows = rows ?? (await this.accounts.getAccountsRaw(profileId))
@@ -150,7 +166,13 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 					"account address integrity mismatch — session withheld",
 					`profile=${profileId} chain=${account.chainId} index=${account.index}`,
 				)
-				await this.blocked.set(record)
+				// Persist best-effort but ALWAYS throw the typed error afterward, so the caller's
+				// close-on-`AccountAddressInconsistencyError` still runs even if the write failed.
+				try {
+					await persistBlock(record)
+				} catch (writeError) {
+					this.logger.log(this.name, LogLevel.Error, "integrity block persist failed", String(writeError))
+				}
 				throw new AccountAddressInconsistencyError(undefined, {
 					profileId,
 					chainId: account.chainId,

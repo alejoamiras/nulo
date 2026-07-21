@@ -318,3 +318,43 @@ in the coordinator/barrier/session-open/changePassword surfaces); the frozen-acc
 green with native proving across the arc. Total post-impl audit rounds: 1 (first codex block, 5
 HIGH) + this verify-loop (5 rounds) = the coordinator/session surface was adversarially
 re-attacked until an independent pass found nothing actionable.
+
+### Fable dual-audit pass (2 parallel Fable subagents, fresh context, 2026-07-21)
+
+The prior audit trail was codex-only (half of the blueprint's dual-audit protocol). Ran two
+fresh-context Fable bug-hunters — one on runtime/concurrency, one on freeze/transport/tests — with
+instructions to find NEW bugs, not re-confirm codex's.
+
+**Freeze/transport/tests agent: no CRITICAL/HIGH/MEDIUM** (independently corroborates codex B).
+Verified sound: `unwrapParams` DoS bound + gap-tolerance across the whole RPC surface; vendored-JSON
+byte-determinism cross-OS (`.gitattributes` `eol=lf`, no CRLF/BOM); `accountSetDigest` injectivity;
+canary as a real gate; fixture-intent preserved (duplicate-address rejection fires before the
+integrity check). Actioned LOWs: (a) inline note that the KAT — not the descriptor digest — is the
+real constructor-arg-marshalling pin (the digest is symbolic); (b) a mechanical CI test pinning the
+proverless-exclusions == dedicated-jobs partition, so the mandatory canary can't silently fall out
+of both pools. Accepted: canary Stage-5 SW-busy degradation (pre-existing pattern; the final tx
+still fails-closed via getAccountContract).
+
+**Runtime/concurrency agent: found a real MEDIUM that codex + 5 verify rounds MISSED** —
+- **[MEDIUM] Orphan integrity-block for a deleted profile.** The two OFF-LOCK block writers
+  (coordinator boot re-verify; `AccountService.raiseRuntimeMismatch`) could race `deleteProfile`'s
+  under-lock block-CLEAR: a delete during the unlocked re-derivation is followed by the mismatch's
+  block write → an unclearable record for a gone profile (permanent storage leak), which the
+  barrier's `presentedProfileId===null → block` default surfaces as a spurious "verification
+  failed" flash in the delete-and-reimport recovery flow. FIXED: both off-lock writes route through
+  `ProfileService.persistIntegrityBlockIfLive` — a locked write that SKIPS if the profile is
+  gone/reserved (deleteProfile's clear runs under the same lock, so the write lands-then-cleared or
+  is skipped). The pre-open path (already under the lock) still writes directly. New tests:
+  coordinator "no orphan if deleted during verify", integration "persistIntegrityBlockIfLive skips
+  a deleted profile".
+- **[LOW] boot-verify skipped the session close if the block persist threw** → folded into the fix:
+  `verifyProfile` now try/catches the persist and ALWAYS throws the typed error, so the caller's
+  close-on-mismatch runs regardless (mirrors raiseRuntimeMismatch).
+- **[LOW dev-only] a "unknown" (no `__VERSION__`) stamp matched itself** → the boot skip now
+  requires `walletVersion() !== "unknown"`, so dev builds always re-verify.
+- Accepted (agent-flagged, not demanded): the pre-open verify runs under the facade lock (bounded;
+  moving it out would REINTRODUCE the orphan race the agent found — explicitly not done); the
+  transient master-secret `Fr` copy in `verifyBeforeSessionOpen` isn't zeroized (consistent with
+  the codebase's existing unzeroized session `Fr`).
+
+Gates after the fixes: lint/typecheck:all/test:all/ci-gating all 0.

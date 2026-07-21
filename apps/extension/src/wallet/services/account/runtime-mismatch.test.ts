@@ -31,13 +31,19 @@ async function build(opts: { failBlockWrite?: boolean } = {}) {
 		}
 	}
 	const locked: string[] = []
+	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
 	const services = new ServiceCollection()
-	services.add(svc(ProfileService.name, { lockProfileIfActive: async (id: string) => void locked.push(id) }))
+	services.add(
+		svc(ProfileService.name, {
+			lockProfileIfActive: async (id: string) => void locked.push(id),
+			// Stands in for the real locked, still-exists-guarded writer (the profile is "live" here).
+			persistIntegrityBlockIfLive: async (record: Parameters<typeof repo.set>[0]) => repo.set(record),
+		}),
+	)
 	services.add(svc(NetworkService.name, { registerChainPurgeSubscriber: () => {} }))
 	const accounts = new AccountService(new LoggerStore(new ConfigStore()), api)
 	services.add(accounts)
 	await services.start()
-	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
 	// biome-ignore lint/suspicious/noExplicitAny: reach the extracted private handler under test
 	const raise = (accounts as any).raiseRuntimeMismatch.bind(accounts) as (
 		p: string,

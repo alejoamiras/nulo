@@ -39,17 +39,27 @@ async function build(opts: {
 	derive: DeriveAddress
 	/** Simulates a silently-rehydrated session present at coordinator start. */
 	activeProfileId?: string
+	/** Simulates a delete that completed during the off-lock verify: the guarded writer skips it. */
+	deletedProfileId?: string
 	api?: FakeBrowserApi
 }) {
 	const api = opts.api ?? new FakeBrowserApi()
 	if (!opts.api) api.reset()
 	const locks: string[] = []
 	const services = new ServiceCollection()
+	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
 	services.add(
 		svc(ProfileService.name, {
 			setIntegrityDelegate: () => {},
 			lockProfileIfActive: async (id: string) => {
 				locks.push(id)
+			},
+			// The off-lock boot path routes block writes through this locked, still-exists-guarded
+			// writer. `opts.deletedProfileId` simulates a delete that completed during verify — the
+			// write is then SKIPPED (no orphan block for a gone profile).
+			persistIntegrityBlockIfLive: async (record: Parameters<typeof repo.set>[0]) => {
+				if (record.profileId === opts.deletedProfileId) return
+				await repo.set(record)
 			},
 			getActiveProfile: async () => (opts.activeProfileId ? { id: opts.activeProfileId, name: "P", type: "password" } : undefined),
 			getProfileSecret: async () => Fr.fromBuffer(Buffer.from(MASTER)),
@@ -60,7 +70,6 @@ async function build(opts: {
 	services.add(coordinator)
 	await services.start()
 	await coordinator.bootVerification
-	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
 	const stamps = new AccountIntegrityVerifiedStampRepository(api.storage.local)
 	return { coordinator, repo, stamps, locks, api }
 }
@@ -135,6 +144,20 @@ describe("AccountIntegrityCoordinator", () => {
 			activeProfileId: "p1",
 		})
 		expect(await repo.isBlocked("p1")).toBe(true)
+		expect(locks).toEqual(["p1"])
+	})
+
+	test("boot verify: NO orphan block if the profile was deleted during the off-lock verify", async () => {
+		// Mismatch detected, but the guarded writer reports the profile as gone (deleted mid-verify)
+		// → the block is NOT written, so a deleted profile leaves no unclearable record.
+		const { repo, locks } = await build({
+			rows: [row({ address: "0xDRIFTED" })],
+			derive: async () => "0xreal",
+			activeProfileId: "p1",
+			deletedProfileId: "p1",
+		})
+		expect(await repo.isBlocked("p1")).toBe(false)
+		// The close is still attempted (harmless no-op for a gone profile).
 		expect(locks).toEqual(["p1"])
 	})
 

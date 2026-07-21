@@ -37,7 +37,7 @@ import { TombstoneRepository } from "./tombstone-repository"
 import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
 import type { ProfileDeletionDelegate } from "../profile-deletion/types"
 import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "../account-integrity/blocked-repository"
-import type { AccountIntegrityDelegate } from "../account-integrity/types"
+import type { AccountIntegrityBlocked, AccountIntegrityDelegate } from "../account-integrity/types"
 
 export * from "./spec"
 
@@ -547,6 +547,22 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (this.sessionManager.isActive(profileId)) {
 				await this.sessionManager.close()
 			}
+		})
+	}
+
+	/**
+	 * Persist an integrity block record — but ONLY if the profile still exists and isn't being
+	 * deleted. The two OFF-LOCK integrity writers (the coordinator's boot re-verify, AccountService's
+	 * operation-time mismatch) route through here so a `deleteProfile` racing them (whose own
+	 * block-CLEAR runs under this same lock) can't be followed by an orphan write: the write either
+	 * lands before the delete's clear (then the delete clears it) or is skipped here because the
+	 * profile is gone/reserved. Prevents an unclearable block record for a deleted profile.
+	 */
+	public async persistIntegrityBlockIfLive(record: AccountIntegrityBlocked): Promise<void> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			if (this.deletionState.isReserved(record.profileId) || !(await this.repo.get(record.profileId))) return
+			await this.integrityBlocked.set(record)
 		})
 	}
 

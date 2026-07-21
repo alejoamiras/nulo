@@ -14,8 +14,6 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
-import type { StorageArea } from "@nulo/wallet-core/ports"
-import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import type { AccountIntegrityBlocked } from "../account-integrity/types"
 import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
 
@@ -44,14 +42,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	private profileService: ProfileService = null!
 
-	/** Owned so the durable mismatch block is written delegate-independently (fail-closed even
-	 *  during the startup window). */
-	private readonly integrityBlocked: AccountIntegrityBlockedRepository
-
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
 		this.storage = new EntityStorage<Account>(ACCOUNT_STORAGE_ROOT, browserApi.storage.local, (raw) => AccountSchema.parse(raw))
-		this.integrityBlocked = new AccountIntegrityBlockedRepository(browserApi.storage.local as StorageArea)
 	}
 
 	protected async init(services: ServiceCollection): Promise<void> {
@@ -238,8 +231,11 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
 			detectedAt: Date.now(),
 		}
+		// Persist through ProfileService's locked, still-exists-guarded writer: this runs OFF the
+		// facade lock (getAccountContract isn't inside a profile op), so a concurrent delete must not
+		// leave an orphan block for a just-deleted profile.
 		try {
-			await this.integrityBlocked.set(record)
+			await this.profileService.persistIntegrityBlockIfLive(record)
 		} catch (writeError) {
 			this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity block persist failed", String(writeError))
 		}
