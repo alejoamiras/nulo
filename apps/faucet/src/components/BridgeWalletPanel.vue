@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AddressDisplay, Button, Spinner } from "@nulo/design"
+import { AddressDisplay, Button } from "@nulo/design"
 import { computed } from "vue"
 import { truncateName } from "@/composables/createAztecWalletSession"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
@@ -65,21 +65,26 @@ async function onClick() {
 			</button>
 		</div>
 
-		<div v-else-if="status === 'setting-up'" class="setting-up">
-			<Spinner :size="18" />
-			<span>Setting up the bridge session…</span>
+		<div v-else-if="status === 'setting-up'" class="morph">
+			<Button loading disabled>Setting up session…</Button>
 		</div>
 
-		<Flex
+		<div
 			v-else-if="status === 'capability-approval' || (status === 'error' && error?.category === 'capability-rejected')"
-			direction="column"
-			gap="12"
-			align="start"
-			class="capability"
+			class="morph"
 		>
-			<p>Approve the bridge's permissions in your wallet - claim, exit, and balance reads on the bridge contracts.</p>
-			<Button @click="retryCapabilities">Approve permissions</Button>
-		</Flex>
+			<Button
+				v-if="status === 'error'"
+				class="denied"
+				@click="retryCapabilities"
+			>
+				Permissions denied — try again
+			</Button>
+			<Button v-else class="waiting" loading @click="retryCapabilities">
+				Approve in your wallet
+			</Button>
+			<span class="morph-sub">claim, exit + balance reads — nothing else</span>
+		</div>
 
 		<div v-else class="connect">
 			<div v-if="showSplitConnect" class="split">
@@ -159,22 +164,47 @@ async function onClick() {
 	color: var(--red);
 }
 
-.setting-up {
+.morph {
 	display: inline-flex;
-	align-items: center;
-	gap: 12px;
-	color: var(--txt-secondary);
-	font: 500 13px/1 var(--font-mono);
-	letter-spacing: 0.04em;
+	flex-direction: column;
+	gap: 8px;
+	align-items: flex-start;
 }
 
-.capability {
-	max-width: 56ch;
+.morph-sub {
+	color: var(--txt-secondary);
+	font: 500 11px/1 var(--font-mono);
+	letter-spacing: 0.02em;
 }
 
-.capability p {
-	color: var(--txt-secondary);
-	font-size: 14px;
+.waiting {
+	animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.72;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.waiting {
+		animation: none;
+	}
+}
+
+.denied {
+	background: transparent;
+	color: var(--red);
+	border: 2px solid var(--red);
+}
+
+.denied:hover {
+	background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .error-hint {

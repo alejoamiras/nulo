@@ -63,9 +63,10 @@ describe("BridgeWalletPanel", () => {
 	})
 
 	// Guards the Phase-2 .capability div -> <Flex> class-preserving swap: the copy must survive.
-	it("capability-approval: renders the permissions copy in the (Flex-wrapped) block", () => {
+	it("capability-approval: the button morphs to the awaiting state with the scope subline", () => {
 		status.value = "capability-approval"
 		const w = mount(BridgeWalletPanel)
-		expect(w.text()).toMatch(/approve the bridge's permissions/i)
+		expect(w.text()).toContain("Approve in your wallet")
+		expect(w.text()).toContain("claim, exit + balance reads")
 	})
 })

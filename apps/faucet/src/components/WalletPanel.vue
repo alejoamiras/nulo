@@ -3,7 +3,7 @@ import { computed } from "vue"
 import { truncateName } from "@/composables/createAztecWalletSession"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-import { AddressDisplay, Button, Spinner } from "@nulo/design"
+import { AddressDisplay, Button } from "@nulo/design"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -80,22 +80,30 @@ function openInstall() {
 			</button>
 		</div>
 
-		<div v-else-if="showSettingUp" class="setting-up" :data-testid="TESTIDS.settingUp">
-			<Spinner :size="18" />
-			<span>Setting up your session…</span>
+		<div v-else-if="showSettingUp" class="morph" :data-testid="TESTIDS.settingUp">
+			<Button loading disabled>Setting up session…</Button>
 		</div>
 
-		<Flex v-else-if="showCapabilityApproval" direction="column" gap="12" align="start" class="capability" :data-testid="TESTIDS.capabilityApproval">
-			<h3>Awaiting permissions</h3>
-			<p>
-				Approve this faucet's permissions in your wallet. We're asking to read your balances and
-				submit drip transactions to the Dripper contract - nothing else.
-			</p>
-			<p v-if="showCapabilityError" class="hint">You denied the permissions. Click to try again.</p>
-			<Button :data-testid="TESTIDS.btnCapabilityRetry" @click="retryCapabilities">
-				Approve permissions
+		<div v-else-if="showCapabilityApproval" class="morph" :data-testid="TESTIDS.capabilityApproval">
+			<Button
+				v-if="showCapabilityError"
+				class="denied"
+				:data-testid="TESTIDS.btnCapabilityRetry"
+				@click="retryCapabilities"
+			>
+				Permissions denied — try again
 			</Button>
-		</Flex>
+			<Button
+				v-else
+				class="waiting"
+				loading
+				:data-testid="TESTIDS.btnCapabilityRetry"
+				@click="retryCapabilities"
+			>
+				Approve in your wallet
+			</Button>
+			<span class="morph-sub">balance reads + drip txs — nothing else</span>
+		</div>
 
 		<Flex v-else-if="showNoWalletCta" direction="column" gap="12" align="start" class="no-wallet">
 			<h3>No Aztec wallet detected on this browser.</h3>
@@ -179,21 +187,10 @@ function openInstall() {
 	color: var(--red);
 }
 
-.capability,
 .no-wallet {
 	max-width: 56ch;
 }
 
-.setting-up {
-	display: inline-flex;
-	align-items: center;
-	gap: 12px;
-	color: var(--txt-secondary);
-	font: 500 13px/1 var(--font-mono);
-	letter-spacing: 0.04em;
-}
-
-.capability h3,
 .no-wallet h3 {
 	font-family: var(--font-headline);
 	font-weight: 600;
@@ -201,14 +198,52 @@ function openInstall() {
 	color: var(--txt-primary);
 }
 
-.capability p,
 .no-wallet p {
 	color: var(--txt-secondary);
 	font-size: 14px;
 }
 
-.capability .hint {
-	color: var(--yellow);
+.morph {
+	display: inline-flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: flex-start;
+}
+
+.morph-sub {
+	color: var(--txt-secondary);
+	font: 500 11px/1 var(--font-mono);
+	letter-spacing: 0.02em;
+}
+
+.waiting {
+	animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.72;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.waiting {
+		animation: none;
+	}
+}
+
+.denied {
+	background: transparent;
+	color: var(--red);
+	border: 2px solid var(--red);
+}
+
+.denied:hover {
+	background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .split {
