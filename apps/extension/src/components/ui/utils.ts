@@ -1,13 +1,8 @@
-/**
- * Known Aztec network chain IDs.
- * Computed as: l1ChainId ^ rollupVersion
- */
-export const CHAIN_IDS = {
-	MAINNET: 2934756904, // (1 ^ 2934756905) >>> 0 — Alpha mainnet
-	TESTNET: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet rollup version
-	DEVNET: 896946031, // (11155111 ^ 903641544) >>> 0 — v4-devnet-3
-	SANDBOX: 0, // localhost:8080
-} as const
+import { CHAIN_IDS } from "@/utils/chain-ids"
+
+// Re-exported so existing popup-side importers keep their path; the definition lives in
+// @/utils/chain-ids (shared with the SW side, which must not import components/*).
+export { CHAIN_IDS }
 
 export function getChainPosition(chainId: number): number {
 	switch (chainId) {

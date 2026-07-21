@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { CHAIN_IDS, MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION } from "../../apps/extension/src/utils/chain-ids"
 import {
 	assertTestnetIdentity,
 	TESTNET_L1_CHAIN_ID,
@@ -26,8 +27,16 @@ describe("walletChainId (the XOR the wallet uses)", () => {
 		expect(walletChainId(0xffffffff, 0x1)).toBeGreaterThanOrEqual(0)
 	})
 
-	test("formula generalizes — mainnet seed (1 ^ 2934756905) → 2934756904", () => {
-		expect(walletChainId(1, 2934756905)).toBe(2934756904)
+	test("formula generalizes — Alpha mainnet seed (1 ^ 4248422647) → 4248422646", () => {
+		expect(walletChainId(1, 4248422647)).toBe(4248422646)
+	})
+
+	// The mainnet identity is single-sourced in the extension's chain-ids module; this pin is the
+	// release-side tripwire that the SEEDED id always equals the formula over the recorded pair
+	// (the 5.0.1 Alpha upgrade shipped a stale bare-literal pin precisely for lack of this).
+	test("extension CHAIN_IDS.MAINNET derives from its recorded pair (no bare-literal drift)", () => {
+		expect(CHAIN_IDS.MAINNET).toBe(walletChainId(MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION))
+		expect(CHAIN_IDS.MAINNET).toBe(4248422646)
 	})
 
 	test("TESTNET_WALLET_CHAIN_ID is the canonical the guard accepts", () => {

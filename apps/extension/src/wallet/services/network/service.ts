@@ -16,6 +16,7 @@ import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -74,21 +75,21 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
 		name: "Alpha Mainnet",
 		rpcUrl: "https://aztec-mainnet.drpc.org",
-		chainId: 2934756904, // (1 ^ 2934756905) >>> 0
+		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		kind: "mainnet",
 		isPrimaryActive: false,
 	},
 	{
 		name: "Testnet",
 		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
-		chainId: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet rollup version
+		chainId: CHAIN_IDS.TESTNET,
 		kind: "testnet",
 		isPrimaryActive: true,
 	},
 	{
 		name: "Devnet",
 		rpcUrl: "https://v4-devnet-3.aztec-labs.com/",
-		chainId: 896946031, // (11155111 ^ 903641544) >>> 0
+		chainId: CHAIN_IDS.DEVNET,
 		kind: "devnet",
 		isPrimaryActive: false,
 	},
