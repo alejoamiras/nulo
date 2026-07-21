@@ -36,7 +36,6 @@ import {
 	isMsgConsumed,
 	isMsgNotReady,
 	markApproveOutcome,
-	hideCompleted,
 	markSessionLive,
 	rekeyJournalRecord,
 	releaseForeground,
@@ -746,28 +745,15 @@ describe("useBridgeJournal engine", () => {
 		expect(polls).toBeLessThan(10)
 	})
 
-	it("completed cards STAY visible (no auto-hide) - hideCompleted is the receipt path's explicit act", async () => {
+	it("completed cards STAY visible in the journal - history is permanent until the user discards", async () => {
 		const deps = baseDeps(kv)
 		connectJournalDeps({ ...deps, claim: smartClaimFake() })
 		addRecord(mkDeposit("0xhide"))
 		await runDepositClaim("0xhide")
 		const { records: recs } = useBridgeJournal()
 		expect(recs.value.find((r) => r.id === "0xhide")?.completedAt).toBe(999)
-		// The card remains until the user (or the receipt flow) says otherwise.
-		expect(useBridgeJournal().runtime.value["0xhide"]?.hidden).toBeUndefined()
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xhide")).toBe(true)
 		expect(useBridgeJournal().lastCompleted.value?.id).toBe("0xhide")
-		hideCompleted("0xhide")
-		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xhide")).toBe(false)
-		expect(useBridgeJournal().records.value.find((r) => r.id === "0xhide")?.completedAt).toBe(999)
-	})
-
-	it("hideCompleted refuses non-completed records (a live card can never be hidden)", async () => {
-		const deps = baseDeps(kv)
-		connectJournalDeps(deps)
-		addRecord(mkDeposit("0xlive"))
-		hideCompleted("0xlive")
-		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xlive")).toBe(true)
 	})
 
 	it("a REDISCOVERED completion stays visible with its ✓ card", async () => {
@@ -783,7 +769,6 @@ describe("useBridgeJournal engine", () => {
 		await runDepositClaim("0xredisc")
 		await new Promise((r) => setTimeout(r, 20))
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xredisc")?.completedAt).toBe(999)
-		expect(useBridgeJournal().runtime.value["0xredisc"]?.hidden).toBeUndefined()
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xredisc")).toBe(true)
 	})
 
@@ -813,7 +798,6 @@ describe("useBridgeJournal engine", () => {
 		addRecord(mkWithdraw("0xwdhide"))
 		await runWithdrawConsume("0xwdhide")
 		expect(useBridgeJournal().records.value.find((r) => r.id === "0xwdhide")?.completedAt).toBe(999)
-		expect(useBridgeJournal().runtime.value["0xwdhide"]?.hidden).toBeUndefined()
 		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xwdhide")).toBe(true)
 		expect(useBridgeJournal().lastCompleted.value).toMatchObject({ id: "0xwdhide", direction: "withdraw", txHash: "0xconsumetx" })
 	})

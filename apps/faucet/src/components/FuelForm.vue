@@ -12,7 +12,7 @@ import FeeJuiceNotice from "./FeeJuiceNotice.vue"
 
 /** Composables */
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
-import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useFuelFlow } from "@/composables/useFuel"
 import { FUEL_ASSET_DECIMALS, useL1FeeAsset } from "@/composables/useL1FeeAsset"
@@ -84,11 +84,8 @@ function onBackground() {
 }
 
 function onNewFuel() {
-	// The receipt WAS the result — hide the completed card instead of re-surfacing it in the journal below.
-	if (activeId.value) {
-		hideCompleted(activeId.value)
-		journal.releaseForeground(activeId.value)
-	}
+	// The completed record already lives in "Your fuels" (foreground released at completion) - just
+	// clear the receipt and reset the form.
 	receiptSnapshot.value = null
 	fuelFlow.error.value = null
 	formStage.value = "form"
@@ -114,7 +111,9 @@ watch(
 			completedAt: rec.completedAt,
 		}
 		formStage.value = "receipt"
-		// A finished fuel bridge now lives in "Your fuels" below - nudge the parent to scroll it into view.
+		// Release the takeover so the finished record surfaces in "Your fuels" (the receipt renders from
+		// the snapshot, so it survives the release), then nudge the parent to scroll the list into view.
+		journal.releaseForeground(rec.id)
 		emit("completed")
 	},
 )

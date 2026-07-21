@@ -16,10 +16,6 @@ const claimForeground = vi.fn((id: string) => {
 const releaseForeground = vi.fn(() => {
 	activeFlowId.value = null
 })
-// `hideCompleted` is a NAMED export referenced eagerly in the mock's return object (not inside a lazy
-// factory arrow like the refs), so it must be hoisted above the vi.mock call.
-const hideCompleted = vi.hoisted(() => vi.fn())
-
 function fuelRecord(over: Partial<BridgeJournalRecord> = {}): BridgeJournalRecord {
 	return {
 		id: "rec-1",
@@ -45,7 +41,6 @@ vi.mock("@/composables/useL1FeeAsset", () => ({ FUEL_ASSET_DECIMALS: 18, useL1Fe
 vi.mock("@/composables/useFuel", () => ({ useFuelFlow: () => ({ error: fuelError, deposit }) }))
 vi.mock("@/composables/useBridgeBackup", () => ({ useBridgeBackup: () => ({ exportBridgeWithToast: vi.fn() }) }))
 vi.mock("@/composables/useBridgeJournal", () => ({
-	hideCompleted,
 	useBridgeJournal: () => ({ activeFlowId, records, claimForeground, releaseForeground }),
 }))
 // Deterministic minimum for the debounce cases (the real constant is deployment-derived).
@@ -73,7 +68,7 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		records.value = []
 		fuelError.value = null
 		deposit.mockClear()
-		hideCompleted.mockClear()
+		releaseForeground.mockClear()
 	})
 
 	it("submit → stepper; the record completes → receipt (NEW FUEL, fee-juice); NEW FUEL resets to the form", async () => {
@@ -95,11 +90,12 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		expect(receipt.attributes("data-cta")).toBe("NEW FUEL")
 		expect(receipt.attributes("data-kind")).toBe("fee-juice")
 		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(false)
+		// Completion released the takeover so the finished record surfaces in "Your fuels".
+		expect(releaseForeground).toHaveBeenCalledWith("rec-1")
 
-		// NEW FUEL → hide the completed card + reset to the form
+		// NEW FUEL → reset to the form (the record stays in the journal history)
 		await w.find('[data-testid="stub-newfuel"]').trigger("click")
 		await w.vm.$nextTick()
-		expect(hideCompleted).toHaveBeenCalledWith("rec-1")
 		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
 	})
 })

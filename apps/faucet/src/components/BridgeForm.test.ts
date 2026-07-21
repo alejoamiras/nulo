@@ -1,6 +1,10 @@
-import { mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { enableAutoUnmount, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
+
+// A stale mounted form from a prior test still watches the SHARED journal refs (activeFlowId /
+// records) and would release the next test's foreground at completion - unmount between tests.
+enableAutoUnmount(afterEach)
 
 const depositFn = vi.fn(async (_a: bigint, _p: boolean) => {})
 const depositErr = ref<string | null>(null)
@@ -256,6 +260,10 @@ describe("BridgeForm", () => {
 		await w.vm.$nextTick()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(2)
+		// Completion releases the takeover: the finished record surfaces in the journal history
+		// alongside the receipt (the bug: it used to stay foreground-suppressed, then get hidden).
+		expect(useBridgeJournal().activeFlowId.value).toBeNull()
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xdone")).toBe(true)
 		// Cross-tab discard cannot blank the receipt - it renders the snapshot.
 		__resetJournalForTests()
 		await w.vm.$nextTick()

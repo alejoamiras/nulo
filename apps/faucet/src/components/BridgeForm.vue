@@ -14,7 +14,7 @@ import FeeJuiceNotice from "./FeeJuiceNotice.vue"
 
 /** Composables */
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
-import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { providerFingerprint, readClaimFee, useDepositFlow } from "@/composables/useDeposit"
 import { useL1Usdc } from "@/composables/useL1Usdc"
@@ -252,8 +252,9 @@ watch(
 						completedAt: rec.completedAt,
 					}
 		formStage.value = "receipt"
-		// A finished bridge now lives in "Your bridges" below - nudge the parent to scroll it into view so
-		// the completion is where the user expects to find it (the receipt stays above, still reachable).
+		// Release the takeover so the finished record surfaces in "Your bridges" (the receipt renders
+		// from the snapshot, so it survives the release), then nudge the parent to scroll the list in.
+		journal.releaseForeground(rec.id)
 		emit("completed")
 		// Fueled deposits: read the claim tx fee (gas used) post-completion + patch the snapshot so the
 		// receipt's "gas used / available" ledger fills in. Claim flow untouched; best-effort (a failed
@@ -294,11 +295,8 @@ function onBackground() {
 }
 
 function onNewBridge() {
-	// The receipt WAS the result - hide the completed card instead of re-surfacing it below.
-	if (activeId.value) {
-		hideCompleted(activeId.value)
-		journal.releaseForeground(activeId.value)
-	}
+	// The completed record already lives in "Your bridges" (foreground released at completion) - just
+	// clear the receipt and reset the form.
 	receiptSnapshot.value = null
 	clearFlowErrors()
 	formStage.value = "form"
