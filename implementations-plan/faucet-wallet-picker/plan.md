@@ -118,7 +118,7 @@ modal at app root reusing the verification-modal pattern.
 
 ## Phases
 
-### Phase 1 — Session composable: epoch-guarded progressive discovery + choosing + persistence
+### Phase 1 ✓ — Session composable: epoch-guarded progressive discovery + choosing + persistence
 Implement the v3 design. Inline unit tests (mocked manager/async-iterator), REQUIRED cases (from
 both audit rounds): progressive accumulation with per-announcement keys; claimed-id collision
 renders two rows; first-arrival → `choosing`; `selectWallet` synchronous re-entrancy (double

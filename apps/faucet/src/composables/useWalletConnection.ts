@@ -70,4 +70,4 @@ export function useWalletConnection() {
 export const __resetWalletConnectionForTests = session.reset
 
 export { extractGrantedAccounts } from "./createAztecWalletSession"
-export type { ConnectStatus, GrantedAccount } from "./createAztecWalletSession"
+export type { ConnectStatus, DiscoveredWallet, GrantedAccount } from "./createAztecWalletSession"
