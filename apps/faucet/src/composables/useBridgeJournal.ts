@@ -281,6 +281,7 @@ export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): vo
 
 export function discard(id: string): void {
 	bumpGen(id) // Any in-flight chunked round dies at its next generation check.
+	releaseForeground(id) // A discarded record can never be a valid takeover (CAS - only if it owns it).
 	removeRecord(deps.kv, id)
 	secretCache.delete(id)
 	sessionLive.delete(id)
@@ -421,6 +422,9 @@ export const lastCompleted = ref<{
 	isPrivate: boolean
 	assetKind: "bridge-token" | "fee-juice"
 	txHash?: string
+	/** Captured SYNCHRONOUSLY at completion, before the form's watcher releases the takeover - the
+	 *  toast must key off this, not the live activeFlowId (already null by the time it runs). */
+	foreground: boolean
 } | null>(null)
 
 function setStep(id: string, step?: BridgeStep, stepDetail?: string): void {
@@ -475,6 +479,7 @@ function completeDeposit(rec: DepositJournalRecord | undefined): void {
 		isPrivate: rec.isPrivate,
 		assetKind: assetKindOf(rec),
 		txHash: rec.claimTxHash,
+		foreground: activeFlowId.value === rec.id,
 	}
 	// Completed cards STAY (✓ + the ✕ dismiss) - auto-hide was provenance-scoped and read as
 	// "sometimes my card vanishes". The foreground receipt path releases its takeover on completion,
@@ -497,6 +502,7 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
 		isPrivate: rec.isPrivate,
 		assetKind: assetKindOf(rec),
 		txHash: consumeTxHash,
+		foreground: activeFlowId.value === rec.id,
 	}
 	log("withdraw complete", rec.id)
 }

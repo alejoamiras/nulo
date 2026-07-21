@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /** Services */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
+import { assetKindOf, buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
 import { sepolia } from "viem/chains"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
@@ -230,6 +230,10 @@ watch(
 		if (!done || formStage.value !== "stepper") return
 		const rec = activeRecord.value
 		if (!rec) return
+		// Both forms stay MOUNTED (App.vue v-show) and share ONE activeFlowId: a Fuel submit from the
+		// other tab re-points it while this form is mid-stepper. Never snapshot a fee-juice record as a
+		// token receipt (and never release the other form's takeover) - FuelForm owns those.
+		if (assetKindOf(rec) === "fee-juice") return
 		receiptSnapshot.value =
 			rec.direction === "deposit"
 				? {
@@ -271,12 +275,19 @@ watch(
 	},
 )
 
-// Fail-open guard: a stepper pointing at a vanished record (cross-tab discard) resets to the form.
+// Fail-open guard: a stepper whose record VANISHED (cross-tab discard, rejection cleanup) or whose
+// foreground was USURPED by the other, permanently-mounted form (App.vue v-show + the shared
+// activeFlowId) resets to the form - otherwise formStage sticks in "stepper" and blocks every future
+// submit. Release only a DEAD id this form still holds; a live fee-juice record belongs to FuelForm.
 watch(
-	() => formStage.value === "stepper" && activeId.value !== null && activeRecord.value === undefined,
-	(orphaned) => {
-		if (!orphaned) return
-		if (activeId.value) journal.releaseForeground(activeId.value)
+	() => {
+		if (formStage.value !== "stepper") return false
+		const rec = activeRecord.value
+		return rec === undefined || assetKindOf(rec) === "fee-juice"
+	},
+	(broken) => {
+		if (!broken) return
+		if (activeId.value && activeRecord.value === undefined) journal.releaseForeground(activeId.value)
 		formStage.value = "form"
 	},
 )

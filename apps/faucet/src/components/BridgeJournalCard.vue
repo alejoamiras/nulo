@@ -87,6 +87,9 @@ function onClaimWithoutFuel() {
 // reverting "already claimed" just clears the affordance). Closes both stranding paths the
 // post-impl audit flagged.
 const fuelRecoverable = computed(() => {
+	// Fueled BRIDGES only: a direct-Fuel record's completion IS its gas claim, so the affordance would
+	// falsely offer a re-claim on every completed fuel card in the history.
+	if (isFuel.value) return false
 	const f = fuel.value
 	return f !== undefined && !!f.received && props.record.completedAt !== undefined && f.consumed !== true && f.standaloneClaimed !== true
 })

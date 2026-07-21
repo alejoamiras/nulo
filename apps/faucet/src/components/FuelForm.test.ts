@@ -98,6 +98,37 @@ describe("FuelForm: completion → receipt → new fuel", () => {
 		await w.vm.$nextTick()
 		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
 	})
+
+	it("a rejected fuel (record discarded pre-deposit) self-heals to the form instead of soft-bricking", async () => {
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+		// The rejection path discards the record; the foreground id keeps pointing at the dead id.
+		records.value = []
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(releaseForeground).toHaveBeenCalledWith("rec-1")
+		// The form is back AND submittable (formStage reset - the old bug left it stuck in "stepper").
+		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		expect(deposit).toHaveBeenCalledTimes(2)
+	})
+
+	it("a Bridge-tab takeover (foreground re-pointed at a token record) stands this form down without releasing", async () => {
+		const w = mount(FuelForm, { global: { stubs: STUBS } })
+		await w.find(sel(TESTIDS.fuelSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find('[data-testid="stub-stepper"]').exists()).toBe(true)
+		// Both forms stay mounted (App.vue v-show); a bridge submit overwrites the shared foreground.
+		records.value = [fuelRecord({ id: "rec-2", assetKind: "bridge-token" } as Partial<BridgeJournalRecord>)]
+		activeFlowId.value = "rec-2"
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		// This form resets but must NOT release the OTHER form's live takeover.
+		expect(w.find(sel(TESTIDS.fuelSubmit)).exists()).toBe(true)
+		expect(releaseForeground).not.toHaveBeenCalled()
+	})
 })
 
 describe("FuelForm: minimum-amount error display is settle-debounced", () => {

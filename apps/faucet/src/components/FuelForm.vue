@@ -83,6 +83,23 @@ function onBackground() {
 	formStage.value = "form"
 }
 
+// Fail-open guard (mirror of BridgeForm's): a stepper whose record VANISHED (the rejection path
+// discards a pre-deposit record; cross-tab discard) or whose foreground was USURPED by the other,
+// permanently-mounted form resets to the form - otherwise formStage sticks in "stepper" and the
+// submit guard blocks every future fuel. Release only a DEAD id this form still holds.
+watch(
+	() => {
+		if (formStage.value !== "stepper") return false
+		const rec = activeRecord.value
+		return rec === undefined || assetKindOf(rec) !== "fee-juice"
+	},
+	(broken) => {
+		if (!broken) return
+		if (activeId.value && activeRecord.value === undefined) journal.releaseForeground(activeId.value)
+		formStage.value = "form"
+	},
+)
+
 function onNewFuel() {
 	// The completed record already lives in "Your fuels" (foreground released at completion) - just
 	// clear the receipt and reset the form.

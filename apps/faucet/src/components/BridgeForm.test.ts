@@ -55,7 +55,14 @@ vi.mock("@/composables/useWithdraw", () => ({
 }))
 
 import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
-import { __resetJournalForTests, addRecord, rekeyJournalRecord, updateRecord, useBridgeJournal } from "@/composables/useBridgeJournal"
+import {
+	__resetJournalForTests,
+	addRecord,
+	claimForeground,
+	rekeyJournalRecord,
+	updateRecord,
+	useBridgeJournal,
+} from "@/composables/useBridgeJournal"
 import { TESTIDS } from "@/lib/testids"
 import BridgeForm from "./BridgeForm.vue"
 
@@ -270,5 +277,36 @@ describe("BridgeForm", () => {
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.receiptNewBridge)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).exists()).toBe(true)
+	})
+
+	it("a Fuel-tab takeover mid-stepper stands this form down - never a token receipt for a fuel record", async () => {
+		// Both forms stay mounted (App.vue v-show) and share activeFlowId: a Fuel submit re-points it
+		// while this form is mid-stepper. BridgeForm must neither snapshot the fee-juice record as a
+		// token receipt nor release the other form's takeover - it resets to its own form.
+		__resetJournalForTests()
+		depositFn.mockImplementationOnce(async (_a: bigint, _p: boolean, opts?: { onRecord?: (id: string) => void }) => {
+			addRecord(activeFixture("0xmine"))
+			opts?.onRecord?.("0xmine")
+			await new Promise(() => {})
+		})
+		const w = mount(BridgeForm)
+		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
+		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.stepper)).exists()).toBe(true)
+		// The Fuel form submits: a fee-juice record takes the shared foreground.
+		const fuelRec = { ...activeFixture("0xfuelx"), schema: 2, assetKind: "fee-juice" } as DepositJournalRecord
+		addRecord(fuelRec)
+		claimForeground("0xfuelx")
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		// Stood down to the form; the fuel takeover is untouched (FuelForm owns its receipt).
+		expect(w.find(sel(TESTIDS.bridgeSubmit)).exists()).toBe(true)
+		expect(useBridgeJournal().activeFlowId.value).toBe("0xfuelx")
+		// The fuel record completes - BridgeForm must NOT render it as a token receipt.
+		updateRecord("0xfuelx", { claimTxHash: `0x${"cd".repeat(32)}`, completedAt: Date.now() })
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(false)
 	})
 })
