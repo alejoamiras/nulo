@@ -533,9 +533,25 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		verificationEmojis.value = null
 	}
 
-	/** Reset all state (test helper + hard reset). */
+	/** Reset all state (test helper + hard reset). Live SDK handles get the
+	 *  same best-effort teardown as the production paths — a hard reset must
+	 *  not leak a pending channel or a connected provider session. */
 	function reset(): void {
+		const stalePending = pending
+		const staleProvider = provider
 		wipeToIdle()
+		// Promise.resolve tolerates both promise-returning and void-typed SDK
+		// teardown signatures; try/catch covers synchronous throws.
+		try {
+			if (stalePending) void Promise.resolve(stalePending.cancel()).catch(() => {})
+		} catch {
+			// best-effort
+		}
+		try {
+			if (staleProvider) void Promise.resolve(staleProvider.disconnect()).catch(() => {})
+		} catch {
+			// best-effort
+		}
 	}
 
 	return {

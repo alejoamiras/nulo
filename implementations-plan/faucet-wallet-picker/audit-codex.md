@@ -108,3 +108,19 @@ required tests, and the inline verdict section).
 11. (L) The modal got a minimal Tab focus trap (cycling within the dialog).
 
 Post-fix gates: lint 0, typecheck:all 0, faucet units 492, faucet e2e 15, faucet build 0.
+
+## Re-verification (fresh session — the original session was destroyed by a host /tmp wipe
+## mid-arc; the fresh session read the committed findings + disposition instead)
+
+**Verdict: `approve` — "All High and Medium findings are fixed in substance; no new blocking
+interleaving was found."** Two Low residuals, both fixed in the same round:
+1. (L) `reset()` dropped live pending/provider handles without SDK teardown — now runs the same
+   best-effort cancel/disconnect as the production paths (Promise.resolve-wrapped: the SDK types
+   these void).
+2. (L) The focus trap allowed an immediate Shift+Tab escape while focus sat on the dialog
+   container — container-focus now wraps to the last focusable.
+
+Operational note: this re-verification ran via DIRECT `codex exec` with per-run home-scratch
+files — a deliberate, documented deviation from the run-codex.sh helper, which crashes on this
+host since the /tmp wipe (empty-heredoc prompts + lost session dirs). No fixed shared paths were
+used.

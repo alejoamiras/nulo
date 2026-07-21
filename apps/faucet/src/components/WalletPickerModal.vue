@@ -65,7 +65,10 @@ function onKey(evt: KeyboardEvent) {
 		if (focusables.length === 0) return
 		const first = focusables[0]
 		const last = focusables[focusables.length - 1]
-		if (evt.shiftKey && document.activeElement === first) {
+		// Initial focus sits on the dialog CONTAINER — both Tab directions
+		// must wrap from there too, or Shift+Tab escapes on the first press.
+		const onContainer = document.activeElement === dialogEl.value
+		if (evt.shiftKey && (onContainer || document.activeElement === first)) {
 			evt.preventDefault()
 			last.focus()
 		} else if (!evt.shiftKey && document.activeElement === last) {
