@@ -358,3 +358,17 @@ still fails-closed via getAccountContract).
   the codebase's existing unzeroized session `Fr`).
 
 Gates after the fixes: lint/typecheck:all/test:all/ci-gating all 0.
+
+### Scope call — codex round-6 incarnation findings deferred (2026-07-21)
+
+Verifying the orphan-block fix, codex flagged two MEDIUMs about SAME-ID re-import: a profile deleted
+then re-imported under the same id could have a stale in-flight verify write the OLD incarnation's
+block/stamp, or close the successor's session (the fix is gone/reserved-aware but not
+incarnation-aware). DISPOSITION: out of scope for this plan, documented as a residual, not built
+here. Rationale: (1) reachable only through the pre-existing same-id delete→re-import profile
+LIFECYCLE (backup-restore domain), not anything the freeze feature introduces; (2) fencing it means
+threading pxeGeneration/deletion-epoch through every integrity write + the session close — the
+cross-service incarnation-fence work the parent arc (backup-restore-residuals) already deferred as a
+multi-PR epic; (3) backstopped: the operation-time getAccountContract check re-derives + blocks on
+any real use of a drifted account, and a same-id successor re-verifies on its own next boot. The
+IN-SCOPE half — the orphan block for a fully-DELETED profile — IS fixed (persistIntegrityBlockIfLive).
