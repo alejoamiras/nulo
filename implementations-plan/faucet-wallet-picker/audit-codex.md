@@ -185,8 +185,10 @@ switch/capability re-clicks guarded, no testid/aria regressions. Two findings, b
 
 1. (MED) The new capability sublines under-claimed the grant ("nothing else") while both tabs
    share ONE combined manifest (faucet drips + bridge claims/exits + burns + balance reads).
-   Fixed: one honest shared subline — "one grant covers faucet + bridge: drips, claims/exits,
-   balance reads — no wildcard scopes".
+   Fixed first as one honest shared subline; then REMOVED entirely on owner review (post-merge
+   follow-up PR): the long line looked bad and widened the panel (row-wrap bug), and "no claim"
+   is equally honest — the wallet's own approval prompt enumerating the real grant is the trust
+   anchor. The audit's objection was to a FALSE claim, which removal also satisfies.
 2. (LOW) After a remembered-id collision, `autoReconnectDisabled` (sticky, non-reactive) left the
    split button promising "Connect <name>" while `connectImpl` would force the picker. Fixed:
    the flag is now a reactive ref exported by the session; the split button renders only while

@@ -103,7 +103,6 @@ function openInstall() {
 			>
 				Approve in your wallet
 			</Button>
-			<span class="morph-sub">one grant covers faucet + bridge: drips, claims/exits, balance reads — no wildcard scopes</span>
 		</div>
 
 		<Flex v-else-if="showNoWalletCta" direction="column" gap="12" align="start" class="no-wallet">
@@ -209,18 +208,6 @@ function openInstall() {
 	flex-direction: column;
 	gap: 8px;
 	align-items: flex-start;
-}
-
-.morph-sub {
-	color: var(--txt-secondary);
-	font: 500 11px/1.5 var(--font-mono);
-	letter-spacing: 0.02em;
-	/* The subline must not set the panel's intrinsic width: in the wrapping
-	 * .wallets row a max-content-sized line this long pushes the whole panel
-	 * onto its own row. width:0 + min-width:100% makes the BUTTON define the
-	 * width and the subline wrap under it. */
-	width: 0;
-	min-width: 100%;
 }
 
 .waiting {

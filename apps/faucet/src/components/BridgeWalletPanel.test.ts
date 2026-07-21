@@ -66,10 +66,9 @@ describe("BridgeWalletPanel", () => {
 	})
 
 	// Guards the Phase-2 .capability div -> <Flex> class-preserving swap: the copy must survive.
-	it("capability-approval: the button morphs to the awaiting state with the scope subline", () => {
+	it("capability-approval: the button morphs to the awaiting state", () => {
 		status.value = "capability-approval"
 		const w = mount(BridgeWalletPanel)
 		expect(w.text()).toContain("Approve in your wallet")
-		expect(w.text()).toContain("one grant covers faucet + bridge")
 	})
 })
