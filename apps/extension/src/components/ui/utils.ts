@@ -1,13 +1,8 @@
-/**
- * Known Aztec network chain IDs.
- * Computed as: l1ChainId ^ rollupVersion
- */
-export const CHAIN_IDS = {
-	MAINNET: 2934756904, // (1 ^ 2934756905) >>> 0 — Alpha mainnet
-	TESTNET: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet rollup version
-	DEVNET: 896946031, // (11155111 ^ 903641544) >>> 0 — v4-devnet-3
-	SANDBOX: 0, // localhost:8080
-} as const
+import { CHAIN_IDS } from "@/utils/chain-ids"
+
+// Re-exported so existing popup-side importers keep their path; the definition lives in
+// @/utils/chain-ids (shared with the SW side, which must not import components/*).
+export { CHAIN_IDS }
 
 export function getChainPosition(chainId: number): number {
 	switch (chainId) {
@@ -15,12 +10,10 @@ export function getChainPosition(chainId: number): number {
 			return 0
 		case CHAIN_IDS.TESTNET:
 			return 1
-		case CHAIN_IDS.DEVNET:
-			return 2
 		case CHAIN_IDS.SANDBOX:
-			return 3
+			return 2
 		default:
-			return 4
+			return 3
 	}
 }
 
@@ -30,8 +23,6 @@ export function getChainColor(chainId: number): string {
 			return "green"
 		case CHAIN_IDS.TESTNET:
 			return "neutral-mint"
-		case CHAIN_IDS.DEVNET:
-			return "blue"
 		case CHAIN_IDS.SANDBOX:
 			return "sand"
 		default:
@@ -45,8 +36,6 @@ export function getChainName(chainId: number): string {
 			return "Alpha"
 		case CHAIN_IDS.TESTNET:
 			return "Testnet"
-		case CHAIN_IDS.DEVNET:
-			return "Devnet"
 		case CHAIN_IDS.SANDBOX:
 			return "Sandbox"
 		default:

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref } from "vue"
+import { computed, ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import WalletPickerModal from "./components/WalletPickerModal.vue"
 import BridgeFooter from "./components/BridgeFooter.vue"
 import ThemeToggle from "./components/ThemeToggle.vue"
 import Footer from "./components/Footer.vue"
+import ConnectionErrorStrip from "./components/ConnectionErrorStrip.vue"
 import BridgeView from "./views/BridgeView.vue"
 import FaucetView from "./views/FaucetView.vue"
 import FuelView from "./views/FuelView.vue"
@@ -18,6 +20,11 @@ function defaultTab(): Tab {
 }
 
 const tab = ref<Tab>(defaultTab())
+
+/** States with a dedicated in-panel UI never go to the strip: capability
+ *  denial has the red morph everywhere; no-wallet has the install CTA on
+ *  the faucet tab only (bridge/fuel have no CTA, so it shows here). */
+const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "capability-rejected"] : ["capability-rejected"]))
 </script>
 
 <template>
@@ -58,6 +65,11 @@ const tab = ref<Tab>(defaultTab())
 			<ThemeToggle />
 		</div>
 
+		<!-- ONE strip for the shared session, above whichever view is active — the views stay
+		     mounted (v-show), so per-view strips would render duplicate alerts/testids with
+		     diverging dismissal state. -->
+		<ConnectionErrorStrip class="strip-slot" :exclude="stripExclude" />
+
 		<!-- v-show (not v-if): keep both views mounted so each tab owns an independent,
 		     persistent wallet session (codex: two sessions, not one shared connection). -->
 		<FaucetView v-show="tab === 'faucet'" />
@@ -67,10 +79,16 @@ const tab = ref<Tab>(defaultTab())
 		<Footer v-if="tab === 'faucet'" />
 		<BridgeFooter v-else />
 		<AppToastRegion />
+		<!-- ONE picker for the shared session — the panels only trigger connect(). -->
+		<WalletPickerModal />
 	</main>
 </template>
 
 <style scoped>
+.strip-slot {
+	margin-bottom: 24px;
+}
+
 .page {
 	max-width: 760px;
 	margin: 0 auto;

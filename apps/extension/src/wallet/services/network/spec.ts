@@ -12,6 +12,8 @@ export enum NodeStatus {
 	InvalidChain,
 }
 
+// "devnet" is LEGACY-tolerated only (no seed/UI since the devnet default was dropped): stored
+// rows and backups may still carry it, so the schema keeps accepting it.
 export type ChainKind = "mainnet" | "testnet" | "devnet" | "local" | "custom"
 
 export type NetworkEndpoint = {
@@ -251,7 +253,7 @@ export const NetworkMethodSchemas = {
 } as const
 
 export type Methods = {
-	/** Returns existing networks if any, or seeds + returns the 4 defaults. */
+	/** Returns existing networks if any, or seeds + returns the 3 defaults. */
 	getOrInitNetworks(): Network[]
 	/** Returns all networks for the active profile, or filtered by chainId. */
 	getNetworks(chainId?: number): Network[]

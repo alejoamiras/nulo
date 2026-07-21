@@ -18,8 +18,16 @@ bun run --cwd apps/faucet dev    # http://localhost:5176
 ```
 
 Connect with the Nulo extension (or any wallet that speaks
-`@aztec/wallet-sdk`). The faucet uses **discovery** to find a wallet, so
-you don't need to do anything other than have an extension installed.
+`@aztec/wallet-sdk`). The faucet uses **discovery** to find wallets: every
+wallet that answers is listed in a picker and you choose explicitly (a
+wallet's name/icon/id are self-claimed, so the picker is a selection, not a
+trust decision — the emoji verification that follows is what proves the
+channel). Your choice is remembered per browser: the next
+Connect briefly re-scans and tries your previous selection; "use a
+different wallet" (or the `switch` action on the connected chip) forgets
+it. Collision detection is best-effort: if multiple wallets claim the
+remembered identity during the scan window, auto-reconnect turns itself
+off and the picker shows all claimants.
 
 ## Deploy the contracts (one-time)
 

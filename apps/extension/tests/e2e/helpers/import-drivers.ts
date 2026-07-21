@@ -176,7 +176,10 @@ export async function importFullBackup(
 			expectedText,
 		)
 	} else {
-		await waitForHash(page, shell.successHash, 30_000)
+		// The import flow is restore + (possibly) the app's OWN bounded 30s recovery wait before it
+		// routes (import.vue completeImportWithRecovery) - a 30s clock expired structurally whenever
+		// the recovery leg ran. Sized to the recovery envelope + slow-runner restore + margin.
+		await waitForHash(page, shell.successHash, 300_000)
 	}
 }
 
@@ -186,6 +189,24 @@ export async function readActiveAccount(page: Page): Promise<string> {
 		const r = await chrome.storage.local.get("nulo:ui:activeAccount")
 		return r["nulo:ui:activeAccount"] as string
 	})
+}
+
+/** Wait until the active-account pointer CONVERGES to `expected`. Post-import account setup runs
+ *  against the active network's RPC, so the pointer can transit intermediate states first — a
+ *  single-shot read races it (surfaced when the default network became Alpha mainnet, whose public
+ *  RPC throttles CI). The budget is sized to the node client's DOCUMENTED stall envelope
+ *  (aztec-runtime utils/fetch: 60s per-request abort × makeBackoff([1,2,3]) retries), so one
+ *  timed-out request + its successful retry fits — a smaller budget loses to a single throttled
+ *  request by design. Polls storage; throws on timeout. */
+export async function waitForActiveAccount(page: Page, expected: string, timeoutMs = 240_000): Promise<void> {
+	await page.waitForFunction(
+		async (want: string) => {
+			const r = await chrome.storage.local.get("nulo:ui:activeAccount")
+			return r["nulo:ui:activeAccount"] === want
+		},
+		{ timeout: timeoutMs, polling: 500 },
+		expected,
+	)
 }
 
 /** Generate an Fr-valid 32-byte master, base64-encoded (the form `importPlain`

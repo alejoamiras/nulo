@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — faucet-wallet-picker</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>faucet-wallet-picker</h1>
+  <p>When you click "Connect wallet" on the faucet today, it broadcasts "any Aztec wallets here?" and then grabs <em>whichever answers first</em> — so with two compatible wallets installed, which one you get is a coin toss, and the flow can break. This plan makes the faucet list every wallet as it announces itself and lets you pick — always, even when there's only one. Your pick is remembered, so next visit connects straight to the same wallet, with a "use a different wallet" link to change your mind. Faucet only, by your call — the playground has the same coin toss and is recorded as a follow-up.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>light.</strong> One app (the faucet), no storage migrations, no new dependencies — the wallet-discovery API already streams every wallet; the current code just stops listening after the first. Nothing scores high on the risk rubric. One plan-time codex audit, then your standing multi-round codex post-impl cadence.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: The connection brain</h3>
+    <p>Rewrite the connection state machine: keep listening as wallets announce, build a live list, add a "choosing" state, connect only on an explicit pick, and remember the pick only after a fully successful connection (a wallet that failed verification never becomes your default). A remembered wallet that stops working un-remembers itself instead of locking you out.</p>
+    <p class="muted">Proves itself by: lint + typecheck + the faucet unit suite, with new tests for every stream shape (0, 1, many, latecomers) and every path.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: The picker UI</h3>
+    <p>A small list component: each wallet's icon, name, and a badge saying whether it's an extension or a web wallet; a "Scanning for more wallets…" hint while discovery is live; Cancel; and the "use a different wallet" link when a preference exists. Names render as plain text — a wallet calling itself something sneaky can't inject anything, and the real security check (the emoji match) stays exactly where it was.</p>
+    <p class="muted">Proves itself by: component tests (rows, live appends, per-row connect, cancel, the spoof-safety render).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: End-to-end + build + docs</h3>
+    <p>Teach the faucet's browser test to click through the picker, prove the deployable faucet still builds, and write the docs (including the playground follow-up note).</p>
+    <p class="muted">Proves itself by: full lint/typecheck/faucet tests + the faucet e2e suite (named explicitly — it does not run inside the unit script) + the faucet build, all green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>Wallet discovery works like a roll call: the page asks, and each installed wallet raises its hand — but not simultaneously; answers trickle in over a few hundred milliseconds. The old code left the room as soon as the first hand went up. The fix is to keep the door open, show hands as they rise, and let you choose. The plan's first codex audit sharpened one thing considerably: a wallet's name tag is <em>self-written</em> — any extension can claim to be "Nulo", identical name, identical id. So the design fails closed: if two wallets ever claim the same remembered identity, the auto-reconnect turns itself off and you're shown both, side by side, to choose deliberately. The audit also caught (from the SDK's own source) that cancelled discovery can still deliver buffered stragglers — the state machine discards those — and found a dormant pre-existing bug (the "wallet disconnected" cleanup never actually fired) that gets fixed along the way.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>A1 — Cancel semantics</strong>: dismissing the picker returns to the idle connect button; an intentional cancel can never show the "no wallet found" error. Confirm.</li>
+    <li><strong>A2 — The "use a different wallet" affordance</strong> (audit-extended): both next to the connect button when a preference exists AND in the connected view's menu (disconnect + forget in one action, so switching doesn't need a manual disconnect first). Confirm.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: faucet only; always-show progressive picker; remember + reconnect.</li>
+      <li>Confirm tier <code>light</code>.</li>
+      <li>Confirm validation: faucet unit/component per phase; faucet e2e + build at the end.</li>
+      <li>Answer A1 and A2.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/faucet-wallet-picker/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run lint`, `bun run typecheck:all`, `bun run test:faucet`, `bun run --cwd apps/faucet test:e2e`, and `bun run --cwd apps/faucet build` all report exit 0 in the transcript.</code></pre>
+    </div>
+    <h3>Alternative: /loop</h3>
+    <pre><code>/loop 15m Drive implementations-plan/faucet-wallet-picker forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/faucet-wallet-picker/plan.md and lessons/ (authoritative state — not the chat); run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch).
+2. Waiting on CI is fine — confirm it's progressing (`gh run watch &lt;run-id&gt;` up to 10 minutes). Use the wait productively; don't start conflicting work.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint &amp;&amp; bun run --cwd apps/faucet typecheck &amp;&amp; bun run test:faucet`. Then commit → push.
+4. Stuck, or facing a decision you'd normally bring to me? Call /codex xhigh with full context, reach a defensible decision, act on it, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never expand scope beyond plan.md (the playground stays out).
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? "Green" = the phase's validation gate as written in plan.md. Run it, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=..., advance.
+7. All phases ✓? Post-impl sequence: /code-review max --fix → commit separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → wrap-up report. Surface and stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

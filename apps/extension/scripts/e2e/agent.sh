@@ -15,6 +15,16 @@ cd "$(dirname "$0")/../.."
 
 PORTS_JSON=".e2e-state/ports.json"
 
+# DELIBERATELY NO signal trap here (review CONFIRMED x5): bash defers INT/TERM traps until the
+# foreground child exits, so a trap can never run during the build or vitest - the only windows
+# worth protecting - and a DEFERRED trap that fires after the child completes would clobber the
+# real classified exit (a green 25-min run reported as 130, or an exit-86 that must trigger the
+# CI retry swallowed). Pre-vitest this script owns NO processes (spawns happen inside vitest's
+# global-setup), and a trap reading owned.json in that window would kill a PRIOR/CONCURRENT run's
+# recorded pids. Sandbox lifecycle is owned end-to-end by the TypeScript side: vitest's wired
+# global teardown (KILL-escalated, ownership-gated) + its signal hooks + the next run's
+# liveness-checked orphan reap via the progressively-written lock.
+
 # Clear stale boot-sentinel markers from a prior run so the boot-failure
 # classifier (scripts/e2e/classify-exit.ts) sees only THIS run's state.
 rm -f .e2e-state/boot-started .e2e-state/boot-ready .e2e-state/tests-started
@@ -34,6 +44,9 @@ PLAYGROUND_URL=$(jq -r .playgroundUrl "$PORTS_JSON")
 FAUCET_URL=$(jq -r .faucetUrl "$PORTS_JSON")
 
 echo "[e2e:agent] building wallet with VITE_LOCAL_NETWORK_RPC_URL=$AZTEC_NODE_URL"
+# VITE_NULO_E2E_DEFAULT_NET=testnet pins the SEEDED-ACTIVE network: fresh-extension import flows
+# bootstrap on the default before any fixture can switch, and CI cannot reliably reach the Alpha
+# mainnet RPC (each blocked call eats the node client's 60s-abort x retry envelope).
 # NULO_E2E_PROVERLESS=1 builds a proverless wallet (skips BB-SNARK generation;
 # kernel simulation + on-chain submission stay real). Arms the double-opt-in
 # flags so apps/extension/src/e2e/config.ts enables the proverless PXE +
@@ -51,6 +64,7 @@ if [ "${NULO_E2E_PROVERLESS:-}" = "1" ]; then
   fi
   echo "[e2e:agent] PROVERLESS build — BB-SNARK generation skipped (double opt-in)"
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
   VITE_NULO_E2E_PROVERLESS=1 \
   VITE_NULO_E2E_PROVERLESS_CONFIRM=1 \
@@ -62,6 +76,7 @@ else
   # (codex post-impl audit).
   unset VITE_NULO_E2E_PROVERLESS VITE_NULO_E2E_PROVERLESS_CONFIRM
   VITE_LOCAL_NETWORK_RPC_URL="$AZTEC_NODE_URL" \
+  VITE_NULO_E2E_DEFAULT_NET=testnet \
   VITE_NULO_E2E_MIGRATION_FIXTURE=1 \
     bun run build:chrome
 fi

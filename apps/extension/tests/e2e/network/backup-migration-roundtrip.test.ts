@@ -54,7 +54,7 @@ test.skipIf(!hasConfig)("fixture-arming contract: the agent runner must arm the 
 
 test.skipIf(!hasConfig || !HAS_FIXTURE)(
 	"a doctored v1 backup migrates, restores, and the wallet is on-chain functional",
-	{ timeout: 600_000 },
+	{ timeout: 900_000 },
 	async ({ tokenReadyExtension }) => {
 		// ── 1. Export a REAL backup from the funded wallet ────────────────
 		const page = await openPopup(tokenReadyExtension)
