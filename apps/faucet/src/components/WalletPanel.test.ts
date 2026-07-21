@@ -37,6 +37,16 @@ describe("WalletPanel", () => {
 		expect(btn.text()).toBe("Connect wallet")
 	})
 
+	it("idle with a remembered wallet: split button — 'Connect <name>' + picker caret", () => {
+		const c = useWalletConnection()
+		c.preferredWalletName.value = "Nulo"
+		const w = mount(WalletPanel)
+		const btn = w.get(`[data-testid="${TESTIDS.btnConnect}"]`)
+		expect(btn.text()).toBe("Connect Nulo")
+		const caret = w.get(`[data-testid="${TESTIDS.btnSwitchWallet}"]`)
+		expect(caret.attributes("aria-label")).toBe("Choose a different wallet")
+	})
+
 	it("discovering: button label becomes 'Searching for wallet…' and is loading", async () => {
 		const c = useWalletConnection()
 		c.status.value = "discovering"
@@ -57,21 +67,23 @@ describe("WalletPanel", () => {
 		expect(document.querySelector(`[data-testid="${TESTIDS.verificationModal}"]`)).not.toBeNull()
 	})
 
-	it("capability-approval: shows the awaiting-permissions section", async () => {
+	it("capability-approval: the button morphs to the awaiting state in the same footprint", async () => {
 		const c = useWalletConnection()
 		c.status.value = "capability-approval"
 		const w = mount(WalletPanel)
 		expect(w.find(`[data-testid="${TESTIDS.capabilityApproval}"]`).exists()).toBe(true)
-		expect(w.text()).toContain("Awaiting permissions")
+		const btn = w.get(`[data-testid="${TESTIDS.btnCapabilityRetry}"]`)
+		expect(btn.text()).toContain("Approve in your wallet")
+		expect(btn.attributes("aria-busy")).toBe("true")
 	})
 
-	it("capability-rejected (error state): shows the retry path and the denial hint", async () => {
+	it("capability-rejected (error state): denied retry button in the same footprint", async () => {
 		const c = useWalletConnection()
 		c.status.value = "error"
 		c.error.value = { category: "capability-rejected", message: "x", raw: null }
 		const w = mount(WalletPanel)
-		expect(w.text()).toContain("You denied the permissions")
-		expect(w.find(`[data-testid="${TESTIDS.btnCapabilityRetry}"]`).exists()).toBe(true)
+		const btn = w.get(`[data-testid="${TESTIDS.btnCapabilityRetry}"]`)
+		expect(btn.text()).toContain("Permissions denied")
 	})
 
 	it("no-wallet (error state): shows install-Nulo CTA", async () => {

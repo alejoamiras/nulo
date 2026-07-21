@@ -6,7 +6,10 @@ const status = ref("idle")
 const verificationEmojis = ref<string | null>(null)
 const selectedAccount = ref<string | null>(null)
 const error = ref<{ message: string } | null>(null)
+const preferredWalletName = ref<string | null>(null)
+const autoReconnectDisabled = ref(false)
 const connect = vi.fn()
+const switchWallet = vi.fn()
 const confirmVerification = vi.fn()
 const cancelVerification = vi.fn()
 const retryCapabilities = vi.fn()
@@ -18,7 +21,10 @@ vi.mock("@/composables/useBridgeWallet", () => ({
 		verificationEmojis,
 		selectedAccount,
 		error,
+		preferredWalletName,
+		autoReconnectDisabled,
 		connect,
+		switchWallet,
 		confirmVerification,
 		cancelVerification,
 		retryCapabilities,
@@ -36,6 +42,8 @@ describe("BridgeWalletPanel", () => {
 		status.value = "idle"
 		selectedAccount.value = null
 		error.value = null
+		preferredWalletName.value = null
+		autoReconnectDisabled.value = false
 		verificationEmojis.value = null
 		disconnect.mockClear()
 		connect.mockClear()
@@ -58,9 +66,10 @@ describe("BridgeWalletPanel", () => {
 	})
 
 	// Guards the Phase-2 .capability div -> <Flex> class-preserving swap: the copy must survive.
-	it("capability-approval: renders the permissions copy in the (Flex-wrapped) block", () => {
+	it("capability-approval: the button morphs to the awaiting state with the scope subline", () => {
 		status.value = "capability-approval"
 		const w = mount(BridgeWalletPanel)
-		expect(w.text()).toMatch(/approve the bridge's permissions/i)
+		expect(w.text()).toContain("Approve in your wallet")
+		expect(w.text()).toContain("one grant covers faucet + bridge")
 	})
 })

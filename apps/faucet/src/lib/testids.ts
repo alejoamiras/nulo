@@ -17,6 +17,17 @@ export const TESTIDS = {
 	btnInstallNulo: "fa-btn-install-nulo",
 	account: "fa-account",
 
+	// Wallet picker modal - progressive discovery list, user picks explicitly
+	walletPicker: "fa-wallet-picker",
+	walletPickerRow: "fa-wallet-picker-row",
+	walletPickerConnect: "fa-wallet-picker-connect",
+	walletPickerCancel: "fa-wallet-picker-cancel",
+	walletPickerScanning: "fa-wallet-picker-scanning",
+	walletPickerWaiting: "fa-wallet-picker-waiting",
+	walletPickerWarning: "fa-wallet-picker-warning",
+	btnSwitchWallet: "fa-btn-switch-wallet",
+	bridgeL2SwitchWallet: "fa-bridge-l2-switch-wallet",
+
 	// Verification modal - 3×3 emoji grid + match/cancel
 	verificationModal: "fa-verification-modal",
 	emojiGrid: "fa-emoji-grid",

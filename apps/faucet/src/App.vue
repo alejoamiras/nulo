@@ -2,6 +2,7 @@
 import { ref } from "vue"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import WalletPickerModal from "./components/WalletPickerModal.vue"
 import BridgeFooter from "./components/BridgeFooter.vue"
 import ThemeToggle from "./components/ThemeToggle.vue"
 import Footer from "./components/Footer.vue"
@@ -67,6 +68,8 @@ const tab = ref<Tab>(defaultTab())
 		<Footer v-if="tab === 'faucet'" />
 		<BridgeFooter v-else />
 		<AppToastRegion />
+		<!-- ONE picker for the shared session — the panels only trigger connect(). -->
+		<WalletPickerModal />
 	</main>
 </template>
 

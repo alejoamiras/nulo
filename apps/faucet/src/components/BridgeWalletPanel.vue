@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { AddressDisplay, Button, Spinner } from "@nulo/design"
+import { AddressDisplay, Button } from "@nulo/design"
 import { computed } from "vue"
+import { truncateName } from "@/composables/createAztecWalletSession"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { TESTIDS } from "@/lib/testids"
 import VerificationModal from "./VerificationModal.vue"
@@ -10,17 +11,22 @@ const {
 	verificationEmojis,
 	selectedAccount,
 	error,
+	preferredWalletName,
 	connect,
 	confirmVerification,
 	cancelVerification,
 	retryCapabilities,
 	disconnect,
+	switchWallet,
+	autoReconnectDisabled,
 } = useBridgeWallet()
 
 const connectLabel = computed(() => {
 	switch (status.value) {
 		case "discovering":
-			return "Searching for wallet…"
+			return "Searching for wallets…"
+		case "choosing":
+			return "Choose a wallet"
 		case "verifying":
 			return "Verify in wallet"
 		case "capability-approval":
@@ -31,6 +37,9 @@ const connectLabel = computed(() => {
 			return "Connect Aztec"
 	}
 })
+
+const showSplitConnect = computed(() => status.value === "idle" && preferredWalletName.value !== null && !autoReconnectDisabled.value)
+const shortPreferredName = computed(() => (preferredWalletName.value ? truncateName(preferredWalletName.value, 20) : null))
 
 async function onClick() {
 	if (status.value === "connected") {
@@ -57,18 +66,48 @@ async function onClick() {
 			</button>
 		</div>
 
-		<div v-else-if="status === 'setting-up'" class="setting-up">
-			<Spinner :size="18" />
-			<span>Setting up the bridge session…</span>
+		<div v-else-if="status === 'setting-up'" class="morph">
+			<Button loading disabled>Setting up session…</Button>
 		</div>
 
-		<Flex v-else-if="status === 'capability-approval'" direction="column" gap="12" align="start" class="capability">
-			<p>Approve the bridge's permissions in your wallet - claim, exit, and balance reads on the bridge contracts.</p>
-			<Button @click="retryCapabilities">Approve permissions</Button>
-		</Flex>
+		<div
+			v-else-if="status === 'capability-approval' || (status === 'error' && error?.category === 'capability-rejected')"
+			class="morph"
+		>
+			<Button
+				v-if="status === 'error'"
+				class="denied"
+				@click="retryCapabilities"
+			>
+				Permissions denied — try again
+			</Button>
+			<Button v-else class="waiting" loading @click="retryCapabilities">
+				Approve in your wallet
+			</Button>
+			<span class="morph-sub">one grant covers faucet + bridge: drips, claims/exits, balance reads — no wildcard scopes</span>
+		</div>
 
 		<div v-else class="connect">
-			<Button :loading="status === 'discovering'" :disabled="status === 'discovering'" :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
+			<div v-if="showSplitConnect" class="split">
+				<Button :data-testid="TESTIDS.bridgeL2Connect" @click="onClick">
+					Connect {{ shortPreferredName }}
+				</Button>
+				<Button
+					class="caret"
+					aria-label="Choose a different wallet"
+					:data-testid="TESTIDS.bridgeL2SwitchWallet"
+					@click="switchWallet"
+				>
+					▾
+				</Button>
+			</div>
+			<Button
+				v-else
+				:loading="status === 'discovering'"
+				:disabled="status === 'discovering' || status === 'choosing'"
+				:data-testid="TESTIDS.bridgeL2Connect"
+				@click="onClick"
+			>
 				{{ connectLabel }}
 			</Button>
 			<p v-if="status === 'error' && error" class="error-hint">{{ error.message }}</p>
@@ -100,6 +139,19 @@ async function onClick() {
 	text-transform: uppercase;
 }
 
+.split {
+	display: inline-flex;
+}
+
+.split > :first-child {
+	border-right: 1px solid color-mix(in srgb, var(--txt-inverse) 25%, transparent);
+}
+
+.split .caret {
+	min-width: 44px;
+	padding: 0 12px;
+}
+
 .disconnect {
 	color: var(--txt-secondary);
 	font: 600 12px/1 var(--font-mono);
@@ -113,22 +165,47 @@ async function onClick() {
 	color: var(--red);
 }
 
-.setting-up {
+.morph {
 	display: inline-flex;
-	align-items: center;
-	gap: 12px;
-	color: var(--txt-secondary);
-	font: 500 13px/1 var(--font-mono);
-	letter-spacing: 0.04em;
+	flex-direction: column;
+	gap: 8px;
+	align-items: flex-start;
 }
 
-.capability {
-	max-width: 56ch;
+.morph-sub {
+	color: var(--txt-secondary);
+	font: 500 11px/1 var(--font-mono);
+	letter-spacing: 0.02em;
 }
 
-.capability p {
-	color: var(--txt-secondary);
-	font-size: 14px;
+.waiting {
+	animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.72;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.waiting {
+		animation: none;
+	}
+}
+
+.denied {
+	background: transparent;
+	color: var(--red);
+	border: 2px solid var(--red);
+}
+
+.denied:hover {
+	background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .error-hint {
