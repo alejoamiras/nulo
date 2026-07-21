@@ -1,6 +1,6 @@
 {
-  "nodeUrl": "http://localhost:45179",
-  "tokenAddress": "0x2254a9d805323415312c2339588cb81645a3719f9ac8d1d8866ed8a0aec1d5d3",
-  "sponsoredFpcAddress": "0x0628377e98bca5913dc86765ad0758f7b7aa83eac49079c6fba125807b393fe1",
-  "minterAddress": "0x0e77deadfc4caf70f623a7db699131860b712948e5f27b7c8593ecbba2265eca"
+  "nodeUrl": "http://localhost:18084",
+  "tokenAddress": "0x025c4ebb0f874f4b69153cd3231636de52a4b72582a4d74cff1a60f2d41c3ee4",
+  "sponsoredFpcAddress": "0x1441491b59934ec64f8c98f17c91f23c01ca2a45dbb35caf123146ec76f9970c",
+  "minterAddress": "0x201d3ae7ed4e9a8c15b29bc5b7c07d660c150b29d86f6317d4cc101885f722b8"
 }

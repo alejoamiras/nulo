@@ -68,6 +68,13 @@ vi.mock("@/contracts/sponsored-fpc", () => ({
 	getSponsoredFpcInstance: async () => ({ address: { toString: () => "0xfpc" } }),
 }))
 
+// Pre-baked like every other contract module here: the real getPrivateFpc dynamically imports the
+// PrivateFPC artifact + runs loadContractArtifact/derivation, which the gutted aztec.js mocks can't
+// support - unmocked, the connect-time registration rejects and status wedges at "setting-up".
+vi.mock("@/contracts/private-fpc", () => ({
+	getPrivateFpc: async () => ({ instance: { address: { toString: () => "0xprivfpc" } }, artifact: { name: "PrivateFPC" } }),
+}))
+
 vi.mock("@aztec/aztec.js/contracts", () => ({
 	Contract: {
 		at: vi.fn(async () => ({

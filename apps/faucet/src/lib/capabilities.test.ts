@@ -148,7 +148,7 @@ describe("buildCombinedManifest", () => {
 		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
 	})
 
-	it("declares all six contracts - faucet (dripper, usdc, eth) + bridge (bridge, token, proxy)", () => {
+	it("declares all seven contracts - faucet (dripper, usdc, eth) + bridge (bridge, token, proxy) + PrivateFPC", () => {
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 		expect(cap.contracts.map((a) => a.toString())).toEqual([
@@ -158,6 +158,7 @@ describe("buildCombinedManifest", () => {
 			BRIDGE.toString(),
 			TOKEN.toString(),
 			PROXY.toString(),
+			PRIVATE_FPC_ADDRESS,
 		])
 	})
 
@@ -245,11 +246,14 @@ describe("fuel claim scope (canonical FeeJuice)", () => {
 		expect(hasPrivateFuel(simTxScope(m))).toBe(true)
 	})
 
-	it("keeps the PrivateFPC OUT of contracts (wallet auto-registers it, like the SponsoredFPC)", () => {
+	it("includes the PrivateFPC in contracts (pre-registered for the no-fuel private-FJ read under 5.0.1)", () => {
+		// The wallet only auto-registers the FPC when a tx USES it as fee payer; the no-fuel claim gate
+		// reads its balance_of BEFORE that, and 5.0.1's registerContract conformance (dev #288) stops the
+		// read's on-the-fly Contract.at() from registering the artifact — so the faucet pre-registers it.
 		const m = buildCombinedManifest(combinedInput())
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
-		expect(cap.contracts.map(String)).not.toContain(PRIVATE_FPC_ADDRESS)
+		expect(cap.contracts.map(String)).toContain(PRIVATE_FPC_ADDRESS)
 	})
 
 	it("scopes PrivateFPC.balance_of for the no-fuel private-FJ read (utilities only — it is abi_utility)", () => {

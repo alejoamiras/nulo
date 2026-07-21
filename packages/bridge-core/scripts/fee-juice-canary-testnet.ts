@@ -7,8 +7,9 @@
  *   2. FeeAssetHandler.mint(owner)            — the wallet's mint button
  *   3. approve + FeeJuicePortal.depositToAztecPublic(to, minFj, secretHash)  — deposits EXACTLY
  *      the manifest's minFj, so the floor the manifest promises the wallet is what gets proven
- *   4. fresh L2 account (sponsored-FPC deploy), then FeeJuice.claim paid by the Sponsored FPC —
- *      the faucet's public claim lane — and the FULL deposit must land as balance.
+ *   4. fresh L2 account (sponsored-FPC deploy), then a SELF-PAY claim (fuelClaim.ts): a carrier-less
+ *      zero-app-call BatchCall([]) + FeeJuicePaymentMethodWithClaim (claim_and_end_setup in setup) — the
+ *      mainnet-shaped public claim lane (NO Sponsored FPC). Net balance = deposit − self-paid gas.
  *
  * Run: bun scripts/fee-juice-canary-testnet.ts --config <candidate.json>
  *      (PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env)
@@ -16,11 +17,12 @@
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
+import { BatchCall, Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
+import { Gas } from "@aztec/stdlib/gas"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
@@ -31,7 +33,7 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { parseCandidateManifest } from "../src/candidate-schema"
-import { feeJuiceAddress } from "../src/fee-juice"
+import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
@@ -135,7 +137,13 @@ async function main() {
 		await ewallet.registerContract(fpc, SponsoredFPCContract.artifact)
 	} catch {}
 	const sponsoredFee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-	if (!(await node.getContract(from))) {
+	// --fresh-selfpay: SKIP the sponsored account deploy so the self-pay claim is the account's FIRST
+	// tx and carries initialization (ctor + instance publication) - the mainnet persona (no sponsor
+	// exists there). Measures the gas shape the steady-state calibration excludes (fable audit H1).
+	const freshSelfPay = process.argv.includes("--fresh-selfpay")
+	if (freshSelfPay) {
+		console.log("FRESH-SELFPAY mode: skipping the sponsored account deploy - the claim must carry init")
+	} else if (!(await node.getContract(from))) {
 		console.log(`deploying L2 account via sponsored FPC (real proof)… (${mins()})`)
 		const deployMethod = await manager.getDeployMethod()
 		await deployMethod.send({ fee: sponsoredFee, from: "NO_FROM" as never } as never)
@@ -167,11 +175,12 @@ async function main() {
 	console.log(`deposited: ${deposit.amount} FJ-wei, leaf ${deposit.leafIndex} (${mins()})`)
 	if (deposit.amount !== minFj) throw new Error(`deposit event amount ${deposit.amount} != minFj ${minFj}`)
 
-	// 5. The faucet's PUBLIC claim lane: FeeJuice.claim paid by the Sponsored FPC. NOT
-	//    claim_and_end_setup — that variant calls end_setup() and is ONLY valid as the fee payload
-	//    (FeeJuicePaymentMethodWithClaim places it in the setup phase); under a sponsored fee the FPC
-	//    already ended setup, so an app-phase claim_and_end_setup asserts on every attempt (live-caught
-	//    by this canary: 149 failed simulates while the message witness was provably available).
+	// 5. The faucet's PUBLIC claim lane — SELF-PAY (fuelClaim.ts, owner call 2026-07-21): claim the bridged
+	//    FJ and pay THIS tx's fee FROM it in one carrier-less zero-app-call tx (BatchCall([]) +
+	//    FeeJuicePaymentMethodWithClaim → claim_and_end_setup in the SETUP phase). No Sponsored FPC — the
+	//    mainnet shape. Setup is the CORRECT home for claim_and_end_setup: the 5.0.0 "149 failed simulates"
+	//    bug was that variant in the APP phase under a sponsored fee; as a fee payload it is valid. This
+	//    canary is what PROVES the zero-app-call + claim_and_end_setup combination live before we ship it.
 	//    Retry until the L1→L2 message syncs (same cadence as fuel-testnet's claim loop).
 	const feeJuice = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact, ewallet as never)
 	const fjBalance = async (): Promise<bigint> => {
@@ -179,30 +188,54 @@ async function main() {
 		return typeof r === "bigint" ? r : (r.result ?? 0n)
 	}
 	const fjBefore = await fjBalance()
+	// predicted-worst maxFeesPerGas (NO padding): a self-pay claim spends the bridged amount as its whole
+	// budget, so any padding inflates max_gas_cost past it and claim_and_end_setup reverts "Amount too low".
+	const worst = await predictedWorstMinFees(node)
+	const selfPayFee = {
+		paymentMethod: publicFeeJuicePayment(from, {
+			claimAmount: deposit.amount,
+			claimSecret: plan.secret,
+			messageLeafIndex: BigInt(deposit.leafIndex),
+		}),
+		gasSettings: {
+			// EXPLICIT gasLimits — the empty BatchCall([]) gives the estimator nothing, so it would default to
+			// the per-tx MAX and max_gas_cost would blow past the bridged amount. CALIBRATED (1.5M/3k, a ~2.3x
+			// margin over a landed claim's 659_123/224) and mirrored in fuelClaim.ts. Deliberately far below
+			// the private 4M so the limit-based balance check keeps fee-spike headroom under the floor.
+			gasLimits: Gas.from({ daGas: 3_000, l2Gas: 1_500_000 }),
+			teardownGasLimits: Gas.from({ daGas: 0, l2Gas: 0 }),
+			maxFeesPerGas: { feePerDaGas: worst.feePerDaGas, feePerL2Gas: worst.feePerL2Gas },
+		},
+	}
 	let settled = false
 	for (let i = 0; i < 300 && !settled; i++) {
 		try {
-			await feeJuice.methods.claim(from, deposit.amount, plan.secret, new Fr(deposit.leafIndex)).send({
+			await new BatchCall(ewallet as never, []).send({
 				from,
-				fee: sponsoredFee,
+				fee: selfPayFee,
 				wait: { waitForStatus: TxStatus.PROPOSED },
 			} as never)
 			settled = true
 		} catch (e) {
-			// Surface the real error on the retry cadence — a swallowed persistent assert looks identical
-			// to a slow message sync from the outside (the claim_and_end_setup bug hid behind this).
-			if (i % 10 === 0) console.log(`claim retry (${mins()}): ${e instanceof Error ? e.message.slice(0, 200) : e}`)
+			// Surface the real error on the retry cadence — a swallowed persistent assert looks identical to a
+			// slow message sync from the outside (the claim_and_end_setup bug hid behind this in 5.0.0).
+			if (i % 10 === 0) console.log(`self-pay claim retry (${mins()}): ${e instanceof Error ? e.message.slice(0, 200) : e}`)
 			await new Promise((r) => setTimeout(r, 6000))
 		}
 	}
-	if (!settled) throw new Error("direct-FJ claim never SETTLED within budget")
+	if (!settled) throw new Error("direct-FJ SELF-PAY claim never SETTLED within budget")
 
-	// Sponsored FPC paid the fee, so the FULL deposit must land as public balance.
+	// SELF-PAY: the claim paid this tx's fee FROM the deposit, so the NET gain is deposit − max_gas_cost
+	// (NOT the full deposit). Assert a positive balance landed strictly below the deposit — the mainnet shape.
 	const fjAfter = await fjBalance()
 	const gained = fjAfter - fjBefore
-	if (gained !== deposit.amount) throw new Error(`claimed balance gained ${gained} != deposited ${deposit.amount}`)
-	console.log(`\n✅ DIRECT Fee-Juice canary PASSED — mint→deposit(minFj)→claim landed ${gained} FJ-wei in ${mins()}.`)
-	console.log("   The l1.feeJuice lane (handler mint + direct portal deposit + public claim) is live.")
+	const feePaid = deposit.amount - gained
+	if (gained <= 0n) throw new Error(`self-pay claim gained ${gained} (<=0) — nothing landed`)
+	if (gained >= deposit.amount) throw new Error(`self-pay claim gained ${gained} >= deposited ${deposit.amount} — fee not deducted?`)
+	console.log(
+		`\n✅ DIRECT Fee-Juice SELF-PAY canary PASSED — mint→deposit(minFj)→self-pay-claim landed ${gained} FJ-wei (fee ${feePaid}) in ${mins()}.`,
+	)
+	console.log("   The l1.feeJuice lane (handler mint + direct portal deposit + zero-app-call self-pay claim) is live.")
 }
 
 main().catch((e) => {

@@ -68,7 +68,7 @@ describe("BridgePhaseRail", () => {
 		const w = mount(BridgePhaseRail, { props: { record: dep({ id: "0xt2", secretHashHex: "0xt2" }) } })
 		vi.setSystemTime(24_000) // stamps read the real (faked) clock; mockNow only drives renders.
 		mockNow.value = 24_000
-		runtime.value = { "0xt2": { step: "approving" } }
+		runtime.value = { "0xt2": { step: "signing" } } // bridge-only private: seal → sign (no approve)
 		await w.vm.$nextTick()
 		const seal = w.findAll(sel(TESTIDS.stepperPhase)).find((p) => p.attributes("data-phase") === "seal")
 		expect(seal?.attributes("data-state")).toBe("done")

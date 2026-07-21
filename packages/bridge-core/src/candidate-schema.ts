@@ -69,6 +69,9 @@ export const candidateManifestSchema = z
 					})
 					.strict()
 					.optional(),
+				// L9 interlock: the recipient-committed cutover writes this into the candidate so the deposit
+				// code will build private deposits; absent on bearer manifests. (deploy-bridge-testnet.ts)
+				privateClaimMode: z.literal("salt-v2").optional(),
 			})
 			.strict(),
 		l2: z

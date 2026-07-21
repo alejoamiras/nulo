@@ -32,20 +32,38 @@ export type ParsedExport = {
 	contacts: ImportedContactV2[]
 }
 
+/** Import files are hostile input: an unbounded row count would amplify
+ *  downstream work (per-row storage upserts, and PXE sender registrations
+ *  for `isSender` rows). Reject oversized files at the boundary. */
+export const MAX_CONTACT_IMPORT_ROWS = 512
+
+/** Byte ceiling checked BEFORE JSON.parse, so an oversized file is
+ *  rejected without materializing its object graph. 512 maximal rows fit
+ *  in well under 100 KB; 1 MB leaves generous formatting headroom. */
+export const MAX_CONTACT_IMPORT_BYTES = 1_000_000
+
 /** Strict parser. Throws on any shape that isn't a v1 array or
- *  a v2 envelope. Caller surfaces a generic import-failure toast. */
+ *  a v2 envelope, and on files exceeding the byte or row bounds.
+ *  Caller surfaces a generic import-failure toast. */
 export function parseContactsExport(raw: string): ParsedExport {
-	const parsed: unknown = JSON.parse(raw)
-	if (Array.isArray(parsed)) {
-		return { version: 1, contacts: parsed as ImportedContactV2[] }
+	if (raw.length > MAX_CONTACT_IMPORT_BYTES) {
+		throw new Error(`Contacts file too large (max ${MAX_CONTACT_IMPORT_BYTES} bytes)`)
 	}
-	if (
+	const parsed: unknown = JSON.parse(raw)
+	let result: ParsedExport | null = null
+	if (Array.isArray(parsed)) {
+		result = { version: 1, contacts: parsed as ImportedContactV2[] }
+	} else if (
 		parsed !== null &&
 		typeof parsed === "object" &&
 		(parsed as { version?: unknown }).version === 2 &&
 		Array.isArray((parsed as { contacts?: unknown }).contacts)
 	) {
-		return { version: 2, contacts: (parsed as { contacts: ImportedContactV2[] }).contacts }
+		result = { version: 2, contacts: (parsed as { contacts: ImportedContactV2[] }).contacts }
 	}
-	throw new Error("Unrecognized contacts export format")
+	if (!result) throw new Error("Unrecognized contacts export format")
+	if (result.contacts.length > MAX_CONTACT_IMPORT_ROWS) {
+		throw new Error(`Too many contacts in file (max ${MAX_CONTACT_IMPORT_ROWS})`)
+	}
+	return result
 }

@@ -74,11 +74,10 @@ export interface RecordRuntime {
 	/** Live narration (D1): the current step + a free-text detail (poll counts etc.). */
 	step?: BridgeStep
 	stepDetail?: string
-	/** Set after the post-✓ grace: the card leaves the rendered list; the RECORD stays in storage. */
-	hidden?: boolean
-	/** Whether the APPROVE leg was skipped (sufficient allowance) or completed - display-only,
-	 *  underivable from facts once the flow advances (plan S15). Absent after a reload. */
-	approveOutcome?: "skipped" | "done"
+	/** Set when a real APPROVE tx completed in THIS session - keeps the step visible as done for the
+	 *  rest of the run. A sufficient allowance never sets it (the step is simply not rendered), and it
+	 *  is absent after a reload - a retry re-checks the allowance idempotently (plan S15). */
+	approveOutcome?: "done"
 	/** Withdraw proving countdown inputs. */
 	provenBlock?: number
 	targetBlock?: number
@@ -282,6 +281,7 @@ export function rekeyJournalRecord(oldId: string, next: BridgeJournalRecord): vo
 
 export function discard(id: string): void {
 	bumpGen(id) // Any in-flight chunked round dies at its next generation check.
+	releaseForeground(id) // A discarded record can never be a valid takeover (CAS - only if it owns it).
 	removeRecord(deps.kv, id)
 	secretCache.delete(id)
 	sessionLive.delete(id)
@@ -422,6 +422,9 @@ export const lastCompleted = ref<{
 	isPrivate: boolean
 	assetKind: "bridge-token" | "fee-juice"
 	txHash?: string
+	/** Captured SYNCHRONOUSLY at completion, before the form's watcher releases the takeover - the
+	 *  toast must key off this, not the live activeFlowId (already null by the time it runs). */
+	foreground: boolean
 } | null>(null)
 
 function setStep(id: string, step?: BridgeStep, stepDetail?: string): void {
@@ -433,8 +436,8 @@ export function setRecordStep(id: string, step?: BridgeStep, stepDetail?: string
 	setStep(id, step, stepDetail)
 }
 
-/** Display-only APPROVE outcome (plan S15) - written at the allowance decision. */
-export function markApproveOutcome(id: string, outcome: "skipped" | "done"): void {
+/** Display-only APPROVE outcome (plan S15) - written when a real approval tx lands. */
+export function markApproveOutcome(id: string, outcome: "done"): void {
 	setRuntime(id, { approveOutcome: outcome })
 }
 
@@ -459,13 +462,6 @@ export function releaseForeground(id: string): void {
 	if (activeFlowId.value === id) activeFlowId.value = null
 }
 
-/** Hide a COMPLETED record's card (the receipt flow ends, the user saw the result). The RECORD
- *  is untouched - deletion stays human-only (the ✕) or the 7-day prune. */
-export function hideCompleted(id: string): void {
-	const rec = records.value.find((r) => r.id === id)
-	if (rec?.completedAt) setRuntime(id, { hidden: true })
-}
-
 function completeDeposit(rec: DepositJournalRecord | undefined): void {
 	// Cross-tab guard: another tab may have discarded (record gone) or completed this record while
 	// we ran - generations are tab-local, so the WRITE must be existence- and idempotency-checked.
@@ -483,9 +479,11 @@ function completeDeposit(rec: DepositJournalRecord | undefined): void {
 		isPrivate: rec.isPrivate,
 		assetKind: assetKindOf(rec),
 		txHash: rec.claimTxHash,
+		foreground: activeFlowId.value === rec.id,
 	}
 	// Completed cards STAY (✓ + the ✕ dismiss) - auto-hide was provenance-scoped and read as
-	// "sometimes my card vanishes". The foreground receipt path hides via hideCompleted instead.
+	// "sometimes my card vanishes". The foreground receipt path releases its takeover on completion,
+	// so the finished record lands in the history list alongside the receipt.
 	localClaimProvenance.delete(rec.id)
 	log("deposit complete", rec.id)
 }
@@ -504,6 +502,7 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
 		isPrivate: rec.isPrivate,
 		assetKind: assetKindOf(rec),
 		txHash: consumeTxHash,
+		foreground: activeFlowId.value === rec.id,
 	}
 	log("withdraw complete", rec.id)
 }
@@ -917,7 +916,7 @@ export function resumeSessionWork(): void {
 
 /** The render list: completed-and-graced cards are hidden (D3), and the FOREGROUND record is
  *  suppressed (its stepper/receipt is the one surface - plan S12/S13). Records stay in storage. */
-export const visibleRecords = computed(() => records.value.filter((r) => !runtime.value[r.id]?.hidden && r.id !== activeFlowId.value))
+export const visibleRecords = computed(() => records.value.filter((r) => r.id !== activeFlowId.value))
 
 export function useBridgeJournal() {
 	initJournal()

@@ -1,10 +1,21 @@
 <script setup lang="ts">
+import { nextTick, ref } from "vue"
 import BridgeJournal from "@/components/BridgeJournal.vue"
 import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import FuelForm from "@/components/FuelForm.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import MintFuelAsset from "@/components/MintFuelAsset.vue"
 import { TESTIDS } from "@/lib/testids"
+
+const journalAnchor = ref<HTMLElement | null>(null)
+
+// When a fuel bridge finishes, scroll "Your fuels" into view: the completed bridge lives there, and the
+// form otherwise leaves the user on the receipt without ever surfacing the list. nextTick so the list
+// has re-rendered the just-completed record before we scroll to it.
+async function onFuelCompleted() {
+	await nextTick()
+	journalAnchor.value?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+}
 </script>
 
 <template>
@@ -22,9 +33,11 @@ import { TESTIDS } from "@/lib/testids"
 			<BridgeWalletPanel />
 		</section>
 
-		<FuelForm />
+		<FuelForm @completed="onFuelCompleted" />
 		<MintFuelAsset />
-		<BridgeJournal kind="fee-juice" :toasts="false" title="YOUR FUELS" />
+		<div ref="journalAnchor">
+			<BridgeJournal kind="fee-juice" :toasts="false" title="YOUR FUELS" />
+		</div>
 	</div>
 </template>
 

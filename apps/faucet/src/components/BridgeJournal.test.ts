@@ -15,6 +15,7 @@ const lastCompleted = ref<{
 	isPrivate: boolean
 	assetKind?: "bridge-token" | "fee-juice"
 	txHash?: string
+	foreground?: boolean
 } | null>(null)
 const push = vi.fn()
 
@@ -69,9 +70,17 @@ describe("BridgeJournal", () => {
 	})
 
 	it("a FOREGROUND completion does not toast (the receipt already announced it)", async () => {
+		// `foreground` is the SYNCHRONOUS capture from completion time - the live activeFlowId is
+		// already released (null) by the time this watcher runs, so it cannot be the key.
 		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		activeFlowId.value = "0xfg"
-		lastCompleted.value = { id: "0xfg", direction: "deposit", amount: "100000000000000000000", isPrivate: false, txHash: GOOD_HASH }
+		lastCompleted.value = {
+			id: "0xfg",
+			direction: "deposit",
+			amount: "100000000000000000000",
+			isPrivate: false,
+			txHash: GOOD_HASH,
+			foreground: true,
+		}
 		await nextTick()
 		expect(push).not.toHaveBeenCalled()
 	})

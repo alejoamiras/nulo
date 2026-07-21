@@ -4,16 +4,14 @@ import { isValidHex } from "@/utils/string"
 
 /** Services */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
-import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
 const { openToast } = useToast()
 
 /** Store */
-import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
-const appStore = useAppStore()
 const popupStore = usePopupStore()
 
 const displaceIdx = computed(() => {
@@ -26,7 +24,6 @@ const props = defineProps({
 })
 
 const contactService = new ContactServiceClient()
-const accountStateService = new AccountStateServiceClient()
 contactService.onContactAdded.add(onContactAdded)
 contactService.onContactUpdated.add(onContactUpdated)
 contactService.onContactDeleted.add(onContactDeleted)
@@ -48,9 +45,6 @@ function onContactDeleted(contact) {
 
 const contacts = ref([])
 
-/** Default-on for `registerAsSender` per plan-v4: a freshly-added
- *  individual contact is the intentional opt-in moment. User can untick
- *  to skip sender registration. */
 const form = useFormState({
 	name: {
 		initial: "",
@@ -65,17 +59,17 @@ const form = useFormState({
 		validate: (v) => {
 			if (!v) return null // empty: pre-input, not an error to display
 			if (!isValidHex(v)) return "Invalid address"
-			if (contacts.value.some((c) => c.address === v)) return "Already exist"
+			// Hex is case-insensitive — a mixed-case rendering of a saved
+			// address is the same contact, not a new one.
+			if (contacts.value.some((c) => c.address.toLowerCase() === v.toLowerCase())) return "Already exist"
 			return null
 		},
 	},
-	registerAsSender: { initial: true },
 })
 
 // Aliases preserve the existing template bindings (v-model="nameTerm" etc.).
 const nameTerm = form.fields.name.value
 const contactAddressTerm = form.fields.address.value
-const registerAsSender = form.fields.registerAsSender.value
 
 // Existing template uses these inline-warning predicates. Map to the form's
 // error messages so the visual contract is unchanged.
@@ -103,36 +97,13 @@ const handleAddContact = async () => {
 
 	isLoading.value = true
 	try {
-		const address = contactAddressTerm.value
-		await contactService.addContact(nameTerm.value.trim(), address)
-
-		// Sender registration is non-fatal: contact saves successfully even
-		// if PXE is down. The toast distinguishes the two outcomes so the
-		// user knows whether to retry from Settings → Senders. Privacy
-		// rationale: registering a sender broadens the dApp-observable
-		// graph via `aztec_getPrivateEvents`, so this is opt-in, not
-		// silent.
-		//
-		// Only attempt sender registration when both network AND account are
-		// loaded (network watcher's auto-create can be in-flight on freshly
-		// switched chains; addSender then writes against an unintended PXE
-		// scope and the chip never renders).
-		let senderRegistered = false
-		if (registerAsSender.value && appStore.network && appStore.account?.address) {
-			try {
-				await accountStateService.addSender(appStore.network.id, address)
-				senderRegistered = true
-			} catch (err) {
-				console.warn("Sender registration failed after contact add:", err)
-			}
-		}
+		// Canonicalize to lowercase on save — the wallet emits lowercase hex
+		// everywhere else (PXE senders, derived addresses), and case-mixed
+		// stored rows break exact-match lookups downstream.
+		await contactService.addContact(nameTerm.value.trim(), contactAddressTerm.value.toLowerCase())
 
 		emit("onClose")
-		if (registerAsSender.value && !senderRegistered) {
-			openToast({ label: "Contact saved · sender registration failed", icon: "warning" }, TOAST_DURATION.LONG)
-		} else {
-			openToast({ label: "Contact is added" })
-		}
+		openToast({ label: "Contact is added" })
 	} catch (err) {
 		processingError.value = {
 			show: true,
@@ -151,7 +122,6 @@ watch(
 	async () => {
 		if (!props.show) {
 			contactService.disconnect()
-			accountStateService.disconnect()
 
 			contacts.value = []
 			form.reset()
@@ -242,24 +212,6 @@ const onKeydown = (e) => {
 			</template>
 		</AddressInput>
 
-		<Flex
-			align="center"
-			justify="between"
-			gap="12"
-			:class="$style.sender_row"
-		>
-			<Flex direction="column" gap="2" :class="$style.sender_text">
-				<Text size="13" weight="600" color="primary">Register as sender</Text>
-				<Text size="11" weight="500" color="tertiary" height="140">
-					Lets your wallet detect incoming private transfers from this address.
-				</Text>
-			</Flex>
-			<Toggle
-				v-model="registerAsSender"
-				data-testid="new-contact-register-sender"
-			/>
-		</Flex>
-
 		<template #aboveSubmit>
 			<Transition name="fade">
 				<Tooltip
@@ -292,15 +244,3 @@ const onKeydown = (e) => {
 		</template>
 	</FormPopup>
 </template>
-
-<style module>
-.sender_row {
-	margin-top: -12px;
-	padding: 12px 0;
-}
-
-.sender_text {
-	min-width: 0;
-	flex: 1;
-}
-</style>

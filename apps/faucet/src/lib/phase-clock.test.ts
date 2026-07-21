@@ -20,10 +20,10 @@ describe("phase-clock (the labor-illusion timekeeper)", () => {
 		expect(out[0].startedAt).toBeUndefined()
 	})
 
-	it("skipped phases stamp like done; repeat calls never restamp", () => {
+	it("done stamps once; repeat calls never restamp", () => {
 		trackPhases("r3", [phase("approve", "active")], 1_000)
-		const a = trackPhases("r3", [phase("approve", "skipped")], 3_000)
-		const b = trackPhases("r3", [phase("approve", "skipped")], 9_000)
+		const a = trackPhases("r3", [phase("approve", "done")], 3_000)
+		const b = trackPhases("r3", [phase("approve", "done")], 9_000)
 		expect(a[0].elapsedMs).toBe(2_000)
 		expect(b[0].elapsedMs).toBe(2_000)
 	})

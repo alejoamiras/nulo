@@ -2,9 +2,11 @@ import { PRIVATE_FPC_ADDRESS, feeJuiceAddress } from "@nulo/bridge-core"
 
 /** The canonical L2 FeeJuice protocol contract (identical on every network). */
 const FEE_JUICE_L2 = AztecAddress.fromStringUnsafe(feeJuiceAddress)
-/** The Wonderland PrivateFPC L2 address (pinned from the installed artifact). Like the SponsoredFPC it
- *  is auto-registered by the wallet (`fpc/service.ts`), so it stays OUT of `contracts` (the faucet never
- *  loads its artifact) — only its `mint_and_pay_fee` call is scoped, mirroring the sponsor-call pattern. */
+/** The Wonderland PrivateFPC L2 address (pinned from the installed artifact). The wallet auto-registers
+ *  it when a tx USES it as fee payer (`fpc/service.ts`), but the no-fuel-claim gate reads its
+ *  `balance_of` BEFORE any such tx, and 5.0.1's registerContract conformance (dev #288) stops the read's
+ *  on-the-fly Contract.at() from registering the artifact — so the faucet now pre-registers it at connect
+ *  (`useWalletConnection` + `@/contracts/private-fpc`) and it is IN `contracts` (registerable). */
 const PRIVATE_FPC_L2 = AztecAddress.fromStringUnsafe(PRIVATE_FPC_ADDRESS)
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { STANDARD_AUTH_REGISTRY_ADDRESS } from "@aztec/standard-contracts/auth-registry/constants"
@@ -224,7 +226,7 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 			{ type: "accounts", canGet: true, canCreateAuthWit: true },
 			{
 				type: "contracts",
-				contracts: [dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress],
+				contracts: [dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, PRIVATE_FPC_L2],
 				canRegister: true,
 				canGetMetadata: true,
 			},

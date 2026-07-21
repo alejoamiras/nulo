@@ -5,8 +5,10 @@
 // selector or arg order ever drifts, a deposit's L1->L2 message becomes
 // unconsumable and funds strand. Run: nargo test (with the 5.0.0 nargo).
 
+use aztec::hash::compute_secret_hash;
 use aztec::protocol::address::{AztecAddress, EthAddress};
 use aztec::protocol::traits::FromField;
+use claim_secret_lib::{derive_claim_secret, DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET};
 use token_portal_content_hash_lib::{
     get_mint_to_private_content_hash, get_mint_to_public_content_hash, get_withdraw_content_hash,
 };
@@ -32,4 +34,44 @@ fn withdraw_matches_l1() {
     let caller = EthAddress::zero();
     let h = get_withdraw_content_hash(recipient, 1_000_000, caller);
     assert(h == 0x00ac390e12f1097130e1a7c2e5eea30780cd11d12002b8de22d608cf10a60775);
+}
+
+// ─── Recipient-committed private-claim secret derivation ─────────────
+// The keystone's second cross-toolchain boundary: derive_claim_secret + compute_secret_hash
+// must byte-match the TS mirror (packages/bridge-core/src/claim-secret.test.ts) for the SAME
+// (salt, recipient) vectors — a drift strands every private deposit. Vectors computed with the
+// installed rc.2 crypto; the TS test asserts the identical literals.
+
+// poseidon2_hash_bytes("nulo_dom_sep__token_bridge_private_claim_secret") as u32. Distinct from the
+// FPC fuel separator (3952304070) — the cross-protocol-secret-reuse tripwire.
+#[test]
+fn claim_secret_dom_sep_is_pinned() {
+    assert(DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET == 3140354885);
+    assert(DOM_SEP__TOKEN_BRIDGE_PRIVATE_CLAIM_SECRET != 3952304070);
+}
+
+#[test]
+fn claim_secret_vectors_match_ts() {
+    // (salt, recipient) -> derived secret
+    let s0 = derive_claim_secret(0, AztecAddress::from_field(0));
+    assert(s0 == 0x1bcb2e97aaeb9788f9b23d331c90b0e138b8fa84890f1fb045c4c260b26e1a4f);
+    let s1 = derive_claim_secret(1, AztecAddress::from_field(2));
+    assert(s1 == 0x12e754c717173c3dd6f22932580bf8332274034b2c4a6a8ec8d682b482e104a5);
+    let s2 = derive_claim_secret(0x1234567890abcdef, AztecAddress::from_field(0xdeadbeef));
+    assert(s2 == 0x02c856f2079a8e1cc126d02e81cd409c7ee02e0c4c7cd2dd9450edaa8c681e7d);
+}
+
+#[test]
+fn claim_secret_hash_vectors_match_ts() {
+    // compute_secret_hash([derive_claim_secret(...)]) — the value L1 commits into the message. 5.0.1's
+    // compute_secret_hash is generic over the array length (`[Field; N]`); a single secret is `[secret]`.
+    // For N=1 it is still `poseidon2_hash_with_separator([secret], DOM_SEP__SECRET_HASH)`, so the pinned
+    // values are unchanged from rc.2 — the version bump only made the array explicit in the signature.
+    let h0 = compute_secret_hash([derive_claim_secret(0, AztecAddress::from_field(0))]);
+    assert(h0 == 0x087647b3c1976bde1cf12bfa5213c1d619f4f0b9a0bae6e1000d7030fcb9d5fc);
+    let h1 = compute_secret_hash([derive_claim_secret(1, AztecAddress::from_field(2))]);
+    assert(h1 == 0x23d9fa16980e66c10886f09780ea412bd1c942a0a6e588d838ea05d7228c6754);
+    let h2 =
+        compute_secret_hash([derive_claim_secret(0x1234567890abcdef, AztecAddress::from_field(0xdeadbeef))]);
+    assert(h2 == 0x2a636f84225eec69e412ed5dffd735f1ac8ff6d28b24dac5d796f0c2a648ac1c);
 }

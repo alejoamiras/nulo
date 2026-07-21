@@ -10,11 +10,13 @@ Cross-model convergence is the primary confidence signal. "×3" = found independ
 | F-004 | `swapTarget` owner-mutable but not witness-bound → owner extracts signed slippage on fuel leg | **Medium 5.9** | high (mech.) | Claude + Codex | CONFIRMED |
 | F-005 | Exported `runSwapBridge` fail-open for private-fuel invariants (library API; faucet safe) | **Medium 5.3** | moderate | Codex only | CONFIRMED |
 | F-006 | `UniswapFuelSwap.swap()` permissionless + caller `minOutput` → direct-call sandwich (self-harm) | **Low 3.1** | high | Claude | CONFIRMED |
-| F-007 | Bearer-secret private claim (recipient omitted) — accepted-risk, off-chain custody is the only guard | **Low 2.6** | high | Claude + Codex | CONFIRMED (accepted-risk) |
+| F-007 | Bearer-secret private claim (recipient omitted) — accepted-risk, off-chain custody is the only guard | **Low 2.6** | high | Claude + Codex | CONFIRMED → **FIXED** (recipient-committed, see note) |
 | F-008 | `UniswapFuelSwap.sweep` lacks `nonReentrant` (router's sweep has it) — latent | **Low 2.0** | high | Claude | CONFIRMED |
 | INFO-1 | `MintableERC20` permissionless mint + Permit2 allowance override — testnet footgun, not a theft path | Info | high | Claude + Codex | CLEARED as non-exploit; flagged for prod |
 | INFO-2 | L1 deposits not gated by L2 pause → in-flight strand during a paused incident (liveness/UX) | Info | high | Claude | CONFIRMED (liveness) |
 | INFO-3 | `deposit-testnet.ts` guesses Inbox leaf index via `simulateContract` (script-only) | Info | high | Codex | CONFIRMED (script) |
+
+> **F-007 FIXED (2026-07-06) — recipient-committed private claim.** The `bridge-permit2-recipient-commitment` plan closed this: `claim_private` now takes a per-deposit `claim_salt` and re-derives the consumption secret from `poseidon2([claim_salt, recipient], DS=3140354885)` in-circuit (`contracts/bridge/aztec/claim_secret/` ↔ TS `deriveTokenClaimSecret`, keystone-pinned both toolchains). A leaked salt can only claim to the ORIGINALLY-BOUND recipient — so a relayer can finish a stranded claim but never redirect it, and the salt is a strand-prevention + linkage-privacy credential, not a bearer credential. The **real driver was the relayer capability**, not this Low-2.6 finding. Requires a fresh L2 stack (the deployment migration is part of that plan); the old bearer deployment keeps bearer semantics for its in-flight claims. **INFO-1 remains a hard blocker for any value token** — `MintableERC20`'s permissionless mint + forced-Permit2 allowance is testnet-only and must not survive into a value-bearing deployment.
 
 ## Spot-verifications performed by the main agent (against ground truth)
 

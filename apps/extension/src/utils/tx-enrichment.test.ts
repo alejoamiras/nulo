@@ -71,6 +71,15 @@ describe("humanizeMethodName — fallback when no label exists", () => {
 })
 
 describe("getPrimaryCall — TxCall wrapper around pickPrimaryMethod", () => {
+	test("duplicate-name primary returns the APP call's object, not the fee claim's (index-based)", () => {
+		const calls = [
+			{ method: "claim", contract: "0xfeejuice" },
+			{ method: "mint_and_pay_fee", contract: "0xfpc" },
+			{ method: "claim", contract: "0xapp" },
+		]
+		expect(getPrimaryCall(calls)?.contract).toBe("0xapp")
+	})
+
 	test("empty array → undefined", () => {
 		expect(getPrimaryCall([])).toBeUndefined()
 	})

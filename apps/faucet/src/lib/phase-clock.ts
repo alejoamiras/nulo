@@ -43,7 +43,7 @@ export function trackPhases(recordId: string, phases: BridgePhase[], now: number
 		if ((phase.state === "active" || phase.state === "failed") && times.startedAt === undefined) {
 			times.startedAt = now
 		}
-		if ((phase.state === "done" || phase.state === "skipped") && times.doneAt === undefined && times.startedAt !== undefined) {
+		if (phase.state === "done" && times.doneAt === undefined && times.startedAt !== undefined) {
 			times.doneAt = now
 		}
 		const out: TimedBridgePhase = { ...phase }

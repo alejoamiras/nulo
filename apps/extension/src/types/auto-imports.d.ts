@@ -13,6 +13,8 @@ declare global {
   const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
+  const MAX_CONTACT_IMPORT_BYTES: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_BYTES
+  const MAX_CONTACT_IMPORT_ROWS: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_ROWS
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
@@ -178,6 +180,7 @@ declare global {
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
+  const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
   const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
   const watch: typeof import('vue').watch
   const watchEffect: typeof import('vue').watchEffect
@@ -284,6 +287,8 @@ declare module 'vue' {
     readonly FEE_JUICE_USD_RATE: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_USD_RATE']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
+    readonly MAX_CONTACT_IMPORT_BYTES: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_BYTES']>
+    readonly MAX_CONTACT_IMPORT_ROWS: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_ROWS']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
@@ -449,6 +454,7 @@ declare module 'vue' {
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
+    readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
     readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
     readonly watchEffect: UnwrapRef<typeof import('vue')['watchEffect']>

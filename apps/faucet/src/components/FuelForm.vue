@@ -12,7 +12,7 @@ import FeeJuiceNotice from "./FeeJuiceNotice.vue"
 
 /** Composables */
 import { useBridgeBackup } from "@/composables/useBridgeBackup"
-import { hideCompleted, useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useBridgeJournal } from "@/composables/useBridgeJournal"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { useFuelFlow } from "@/composables/useFuel"
 import { FUEL_ASSET_DECIMALS, useL1FeeAsset } from "@/composables/useL1FeeAsset"
@@ -22,6 +22,9 @@ import { useSettledError } from "@/composables/useSettledError"
 /** Utils */
 import { formatBigInt, parseAmount } from "@/lib/format"
 import { TESTIDS } from "@/lib/testids"
+
+/** Emitted when a fuel bridge completes so the parent view can surface "Your fuels" (scroll the list in). */
+const emit = defineEmits<{ completed: [] }>()
 
 const l1 = useL1Wallet()
 const feeAsset = useL1FeeAsset()
@@ -40,10 +43,15 @@ const submitting = ref(false)
 const formStage = ref<"form" | "stepper" | "receipt">("form")
 const receiptSnapshot = ref<ReceiptSnapshot | null>(null)
 const activeId = journal.activeFlowId
+// The id of the record THIS form started (mirror of BridgeForm's ownedId): the completion/receipt
+// path keys off it, not the shared foreground, so the other permanently-mounted form re-pointing
+// activeFlowId in the same flush as a completion can never swallow the receipt.
+const ownedId = ref<string | null>(null)
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
 const activeRecord = computed(() => (activeId.value ? journal.records.value.find((r) => r.id === activeId.value) : undefined))
-const fuelActive = computed(() => formStage.value === "stepper" && !!activeRecord.value && assetKindOf(activeRecord.value) === "fee-juice")
+const ownedRecord = computed(() => (ownedId.value ? journal.records.value.find((r) => r.id === ownedId.value) : undefined))
+const fuelActive = computed(() => formStage.value === "stepper" && !!ownedRecord.value && assetKindOf(ownedRecord.value) === "fee-juice")
 
 const amountUnits = computed(() => parseAmount(amount.value || "0", FUEL_ASSET_DECIMALS))
 const validationError = computed(() => {
@@ -65,6 +73,7 @@ async function onSubmit() {
 	if (amountUnits.value === 0n || validationError.value || formStage.value !== "form" || submitting.value) return
 	submitting.value = true
 	const onRecord = (id: string) => {
+		ownedId.value = id
 		journal.claimForeground(id)
 		formStage.value = "stepper"
 		submitting.value = false
@@ -75,17 +84,35 @@ async function onSubmit() {
 }
 
 function onBackground() {
-	if (activeId.value) journal.releaseForeground(activeId.value)
+	if (ownedId.value) journal.releaseForeground(ownedId.value)
+	ownedId.value = null
 	fuelFlow.error.value = null
 	formStage.value = "form"
 }
 
+// Fail-open guard on the OWNED record (mirror of BridgeForm's, minus rekey re-adoption - fuel
+// records never rekey). VANISHED (the rejection path discards a pre-deposit record; cross-tab
+// discard): release the dead id + reset. USURPED while NOT completed (the other permanently-mounted
+// form took the foreground): stand down WITHOUT releasing the other form's live takeover. A
+// COMPLETED own record is not broken - the completion watcher receipts it regardless of order.
+watch(
+	() => {
+		if (formStage.value !== "stepper") return false
+		const rec = ownedRecord.value
+		if (rec === undefined) return true
+		return activeId.value !== ownedId.value && !rec.completedAt
+	},
+	(broken) => {
+		if (!broken) return
+		if (ownedRecord.value === undefined && ownedId.value) journal.releaseForeground(ownedId.value)
+		ownedId.value = null
+		formStage.value = "form"
+	},
+)
+
 function onNewFuel() {
-	// The receipt WAS the result — hide the completed card instead of re-surfacing it in the journal below.
-	if (activeId.value) {
-		hideCompleted(activeId.value)
-		journal.releaseForeground(activeId.value)
-	}
+	// The completed record already lives in "Your fuels" (foreground released at completion) - just
+	// clear the receipt and reset the form.
 	receiptSnapshot.value = null
 	fuelFlow.error.value = null
 	formStage.value = "form"
@@ -95,10 +122,10 @@ function onNewFuel() {
 // stepper → receipt on the fuel record's completion (mirrors BridgeForm S11): snapshot the FJ result so a
 // cross-tab discard / auto-hide can't blank the receipt. Only our own fee-juice record ever steppers here.
 watch(
-	() => activeRecord.value?.completedAt,
+	() => ownedRecord.value?.completedAt,
 	(done) => {
 		if (!done || formStage.value !== "stepper") return
-		const rec = activeRecord.value
+		const rec = ownedRecord.value
 		if (!rec || assetKindOf(rec) !== "fee-juice") return
 		receiptSnapshot.value = {
 			direction: "deposit",
@@ -111,6 +138,10 @@ watch(
 			completedAt: rec.completedAt,
 		}
 		formStage.value = "receipt"
+		// Release the takeover so the finished record surfaces in "Your fuels" (the receipt renders from
+		// the snapshot, so it survives the release), then nudge the parent to scroll the list into view.
+		journal.releaseForeground(rec.id)
+		emit("completed")
 	},
 )
 
@@ -125,7 +156,7 @@ function fmt(b: bigint | null): string {
 
 <template>
 	<section class="fuel-form" :data-testid="TESTIDS.fuelForm" :data-stage="formStage">
-		<BridgeStepper v-if="fuelActive && activeRecord" :record="activeRecord" @background="onBackground" @backup="onBackup" />
+		<BridgeStepper v-if="fuelActive && ownedRecord" :record="ownedRecord" @background="onBackground" @backup="onBackup" />
 		<BridgeReceipt
 			v-else-if="formStage === 'receipt' && receiptSnapshot"
 			:snapshot="receiptSnapshot"

@@ -1,6 +1,10 @@
-import { mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { enableAutoUnmount, mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ref } from "vue"
+
+// A stale mounted form from a prior test still watches the SHARED journal refs (activeFlowId /
+// records) and would release the next test's foreground at completion - unmount between tests.
+enableAutoUnmount(afterEach)
 
 const depositFn = vi.fn(async (_a: bigint, _p: boolean) => {})
 const depositErr = ref<string | null>(null)
@@ -51,7 +55,14 @@ vi.mock("@/composables/useWithdraw", () => ({
 }))
 
 import type { DepositJournalRecord, WithdrawJournalRecord } from "@nulo/bridge-core"
-import { __resetJournalForTests, addRecord, rekeyJournalRecord, updateRecord, useBridgeJournal } from "@/composables/useBridgeJournal"
+import {
+	__resetJournalForTests,
+	addRecord,
+	claimForeground,
+	rekeyJournalRecord,
+	updateRecord,
+	useBridgeJournal,
+} from "@/composables/useBridgeJournal"
 import { TESTIDS } from "@/lib/testids"
 import BridgeForm from "./BridgeForm.vue"
 
@@ -256,11 +267,46 @@ describe("BridgeForm", () => {
 		await w.vm.$nextTick()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(2)
+		// Completion releases the takeover: the finished record surfaces in the journal history
+		// alongside the receipt (the bug: it used to stay foreground-suppressed, then get hidden).
+		expect(useBridgeJournal().activeFlowId.value).toBeNull()
+		expect(useBridgeJournal().visibleRecords.value.some((r) => r.id === "0xdone")).toBe(true)
 		// Cross-tab discard cannot blank the receipt - it renders the snapshot.
 		__resetJournalForTests()
 		await w.vm.$nextTick()
 		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.receiptNewBridge)).trigger("click")
 		expect(w.find(sel(TESTIDS.bridgeSubmit)).exists()).toBe(true)
+	})
+
+	it("a Fuel-tab takeover mid-stepper stands this form down - never a token receipt for a fuel record", async () => {
+		// Both forms stay mounted (App.vue v-show) and share activeFlowId: a Fuel submit re-points it
+		// while this form is mid-stepper. BridgeForm must neither snapshot the fee-juice record as a
+		// token receipt nor release the other form's takeover - it resets to its own form.
+		__resetJournalForTests()
+		depositFn.mockImplementationOnce(async (_a: bigint, _p: boolean, opts?: { onRecord?: (id: string) => void }) => {
+			addRecord(activeFixture("0xmine"))
+			opts?.onRecord?.("0xmine")
+			await new Promise(() => {})
+		})
+		const w = mount(BridgeForm)
+		await w.find(sel(TESTIDS.bridgeAmount)).setValue("100")
+		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.stepper)).exists()).toBe(true)
+		// The Fuel form submits: a fee-juice record takes the shared foreground.
+		const fuelRec = { ...activeFixture("0xfuelx"), schema: 2, assetKind: "fee-juice" } as DepositJournalRecord
+		addRecord(fuelRec)
+		claimForeground("0xfuelx")
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		// Stood down to the form; the fuel takeover is untouched (FuelForm owns its receipt).
+		expect(w.find(sel(TESTIDS.bridgeSubmit)).exists()).toBe(true)
+		expect(useBridgeJournal().activeFlowId.value).toBe("0xfuelx")
+		// The fuel record completes - BridgeForm must NOT render it as a token receipt.
+		updateRecord("0xfuelx", { claimTxHash: `0x${"cd".repeat(32)}`, completedAt: Date.now() })
+		await w.vm.$nextTick()
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.receipt)).exists()).toBe(false)
 	})
 })

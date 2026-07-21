@@ -3,35 +3,49 @@ import { Fr } from "@aztec/aztec.js/fields"
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import { type Mock, beforeEach, describe, expect, it, vi } from "vitest"
 
-const claimMethod = vi.fn(() => ({
-	simulate: async () => ({}),
-	send: async () => ({ receipt: { txHash: "0xpubclaim" } }),
-}))
-
 vi.mock("@aztec/aztec.js/contracts", () => ({
-	Contract: { at: vi.fn(async () => ({ methods: { claim: claimMethod } })) },
-	// `new BatchCall(...)` needs a constructable fn, not an arrow.
+	// `new BatchCall(...)` needs a constructable fn, not an arrow. BOTH paths (public + private) are now
+	// carrier-less zero-app-call BatchCall([]) txs — the self-pay fee method does all the work in setup.
+	// `request()` builds the payload the fixed simulate() feeds to wallet.simulateTx (NOT BatchCall.simulate,
+	// which no-ops for an empty batch + ignores the fee).
 	BatchCall: vi.fn(function () {
-		return { simulate: async () => ({}), send: async () => ({ receipt: { txHash: "0xprivclaim" } }) }
+		return {
+			request: async () => ({ calls: [], authWitnesses: [] }),
+			simulate: async () => ({}),
+			send: async () => ({ receipt: { txHash: "0xfuelclaim" } }),
+		}
 	}),
+	// Identity passthrough: the unit contract pinned here is that simulate() routes the FULL interaction
+	// options (from + fee incl. the explicit gasSettings) through toSimulateOptions into simulateTx; the
+	// real gasSettings mapping is the SDK's own logic, exercised upstream.
+	toSimulateOptions: vi.fn((o: unknown) => o),
 }))
-vi.mock("@aztec/noir-contracts.js/FeeJuice", () => ({ FeeJuiceContractArtifact: {} }))
-// Keep every real export EXCEPT the two that the private claim feeds the salt into — stub them so we can
-// (a) capture which salt the builder routed to `privateMintAndPayFee`, and (b) avoid real poseidon in jsdom
-// (deriveBridgeSecret would compute an @aztec hash — the module-load-crash class).
+// Keep every real export EXCEPT the fee-method builders each path feeds material into — stub them so we can
+// (a) capture the salt/secret each path routed in, and (b) avoid real poseidon in jsdom (deriveBridgeSecret
+// would compute an @aztec hash — the module-load-crash class).
 vi.mock("@nulo/bridge-core", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@nulo/bridge-core")>()
-	return { ...actual, privateMintAndPayFee: vi.fn(() => ({})), deriveBridgeSecret: vi.fn(() => Fr.fromString("0xdead")) }
+	return {
+		...actual,
+		privateMintAndPayFee: vi.fn(() => ({})),
+		publicFeeJuicePayment: vi.fn(() => ({})),
+		deriveBridgeSecret: vi.fn(() => Fr.fromString("0xdead")),
+	}
 })
 
-import { privateMintAndPayFee } from "@nulo/bridge-core"
+import { privateMintAndPayFee, publicFeeJuicePayment } from "@nulo/bridge-core"
 import { buildFuelClaimInteraction } from "./fuelClaim"
 
 const saltArgOf = (call = 0): Fr => (privateMintAndPayFee as unknown as Mock).mock.calls[call][3] as Fr
-const secretArgOf = (call = 0): Fr => (claimMethod.mock.calls[call] as unknown as Fr[])[2]
+// The public self-pay routes its claim into publicFeeJuicePayment(recipient, { claimAmount, claimSecret, leaf }).
+const publicClaimArg = (call = 0) =>
+	(publicFeeJuicePayment as unknown as Mock).mock.calls[call] as [
+		AztecAddress,
+		{ claimAmount: bigint; claimSecret: Fr; messageLeafIndex: bigint },
+	]
+const secretArgOf = (call = 0): Fr => publicClaimArg(call)[1].claimSecret
 
 const RECIPIENT = AztecAddress.fromNumberUnsafe(0x1234)
-const SPONSORED = AztecAddress.fromNumberUnsafe(0x5)
 const ABOVE_FLOOR = "100000000000000000000" // 100e18, well above the 11e18 floor
 const FLOOR = 11_000_000_000_000_000_000n
 
@@ -57,13 +71,12 @@ const rec = (over: Record<string, unknown>): DepositJournalRecord =>
 const deps = (over: Record<string, unknown> = {}) => ({
 	aztec: {},
 	recipient: RECIPIENT,
-	sponsoredFpc: SPONSORED,
 	minFloorFj: FLOOR,
 	...over,
 })
 
 describe("buildFuelClaimInteraction — fail-closed guards", () => {
-	beforeEach(() => claimMethod.mockClear())
+	beforeEach(() => (publicFeeJuicePayment as unknown as Mock).mockClear())
 
 	it("no claimable Fee Juice (missing received) ⇒ stop", async () => {
 		const i = await buildFuelClaimInteraction(rec({ fuel: { leafIndex: "7" } }), deps())
@@ -78,9 +91,25 @@ describe("buildFuelClaimInteraction — fail-closed guards", () => {
 		await expect(i.send()).rejects.toThrow(/below the safe claim floor/)
 	})
 
+	it("public below the floor ⇒ stop (public self-pays now, so the same fail-closed floor guards it)", async () => {
+		const i = await buildFuelClaimInteraction(
+			rec({ fuel: { received: "5", secret: "0x1", leafIndex: "7" } }),
+			deps({ minFloorFj: 10n }),
+		)
+		await expect(i.send()).rejects.toThrow(/below the safe claim floor/)
+	})
+
 	it("private with an UNCONFIGURED floor ⇒ stop (never silently skipped)", async () => {
 		const i = await buildFuelClaimInteraction(
 			rec({ isPrivate: true, fuel: { received: ABOVE_FLOOR, bridgeSecretSalt: "0x1", leafIndex: "7" } }),
+			deps({ minFloorFj: undefined }),
+		)
+		await expect(i.simulate()).rejects.toThrow(/not configured/)
+	})
+
+	it("public with an UNCONFIGURED floor ⇒ stop (never silently skipped)", async () => {
+		const i = await buildFuelClaimInteraction(
+			rec({ fuel: { received: ABOVE_FLOOR, secret: "0x1", leafIndex: "7" } }),
 			deps({ minFloorFj: undefined }),
 		)
 		await expect(i.simulate()).rejects.toThrow(/not configured/)
@@ -103,17 +132,97 @@ describe("buildFuelClaimInteraction — fail-closed guards", () => {
 		const i = await buildFuelClaimInteraction(rec({ fuel: { received: ABOVE_FLOOR, leafIndex: "7" } }), deps())
 		await expect(i.simulate()).rejects.toThrow(/missing its claim secret/)
 	})
+
+	// Clears the static floor but NOT getFeeLimit (gasLimits*maxFees) once fees spike — the protocol's
+	// balance check is against the LIMIT, so both paths must fail CLOSED before send (codex Med).
+	// received = 100e18 (clears the 11e18 floor); feePerL2Gas 1e14 ⇒ public limit 1.5e20, private 4e20.
+	const SPIKED = { feePerDaGas: 0n, feePerL2Gas: 100_000_000_000_000n }
+
+	it("public clears the floor but not the fee LIMIT (fee spike) ⇒ stop", async () => {
+		const i = await buildFuelClaimInteraction(rec({}), deps({ maxFeesPerGas: SPIKED }))
+		await expect(i.send()).rejects.toThrow(/fee limit/)
+	})
+
+	it("private clears the floor but not the fee LIMIT (fee spike) ⇒ stop", async () => {
+		const i = await buildFuelClaimInteraction(
+			rec({ isPrivate: true, fuel: { received: ABOVE_FLOOR, bridgeSecretSalt: "0x1", leafIndex: "7" } }),
+			deps({ maxFeesPerGas: SPIKED }),
+		)
+		await expect(i.send()).rejects.toThrow(/fee limit/)
+	})
 })
 
-describe("buildFuelClaimInteraction — public claim", () => {
-	beforeEach(() => claimMethod.mockClear())
+// The claim's simulate() is a load-bearing gate in useBridgeJournal: it drives the message-availability
+// wait (line 704) AND recordMessageConsumed (line 820). BatchCall([]).simulate() IGNORES the fee for an
+// empty batch and no-ops, so simulate MUST build the payload via request() and run it through simulateTx.
+describe("buildFuelClaimInteraction — simulate validates the REAL payload, not the empty-batch no-op", () => {
+	it("PUBLIC: simulate() builds the fee payload via request() and runs it through wallet.simulateTx", async () => {
+		const simulateTx = vi.fn(async () => ({ ok: true }))
+		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx } }))
+		await i.simulate()
+		expect(simulateTx).toHaveBeenCalledTimes(1)
+	})
 
-	it("builds claim(recipient, received, secret, leaf) paid by the Sponsored FPC", async () => {
+	it("PUBLIC: simulate() PROPAGATES a message-not-ready throw (so the gate can wait, not no-op past it)", async () => {
+		const simulateTx = vi.fn(async () => {
+			throw new Error("No L1 to L2 message found for message hash 0xabc")
+		})
+		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx } }))
+		await expect(i.simulate()).rejects.toThrow(/No L1 to L2 message found/)
+	})
+
+	it("PRIVATE: simulate() also routes through wallet.simulateTx (shared fix; recordMessageConsumed needs it)", async () => {
+		const simulateTx = vi.fn(async () => ({ ok: true }))
+		const i = await buildFuelClaimInteraction(
+			rec({ isPrivate: true, fuel: { received: ABOVE_FLOOR, bridgeSecretSalt: "0x1", leafIndex: "7" } }),
+			deps({ aztec: { simulateTx } }),
+		)
+		await i.simulate()
+		expect(simulateTx).toHaveBeenCalledTimes(1)
+	})
+
+	// Simulation must run under the SAME explicit gasSettings as send — the wallet otherwise fills
+	// estimation defaults (max limits + padded fees), which can spuriously fail the self-pay budget
+	// check while the real send would succeed (codex round 3).
+	it("PUBLIC: simulate() carries the claim's explicit gasSettings + predicted fees into simulateTx", async () => {
+		const simulateTx = vi.fn(async (..._args: unknown[]) => ({ ok: true }))
+		const maxFeesPerGas = { feePerDaGas: 5n, feePerL2Gas: 7n }
+		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx }, maxFeesPerGas }))
+		await i.simulate()
+		const opts = simulateTx.mock.calls[0][1] as {
+			from: unknown
+			fee: { gasSettings: { gasLimits: { daGas: number; l2Gas: number }; maxFeesPerGas: typeof maxFeesPerGas } }
+		}
+		expect(opts.from).toBe(RECIPIENT)
+		// The PUBLIC canary-calibrated limits, not the wallet's estimation defaults.
+		expect(opts.fee.gasSettings.gasLimits.l2Gas).toBe(1_500_000)
+		expect(opts.fee.gasSettings.gasLimits.daGas).toBe(3_000)
+		expect(opts.fee.gasSettings.maxFeesPerGas).toEqual(maxFeesPerGas)
+	})
+
+	it("PRIVATE: simulate() carries the private 2-call gasSettings into simulateTx", async () => {
+		const simulateTx = vi.fn(async (..._args: unknown[]) => ({ ok: true }))
+		const i = await buildFuelClaimInteraction(
+			rec({ isPrivate: true, fuel: { received: ABOVE_FLOOR, bridgeSecretSalt: "0x1", leafIndex: "7" } }),
+			deps({ aztec: { simulateTx } }),
+		)
+		await i.simulate()
+		const opts = simulateTx.mock.calls[0][1] as { fee: { gasSettings: { gasLimits: { daGas: number; l2Gas: number } } } }
+		expect(opts.fee.gasSettings.gasLimits.l2Gas).toBe(4_000_000)
+		expect(opts.fee.gasSettings.gasLimits.daGas).toBe(100_000)
+	})
+})
+
+describe("buildFuelClaimInteraction — public self-pay claim", () => {
+	beforeEach(() => (publicFeeJuicePayment as unknown as Mock).mockClear())
+
+	it("self-pays via publicFeeJuicePayment(recipient, {claimAmount, claimSecret, leaf}) — carrier-less, NO Sponsored FPC", async () => {
 		const i = await buildFuelClaimInteraction(rec({}), deps())
-		expect(await i.send()).toEqual({ txHash: "0xpubclaim" })
-		const [to, amount] = claimMethod.mock.calls[0] as unknown as [AztecAddress, bigint]
+		expect(await i.send()).toEqual({ txHash: "0xfuelclaim" })
+		const [to, claim] = publicClaimArg()
 		expect(to).toBe(RECIPIENT)
-		expect(amount).toBe(BigInt(ABOVE_FLOOR))
+		expect(claim.claimAmount).toBe(BigInt(ABOVE_FLOOR))
+		expect(claim.messageLeafIndex).toBe(7n)
 	})
 })
 
@@ -123,7 +232,7 @@ describe("buildFuelClaimInteraction — public claim", () => {
 // and lets a public claim diverge from the secret the engine gated on (codex LOW).
 describe("buildFuelClaimInteraction — authoritative claim material wins over the journal plaintext", () => {
 	beforeEach(() => {
-		claimMethod.mockClear()
+		;(publicFeeJuicePayment as unknown as Mock).mockClear()
 		;(privateMintAndPayFee as unknown as Mock).mockClear()
 	})
 
@@ -142,7 +251,7 @@ describe("buildFuelClaimInteraction — authoritative claim material wins over t
 		)
 		expect(saltArgOf().toString()).toBe(Fr.fromString("0x3333").toString())
 		// The build succeeded into a real interaction — not the guard's fail-stop pair.
-		expect(await i.send()).toEqual({ txHash: "0xprivclaim" })
+		expect(await i.send()).toEqual({ txHash: "0xfuelclaim" })
 	})
 
 	it("PRIVATE: falls back to the plaintext salt when the engine passes none (legacy/no-envelope)", async () => {
@@ -154,17 +263,16 @@ describe("buildFuelClaimInteraction — authoritative claim material wins over t
 	})
 
 	it("PUBLIC: claims with the engine-gated resolvedSecret, NOT a divergent fuel.secret", async () => {
-		const i = await buildFuelClaimInteraction(
+		await buildFuelClaimInteraction(
 			rec({ fuel: { received: ABOVE_FLOOR, leafIndex: "7", secret: "0xbad" } }),
 			deps({ resolvedSecret: "0x1234" }),
 		)
-		await i.send() // the claim call runs inside send, not at build time.
+		// The self-pay fee method is built at build time (before send), so the routed secret is captured here.
 		expect(secretArgOf().toString()).toBe(Fr.fromString("0x1234").toString())
 	})
 
 	it("PUBLIC: falls back to fuel.secret when the engine passes no resolvedSecret", async () => {
-		const i = await buildFuelClaimInteraction(rec({ fuel: { received: ABOVE_FLOOR, leafIndex: "7", secret: "0x99" } }), deps())
-		await i.send()
+		await buildFuelClaimInteraction(rec({ fuel: { received: ABOVE_FLOOR, leafIndex: "7", secret: "0x99" } }), deps())
 		expect(secretArgOf().toString()).toBe(Fr.fromString("0x99").toString())
 	})
 })

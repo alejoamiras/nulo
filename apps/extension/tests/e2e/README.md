@@ -159,7 +159,7 @@ Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 
 ## Known failures + triage
 
-The full network suite is currently **46 / 66 passing**. The 18 remaining failures are tracked in `implementations-plan/network-test-triage/plan.md` and bucketed as: importToken cascade (14), contacts-sender (3), data-registerSender (1). None are infrastructure regressions from this work — they predate the parallel-isolation refactor.
+The full network suite is currently **46 / 66 passing**. The 18 remaining failures are tracked in `implementations-plan/network-test-triage/plan.md` and bucketed as: importToken cascade (14), contacts-sender (3 — that file has since been reworked into `senders-advanced.test.ts` by the contacts↔sender decoupling), data-registerSender (1). None are infrastructure regressions from this work — they predate the parallel-isolation refactor.
 
 ## What's owned per worktree (parallel-safety summary)
 

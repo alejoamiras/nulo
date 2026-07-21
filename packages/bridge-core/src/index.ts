@@ -3,6 +3,7 @@
  * No React, no Vue, no server. Consumed by the bridge frontend's composables.
  */
 
+export * from "./claim-secret"
 export * from "./candidate-schema"
 export * from "./content-hash"
 export * from "./fee-juice"
@@ -15,6 +16,7 @@ export * from "./l2"
 export * from "./journal"
 export * from "./progress"
 export * from "./recovery-crypto"
+export * from "./relay-claim"
 export * from "./seal-trust"
 export * from "./status"
 export * from "./backup"
