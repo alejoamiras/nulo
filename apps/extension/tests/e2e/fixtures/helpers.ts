@@ -344,22 +344,10 @@ export async function switchAccountByAddress(page: Page, address: string): Promi
 
 // ── Contact ────────────────────────────────────────────────────────────
 
-/** Add a contact via the NewContactPopup.
- *
- *  `opts.registerAsSender` controls the register-as-sender toggle. Default
- *  is `false` because `registeredExtension` runs without a real PXE node —
- *  the popup's add-sender call would fail with the WARNING toast
- *  "Contact saved · sender registration failed" rather than the success
- *  toast "Contact is added". Tests that need a sender contact must use
- *  `localNetworkExtension` and pass `registerAsSender: true`.
- *
- *  The popup's default toggle state is ON (per `NewContactPopup.vue`'s
- *  `useFormState({ registerAsSender: { initial: true } })`); the helper
- *  flips when `registerAsSender === false` to land on the requested state.
- */
-export async function addContact(page: Page, name: string, address: string, opts: { registerAsSender?: boolean } = {}): Promise<void> {
-	const registerAsSender = opts.registerAsSender ?? false
-
+/** Add a contact via the NewContactPopup. Saving a contact touches the
+ *  contact service only — sender registration is a separate concern
+ *  (Settings → Advanced → Account State → Senders). */
+export async function addContact(page: Page, name: string, address: string): Promise<void> {
 	await clickByTestId(page, "contacts-new-btn")
 
 	// Wait for form inputs to mount
@@ -368,14 +356,6 @@ export async function addContact(page: Page, name: string, address: string, opts
 
 	await page.waitForSelector('input[placeholder*="0x15c4"]', { visible: true, timeout: 5_000 })
 	await replaceInputValue(page, 'input[placeholder*="0x15c4"]', address)
-
-	// Toggle defaults ON; click flips it OFF when the caller doesn't want
-	// sender registration. Idempotent across calls because `form.reset()`
-	// (NewContactPopup.vue watcher) re-applies `initial: true` on every
-	// popup open.
-	if (!registerAsSender) {
-		await clickByTestId(page, "new-contact-register-sender")
-	}
 
 	await clickByTestId(page, "new-contact-submit")
 
@@ -391,19 +371,6 @@ export async function addContact(page: Page, name: string, address: string, opts
 		{ timeout: 10_000, polling: 200 },
 		name,
 	)
-
-	// When the caller asked for sender registration, also wait for the chip
-	// to render BEFORE we close the popup. The submit handler awaits both
-	// addContact and addSender before emitting onClose, but the contact-row
-	// (storage write) lands well before addSender (PXE write) — so the
-	// previous early `closeStuckPopup` call ran while addSender was still in
-	// flight and we'd race the popup tear-down.
-	if (registerAsSender) {
-		await page.waitForSelector(`[data-testid="contact-row"][data-contact-name="${name}"] [data-testid="contact-sender-chip"]`, {
-			visible: true,
-			timeout: 30_000,
-		})
-	}
 
 	await closeStuckPopup(page)
 }
@@ -428,21 +395,10 @@ export async function closeStuckPopup(page: Page): Promise<void> {
 	})
 }
 
-/** Delete a contact by name (assumes contacts page is open).
- *
- *  When the contact is currently registered as a sender on the active
- *  network, the confirm popup renders an additional "Also unregister as
- *  sender on <network>" toggle defaulted ON. `opts.unregisterSender`
- *  forces a desired state on that toggle:
- *    - `undefined` (default): leave whatever the popup decided. For
- *      non-sender contacts this is a no-op; for sender contacts the
- *      toggle stays ON.
- *    - `true`: ensure the toggle is ON before submitting.
- *    - `false`: ensure the toggle is OFF before submitting.
- *  When the contact is NOT a sender, the toggle isn't rendered and the
- *  option is silently ignored (caller responsibility to know).
- */
-export async function deleteContact(page: Page, name: string, opts: { unregisterSender?: boolean } = {}): Promise<void> {
+/** Delete a contact by name (assumes contacts page is open). Deleting a
+ *  contact never touches sender registration — senders are managed only
+ *  in Settings → Advanced → Account State → Senders. */
+export async function deleteContact(page: Page, name: string): Promise<void> {
 	const rowSelector = `[data-testid="contact-row"][data-contact-name="${name}"]`
 	await page.waitForSelector(rowSelector, { visible: true, timeout: 5_000 })
 
@@ -468,28 +424,6 @@ export async function deleteContact(page: Page, name: string, opts: { unregister
 		visible: true,
 		timeout: 5_000,
 	})
-
-	// If caller specified a desired toggle state, flip the unregister-sender
-	// toggle when its current state doesn't match. The toggle is only present
-	// for sender contacts; on non-sender contacts the query yields null and
-	// we leave the popup as-is.
-	if (opts.unregisterSender !== undefined) {
-		const desired = opts.unregisterSender
-		const flipped = await page.evaluate((want: boolean) => {
-			const toggle = document.querySelector<HTMLElement>('[data-testid="confirm-toggle"]')
-			if (!toggle) return false
-			const isOn = toggle.getAttribute("data-toggle-active") === "true"
-			if (isOn !== want) {
-				toggle.click()
-				return true
-			}
-			return false
-		}, desired)
-		// `flipped` is informational; the surface contract is the toggle's
-		// final state matches `desired` (or it wasn't present and the caller
-		// shouldn't have asked).
-		void flipped
-	}
 
 	await clickByTestId(page, "confirm-submit")
 

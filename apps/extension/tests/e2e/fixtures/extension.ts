@@ -144,6 +144,12 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		}
 	})
 	page.on("pageerror", (err: Error) => {
+		// Mirror the consoleErrors filter above: the benign SW-port-close
+		// cascade also surfaces as an UNHANDLED REJECTION (pageerror) when a
+		// fire-and-forget RPC (e.g. app.vue's account-switch syncTransactions)
+		// is in flight during an MV3 service-worker restart. Same known noise,
+		// same filter — everything else still fails the assertion.
+		if (err.message?.includes("Client disconnected")) return
 		ctx.pageErrors.push(err)
 	})
 
@@ -1051,6 +1057,12 @@ async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	})
 
 	page.on("pageerror", (err: Error) => {
+		// Mirror the consoleErrors filter above: the benign SW-port-close
+		// cascade also surfaces as an UNHANDLED REJECTION (pageerror) when a
+		// fire-and-forget RPC (e.g. app.vue's account-switch syncTransactions)
+		// is in flight during an MV3 service-worker restart. Same known noise,
+		// same filter — everything else still fails the assertion.
+		if (err.message?.includes("Client disconnected")) return
 		ctx.pageErrors.push(err)
 	})
 

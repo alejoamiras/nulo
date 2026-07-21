@@ -77,7 +77,11 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		const contact = (await this.storage.getValues()).filter((c) => c.profileId === profile.id && c.address === contactAddress)
+		// Case-insensitive: hex casing doesn't make a different address, and
+		// stored rows may predate canonical-lowercase-on-save.
+		const contact = (await this.storage.getValues()).filter(
+			(c) => c.profileId === profile.id && c.address.toLowerCase() === contactAddress.toLowerCase(),
+		)
 
 		if (!contact.length) return undefined
 

@@ -45,6 +45,8 @@
     "JournalTerminalCardProps": true,
     "JournalTerminalDisplay": true,
     "JournalTerminalVisualState": true,
+    "MAX_CONTACT_IMPORT_BYTES": true,
+    "MAX_CONTACT_IMPORT_ROWS": true,
     "MaybeRef": true,
     "MaybeRefOrGetter": true,
     "MethodCarrier": true,

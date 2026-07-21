@@ -58,7 +58,8 @@ const handleDelete = (sender) => {
 	cacheStore.confirm.confirm_color = "red"
 	cacheStore.confirm.confirm_text = "Yes, delete sender"
 	cacheStore.confirm.title = "Delete this sender?"
-	cacheStore.confirm.description = "If you delete a sender, further private transactions from that sender won’t appear in your wallet"
+	cacheStore.confirm.description =
+		"Most transfers are detected automatically; removing a sender only affects transfers delivered with address-derived tagging"
 	cacheStore.confirm.callback = async () => {
 		await accountStateClientService.deleteSender(appStore.network.id, sender)
 
@@ -97,7 +98,7 @@ onBeforeUnmount(() => {
 			</Tooltip>
 
 			<Flex v-else-if="senders.length" direction="column" gap="8">
-				<Flex v-for="sender in senders" justify="between" :class="$style.card">
+				<Flex v-for="sender in senders" justify="between" :class="$style.card" data-testid="sender-row" :data-sender-address="sender">
 					<Flex align="center" gap="10">
 						<Icon name="user" size="16" color="tertiary" />
 
@@ -132,6 +133,7 @@ onBeforeUnmount(() => {
 								size="14"
 								color="tertiary"
 								:class="$style.icon_btn"
+								data-testid="sender-delete"
 							/>
 
 							<template #content> Delete sender </template>
@@ -142,10 +144,10 @@ onBeforeUnmount(() => {
 
 			<div v-else :class="$style.empty">
 				<span :class="$style.empty_headline">NO SENDERS YET</span>
-				<span :class="$style.empty_sub">Add accounts you want to receive private transactions from.</span>
+				<span :class="$style.empty_sub">Most transfers are detected automatically. Add a sender only for transfers delivered with address-derived tagging.</span>
 			</div>
 
-			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large">
+			<Button @click="popupStore.open('new_sender')" wide variant="primary" size="large" data-testid="senders-add-btn">
 				Add sender
 			</Button>
 		</Flex>
