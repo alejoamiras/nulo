@@ -62,7 +62,6 @@ import {
 	connectJournalDeps,
 	discard,
 	flagRecordError,
-	markApproveOutcome,
 	markSessionLive,
 	isMsgConsumed,
 	resumeSessionWork,
@@ -967,7 +966,6 @@ export function useDepositFlow() {
 			if (permit2Allowance < tokenAmount) {
 				throw new Error("This token does not pre-approve Permit2 - bridging is unavailable for it.")
 			}
-			markApproveOutcome(id, "skipped")
 
 			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)

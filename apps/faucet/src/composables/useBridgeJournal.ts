@@ -76,9 +76,10 @@ export interface RecordRuntime {
 	stepDetail?: string
 	/** Set after the post-✓ grace: the card leaves the rendered list; the RECORD stays in storage. */
 	hidden?: boolean
-	/** Whether the APPROVE leg was skipped (sufficient allowance) or completed - display-only,
-	 *  underivable from facts once the flow advances (plan S15). Absent after a reload. */
-	approveOutcome?: "skipped" | "done"
+	/** Set when a real APPROVE tx completed in THIS session - keeps the step visible as done for the
+	 *  rest of the run. A sufficient allowance never sets it (the step is simply not rendered), and it
+	 *  is absent after a reload - a retry re-checks the allowance idempotently (plan S15). */
+	approveOutcome?: "done"
 	/** Withdraw proving countdown inputs. */
 	provenBlock?: number
 	targetBlock?: number
@@ -433,8 +434,8 @@ export function setRecordStep(id: string, step?: BridgeStep, stepDetail?: string
 	setStep(id, step, stepDetail)
 }
 
-/** Display-only APPROVE outcome (plan S15) - written at the allowance decision. */
-export function markApproveOutcome(id: string, outcome: "skipped" | "done"): void {
+/** Display-only APPROVE outcome (plan S15) - written when a real approval tx lands. */
+export function markApproveOutcome(id: string, outcome: "done"): void {
 	setRuntime(id, { approveOutcome: outcome })
 }
 

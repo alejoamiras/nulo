@@ -922,10 +922,10 @@ describe("useBridgeJournal engine", () => {
 		connectJournalDeps(deps)
 		addRecord(mkDeposit("0xnarr"))
 		setRecordStep("0xnarr", "approving", "confirm the allowance")
-		markApproveOutcome("0xnarr", "skipped")
+		markApproveOutcome("0xnarr", "done")
 		const rt = useBridgeJournal().runtime.value["0xnarr"]
 		expect(rt?.step).toBe("approving")
-		expect(rt?.approveOutcome).toBe("skipped")
+		expect(rt?.approveOutcome).toBe("done")
 	})
 
 	it("runOnLane serializes one lane and leaves the other free", async () => {

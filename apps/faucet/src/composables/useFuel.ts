@@ -25,6 +25,7 @@ import {
 	cacheSecret,
 	discard,
 	flagRecordError,
+	markApproveOutcome,
 	markSessionLive,
 	runDepositClaim,
 	runOnLane,
@@ -190,6 +191,9 @@ export function useFuelFlow() {
 				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
 					onStillWaiting: (attempt) => setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
 				})
+				// Keeps the APPROVE step visible as done for the rest of the run — the rail renders it only
+				// when an approval was actually part of this run (a sufficient allowance shows no step at all).
+				markApproveOutcome(id, "done")
 			}
 
 			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")

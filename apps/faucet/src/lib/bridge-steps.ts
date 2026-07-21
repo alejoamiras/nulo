@@ -9,7 +9,7 @@ import type { RecordRuntime } from "@/composables/useBridgeJournal"
  * active, its live detail, and its determinate progress.
  */
 
-export type PhaseState = "pending" | "active" | "done" | "skipped" | "failed"
+export type PhaseState = "pending" | "active" | "done" | "failed"
 
 export interface BridgePhase {
 	key: "seal" | "approve" | "sign" | "deposit" | "sync" | "claim" | "confirm" | "exit" | "prove" | "finish"
@@ -52,10 +52,15 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 	// Every deposit now SIGNS a Permit2 witness and calls the router's bridge()/bridgeWithFuel (the
 	// single path). The AZLO token pre-approves canonical Permit2 for every holder, so bridge-only +
 	// swap-fueled need no approve. Fuel-only is the exception: the canonical fee asset does NOT
-	// pre-approve Permit2, so its FIRST deposit shows a one-time APPROVE (skipped thereafter).
+	// pre-approve Permit2, so its FIRST deposit needs a one-time APPROVE. The step renders ONLY when an
+	// approval is actually part of this run — actively approving now, or done earlier in the session
+	// (the flow checks the allowance silently, so already-approved users never see a step they don't
+	// need). Post-reload the ephemeral outcome is gone and the step simply isn't shown; honest, because
+	// a retry re-checks the allowance idempotently.
+	const approveInRun = rt.step === "approving" || rt.approveOutcome === "done"
 	const keys: BridgePhase["key"][] = [
 		...(rec.isPrivate ? (["seal"] as BridgePhase["key"][]) : []),
-		...(isFuel ? (["approve"] as BridgePhase["key"][]) : []),
+		...(isFuel && approveInRun ? (["approve"] as BridgePhase["key"][]) : []),
 		"sign",
 		"deposit",
 		"sync",
@@ -184,12 +189,7 @@ function buildPhases(
 	const failed = !!rt.attention && FAILED_ATTENTIONS.has(rt.attention)
 	return keys.map((key, i) => {
 		if (completed) return { key, label: labels[key], state: "done" as const }
-		if (i < activeIndex) {
-			// APPROVE's skipped-vs-done is underivable from facts (plan S15) - the ephemeral
-			// approveOutcome carries it; absent (post-reload) degrades to a plain done.
-			if (key === "approve" && rt.approveOutcome === "skipped") return { key, label: labels[key], state: "skipped" as const }
-			return { key, label: labels[key], state: "done" as const }
-		}
+		if (i < activeIndex) return { key, label: labels[key], state: "done" as const }
 		if (i === activeIndex) {
 			return {
 				key,

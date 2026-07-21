@@ -44,27 +44,14 @@ describe("stepperPhases - fuel (fee-juice) records", () => {
 	const fuelRec = (over: Partial<DepositJournalRecord> = {}): DepositJournalRecord =>
 		dep({ schema: 2, assetKind: "fee-juice", fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" }, ...over })
 
-	it("a public fuel record APPROVEs Permit2 (one-time) then SIGNs the router bridge()", () => {
-		expect(stepperPhases(fuelRec({ isPrivate: false }), {}).map((p) => p.key)).toEqual([
-			"approve",
-			"sign",
-			"deposit",
-			"sync",
-			"claim",
-			"confirm",
-		])
+	it("a public fuel record shows NO approve step by default (sufficient allowance = no step at all)", () => {
+		expect(stepperPhases(fuelRec({ isPrivate: false }), {}).map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
 	})
 
-	it("a private fuel record SEALs the salt, APPROVEs Permit2 (one-time), then SIGNs", () => {
-		expect(stepperPhases(fuelRec({ isPrivate: true }), {}).map((p) => p.key)).toEqual([
-			"seal",
-			"approve",
-			"sign",
-			"deposit",
-			"sync",
-			"claim",
-			"confirm",
-		])
+	it("APPROVE materializes only while a real approval runs (rt.step approving), active", () => {
+		const phases = stepperPhases(fuelRec({ isPrivate: true }), { step: "approving" })
+		expect(phases.map((p) => p.key)).toEqual(["seal", "approve", "sign", "deposit", "sync", "claim", "confirm"])
+		expect(phases.find((p) => p.key === "approve")?.state).toBe("active")
 	})
 
 	it("claim is labelled CLAIM GAS and deposit is plain DEPOSIT (gas-only, no token/swap leg)", () => {
@@ -97,17 +84,19 @@ describe("stepperPhases - deposit matrix", () => {
 		expect(s.sign).toBe("active")
 	})
 
-	it("approveOutcome carries skipped (⊘) vs done vs honest degradation when absent (fuel-only, the sole approve path)", () => {
-		// Only fuel-only shows a one-time Permit2 APPROVE now (bridge-only pre-approves via the token).
+	it("APPROVE renders only when an approval was part of this run (fuel-only, the sole approve path)", () => {
+		// Only fuel-only can need a one-time Permit2 APPROVE (bridge-only pre-approves via the token).
+		// A sufficient allowance renders no step at all; a completed approval stays visible as done for
+		// the rest of the run; after a reload the ephemeral outcome is gone and the step isn't shown
+		// (honest - a retry re-checks the allowance idempotently).
 		const base = dep({
 			assetKind: "fee-juice",
 			fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" },
 			isPrivate: false,
 			depositTxHash: "0xt",
 		})
-		expect(states(base, { approveOutcome: "skipped" }).approve).toBe("skipped")
 		expect(states(base, { approveOutcome: "done" }).approve).toBe("done")
-		expect(states(base, {}).approve).toBe("done") // absent (reload) - no false skipped badge
+		expect(states(base, {}).approve).toBeUndefined() // absent runtime (reload / never needed) - no step
 	})
 
 	it("depositTxHash without leafIndex: DEPOSIT active (waiting for Ethereum)", () => {
