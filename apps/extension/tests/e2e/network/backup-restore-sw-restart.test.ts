@@ -12,6 +12,15 @@
  * navigation (restore not finished). If the restore wins the race and finishes
  * first, the test degenerates to the plain reopen-recovery leg — still a valid
  * pass, logged for visibility.
+ *
+ * The registration guarantee only applies when there ARE registrations to lose:
+ * a kill landing PRE-finalize triggers the import composable's designed rollback
+ * (the orphan profile is deleted so a retry starts clean) and registrations
+ * haven't happened yet — the wallet legitimately resets to register. The test
+ * therefore accepts two outcomes, asserting whichever occurred was performed
+ * correctly: full recovery to a synced balance, or a CLEAN rollback. What it
+ * rejects is the third state this test once flaked on: a silent park where the
+ * wallet is neither recovered nor reset.
  */
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -77,7 +86,7 @@ async function stopServiceWorker(ctx: ExtensionContext): Promise<void> {
 }
 
 test.skipIf(!hasConfig)(
-	"a SW restart mid-restore does not lose contract registrations — recovery reaches a synced on-chain balance",
+	"a SW restart mid-restore recovers to a synced on-chain balance or rolls back cleanly — never a silent wedge",
 	// 15 min: this test does export + fresh-import + mid-restore SW kill + full recovery + on-chain
 	// balance sync — more than any single-op network test, so it needs headroom for the generous
 	// inner waits above under CI proving load.
@@ -154,15 +163,93 @@ test.skipIf(!hasConfig)(
 			await page2.close()
 
 			// ── 3. The user's natural recovery: reopen + unlock ─────────────
-			// Generous under CI: after a mid-restore SW kill the recovery re-derives the master,
-			// re-provisions the encrypted store key, re-boots the chain runtime, and re-registers
-			// contracts — all behind real proving on a loaded runner.
+			// Two DESIGNED outcomes exist, decided by where the kill lands relative to
+			// finalizeRestore (verified against useFullBackupImport):
+			//  - RECOVERED: kill landed post-finalize (session opened, registrations
+			//    applied) — reopen routes to auth, unlock re-derives the master and
+			//    boots the chain runtime, and the wallet lands on general.
+			//  - ROLLED BACK: kill landed pre-finalize — the import page's outer catch
+			//    deletes the just-created profile ("delete the orphan so a retry starts
+			//    clean"), so the reopened popup has ZERO profiles and legitimately routes
+			//    to register. Registrations only happen post-finalize, so this kill point
+			//    has none to lose; the user retries with their backup file. This leg
+			//    asserts the rollback was CLEAN (no orphan profile row).
+			// A settle LOOP (not a one-shot unlock + single long wait) is required: the
+			// fresh popup can transiently show /popup (an index route that immediately
+			// pushes general) before the auth guard settles, and a one-shot hash sample
+			// taken in that window no-ops the unlock — after which nobody ever types the
+			// password and the old 240s wait parked silently.
 			const page3 = await openPopup(ctx2)
+			// Route-trajectory recorder: poll-based because vue-router's hash history
+			// navigates via pushState, which fires neither hashchange nor popstate.
+			await page3.evaluate(() => {
+				const w = window as unknown as { __nuloRouteTrace?: Array<{ t: number; h: string }> }
+				const trace: Array<{ t: number; h: string }> = [{ t: Date.now(), h: window.location.hash }]
+				w.__nuloRouteTrace = trace
+				setInterval(() => {
+					const h = window.location.hash
+					if (trace[trace.length - 1]?.h !== h) trace.push({ t: Date.now(), h })
+				}, 100)
+			})
 			await page3.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
-			await ensureUnlocked(page3, TEST_PASSWORD)
-			await page3.waitForFunction(() => window.location.hash.includes("/popup/general"), { timeout: 240_000 })
 
-			// ── 4. Contracts survived: the imported account syncs its REAL balance ──
+			let leg: "recovered" | "rolled-back" | "timeout" = "timeout"
+			const deadline = Date.now() + 240_000
+			while (Date.now() < deadline) {
+				const hash = await page3.evaluate(() => window.location.hash)
+				if (hash.includes("/popup/general")) {
+					leg = "recovered"
+					break
+				}
+				if (hash.includes("/popup/auth")) {
+					await ensureUnlocked(page3, TEST_PASSWORD).catch(() => {})
+					continue
+				}
+				if (hash.includes("/popup/register")) {
+					// Register is terminal ONLY with the profile row really gone (the guard
+					// routes here strictly on an empty getProfiles()); re-check raw storage
+					// so a transient guard state can't end the loop early.
+					const profileRows = await page3.evaluate(async () => {
+						const all = await chrome.storage.local.get()
+						return Object.keys(all).filter((k) => k.startsWith("nulo:core:profiles@"))
+					})
+					if (profileRows.length === 0) {
+						leg = "rolled-back"
+						break
+					}
+				}
+				await new Promise((resolve) => setTimeout(resolve, 500))
+			}
+
+			if (leg === "timeout") {
+				const diag = await page3
+					.evaluate(async () => {
+						const w = window as unknown as { __nuloRouteTrace?: Array<{ t: number; h: string }> }
+						const local = await chrome.storage.local.get()
+						const session = await chrome.storage.session.get()
+						return {
+							trace: w.__nuloRouteTrace ?? "<recorder lost — page reloaded>",
+							hash: window.location.hash,
+							authFormVisible: document.querySelector('[data-testid="auth-password-input"]') !== null,
+							bodyText: document.body.innerText.replace(/\s+/g, " ").slice(0, 300),
+							localKeys: Object.keys(local).sort(),
+							sessionKeys: Object.keys(session).sort(),
+						}
+					})
+					.catch((evalErr) => ({ evalFailed: String(evalErr) }))
+				throw new Error(
+					`[sw-restart-restore] recovery neither reached general nor rolled back within 240s; parked state: ${JSON.stringify(diag)}`,
+				)
+			}
+
+			if (leg === "rolled-back") {
+				console.warn(
+					"[sw-restart-restore] pre-finalize kill → designed clean rollback (profile deleted, register shown); recovery leg not exercised this run",
+				)
+				return
+			}
+
+			// ── 4. RECOVERED: contracts survived — the imported account syncs its REAL balance ──
 			await switchToLocalNetwork(page3)
 			expect(await getAccountAddress(page3)).toBe(funded)
 			for (let i = 0; i < 40; i++) {

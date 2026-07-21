@@ -90,6 +90,24 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   paths — never key on bare `EXTENSION_PATH`): prod-shaped builds seed Alpha-active and CI cannot
   reach that RPC. Coverage lives on every PR via the pinned in-job build; the release gate keeps
   every other smoke test. Revisit if an official CI-reachable mainnet RPC appears.
+- **A kill-recovery test must model ALL designed outcomes, not just the flattering one.** The
+  sw-restart-mid-restore test flaked for months (silent 240s park, ≥4 red CI runs) because a
+  PRE-finalize SW kill triggers the import composable's designed rollback (`deleteProfile` of the
+  orphan → wallet legitimately resets to register), while the test only accepted the recovery
+  outcome. Under CI proving load the restore stretches, the kill lands pre-finalize more often, and
+  the "flake" was the product doing exactly what it was coded to do. Map the implementation's
+  outcome space (read the error paths, not just the happy path) BEFORE writing the assertion.
+- **One-shot route checks race vue-router settling — use settle loops.** `ensureUnlocked` samples the
+  hash ONCE and no-ops off-auth; a fresh popup transiently shows `/popup` (an index route that
+  immediately pushes general) before the guard settles on auth, so a one-shot sample in that window
+  means nobody ever types the password. Recovery waits should loop: general → done; auth → unlock →
+  re-check; terminal-reset route → verify via raw storage before ending the wait.
+- **Instrument long navigation waits with a route-trajectory recorder** (poll `window.location.hash`
+  on an interval and push transitions into a `window.__nuloRouteTrace` array — vue-router's hash
+  history navigates via pushState, so `hashchange`/`popstate` listeners see NOTHING). On timeout,
+  dump trace + parked hash + storage key names into the thrown Error message (vitest prints it with
+  the failure; console.error can interleave away from the test's block in CI logs). A silent
+  multi-minute park is undiagnosable from CI logs after the fact.
 
 ## References
 
