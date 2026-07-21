@@ -31,6 +31,10 @@ jobs:
     timeout-minutes: 20
     env:
       EXTENSION_PATH: ${{ inputs.extension_path }}
+      # Explicit artifact-mode flag for BOTH prod-artifact delivery paths (downloaded artifact_name
+      # AND caller-supplied extension_path) - the suite's skips/contracts key off this, never off
+      # bare EXTENSION_PATH (review CONFIRMED the asymmetry when only the artifact_name step set it).
+      NULO_E2E_ARTIFACT_RUN: ${{ (inputs.artifact_name != '' || inputs.extension_path != '') && '1' || '' }}
       # Single source for BOTH the build stamp and the runner flag below: if
       # these ever diverge, migration.test.ts silently skips (build armed,
       # runner unaware) or times out (runner armed, build without the fixture).

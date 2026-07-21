@@ -69,11 +69,27 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   any fixture can switch. CI egress to the public Alpha mainnet RPC blackholes, and each blocked call
   eats the node client's full 60s-abort × retry envelope — so e2e builds pin
   `VITE_NULO_E2E_DEFAULT_NET=testnet` (smoke workflow + agent.sh; never ships, prod default unaffected).
-- **Known debt (queued, not fixed)**: vitest ignores `global-setup.ts`'s named teardown export while a
-  default setup export exists, and `agent.sh` has no trap — a mid-boot death can leak the sandbox
-  process group. Fix shape: default-export setup returning teardown + `kill(-pgid)` TERM→KILL + faucet
-  included + lock cleared. Also queued: release-chain artifact-smoke uses prod-shaped builds (Alpha
-  default) and will hit the mainnet-RPC wall at the next stable cut.
+- **Vitest globalSetup contract (FIXED, was silent for the suite's whole life)**: with a `default`
+  export present, a named `teardown` export is IGNORED — the teardown must be the default's RETURN
+  value (vitest loader: `if (m.default) return { file, setup: m.default }`). Both `global-setup.ts`
+  and `global-setup-smoke.ts` had the dead-named-teardown bug; both now return the teardown, and a
+  setup that fails midway tears down what it already started before rethrowing.
+- **Do NOT add bash signal traps around foreground vitest** (tried, review-killed with empirical
+  proof): bash DEFERS INT/TERM traps until the foreground child exits, so a trap can never fire
+  during the build/suite windows it would protect — and a deferred trap that fires after the child
+  finishes CLOBBERS the real exit code (green run → 130; exit-86 → retry swallowed). Pre-vitest the
+  agent owns no processes; sandbox lifecycle belongs to the TS side: the wired global teardown
+  (ownership-gated, KILL-escalated), its signal hooks (fire-and-forget kills, lock left in place as
+  the reap record), and the next run's liveness-checked orphan reap via the progressively-written
+  `owned.json` (pids recorded per-spawn, not post-deploy).
+- **Lock-ownership rule**: only the run that WROTE `owned.json` may clear it; the reuse path updates
+  deployment fields in place without claiming ownership (overwriting with an empty pid map orphans
+  the prior run's live sandbox beyond reap).
+- **Release-gate tradeoff (deliberate, owner-visible)**: the encrypted backup-roundtrip SKIPS on
+  artifact smoke runs (`NULO_E2E_ARTIFACT_RUN=1`, the explicit flag set for BOTH artifact delivery
+  paths — never key on bare `EXTENSION_PATH`): prod-shaped builds seed Alpha-active and CI cannot
+  reach that RPC. Coverage lives on every PR via the pinned in-job build; the release gate keeps
+  every other smoke test. Revisit if an official CI-reachable mainnet RPC appears.
 
 ## References
 

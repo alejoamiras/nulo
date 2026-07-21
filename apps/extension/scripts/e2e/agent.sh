@@ -15,6 +15,16 @@ cd "$(dirname "$0")/../.."
 
 PORTS_JSON=".e2e-state/ports.json"
 
+# DELIBERATELY NO signal trap here (review CONFIRMED x5): bash defers INT/TERM traps until the
+# foreground child exits, so a trap can never run during the build or vitest - the only windows
+# worth protecting - and a DEFERRED trap that fires after the child completes would clobber the
+# real classified exit (a green 25-min run reported as 130, or an exit-86 that must trigger the
+# CI retry swallowed). Pre-vitest this script owns NO processes (spawns happen inside vitest's
+# global-setup), and a trap reading owned.json in that window would kill a PRIOR/CONCURRENT run's
+# recorded pids. Sandbox lifecycle is owned end-to-end by the TypeScript side: vitest's wired
+# global teardown (KILL-escalated, ownership-gated) + its signal hooks + the next run's
+# liveness-checked orphan reap via the progressively-written lock.
+
 # Clear stale boot-sentinel markers from a prior run so the boot-failure
 # classifier (scripts/e2e/classify-exit.ts) sees only THIS run's state.
 rm -f .e2e-state/boot-started .e2e-state/boot-ready .e2e-state/tests-started
