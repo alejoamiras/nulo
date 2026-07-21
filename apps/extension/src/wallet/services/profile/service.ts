@@ -625,29 +625,28 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("Invalid profile old password")
 			}
 
-			profile.guard = resealed.encrypted.guard
-			profile.secret = resealed.encrypted.secret
-			await this.repo.set(id, profile)
-
-			this.emit("onProfileUpdated", this.getProfileInfo(profile))
-
-			if (this.sessionManager.isActive(id)) {
-				// Re-unseal with the new password so we can re-open the session
-				// with a fresh Fr. `reseal` returns the new passhash+encrypted
-				// but not the raw secret; cheapest path is to unseal once here.
-				const secret = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
-				try {
-					if (secret) {
-						await this.openSessionVerified(profile, secret, resealed.passhash)
-					}
-				} finally {
-					// zero secret + new passhash after session re-open.
-					zeroize(secret)
-					zeroize(resealed.passhash)
+			// Unseal the (new-cipher) secret up front so integrity can be checked BEFORE the new
+			// password is persisted. If the check throws (address drift), nothing is committed and
+			// the RPC failure is honest — the password is NOT durably changed under a reported
+			// failure. `reseal` returns passhash + ciphertext but not the raw secret.
+			const secret = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
+			try {
+				if (secret) {
+					await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
 				}
-			} else {
-				// Even if no active session, the new passhash returned by
-				// `reseal` was held briefly. Zero it.
+
+				profile.guard = resealed.encrypted.guard
+				profile.secret = resealed.encrypted.secret
+				await this.repo.set(id, profile)
+				this.emit("onProfileUpdated", this.getProfileInfo(profile))
+
+				if (secret && this.sessionManager.isActive(id)) {
+					// Re-open with a fresh Fr. openSessionVerified re-runs the (now-green) check + the
+					// deletion bracket; the double-verify is negligible on a rare, deliberately-slow op.
+					await this.openSessionVerified(profile, secret, resealed.passhash)
+				}
+			} finally {
+				zeroize(secret)
 				zeroize(resealed.passhash)
 			}
 
@@ -762,13 +761,22 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			throw error
 		}
-		// Re-validate deletion state AFTER the (possibly slow) verification: a deletion that began
-		// during it — or a force-released facade lock — must abort the open rather than resurrect a
-		// deleted profile's session.
+		// Bracket the open against a deletion racing the (possibly slow) verification — or a
+		// force-released facade lock letting a delete interleave. `beginDeletion` sets `isReserved`
+		// synchronously at the START of `deleteProfile`, so checking it on BOTH sides of the open
+		// fences the whole operation: a delete that reserved before the open aborts here; one that
+		// reserved while the open ran is caught after and the just-opened session is closed, so a
+		// deleted profile can never be resurrected.
 		if (this.deletionState.isReserved(profile.id)) {
 			throw new Error("Invalid profile id")
 		}
 		await this.sessionManager.open(profile, secret, passhash)
+		if (this.deletionState.isReserved(profile.id)) {
+			if (this.sessionManager.isActive(profile.id)) {
+				await this.sessionManager.close()
+			}
+			throw new Error("Invalid profile id")
+		}
 	}
 
 	/** The SHARED deletion state (reserved ids + per-profile epoch). Execution +

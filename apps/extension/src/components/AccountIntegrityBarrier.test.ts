@@ -1,13 +1,21 @@
+import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { reactive } from "vue"
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { useAppStore } from "@/stores/app.store"
 import { ACCOUNT_INTEGRITY_BLOCKED_ROOT } from "@/wallet/services/account-integrity/types"
 import { installChromeStorage } from "../../tests/helpers/chrome-storage-mock"
 import AccountIntegrityBarrier from "./AccountIntegrityBarrier.vue"
 
+// Router-aware route, controllable per test. `route.name` is what the barrier reads.
+const mockRoute = reactive<{ name: string }>({ name: "popup-general" })
+vi.mock("vue-router", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("vue-router")>()
+	return { ...mod, useRoute: () => mockRoute }
+})
+
 const stubs = { MaterialIcon: true, Teleport: true }
-const mountBarrier = () => mount(AccountIntegrityBarrier, { global: { stubs } })
 const KEY = `${ACCOUNT_INTEGRITY_BLOCKED_ROOT}@p1`
-const LAST_ACTIVE = "nulo:ui:lastActiveProfile"
 
 function record(profileId: string): string {
 	return JSON.stringify({
@@ -22,45 +30,68 @@ function record(profileId: string): string {
 	})
 }
 
+/** Mount with a controllable presented profile (the app store's `profile.id`). */
+function mountBarrier(presentedProfileId: string | undefined = "p1") {
+	const pinia = createTestingPinia({ stubActions: false })
+	const appStore = useAppStore(pinia)
+	appStore.profile = presentedProfileId ? ({ id: presentedProfileId } as never) : undefined
+	const wrapper = mount(AccountIntegrityBarrier, { global: { stubs, plugins: [pinia] } })
+	return wrapper
+}
+
+const blocked = (w: ReturnType<typeof mountBarrier>) => w.find("[data-testid='account-integrity-blocked']").exists()
+
 describe("AccountIntegrityBarrier", () => {
 	beforeEach(() => {
 		document.body.innerHTML = ""
-		window.location.hash = ""
+		mockRoute.name = "popup-general"
 	})
 	afterEach(() => {
-		window.location.hash = ""
+		mockRoute.name = "popup-general"
 	})
 
 	test("no blocking record: renders nothing", async () => {
-		installChromeStorage({ [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
+		installChromeStorage({})
+		const w = mountBarrier("p1")
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
+		expect(blocked(w)).toBe(false)
 	})
 
-	test("record for the last-active profile: full-screen barrier with the required copy", async () => {
-		installChromeStorage({ [KEY]: record("p1"), [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
+	test("record for the PRESENTED profile: full-screen barrier with the required copy", async () => {
+		installChromeStorage({ [KEY]: record("p1") })
+		const w = mountBarrier("p1")
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
+		expect(blocked(w)).toBe(true)
 		expect(w.text()).toContain("ACCOUNT VERIFICATION FAILED")
-		// The two mandated content claims: what happened + the seed still derives the accounts
-		// on a compatible version (and no categorical "funds are safe").
 		expect(w.text()).toContain("derives a different address")
 		expect(w.text()).toContain("seed phrase still derives your accounts")
 		expect(w.text()).not.toContain("funds are safe")
 	})
 
-	test("record for a DIFFERENT profile does not brick the presented one", async () => {
-		installChromeStorage({ [KEY]: record("p1"), [LAST_ACTIVE]: "other-profile" })
-		const w = mountBarrier()
+	test("record for a DIFFERENT profile than the presented one does not brick it", async () => {
+		installChromeStorage({ [KEY]: record("p1") })
+		const w = mountBarrier("other-profile")
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
+		expect(blocked(w)).toBe(false)
 	})
 
-	test("phishing-surface bans: no inputs, no links, no buttons — nothing to click or type into", async () => {
-		installChromeStorage({ [KEY]: record("p1"), [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
+	test("FAIL CLOSED: a block while the presented profile is UNRESOLVED still shows the barrier", async () => {
+		installChromeStorage({ [KEY]: record("p1") })
+		const w = mountBarrier(undefined)
+		await flushPromises()
+		expect(blocked(w)).toBe(true)
+	})
+
+	test("a CORRUPT record blocks regardless of profile (fail-closed presence semantics)", async () => {
+		installChromeStorage({ [KEY]: "{truncated" })
+		const w = mountBarrier("unrelated")
+		await flushPromises()
+		expect(blocked(w)).toBe(true)
+	})
+
+	test("phishing-surface bans: no inputs, no links, no buttons", async () => {
+		installChromeStorage({ [KEY]: record("p1") })
+		const w = mountBarrier("p1")
 		await flushPromises()
 		expect(w.find("input").exists()).toBe(false)
 		expect(w.find("textarea").exists()).toBe(false)
@@ -68,63 +99,46 @@ describe("AccountIntegrityBarrier", () => {
 		expect(w.find("button").exists()).toBe(false)
 	})
 
-	test("a CORRUPT record blocks regardless of profile (fail-closed presence semantics)", async () => {
-		installChromeStorage({ [KEY]: "{truncated", [LAST_ACTIVE]: "unrelated" })
-		const w = mountBarrier()
-		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
-	})
-
 	test("yields on the auth route so unlock (the heal vector) stays reachable", async () => {
-		window.location.hash = "#/popup/auth"
-		installChromeStorage({ [KEY]: record("p1"), [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
-		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
-	})
-
-	test("an auth path in a QUERY PARAM does not suppress the barrier (exact-path match, not substring)", async () => {
-		window.location.hash = "#/popup/general?return=/popup/auth"
-		installChromeStorage({ [KEY]: record("p1"), [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
-		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
-	})
-
-	test("FAIL CLOSED: a block with unresolved (missing) lastActiveProfile still shows the barrier", async () => {
-		// App fell back to profiles[0] but the lastActive pointer is missing — we can't tell which
-		// profile is presented, so a block must not be silently ignored.
+		mockRoute.name = "popup-auth"
 		installChromeStorage({ [KEY]: record("p1") })
-		const w = mountBarrier()
+		const w = mountBarrier("p1")
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
+		expect(blocked(w)).toBe(false)
+	})
+
+	test("yields on the register route too", async () => {
+		mockRoute.name = "popup-register"
+		installChromeStorage({ [KEY]: record("p1") })
+		const w = mountBarrier("p1")
+		await flushPromises()
+		expect(blocked(w)).toBe(false)
 	})
 
 	test("live updates: appears on record write, disappears on heal", async () => {
-		const storage = installChromeStorage({ [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
+		const storage = installChromeStorage({})
+		const w = mountBarrier("p1")
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
+		expect(blocked(w)).toBe(false)
 
 		storage.data[KEY] = record("p1")
 		storage.fire({ [KEY]: { newValue: storage.data[KEY] } })
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(true)
+		expect(blocked(w)).toBe(true)
 
 		delete storage.data[KEY]
 		storage.fire({ [KEY]: { newValue: undefined } })
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
+		expect(blocked(w)).toBe(false)
 	})
 
-	test("changes in other storage areas or keys are ignored", async () => {
-		const storage = installChromeStorage({ [LAST_ACTIVE]: "p1" })
-		const w = mountBarrier()
+	test("changes in other storage areas are ignored", async () => {
+		const storage = installChromeStorage({})
+		const w = mountBarrier("p1")
 		await flushPromises()
 		storage.data[KEY] = record("p1")
-		// Same key but SESSION area — must not trigger.
 		storage.fire({ [KEY]: { newValue: storage.data[KEY] } }, "session")
 		await flushPromises()
-		expect(w.find("[data-testid='account-integrity-blocked']").exists()).toBe(false)
+		expect(blocked(w)).toBe(false)
 	})
 })

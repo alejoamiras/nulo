@@ -2,36 +2,31 @@
 /** Utils */
 import { ACCOUNT_INTEGRITY_BLOCKED_ROOT, AccountIntegrityBlockedSchema } from "@/wallet/services/account-integrity/types"
 
+/** Store + route (router-aware: `route.name` normalizes trailing slashes + query params that a
+ *  raw-hash substring/equality test would get wrong). */
+import { useAppStore } from "@/stores/app.store"
+const appStore = useAppStore()
+const route = useRoute()
+
 /** Reactive state */
 // Raw chrome.storage reads ON PURPOSE (allowlisted in storage-facade-ban, same as
-// MigrationBarrier): this component OBSERVES the background coordinator's durable blocking
-// records. Scope rules:
-//  - A record for the LAST-ACTIVE profile (the one this popup presents) raises the barrier.
-//    Records for other profiles don't brick the whole wallet — their profiles simply refuse to
-//    unlock, and they can be deleted from a healthy profile's settings.
-//  - A CORRUPT record (unparseable, so its profile is unknown) blocks regardless — fail-closed.
-//  - The barrier YIELDS on the pre-auth routes (auth/register): unlock is the safe retry vector —
-//    a compatible build's verification heals the record; an incompatible one re-withholds the
-//    session. Both screens are pre-session and never expose account data.
+// MigrationBarrier): this component OBSERVES the background coordinator's durable blocking records.
 const blockedRecords = ref([])
-const lastActiveProfileId = ref(null)
-const routeHash = ref(window.location.hash)
 
-// Exact PATH comparison, not substring: a protected route can carry an auth path in a query
-// param (e.g. `#/popup/general?return=/popup/auth`), which a substring test would wrongly treat
-// as pre-auth and suppress the barrier. Strip the leading `#` and any query/hash tail.
-const routePath = computed(() => routeHash.value.replace(/^#/, "").split(/[?#]/)[0])
-const isPreAuthRoute = computed(() => routePath.value === "/popup/auth" || routePath.value === "/popup/register")
+// The auth + register screens are pre-session heal/retry vectors — never overlay them.
+const isPreAuthRoute = computed(() => route.name === "popup-auth" || route.name === "popup-register")
+// GROUND TRUTH for "which profile is on screen" — the app store, not the `lastActiveProfile`
+// storage pointer (which can be stale/missing while the app presents a fallback profile).
+const presentedProfileId = computed(() => appStore.profile?.id ?? null)
 
 const isBlocked = computed(() => {
 	if (isPreAuthRoute.value) return false
 	if (blockedRecords.value.length === 0) return false
 	// FAIL CLOSED: a corrupt record (unknown profile) always blocks; a record for the presented
-	// (last-active) profile blocks; and if a block EXISTS but the presented-profile identity can't
-	// be resolved (missing/stale `lastActiveProfile` while the app fell back to profiles[0]), block
-	// rather than silently expose a possibly-mismatched profile.
-	if (lastActiveProfileId.value === null) return true
-	return blockedRecords.value.some((r) => r.profileId === null || r.profileId === lastActiveProfileId.value)
+	// profile blocks; and if a block EXISTS but the presented profile can't be resolved yet, block
+	// rather than expose a possibly-mismatched profile.
+	if (presentedProfileId.value === null) return true
+	return blockedRecords.value.some((r) => r.profileId === null || r.profileId === presentedProfileId.value)
 })
 
 /** Handlers */
@@ -43,7 +38,6 @@ async function refresh() {
 	const generation = ++refreshGeneration
 	const all = await chrome.storage.local.get(null)
 	if (generation !== refreshGeneration) return
-	lastActiveProfileId.value = all["nulo:ui:lastActiveProfile"] ?? null
 	blockedRecords.value = Object.entries(all)
 		.filter(([k]) => k.startsWith(prefix))
 		.map(([, v]) => {
@@ -57,21 +51,16 @@ async function refresh() {
 }
 function onStorageChanged(changes, area) {
 	if (area !== "local") return
-	if (Object.keys(changes).some((k) => k.startsWith(prefix) || k === "nulo:ui:lastActiveProfile")) void refresh()
-}
-function onHashChange() {
-	routeHash.value = window.location.hash
+	if (Object.keys(changes).some((k) => k.startsWith(prefix))) void refresh()
 }
 
 /** Service subscriptions (before the initial read, so no change is missed) */
 chrome.storage.onChanged.addListener(onStorageChanged)
-window.addEventListener("hashchange", onHashChange)
 void refresh()
 
 /** Lifecycle */
 onBeforeUnmount(() => {
 	chrome.storage.onChanged.removeListener(onStorageChanged)
-	window.removeEventListener("hashchange", onHashChange)
 })
 </script>
 

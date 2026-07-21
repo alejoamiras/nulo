@@ -4,11 +4,22 @@ import { z } from "zod"
 export const ACCOUNT_INTEGRITY_BLOCKED_ROOT = "nulo:core:account-integrity-blocked"
 export const ACCOUNT_INTEGRITY_VERIFIED_ROOT = "nulo:core:account-integrity-verified"
 
-/** Per-profile marker of the last wallet build whose derivation verified green. Lets the boot
- *  path skip re-deriving on every SW wake: a silently-rehydrated session is re-verified ONLY on
- *  the first boot of a new build (the update window the per-open chokepoint cannot see). */
-export const VerifiedStampSchema = z.object({ walletVersion: z.string() })
+/** Per-profile marker of the last verification that passed green. Lets the boot path skip
+ *  re-deriving on every SW wake: a silently-rehydrated session is re-verified ONLY when the wallet
+ *  build changed OR the account set changed since the stamp. Both are keyed here — the digest is
+ *  computed from storage at verify AND at check time, so an account added/restored/removed after a
+ *  green stamp deterministically invalidates it (no event race). */
+export const VerifiedStampSchema = z.object({ walletVersion: z.string(), accountSetDigest: z.string() })
 export type AccountIntegrityVerifiedStamp = z.infer<typeof VerifiedStampSchema>
+
+/**
+ * Deterministic identity of a profile's account set — order-independent over the fields that feed
+ * address derivation + the derived address itself. Pure string work (jsdom-safe, no crypto/bb);
+ * it is an identity key, not a security digest.
+ */
+export function accountSetDigest(rows: ReadonlyArray<{ chainId: number; index: number; type: number; address: string }>): string {
+	return JSON.stringify(rows.map((r) => `${r.chainId}:${r.index}:${r.type}:${r.address}`).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)))
+}
 
 /**
  * The persisted mismatch record — one per blocked profile. Written by the integrity coordinator
@@ -42,14 +53,4 @@ export interface AccountIntegrityDelegate {
 	 * Deterministic and PXE/node-independent, so there are no transient false positives.
 	 */
 	verifyBeforeSessionOpen(profileId: string, masterSecret: MasterSecretBytes): Promise<void>
-}
-
-/**
- * Injected into AccountService for the mid-session window (e.g. an extension update rehydrated a
- * live session under new derivation code): `getAccountContract` detects the mismatch at operation
- * time, writes the DURABLE block itself (fail-closed, delegate-independent), then asks the
- * coordinator to close the live session for the mismatching profile.
- */
-export interface AccountRuntimeIntegrityDelegate {
-	closeSessionForMismatch(profileId: string): Promise<void>
 }

@@ -50,5 +50,5 @@ Current line: **`@aztec/* = 5.0.1`** (Noir wasm packages `noir-acvm_js` / `noir-
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).
 - `bun run test:all` (units across ALL workspaces — plain `bun run test` is extension-only and does NOT carry the account KAT + freeze suites) + `bun run build`.
-- `bun run test:e2e` (smoke) + `bun run e2e:agent` (FULL network — includes the real-proving canary; a WASM fallback is a hard fail).
+- `bun run test:e2e` (smoke) + `bun run e2e:agent` (FULL network — includes the frozen-account canary). NOTE: `e2e:agent` LOCALLY does NOT enforce native proving (silent WASM fallback if no accelerator). "A WASM fallback is a hard fail" is true only in CI (`VITE_NULO_ACCELERATOR_REQUIRED=1` in the prover-ON `network-e2e-canary` job) — that CI check is the authoritative gate. To run the canary prover-ON locally, start `accelerator-server`, build with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and confirm a `/prove` request (see the `aztec-update` skill).
 - Confirm the class-id/address fixture still matches (coupling #3).

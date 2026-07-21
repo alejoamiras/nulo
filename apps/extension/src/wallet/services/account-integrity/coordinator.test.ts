@@ -55,23 +55,14 @@ async function build(opts: {
 			getProfileSecret: async () => Fr.fromBuffer(Buffer.from(MASTER)),
 		}),
 	)
-	const added = new EventHandler<Account>()
-	const deleted = new EventHandler<Account>()
-	services.add(
-		svc(AccountService.name, {
-			setIntegrityDelegate: () => {},
-			getAccountsRaw: async () => opts.rows,
-			onAccountAdded: added,
-			onAccountDeleted: deleted,
-		}),
-	)
+	services.add(svc(AccountService.name, { getAccountsRaw: async () => opts.rows }))
 	const coordinator = new AccountIntegrityCoordinator(new LoggerStore(new ConfigStore()), api, opts.derive)
 	services.add(coordinator)
 	await services.start()
 	await coordinator.bootVerification
 	const repo = new AccountIntegrityBlockedRepository(api.storage.local)
 	const stamps = new AccountIntegrityVerifiedStampRepository(api.storage.local)
-	return { coordinator, repo, stamps, locks, api, accountEvents: { added, deleted } }
+	return { coordinator, repo, stamps, locks, api }
 }
 
 describe("AccountIntegrityCoordinator", () => {
@@ -172,45 +163,33 @@ describe("AccountIntegrityCoordinator", () => {
 		expect(derives).toBe(0)
 	})
 
-	test("closeSessionForMismatch closes ONLY the mismatching profile (never a different active one)", async () => {
-		// ProfileService.lockProfileIfActive is stubbed to record the id it was asked to lock; the
-		// coordinator must pass the mismatching profile id, not "the active one".
-		const askedToLock: string[] = []
-		const api = new FakeBrowserApi()
-		api.reset()
-		const services = new ServiceCollection()
-		services.add(
-			svc(ProfileService.name, {
-				setIntegrityDelegate: () => {},
-				lockProfileIfActive: async (id: string) => {
-					askedToLock.push(id)
-				},
-				getActiveProfile: async () => undefined,
-			}),
-		)
-		services.add(
-			svc(AccountService.name, {
-				setIntegrityDelegate: () => {},
-				getAccountsRaw: async () => [],
-				onAccountAdded: new EventHandler<Account>(),
-				onAccountDeleted: new EventHandler<Account>(),
-			}),
-		)
-		const coordinator = new AccountIntegrityCoordinator(new LoggerStore(new ConfigStore()), api, async () => "0x")
-		services.add(coordinator)
-		await services.start()
-		await coordinator.bootVerification
+	// A green deriver: returns each row's OWN stored address, so verification passes and stamps.
+	const greenDerive =
+		(counter: { n: number }): DeriveAddress =>
+		async (_master, account) => {
+			counter.n++
+			return account.index === 0 ? "0xaaaa" : "0xsecond"
+		}
 
-		await coordinator.closeSessionForMismatch("p9")
-		expect(askedToLock).toEqual(["p9"])
+	test("boot verify: an ACCOUNT-SET change on the same build invalidates the stamp (re-verifies)", async () => {
+		const c = { n: 0 }
+		const derive = greenDerive(c)
+		// First boot: one account, verified green + stamped.
+		const { api } = await build({ rows: [row()], derive, activeProfileId: "p1" })
+		expect(c.n).toBe(1)
+		// Same build + same persisted storage, but the account SET changed (a second row) — the
+		// storage-derived digest differs from the stamp, so the boot re-derives instead of skipping.
+		await build({ rows: [row(), row({ address: "0xsecond", index: 1 })], derive, activeProfileId: "p1", api })
+		expect(c.n).toBe(3) // 1 (first boot) + 2 (both rows re-derived on the second boot)
 	})
 
-	test("stamp is CLEARED when the profile's account set changes (no skip-verify of a new row)", async () => {
-		const { stamps, accountEvents } = await build({ rows: [row()], derive: async () => "0xaaaa", activeProfileId: "p1" })
-		// A green boot stamped the build.
-		expect((await stamps.get("p1"))?.walletVersion).toBeDefined()
-		accountEvents.added.invoke(row({ profileId: "p1", address: "0xnew", index: 1 }))
-		await new Promise((r) => setTimeout(r, 0))
-		expect(await stamps.get("p1")).toBeUndefined()
+	test("boot verify: an UNCHANGED account set on the same build skips (digest match)", async () => {
+		const c = { n: 0 }
+		const derive = greenDerive(c)
+		const rows = [row(), row({ address: "0xsecond", index: 1 })]
+		const { api } = await build({ rows, derive, activeProfileId: "p1" })
+		expect(c.n).toBe(2)
+		await build({ rows, derive, activeProfileId: "p1", api })
+		expect(c.n).toBe(2) // no re-derive: same build + same digest
 	})
 })

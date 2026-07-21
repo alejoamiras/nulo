@@ -10,7 +10,8 @@ import { NuloAccount, V5_REGIME } from "@nulo/aztec-runtime/account"
 import type { MasterSecretBytes } from "@nulo/wallet-crypto"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "./blocked-repository"
-import type { AccountIntegrityBlocked, AccountIntegrityDelegate, AccountRuntimeIntegrityDelegate } from "./types"
+import { accountSetDigest } from "./types"
+import type { AccountIntegrityBlocked, AccountIntegrityDelegate } from "./types"
 
 declare const __VERSION__: string
 const walletVersion = (): string => (typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__)
@@ -25,14 +26,17 @@ export type DeriveAddress = (master: Fr, account: { chainId: number; type: numbe
  * AccountIntegrityCoordinator — the background owner of the address-freeze runtime check.
  *
  * Started LAST (declares dependencies on the services it drives), then registers itself as the
- * integrity delegate of ProfileService (pre-session-open verification) and AccountService
- * (operation-time mismatch reporting). A mismatch means this build derives different addresses
- * than the profile's stored accounts — wrong build for the profile's address regime, or tampered
- * rows. Response: withhold/close the session, persist a blocking record that survives SW
- * restarts (read raw by the popup barrier), and surface the typed error. The check is pure
- * KDF + descriptor + artifact — no PXE, no node — so it cannot produce transient false positives.
+ * pre-session-open integrity delegate of ProfileService and runs a one-shot boot verification of
+ * any silently-rehydrated session. (The operation-time mismatch path is owned directly by
+ * AccountService — it writes the durable block + closes the session itself, delegate-independently,
+ * so a mismatch during the startup window before this coordinator starts is still fail-closed.)
+ * A mismatch means this build derives different addresses than the profile's stored accounts —
+ * wrong build for the profile's address regime, or tampered rows. Response: withhold/close the
+ * session, persist a blocking record that survives SW restarts (read raw by the popup barrier),
+ * and surface the typed error. The check is pure KDF + descriptor + artifact — no PXE, no node —
+ * so it cannot produce transient false positives.
  */
-export class AccountIntegrityCoordinator implements IService, AccountIntegrityDelegate, AccountRuntimeIntegrityDelegate {
+export class AccountIntegrityCoordinator implements IService, AccountIntegrityDelegate {
 	public static readonly name = ACCOUNT_INTEGRITY_COORDINATOR_NAME
 	public readonly name = ACCOUNT_INTEGRITY_COORDINATOR_NAME
 	public readonly dependencies = [ProfileService.name, AccountService.name] as const
@@ -60,13 +64,12 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 		this.profiles = services.get(ProfileService.name)
 		this.accounts = services.get(AccountService.name)
 		this.profiles.setIntegrityDelegate(this)
-		this.accounts.setIntegrityDelegate(this)
-		// The green stamp is keyed by (profile, walletVersion) — it must NOT survive an account-set
-		// change on the same build, or a boot could skip re-verifying a row added/restored after the
-		// stamp was written. Any account mutation invalidates the profile's stamp, forcing a
-		// re-verify on the next boot.
-		this.accounts.onAccountAdded.add((account) => void this.stamps.clear(account.profileId).catch(() => {}))
-		this.accounts.onAccountDeleted.add((account) => void this.stamps.clear(account.profileId).catch(() => {}))
+		// The stamp is keyed by (walletVersion, accountSetDigest) — the digest is recomputed from
+		// STORAGE at both stamp-time and check-time, so an account added/restored/removed after a
+		// green stamp deterministically changes the digest and forces a re-verify. This is
+		// event-free ON PURPOSE (a prior `onAccountAdded` subscription had race gaps: the last-phase
+		// subscription missed earlier mutations, `restore()` writes rows without emitting, and an
+		// event-driven clear could lose to a concurrent stamp write).
 		// The one activation the per-open chokepoint cannot see: an extension UPDATE rehydrates the
 		// previous session silently, so the first boot of a NEW build re-verifies it here (once per
 		// (profile, walletVersion) — the stamp keeps every later SW wake free). Fire-and-forget ON
@@ -85,7 +88,10 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 	private async verifyRestoredSessionOnce(): Promise<void> {
 		const active = await this.profiles.getActiveProfile()
 		if (!active) return
-		if ((await this.stamps.get(active.id))?.walletVersion === walletVersion()) return
+		const rows = await this.accounts.getAccountsRaw(active.id)
+		const stamp = await this.stamps.get(active.id)
+		// Skip re-derivation ONLY when the build AND the account set both match the last green stamp.
+		if (stamp?.walletVersion === walletVersion() && stamp.accountSetDigest === accountSetDigest(rows)) return
 		let master: Fr
 		try {
 			master = await this.profiles.getProfileSecret(active.id)
@@ -95,7 +101,7 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 			return
 		}
 		try {
-			await this.verifyProfile(active.id, master)
+			await this.verifyProfile(active.id, master, rows)
 		} catch (error) {
 			if (error instanceof AccountAddressInconsistencyError) {
 				// Close ONLY the profile we verified — a different profile may have become active
@@ -113,10 +119,16 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 	}
 
 	/** Re-derive every stored account for the profile and compare; persist + throw on mismatch,
-	 *  heal the block and stamp the build on green. */
-	private async verifyProfile(profileId: string, master: Fr): Promise<void> {
-		const rows = await this.accounts.getAccountsRaw(profileId)
-		for (const account of rows) {
+	 *  heal the block and stamp (walletVersion + the digest of the EXACT rows verified) on green.
+	 *  `rows` may be passed to reuse the boot-path read (the stamp then binds precisely what was
+	 *  verified). */
+	private async verifyProfile(
+		profileId: string,
+		master: Fr,
+		rows?: Awaited<ReturnType<AccountService["getAccountsRaw"]>>,
+	): Promise<void> {
+		const verifiedRows = rows ?? (await this.accounts.getAccountsRaw(profileId))
+		for (const account of verifiedRows) {
 			// Only Nulo_v1 rows have a derivation to re-check; an unknown future type is skipped
 			// here and rejected at use by AccountService's own type guard.
 			if (account.type !== AccountType.Nulo_v1) continue
@@ -147,17 +159,10 @@ export class AccountIntegrityCoordinator implements IService, AccountIntegrityDe
 			}
 		}
 		// A green pass heals a stale block (installing a build whose derivation matches again is
-		// exactly the documented recovery path) and stamps the build so the boot path can skip
-		// re-deriving until the next update.
+		// exactly the documented recovery path) and stamps (walletVersion + the digest of the exact
+		// rows just verified) so the boot path can skip re-deriving until the build OR the account
+		// set changes.
 		await this.blocked.clear(profileId)
-		await this.stamps.set(profileId, { walletVersion: walletVersion() })
-	}
-
-	/** See `AccountRuntimeIntegrityDelegate.closeSessionForMismatch`. The DURABLE block was already
-	 *  written by AccountService (fail-closed); this only closes the live session — and ONLY if the
-	 *  mismatching profile is still the active one. */
-	public async closeSessionForMismatch(profileId: string): Promise<void> {
-		this.logger.log(this.name, LogLevel.Error, "runtime account address mismatch — closing session", `profile=${profileId}`)
-		await this.profiles.lockProfileIfActive(profileId)
+		await this.stamps.set(profileId, { walletVersion: walletVersion(), accountSetDigest: accountSetDigest(verifiedRows) })
 	}
 }
