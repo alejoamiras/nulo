@@ -45,8 +45,11 @@
 
 ## Tests (all five plan-mandated layers)
 
-1. Coordinator unit (5): green-heals, tampered→typed error + record, all-chains sweep,
-   non-Nulo_v1 skip, runtime report → record + session close.
+1. Coordinator unit: green-heals, tampered→typed error + record, all-chains sweep, non-Nulo_v1
+   skip, boot-verify (mismatch→block+lock, digest-change re-verify, digest-match skip). The
+   runtime (operation-time) mismatch path is owned by AccountService, not the coordinator, and is
+   covered by `account/runtime-mismatch.test.ts` (`raiseRuntimeMismatch`: durable block + close the
+   mismatching profile + typed error).
 2. SW-restart persistence: integration — blocked profile NOT rehydrated after a simulated SW
    restart (`makeServiceFromExistingApi`), plus the no-record control (gate is targeted).
 3. RPC-reconstruction test (extension-messaging errors suite).

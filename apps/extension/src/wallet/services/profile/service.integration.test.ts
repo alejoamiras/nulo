@@ -1460,4 +1460,48 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		await service.deleteProfile(profile.id)
 		expect(await repo.isBlocked(profile.id)).toBe(false)
 	}, 30_000)
+
+	test("EPOCH FENCE: a deletion that completes (reserve→release) DURING verify aborts the open", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+
+		// The delegate stands in for a slow verify; while it runs, a delete fully completes
+		// (reserve then release) — `isReserved` is false afterward, but the epoch advanced.
+		const state = service.getDeletionState()
+		service.setIntegrityDelegate({
+			verifyBeforeSessionOpen: async () => {
+				state.beginDeletion(profile.id)
+				state.release(profile.id)
+			},
+		})
+
+		await expect(service.unlockProfile(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+		// A deleted profile must never be resurrected — no active session.
+		expect(await service.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("changePassword: an integrity block on RE-OPEN commits the password but withholds the session", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "oldpass12")
+
+		// Pass the PRE-check (before persist), throw on the RE-open (post-persist) — simulating a
+		// mismatched account restored between the two. The password change must still report success.
+		let call = 0
+		service.setIntegrityDelegate({
+			verifyBeforeSessionOpen: async () => {
+				call++
+				if (call >= 2) throw new AccountAddressInconsistencyError()
+			},
+		})
+
+		const info = await service.changeProfilePassword(profile.id, "oldpass12", "newpass12")
+		expect(info.id).toBe(profile.id)
+		expect(call).toBe(2)
+		// Session withheld (re-open threw + closed), but the NEW password is what's persisted.
+		expect(await service.getActiveProfile()).toBeUndefined()
+		await service.setIntegrityDelegate({ verifyBeforeSessionOpen: async () => {} })
+		const reunlocked = await service.unlockProfile(profile.id, "newpass12")
+		expect(reunlocked.id).toBe(profile.id)
+	}, 30_000)
 })

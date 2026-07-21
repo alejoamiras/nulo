@@ -641,9 +641,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
 
 				if (secret && this.sessionManager.isActive(id)) {
-					// Re-open with a fresh Fr. openSessionVerified re-runs the (now-green) check + the
-					// deletion bracket; the double-verify is negligible on a rare, deliberately-slow op.
-					await this.openSessionVerified(profile, secret, resealed.passhash)
+					// Re-open with a fresh Fr. openSessionVerified re-runs the check + the deletion
+					// bracket. If the RE-check now fails on an address-drift block (e.g. a foreign
+					// account was restored between the pre-check and here), the password change ALREADY
+					// SUCCEEDED — it must not be reported as a failure. Swallow ONLY that typed error:
+					// openSessionVerified has already persisted the block + closed the session, so the
+					// barrier surfaces the drift as its own handled state. Any other error (deletion
+					// fence, etc.) propagates.
+					try {
+						await this.openSessionVerified(profile, secret, resealed.passhash)
+					} catch (reopenError) {
+						if (!(reopenError instanceof AccountAddressInconsistencyError)) throw reopenError
+						this.logger.log(
+							this.name,
+							LogLevel.Error,
+							"password changed but re-open hit an address-integrity block — surfaced via the barrier",
+							id,
+						)
+					}
 				}
 			} finally {
 				zeroize(secret)
@@ -740,6 +755,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * (unit tests without the coordinator) the open proceeds unchecked.
 	 */
 	private async openSessionVerified(profile: Profile, secret: MasterSecretBytes, passhash?: Passhash): Promise<void> {
+		// Capture the PERSISTENT deletion epoch up front. `isReserved` alone is transient — a
+		// force-released facade lock could let a delete reserve→purge→RELEASE entirely while the
+		// verify/open below runs, leaving `isReserved` false on both sides. The monotonic epoch does
+		// not reset on release, so comparing it after the open detects a delete that fully completed.
+		const deletionEpoch = this.deletionState.capture(profile.id)
 		try {
 			if (this.integrityDelegate) {
 				await this.integrityDelegate.verifyBeforeSessionOpen(profile.id, secret)
@@ -761,17 +781,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			throw error
 		}
-		// Bracket the open against a deletion racing the (possibly slow) verification — or a
-		// force-released facade lock letting a delete interleave. `beginDeletion` sets `isReserved`
-		// synchronously at the START of `deleteProfile`, so checking it on BOTH sides of the open
-		// fences the whole operation: a delete that reserved before the open aborts here; one that
-		// reserved while the open ran is caught after and the just-opened session is closed, so a
-		// deleted profile can never be resurrected.
+		// Bracket the open against a deletion racing the (possibly slow) verification. Pre-open:
+		// reject if already reserved. Post-open: reject + close the just-opened session if the
+		// profile is reserved OR its deletion epoch advanced during the open (a delete that
+		// reserved→purged→released entirely while the open ran) — so a deleted profile can never be
+		// resurrected.
 		if (this.deletionState.isReserved(profile.id)) {
 			throw new Error("Invalid profile id")
 		}
 		await this.sessionManager.open(profile, secret, passhash)
-		if (this.deletionState.isReserved(profile.id)) {
+		if (this.deletionState.isReserved(profile.id) || !this.deletionState.isCurrent(profile.id, deletionEpoch)) {
 			if (this.sessionManager.isActive(profile.id)) {
 				await this.sessionManager.close()
 			}

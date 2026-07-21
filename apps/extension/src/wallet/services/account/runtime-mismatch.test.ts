@@ -16,9 +16,20 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { svc } from "../composition-harness"
 import { AccountService } from "./service"
 
-async function build() {
+async function build(opts: { failBlockWrite?: boolean } = {}) {
 	const api = new FakeBrowserApi()
 	api.reset()
+	if (opts.failBlockWrite) {
+		// Force the block-persist to reject so the fail-closed contract (throw + close still happen)
+		// is genuinely exercised.
+		const realSet = api.storage.local.set.bind(api.storage.local)
+		api.storage.local.set = async (items: Record<string, unknown>) => {
+			if (Object.keys(items).some((k) => k.startsWith("nulo:core:account-integrity-blocked@"))) {
+				throw new Error("storage full")
+			}
+			return realSet(items)
+		}
+	}
 	const locked: string[] = []
 	const services = new ServiceCollection()
 	services.add(svc(ProfileService.name, { lockProfileIfActive: async (id: string) => void locked.push(id) }))
@@ -53,10 +64,11 @@ describe("AccountService runtime mismatch (raiseRuntimeMismatch)", () => {
 		expect(locked).toEqual(["p1"])
 	})
 
-	test("the typed error still throws even if the block persist fails (fail-closed)", async () => {
-		const { raise } = await build()
-		// A malformed profileId can't break the string-keyed repo, so simulate a persist failure by
-		// asserting the throw is unconditional: the record write is best-effort but the throw is not.
+	test("fail-closed: even when the block PERSIST fails, the throw + session close still happen", async () => {
+		const { raise, locked } = await build({ failBlockWrite: true })
 		await expect(raise("p9", 0, 0, "0xa", "0xb")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		// The persist failure is logged and swallowed, but the session close still runs and the
+		// typed error still propagates — the caller can never end up with a usable mismatched session.
+		expect(locked).toEqual(["p9"])
 	})
 })
