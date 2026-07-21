@@ -186,3 +186,59 @@ Critical/High defects; 2 NEW Medium/Low + 5 PRE-EXISTING findings + deflake root
   (`data-backup-stage`, progress-set-at-ceremony) — product changes beyond this PR's surface.
 - receive-unregistered refresh pacing (await a refresh cycle via an isUpdating signal) — current
   bounded polling passed every run; tied to the same product-signal follow-up.
+
+---
+
+# Tri-audit round (user-requested): 2× codex xhigh + 1 fable leg, PR-scoped
+
+Scope directive from the user: findings on THIS PR's diff only. Legs ran with disjoint lenses:
+codex-regression (session `019f...biweod run`), codex-concurrency, and an independent Fable
+subagent (its report is appended to `audit-fable.md`). All verdicts: `conditional approve`.
+No Critical/High anywhere.
+
+## Fixed in this round (commit `fix(contacts): tri-audit round …`)
+1. **(M, converged: fable + codex-concurrency) The SHIP-GATE could false-pass**:
+   `receive-unregistered.test.ts`'s `assertNoSendersRegistered` counted rows without waiting for
+   the list fetch to settle (the add button renders during loading; loading AND error states both
+   show zero rows). Now waits for `loading-state` to clear + asserts the error banner is absent.
+   Same settle wait added to `senders-advanced.test.ts`'s second test (it bypassed `gotoSenders`).
+2. **(M, codex-concurrency) Sender events could be lost to an in-flight snapshot**: an
+   `onSenderAdded/Deleted` event landing between `getSenders()` dispatch and resolution was
+   overwritten by the stale snapshot. Events now bump the sequence guard (invalidate pending
+   snapshots). Residual documented in-code: events carry no networkId, so a cross-network event
+   can paint a transient chip until the next sync — cosmetic, self-healing.
+3. **(M, codex-concurrency) Dead external-update branch revived**: `EditContactPopup`'s
+   `onContactUpdated` compared `contact.id === contactToEdit.id` (ref object — never equal), so
+   an external update to the contact being edited never refreshed the draft and a later submit
+   overwrote it. Fixed to `.value?.id` + also refreshes `contactToEdit` (the dirty baseline).
+   Pre-existing in dev; fixed rather than pinned because two auditors flagged the concrete
+   lost-update interleaving and the file was already fully rewritten by this PR.
+4. **(M, codex-concurrency) Smoke contacts retry-wall**: fixed identities + the file-scoped
+   fixture turned every vitest retry into duplicate-validation. All four tests now generate
+   per-call fresh names/addresses (same fix as senders-advanced earlier).
+5. **(L, fable) Canonicalization escape — import staging**: `EditContactPopup`'s staging branch
+   wrote the raw address; now lowercased like both direct-save paths.
+6. **(M→converged: fable + codex-regression) Canonicalization escape — export**:
+   `senderUnion.has(contact.address)` compared raw against lowercase PXE senders — a mixed-case
+   legacy contact exported `isSender:false`, silently dropping the flag on a file round-trip.
+   Union + membership now canonical. Pinned by a mixed-case export test.
+7. **(L, codex-regression) PR-caused regression in send-flow suggestion**: lowercase-on-save
+   broke `RecipientField`'s exact-match address suggestion and `getContactByAddress` for
+   re-pasted mixed-case input. Both comparisons made case-insensitive (the two touched lines are
+   adjacent to, not inside, the original diff — fixed because the regression is PR-caused).
+8. **(L, codex-regression) ImportContactsPopup duplicate detection**: existing-contact maps used
+   raw address keys against now-lowercased staged rows — a legacy mixed-case contact presented
+   as a fresh row. Map keys + both lookups (incl. the edited-row watch) canonicalized. Pinned.
+9. **(L, fable) "Skipped" vs "failed"**: the no-network import outcome was promised as a skip by
+   the banner but toasted as a failure. Toast now says "sender registrations skipped (no active
+   network)" for the all-skipped case; unit test updated.
+10. **(L, fable) Test gap**: lowercase-on-save itself was unpinned (deleting the `.toLowerCase()`
+    kept all tests green). Uppercase-save assertions added for both popups.
+
+## Noted, not fixed (with reasons)
+- (codex-concurrency L) `useEntityCrud` resync amplification during large imports (N full
+  fetches) — pre-existing composable behavior, converges correctly; debounce is a follow-up.
+- (codex-regression L) Legacy mixed-case contacts' broader exact-match surfaces outside this
+  PR's diff — out of scope per the user's directive; pre-production means no legacy rows exist.
+- Cross-network sender-event attribution (needs networkId in the service event payload) —
+  follow-up; residual is cosmetic and documented in-code.

@@ -52,7 +52,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 		let senderUnion = new Set<string>()
 		try {
 			const list = await accountStateService.getSendersAcrossActiveNetworks()
-			senderUnion = new Set(list)
+			senderUnion = new Set(list.map((a) => a.toLowerCase()))
 		} catch (err) {
 			console.warn("Failed to read sender union for export; isSender flags will all be false:", err)
 		}
@@ -62,7 +62,10 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			contacts: contacts.value.map((contact) => ({
 				name: contact.name,
 				address: contact.address,
-				isSender: senderUnion.has(contact.address),
+				// Canonical compare: PXE senders are lowercase; a stored contact
+				// may predate canonical-on-save — its registration must still
+				// export as isSender:true or a file round-trip drops the flag.
+				isSender: senderUnion.has(contact.address.toLowerCase()),
 			})),
 		}
 
@@ -172,6 +175,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			const errors: Array<{ name: string; address: string; operation: string; error: unknown }> = []
 			let senderTotal = 0
 			let senderOk = 0
+			let senderSkippedNoNetwork = 0
 
 			// Import is adds-only toward sender state: rows explicitly carrying
 			// `isSender: true` (from a previous deliberate export) get registered
@@ -211,6 +215,7 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 							console.warn(`Failed to register sender ${_c.address}`, err)
 						}
 					} else {
+						senderSkippedNoNetwork++
 						console.warn(`Skipping sender registration for ${_c.address}: no active network`)
 					}
 				}
@@ -222,7 +227,14 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 				}
 				openToast({ label: "Import ended with errors", icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (senderTotal > 0 && senderOk < senderTotal) {
-				const detail = senderOk === 0 ? "sender registration failed" : `${senderOk} of ${senderTotal} senders registered`
+				// "Skipped" ≠ "failed": the no-network case was announced as a
+				// skip by the import banner — the toast must say the same thing.
+				const allSkipped = senderSkippedNoNetwork === senderTotal - senderOk && senderOk === 0
+				const detail = allSkipped
+					? "sender registrations skipped (no active network)"
+					: senderOk === 0
+						? "sender registration failed"
+						: `${senderOk} of ${senderTotal} senders registered`
 				openToast({ label: `Contacts imported · ${detail}`, icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (senderTotal > 0) {
 				openToast({ label: `Contacts imported · ${senderOk} ${senderOk === 1 ? "sender" : "senders"} registered`, icon: "info" })

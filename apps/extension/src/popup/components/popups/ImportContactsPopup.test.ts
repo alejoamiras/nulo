@@ -106,6 +106,16 @@ describe("ImportContactsPopup — counted sender banner", () => {
 		expect(w.text()).not.toContain("will be registered on")
 	})
 
+	test("a mixed-case EXISTING contact marks its lowercase import row as an address duplicate", async () => {
+		contactServiceMock.getContacts.mockResolvedValueOnce([
+			{ id: "c1", name: "Legacy", address: VALID_A.toUpperCase().replace("0X", "0x") },
+		])
+		const w = await mountWithStaged([{ name: "Other", address: VALID_A, isSender: false }])
+		// The "existing" tag renders for the staged row (canonical map lookup)
+		// — a legacy mixed-case save must not present as a fresh row.
+		expect(w.text()).toContain("existing")
+	})
+
 	test("no active network: states that registrations will be skipped (not a contradictory network name)", async () => {
 		appStoreState.network = null
 		const w = await mountWithStaged([{ name: "A", address: VALID_A, isSender: true }])

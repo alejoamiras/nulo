@@ -145,8 +145,9 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 
 		expect(contactService.addContact).toHaveBeenCalledTimes(1)
 		expect(accountStateService.addSender).not.toHaveBeenCalled()
+		// "Skipped", not "failed" — matches the popup banner's promise.
 		expect(openToastMock).toHaveBeenCalledWith(
-			{ label: "Contacts imported · sender registration failed", icon: "warning" },
+			{ label: "Contacts imported · sender registrations skipped (no active network)", icon: "warning" },
 			expect.anything(),
 		)
 	})
@@ -277,6 +278,24 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 })
 
 describe("useContactImportExport — export", () => {
+	test("a mixed-case stored contact still exports isSender:true (canonical union compare)", async () => {
+		const { contactService, accountStateService } = makeServices()
+		ensurePermissionsMock.mockResolvedValue(true)
+		accountStateService.getSendersAcrossActiveNetworks.mockResolvedValue([ADDR_A])
+		const { downloadFile } = await import("@/utils")
+		const mixedCase = ADDR_A.toUpperCase().replace("0X", "0x")
+		const api = useContactImportExport({
+			contacts: ref([{ id: "c1", name: "Legacy", address: mixedCase }]),
+			contactService,
+			accountStateService,
+		} as never)
+
+		await api.exportContacts()
+
+		const payload = JSON.parse((vi.mocked(downloadFile).mock.calls.at(-1)?.[0] as { data: string }).data)
+		expect(payload.contacts[0]).toEqual({ name: "Legacy", address: mixedCase, isSender: true })
+	})
+
 	test("isSender flags come from the cross-network sender union", async () => {
 		const { contactService, accountStateService } = makeServices()
 		ensurePermissionsMock.mockResolvedValue(true)

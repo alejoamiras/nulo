@@ -28,7 +28,10 @@ const filteredContacts = computed(() => {
 	if (!searchTerm.value) return []
 	const lowTerm = searchTerm.value?.toLowerCase() || ""
 	return [...props.candidates].filter(
-		(c) => c.name?.toLowerCase().includes(lowTerm) || c.address === searchTerm.value || c.abbr?.toLowerCase() === lowTerm,
+		// Address compare is case-insensitive: contacts are stored lowercase
+		// (canonical-on-save), but a user may re-paste the mixed-case string
+		// they originally typed — same address, same contact.
+		(c) => c.name?.toLowerCase().includes(lowTerm) || c.address?.toLowerCase() === lowTerm || c.abbr?.toLowerCase() === lowTerm,
 	)
 })
 

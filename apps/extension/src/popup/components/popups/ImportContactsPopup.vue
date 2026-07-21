@@ -86,7 +86,7 @@ watch(
 			importContacts.value[cacheStore.importContact.idx] = {
 				...cacheStore.importContact,
 				duplicateName: !!contactsByName.value.get(cacheStore.importContact.name),
-				duplicateAddress: !!contactsByAddress.value.get(cacheStore.importContact.address),
+				duplicateAddress: !!contactsByAddress.value.get(cacheStore.importContact.address?.toLowerCase()),
 				isInvalidAddress: false,
 				selected: true,
 			}
@@ -103,15 +103,19 @@ watch(
 
 			importContacts.value = cacheStore.importContacts
 
+			// Address keys are lowercased: staged rows arrive canonicalized, but
+			// an existing contact saved before canonical-on-save may be mixed-
+			// case — it must still be detected as a duplicate (and auto-
+			// unselected), not presented as a fresh row.
 			for (const _c of contacts.value) {
 				contactsByName.value.set(_c.name, _c)
-				contactsByAddress.value.set(_c.address, _c)
+				contactsByAddress.value.set(_c.address.toLowerCase(), _c)
 			}
 
 			for (const idx in importContacts.value) {
 				const _c = importContacts.value[idx]
 				const _cbn = contactsByName.value.get(_c.name)
-				const _cba = contactsByAddress.value.get(_c.address)
+				const _cba = contactsByAddress.value.get(_c.address.toLowerCase())
 
 				importContacts.value[idx] = {
 					..._c,

@@ -24,12 +24,20 @@ const hasConfig = aztecConfig !== undefined
 
 /** Assert the Advanced senders surface lists ZERO registrations.
  *  Hash hop (not navigateToSettings): callers arrive from sub-pages,
- *  which render no bottom nav for clickNavTab to find. */
+ *  which render no bottom nav for clickNavTab to find.
+ *  The row count is read only after the list FETCH SETTLES (the add
+ *  button renders during loading, and both the loading and error states
+ *  show zero rows) — otherwise this pin could false-pass mid-fetch. */
 async function assertNoSendersRegistered(page: Awaited<ReturnType<typeof openPopup>>) {
 	await navigateByHash(page, "#/popup/settings/advanced/account-state/senders")
 	await page.waitForSelector('[data-testid="senders-add-btn"]', { visible: true, timeout: 10_000 })
-	const senderRows = await page.evaluate(() => document.querySelectorAll('[data-testid="sender-row"]').length)
-	expect(senderRows).toBe(0)
+	await page.waitForFunction(() => !document.querySelector('[data-testid="loading-state"]'), { timeout: 15_000, polling: 100 })
+	const state = await page.evaluate(() => ({
+		rows: document.querySelectorAll('[data-testid="sender-row"]').length,
+		errorShown: (document.body.innerText ?? "").includes("Something went wrong"),
+	}))
+	expect(state.errorShown).toBe(false)
+	expect(state.rows).toBe(0)
 }
 
 test.skipIf(!hasConfig)(

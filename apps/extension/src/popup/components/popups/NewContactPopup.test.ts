@@ -111,6 +111,16 @@ describe("NewContactPopup — decoupled from sender registration", () => {
 		expect(openToastMock).toHaveBeenCalledWith({ label: "Contact is added" })
 	})
 
+	test("saves the address canonicalized to lowercase", async () => {
+		const w = await mountAndOpen()
+		contactServiceMock.addContact.mockResolvedValueOnce({ id: "c1" })
+		await fill(w, "Alice", `0x${"A".repeat(64)}`)
+		await w.find('[data-testid="form-submit"]').trigger("click")
+		await flushPromises()
+
+		expect(contactServiceMock.addContact).toHaveBeenCalledWith("Alice", `0x${"a".repeat(64)}`)
+	})
+
 	test("renders NO register-as-sender toggle", async () => {
 		const w = await mountAndOpen()
 		expect(w.find('[data-testid="new-contact-register-sender"]').exists()).toBe(false)

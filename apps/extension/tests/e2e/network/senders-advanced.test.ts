@@ -135,8 +135,11 @@ test.skipIf(!hasConfig)(
 		await waitForHash(page, "#/popup/general")
 
 		// Register a sender via Advanced, then add a contact with that address.
+		// Same settle rule as gotoSenders: don't act on the list mid-fetch —
+		// the initial snapshot could overwrite the add-event's row render.
 		await navigateToSettings(page, "advanced", "account-state", "senders")
 		await page.waitForSelector('[data-testid="senders-add-btn"]', { visible: true, timeout: 10_000 })
+		await page.waitForFunction(() => !document.querySelector('[data-testid="loading-state"]'), { timeout: 15_000, polling: 100 })
 		await addSenderViaAdvanced(page, address)
 
 		await gotoContacts(page)

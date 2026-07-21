@@ -36,7 +36,13 @@ function onContactAdded(contact) {
 function onContactUpdated(contact) {
 	const idx = contacts.value.findIndex((c) => c.id === contact.id)
 	if (idx !== -1) {
-		if (cacheStore.contactToEditIdx && contact.id === contactToEdit.id) {
+		// External update to the contact being edited (another window, an
+		// import): refresh the draft + the dirty baseline so a later submit
+		// doesn't overwrite the external change with stale fields. (This
+		// branch was dead in the original — it compared against the ref
+		// object instead of its value.)
+		if (cacheStore.contactToEditIdx && contact.id === contactToEdit.value?.id) {
+			contactToEdit.value = contact
 			nameTerm.value = contact.name
 			contactAddressTerm.value = contact.address
 			return
@@ -126,7 +132,9 @@ const handleUpdateContact = async () => {
 			cacheStore.importContact = {
 				...contactToEdit.value,
 				name: nameTerm.value.trim(),
-				address: contactAddressTerm.value,
+				// Same canonical-lowercase rule as the direct-save path below —
+				// staged rows feed addContact/addSender downstream.
+				address: contactAddressTerm.value.toLowerCase(),
 				updated: true,
 			}
 			emit("onClose")

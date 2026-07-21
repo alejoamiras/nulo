@@ -86,12 +86,20 @@ async function syncSenders() {
 		senderAddresses.value = new Set()
 	}
 }
+// Events also INVALIDATE any in-flight syncSenders snapshot (seq bump):
+// without it, a snapshot taken before the event resolves later and
+// overwrites the event's write with stale data. Residual accepted: the
+// event carries no networkId, so a registration pinned to a previous
+// network (e.g. an import racing a network switch) briefly shows a chip
+// here until the next sync corrects it — cosmetic and self-healing.
 function onSenderAdded(address) {
+	senderSyncSeq++
 	const next = new Set(senderAddresses.value)
 	next.add(address.toLowerCase())
 	senderAddresses.value = next
 }
 function onSenderDeleted(address) {
+	senderSyncSeq++
 	const next = new Set(senderAddresses.value)
 	next.delete(address.toLowerCase())
 	senderAddresses.value = next

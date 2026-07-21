@@ -131,6 +131,17 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		expect(openToastMock).toHaveBeenCalledWith({ label: "Contact is updated" })
 	})
 
+	test("saves an edited address canonicalized to lowercase", async () => {
+		const w = await mountAndOpen()
+		contactServiceMock.updateContact.mockResolvedValueOnce({ ...CONTACT, address: NEW_ADDRESS })
+		await w.find('[data-testid="address-input"]').setValue(NEW_ADDRESS.toUpperCase().replace("0X", "0x"))
+		await flushPromises()
+		await w.find('[data-testid="form-submit"]').trigger("click")
+		await flushPromises()
+
+		expect(contactServiceMock.updateContact).toHaveBeenCalledWith("c1", "Alice", NEW_ADDRESS)
+	})
+
 	test("name edit is trimmed on update", async () => {
 		const w = await mountAndOpen()
 		contactServiceMock.updateContact.mockResolvedValueOnce({ ...CONTACT, name: "Alicia" })
