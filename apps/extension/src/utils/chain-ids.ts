@@ -20,6 +20,5 @@ export const MAINNET_ROLLUP_VERSION = 4248422647
 export const CHAIN_IDS = {
 	MAINNET: walletChainId(MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION), // 4248422646
 	TESTNET: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet; canonical pair lives in the faucet's chain-constants.ts (release chain-guard single-sources it)
-	DEVNET: 896946031, // (11155111 ^ 903641544) >>> 0 — v4-devnet-3
 	SANDBOX: 0, // localhost:8080
 } as const

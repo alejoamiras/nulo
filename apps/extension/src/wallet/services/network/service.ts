@@ -77,20 +77,13 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		rpcUrl: "https://aztec-mainnet.drpc.org",
 		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		kind: "mainnet",
-		isPrimaryActive: false,
+		isPrimaryActive: true,
 	},
 	{
 		name: "Testnet",
 		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
 		chainId: CHAIN_IDS.TESTNET,
 		kind: "testnet",
-		isPrimaryActive: true,
-	},
-	{
-		name: "Devnet",
-		rpcUrl: "https://v4-devnet-3.aztec-labs.com/",
-		chainId: CHAIN_IDS.DEVNET,
-		kind: "devnet",
 		isPrimaryActive: false,
 	},
 	{

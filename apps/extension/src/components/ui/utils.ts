@@ -10,12 +10,10 @@ export function getChainPosition(chainId: number): number {
 			return 0
 		case CHAIN_IDS.TESTNET:
 			return 1
-		case CHAIN_IDS.DEVNET:
-			return 2
 		case CHAIN_IDS.SANDBOX:
-			return 3
+			return 2
 		default:
-			return 4
+			return 3
 	}
 }
 
@@ -25,8 +23,6 @@ export function getChainColor(chainId: number): string {
 			return "green"
 		case CHAIN_IDS.TESTNET:
 			return "neutral-mint"
-		case CHAIN_IDS.DEVNET:
-			return "blue"
 		case CHAIN_IDS.SANDBOX:
 			return "sand"
 		default:
@@ -40,8 +36,6 @@ export function getChainName(chainId: number): string {
 			return "Alpha"
 		case CHAIN_IDS.TESTNET:
 			return "Testnet"
-		case CHAIN_IDS.DEVNET:
-			return "Devnet"
 		case CHAIN_IDS.SANDBOX:
 			return "Sandbox"
 		default:
