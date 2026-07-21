@@ -33,6 +33,17 @@ export type MethodCarrier = { method?: string; name?: string }
 const methodOf = (c: MethodCarrier | undefined): string | undefined => c?.method ?? c?.name
 
 /**
+ * The user-facing methods of a call list. Beyond the static FEE_METHODS set, the embedded private-FPC
+ * fee payload pairs a FeeJuice `claim` with `mint_and_pay_fee` in ONE payment method — when that pair
+ * is present, the `claim` is fee infra too. A LONE `claim` stays user-facing (airdrop-style claims are
+ * legitimate user intent, and blanket-filtering `claim` would mistitle them).
+ */
+export function userMethodsOf(named: readonly string[]): string[] {
+	const pairedClaim = named.includes("mint_and_pay_fee")
+	return named.filter((m) => !FEE_METHODS.has(m) && !(pairedClaim && m === "claim"))
+}
+
+/**
  * Pick the user-facing primary method from a list of call-like items.
  * Mirrors `getPrimaryCall`'s filter + mint heuristic but works on the
  * looser shape available at journal-creation time (before transfers /
@@ -48,7 +59,7 @@ export function pickPrimaryMethod(items: ReadonlyArray<MethodCarrier> | undefine
 	if (!Array.isArray(items) || items.length === 0) return undefined
 	const named = items.map(methodOf).filter((m): m is string => typeof m === "string" && m.length > 0)
 	if (named.length === 0) return undefined
-	const userMethods = named.filter((m) => !FEE_METHODS.has(m))
+	const userMethods = userMethodsOf(named)
 	if (userMethods.length === 0) return named[0]
 	if (userMethods[1]?.startsWith("mint")) return userMethods[1]
 	return userMethods[0]

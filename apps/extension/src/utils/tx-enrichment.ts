@@ -3,7 +3,7 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
 import { trimAddress } from "@/utils/string"
-import { FEE_METHODS, pickPrimaryMethod } from "./primary-method"
+import { FEE_METHODS, pickPrimaryMethod, userMethodsOf } from "./primary-method"
 
 export { FEE_METHODS, pickPrimaryMethod }
 
@@ -131,7 +131,9 @@ export function getTxTitle(calls: TxCall[]): string {
  */
 export function getCallCountLabel(calls: TxCall[]): string | null {
 	if (!calls) return null
-	const userCalls = calls.filter((c) => !FEE_METHODS.has(c.method))
+	// Same infra rule as the primary picker (incl. the paired-claim case) so the count never says
+	// "2 calls" for a claim whose second call is just its own fee payload.
+	const userCalls = userMethodsOf(calls.map((c) => c.method))
 	if (userCalls.length <= 1) return null
 	return `${userCalls.length} calls`
 }

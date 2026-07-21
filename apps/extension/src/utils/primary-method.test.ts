@@ -41,6 +41,15 @@ describe("pickPrimaryMethod — self-pay fee payloads are infra, not intent", ()
 	test("public fuel claim: [claim_and_end_setup] alone → claim_and_end_setup (all-fee fallback)", () => {
 		expect(pickPrimaryMethod([{ method: "claim_and_end_setup" }])).toBe("claim_and_end_setup")
 	})
+	// The PRIVATE fueled bridge claim: the embedded private-FPC payment prepends [claim, mint_and_pay_fee]
+	// before the token claim. The paired claim is fee infra - the token claim is the intent.
+	test("private fueled bridge claim: [claim, mint_and_pay_fee, claim_private] → claim_private", () => {
+		expect(pickPrimaryMethod([{ method: "claim" }, { method: "mint_and_pay_fee" }, { method: "claim_private" }])).toBe("claim_private")
+	})
+	// A LONE claim (no mint_and_pay_fee alongside) stays user-facing - airdrop-style claims are intent.
+	test("lone claim next to a sponsor stays the primary (no blanket claim filtering)", () => {
+		expect(pickPrimaryMethod([{ method: "sponsor_unconditionally" }, { method: "claim" }])).toBe("claim")
+	})
 })
 
 describe("pickPrimaryMethod — empty / degenerate inputs", () => {
