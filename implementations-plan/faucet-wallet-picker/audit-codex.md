@@ -194,6 +194,24 @@ switch/capability re-clicks guarded, no testid/aria regressions. Two findings, b
    the flag is now a reactive ref exported by the session; the split button renders only while
    auto-reconnect will actually be attempted; `reset()` clears it. Collision pin extended.
 
+## Round 10 — error-UX follow-up PR audit (gpt-5.6-sol, xhigh; scoped to PR #307)
+
+Scope: `origin/dev..HEAD` on `fix/faucet-morph-subline-wrap` (subline removal + ConnectionErrorStrip
++ red retry). Verdict: no HIGH/MED; error-category coverage confirmed clean on both pages (no
+reachable category renders an empty branch); dismissal semantics + subline/disposition claims
+verified. Three LOW findings:
+
+1. (L, fixed) Red retry hover regression: the design Button's module rule
+   `.primary:hover:not(...)` outranked the scoped `.denied:hover`, restoring the accent fill on
+   hover. Fixed with `!important` on the scoped hover declarations (commented).
+2. (L, fixed) Duplicate strips: all three tab views stay mounted via v-show, so per-view strips
+   rendered duplicate role=alert nodes with identical testids and diverging dismissal state —
+   and the fuel tab (which also mounts BridgeWalletPanel) had NO strip at all. Fixed: ONE strip
+   in App.vue with the exclude list computed from the active tab.
+3. (L, recorded) View-level state-matrix tests (exclusion asymmetry, duplicate-strip detection)
+   not added — component + panel pins cover the logic; L5/L6 view tests are optional per repo
+   convention. Recorded as a follow-up, not fixed.
+
 ## Recorded follow-ups (not fixed)
 - Reducer-style extraction of the discovery/remembered-window policy (leg C #4's larger half).
 - Integration-level "scanning persists + cancel-mid-scan" e2e (jsdom smoke's ending-stream gap).

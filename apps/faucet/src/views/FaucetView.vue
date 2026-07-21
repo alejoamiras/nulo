@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { computed } from "vue"
-import ConnectionErrorStrip from "@/components/ConnectionErrorStrip.vue"
 import TokenCard from "@/components/TokenCard.vue"
 import WalletPanel from "@/components/WalletPanel.vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
@@ -29,8 +28,6 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 				private balance. Internal faucet. No real value.
 			</p>
 		</Flex>
-
-		<ConnectionErrorStrip :exclude="['no-wallet', 'capability-rejected']" />
 
 		<section class="wallets">
 			<WalletPanel />

@@ -235,7 +235,10 @@ function openInstall() {
 }
 
 .denied:hover {
-	background: color-mix(in srgb, var(--red) 10%, transparent);
+	/* !important: the design Button's module rule `.primary:hover:not(...)`
+	 * outranks this scoped selector and would restore the accent fill. */
+	background: color-mix(in srgb, var(--red) 10%, transparent) !important;
+	color: var(--red) !important;
 }
 
 .split {
