@@ -13,9 +13,12 @@ import { TESTIDS } from "@/lib/testids"
  * trust anchor.
  */
 
-const { status, discoveredWallets, scanning, selectWallet, cancelChoice } = useWalletConnection()
+const { discoveredWallets, scanning, pickerOpen, selectWallet, cancelChoice } = useWalletConnection()
 
-const open = computed(() => status.value === "choosing")
+// The session owns visibility: open IMMEDIATELY on a fresh connect (empty +
+// scanning — wallets may need the user's discovery approval before the first
+// row can arrive), closed during a remembered auto-reconnect attempt.
+const open = computed(() => pickerOpen.value)
 
 /** Provider-supplied name, hard-capped by CODE POINTS (a UTF-16 slice can
  *  split an emoji surrogate pair; CSS ellipsis is presentation, not capping). */
@@ -117,6 +120,10 @@ watch(open, async (isOpen) => {
 
 				<p v-if="hasCollision" class="warning" role="alert" :data-testid="TESTIDS.walletPickerWarning">
 					⚠ Multiple wallets claim the same identity. Names and icons are self-reported — pick deliberately. The emoji check on the next step verifies only the connection to the wallet you select.
+				</p>
+
+				<p v-if="discoveredWallets.length === 0" class="waiting" :data-testid="TESTIDS.walletPickerWaiting">
+					No wallets have answered yet. If your wallet asks to allow this site, approve it there.
 				</p>
 
 				<ul class="rows" aria-live="polite">
@@ -264,6 +271,12 @@ watch(open, async (isOpen) => {
 .connect {
 	margin-left: auto;
 	flex: none;
+}
+
+.waiting {
+	color: var(--txt-secondary);
+	font-size: 12px;
+	line-height: 1.5;
 }
 
 .scanning {

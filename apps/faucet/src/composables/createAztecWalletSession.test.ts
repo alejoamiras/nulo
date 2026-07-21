@@ -115,6 +115,9 @@ describe("progressive discovery (fresh path)", () => {
 		const c = s.connect()
 		await flush()
 		expect(s.status.value).toBe("discovering")
+		// Fresh path: the picker is open BEFORE any wallet answers (a wallet's
+		// discovery-approval prompt can gate the first announcement).
+		expect(s.pickerOpen.value).toBe(true)
 
 		stream.push(makeProvider({ id: "nulo" }).provider)
 		await flush()
@@ -161,6 +164,18 @@ describe("progressive discovery (fresh path)", () => {
 		expect(s.status.value).toBe("choosing")
 		s.cancelChoice()
 		expect(s.status.value).toBe("idle")
+		expect(s.error.value).toBeNull()
+	})
+
+	it("cancel from the empty scanning state (no announcements yet) returns to idle", async () => {
+		const s = makeSession()
+		void s.connect()
+		await flush()
+		expect(s.pickerOpen.value).toBe(true)
+		expect(s.discoveredWallets.value).toHaveLength(0)
+		s.cancelChoice()
+		expect(s.status.value).toBe("idle")
+		expect(s.pickerOpen.value).toBe(false)
 		expect(s.error.value).toBeNull()
 	})
 
@@ -502,10 +517,12 @@ describe("remembered path (bounded ambiguity window)", () => {
 		stream.push(provider)
 		await flush()
 		expect(s.status.value).toBe("discovering") // no picker while the window runs
+		expect(s.pickerOpen.value).toBe(false) // remembered attempt: no picker flash
 
 		await vi.advanceTimersByTimeAsync(1_000)
 		await flush()
 		expect(s.status.value).toBe("verifying")
+		expect(s.pickerOpen.value).toBe(false)
 		expect(stream.cancel).toHaveBeenCalled()
 	})
 
@@ -520,6 +537,7 @@ describe("remembered path (bounded ambiguity window)", () => {
 		stream.push(makeProvider({ id: "nulo", name: "Nulo" }).provider) // impostor (or vice versa)
 		await flush()
 		expect(s.status.value).toBe("choosing")
+		expect(s.pickerOpen.value).toBe(true) // forced open on the collision
 		expect(s.discoveredWallets.value).toHaveLength(2)
 
 		await vi.advanceTimersByTimeAsync(2_000)

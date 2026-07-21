@@ -14,11 +14,12 @@ import type { ConnectStatus, DiscoveredWallet } from "@/composables/useWalletCon
 const status = ref<ConnectStatus>("choosing")
 const discoveredWallets = ref<DiscoveredWallet[]>([])
 const scanning = ref(true)
+const pickerOpen = ref(true)
 const selectWallet = vi.fn()
 const cancelChoice = vi.fn()
 
 vi.mock("@/composables/useWalletConnection", () => ({
-	useWalletConnection: () => ({ status, discoveredWallets, scanning, selectWallet, cancelChoice }),
+	useWalletConnection: () => ({ status, discoveredWallets, scanning, pickerOpen, selectWallet, cancelChoice }),
 }))
 
 import WalletPickerModal from "./WalletPickerModal.vue"
@@ -45,6 +46,7 @@ beforeEach(() => {
 	status.value = "choosing"
 	discoveredWallets.value = []
 	scanning.value = true
+	pickerOpen.value = true
 	selectWallet.mockReset()
 	cancelChoice.mockReset()
 })
@@ -55,15 +57,21 @@ afterEach(() => {
 })
 
 describe("WalletPickerModal", () => {
-	it("renders only in 'choosing' and appends rows progressively", async () => {
-		status.value = "idle"
+	it("visibility follows the session's pickerOpen; rows append progressively", async () => {
+		pickerOpen.value = false
 		wrapper = mountModal()
 		expect(q(TESTIDS.walletPicker)).toBeNull()
 
-		status.value = "choosing"
-		discoveredWallets.value = [row({ key: 1 })]
+		// Opens EMPTY (fresh connect, nothing answered yet): waiting hint shows.
+		pickerOpen.value = true
 		await wrapper.vm.$nextTick()
 		expect(q(TESTIDS.walletPicker)).not.toBeNull()
+		expect(q(TESTIDS.walletPickerWaiting)).not.toBeNull()
+		expect(qa(TESTIDS.walletPickerRow)).toHaveLength(0)
+
+		discoveredWallets.value = [row({ key: 1 })]
+		await wrapper.vm.$nextTick()
+		expect(q(TESTIDS.walletPickerWaiting)).toBeNull()
 		expect(qa(TESTIDS.walletPickerRow)).toHaveLength(1)
 
 		discoveredWallets.value = [...discoveredWallets.value, row({ key: 2, id: "acme", name: "Acme", type: "web" })]
@@ -151,9 +159,9 @@ describe("WalletPickerModal", () => {
 	it("moves focus into the dialog on open", async () => {
 		wrapper = mountModal()
 		discoveredWallets.value = [row({ key: 1 })]
-		status.value = "idle"
+		pickerOpen.value = false
 		await wrapper.vm.$nextTick()
-		status.value = "choosing"
+		pickerOpen.value = true
 		await wrapper.vm.$nextTick()
 		await wrapper.vm.$nextTick()
 		expect(document.activeElement?.getAttribute("role")).toBe("dialog")

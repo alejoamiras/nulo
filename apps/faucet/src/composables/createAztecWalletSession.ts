@@ -97,6 +97,12 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	const discoveredWallets = ref<DiscoveredWallet[]>([])
 	/** True while the discovery stream is live (drives the picker's "scanning" hint). */
 	const scanning = ref(false)
+	/** The picker modal's visibility — opened IMMEDIATELY on a fresh connect
+	 *  (before any wallet answers: discovery approval in a wallet can gate the
+	 *  first announcement, and the user must see the scan happening, not a
+	 *  frozen button). The remembered path keeps it closed unless it falls
+	 *  back to a choice. */
+	const pickerOpen = ref(false)
 	const preferredWalletName = ref<string | null>(readPreferred()?.name ?? null)
 
 	let provider: WalletProvider | null = null
@@ -218,6 +224,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		scanning.value = true
 
 		const preferred = autoReconnectDisabled ? null : readPreferred()
+		pickerOpen.value = preferred === null
 
 		try {
 			const manager = WalletManager.configure({ extensions: { enabled: true } })
@@ -248,6 +255,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 						clearAmbiguityTimer()
 						autoReconnectDisabled = true
 						if (status.value === "discovering") status.value = "choosing"
+						pickerOpen.value = true
 					} else if (ambiguityTimer === null && status.value === "discovering") {
 						// FIRST announcement (claimant or not) opens the bounded
 						// window. Discovery stays LIVE during it so buffered + late
@@ -265,6 +273,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 								void proceedWith(cs[0].key, flowEpoch)
 							} else if (discoveredWallets.value.length > 0) {
 								status.value = "choosing"
+								pickerOpen.value = true
 							}
 						}, REMEMBERED_AMBIGUITY_WINDOW_MS)
 					}
@@ -291,6 +300,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 				}
 				if (discoveredWallets.value.length > 0) {
 					status.value = "choosing"
+					pickerOpen.value = true
 					return
 				}
 				throw new Error("No wallet discovered")
@@ -307,11 +317,12 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	/** User picks a row. Transitions SYNCHRONOUSLY so a double click (or a second panel's click,
 	 *  or a racing remembered-window timer) is a no-op. */
 	function selectWallet(key: number): void {
-		if (status.value !== "choosing") return
+		if (status.value !== "choosing" && status.value !== "discovering") return
 		const flowEpoch = epoch
 		clearAmbiguityTimer()
 		connectingViaRemembered = false
 		status.value = "verifying" // synchronous transition — closes every double-entry race
+		pickerOpen.value = false
 		void proceedWith(key, flowEpoch)
 	}
 
@@ -328,6 +339,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		}
 		stopDiscovery()
 		status.value = "verifying"
+		pickerOpen.value = false
 		provider = chosen
 
 		try {
@@ -433,9 +445,10 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		await requestCapabilities(flowEpoch)
 	}
 
-	/** Dismiss the picker: back to idle. An intentional cancel is never a `no-wallet` error. */
+	/** Dismiss the picker: back to idle. An intentional cancel is never a `no-wallet` error.
+	 *  Valid from `choosing` AND from the open-while-scanning `discovering` state. */
 	function cancelChoice(): void {
-		if (status.value !== "choosing") return
+		if (status.value !== "choosing" && status.value !== "discovering") return
 		wipeToIdle()
 	}
 
@@ -546,6 +559,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		pending = null
 		cancelDiscovery = null
 		scanning.value = false
+		pickerOpen.value = false
 		providersByKey.clear()
 		discoveredWallets.value = []
 		connectingViaRemembered = false
@@ -585,6 +599,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		wallet,
 		discoveredWallets,
 		scanning,
+		pickerOpen,
 		preferredWalletName,
 		connect,
 		selectWallet,
