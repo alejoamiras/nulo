@@ -15,6 +15,10 @@ after implementation.
 **Baseline**: `dev` @ `f5ee3be`.
 **User decisions (Phase 0)**: always show the picker on a fresh choice; progressive streaming UX;
 remember + reconnect; **faucet only** (the playground's identical race is a recorded follow-up).
+**Status: APPROVED 2026-07-21** — asks resolved: A1 confirmed (Cancel → idle, never `no-wallet`);
+A2 confirmed (switch affordance in idle state AND connected chip menu); **UI pre-approved from
+the mockup artifact: Option B — MODAL OVERLAY** ("closer to the EVM experience"), one picker
+modal at app root reusing the verification-modal pattern.
 
 ## Threat framing (audit-corrected — load-bearing for the design)
 
@@ -101,10 +105,13 @@ remember + reconnect; **faucet only** (the playground's identical race is a reco
   not CSS-only) and rendered as text; `type` badge; per-row Connect; "Scanning for more
   wallets…" while live; Cancel. Testids from `TESTIDS` (new: `walletPicker`, `walletPickerRow` + `data-wallet-key`,
   `walletPickerConnect`, `walletPickerCancel`, `walletPickerScanning`, `btnSwitchWallet`).
-- Panels: the session singleton is consumed by THREE always-mounted `v-show` views (WalletPanel +
-  two BridgeWalletPanel instances — audit-corrected fact). The picker renders in whichever panel
-  is visible; `selectWallet`'s synchronous guard makes cross-panel double-selection safe, and
-  e2e/component selectors scope beneath the visible panel.
+- **Presentation (user-approved: Option B, modal overlay)**: ONE `WalletPickerModal` instance at
+  the app root (like the existing emoji-verification modal), backdrop-dimmed, rendered whenever
+  the session is in `"choosing"`. This dissolves most of the three-panel concern (the panels only
+  trigger `connect()`; the single modal owns selection), and `selectWallet`'s synchronous guard
+  covers any residual double-trigger. Overlay hygiene per audit: Escape = `cancelChoice()`,
+  backdrop click = `cancelChoice()`, focus moves into the modal on open and returns to the
+  trigger on close. The collision warning renders as a strip INSIDE the modal above the rows.
 - Switch affordance in BOTH places (audit-adopted A2): idle state ("Use a different wallet" next
   to Connect when a preference exists) AND the connected chip menu (disconnect + forget in one
   action, so switching doesn't require a manual disconnect first).
@@ -133,12 +140,14 @@ subscribed after `confirm()` (test that the pre-confirm registration bug stays f
 bun run test:faucet`. Pass: exit 0, all required cases present + green.
 Layers: lint/typecheck/unit.
 
-### Phase 2 — Picker UI + panels wiring + testids
-`WalletPickerList.vue`, three-panel wiring, both switch affordances, `TESTIDS` additions.
-Component tests: rows render (name as text — HTML-bearing name inert; 48-char cap enforced on the
-STRING), icon protocol allowlist (javascript:/http: URL → fallback glyph), progressive append,
-per-row connect emits the key, scanning hint tracks liveness, cancel path, switch affordance
-visibility rules (idle-with-preference; connected chip), collision rows both render.
+### Phase 2 — Picker modal + wiring + testids
+`WalletPickerModal.vue` (app-root overlay per the approved Option B mockup), both switch
+affordances (idle link + connected chip menu), `TESTIDS` additions. Component tests: rows render
+(name as text — HTML-bearing name inert; 48-char cap enforced on the STRING), icon protocol
+allowlist (javascript:/http: URL → fallback glyph; chrome-extension:/https/data:image pass),
+progressive append, per-row connect emits the key, scanning hint tracks liveness, collision
+warning strip renders when rows share a claimed id, Escape/backdrop → cancel, focus enters the
+modal on open, switch affordance visibility rules, collision rows both render.
 
 **Validation gate** — commands: `bun run lint && bun run --cwd apps/faucet typecheck &&
 bun run test:faucet`. Pass: exit 0. Layers: lint/typecheck/unit/component.
@@ -242,7 +251,7 @@ None scheduled beyond the standing multi-round codex post-impl cadence (user-req
 
 ## Seeds
 
-_Draft until the approval gate; finalized post-approval._
+_FINAL (post-approval, 2026-07-21; Option B modal UI pre-approved via mockup artifact)._
 
 ```
 /goal All phases marked ✓ in plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/faucet-wallet-picker/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; `bun run lint`, `bun run typecheck:all`, `bun run test:faucet`, `bun run --cwd apps/faucet test:e2e`, and `bun run --cwd apps/faucet build` all report exit 0 in the transcript.
