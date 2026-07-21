@@ -2,18 +2,44 @@ import { describe, expect, test } from "vitest"
 import { FEE_METHODS, pickPrimaryMethod } from "./primary-method"
 
 describe("FEE_METHODS — wallet-injected fee/entrypoint set", () => {
-	test("contains the documented five entries", () => {
+	test("contains the documented seven entries", () => {
 		expect(FEE_METHODS.has("sponsor_unconditionally")).toBe(true)
 		expect(FEE_METHODS.has("fee_entrypoint_private")).toBe(true)
 		expect(FEE_METHODS.has("fee_entrypoint_public")).toBe(true)
 		expect(FEE_METHODS.has("pay_fee")).toBe(true)
 		expect(FEE_METHODS.has("set_authorized")).toBe(true)
+		// The self-pay fee payloads: FeeJuicePaymentMethodWithClaim's setup call + the embedded
+		// private-FPC payment's setup call. Fee mechanics, never the user's intent.
+		expect(FEE_METHODS.has("claim_and_end_setup")).toBe(true)
+		expect(FEE_METHODS.has("mint_and_pay_fee")).toBe(true)
 	})
 	test("does NOT contain common user method names", () => {
 		expect(FEE_METHODS.has("transfer")).toBe(false)
 		expect(FEE_METHODS.has("transfer_in_private")).toBe(false)
 		expect(FEE_METHODS.has("mint_to_private")).toBe(false)
 		expect(FEE_METHODS.has("drip_to_private")).toBe(false)
+		// Plain fee-juice `claim` stays a USER method: it is the honest primary of a fuel claim tx, and
+		// third-party contracts legitimately name user-facing methods `claim` (airdrops etc.).
+		expect(FEE_METHODS.has("claim")).toBe(false)
+	})
+})
+
+describe("pickPrimaryMethod — self-pay fee payloads are infra, not intent", () => {
+	// The private fuel claim bundles [FeeJuice.claim, PrivateFPC.mint_and_pay_fee] with NO app call.
+	// Pre-fix, the mint heuristic saw userMethods[1] = mint_and_pay_fee and titled the tx
+	// "Mint And Pay Fee"; the honest primary is the FeeJuice claim.
+	test("private fuel claim: [claim, mint_and_pay_fee] → claim (mint heuristic no longer hijacked)", () => {
+		expect(pickPrimaryMethod([{ method: "claim" }, { method: "mint_and_pay_fee" }])).toBe("claim")
+	})
+	// The fueled private bridge claim bundles the fee's claim_and_end_setup with the token claim; the
+	// token claim is the intent.
+	test("fueled bridge claim: [claim_and_end_setup, claim_private] → claim_private", () => {
+		expect(pickPrimaryMethod([{ method: "claim_and_end_setup" }, { method: "claim_private" }])).toBe("claim_private")
+	})
+	// The public fuel-only self-pay claim is carrier-less: the fee payload is the ONLY call, so the
+	// all-fee fallback surfaces it (humanize maps it to "Claim Fee Juice").
+	test("public fuel claim: [claim_and_end_setup] alone → claim_and_end_setup (all-fee fallback)", () => {
+		expect(pickPrimaryMethod([{ method: "claim_and_end_setup" }])).toBe("claim_and_end_setup")
 	})
 })
 

@@ -16,6 +16,12 @@ export const FEE_METHODS: ReadonlySet<string> = new Set([
 	"fee_entrypoint_public",
 	"pay_fee",
 	"set_authorized",
+	// Fee-payload setup calls of the SELF-PAY payment methods: FeeJuicePaymentMethodWithClaim injects
+	// claim_and_end_setup; an embedded private-FPC payment injects mint_and_pay_fee (after FeeJuice.claim).
+	// Both are HOW the fee is paid, never the user's intent — and mint_and_pay_fee additionally hijacked
+	// the mint heuristic below, titling a bundled private token claim "Mint And Pay Fee".
+	"claim_and_end_setup",
+	"mint_and_pay_fee",
 ])
 
 /** Heterogeneous call-like shape. Covers `TxCall` (`method`), `Action` of
