@@ -70,14 +70,6 @@ function openInstall() {
 			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.account" />
 			<button
-				class="switch-link in-chip"
-				type="button"
-				:data-testid="TESTIDS.btnSwitchWallet"
-				@click="switchWallet"
-			>
-				switch
-			</button>
-			<button
 				class="disconnect"
 				type="button"
 				aria-label="Disconnect"
@@ -230,28 +222,6 @@ function openInstall() {
 .split .caret {
 	min-width: 44px;
 	padding: 0 12px;
-}
-
-.switch-link {
-	background: none;
-	border: none;
-	color: var(--txt-secondary);
-	font: 600 11px/1 var(--font-mono);
-	cursor: pointer;
-	text-decoration: underline;
-	text-underline-offset: 3px;
-	padding: 2px 0;
-}
-
-.switch-link:hover {
-	color: var(--txt-primary);
-}
-
-.switch-link.in-chip {
-	text-decoration: none;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	font-size: 10px;
 }
 
 .error-hint {

@@ -54,7 +54,6 @@ async function onClick() {
 		<div v-if="status === 'connected' && selectedAccount" class="chip">
 			<span class="label">Aztec</span>
 			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.bridgeL2Account" />
-			<button class="switch-link" type="button" :data-testid="TESTIDS.bridgeL2SwitchWallet" @click="switchWallet">switch</button>
 			<button
 				class="disconnect"
 				type="button"
@@ -145,21 +144,6 @@ async function onClick() {
 .split .caret {
 	min-width: 44px;
 	padding: 0 12px;
-}
-
-.switch-link {
-	background: none;
-	border: none;
-	color: var(--txt-secondary);
-	font: 600 10px/1 var(--font-mono);
-	cursor: pointer;
-	text-transform: uppercase;
-	letter-spacing: 0.08em;
-	padding: 2px 0;
-}
-
-.switch-link:hover {
-	color: var(--txt-primary);
 }
 
 .disconnect {
