@@ -97,11 +97,24 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   outcome. Under CI proving load the restore stretches, the kill lands pre-finalize more often, and
   the "flake" was the product doing exactly what it was coded to do. Map the implementation's
   outcome space (read the error paths, not just the happy path) BEFORE writing the assertion.
+  Three hardening rules for the accepted alternate leg (each closed a codex-audit finding):
+  (1) *completion signal, not first-visible effect* — the profile row vanishes in `deleteProfile`'s
+  phase 1, but the deletion TOMBSTONE (`nulo:core:profile-tombstones@`) clears only after the
+  coordinator's full purge, so "row gone" alone accepts a half-done or wedged purge;
+  (2) *provenance-gate the alternate leg* — a clean register end-state is only PROVEN rollback if
+  the row demonstrably existed first (the mid-restore marker); without that it's equally consistent
+  with a restore that crashed before creating anything, which must FAIL;
+  (3) *converge the legs* — never `return` early around the test's load-bearing assertions; drive
+  the product's designed retry path so the on-chain checks execute on EVERY pass, or a required
+  gate can sit green for weeks while its raison-d'être assertions never run.
 - **One-shot route checks race vue-router settling — use settle loops.** `ensureUnlocked` samples the
   hash ONCE and no-ops off-auth; a fresh popup transiently shows `/popup` (an index route that
   immediately pushes general) before the guard settles on auth, so a one-shot sample in that window
   means nobody ever types the password. Recovery waits should loop: general → done; auth → unlock →
-  re-check; terminal-reset route → verify via raw storage before ending the wait.
+  re-check; terminal-reset route → verify completion via raw storage (row AND tombstone gone, see
+  above) before ending the wait. Always fall through to the loop's sleep after an unlock attempt
+  (oscillation must not hot-spin), and record the LAST unlock error into the timeout diagnostics —
+  a swallowed `.catch(() => {})` turns a selector regression into an opaque park.
 - **Instrument long navigation waits with a route-trajectory recorder** (poll `window.location.hash`
   on an interval and push transitions into a `window.__nuloRouteTrace` array — vue-router's hash
   history navigates via pushState, so `hashchange`/`popstate` listeners see NOTHING). On timeout,
