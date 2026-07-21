@@ -17,7 +17,7 @@
  * `leafIndex`. There is NO token leg — this builds ONLY the fee-juice claim.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { BatchCall } from "@aztec/aztec.js/contracts"
+import { BatchCall, toSimulateOptions } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { Gas } from "@aztec/stdlib/gas"
@@ -108,11 +108,16 @@ export async function buildFuelClaimInteraction(rec: DepositJournalRecord, deps:
 	// pass, so a claim could send before the L1→L2 message anchors and a consumed message could look
 	// claimable forever (codex). simulateTx runs the SAME l1_to_l2_message check send does, so it throws the
 	// isMsgNotReady / isMsgConsumed shapes those consumers key off. Used by BOTH self-pay branches.
-	const simulateViaPayload = async (fee: unknown): Promise<unknown> => {
-		const payload = await new BatchCall(aztec as never, []).request({ from: recipient, fee } as never)
-		return await (aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(payload, {
-			from: recipient,
-		} as never)
+	// toSimulateOptions carries the claim's EXPLICIT gasSettings into the wallet call — without it the
+	// wallet simulates with estimation defaults (max limits + padded fees), which mismatches send and can
+	// spuriously fail the self-pay budget check (codex round 3). Mirrors BatchCall.simulate's own
+	// non-empty-batch path: [request payload, toSimulateOptions(interaction options)].
+	const simulateViaPayload = async (fee: { paymentMethod: unknown }): Promise<unknown> => {
+		const payload = await new BatchCall(aztec as never, []).request({ fee: { paymentMethod: fee.paymentMethod } } as never)
+		return await (aztec as { simulateTx: (p: unknown, o: unknown) => Promise<unknown> }).simulateTx(
+			payload,
+			toSimulateOptions({ from: recipient, fee } as never),
+		)
 	}
 
 	if (rec.isPrivate) {

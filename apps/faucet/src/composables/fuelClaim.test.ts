@@ -15,6 +15,10 @@ vi.mock("@aztec/aztec.js/contracts", () => ({
 			send: async () => ({ receipt: { txHash: "0xfuelclaim" } }),
 		}
 	}),
+	// Identity passthrough: the unit contract pinned here is that simulate() routes the FULL interaction
+	// options (from + fee incl. the explicit gasSettings) through toSimulateOptions into simulateTx; the
+	// real gasSettings mapping is the SDK's own logic, exercised upstream.
+	toSimulateOptions: vi.fn((o: unknown) => o),
 }))
 // Keep every real export EXCEPT the fee-method builders each path feeds material into — stub them so we can
 // (a) capture the salt/secret each path routed in, and (b) avoid real poseidon in jsdom (deriveBridgeSecret
@@ -175,6 +179,37 @@ describe("buildFuelClaimInteraction — simulate validates the REAL payload, not
 		)
 		await i.simulate()
 		expect(simulateTx).toHaveBeenCalledTimes(1)
+	})
+
+	// Simulation must run under the SAME explicit gasSettings as send — the wallet otherwise fills
+	// estimation defaults (max limits + padded fees), which can spuriously fail the self-pay budget
+	// check while the real send would succeed (codex round 3).
+	it("PUBLIC: simulate() carries the claim's explicit gasSettings + predicted fees into simulateTx", async () => {
+		const simulateTx = vi.fn(async (..._args: unknown[]) => ({ ok: true }))
+		const maxFeesPerGas = { feePerDaGas: 5n, feePerL2Gas: 7n }
+		const i = await buildFuelClaimInteraction(rec({}), deps({ aztec: { simulateTx }, maxFeesPerGas }))
+		await i.simulate()
+		const opts = simulateTx.mock.calls[0][1] as {
+			from: unknown
+			fee: { gasSettings: { gasLimits: { daGas: number; l2Gas: number }; maxFeesPerGas: typeof maxFeesPerGas } }
+		}
+		expect(opts.from).toBe(RECIPIENT)
+		// The PUBLIC canary-calibrated limits, not the wallet's estimation defaults.
+		expect(opts.fee.gasSettings.gasLimits.l2Gas).toBe(1_500_000)
+		expect(opts.fee.gasSettings.gasLimits.daGas).toBe(3_000)
+		expect(opts.fee.gasSettings.maxFeesPerGas).toEqual(maxFeesPerGas)
+	})
+
+	it("PRIVATE: simulate() carries the private 2-call gasSettings into simulateTx", async () => {
+		const simulateTx = vi.fn(async (..._args: unknown[]) => ({ ok: true }))
+		const i = await buildFuelClaimInteraction(
+			rec({ isPrivate: true, fuel: { received: ABOVE_FLOOR, bridgeSecretSalt: "0x1", leafIndex: "7" } }),
+			deps({ aztec: { simulateTx } }),
+		)
+		await i.simulate()
+		const opts = simulateTx.mock.calls[0][1] as { fee: { gasSettings: { gasLimits: { daGas: number; l2Gas: number } } } }
+		expect(opts.fee.gasSettings.gasLimits.l2Gas).toBe(4_000_000)
+		expect(opts.fee.gasSettings.gasLimits.daGas).toBe(100_000)
 	})
 })
 

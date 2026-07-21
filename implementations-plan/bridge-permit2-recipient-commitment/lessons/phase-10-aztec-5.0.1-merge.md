@@ -37,3 +37,49 @@ salt-v2, Token 5-arg, dev's journal-resume reuse logic).
 
 Gates green: typecheck:all (13 pkgs), bridge-core 181, faucet 450, keystone 6/6 on 5.0.1,
 sole-consumer self-test 5/5, biome lint.
+
+## `[✓ 2026-07-21]` Smoke-feedback batch: public fuel self-pay (mainnet shape) + 3 UX fixes
+
+Owner feedback from manually smoking the promoted 5.0.1 deployment — 5 items, one a real fee-strategy
+decision (owner call: the Sponsored FPC does not exist on mainnet, so a self-pay bug must SURFACE,
+never be masked): switch the public fuel-only claim from sponsor+app-phase-claim to
+`FeeJuicePaymentMethodWithClaim` self-pay (`880f2ba`), plus SIGN→AUTHORIZE, journal auto-surface on
+completion (`6fda94d`), and the extension titling fix (`2defc58`).
+
+**The load-bearing discovery (codex gpt-5.6-sol ultra, 3 rounds): `BatchCall([]).simulate({fee})` is
+a silent NO-OP.** SDK `batch_call.ts`: `request()` merges `options.fee.paymentMethod`'s payload, but
+`simulate()` reads ONLY the batch's own interactions — an empty batch produces zero batchRequests and
+never executes the fee payload. Consequences: the journal's message-availability gate
+(`useBridgeJournal` polls `interaction.simulate()` expecting `isMsgNotReady` throws) and the
+`recordMessageConsumed` rediscovery probe both silently "pass" for a carrier-less claim. Pre-existing
+on the shipped private fuel path (masked because this-process claims complete via the receipt path,
+not the probe); would have become public's problem too once it lost its real app-phase claim
+interaction. Fix shipped for BOTH branches: `simulateViaPayload` = `BatchCall([]).request({fee})` →
+`wallet.simulateTx(payload)` — throws the real not-ready/consumed shapes.
+
+Second codex catch: the protocol's balance check is against `getFeeLimit()` = Σ gasLimit×maxFee (the
+LIMIT, not the actual charge), so a bridge clearing the static 16e18 floor can still revert once fees
+spike. Shipped `clearsFeeLimit()` fail-closed on both branches + calibrated `PUBLIC_CLAIM_GAS` to
+1.5M/3k from the live canary's measured 659,123 l2Gas (the private 4M limit at a 2× spike would graze
+the floor).
+
+**Live proof ×2**: converted `fee-juice-canary-testnet.ts` to the self-pay shape (zero-app-call
+`BatchCall([])` + `claim_and_end_setup` in setup — the exact unproven combination) and ran it twice
+against the promoted manifest: both PASSED (16e18 deposit → ~14.72e18 net, fee ~1.28e18,
+revertCode 0). The 5.0.0 "149 failed simulates" bug was the APP-phase variant under a sponsored fee;
+setup is the correct home. Fuel-only titling: the extension's mint-heuristic picked
+`mint_and_pay_fee` ("Mint And Pay Fee") — fixed by classifying both self-pay fee payloads as
+`FEE_METHODS` (extension), NOT by labeling: bare `claim` deliberately stays a user method
+(third-party airdrop claims).
+
+Deliberately NOT done (codex-agreed pre-existing, cross-path): the ambiguous post-broadcast/no-hash
+recovery machine (affects old public + private + token claims equally — separate PR); the canary
+still sponsor-deploys its fresh account (faucet flows require a deployed wallet before any claim).
+
+Round 3 (post-implementation confirm) caught one more: `simulateTx` was called with only `{from}`, so
+the standalone simulation ran under the wallet's ESTIMATION defaults (max limits + padded fees) —
+mismatching send and able to spuriously fail the self-pay budget check. Fixed by routing the
+interaction options through the SDK's own `toSimulateOptions` (exactly what a non-empty
+`BatchCall.simulate` does), unit-pinned for both branches' explicit gasLimits + predicted fees.
+
+Gates: faucet typecheck + 459 (7 new), extension 3176 (+5 primary-method pins), biome; canary ×2 live.
