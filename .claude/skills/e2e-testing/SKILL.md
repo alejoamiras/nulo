@@ -138,24 +138,31 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   timeouts by 22:00 with identical code (verified via a pre-change checkout that failed the same
   way).
 
-## Known-marginal: backup-restore-sw-restart (mid-restore recovery leg)
+## backup-restore-sw-restart: two DESIGNED outcomes, not one
 
-The "SW restart mid-restore" case is built on TWO inherent races; small timing shifts anywhere in
-the SW boot/unlock path change which branch CI takes (observed: 5 consecutive CI reds on a branch
-whose diff only added ~seconds of unlock-path work, then green; sibling branches green all along):
+The mid-restore SW-kill scenario has two legitimate endings, decided by where the kill lands
+relative to `finalizeRestore` (the test asserts BOTH since #308 — do not "fix" a rollback ending
+back into a recovery expectation):
 
-1. **Rollback vs page-close.** Killing the SW rejects the import page's pending restore RPC; its
-   catch RECONNECTS and calls `deleteProfile` on the pre-finalize profile (rollback). The test
-   closes that page right after the kill — close usually wins locally (no rollback), but on a slow
-   runner the rollback can escape and race the recovery unlock, closing the just-opened session
-   (page bounces auth→general→auth; the 240s general-wait then times out).
-2. **Partial network rows suppress seeding.** Restore writes profile → networks (Local LAST) →
-   accounts; recovery seeds default networks ONLY when zero network rows exist. A kill landing
-   mid-network-writes leaves the profile permanently without "Local" — the switchToLocalNetwork
-   row wait then fails on ABSENCE, not slowness. (Product gap, tracked outside the test.)
+- **RECOVERED** (kill post-finalize): reopen → auth → unlock → general, registrations survive.
+- **ROLLED BACK** (kill pre-finalize): the import page's catch deletes the orphan profile — the
+  reopened popup has zero profiles and legitimately routes to REGISTER. The test asserts the
+  rollback completed (row gone, tombstone cleared) and then re-imports cleanly.
 
-The test self-instruments on failure (hash-change history + page text + storage keys + SW
-liveness dumped to stdout) — read the CI log's `[sw-restart-restore]` lines before re-running.
+Two flake mechanisms this design killed (worth remembering as PATTERNS):
+
+1. **One-shot route sampling parks flows.** The fresh popup can transiently show `/popup` (an
+   index route that immediately pushes general) before the auth guard settles. A helper that
+   samples the hash ONCE (`ensureUnlocked`'s "not on auth → return") no-ops in that window —
+   nobody ever types the password and the downstream long wait parks silently. Use a settle LOOP
+   around unlock, never a single sample.
+2. **vue-router hash navigation fires NO `hashchange`** (it navigates via pushState). A
+   `hashchange`-listener route recorder logs nothing; record routes by POLLING (see the test's
+   `__nuloRouteTrace`).
+
+Related product gap (tracked separately): restore writes networks with Local LAST, and recovery
+seeds defaults only when ZERO network rows exist — a kill mid-network-writes leaves the profile
+without "Local" permanently.
 
 ## PR-workflow silence — check mergeability first
 
