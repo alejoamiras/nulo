@@ -50,6 +50,11 @@ describe("pickPrimaryMethod — self-pay fee payloads are infra, not intent", ()
 	test("lone claim next to a sponsor stays the primary (no blanket claim filtering)", () => {
 		expect(pickPrimaryMethod([{ method: "sponsor_unconditionally" }, { method: "claim" }])).toBe("claim")
 	})
+	// Only the ADJACENT [claim, mint_and_pay_fee] pair is fee infra - a user-facing claim elsewhere in
+	// the SAME tx (an app call riding a private-FPC-paid tx) must survive the filter (codex verify Med).
+	test("app claim riding a private-FPC-paid tx survives: [claim, mint_and_pay_fee, claim] → the app claim", () => {
+		expect(pickPrimaryMethod([{ method: "claim" }, { method: "mint_and_pay_fee" }, { method: "claim" }])).toBe("claim")
+	})
 })
 
 describe("pickPrimaryMethod — empty / degenerate inputs", () => {

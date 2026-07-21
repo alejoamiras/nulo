@@ -3,7 +3,7 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { OriginType } from "@/wallet/services/transaction/spec"
 import type { TxOrigin } from "@/wallet/services/transaction/spec"
 import { trimAddress } from "@/utils/string"
-import { FEE_METHODS, pickPrimaryMethod, userMethodsOf } from "./primary-method"
+import { FEE_METHODS, pickPrimaryIndex, pickPrimaryMethod, userMethodsOf } from "./primary-method"
 
 export { FEE_METHODS, pickPrimaryMethod }
 
@@ -96,9 +96,10 @@ export function humanizeMethodName(method: string): string {
  */
 export function getPrimaryCall<T extends { method: string }>(calls: T[]): T | undefined {
 	if (!calls?.length) return undefined
-	const primary = pickPrimaryMethod(calls)
-	if (!primary) return calls[0]
-	return calls.find((c) => c.method === primary) ?? calls[0]
+	// Index-based, not find-by-name: when the primary's NAME also appears in the fee payload (the
+	// paired FeeJuice claim), a name find would return the fee call's object - wrong contract/transfers.
+	const idx = pickPrimaryIndex(calls)
+	return idx === undefined ? calls[0] : calls[idx]
 }
 
 /**
