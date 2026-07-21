@@ -286,3 +286,35 @@ Session zeroization, pending-secret consumption, TTL-lock direction sound; the e
 
 Post-fix gates: lint 0 · typecheck:all 0 · test:all 0 (incl. new coordinator/barrier/integration
 tests for every fix) · armed smoke + canary re-run below.
+
+### Convergence: iterative codex verify-loop (session A resumed, rounds 3–5, 2026-07-21)
+
+At the maintainer's request ("keep auditing and fixing until stable"), the runtime-audit session
+was resumed to VERIFY each round of fixes and re-attack them (fresh fixes are where regressions
+hide). Trajectory:
+
+- **Round 3 verify**: the round-2 fixes were 4 CORRECT / 4 CORRECT-BUT-INCOMPLETE / 1 REGRESSED.
+  Fixed (commit `00d4da7`): the verified-stamp is now keyed by a STORAGE-DERIVED
+  `accountSetDigest` (dropping the event-driven clear and its race gaps); the runtime mismatch
+  closes the session DIRECTLY via `profileService.lockProfileIfActive` (the
+  `AccountRuntimeIntegrityDelegate` is removed) + extracted `raiseRuntimeMismatch` with a unit
+  test; `openSessionVerified` brackets the open with a post-open deletion re-check; the barrier
+  reads the PRESENTED profile from the app store + `route.name` (fixing the stale-lastActive
+  fail-open and the trailing-slash lockout); changePassword verifies before persist; the
+  descriptor-binding test asserts live instance fields.
+- **Round 4 verify**: 4 RESOLVED / 2 STILL-INCOMPLETE / 1 LOW. Fixed (commit `f8a2ffd`): the
+  deletion bracket now uses the PERSISTENT deletion epoch (catches a delete that
+  reserve→purge→released entirely during a force-released open); changePassword reports the
+  password change as committed when only the RE-open hits an integrity block; the fail-closed test
+  now genuinely fails the block persist.
+- **Round 5 verify**: 3 RESOLVED / 1 NEW HIGH (self-introduced): the changePassword PRE-check threw
+  on drift but left the active session open. Fixed (commit `62822c4`): the pre-check closes the
+  matching active session before rethrowing.
+- **Round 5 re-verify: RESOLVED, "No new defects found", "STABLE to merge to dev."**
+
+Each round ran full `lint`/`typecheck:all`/`test:all` green with new tests for every fix. The
+freeze artifact/descriptor/derivation + proving path were untouched by rounds 3–5 (all changes are
+in the coordinator/barrier/session-open/changePassword surfaces); the frozen-account canary stayed
+green with native proving across the arc. Total post-impl audit rounds: 1 (first codex block, 5
+HIGH) + this verify-loop (5 rounds) = the coordinator/session surface was adversarially
+re-attacked until an independent pass found nothing actionable.
