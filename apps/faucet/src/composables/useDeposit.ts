@@ -340,27 +340,23 @@ export function ensureDepositJournalDeps(): void {
 			// Fee-juice (Fuel) records claim via a different, no-token-leg path — dispatch to the dedicated
 			// builder; the token claim below never runs for them (codex Option C, lessons/phase-3.md).
 			if (assetKindOf(rec) === "fee-juice") {
-				const fpcInst = await getSponsoredFpcInstance()
 				const latchFuel = (patch: Record<string, unknown>) => {
 					const f = rec.fuel
 					if (f) updateRecord(rec.id, { fuel: { ...f, ...patch } })
 				}
-				// V5: pin the private claim's maxFeesPerGas to predicted-worst — NO extra padding. This is a
-				// SELF-PAY claim: the bridged amount is the whole budget and the FPC asserts
-				// amount >= gasLimits*maxFeesPerGas with no refund, so any fee headroom inflates max_gas_cost
-				// past the bridged amount and reverts "Amount too low to cover gas cost". (The wallet's x1.5
-				// minFeePadding is for refundable txs, not this.) predicted-worst is already a forward-looking
-				// ceiling so it still covers base-fee drift through the proving window; a rare spike beyond it
-				// fails recoverably and the engine reprices on retry. Public uses the Sponsored FPC (no cap).
-				const claimMaxFees = rec.isPrivate ? await predictedWorstMinFees(createAztecNodeClient(NODE_URL)) : undefined
+				// V5: pin the claim's maxFeesPerGas to predicted-worst — NO extra padding. BOTH paths now
+				// SELF-PAY (public via FeeJuicePaymentMethodWithClaim, private via the embedded FPC): the bridged
+				// amount is the whole budget and the setup asserts amount >= gasLimits*maxFeesPerGas with no
+				// refund, so any fee headroom inflates max_gas_cost past the bridged amount and reverts "Amount
+				// too low to cover gas cost". (The wallet's x1.5 minFeePadding is for refundable txs, not this.)
+				// predicted-worst is already a forward-looking ceiling so it still covers base-fee drift through
+				// the proving window; a rare spike beyond it fails recoverably (the engine reprices on retry).
+				const claimMaxFees = await predictedWorstMinFees(createAztecNodeClient(NODE_URL))
 				return buildFuelClaimInteraction(rec, {
 					aztec,
 					recipient: AztecAddress.fromStringUnsafe(rec.recipient),
-					sponsoredFpc: fpcInst.address,
 					minFloorFj: FUEL_MIN_FJ,
-					maxFeesPerGas: claimMaxFees
-						? { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas }
-						: undefined,
+					maxFeesPerGas: { feePerDaGas: claimMaxFees.feePerDaGas, feePerL2Gas: claimMaxFees.feePerL2Gas },
 					// Authoritative claim material from the engine: the unsealed `envelope.salt` (private) and
 					// the gated top-level secret (public) — never the plaintext journal copy (codex HIGH/LOW).
 					resolvedSalt: rec.isPrivate ? envelope?.salt : undefined,
