@@ -10,8 +10,6 @@ declare global {
   const AccessLevel: typeof import('../utils/confirmation-policies').AccessLevel
   const CHAIN_IDS: typeof import('../utils/chain-ids').CHAIN_IDS
   const EffectScope: typeof import('vue').EffectScope
-  const FEE_JUICE_PRICING: typeof import('../utils/fee-estimation').FEE_JUICE_PRICING
-  const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
   const MAINNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').MAINNET_L1_CHAIN_ID
@@ -46,7 +44,6 @@ declare global {
   const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
-  const ensurePermissions: typeof import('../utils/general').ensurePermissions
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
@@ -128,6 +125,7 @@ declare global {
   const requireNetwork: typeof import('../utils/core').requireNetwork
   const requireTransaction: typeof import('../utils/core').requireTransaction
   const resolveComponent: typeof import('vue').resolveComponent
+  const resolveRestoredActiveNetworkId: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkId
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
   const setLastActiveProfileId: typeof import('../utils/lastActiveProfile').setLastActiveProfileId
@@ -325,7 +323,6 @@ declare module 'vue' {
     readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
-    readonly ensurePermissions: UnwrapRef<typeof import('../utils/general')['ensurePermissions']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
@@ -407,6 +404,7 @@ declare module 'vue' {
     readonly requireNetwork: UnwrapRef<typeof import('../utils/core')['requireNetwork']>
     readonly requireTransaction: UnwrapRef<typeof import('../utils/core')['requireTransaction']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
+    readonly resolveRestoredActiveNetworkId: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkId']>
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
     readonly setLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['setLastActiveProfileId']>

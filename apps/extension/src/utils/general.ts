@@ -28,15 +28,3 @@ export const debounce = <T extends (...args: never[]) => unknown>(fn: T, delay: 
 		}, delay)
 	}
 }
-
-export async function ensurePermissions(perms: chrome.permissions.Permissions): Promise<boolean> {
-	return new Promise((resolve) => {
-		chrome.permissions.contains(perms, (has) => {
-			if (has) return resolve(true)
-
-			chrome.permissions.request(perms, (granted) => {
-				resolve(Boolean(granted))
-			})
-		})
-	})
-}

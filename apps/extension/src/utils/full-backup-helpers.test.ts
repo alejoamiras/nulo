@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { collectRestoreErrors, detectBackupType, normalizeAllIds, readBackupFile, remapByMap } from "./full-backup-helpers"
+import {
+	collectRestoreErrors,
+	detectBackupType,
+	normalizeAllIds,
+	readBackupFile,
+	remapByMap,
+	resolveRestoredActiveNetworkId,
+} from "./full-backup-helpers"
 
 describe("detectBackupType", () => {
 	it("detects plain JSON object", () => {
@@ -195,5 +202,41 @@ describe("normalizeAllIds + remapByMap", () => {
 			{ profileId: "new", id: "a1" },
 			{ profileId: "new", id: "a2" },
 		])
+	})
+})
+
+describe("resolveRestoredActiveNetworkId (item 1b — preserve active-network across import)", () => {
+	it("maps a CHANGED id through the index pairing", () => {
+		const got = resolveRestoredActiveNetworkId("a", [{ id: "A" }], [{ id: "a" }])
+		expect(got).toBe("A")
+	})
+	it("maps an UNCHANGED id via identity (the changed-only remap map would miss this)", () => {
+		const got = resolveRestoredActiveNetworkId("b", [{ id: "b" }], [{ id: "b" }])
+		expect(got).toBe("b")
+	})
+	it("picks the correct row among several", () => {
+		const news = [{ id: "A" }, { id: "b" }, { id: "C" }]
+		const olds = [{ id: "a" }, { id: "b" }, { id: "c" }]
+		expect(resolveRestoredActiveNetworkId("a", news, olds)).toBe("A")
+		expect(resolveRestoredActiveNetworkId("b", news, olds)).toBe("b")
+		expect(resolveRestoredActiveNetworkId("c", news, olds)).toBe("C")
+	})
+	it("returns undefined when the selected source FAILED to restore", () => {
+		const news = [{ id: "A" }, { id: "c", restoreError: "boom" }]
+		const olds = [{ id: "a" }, { id: "c" }]
+		expect(resolveRestoredActiveNetworkId("c", news, olds)).toBeUndefined()
+	})
+	it("returns undefined for a DUPLICATED source id (ambiguous pairing)", () => {
+		const news = [{ id: "D1" }, { id: "D2" }]
+		const olds = [{ id: "d" }, { id: "d" }]
+		expect(resolveRestoredActiveNetworkId("d", news, olds)).toBeUndefined()
+	})
+	it("returns undefined for absent / non-string / foreign ids (hostile-safe)", () => {
+		const news = [{ id: "A" }]
+		const olds = [{ id: "a" }]
+		expect(resolveRestoredActiveNetworkId(undefined, news, olds)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkId(12345 as unknown, news, olds)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkId({} as unknown, news, olds)).toBeUndefined()
+		expect(resolveRestoredActiveNetworkId("does-not-exist", news, olds)).toBeUndefined()
 	})
 })
