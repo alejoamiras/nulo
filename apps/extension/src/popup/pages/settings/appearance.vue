@@ -30,6 +30,8 @@ const isShowPopupFullscreen = ref(defaultConfig.showPopupFullscreen)
 const isAnimationsDisabled = ref(defaultConfig.disableAnimations)
 const isIncomingTransfersVisible = ref(defaultConfig.incomingTransfersVisible)
 const isShowFiatValues = ref(defaultConfig.showFiatValues)
+// D8 dust filter — a NUMBER, not a toggle, so it lives outside the `settings` toggle map.
+const dustThreshold = ref(String(defaultConfig.incomingDustUsdThreshold))
 const settings = {
 	theme: {
 		title: "",
@@ -68,6 +70,17 @@ const settings = {
 	},
 }
 
+async function updateDustThreshold(raw) {
+	const n = Number.parseFloat(raw)
+	const value = Number.isFinite(n) && n >= 0 ? n : 0
+	try {
+		await configService.setValue("incomingDustUsdThreshold", value)
+		dustThreshold.value = String(value)
+	} catch (err) {
+		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
+	}
+}
+
 async function updateSetting(key, value) {
 	if (!settings[key]) return
 	if (settings[key].model.value === value) return
@@ -101,6 +114,10 @@ async function applySetting(key, value) {
 }
 
 function onSettingUpdate(setting) {
+	if (setting.key === "incomingDustUsdThreshold") {
+		dustThreshold.value = String(setting.value)
+		return
+	}
 	if (settings[setting.key]) {
 		if (settings[setting.key].model.value !== setting.value) {
 			applySetting(setting.key, setting.value)
@@ -111,6 +128,10 @@ function onSettingUpdate(setting) {
 onMounted(async () => {
 	const _settings = await configService.getProps()
 	_settings.forEach((s) => {
+		if (s.key === "incomingDustUsdThreshold") {
+			dustThreshold.value = String(s.value)
+			return
+		}
 		if (settings[s.key]) {
 			settings[s.key].model.value = s.value
 		}
@@ -188,6 +209,27 @@ onBeforeUnmount(() => {
 					:data-testid="(sk === 'disableAnimations' && 'animations-toggle') || (sk === 'showFiatValues' && 'fiat-values-toggle') || null"
 				/>
 			</Flex>
+
+			<!-- D8 dust filter: hide incoming receipts worth less than this USD value (0 = off). -->
+			<Flex justify="between" align="center" gap="12">
+				<Flex direction="column" gap="6">
+					<Text size="13" weight="600" color="primary"> Hide dust receipts </Text>
+					<Text size="12" weight="500" color="tertiary">
+						Hide incoming receipts worth less than this USD value (0 = off; unpriced tokens always show)
+					</Text>
+				</Flex>
+
+				<input
+					:class="$style.dust_input"
+					type="number"
+					min="0"
+					step="0.01"
+					inputmode="decimal"
+					data-testid="dust-threshold-input"
+					:value="dustThreshold"
+					@change="updateDustThreshold($event.target.value)"
+				/>
+			</Flex>
 		</Flex>
 
 	</Flex>
@@ -231,5 +273,16 @@ onBeforeUnmount(() => {
 	transform: rotate(-90deg);
 
 	transition: transform 0.2s var(--bezier);
+}
+
+.dust_input {
+	width: 88px;
+	text-align: right;
+	font-family: var(--font-mono);
+	font-size: 13px;
+	color: var(--txt-primary);
+	background: var(--nulo-surface-low);
+	border: 1px solid var(--nulo-border);
+	padding: 6px 8px;
 }
 </style>

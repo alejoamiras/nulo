@@ -3,7 +3,12 @@ import { effectScope } from "vue"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
-import { type ConfigServiceLike, type IncomingTransferServiceLike, useIncomingTransfers } from "./useIncomingTransfers"
+import {
+	type ConfigServiceLike,
+	type IncomingTransferServiceLike,
+	type PriceServiceLike,
+	useIncomingTransfers,
+} from "./useIncomingTransfers"
 
 const rec = (id: string, extra: Record<string, unknown> = {}): IncomingTransferRecord =>
 	({ id, ...extra }) as unknown as IncomingTransferRecord
@@ -22,6 +27,10 @@ function makeConfigService() {
 	return { onUpdate: new EventHandler<ConfigProp>() } satisfies ConfigServiceLike
 }
 
+function makePriceService() {
+	return { onQuotesUpdated: new EventHandler<unknown>() } satisfies PriceServiceLike
+}
+
 const READY = () => ({ profileId: "p", networkId: "n", account: "a" })
 
 /** Run the composable inside an effect scope so `onScopeDispose` is valid +
@@ -29,6 +38,7 @@ const READY = () => ({ profileId: "p", networkId: "n", account: "a" })
 function setup(opts: {
 	incoming: ReturnType<typeof makeIncomingService>
 	config: ReturnType<typeof makeConfigService>
+	price?: ReturnType<typeof makePriceService>
 	scope?: () => { profileId: string; networkId: string; account: string } | undefined
 }) {
 	const effect = effectScope()
@@ -36,6 +46,7 @@ function setup(opts: {
 		useIncomingTransfers({
 			incomingTransferService: opts.incoming,
 			configService: opts.config,
+			priceService: opts.price,
 			scope: opts.scope ?? READY,
 		}),
 	)
@@ -157,5 +168,38 @@ describe("useIncomingTransfers", () => {
 		effect.stop()
 		incoming.onIncomingTransferAdded.invoke(rec("a"))
 		expect(incomingTransfers.value).toEqual([])
+	})
+
+	it("re-fetches when the dust threshold config changes (D8)", async () => {
+		const incoming = makeIncomingService([rec("a")])
+		const config = makeConfigService()
+		setup({ incoming, config })
+		incoming.getIncomingTransfers.mockClear()
+		config.onUpdate.invoke({ key: "incomingDustUsdThreshold", value: 0.05 } as unknown as ConfigProp)
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+	})
+
+	it("re-fetches on onQuotesUpdated (a fresh quote can move a receipt across the threshold)", async () => {
+		const incoming = makeIncomingService([rec("a")])
+		const price = makePriceService()
+		setup({ incoming, config: makeConfigService(), price })
+		incoming.getIncomingTransfers.mockClear()
+		price.onQuotesUpdated.invoke({})
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+	})
+
+	it("dispose() removes the price + config subscriptions", async () => {
+		const incoming = makeIncomingService([rec("a")])
+		const config = makeConfigService()
+		const price = makePriceService()
+		const { dispose } = setup({ incoming, config, price })
+		dispose()
+		incoming.getIncomingTransfers.mockClear()
+		config.onUpdate.invoke({ key: "incomingDustUsdThreshold", value: 1 } as unknown as ConfigProp)
+		price.onQuotesUpdated.invoke({})
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
 	})
 })

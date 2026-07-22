@@ -235,15 +235,20 @@ function makeNoteStub(notesByContract: Record<string, unknown[]> = {}, blockTime
 
 function makeConfigStub(initialVisibility: boolean = true) {
 	let visibility = initialVisibility
+	let dustThreshold = 0
 	return {
 		name: "config",
 		dependencies: [],
 		getValue: vi.fn().mockImplementation(async (key: string) => {
 			if (key === "incomingTransfersVisible") return visibility
+			if (key === "incomingDustUsdThreshold") return dustThreshold
 			return undefined
 		}),
 		setVisibility(v: boolean) {
 			visibility = v
+		},
+		setDustThreshold(t: number) {
+			dustThreshold = t
 		},
 		async start() {},
 	}
@@ -265,6 +270,20 @@ function makeTokenBalanceStub() {
 		},
 		setThrow(t: boolean) {
 			state.throwOnRequest = t
+		},
+		async start() {},
+	}
+}
+
+/** PriceService stub — `getQuotes` returns a settable `coingeckoId → {usd}` map (D8 dust filter). */
+function makePriceStub() {
+	const state = { quotes: {} as Record<string, { usd: number }> }
+	return {
+		name: "price",
+		dependencies: [],
+		getQuotes: vi.fn(async () => state.quotes),
+		setQuotes(q: Record<string, { usd: number }>) {
+			state.quotes = q
 		},
 		async start() {},
 	}
@@ -302,6 +321,7 @@ async function bootService(
 		config?: ReturnType<typeof makeConfigStub>
 		tokenBalance?: ReturnType<typeof makeTokenBalanceStub>
 		task?: ReturnType<typeof makeTaskStub>
+		price?: ReturnType<typeof makePriceStub>
 		publicReader?: PublicEventReader
 	} = {},
 ) {
@@ -316,6 +336,7 @@ async function bootService(
 		config: stubs.config ?? makeConfigStub(),
 		tokenBalance: stubs.tokenBalance ?? makeTokenBalanceStub(),
 		task: stubs.task ?? makeTaskStub(),
+		price: stubs.price ?? makePriceStub(),
 	}
 	const logger = new LoggerStore(new ConfigStore())
 	// Huge poll interval so scheduler doesn't fire during tests; we exercise
@@ -2867,5 +2888,121 @@ describe("IncomingTransferService — balance-refresh drain (D4 causal ack)", ()
 
 		expect(tokenBalance.requestBalanceRefresh).toHaveBeenCalledWith(1, "0xa")
 		expect(outboxFor()?.pendingTaskId).toBe("T1")
+	})
+})
+
+// ── D8 USD-value dust filter in getIncomingTransfers ───────────────────────
+
+// The one (chainId, contract) the price map recognizes: CHAIN_IDS.MAINNET + the cUSD proxy → USDC.
+const MAINNET_CHAIN = 4248422646
+const MAPPED_CONTRACT = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+const mappedToken = { id: 9, profileId: "p1", chainId: MAINNET_CHAIN, contract: MAPPED_CONTRACT, symbol: "cUSD", decimals: 6 }
+
+async function bootDust(overrides: { threshold?: number; quotes?: Record<string, { usd: number }>; visibility?: boolean } = {}) {
+	const config = makeConfigStub(overrides.visibility ?? true)
+	const price = makePriceStub()
+	const booted = await bootService({
+		network: makeNetworkStub([{ id: "nMain", chainId: MAINNET_CHAIN }]),
+		account: makeAccountStub([{ profileId: "p1", chainId: MAINNET_CHAIN, address: "0xa" }]),
+		token: makeTokenStub([mappedToken]),
+		config,
+		price,
+	})
+	await flushPromises()
+	if (overrides.quotes) price.setQuotes(overrides.quotes)
+	if (overrides.threshold !== undefined) config.setDustThreshold(overrides.threshold)
+	return booted.service
+}
+
+const dustSeed = (siloedNullifier: string, amountRaw: string) =>
+	seedNote({
+		siloedNullifier,
+		networkId: "nMain",
+		accountAddress: "0xa",
+		contract: MAPPED_CONTRACT,
+		tokenId: 9,
+		amountRaw,
+		hidden: false,
+	})
+
+describe("IncomingTransferService — D8 dust filter (getIncomingTransfers)", () => {
+	test("hides sub-threshold receipts; keeps at/above (RAISING hides MORE, LOWERING re-reveals)", async () => {
+		const service = await bootDust({ threshold: 0.01, quotes: { "usd-coin": { usd: 1 } } })
+		dustSeed("big", "20000") // 0.02 cUSD @ $1 = $0.02
+		dustSeed("dust", "5000") // 0.005 cUSD @ $1 = $0.005 < $0.01
+
+		let out = await service.getIncomingTransfers("p1", "nMain", "0xa")
+		expect(out.map((r) => r.id)).toEqual(["note:p1|nMain|big"])
+
+		// RAISE the threshold above the big one → it hides too.
+		;(service as unknown as { configService: { setDustThreshold: (t: number) => void } }).configService.setDustThreshold(0.05)
+		out = await service.getIncomingTransfers("p1", "nMain", "0xa")
+		expect(out).toHaveLength(0)
+
+		// LOWER back → both re-revealed.
+		;(service as unknown as { configService: { setDustThreshold: (t: number) => void } }).configService.setDustThreshold(0.001)
+		out = await service.getIncomingTransfers("p1", "nMain", "0xa")
+		expect(out.map((r) => r.id).sort()).toEqual(["note:p1|nMain|big", "note:p1|nMain|dust"])
+	})
+
+	test("fails OPEN when the token has NO CoinGecko mapping (shown regardless of threshold)", async () => {
+		const config = makeConfigStub()
+		const price = makePriceStub()
+		const unmappedToken = { id: 3, profileId: "p1", chainId: 1, contract: "0xunmapped", symbol: "UNK", decimals: 18 }
+		const { service } = await bootService({ account: publicAccountStub(), token: makeTokenStub([unmappedToken]), config, price })
+		await flushPromises()
+		config.setDustThreshold(1000) // huge threshold
+		price.setQuotes({ "usd-coin": { usd: 1 } })
+		seedNote({
+			siloedNullifier: "unk",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: "0xunmapped",
+			tokenId: 3,
+			amountRaw: "1",
+			hidden: false,
+		})
+
+		const out = await service.getIncomingTransfers("p1", "n1", "0xa")
+		expect(out.map((r) => r.id)).toEqual(["note:p1|n1|unk"]) // no mapping → fail open
+	})
+
+	test("fails OPEN when the quote is stale/absent (getQuotes returns FRESH only)", async () => {
+		const service = await bootDust({ threshold: 1000, quotes: {} }) // mapped token, but NO quote present
+		dustSeed("noquote", "1")
+
+		const out = await service.getIncomingTransfers("p1", "nMain", "0xa")
+		expect(out.map((r) => r.id)).toEqual(["note:p1|nMain|noquote"])
+	})
+
+	test("NEVER bypasses the visible/hidden gates: incomingTransfersVisible=false → [] even with priced records", async () => {
+		const service = await bootDust({ threshold: 0.01, quotes: { "usd-coin": { usd: 1 } }, visibility: false })
+		dustSeed("big", "20000")
+
+		expect(await service.getIncomingTransfers("p1", "nMain", "0xa")).toEqual([])
+	})
+
+	test("NEVER bypasses hidden: a hidden (pending) record stays hidden regardless of dust value", async () => {
+		const service = await bootDust({ threshold: 0.01, quotes: { "usd-coin": { usd: 1 } } })
+		seedNote({
+			siloedNullifier: "hid",
+			networkId: "nMain",
+			accountAddress: "0xa",
+			contract: MAPPED_CONTRACT,
+			tokenId: 9,
+			amountRaw: "20000",
+			hidden: true,
+		})
+
+		expect(await service.getIncomingTransfers("p1", "nMain", "0xa")).toHaveLength(0)
+	})
+
+	test("getIncomingTransferById is UNFILTERED — returns a dust record the feed hides", async () => {
+		const service = await bootDust({ threshold: 100, quotes: { "usd-coin": { usd: 1 } } })
+		const rec = dustSeed("tiny", "1") // way below $100
+
+		expect(await service.getIncomingTransfers("p1", "nMain", "0xa")).toHaveLength(0) // dust-hidden in the feed
+		const byId = await service.getIncomingTransferById(rec.id)
+		expect(byId?.id).toBe(rec.id) // but reachable by id for the detail page
 	})
 })

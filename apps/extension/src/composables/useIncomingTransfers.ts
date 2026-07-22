@@ -27,9 +27,16 @@ export interface ConfigServiceLike {
 	onUpdate: EventHandler<ConfigProp>
 }
 
+/** Minimal slice of `PriceServiceClient` — the dust filter re-evaluates when quotes refresh (D8). */
+export interface PriceServiceLike {
+	onQuotesUpdated: EventHandler<unknown>
+}
+
 export interface UseIncomingTransfersOptions {
 	incomingTransferService: IncomingTransferServiceLike
 	configService: ConfigServiceLike
+	/** Optional — when supplied, an `onQuotesUpdated` re-runs the read-time dust filter (D8). */
+	priceService?: PriceServiceLike
 	/** Resolves the fetch scope; returns `undefined` when the active
 	 *  profile/network/account isn't ready yet (mirrors the original guard,
 	 *  which silently skipped the load). */
@@ -47,7 +54,7 @@ export interface UseIncomingTransfersResult {
 }
 
 export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseIncomingTransfersResult {
-	const { incomingTransferService, configService, scope } = options
+	const { incomingTransferService, configService, priceService, scope } = options
 
 	const incomingTransfers = ref<IncomingTransferRecord[]>([])
 	let disposed = false
@@ -71,14 +78,18 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 		incomingTransfers.value = incomingTransfers.value.filter((x) => x.id !== inc.id)
 	}
 	const onConfigUpdate = (prop: ConfigProp) => {
-		if (prop.key === "incomingTransfersVisible") refresh()
+		// Both the visibility toggle and the dust threshold change the read-time filtered list (D8).
+		if (prop.key === "incomingTransfersVisible" || prop.key === "incomingDustUsdThreshold") refresh()
 	}
+	// A fresh quote can move a receipt across the dust threshold — re-run the read-time filter.
+	const onQuotesUpdated = () => refresh()
 
 	incomingTransferService.onIncomingTransferAdded.add(onAdded)
 	incomingTransferService.onIncomingTransferUpdated.add(onUpdated)
 	incomingTransferService.onIncomingTransferDeleted.add(onDeleted)
 	incomingTransferService.onConnected.add(refresh)
 	configService.onUpdate.add(onConfigUpdate)
+	priceService?.onQuotesUpdated.add(onQuotesUpdated)
 
 	const dispose = () => {
 		if (disposed) return
@@ -88,6 +99,7 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 		incomingTransferService.onIncomingTransferDeleted.remove(onDeleted)
 		incomingTransferService.onConnected.remove(refresh)
 		configService.onUpdate.remove(onConfigUpdate)
+		priceService?.onQuotesUpdated.remove(onQuotesUpdated)
 	}
 	onScopeDispose(dispose)
 

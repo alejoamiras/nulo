@@ -25,6 +25,7 @@ import TransactionIncomingCard from "@/components/composite/activity/Transaction
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { usePrices } from "@/composables/usePrices"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
+import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
 
 const router = useRouter()
 
@@ -67,8 +68,9 @@ const handleSelectRow = (row) => {
 		router.push(`/popup/journal/${row.op.id}`)
 		return
 	}
-	if (row.type === "incoming" && row.inc.tokenId !== undefined) {
-		router.push(`/popup/tokens/${row.inc.tokenId}`)
+	if (row.type === "incoming") {
+		// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
+		router.push(`/popup/received/${row.inc.id}`)
 	}
 }
 
@@ -86,6 +88,7 @@ function incomingCardProps(inc) {
 		tokenDecimals: token?.decimals || 0,
 		txHash: inc.txHash,
 		amountFiat: token ? (prices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
+		receivedLabel: receivedLabel(resolveReceivedType(inc)),
 	}
 }
 

@@ -14,6 +14,9 @@ import { ConfigService } from "@/wallet/services/config/service"
 import { TokenBalanceService } from "@/wallet/services/token-balance/service"
 import { TaskService } from "@/wallet/services/task/service"
 import { TaskStatus } from "@/wallet/services/task/spec"
+import { PriceService } from "@/wallet/services/price/service"
+import { getPriceMapEntry } from "@/wallet/services/price/price-map"
+import { isReceiptAboveDustThreshold, usdThresholdToMicro } from "@/utils/incoming-dust"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { PublicEventCursor, PublicScanTips, PublicTokenClassStatus, PublicTransferEvent } from "@nulo/aztec-runtime/pxe/public-events"
 import { IncomingTransferRepository } from "./repository"
@@ -77,6 +80,7 @@ const DEFAULT_POLL_INTERVAL_MS = 30_000
 export class IncomingTransferService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getIncomingTransfers",
+		"getIncomingTransferById",
 		"getTrustState",
 		"setTrustAllow",
 		"setTrustReject",
@@ -100,6 +104,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// (verified acyclic — TokenBalance does not depend on incoming-transfer).
 		TokenBalanceService.name,
 		TaskService.name,
+		// D8 dust filter: PriceService supplies fresh USD quotes for the read-time filter.
+		PriceService.name,
 	]
 
 	public readonly onIncomingTransferAdded = new EventHandler<IncomingTransferRecord>()
@@ -119,6 +125,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private configService: ConfigService = null!
 	private tokenBalanceService: TokenBalanceService = null!
 	private taskService: TaskService = null!
+	private priceService: PriceService = null!
 
 	/** Singleflight scheduler per `(networkId, accountAddress)`. The interval
 	 *  id keeps each scheduler one-at-a-time. */
@@ -198,6 +205,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.configService = services.get(ConfigService.name)
 		this.tokenBalanceService = services.get(TokenBalanceService.name)
 		this.taskService = services.get(TaskService.name)
+		this.priceService = services.get(PriceService.name)
 
 		// Public-event scan arm (D3): its own PXE client + the injected indexer collaborator.
 		// The reader curries `networkId → NetworkInfo` (via the same `networkInfoFrom` the note arm
@@ -368,10 +376,60 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// Config service unavailable — fail open (default behaviour).
 		}
 		const records = await this.repo.listForAccount(profileId, networkId, accountAddress)
-		return records
-			.filter((r) => !r.hidden)
-			.filter((r) => tokenId === undefined || r.tokenId === tokenId)
-			.sort(orderByBlockIndex)
+		const visible = records.filter((r) => !r.hidden).filter((r) => tokenId === undefined || r.tokenId === tokenId)
+		// Dust filter runs LAST (D8) — the visible/hidden gates above are already applied, so a price
+		// failure inside the dust filter can never un-hide a hidden record.
+		const kept = await this.applyDustFilter(profileId, networkId, visible)
+		return kept.sort(orderByBlockIndex)
+	}
+
+	/**
+	 * Read-by-id for the received-detail page (`/popup/received/:id`). Deliberately UNFILTERED (no
+	 * dust / visibility gate) — the page shows the specific record the user navigated to. `id` is the
+	 * profile+network-scoped PK, so this can only ever return the caller's own record.
+	 */
+	public async getIncomingTransferById(id: string): Promise<IncomingTransferRecord | undefined> {
+		await this.ensureInitialized()
+		return this.repo.getRecord(id)
+	}
+
+	/**
+	 * D8 USD-value dust filter, applied at read time. Fails OPEN at every gap (config unavailable,
+	 * filter off, no token, no CoinGecko mapping, stale/absent quote) so a receipt is only ever
+	 * HIDDEN when it provably falls below a fresh USD threshold. Never gates the balance-refresh
+	 * outbox (balances are chain facts, independent of display).
+	 */
+	private async applyDustFilter(
+		profileId: string,
+		networkId: string,
+		records: IncomingTransferRecord[],
+	): Promise<IncomingTransferRecord[]> {
+		if (records.length === 0) return records
+		let thresholdMicro: bigint
+		try {
+			thresholdMicro = usdThresholdToMicro(await this.configService.getValue("incomingDustUsdThreshold"))
+		} catch {
+			return records // config unavailable → fail open
+		}
+		if (thresholdMicro <= 0n) return records // filter off
+		let chainId: number
+		let tokensById: Map<number, Token>
+		let quotes: Record<string, { usd: number }>
+		try {
+			chainId = (await this.networkService.getNetwork(networkId)).chainId
+			tokensById = new Map((await this.tokenService.getTokensRaw(profileId, chainId)).map((t) => [t.id, t]))
+			quotes = await this.priceService.getQuotes()
+		} catch {
+			return records // any price/token/network dependency unavailable → fail open
+		}
+		return records.filter((r) => {
+			if (r.tokenId === undefined) return true
+			const token = tokensById.get(r.tokenId)
+			if (!token) return true
+			const entry = getPriceMapEntry(chainId, token.contract)
+			const usdRate = entry ? quotes[entry.coingeckoId]?.usd : undefined // `getQuotes` returns FRESH quotes only
+			return isReceiptAboveDustThreshold({ amountRaw: r.amountRaw, decimals: token.decimals, usdRate, thresholdMicro })
+		})
 	}
 
 	public async getTrustState(profileId: string, networkId: string, contract: string): Promise<IncomingTrustState> {

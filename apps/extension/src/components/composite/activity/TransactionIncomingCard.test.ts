@@ -16,6 +16,7 @@ const STUBS = {
 		template: `
 			<div data-testid="layout">
 				<span class="title">{{ title }}</span>
+				<span class="title-trailing"><slot name="title-trailing" /></span>
 				<span class="amount">{{ amount }}</span>
 				<span class="symbol">{{ amountSymbol }}</span>
 				<span v-if="amountFiat" data-testid="activity-fiat">{{ amountFiat }}</span>
@@ -73,5 +74,16 @@ describe("composite/TransactionIncomingCard", () => {
 	test("default token symbol falls back to 'Token'", () => {
 		const w = mountCard({ tokenSymbol: undefined })
 		expect(w.find(".symbol").text()).toBe("Token")
+	})
+
+	test("kind chip defaults to 'Received' (testid tx-incoming-kind-chip)", () => {
+		const chip = mountCard().find('[data-testid="tx-incoming-kind-chip"]')
+		expect(chip.exists()).toBe(true)
+		expect(chip.text()).toBe("Received")
+	})
+
+	test("kind chip renders the resolved receivedLabel (D5-D)", () => {
+		const chip = mountCard({ receivedLabel: "Private → Public" }).find('[data-testid="tx-incoming-kind-chip"]')
+		expect(chip.text()).toBe("Private → Public")
 	})
 })

@@ -297,6 +297,9 @@ export type Methods = {
 	 * filtered out by default.
 	 */
 	getIncomingTransfers(profileId: string, networkId: string, accountAddress: string, tokenId?: number): IncomingTransferRecord[]
+	/** Read ONE record by its `id` PK (for the received-detail page). Unfiltered — no dust/visibility
+	 *  gate; `id` is profile+network-scoped so it only returns the caller's own record. */
+	getIncomingTransferById(id: string): IncomingTransferRecord | undefined
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState
