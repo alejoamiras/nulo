@@ -4,7 +4,7 @@ The checklist for bumping the Aztec / Noir dependency line. **`@aztec/*` is exac
 
 > **Convention:** any code that types against an `@aztec` shape (a PXE method signature, a wire type, an artifact field) MUST add an entry to **§ Types coupled to `@aztec` shape** below, with `file:line`, so the next bump has a checklist. Round-2 phase R4 (P18b PXE descriptor) is the first to append here.
 
-Current line: **`@aztec/* = 5.0.0`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below).
+Current line: **`@aztec/* = 5.0.1`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below).
 
 ## Before you bump
 1. Read the upstream `@aztec/aztec.js` + `@aztec/pxe` changelog for the target version — note any renamed/removed exports, PXE method signature changes, or artifact-format changes.
@@ -14,10 +14,11 @@ Current line: **`@aztec/* = 5.0.0`** (Noir wasm packages `noir-acvm_js` / `noir-
 ## Coupling points to re-verify (the re-check list)
 1. **Bun patches on Noir wasm** — `patches/@aztec%2Fnoir-acvm_js@<ver>.patch` + `patches/@aztec%2Fnoir-noirc_abi@<ver>.patch`. The patch filenames pin the version; on bump they must be re-generated/re-verified against the new package or they silently stop applying. Confirm `bun install` still applies them.
 2. **Noir WASM resolution (darwin arm64 + browser)** — `apps/extension/vite.shared.ts:63` aliases `@aztec/noir-acvm_js` to the package's `nodejs/` entry (fixes `__wbindgen_malloc undefined`); `apps/extension/vite.config.ts:79` `dedupe` + `:286` `optimizeDeps.exclude` list the noir/bb wasm packages. If the package's internal entry layout changes, these paths break — re-check the `nodejs/` path exists.
-3. **On-chain identity invariants** — `packages/aztec-runtime/src/pxe/artifact-class-id.ts` (class-id derivation) + the deferred class-id + address invariant fixture. A protocol-version bump can change contract class ids / addresses; re-derive and update the fixture, and confirm the account-contract + token artifacts still resolve.
+3. **On-chain identity invariants** — `packages/aztec-runtime/src/pxe/artifact-class-id.ts` (class-id derivation) + the deferred class-id + address invariant fixture. A protocol-version bump can change contract class ids / addresses for NON-account contracts; re-derive and update THOSE fixtures, and confirm the token artifacts still resolve. **EXCEPTION — the Nulo ACCOUNT artifact + derived account addresses are FROZEN and are NEVER re-derived here** (see coupling #7): the account KAT (`derivation-vectors.test.ts`) + the freeze tests must stay green with ZERO vector/pin edits. A red account KAT means new-major territory, not a re-pin.
 4. **`WalletSchema` runtime patch** — `packages/wallet-sdk-schema-patch/src/{apply,register}.ts` extends `@aztec/wallet-sdk`'s `WalletSchema` with `registerToken` / `isTokenRegistered` / `grantPublicAuthwit`. If upstream changes `WalletSchema`'s shape or those method names, `apply.test.ts` + the wallet-bridge reachability pin (`packages/wallet-bridge/src/dispatcher.test.ts`) will catch it — but re-check the patch still composes.
 5. **PXE seam** — `packages/aztec-runtime` PXE factory + client. PXE method signatures are an `@aztec` coupling surface; see § Types coupled to `@aztec` shape.
 6. **Native proving (accelerator)** — the network-e2e installs `accelerator-server` (SHA-256-pinned in `.github/workflows/_network-e2e.yml`); a proving-backend bump may need a matching accelerator build. `VITE_NULO_ACCELERATOR_REQUIRED=1` makes a silent WASM fallback a hard fail.
+7. **Frozen account surface — NOT bumped with the line** — `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json` (vendored, digest-pinned), `frozen-artifact.ts` (sha256 + class-id pins), `instantiation-descriptor.ts` (frozen ctor name/args/salt/immutablesHash/deployer + digest), `address-freeze.ts` (append-only regime record + paired hardcoded test). A bump must leave the KAT (`derivation-vectors.test.ts`) and every freeze test green with ZERO vector or pin edits; the **frozen-account execution canary** (`apps/extension/tests/e2e/network/frozen-account-canary.test.ts`, run prover-ON via `bun run e2e:agent`) is a MANDATORY bump gate — a red canary blocks the bump (see the `aztec-update` skill + CLAUDE.md "Account-address freeze").
 
 ## Types coupled to `@aztec` shape
 > Append here whenever you type against an `@aztec` type. Format: `- <type/signature> — <file:line> — <what breaks if the upstream shape changes>`.
@@ -48,6 +49,6 @@ Current line: **`@aztec/* = 5.0.0`** (Noir wasm packages `noir-acvm_js` / `noir-
 
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).
-- `bun run test` (units) + `bun run build`.
-- `bun run test:e2e` (smoke) + `bun run e2e:agent` (FULL network — includes the real-proving canary; a WASM fallback is a hard fail).
+- `bun run test:all` (units across ALL workspaces — plain `bun run test` is extension-only and does NOT carry the account KAT + freeze suites) + `bun run build`.
+- `bun run test:e2e` (smoke) + `bun run e2e:agent` (FULL network — includes the frozen-account canary). NOTE: `e2e:agent` LOCALLY does NOT enforce native proving (silent WASM fallback if no accelerator). "A WASM fallback is a hard fail" is true only in CI (`VITE_NULO_ACCELERATOR_REQUIRED=1` in the prover-ON `network-e2e-canary` job) — that CI check is the authoritative gate. To run the canary prover-ON locally, start `accelerator-server`, build with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and confirm a `/prove` request (see the `aztec-update` skill).
 - Confirm the class-id/address fixture still matches (coupling #3).

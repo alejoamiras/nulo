@@ -38,6 +38,7 @@ import { JournalGC } from "./services/operation-journal/gc"
 import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
+import { AccountIntegrityCoordinator } from "./services/account-integrity/coordinator"
 import { PriceService } from "./services/price/service"
 import { ProfileService } from "./services/profile/service"
 import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
@@ -232,6 +233,9 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// Started LAST (declares dependencies on every service it purges) — finding D.
 		const deletionCoordinator = new ProfileDeletionCoordinator(logger)
 		services.add(deletionCoordinator)
+		// Also last-phase: registers as ProfileService's pre-open address verifier + AccountService's
+		// operation-time mismatch sink (the address-freeze runtime guard).
+		services.add(new AccountIntegrityCoordinator(logger, browserApi))
 
 		await services.start()
 		logger.log("wallet", LogLevel.Info, "Services started")

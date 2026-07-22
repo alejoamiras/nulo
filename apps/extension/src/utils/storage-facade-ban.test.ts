@@ -28,6 +28,10 @@ const ALLOWLIST: RegExp[] = [
 	// The barrier component observes the reserved `nulo:schema:*` keys; going
 	// through the facade would deadlock on the very marker it displays.
 	/^components\/MigrationBarrier\.vue$/,
+	// Same observe-only pattern for the integrity coordinator's durable blocking
+	// records (`nulo:core:account-integrity-blocked@*`): presence must render the
+	// blocking screen even when the background is withholding the session.
+	/^components\/AccountIntegrityBarrier\.vue$/,
 	// Build-time-excluded e2e instrumentation (proof-gate pattern).
 	/^e2e\//,
 	// Tests may exercise storage directly.

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import {
+	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
 	JobCancelledError,
 	remoteErrorFromResponseContent,
@@ -34,6 +35,18 @@ describe("walletErrorFromPayload", () => {
 		const original = new UserRejectedError()
 		const rebuilt = walletErrorFromPayload(original.toPayload())
 		expect(rebuilt).toBeInstanceOf(UserRejectedError)
+	})
+
+	test("AccountAddressInconsistencyError round-trips with code + details preserved", () => {
+		// The popup routes to the integrity blocking state via `instanceof`; a dropped
+		// dispatch case would silently degrade the mismatch to a generic error.
+		const original = new AccountAddressInconsistencyError(undefined, { profileId: "p1", chainId: 0 })
+		const rebuilt = walletErrorFromPayload(original.toPayload())
+		expect(rebuilt).toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(rebuilt).toBeInstanceOf(WalletError)
+		expect(rebuilt.code).toBe(AccountAddressInconsistencyError.CODE)
+		expect(rebuilt.message).toBe("Account address inconsistency")
+		expect((rebuilt.details as { profileId?: string })?.profileId).toBe("p1")
 	})
 
 	test("CapabilityNotGrantedError round-trips with capabilityType + exact stable message", () => {

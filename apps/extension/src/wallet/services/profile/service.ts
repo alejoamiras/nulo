@@ -2,10 +2,10 @@ import { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
-import type { ILogger } from "@/wallet/logger"
+import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import { AccountAddressInconsistencyError, InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -36,6 +36,8 @@ import {
 import { TombstoneRepository } from "./tombstone-repository"
 import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
 import type { ProfileDeletionDelegate } from "../profile-deletion/types"
+import { AccountIntegrityBlockedRepository, AccountIntegrityVerifiedStampRepository } from "../account-integrity/blocked-repository"
+import type { AccountIntegrityBlocked, AccountIntegrityDelegate } from "../account-integrity/types"
 
 export * from "./spec"
 
@@ -109,6 +111,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	/** Lazily injected by the last-started ProfileDeletionCoordinator — the purge
 	 *  executor. Never a topological dependency (would be a cycle). */
 	private deletionDelegate: ProfileDeletionDelegate | null = null
+	/** Lazily injected by the last-started AccountIntegrityCoordinator — the pre-open address
+	 *  verifier. Never a topological dependency (would be a cycle, same as the deletion delegate). */
+	private integrityDelegate: AccountIntegrityDelegate | null = null
+	/** Read-only view of the coordinator's durable blocking records, consulted at init so a
+	 *  blocked profile's session is never silently rehydrated after a SW restart (the coordinator
+	 *  itself starts later, in the last topological phase). */
+	private readonly integrityBlocked: AccountIntegrityBlockedRepository
+	/** Deletion-time cleanup of the coordinator's per-profile verified stamps. */
+	private readonly integrityStamps: AccountIntegrityVerifiedStampRepository
 
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
@@ -120,6 +131,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		super(PROFILE_SERVICE_NAME, logger)
 		this.repo = new ProfileRepository(browserApi)
 		this.tombstones = new TombstoneRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
+		this.integrityBlocked = new AccountIntegrityBlockedRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
+		this.integrityStamps = new AccountIntegrityVerifiedStampRepository(
+			(browserApi?.storage.local ?? chrome.storage.local) as StorageArea,
+		)
 		this.secretBox = new PasswordSecretBox()
 		this.sessionManager = new SessionManager(
 			config,
@@ -177,6 +192,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// row present, id reserved) must NOT have its session restored — it's being
 		// erased, so no downstream unlock/export/secret path can observe it.
 		await this.sessionManager.restore((id) => (this.deletionState.isReserved(id) ? Promise.resolve(undefined) : this.repo.get(id)))
+
+		// Integrity gate on the silent restore: a profile the integrity coordinator flagged must
+		// not rehydrate its session after a SW restart. The durable blocking record is the signal
+		// (fail-closed on corrupt records); the coordinator itself starts in the LAST topological
+		// phase, so this early gate reads the repository directly.
+		const restored = await this.sessionManager.getActive()
+		if (restored && (await this.integrityBlocked.isBlocked(restored.session.profile))) {
+			this.logger.log(this.name, LogLevel.Error, "restored session belongs to an integrity-blocked profile — closing")
+			await this.sessionManager.close()
+		}
 	}
 
 	public async getActiveProfile(): Promise<ProfileInfo | undefined> {
@@ -232,7 +257,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 				this.emit("onProfileAdded", this.getProfileInfo(profile))
 
-				await this.sessionManager.open(profile, secret, passhash)
+				await this.openSessionVerified(profile, secret, passhash)
 
 				return profile
 			})
@@ -309,7 +334,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// suspension. Refuse and let the user retry with the new password.
 					throw new InvalidPasswordError()
 				}
-				await this.sessionManager.open(current, secret, passhash)
+				await this.openSessionVerified(current, secret, passhash)
 				return this.getProfileInfo(current)
 			})
 		} finally {
@@ -367,7 +392,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 				this.emit("onProfileAdded", this.getProfileInfo(profile))
 
-				await this.sessionManager.open(profile, recovery.secret)
+				await this.openSessionVerified(profile, recovery.secret)
 
 				return profile
 			})
@@ -456,7 +481,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// prompt. Refuse rather than open a session bound to the old id.
 					throw new Error("Invalid profile id")
 				}
-				await this.sessionManager.open(current, recovery.secret)
+				await this.openSessionVerified(current, recovery.secret)
 				return this.getProfileInfo(current)
 			})
 		} finally {
@@ -507,6 +532,37 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
 			await this.sessionManager.close()
+		})
+	}
+
+	/**
+	 * Close the active session ONLY if it belongs to `profileId`. Used by the integrity
+	 * coordinator so a mismatch detected for profile P can't close a DIFFERENT profile that became
+	 * active during the (slow, unlocked) re-derivation. The `isActive` check + `close` run under
+	 * the facade lock so no unlock can interleave between them.
+	 */
+	public async lockProfileIfActive(profileId: string): Promise<void> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			if (this.sessionManager.isActive(profileId)) {
+				await this.sessionManager.close()
+			}
+		})
+	}
+
+	/**
+	 * Persist an integrity block record — but ONLY if the profile still exists and isn't being
+	 * deleted. The two OFF-LOCK integrity writers (the coordinator's boot re-verify, AccountService's
+	 * operation-time mismatch) route through here so a `deleteProfile` racing them (whose own
+	 * block-CLEAR runs under this same lock) can't be followed by an orphan write: the write either
+	 * lands before the delete's clear (then the delete clears it) or is skipped here because the
+	 * profile is gone/reserved. Prevents an unclearable block record for a deleted profile.
+	 */
+	public async persistIntegrityBlockIfLive(record: AccountIntegrityBlocked): Promise<void> {
+		await this.ensureInitialized()
+		return this.runExclusive(async () => {
+			if (this.deletionState.isReserved(record.profileId) || !(await this.repo.get(record.profileId))) return
+			await this.integrityBlocked.set(record)
 		})
 	}
 
@@ -585,29 +641,54 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("Invalid profile old password")
 			}
 
-			profile.guard = resealed.encrypted.guard
-			profile.secret = resealed.encrypted.secret
-			await this.repo.set(id, profile)
-
-			this.emit("onProfileUpdated", this.getProfileInfo(profile))
-
-			if (this.sessionManager.isActive(id)) {
-				// Re-unseal with the new password so we can re-open the session
-				// with a fresh Fr. `reseal` returns the new passhash+encrypted
-				// but not the raw secret; cheapest path is to unseal once here.
-				const secret = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
-				try {
-					if (secret) {
-						await this.sessionManager.open(profile, secret, resealed.passhash)
+			// Unseal the (new-cipher) secret up front so integrity can be checked BEFORE the new
+			// password is persisted. If the check throws (address drift), nothing is committed and
+			// the RPC failure is honest — the password is NOT durably changed under a reported
+			// failure. `reseal` returns passhash + ciphertext but not the raw secret.
+			const secret = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
+			try {
+				if (secret) {
+					// Pre-persist verify: on drift, nothing is committed (honest failure — the password
+					// is NOT changed). But a drift here means the CURRENT session is on a mismatched
+					// build, so close it too — a rejected change must not leave the blocked profile
+					// operating (matches openSessionVerified's close-on-throw).
+					try {
+						await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
+					} catch (precheckError) {
+						if (precheckError instanceof AccountAddressInconsistencyError && this.sessionManager.isActive(id)) {
+							await this.sessionManager.close()
+						}
+						throw precheckError
 					}
-				} finally {
-					// zero secret + new passhash after session re-open.
-					zeroize(secret)
-					zeroize(resealed.passhash)
 				}
-			} else {
-				// Even if no active session, the new passhash returned by
-				// `reseal` was held briefly. Zero it.
+
+				profile.guard = resealed.encrypted.guard
+				profile.secret = resealed.encrypted.secret
+				await this.repo.set(id, profile)
+				this.emit("onProfileUpdated", this.getProfileInfo(profile))
+
+				if (secret && this.sessionManager.isActive(id)) {
+					// Re-open with a fresh Fr. openSessionVerified re-runs the check + the deletion
+					// bracket. If the RE-check now fails on an address-drift block (e.g. a foreign
+					// account was restored between the pre-check and here), the password change ALREADY
+					// SUCCEEDED — it must not be reported as a failure. Swallow ONLY that typed error:
+					// openSessionVerified has already persisted the block + closed the session, so the
+					// barrier surfaces the drift as its own handled state. Any other error (deletion
+					// fence, etc.) propagates.
+					try {
+						await this.openSessionVerified(profile, secret, resealed.passhash)
+					} catch (reopenError) {
+						if (!(reopenError instanceof AccountAddressInconsistencyError)) throw reopenError
+						this.logger.log(
+							this.name,
+							LogLevel.Error,
+							"password changed but re-open hit an address-integrity block — surfaced via the barrier",
+							id,
+						)
+					}
+				}
+			} finally {
+				zeroize(secret)
 				zeroize(resealed.passhash)
 			}
 
@@ -686,6 +767,64 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		this.deletionDelegate = delegate
 	}
 
+	/** Injected by the last-started AccountIntegrityCoordinator. */
+	public setIntegrityDelegate(delegate: AccountIntegrityDelegate): void {
+		this.integrityDelegate = delegate
+	}
+
+	/**
+	 * Session-open chokepoint: EVERY path that materializes a session (unlock, create, import,
+	 * finalizeRestore, password change) runs the integrity delegate FIRST — a profile whose
+	 * stored account addresses no longer re-derive is withheld, never exposed. For the backup
+	 * import path this lands after account restoration and before `finalizeRestore` opens the
+	 * session, so a corrupt/foreign backup cannot activate a mismatched profile. The delegate
+	 * registers in the LAST topological phase, before any RPC-driven open can occur; when absent
+	 * (unit tests without the coordinator) the open proceeds unchecked.
+	 */
+	private async openSessionVerified(profile: Profile, secret: MasterSecretBytes, passhash?: Passhash): Promise<void> {
+		// Capture the PERSISTENT deletion epoch up front. `isReserved` alone is transient — a
+		// force-released facade lock could let a delete reserve→purge→RELEASE entirely while the
+		// verify/open below runs, leaving `isReserved` false on both sides. The monotonic epoch does
+		// not reset on release, so comparing it after the open detects a delete that fully completed.
+		const deletionEpoch = this.deletionState.capture(profile.id)
+		try {
+			if (this.integrityDelegate) {
+				await this.integrityDelegate.verifyBeforeSessionOpen(profile.id, secret)
+			} else if (await this.integrityBlocked.isBlocked(profile.id)) {
+				// STARTUP-WINDOW FAIL-CLOSED: the coordinator injects the delegate in a later phase,
+				// but each service accepts RPCs from construction — an unlock racing startup would
+				// otherwise open UNCHECKED. With no delegate we can't re-derive, but a KNOWN durable
+				// block still refuses the open. (A never-before-seen drift in this window is caught by
+				// the coordinator's boot verification, which runs right after it registers; the
+				// version-keyed stamp means a drift can't already carry a green stamp.)
+				throw new AccountAddressInconsistencyError(undefined, { profileId: profile.id })
+			}
+		} catch (error) {
+			// A freshly-flagged profile must not keep a PRIOR live session either (the password-change
+			// flow re-opens over one): withholding the new session while the old stays usable would
+			// leave the blocked profile operating.
+			if (this.sessionManager.isActive(profile.id)) {
+				await this.sessionManager.close()
+			}
+			throw error
+		}
+		// Bracket the open against a deletion racing the (possibly slow) verification. Pre-open:
+		// reject if already reserved. Post-open: reject + close the just-opened session if the
+		// profile is reserved OR its deletion epoch advanced during the open (a delete that
+		// reserved→purged→released entirely while the open ran) — so a deleted profile can never be
+		// resurrected.
+		if (this.deletionState.isReserved(profile.id)) {
+			throw new Error("Invalid profile id")
+		}
+		await this.sessionManager.open(profile, secret, passhash)
+		if (this.deletionState.isReserved(profile.id) || !this.deletionState.isCurrent(profile.id, deletionEpoch)) {
+			if (this.sessionManager.isActive(profile.id)) {
+				await this.sessionManager.close()
+			}
+			throw new Error("Invalid profile id")
+		}
+	}
+
 	/** The SHARED deletion state (reserved ids + per-profile epoch). Execution +
 	 *  Transaction resolve this at init so a write that captured an epoch before a
 	 *  delete is fenced when it tries to persist afterward (D13). */
@@ -743,6 +882,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.pendingRestoreSecrets.delete(id)
 				zeroize(pending)
 			}
+			// A deleted profile's integrity records must not outlive it: a stale blocking record
+			// would keep the barrier up forever, and a stale verified-stamp could let a future
+			// same-id re-import skip its first boot verification.
+			await this.integrityBlocked.clear(id)
+			await this.integrityStamps.clear(id)
 			this.emit("onProfileDeleted", this.getProfileInfo(profile))
 			return { profile, epoch, snapshot }
 		})
@@ -781,6 +925,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				await this.runExclusive(async () => {
 					if (await this.repo.get(t.profileId)) await this.repo.delete(t.profileId)
 					if (this.sessionManager.isActive(t.profileId)) await this.sessionManager.close()
+					// Idempotent, same as the live `deleteProfile` phase-1 block: a deletion that
+					// crashed before these clears must still drop the integrity records so a deleted
+					// profile can't leave an orphan block/stamp behind.
+					await this.integrityBlocked.clear(t.profileId)
+					await this.integrityStamps.clear(t.profileId)
 				})
 				await delegate.runFor(t.profileId, {
 					addresses: t.addresses,
@@ -1072,7 +1221,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 				await this.repo.set(id, profile)
 				this.emit("onProfileAdded", this.getProfileInfo(profile))
-				await this.sessionManager.open(profile, secret, passhash)
+				await this.openSessionVerified(profile, secret, passhash)
 				return profile
 			})
 		} finally {
@@ -1116,7 +1265,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 				await this.repo.set(id, profile)
 				this.emit("onProfileAdded", this.getProfileInfo(profile))
-				await this.sessionManager.open(profile, secret)
+				await this.openSessionVerified(profile, secret)
 				return profile
 			})
 		} finally {
@@ -1361,7 +1510,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 				const passhash = await EncryptionKey.getPasshash(password)
 				try {
-					await this.sessionManager.open(profile, secret, passhash)
+					await this.openSessionVerified(profile, secret, passhash)
 					return this.getProfileInfo(profile)
 				} finally {
 					// zero buffers after sessionManager has copied.
@@ -1376,7 +1525,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("No pending restore secret for passkey profile")
 			}
 			try {
-				await this.sessionManager.open(profile, pending)
+				await this.openSessionVerified(profile, pending)
 				return this.getProfileInfo(profile)
 			} finally {
 				this.pendingRestoreSecrets.delete(id)

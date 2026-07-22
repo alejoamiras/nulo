@@ -5,11 +5,12 @@
  * argument after the hole) and the DoS-hardening posture it must preserve.
  */
 
+import { jsonSanitize } from "@nulo/wallet-core/utils"
 import { describe, expect, test } from "vitest"
 import { unwrapParams, wrapParams } from "./utils"
 
-/** The actual wire: postMessage payloads go through a JSON round-trip. */
-const overTheWire = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+/** The actual wire: postMessage payloads go through base-client.ts's real `jsonSanitize`, not a hand-rolled JSON shim. */
+const overTheWire = <T>(value: T): T => jsonSanitize(value)
 
 describe("wrapParams/unwrapParams — explicit-arity round-trip", () => {
 	test("an undefined MIDDLE argument survives the wire; later args are not truncated", () => {

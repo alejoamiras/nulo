@@ -261,6 +261,7 @@ onBeforeUnmount(() => {
 			<NotificationManager />
 			<GlobalLoader />
 			<MigrationBarrier />
+			<AccountIntegrityBarrier />
 		</div>
 
 		<Header />

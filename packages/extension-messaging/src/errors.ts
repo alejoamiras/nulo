@@ -190,6 +190,23 @@ export class InvalidPasswordError extends WalletError {
 }
 
 /**
+ * A stored account address no longer matches what this wallet build re-derives from the profile
+ * secret — the address-freeze invariant is broken (wrong build for this profile's regime, or
+ * tampered storage). The background integrity coordinator persists a blocking record and withholds
+ * the session; consumers `instanceof` this to route to the blocking state instead of a generic
+ * failure. NEVER surfaced verbatim to dApps — the dApp-facing projection stays generic.
+ */
+export class AccountAddressInconsistencyError extends WalletError {
+	public static readonly CODE = "ACCOUNT_ADDRESS_INCONSISTENCY"
+
+	public constructor(message = "Account address inconsistency", details?: unknown) {
+		super(AccountAddressInconsistencyError.CODE, message, details)
+		this.name = "AccountAddressInconsistencyError"
+		Object.setPrototypeOf(this, AccountAddressInconsistencyError.prototype)
+	}
+}
+
+/**
  * Raised by `createPasskeyProfile` / `importPasskey` when the profile id
  * the caller pre-reserved was claimed by another writer between the
  * unlocked WebAuthn ceremony and the locked persistence step. Callers
@@ -229,6 +246,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof CapabilityNotGrantedError.CODE; message: string; details?: { capabilityType?: string } }
 	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
 	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
+	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
 
 /**
@@ -259,6 +277,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new ValidationError(known.message, known.details)
 		case InvalidPasswordError.CODE:
 			return new InvalidPasswordError(known.message, known.details)
+		case AccountAddressInconsistencyError.CODE:
+			return new AccountAddressInconsistencyError(known.message, known.details)
 		case ProfileIdConflictError.CODE:
 			return new ProfileIdConflictError(known.message, known.details)
 		default:
