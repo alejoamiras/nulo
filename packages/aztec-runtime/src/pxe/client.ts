@@ -29,6 +29,15 @@ import type { IPXE } from "./ipxe"
 import type { Methods, NotesFilter, NoteSchema } from "./spec"
 import { PXE_SERVICE_NAME } from "./spec"
 import { NoteDaoSchema, PackedPrivateEventSchema } from "./schemas"
+import {
+	type PublicScanTips,
+	type PublicTokenClassStatus,
+	type PublicTransferFetchArgs,
+	type PublicTransferPage,
+	PublicScanTipsSchema,
+	PublicTokenClassStatusSchema,
+	PublicTransferPageSchema,
+} from "./public-events"
 import { PXEProxy } from "./proxy"
 
 /**
@@ -278,6 +287,28 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 		const result = await this.request("getBlockTimestamp", network, blockNumber)
 		if (result === undefined || result === null) return undefined
 		return Number(result)
+	}
+
+	/** One page of decoded public `Transfer` events for `(network, contract)` (D1). */
+	public async getPublicTokenTransferEvents(
+		network: NetworkInfo,
+		contract: string,
+		args: PublicTransferFetchArgs,
+	): Promise<PublicTransferPage> {
+		const result = await this.request("getPublicTokenTransferEvents", network, contract, args)
+		return await PublicTransferPageSchema.parseAsync(result)
+	}
+
+	/** The checkpointed + finalized tips for the D6 index bound + rewind floor. */
+	public async getPublicScanTips(network: NetworkInfo): Promise<PublicScanTips> {
+		const result = await this.request("getPublicScanTips", network)
+		return await PublicScanTipsSchema.parseAsync(result)
+	}
+
+	/** Node-direct class gate (D2): whether `contract` is the bundled Token at the finalized anchor. */
+	public async getPublicTokenClassStatus(network: NetworkInfo, contract: string): Promise<PublicTokenClassStatus> {
+		const result = await this.request("getPublicTokenClassStatus", network, contract)
+		return await PublicTokenClassStatusSchema.parseAsync(result)
 	}
 
 	/** Dispose the offscreen runtime for `(profileId, chainId)` and delete

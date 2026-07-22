@@ -18,6 +18,15 @@ import type {
 	UtilityExecutionResult,
 } from "@aztec/stdlib/tx"
 import type { NetworkInfo } from "./chain-runtime"
+import type { PublicScanTips, PublicTokenClassStatus, PublicTransferFetchArgs, PublicTransferPage } from "./public-events"
+export type {
+	PublicEventCursor,
+	PublicScanTips,
+	PublicTokenClassStatus,
+	PublicTransferEvent,
+	PublicTransferFetchArgs,
+	PublicTransferPage,
+} from "./public-events"
 
 export const PXE_SERVICE_NAME = "pxe"
 
@@ -71,6 +80,22 @@ export type Methods = {
 	 * jump forward; this stays correct).
 	 */
 	getBlockTimestamp(network: NetworkInfo, blockNumber: number): number | undefined
+	/**
+	 * Fetch one page of decoded public `Transfer` events for `(network, contract)`, bounded to the
+	 * checkpointed tip. `args.afterCursor` resumes pagination; `args.referenceBlock` is the D6 reorg
+	 * anchor (the node THROWS if that block was reorged out). Returns the decoded+validated events,
+	 * the `scannedThrough` cursor (last log of the page, full or partial; `null` when empty), and
+	 * `hasMore` (the node page was exactly full). Node-only read; no PXE store mutation.
+	 */
+	getPublicTokenTransferEvents(network: NetworkInfo, contract: string, args: PublicTransferFetchArgs): PublicTransferPage
+	/** Resolve the checkpointed (index bound) + finalized (D6 rewind floor) tips in one probe. */
+	getPublicScanTips(network: NetworkInfo): PublicScanTips
+	/**
+	 * Node-direct contract-class gate (D2): is `contract`'s CURRENT class (at the finalized anchor)
+	 * the bundled aztec-standards Token? `unresolved` = transient (fail closed, do not cache);
+	 * `non-standard` = a resolved non-Token / upgraded class (fail closed, cacheable).
+	 */
+	getPublicTokenClassStatus(network: NetworkInfo, contract: string): PublicTokenClassStatus
 	/**
 	 * Dispose any active runtime for `(profileId, chainId)` and delete its
 	 * IndexedDB at `pxe/${profileId}/${chainId}`. Called by the SW-side

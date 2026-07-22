@@ -504,7 +504,11 @@ node API today (verified: `getPublicLogsByTags` is the only public-log query on 
 
 ## Phases
 
-### Phase 1 — Runtime: public Transfer events RPC
+### Phase 1 — Runtime: public Transfer events RPC ✓
+
+**✓ COMPLETE** (validation gate green: `bun run --cwd packages/aztec-runtime test` = 119 passed
+incl. 20 new `public-events.test.ts`; `bun run lint` exit 0; `bun run typecheck:all` exit 0). All
+named tests present + passing. Lessons: `implementations-plan/incoming-public-transfers/lessons/phase-1.md`.
 
 `packages/aztec-runtime`: `getPublicTokenTransferEvents` (D1) on service/spec/client/descriptors,
 Transfer `EventMetadataDefinition` import, Token contract-class-id constant, node-direct

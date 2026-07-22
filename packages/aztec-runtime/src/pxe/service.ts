@@ -43,6 +43,16 @@ import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
 import { type Methods, PXE_SERVICE_NAME } from "./spec"
 import { type PrivateEventFilter, PrivateEventFilterSchema } from "@aztec/aztec.js/wallet"
 import { NotesFilterSchema } from "./schemas"
+import {
+	type PublicScanTips,
+	type PublicTokenClassStatus,
+	type PublicTransferFetchArgs,
+	type PublicTransferPage,
+	PublicTransferFetchArgsSchema,
+	fetchPublicTokenTransferEvents,
+	getPublicScanTips,
+	resolveTokenClassStatus,
+} from "./public-events"
 
 export * from "./spec"
 
@@ -81,6 +91,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		"getPrivateEvents",
 		"getSyncedBlockHeader",
 		"getBlockTimestamp",
+		"getPublicTokenTransferEvents",
+		"getPublicScanTips",
+		"getPublicTokenClassStatus",
 		"clearChainState",
 		"clearProfileState",
 		"provisionChainStoreKey",
@@ -548,6 +561,38 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				return undefined
 			}
 		})
+	}
+
+	/**
+	 * One page of decoded public `Transfer` events for `(network, contract)` (D1). Node-only read
+	 * (no PXE store mutation), so `withPxeRead`. Args are zod-parsed here (the offscreen trust
+	 * boundary re-validates node input); a `referenceBlock`-reorg throw propagates to the SW caller.
+	 */
+	public async getPublicTokenTransferEvents(
+		network: NetworkInfo,
+		contract: string,
+		args: PublicTransferFetchArgs,
+	): Promise<PublicTransferPage> {
+		const parsedArgs = await PublicTransferFetchArgsSchema.parseAsync(args)
+		return this.withPxeRead("getPublicTokenTransferEvents", network, (_pxe, node) =>
+			fetchPublicTokenTransferEvents(node, contract, parsedArgs, (level, msg, ...rest) =>
+				level === "warn" ? this.logWarn(msg, ...rest) : this.logDebug(msg, ...rest),
+			),
+		)
+	}
+
+	/** Resolve the checkpointed + finalized tips (D6 index bound + rewind floor). Node-only read. */
+	public async getPublicScanTips(network: NetworkInfo): Promise<PublicScanTips> {
+		return this.withPxeRead("getPublicScanTips", network, (_pxe, node) => getPublicScanTips(node))
+	}
+
+	/** Node-direct contract-class gate (D2). Node-only read. */
+	public async getPublicTokenClassStatus(network: NetworkInfo, contract: string): Promise<PublicTokenClassStatus> {
+		return this.withPxeRead("getPublicTokenClassStatus", network, (_pxe, node) =>
+			resolveTokenClassStatus(node, contract, (level, msg, ...rest) =>
+				level === "warn" ? this.logWarn(msg, ...rest) : this.logDebug(msg, ...rest),
+			),
+		)
 	}
 
 	/**
