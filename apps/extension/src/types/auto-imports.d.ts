@@ -326,7 +326,6 @@ declare module 'vue' {
     readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
-    readonly ensurePermissions: UnwrapRef<typeof import('../utils/general')['ensurePermissions']>
     readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>

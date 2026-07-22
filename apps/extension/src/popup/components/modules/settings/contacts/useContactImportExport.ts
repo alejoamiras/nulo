@@ -1,7 +1,6 @@
 import type { Ref } from "vue"
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { downloadFile, pickFile, sanitizeString } from "@/utils"
-import { ensurePermissions } from "@/utils/general"
 import { MAX_CONTACT_IMPORT_BYTES, parseContactsExport } from "@/utils/contacts-export-format"
 import type { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 import type { ContactServiceClient } from "@/wallet/services/contact/client"
@@ -23,10 +22,9 @@ export interface UseContactImportExportOptions {
 }
 
 /**
- * Encapsulates the contacts page import/export flows: downloads
- * permission preflight, sender-union resolution for export, file
- * pick + parse + per-row upsert + sender restoration for import,
- * and the aggregate user-facing toasts.
+ * Encapsulates the contacts page import/export flows: sender-union resolution
+ * for export, file pick + parse + per-row upsert + sender restoration for
+ * import, and the aggregate user-facing toasts.
  */
 export function useContactImportExport(opts: UseContactImportExportOptions) {
 	const { contacts, contactService, accountStateService } = opts
@@ -36,16 +34,8 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 	const popupStore = usePopupStore()
 
 	async function exportContacts() {
-		// Ask for the downloads permission FIRST while the user-gesture is
-		// still active. If we did the slow sender-union query first, Chrome
-		// silently denies the permission prompt (gesture window expires
-		// after async work).
-		const hasDownloadsPermission = await ensurePermissions({ permissions: ["downloads"] })
-		if (!hasDownloadsPermission) {
-			openToast({ label: "Permission for downloads not granted", icon: "warning" }, TOAST_DURATION.LONG)
-			return
-		}
-
+		// `downloads` is a required manifest permission (always granted), so no runtime prompt/gesture
+		// dance is needed — the download just happens.
 		// OR-across-networks sender membership: a contact is exported with
 		// `isSender: true` if registered on any active-status network in the
 		// active profile. Down networks are silently skipped.

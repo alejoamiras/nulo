@@ -40,11 +40,9 @@ export function useProfileBootstrap() {
 			// hardcoded `kind === "testnet"` did (#305 flipped the default to Alpha but left this).
 			const primary = await managers.network.getPrimaryNetwork()
 			appStore.network = primary ?? appStore.networks[0]
-			if (appStore.network) {
-				await managers.network.setActiveNetwork(appStore.network.id)
-			}
 		}
 
+		// Persist the resolved active network (covers both the restored-active and fallback branches).
 		if (appStore.network) {
 			await managers.network.setActiveNetwork(appStore.network.id)
 		}
