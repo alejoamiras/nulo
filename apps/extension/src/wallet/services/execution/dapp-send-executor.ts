@@ -35,7 +35,7 @@ import { collectOffchainEffects } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
-import { feeToUsd, formatFeeJuice } from "@/utils/fee-estimation"
+import { formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
@@ -246,7 +246,6 @@ export class DappSendExecutor {
 		return {
 			maxFee: maxFeeRaw.toString(),
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
-			maxFeeUsd: feeToUsd(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 		}
 	}

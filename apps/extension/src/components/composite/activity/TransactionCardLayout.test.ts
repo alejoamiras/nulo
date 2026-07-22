@@ -170,3 +170,24 @@ describe("composite/TransactionCardLayout", () => {
 		expect(w.find("[data-testid='x']").exists()).toBe(true)
 	})
 })
+
+describe("composite/TransactionCardLayout — amountFiat (D2 activity rows)", () => {
+	test("renders the fiat line under the amount when provided", () => {
+		const w = mountLayout({ amount: "−125.00", amountSymbol: "cUSD", amountFiat: "≈ $124.98" })
+		const fiat = w.find('[data-testid="activity-fiat"]')
+		expect(fiat.exists()).toBe(true)
+		expect(fiat.text()).toBe("≈ $124.98")
+		expect(fiat.attributes("title")).toBe("At today's price")
+	})
+
+	test("no fiat element when amountFiat is null (unpriced — never a fake $0.00)", () => {
+		const w = mountLayout({ amount: "−125.00", amountSymbol: "TST" })
+		expect(w.find('[data-testid="activity-fiat"]').exists()).toBe(false)
+		expect(w.text()).not.toContain("$")
+	})
+
+	test("no fiat element without an amount at all", () => {
+		const w = mountLayout({ amountFiat: "≈ $1.00" })
+		expect(w.find('[data-testid="activity-fiat"]').exists()).toBe(false)
+	})
+})

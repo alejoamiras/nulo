@@ -2,6 +2,12 @@
 /** Vendor */
 import { DateTime } from "luxon"
 
+/** Services */
+import { PriceServiceClient } from "@/wallet/services/price/client"
+
+/** Composables */
+import { usePrices } from "@/composables/usePrices"
+
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 
@@ -26,6 +32,17 @@ const decimals = computed(() => token.value?.decimals || 0)
 const publicRaw = computed(() => BigInt(props.tokenBalance?.publicBalance || 0))
 const privateRaw = computed(() => BigInt(props.tokenBalance?.privateBalance || 0))
 const totalBalance = computed(() => balanceFormatted(privateRaw.value + publicRaw.value, decimals.value, 10).value)
+
+/** B1: holding fiat value between amount and split — absent when unpriced.
+ *  The client lifecycle lives here (row-level) because TokenCard is mounted
+ *  per-row from the tokens list; the shared cache keeps this cheap. */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const fiatLabel = computed(() => prices.tokenFiatLabel(token.value, privateRaw.value + publicRaw.value))
+onBeforeUnmount(() => {
+	prices.dispose()
+	priceService.disconnect()
+})
 const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6).value)
 const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6).value)
 const hasPrivate = computed(() => privateRaw.value !== 0n)
@@ -64,7 +81,8 @@ const handleRefreshBalance = async () => {
 			<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
 				{{ token.symbol }}
 			</span>
-			<span :class="$style.type_label">PRIVATE / PUBLIC</span>
+			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
+			<span v-else :class="$style.type_label">PRIVATE / PUBLIC</span>
 		</Flex>
 
 		<Flex
@@ -79,7 +97,10 @@ const handleRefreshBalance = async () => {
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
 			<span :class="$style.amount">{{ totalBalance || 0 }}</span>
-			<span :class="$style.detail">{{ privateFormatted }} / {{ publicFormatted }}</span>
+			<span :class="$style.detail">
+				<span :class="$style.split_dot" /> {{ privateFormatted }}&ensp;<span :class="[$style.split_dot, $style.split_dot_pub]" />
+				{{ publicFormatted }}
+			</span>
 		</Flex>
 	</RouterLink>
 
@@ -136,10 +157,32 @@ const handleRefreshBalance = async () => {
 	color: var(--txt-primary);
 }
 
+.fiat {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--nulo-secondary);
+}
+
 .detail {
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--nulo-outline);
+
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+}
+
+/* Same private/public dot vocabulary as BalanceView's header breakdown. */
+.split_dot {
+	display: inline-block;
+	width: 5px;
+	height: 5px;
+	background: var(--nulo-accent);
+}
+
+.split_dot_pub {
+	background: var(--nulo-outline);
 }
 
 .loading_block {

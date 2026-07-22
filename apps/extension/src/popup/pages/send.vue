@@ -19,16 +19,21 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { proxyTickerFor } from "@/wallet/services/price/price-map"
 import { TransferType } from "@/wallet/services/transaction/client"
 
 /** Utils */
 import { isValidHex } from "@/utils/string"
 import { validateSendAmount } from "@/popup/pages/send-amount"
+import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
 import { useFeeEstimation } from "@/composables/useFeeEstimation"
+import { usePrices } from "@/composables/usePrices"
+import { useTicker } from "@/composables/ticker"
 const { openToast } = useToast()
 
 /** Store */
@@ -187,11 +192,42 @@ const amountValidation = computed(() =>
 	}),
 )
 
+/** C3 live pricing. The card freezes a session quote when fiat mode starts;
+ *  the SUBMIT GATE lives here (this page owns handleSend) and fails closed. */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const liveQuote = computed(() => prices.quoteFor(activeToken.value?.chainId, activeToken.value?.contract) ?? null)
+const proxyTicker = computed(() => (liveQuote.value ? (proxyTickerFor(liveQuote.value.coingeckoId) ?? null) : null))
+
+const fiatMode = ref(false)
+const fiatGuard = ref(null)
+const amountCardRef = useTemplateRef("amountCardRef")
+
+/** Pure, unit-tested gate (send-fiat-gate.ts) — fail-closed by construction. */
+const gateNow = useTicker(30_000)
+const fiatGate = computed(() =>
+	evaluateFiatGate({
+		fiatMode: fiatMode.value,
+		guard: fiatGuard.value,
+		liveUsd: liveQuote.value?.usd ?? null,
+		now: gateNow.value ?? Date.now(),
+	}),
+)
+const fiatQuoteBlocked = computed(() => !fiatGate.value.ok)
+/** Distinguishes "needs explicit re-confirmation" from "just converting". */
+const fiatNeedsRequote = computed(() => !fiatGate.value.ok && fiatGate.value.requote)
+const handleRequote = () => {
+	// Re-freezes at the current quote and re-derives the token amount — the
+	// user sees the NEW derived amount on the card before confirming.
+	amountCardRef.value?.refreezeQuote()
+}
+
 const isAllowedToSend = computed(() => {
 	if (!amountTerm.value) return false
 	if (isBlockedTransfer.value) return false
 	if (!isValidAddress.value) return false
 	if (!feeSettings.value) return false
+	if (fiatQuoteBlocked.value) return false
 	return amountValidation.value.valid
 })
 
@@ -237,6 +273,16 @@ let cancelled = false
 const handleSend = async () => {
 	if (!isAllowedToSend.value || isSending.value) return
 	if (!amountValidation.value.valid) return
+	// The reactive gate runs on a 30s ticker — re-evaluate at TRUE wall-clock
+	// on the actual click so a snapshot cannot slip through expiry/drift by up
+	// to one tick.
+	const submitGate = evaluateFiatGate({
+		fiatMode: fiatMode.value,
+		guard: fiatGuard.value,
+		liveUsd: liveQuote.value?.usd ?? null,
+		now: Date.now(),
+	})
+	if (!submitGate.ok) return
 
 	isSending.value = true
 
@@ -426,6 +472,8 @@ onBeforeUnmount(() => {
 	contactService.disconnect()
 	tokenBalanceService.disconnect()
 	tokenService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 
 	cancelFeeEstimate()
 
@@ -479,11 +527,23 @@ onBeforeUnmount(() => {
 				<div :class="$style.section">
 					<span :class="$style.section_label">Transaction Amount</span>
 					<AmountCard
+						ref="amountCardRef"
 						v-model="amountTerm"
-						:selectedSendType
+						v-model:fiatMode="fiatMode"
+						v-model:fiatGuard="fiatGuard"
 						:token="activeToken"
 						:tokenBalanceByType
+						:balanceRawByType="balanceRaw ?? null"
+						:liveQuote
+						:proxyTicker
 					/>
+					<Flex v-if="fiatNeedsRequote" align="center" gap="6" :class="$style.requote_notice">
+						<Icon name="warning" size="12" color="tertiary" />
+						<Text size="11" weight="500" color="tertiary">
+							{{ liveQuote ? "The price moved since you started typing." : "The price quote went stale." }}
+						</Text>
+						<span @click="handleRequote" data-testid="send-fiat-requote" :class="$style.requote_action">Refresh quote</span>
+					</Flex>
 				</div>
 
 				<!-- Section: Fee Summary -->
@@ -574,4 +634,22 @@ onBeforeUnmount(() => {
 	border-top: 1px solid var(--nulo-border);
 }
 
+
+.requote_notice {
+	padding: 6px 0;
+}
+
+.requote_action {
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--nulo-accent);
+	cursor: pointer;
+
+	&:hover {
+		text-decoration: underline;
+	}
+}
 </style>

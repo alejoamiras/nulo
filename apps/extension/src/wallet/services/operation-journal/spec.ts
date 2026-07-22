@@ -43,8 +43,12 @@ export type OperationKind = "transfer" | "dapp_execute" | "token_import"
  * + dApp interactions, which share `DappInteractionService`). `"sdk"` as a
  * separate origin would require a path that bypasses dapp-interaction; it
  * doesn't exist today. Add the enum variant back when one does.
+ *
+ * `"seed"` marks zero-interaction default-token imports (the built-in seed
+ * list) so the activity feed can label them "Default token" instead of
+ * implying the user or a dApp requested them.
  */
-export type OperationOrigin = "popup" | "dapp"
+export type OperationOrigin = "popup" | "dapp" | "seed"
 
 /**
  * Caller-provided context for services that internally journal an operation
@@ -53,7 +57,7 @@ export type OperationOrigin = "popup" | "dapp"
  * called out that a defaulted optional `origin` would let future callers
  * forget context silently.
  */
-export type OperationContext = { origin: "popup" } | { origin: "dapp"; dappOrigin: string }
+export type OperationContext = { origin: "popup" } | { origin: "dapp"; dappOrigin: string } | { origin: "seed" }
 
 export interface OperationRecord {
 	/** Random 16-hex id assigned at `createOperation`. */
@@ -162,7 +166,7 @@ export type NewOperationInput = {
 // ── Zod schemas ──────────────────────────────────────────────────────
 
 export const OperationKindSchema = z.enum(["transfer", "dapp_execute", "token_import"])
-export const OperationOriginSchema = z.enum(["popup", "dapp"])
+export const OperationOriginSchema = z.enum(["popup", "dapp", "seed"])
 
 export const JobProgressSchema: z.ZodType<JobProgress> = z.discriminatedUnion("stage", [
 	z.object({ stage: z.literal("queued") }),

@@ -82,7 +82,7 @@ const throwExecReached = (): never => {
 }
 
 // A network stub token's init subscribes to; must expose registerChainPurgeSubscriber.
-const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscriber: () => {} })
+const networkStub = () => svc(NetworkService.name, { registerChainPurgeSubscriber: () => {}, onActiveNetworkChanged: new EventHandler() })
 
 /** A ticker that never fires — lets token-balance's init run queue.start() without a poll loop. */
 const noopTicker: BackgroundTickerPort = { subscribe: () => ({ cancel: () => {} }) }
@@ -145,7 +145,7 @@ describe("cross-profile isolation (standing gate)", () => {
 			services.add(networkStub())
 			services.add(svc(AccountService.name, {}))
 			services.add(svc(TaskService.name, {}))
-			services.add(svc(OperationJournalService.name, {}))
+			services.add(svc(OperationJournalService.name, { purgeForProfile: async () => {} }))
 			tokens = new TokenService(mkLogger(), api)
 			services.add(tokens)
 			await services.start()

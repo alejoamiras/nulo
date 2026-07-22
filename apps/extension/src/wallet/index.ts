@@ -16,6 +16,7 @@ import { RealChromeBrowserApi, SystemClock } from "@/core/adapters"
 import { ConfigStore } from "./config"
 import { consoleMethods, LoggerStore, LogLevel } from "./logger"
 import { createWalletRuntime } from "./runtime"
+import { PRICE_REFRESH_ALARM_NAME, PriceService } from "./services/price/service"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { openOrFocusOnboardingTab } from "./utils/onboarding-tab"
 
@@ -69,6 +70,23 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 logger.log("wallet", LogLevel.Info, "Runtime configured")
 
 const runtime = createWalletRuntime({ browserApi, clock, config, logger })
+
+// MV3: when an alarm WAKES the SW, only listeners registered synchronously
+// at module scope receive the triggering event — a listener added inside
+// `runtime.start()` (after awaited config/BB/migration work) would miss it,
+// and with it every price tick of that SW lifetime. This shim is the SINGLE
+// dispatch path for the price alarm: it ensures startup completed (start()
+// is idempotent) and forwards the tick into the service, which does NOT
+// subscribe to alarms itself (no double dispatch).
+chrome.alarms.onAlarm.addListener((alarm) => {
+	if (alarm.name !== PRICE_REFRESH_ALARM_NAME) return
+	runtime
+		.start()
+		.then(() => (runtime.services.get(PriceService.name) as PriceService).onAlarmTick())
+		.catch((error) => {
+			logger.log("wallet", LogLevel.Error, "price alarm dispatch failed", getErrorData(error))
+		})
+})
 
 // Rehydrate logs from the previous SW lifecycle, then start. A failed
 // rehydrate (session storage unavailable) is non-fatal — we start anyway.

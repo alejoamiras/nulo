@@ -29,6 +29,8 @@ const props = defineProps({
 	amountRaw: { type: String, required: true },
 	/** Token decimals — formats the displayed amount. */
 	tokenDecimals: { type: Number, default: 0 },
+	/** `≈ $x.xx` for the received amount — null when unpriced. */
+	amountFiat: { type: String, default: null },
 	/** Transaction hash that delivered the note (for hash-slice rendering). */
 	txHash: { type: String, default: null },
 })
@@ -51,6 +53,7 @@ const hashSlice = computed(() => {
 		:iconRotate="180"
 		:amount="formattedAmount ? `+${formattedAmount}` : null"
 		:amountSymbol="tokenSymbol"
+		:amountFiat="amountFiat"
 		testId="tx-incoming-card"
 	>
 		<template #badge>

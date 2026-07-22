@@ -69,6 +69,12 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   any fixture can switch. CI egress to the public Alpha mainnet RPC blackholes, and each blocked call
   eats the node client's full 60s-abort × retry envelope — so e2e builds pin
   `VITE_NULO_E2E_DEFAULT_NET=testnet` (smoke workflow + agent.sh; never ships, prod default unaffected).
+- **Never relaunch `e2e:agent` immediately after killing a run mid-flight.** Observed: a TaskStop'd
+  run's sandbox was still dying when the relaunch booted; the fresh suite then collapsed mid-run with
+  mass timeouts (28 passed, then 32 files of unrelated-looking failures). The `os error 48` boot line
+  is NOT the tell — it also appears on fully green runs (see the cosmetic-anvil bullet above). Before
+  relaunching after a kill, verify no aztec/anvil survivors hold the previous run's ports; when a run
+  collapses mid-suite like this, suspect the environment before the code.
 - **Vitest globalSetup contract (FIXED, was silent for the suite's whole life)**: with a `default`
   export present, a named `teardown` export is IGNORED — the teardown must be the default's RETURN
   value (vitest loader: `if (m.default) return { file, setup: m.default }`). Both `global-setup.ts`

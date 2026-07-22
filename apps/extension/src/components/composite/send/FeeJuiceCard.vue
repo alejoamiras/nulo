@@ -35,7 +35,7 @@ import { Dropdown } from "@/components/ui/Dropdown"
 				Estimated Fee Juice
 			</Text>
 			<Text size="12" weight="600" color="primary">
-				<Text color="body">$0.00</Text>&nbsp; 0 FJC
+				<Text color="body">—</Text>&nbsp; 0 FJC
 			</Text>
 		</Flex>
 	</Flex>

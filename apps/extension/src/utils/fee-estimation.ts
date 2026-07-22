@@ -3,9 +3,6 @@ import { formatBaseUnits } from "@/utils/amount"
 /** FeeJuice has 18 decimals */
 const FEE_JUICE_DECIMALS = 18
 
-/** Default FeeJuice pricing — hardcoded for privacy (no external API) */
-export const FEE_JUICE_USD_RATE = 0.02
-
 export type AssetPricing = {
 	address: string
 	usdRate: number
@@ -13,11 +10,20 @@ export type AssetPricing = {
 	decimals: number
 }
 
-export const FEE_JUICE_PRICING: AssetPricing = {
-	address: "0x0000000000000000000000000000000000000000000000000000000000000005",
-	usdRate: FEE_JUICE_USD_RATE,
-	symbol: "FJ",
-	decimals: FEE_JUICE_DECIMALS,
+/**
+ * Live Fee Juice pricing from the price feed's AZTEC quote (1 FJ = 1 AZTEC).
+ * `undefined` in → `undefined` out: with no usable quote (stale cache, fiat
+ * display disabled, provider down) fee USD is OMITTED, never faked — the old
+ * hardcoded 0.02 rate is gone.
+ */
+export function feeJuicePricingFromUsd(usd: number | undefined): AssetPricing | undefined {
+	if (usd === undefined || !Number.isFinite(usd) || usd <= 0) return undefined
+	return {
+		address: "0x0000000000000000000000000000000000000000000000000000000000000005",
+		usdRate: usd,
+		symbol: "FJ",
+		decimals: FEE_JUICE_DECIMALS,
+	}
 }
 
 /** Compute max fee from gas limits and fees per gas */
@@ -71,8 +77,13 @@ const RATE_SCALE = 1_000_000n
  * (avoids `Number` precision loss when fees are 18-decimal). Half-up
  * rounded to 3 decimals (`$X.XXX` shape), with the `<$0.001` hint when
  * the unrounded USD value is below $0.001.
+ *
+ * `pricing` has no default anymore: callers pass a LIVE pricing (see
+ * `feeJuicePricingFromUsd`) and get `null` back when none is available —
+ * the fee-USD element is omitted, not faked.
  */
-export function feeToUsd(feeAmount: bigint, pricing: AssetPricing = FEE_JUICE_PRICING): string {
+export function feeToUsd(feeAmount: bigint, pricing: AssetPricing | undefined): string | null {
+	if (!pricing) return null
 	if (feeAmount === 0n) return "$0.000"
 	const scaledRate = BigInt(Math.round(pricing.usdRate * Number(RATE_SCALE)))
 	const tokenScale = 10n ** BigInt(pricing.decimals)
@@ -96,16 +107,23 @@ export type FeeEstimate = {
 	gasUsed: { daGas: number; l2Gas: number }
 	maxFee: bigint
 	maxFeeFormatted: string
-	maxFeeUsd: string
+	/** Null when no live Fee Juice quote is available — display omits USD. */
+	maxFeeUsd: string | null
 }
 
 /** Build a FeeEstimate from raw gas data */
-export function buildFeeEstimate(daGas: number, l2Gas: number, feePerDaGas: bigint, feePerL2Gas: bigint): FeeEstimate {
+export function buildFeeEstimate(
+	daGas: number,
+	l2Gas: number,
+	feePerDaGas: bigint,
+	feePerL2Gas: bigint,
+	pricing?: AssetPricing,
+): FeeEstimate {
 	const maxFee = BigInt(daGas) * feePerDaGas + BigInt(l2Gas) * feePerL2Gas
 	return {
 		gasUsed: { daGas, l2Gas },
 		maxFee,
 		maxFeeFormatted: formatFeeJuice(maxFee),
-		maxFeeUsd: feeToUsd(maxFee),
+		maxFeeUsd: feeToUsd(maxFee, pricing),
 	}
 }

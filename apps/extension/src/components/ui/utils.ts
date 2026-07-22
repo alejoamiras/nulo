@@ -33,7 +33,7 @@ export function getChainColor(chainId: number): string {
 export function getChainName(chainId: number): string {
 	switch (chainId) {
 		case CHAIN_IDS.MAINNET:
-			return "Alpha"
+			return "Alpha V5"
 		case CHAIN_IDS.TESTNET:
 			return "Testnet"
 		case CHAIN_IDS.SANDBOX:
