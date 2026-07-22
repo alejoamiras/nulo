@@ -40,10 +40,12 @@ function mountList(activeId: string) {
 				SettingItem: {
 					props: ["to", "title"],
 					inheritAttrs: false,
-					template: `<a :data-to="to" v-bind="$attrs"><span class="title">{{ title }}</span><slot name="right" /></a>`,
+					template: `<a :data-to="to" v-bind="$attrs"><slot name="dot" /><span class="title">{{ title }}</span><slot name="right" /></a>`,
 				},
 				Flex: { inheritAttrs: false, template: "<div v-bind='$attrs'><slot /></div>" },
 				Text: { template: "<span><slot /></span>" },
+				// Badge is the @nulo/design purple chip; stub keeps the data-testid + text assertions deterministic.
+				Badge: { inheritAttrs: false, template: "<span v-bind='$attrs'><slot /></span>" },
 				MaterialIcon: true,
 				SubPageHeader: true,
 				SectionLabel: true,
@@ -69,12 +71,18 @@ describe("Settings › Networks list (item 4 — active badge, keyboard-activata
 		expect(tos).toContain("/popup/settings/networks/tn")
 	})
 
-	test("the ACTIVE row shows the Active badge; non-active rows don't; testids preserved", async () => {
+	test("the ACTIVE row shows the left dot + Active pill; non-active rows show neither; testids preserved", async () => {
 		const { wrapper } = mountList("alpha")
 		await nextTick()
 		const badges = wrapper.findAll('[data-testid="network-active-badge"]')
 		expect(badges).toHaveLength(1)
 		expect(badges[0]?.text()).toContain("Active")
+
+		// The left status dot (in the #dot slot, where the fake radio used to be) marks the active row.
+		const dots = wrapper.findAll('[data-testid="network-active-dot"]')
+		expect(dots).toHaveLength(1)
+		expect(wrapper.find('[data-network-id="alpha"]').find('[data-testid="network-active-dot"]').exists()).toBe(true)
+		expect(wrapper.find('[data-network-id="tn"]').find('[data-testid="network-active-dot"]').exists()).toBe(false)
 
 		expect(wrapper.find('[data-network-id="alpha"]').find('[data-testid="network-active-badge"]').exists()).toBe(true)
 		expect(wrapper.find('[data-network-id="tn"]').find('[data-testid="network-active-badge"]').exists()).toBe(false)

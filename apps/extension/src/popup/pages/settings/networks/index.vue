@@ -42,17 +42,14 @@ const networks = computed(() =>
 					:data-network-id="network.id"
 					:data-network-name="network.name"
 				>
+					<template #dot>
+						<div v-if="appStore.network?.id === network.id" :class="$style.active_dot" data-testid="network-active-dot" />
+					</template>
 					<template #right>
-						<Flex
-							v-if="appStore.network?.id === network.id"
-							align="center"
-							gap="6"
-							data-testid="network-active-badge"
-						>
-							<div :class="$style.active_dot" />
-							<Text size="12" weight="600" color="primary">Active</Text>
+						<Flex align="center" gap="8">
+							<Badge v-if="appStore.network?.id === network.id" variant="info" data-testid="network-active-badge">Active</Badge>
+							<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
 						</Flex>
-						<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
 					</template>
 				</SettingItem>
 			</ItemsContainer>
@@ -91,10 +88,11 @@ const networks = computed(() =>
 }
 
 .active_dot {
+	/* --green is Nulo's "active/live" status color (mirrors DappStatusStrip's ready dot). */
 	width: 7px;
 	height: 7px;
 	flex: none;
 	border-radius: 50%;
-	background: var(--nulo-accent);
+	background: var(--green);
 }
 </style>
