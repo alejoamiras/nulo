@@ -47,6 +47,7 @@ declare global {
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
   const ensurePermissions: typeof import('../utils/general').ensurePermissions
+  const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
   const formatCallSummary: typeof import('../utils/tx-enrichment').formatCallSummary
@@ -172,6 +173,7 @@ declare global {
   const usePasskeyCeremony: typeof import('../composables/usePasskeyCeremony').usePasskeyCeremony
   const usePopupEntity: typeof import('../composables/usePopupEntity').usePopupEntity
   const usePopupStore: typeof import('../stores/popup.store').usePopupStore
+  const usePrices: typeof import('../composables/usePrices').usePrices
   const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
   const useProfileCreateFlow: typeof import('../composables/useProfileCreateFlow').useProfileCreateFlow
   const useProfileImportFlow: typeof import('../composables/useProfileImportFlow').useProfileImportFlow
@@ -289,8 +291,6 @@ declare module 'vue' {
     readonly AccessLevel: UnwrapRef<typeof import('../utils/confirmation-policies')['AccessLevel']>
     readonly CHAIN_IDS: UnwrapRef<typeof import('../utils/chain-ids')['CHAIN_IDS']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
-    readonly FEE_JUICE_PRICING: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_PRICING']>
-    readonly FEE_JUICE_USD_RATE: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_USD_RATE']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
     readonly MAINNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_L1_CHAIN_ID']>
@@ -326,6 +326,7 @@ declare module 'vue' {
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
     readonly ensurePermissions: UnwrapRef<typeof import('../utils/general')['ensurePermissions']>
+    readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
     readonly formatCallSummary: UnwrapRef<typeof import('../utils/tx-enrichment')['formatCallSummary']>
@@ -451,6 +452,7 @@ declare module 'vue' {
     readonly usePasskeyCeremony: UnwrapRef<typeof import('../composables/usePasskeyCeremony')['usePasskeyCeremony']>
     readonly usePopupEntity: UnwrapRef<typeof import('../composables/usePopupEntity')['usePopupEntity']>
     readonly usePopupStore: UnwrapRef<typeof import('../stores/popup.store')['usePopupStore']>
+    readonly usePrices: UnwrapRef<typeof import('../composables/usePrices')['usePrices']>
     readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>
     readonly useProfileCreateFlow: UnwrapRef<typeof import('../composables/useProfileCreateFlow')['useProfileCreateFlow']>
     readonly useProfileImportFlow: UnwrapRef<typeof import('../composables/useProfileImportFlow')['useProfileImportFlow']>

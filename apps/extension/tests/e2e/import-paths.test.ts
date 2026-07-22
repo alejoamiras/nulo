@@ -18,6 +18,7 @@ import { clickByTestId, launchExtension, openPopup, waitForHash, test } from "./
 import {
 	buildSyntheticBackup,
 	CANONICAL_SEED_24,
+	deriveNuloAccountAddress,
 	gotoPopupImport,
 	importEncryptedKey,
 	importFullBackup,
@@ -233,7 +234,10 @@ test("round-trip: register → export encrypted key → import in fresh ext → 
 
 test("full backup: fresh install → synthetic plain backup → /popup/general", async ({ freshExtensionPerTest }) => {
 	const masterBase64 = await makeRandomMasterBase64()
-	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64 }))
+	// The account row must be derivation-consistent with the master (chainId 31337 = the
+	// synthetic network) — the integrity coordinator blocks a mismatched import at finalize.
+	const accountAddress = await deriveNuloAccountAddress(masterBase64, 31337)
+	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, accountAddress }))
 
 	const page = await gotoPopupImport(freshExtensionPerTest)
 	await importFullBackup(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)

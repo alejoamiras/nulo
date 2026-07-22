@@ -2,7 +2,7 @@
 	"name": "aztec-5.0.0-stable-reference-vectors",
 	"private": true,
 	"type": "module",
-	"description": "Self-contained Regime-B reference project (plan D13). Run: bun install && bun derive-vectors.ts — from THIS directory. Imports ONLY the published 5.0.0 packages (digests in tarball-digests.json); never the repo's own helpers.",
+	"description": "Self-contained Regime-B reference project (plan D13). Run: bun install && bun derive-vectors.ts — from THIS directory. Imports ONLY the published 5.0.1 packages (digests in tarball-digests.json); never the repo's own helpers.",
 	"dependencies": {
 		"@aztec/accounts": "5.0.1",
 		"@aztec/aztec.js": "5.0.1",

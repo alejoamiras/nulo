@@ -27,6 +27,11 @@ export const ConfigSchema = z.object({
 
 	// Additional — enum derived from the explorer-ids single source (no drift).
 	defaultExplorer: z.enum(BLOCK_EXPLORER_IDS).nullable().default("aztecscan"),
+	// When ON (default), the wallet fetches USD prices from CoinGecko (one
+	// batched request for a FIXED id set, only while unlocked) and shows
+	// fiat values across the UI. OFF disables all price fetching and hides
+	// every fiat surface — the privacy kill-switch.
+	showFiatValues: z.boolean().default(true),
 
 	// Activity
 	// When OFF, IncomingTransferService records are still persisted but

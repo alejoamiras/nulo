@@ -29,6 +29,7 @@ const isShowNodeNameEnabled = ref(defaultConfig.showNode)
 const isShowPopupFullscreen = ref(defaultConfig.showPopupFullscreen)
 const isAnimationsDisabled = ref(defaultConfig.disableAnimations)
 const isIncomingTransfersVisible = ref(defaultConfig.incomingTransfersVisible)
+const isShowFiatValues = ref(defaultConfig.showFiatValues)
 const settings = {
 	theme: {
 		title: "",
@@ -59,6 +60,11 @@ const settings = {
 		title: "Show incoming transfers",
 		description: "Hide if you run the same seed on multiple devices and don't want one device's outgoing to appear as incoming here",
 		model: isIncomingTransfersVisible,
+	},
+	showFiatValues: {
+		title: "Show fiat values",
+		description: "Fetch USD prices from CoinGecko while unlocked. Off hides all dollar values",
+		model: isShowFiatValues,
 	},
 }
 
@@ -179,7 +185,7 @@ onBeforeUnmount(() => {
 				<Toggle
 					@update:modelValue="updateSetting(sk, $event)"
 					:modelValue="settings[sk].model.value"
-					:data-testid="sk === 'disableAnimations' ? 'animations-toggle' : null"
+					:data-testid="(sk === 'disableAnimations' && 'animations-toggle') || (sk === 'showFiatValues' && 'fiat-values-toggle') || null"
 				/>
 			</Flex>
 		</Flex>

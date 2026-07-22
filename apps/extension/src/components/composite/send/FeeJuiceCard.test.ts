@@ -39,8 +39,9 @@ describe("composite/FeeJuiceCard", () => {
 		expect(w.text()).toContain("Estimated Fee Juice")
 	})
 
-	test("renders the placeholder dollar amount '$0.00'", () => {
+	test("renders the honest em-dash placeholder — never a fake dollar figure", () => {
 		const w = mountCard()
-		expect(w.text()).toContain("$0.00")
+		expect(w.text()).toContain("—")
+		expect(w.text()).not.toContain("$0.00")
 	})
 })

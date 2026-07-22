@@ -4,8 +4,7 @@
  * payload encoding, signing, and entrypoint semantics to the canonical Aztec SDK.
  */
 import { Fr } from "@aztec/foundation/curves/bn254"
-import { FunctionSelector, type ContractArtifact } from "@aztec/stdlib/abi"
-import { FunctionCall } from "@aztec/stdlib/abi"
+import type { ContractArtifact } from "@aztec/stdlib/abi"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { AuthWitness } from "@aztec/stdlib/auth-witness"
 import {
@@ -19,7 +18,10 @@ import { computeSiloedPrivateInitializationNullifier } from "@aztec/stdlib/hash"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { deriveKeys } from "@aztec/stdlib/keys"
 import { ExecutionPayload, type TxExecutionRequest } from "@aztec/stdlib/tx"
-import { SchnorrAccountContract, SchnorrAccountContractArtifact } from "@aztec/accounts/schnorr"
+// The lazy variant: same upstream signing/auth-witness provider, but the npm artifact sits behind
+// a dynamic import we never trigger — the vendored copy in `./frozen-artifact` is the only
+// artifact this account ever loads (the eager module would double-bundle ~1.4 MB).
+import { SchnorrAccountContract } from "@aztec/accounts/schnorr/lazy"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { AccountFeePaymentMethodOptions, DefaultAccountEntrypoint, type DefaultAccountEntrypointOptions } from "@aztec/entrypoints/account"
 import { DefaultMultiCallEntrypoint } from "@aztec/entrypoints/multicall"
@@ -29,12 +31,14 @@ import type { AuthWitnessProvider } from "@aztec/entrypoints/interfaces"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 import type { IPXE } from "../pxe/ipxe"
 import { completeFeeOptions, type PartialGasSettingsRPC } from "./fee-options"
+import { FrozenSchnorrAccountArtifact } from "./frozen-artifact"
+import { FROZEN_INSTANTIATION_DESCRIPTOR, buildFrozenConstructorCall, frozenConstructorArgs } from "./instantiation-descriptor"
 import type { IAccountContract } from "."
 
 export class NuloAccount implements IAccountContract {
 	public readonly name = "nulo-v1"
 	public readonly address: AztecAddress
-	public readonly artifact: ContractArtifact = SchnorrAccountContractArtifact
+	public readonly artifact: ContractArtifact = FrozenSchnorrAccountArtifact
 
 	private readonly entrypoint: DefaultAccountEntrypoint
 	private readonly authWitnessProvider: AuthWitnessProvider
@@ -59,17 +63,16 @@ export class NuloAccount implements IAccountContract {
 		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
 		const keys = await deriveKeys(secretKey)
 		const accountContract = new SchnorrAccountContract(signingKey)
-		const init = await accountContract.getInitializationFunctionAndArgs()
-		if (!init) {
-			throw new Error("Schnorr account contract is missing its initializer")
-		}
-		const { constructorName, constructorArgs } = init
-		const instance = await getContractInstanceFromInstantiationParams(SchnorrAccountContractArtifact, {
-			constructorArgs,
-			constructorArtifact: constructorName,
+		// Every non-key instantiation input comes from the frozen descriptor — the same source the
+		// first-tx constructor call consumes — so derivation and execution cannot split-brain.
+		const signingPublicKey = await accountContract.getSigningPublicKey()
+		const instance = await getContractInstanceFromInstantiationParams(FrozenSchnorrAccountArtifact, {
+			constructorArgs: frozenConstructorArgs(signingPublicKey),
+			constructorArtifact: FROZEN_INSTANTIATION_DESCRIPTOR.constructorName,
 			publicKeys: keys.publicKeys,
-			salt: Fr.ZERO,
-			immutablesHash: await accountContract.getImmutablesHash(),
+			salt: FROZEN_INSTANTIATION_DESCRIPTOR.salt,
+			immutablesHash: FROZEN_INSTANTIATION_DESCRIPTOR.immutablesHash,
+			deployer: FROZEN_INSTANTIATION_DESCRIPTOR.deployer,
 		})
 		const completeAddress = await CompleteAddress.fromSecretKeyAndInstance(secretKey, instance)
 		return new NuloAccount(secretKey, instance, completeAddress, accountContract, logger)
@@ -196,29 +199,10 @@ export class NuloAccount implements IAccountContract {
 	): Promise<TxExecutionRequest> {
 		const wrappedApp = await this.entrypoint.wrapExecutionPayload(payload, chainInfo, options)
 
-		const ctorFn =
-			this.artifact.functions.find((x) => x.name === "constructor") ??
-			this.artifact.functions.find((x) => x.name.includes("constructor"))
-		if (!ctorFn) {
-			throw new Error("constructor not found in account artifact")
-		}
-		const ctorSelector = await FunctionSelector.fromNameAndParameters(ctorFn.name, ctorFn.parameters)
-		const schnorrInit = await this.signingAccountContract.getInitializationFunctionAndArgs()
-		if (!schnorrInit) {
-			throw new Error("Schnorr account contract is missing its initializer")
-		}
-		const { constructorArgs } = schnorrInit
-
-		const ctorCall = new FunctionCall(
-			ctorFn.name,
-			this.address,
-			ctorSelector,
-			ctorFn.functionType,
-			false,
-			ctorFn.isStatic,
-			constructorArgs,
-			ctorFn.returnTypes,
-		)
+		// Same frozen descriptor the address derivation consumed — the executed constructor can
+		// never drift from the address-committed one.
+		const signingPublicKey = await this.signingAccountContract.getSigningPublicKey()
+		const ctorCall = await buildFrozenConstructorCall(this.artifact, this.address, signingPublicKey)
 
 		const combined = new ExecutionPayload(
 			[ctorCall, ...wrappedApp.calls],

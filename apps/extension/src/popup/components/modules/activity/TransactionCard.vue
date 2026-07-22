@@ -15,6 +15,8 @@ import { OriginType, TxStatus, TxExecutionResult } from "@/wallet/services/trans
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { usePrices } from "@/composables/usePrices"
 import { getTransactionExplorerUrl } from "@/wallet/constants/explorers"
 import { getTxCategory, getTxTitle, getOriginLabel, getPrimaryCall, formatTransferType } from "@/utils/tx-enrichment"
 
@@ -133,6 +135,22 @@ const displayAmountSymbol = computed(() => {
 })
 
 const amountStr = computed(() => (displayAmount.value !== null ? String(displayAmount.value) : null))
+
+/** D2: fiat under the amount for priced transfer rows (today's rate). */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const amountFiat = computed(() => {
+	if (type.value !== "transfer" || !transfer.value || !call.value?.contract) return null
+	const label = prices.tokenFiatLabel(
+		{ chainId: appStore.network?.chainId, contract: call.value.contract, decimals: token.value?.decimals ?? 0 },
+		BigInt(transfer.value.amount || 0),
+	)
+	return label ?? null
+})
+onBeforeUnmount(() => {
+	prices.dispose()
+	priceService.disconnect()
+})
 </script>
 
 <template>
@@ -142,6 +160,7 @@ const amountStr = computed(() => (displayAmount.value !== null ? String(displayA
 			:icon="icon"
 			:amount="amountStr"
 			:amountSymbol="displayAmountSymbol"
+			:amountFiat="amountFiat"
 			testId="tx-card"
 			:txAmountDisplay="amountStr"
 			:txTransferTypeLabel="transferTypeLabel"

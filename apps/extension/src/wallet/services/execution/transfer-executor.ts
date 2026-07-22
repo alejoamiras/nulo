@@ -23,7 +23,7 @@ import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
-import { formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
+import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
 import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { NewOperationInput, OperationRecord } from "@/wallet/services/operation-journal/spec"
@@ -318,7 +318,6 @@ export class TransferExecutor {
 		return {
 			maxFee: maxFeeRaw.toString(),
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
-			maxFeeUsd: feeToUsd(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 			estimateId,
 		}

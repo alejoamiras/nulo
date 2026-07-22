@@ -112,6 +112,10 @@ async function handleBackup() {
 				isAgreed.value = false
 				return
 			}
+			// User-facing copy stays generic; the underlying error goes to the console so a failed
+			// export is diagnosable (this catch and the exportPlain one below are otherwise
+			// indistinguishable — same toast, same navigation).
+			console.error("[export/full] passkey credential acquisition failed:", err)
 			openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
 			router.go(-1)
 			return
@@ -124,6 +128,9 @@ async function handleBackup() {
 		if (!isPasskeyProfile.value) {
 			isWrongPassword.value = true
 		} else {
+			// See the acquisition catch above — stage-tagged so the two failure points are
+			// distinguishable in the console while the user-facing copy stays generic.
+			console.error("[export/full] passkey exportPlain failed:", error)
 			openToast({ label: "Failed to authenticate by passkey", icon: "warning" }, TOAST_DURATION.LONG)
 			router.go(-1)
 		}

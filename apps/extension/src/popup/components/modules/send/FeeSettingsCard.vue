@@ -16,9 +16,12 @@ import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
 import { buildFeeMethods, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
+import { usePrices } from "@/composables/usePrices"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -88,9 +91,16 @@ const privateFeeJuiceFormatted = computed(() =>
 	gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
 )
 
+/** Fee USD is derived LIVE from the estimate's raw FJ amount × the current
+ *  usable AZTEC quote — an estimate-time snapshot would keep displaying a
+ *  stale figure after the 3-min refresh moved the rate (or after the quote
+ *  expired entirely, where the figure must disappear). */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
 const estimatedFeeDisplay = computed(() => {
 	if (!props.feeEstimate) return null
-	return { amount: props.feeEstimate.maxFeeFormatted, usd: props.feeEstimate.maxFeeUsd }
+	const usd = feeToUsd(BigInt(props.feeEstimate.maxFee), feeJuicePricingFromUsd(prices.feeJuiceQuote.value?.usd))
+	return { amount: props.feeEstimate.maxFeeFormatted, usd }
 })
 
 const showMethodSelector = computed(() => {
@@ -300,6 +310,8 @@ onBeforeUnmount(() => {
 	initRequested = false
 	fpcService.disconnect()
 	executionService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 	cacheStore.feePaymentMethods = cacheStore.feePaymentMethods.filter((m) => m.id !== methodId)
 })
 </script>
