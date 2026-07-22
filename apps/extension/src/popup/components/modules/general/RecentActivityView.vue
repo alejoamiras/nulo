@@ -108,7 +108,7 @@ const recentActivityRows = computed(() => {
 		// Fall back to discoveredAt for legacy records or when PXE didn't
 		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
 		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
+		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
 	}
 	rows.sort((a, b) => b.sortKey - a.sortKey)
 	return rows.slice(0, remaining)

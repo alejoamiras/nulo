@@ -59,16 +59,16 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	}
 
 	const onAdded = (inc: IncomingTransferRecord) => {
-		const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
 		if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
 		else incomingTransfers.value[idx] = inc
 	}
 	const onUpdated = (inc: IncomingTransferRecord) => {
-		const idx = incomingTransfers.value.findIndex((x) => x.siloedNullifier === inc.siloedNullifier)
+		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
 		if (idx !== -1) incomingTransfers.value[idx] = inc
 	}
 	const onDeleted = (inc: IncomingTransferRecord) => {
-		incomingTransfers.value = incomingTransfers.value.filter((x) => x.siloedNullifier !== inc.siloedNullifier)
+		incomingTransfers.value = incomingTransfers.value.filter((x) => x.id !== inc.id)
 	}
 	const onConfigUpdate = (prop: ConfigProp) => {
 		if (prop.key === "incomingTransfersVisible") refresh()

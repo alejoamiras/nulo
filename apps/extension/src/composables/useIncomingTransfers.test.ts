@@ -5,8 +5,8 @@ import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
 import { type ConfigServiceLike, type IncomingTransferServiceLike, useIncomingTransfers } from "./useIncomingTransfers"
 
-const rec = (siloedNullifier: string, extra: Record<string, unknown> = {}): IncomingTransferRecord =>
-	({ siloedNullifier, ...extra }) as unknown as IncomingTransferRecord
+const rec = (id: string, extra: Record<string, unknown> = {}): IncomingTransferRecord =>
+	({ id, ...extra }) as unknown as IncomingTransferRecord
 
 function makeIncomingService(records: IncomingTransferRecord[] = []) {
 	return {
@@ -49,7 +49,7 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService() })
 		await refresh()
 		expect(incoming.getIncomingTransfers).toHaveBeenCalledWith("p", "n", "a")
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["a", "b"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a", "b"])
 	})
 
 	it("refresh() is a no-op when scope is not ready (no fetch)", async () => {
@@ -75,7 +75,7 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onConnected.invoke()
 		await Promise.resolve()
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["z"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["z"])
 	})
 
 	it("onAdded prepends a new record", () => {
@@ -83,10 +83,10 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("a"))
 		incoming.onIncomingTransferAdded.invoke(rec("b"))
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["b", "a"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b", "a"])
 	})
 
-	it("onAdded replaces in place when the siloedNullifier already exists", () => {
+	it("onAdded replaces in place when the id already exists", () => {
 		const incoming = makeIncomingService()
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("a", { v: 1 }))
@@ -110,13 +110,13 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value).toEqual([])
 	})
 
-	it("onDeleted removes by siloedNullifier", () => {
+	it("onDeleted removes by id", () => {
 		const incoming = makeIncomingService()
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("a"))
 		incoming.onIncomingTransferAdded.invoke(rec("b"))
 		incoming.onIncomingTransferDeleted.invoke(rec("a"))
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["b"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b"])
 	})
 
 	it("config update for incomingTransfersVisible triggers a refresh", async () => {
@@ -126,7 +126,7 @@ describe("useIncomingTransfers", () => {
 		config.onUpdate.invoke({ key: "incomingTransfersVisible" } as unknown as ConfigProp)
 		await Promise.resolve()
 		expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["a"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a"])
 	})
 
 	it("config update for an unrelated key does NOT refresh", async () => {

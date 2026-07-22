@@ -1,10 +1,13 @@
 import { describe, expect, test } from "vitest"
 import { orderByBlockIndex } from "./service"
-import type { IncomingTransferRecord } from "./spec"
+import type { IncomingNoteRecord, IncomingTransferRecord } from "./spec"
 
-function record(overrides: Partial<IncomingTransferRecord> = {}): IncomingTransferRecord {
+function record(overrides: Partial<IncomingNoteRecord> = {}): IncomingTransferRecord {
+	const siloedNullifier = overrides.siloedNullifier ?? "0xnull"
 	return {
-		siloedNullifier: "0xnull",
+		kind: "note",
+		id: overrides.id ?? `note:p1|net-1|${siloedNullifier}`,
+		siloedNullifier,
 		profileId: "p1",
 		networkId: "net-1",
 		accountAddress: "0xaccount",
@@ -16,14 +19,14 @@ function record(overrides: Partial<IncomingTransferRecord> = {}): IncomingTransf
 		txHash: "0xtx",
 		l2BlockNumber: 0,
 		txIndexInBlock: 0,
-		noteIndexInTx: 0,
+		indexInTx: 0,
 		hidden: false,
 		discoveredAt: 1000,
 		...overrides,
 	}
 }
 
-describe("orderByBlockIndex — (block, txIndex, noteIndex) ascending", () => {
+describe("orderByBlockIndex — (block, txIndex, indexInTx) ascending", () => {
 	test("orders by l2BlockNumber first", () => {
 		const a = record({ l2BlockNumber: 5 })
 		const b = record({ l2BlockNumber: 3 })
@@ -34,9 +37,9 @@ describe("orderByBlockIndex — (block, txIndex, noteIndex) ascending", () => {
 		const b = record({ l2BlockNumber: 1, txIndexInBlock: 1 })
 		expect([a, b].sort(orderByBlockIndex)[0]).toBe(b)
 	})
-	test("falls back to noteIndexInTx when block + txIndex are equal", () => {
-		const a = record({ l2BlockNumber: 1, txIndexInBlock: 1, noteIndexInTx: 7 })
-		const b = record({ l2BlockNumber: 1, txIndexInBlock: 1, noteIndexInTx: 2 })
+	test("falls back to indexInTx when block + txIndex are equal", () => {
+		const a = record({ l2BlockNumber: 1, txIndexInBlock: 1, indexInTx: 7 })
+		const b = record({ l2BlockNumber: 1, txIndexInBlock: 1, indexInTx: 2 })
 		expect([a, b].sort(orderByBlockIndex)[0]).toBe(b)
 	})
 	test("identical positions → stable sort (zero return)", () => {

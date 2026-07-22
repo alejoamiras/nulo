@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
+import type { IncomingNoteRecord, IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import { buildActivityRows } from "./activity-rows"
@@ -26,9 +26,12 @@ function journal(overrides: Partial<OperationRecord>): OperationRecord {
 	} as OperationRecord
 }
 
-function incoming(overrides: Partial<IncomingTransferRecord>): IncomingTransferRecord {
+function incoming(overrides: Partial<IncomingNoteRecord>): IncomingTransferRecord {
+	const siloedNullifier = overrides.siloedNullifier ?? "0xn1"
 	return {
-		siloedNullifier: "0xn1",
+		kind: "note",
+		id: overrides.id ?? `note:p1|net-1|${siloedNullifier}`,
+		siloedNullifier,
 		profileId: "p1",
 		networkId: "net-1",
 		accountAddress: "0xa",
@@ -40,7 +43,7 @@ function incoming(overrides: Partial<IncomingTransferRecord>): IncomingTransferR
 		txHash: "0xtx",
 		l2BlockNumber: 1,
 		txIndexInBlock: 0,
-		noteIndexInTx: 0,
+		indexInTx: 0,
 		hidden: false,
 		discoveredAt: 1_000,
 		...overrides,
@@ -134,6 +137,6 @@ describe("buildActivityRows — three-source merge", () => {
 		expect(new Set(keys).size).toBe(keys.length)
 		expect(keys).toContain("tx:0xtx1")
 		expect(keys).toContain("journal:j1")
-		expect(keys).toContain("incoming:0xn1")
+		expect(keys).toContain("incoming:note:p1|net-1|0xn1")
 	})
 })

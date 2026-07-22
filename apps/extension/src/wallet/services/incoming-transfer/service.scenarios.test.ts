@@ -33,12 +33,23 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 // shared runner, which timed out the first `bootService()` when the import was
 // dynamic. vi.mock("./repository") is hoisted above this, so the mock still applies.
 import { IncomingTransferService } from "./service"
-import type { IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
+import { noteRecordId } from "./spec"
+import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
+import type { PublicEventReader } from "./public-event-indexer"
+import type {
+	PublicScanTips,
+	PublicTokenClassStatus,
+	PublicTransferEvent,
+	PublicTransferFetchArgs,
+	PublicTransferPage,
+} from "@nulo/aztec-runtime/pxe/public-events"
 
 // ── Repo mock (in-memory) ────────────────────────────────────────────────
 
 const records = new Map<string, IncomingTransferRecord>()
 const trust = new Map<string, IncomingTrustRecord>()
+const cursors = new Map<string, unknown>()
+const outbox = new Map<string, unknown>()
 
 function trustKey(profileId: string, networkId: string, contract: string): string {
 	return `${profileId}|${networkId}|${contract}`
@@ -56,7 +67,7 @@ vi.mock("./repository", () => ({
 				getRecord: async (k: string) => records.get(k),
 				hasRecord: async (k: string) => records.has(k),
 				upsertRecord: async (r: IncomingTransferRecord) => {
-					records.set(r.siloedNullifier, r)
+					records.set(r.id, r)
 				},
 				deleteRecord: async (k: string) => {
 					records.delete(k)
@@ -82,7 +93,27 @@ vi.mock("./repository", () => ({
 				clearChain: async (p: string, n: string) => {
 					for (const [k, v] of records) if (v.profileId === p && v.networkId === n) records.delete(k)
 					for (const [k, v] of trust) if (v.profileId === p && v.networkId === n) trust.delete(k)
+					for (const key of cursors.keys()) if (key.startsWith(`${p}|${n}|`)) cursors.delete(key)
+					for (const key of outbox.keys()) if (key.startsWith(`${p}|${n}|`)) outbox.delete(key)
 				},
+				// Public-event cursors (D3/D6).
+				getCursor: async (p: string, n: string, c: string) => cursors.get(`${p}|${n}|${c}`),
+				setCursor: async (p: string, n: string, c: string, cur: unknown) => {
+					cursors.set(`${p}|${n}|${c}`, cur)
+				},
+				deleteCursor: async (p: string, n: string, c: string) => {
+					cursors.delete(`${p}|${n}|${c}`)
+				},
+				listCursors: async () => [...cursors.entries()],
+				// Balance-refresh outbox (D4).
+				getOutbox: async (p: string, n: string, a: string, t: number) => outbox.get(`${p}|${n}|${a}|${t}`),
+				setOutbox: async (p: string, n: string, a: string, t: number, row: unknown) => {
+					outbox.set(`${p}|${n}|${a}|${t}`, row)
+				},
+				deleteOutbox: async (p: string, n: string, a: string, t: number) => {
+					outbox.delete(`${p}|${n}|${a}|${t}`)
+				},
+				listOutbox: async () => [...outbox.entries()],
 			}
 		}
 	},
@@ -229,6 +260,7 @@ async function bootService(
 		journal?: ReturnType<typeof makeJournalStub>
 		note?: ReturnType<typeof makeNoteStub>
 		config?: ReturnType<typeof makeConfigStub>
+		publicReader?: PublicEventReader
 	} = {},
 ) {
 	const fixture = {
@@ -246,7 +278,7 @@ async function bootService(
 	// the scan path via the public surface or via direct method calls.
 	const browserApi = new FakeBrowserApi()
 	browserApi.reset()
-	const service = new IncomingTransferService(logger, browserApi, 1_000_000)
+	const service = new IncomingTransferService(logger, browserApi, 1_000_000, stubs.publicReader)
 	const collection = new ServiceCollection()
 	for (const stub of Object.values(fixture)) collection.add(stub as never)
 	collection.add(service)
@@ -257,7 +289,41 @@ async function bootService(
 beforeEach(() => {
 	records.clear()
 	trust.clear()
+	cursors.clear()
+	outbox.clear()
 })
+
+/** Build a valid note-kind record with the `id` ALWAYS derived from the final
+ *  (profileId, networkId, siloedNullifier) — so a `{ ...other }` spread can't carry a stale id. */
+function noteRecord(overrides: Partial<IncomingNoteRecord> = {}): IncomingNoteRecord {
+	const merged = {
+		kind: "note" as const,
+		siloedNullifier: validNullifier(1),
+		profileId: "p1",
+		networkId: "n1",
+		accountAddress: "0xa",
+		contract: "0xc",
+		tokenId: 1,
+		owner: "0xa",
+		amountRaw: "100",
+		noteHash: "0xnh",
+		txHash: "0xtx",
+		l2BlockNumber: 1,
+		txIndexInBlock: 0,
+		indexInTx: 0,
+		hidden: false,
+		discoveredAt: 0,
+		...overrides,
+	}
+	return { ...merged, id: noteRecordId(merged.profileId, merged.networkId, merged.siloedNullifier) }
+}
+
+/** Seed a note record keyed by its `id` (matches the repo's real keying). Returns the record. */
+function seedNote(overrides: Partial<IncomingNoteRecord> = {}): IncomingNoteRecord {
+	const r = noteRecord(overrides)
+	records.set(r.id, r)
+	return r
+}
 
 // ── Tests ───────────────────────────────────────────────────────────────
 
@@ -307,7 +373,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 	test("getIncomingTransfers returns [] when incomingTransfersVisible=false", async () => {
 		const config = makeConfigStub(false)
 		const { service } = await bootService({ config })
-		records.set("k", {
+		seedNote({
 			siloedNullifier: "k",
 			profileId: "p1",
 			networkId: "n1",
@@ -320,7 +386,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -330,7 +396,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 
 	test("getIncomingTransfers returns visible records when visibility=true", async () => {
 		const { service } = await bootService()
-		records.set("k", {
+		seedNote({
 			siloedNullifier: "k",
 			profileId: "p1",
 			networkId: "n1",
@@ -343,7 +409,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -353,7 +419,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 
 	test("getIncomingTransfers filters hidden records", async () => {
 		const { service } = await bootService()
-		records.set("v", {
+		seedNote({
 			siloedNullifier: "v",
 			profileId: "p1",
 			networkId: "n1",
@@ -366,11 +432,11 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx1",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
-		records.set("h", {
+		seedNote({
 			siloedNullifier: "h",
 			profileId: "p1",
 			networkId: "n1",
@@ -383,13 +449,13 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx2",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
 		const out = await service.getIncomingTransfers("p1", "n1", "0xa")
 		expect(out).toHaveLength(1)
-		expect(out[0].siloedNullifier).toBe("v")
+		expect((out[0] as IncomingNoteRecord).siloedNullifier).toBe("v")
 	})
 
 	test("replayPendingPrompts is a no-op when visibility=false (P4 regression pin)", async () => {
@@ -405,7 +471,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			state: "pending",
 			updatedAt: 0,
 		})
-		records.set(validNullifier(7), {
+		seedNote({
 			siloedNullifier: validNullifier(7),
 			profileId: "p1",
 			networkId: "n1",
@@ -418,7 +484,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
@@ -445,7 +511,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			state: "pending",
 			updatedAt: 0,
 		})
-		records.set("ka", {
+		seedNote({
 			siloedNullifier: "ka",
 			profileId: "p1",
 			networkId: "n1",
@@ -458,11 +524,11 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx1",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
-		records.set("kb", {
+		seedNote({
 			siloedNullifier: "kb",
 			profileId: "p1",
 			networkId: "n1",
@@ -475,7 +541,7 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 			txHash: "0xtx2",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
@@ -488,7 +554,7 @@ describe("IncomingTransferService — trust transitions", () => {
 	test("setTrustAllow flips hidden records visible + emits onIncomingTransferAdded", async () => {
 		const token = makeTokenStub([tokenA])
 		const { service } = await bootService({ token })
-		records.set("k", {
+		seedNote({
 			siloedNullifier: "k",
 			profileId: "p1",
 			networkId: "n1",
@@ -501,21 +567,21 @@ describe("IncomingTransferService — trust transitions", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
 		const added = vi.fn()
 		service.onIncomingTransferAdded.add(added)
 		await service.setTrustAllow("p1", "n1", tokenA.contract)
-		expect(records.get("k")?.hidden).toBe(false)
+		expect(records.get("note:p1|n1|k")?.hidden).toBe(false)
 		expect(added).toHaveBeenCalledTimes(1)
 	})
 
 	test("setTrustAllow with visibility=false flips records visible but does NOT emit (P4 carry)", async () => {
 		const config = makeConfigStub(false)
 		const { service } = await bootService({ config, token: makeTokenStub([tokenA]) })
-		records.set("k", {
+		seedNote({
 			siloedNullifier: "k",
 			profileId: "p1",
 			networkId: "n1",
@@ -528,7 +594,7 @@ describe("IncomingTransferService — trust transitions", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
@@ -536,13 +602,13 @@ describe("IncomingTransferService — trust transitions", () => {
 		service.onIncomingTransferAdded.add(added)
 		await service.setTrustAllow("p1", "n1", tokenA.contract)
 		// Records flipped (so a future toggle-on shows them) but no live event.
-		expect(records.get("k")?.hidden).toBe(false)
+		expect(records.get("note:p1|n1|k")?.hidden).toBe(false)
 		expect(added).not.toHaveBeenCalled()
 	})
 
 	test("setTrustReject sets state=blocked + does NOT flip hidden records visible", async () => {
 		const { service } = await bootService({ token: makeTokenStub([tokenA]) })
-		records.set("k", {
+		seedNote({
 			siloedNullifier: "k",
 			profileId: "p1",
 			networkId: "n1",
@@ -555,13 +621,13 @@ describe("IncomingTransferService — trust transitions", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
 		await service.setTrustReject("p1", "n1", tokenA.contract)
 		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("blocked")
-		expect(records.get("k")?.hidden).toBe(true)
+		expect(records.get("note:p1|n1|k")?.hidden).toBe(true)
 	})
 })
 
@@ -709,7 +775,7 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 		const n = note()
 		const noteSvc = makeNoteStub({ [tokenA.contract]: [n] })
 		const { service } = await bootService({ network, token, note: noteSvc })
-		records.set(n.siloedNullifier, {
+		seedNote({
 			siloedNullifier: n.siloedNullifier,
 			profileId: "p1",
 			networkId: "n1",
@@ -722,7 +788,7 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 			txHash: n.txHash,
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -792,7 +858,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		const transaction = makeTransactionStub()
 		const { service } = await bootService({ transaction })
 
-		const pre = {
+		const pre = noteRecord({
 			siloedNullifier: validNullifier(7),
 			profileId: "p1",
 			networkId: "n1",
@@ -805,11 +871,11 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 			txHash: "0xpending",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
-		}
-		records.set(pre.siloedNullifier, pre)
+		})
+		records.set(pre.id, pre)
 
 		const deleted = vi.fn()
 		service.onIncomingTransferDeleted.add(deleted)
@@ -817,7 +883,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		transaction.onTransactionAdded.invoke({ hash: "0xpending", account: "0xa", chainId: 1, calls: [] } as never)
 		await flushPromises()
 
-		expect(records.has(pre.siloedNullifier)).toBe(false)
+		expect(records.has(pre.id)).toBe(false)
 		expect(deleted).toHaveBeenCalledTimes(1)
 	})
 
@@ -825,7 +891,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		const transaction = makeTransactionStub()
 		const { service } = await bootService({ transaction })
 
-		const pre = {
+		const pre = noteRecord({
 			siloedNullifier: validNullifier(8),
 			profileId: "p1",
 			networkId: "n1",
@@ -838,11 +904,11 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 			txHash: "0xstayedA",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
-		}
-		records.set(pre.siloedNullifier, pre)
+		})
+		records.set(pre.id, pre)
 
 		const deleted = vi.fn()
 		service.onIncomingTransferDeleted.add(deleted)
@@ -850,7 +916,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		transaction.onTransactionAdded.invoke({ hash: "0xdifferent", account: "0xa", chainId: 1, calls: [] } as never)
 		await flushPromises()
 
-		expect(records.has(pre.siloedNullifier)).toBe(true)
+		expect(records.has(pre.id)).toBe(true)
 		expect(deleted).not.toHaveBeenCalled()
 	})
 
@@ -858,7 +924,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		const transaction = makeTransactionStub()
 		const { service } = await bootService({ transaction })
 
-		const pre = {
+		const pre = noteRecord({
 			siloedNullifier: validNullifier(9),
 			profileId: "p1",
 			networkId: "n1",
@@ -871,11 +937,11 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 			txHash: "0xreentrant",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
-		}
-		records.set(pre.siloedNullifier, pre)
+		})
+		records.set(pre.id, pre)
 
 		const deleted = vi.fn()
 		service.onIncomingTransferDeleted.add(deleted)
@@ -887,7 +953,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		transaction.onTransactionAdded.invoke({ hash: "0xreentrant", account: "0xa", chainId: 1, calls: [] } as never)
 		await flushPromises()
 
-		expect(records.has(pre.siloedNullifier)).toBe(false)
+		expect(records.has(pre.id)).toBe(false)
 		expect(deleted).toHaveBeenCalledTimes(1)
 	})
 
@@ -898,7 +964,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		// Two accounts with the same incoming txHash (legal under split-fee
 		// / sponsored flows where account A's outgoing tx can deliver a
 		// note to account B in the same hash).
-		const recordA = {
+		const recordA = noteRecord({
 			siloedNullifier: validNullifier(10),
 			profileId: "p1",
 			networkId: "n1",
@@ -911,13 +977,13 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 			txHash: "0xshared",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
-		}
-		const recordB = { ...recordA, siloedNullifier: validNullifier(11), accountAddress: "0xB", owner: "0xB" }
-		records.set(recordA.siloedNullifier, recordA)
-		records.set(recordB.siloedNullifier, recordB)
+		})
+		const recordB = noteRecord({ ...recordA, siloedNullifier: validNullifier(11), accountAddress: "0xB", owner: "0xB" })
+		records.set(recordA.id, recordA)
+		records.set(recordB.id, recordB)
 
 		const deleted = vi.fn()
 		service.onIncomingTransferDeleted.add(deleted)
@@ -926,8 +992,8 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 		await flushPromises()
 
 		// Only account A's record gone; B's stays grounding.
-		expect(records.has(recordA.siloedNullifier)).toBe(false)
-		expect(records.has(recordB.siloedNullifier)).toBe(true)
+		expect(records.has(recordA.id)).toBe(false)
+		expect(records.has(recordB.id)).toBe(true)
 		expect(deleted).toHaveBeenCalledTimes(1)
 	})
 })
@@ -935,7 +1001,7 @@ describe("IncomingTransferService — late-delete on onTransactionAdded", () => 
 describe("IncomingTransferService — cleanup wiring", () => {
 	test("clearProfile wipes records + trust for that profileId", async () => {
 		const { service } = await bootService()
-		records.set("k1", {
+		seedNote({
 			siloedNullifier: "k1",
 			profileId: "p1",
 			networkId: "n1",
@@ -948,11 +1014,11 @@ describe("IncomingTransferService — cleanup wiring", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
-		records.set("k2", {
+		seedNote({
 			siloedNullifier: "k2",
 			profileId: "p2",
 			networkId: "n1",
@@ -965,7 +1031,7 @@ describe("IncomingTransferService — cleanup wiring", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -974,15 +1040,15 @@ describe("IncomingTransferService — cleanup wiring", () => {
 
 		await service.clearProfile("p1")
 
-		expect(records.has("k1")).toBe(false)
-		expect(records.has("k2")).toBe(true)
+		expect(records.has("note:p1|n1|k1")).toBe(false)
+		expect(records.has("note:p2|n1|k2")).toBe(true)
 		expect(trust.has(trustKey("p1", "n1", "0xc"))).toBe(false)
 		expect(trust.has(trustKey("p2", "n1", "0xc"))).toBe(true)
 	})
 
 	test("clearChain wipes only records + trust matching (profileId, networkId)", async () => {
 		const { service } = await bootService()
-		records.set("k1", {
+		seedNote({
 			siloedNullifier: "k1",
 			profileId: "p1",
 			networkId: "n1",
@@ -995,11 +1061,11 @@ describe("IncomingTransferService — cleanup wiring", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
-		records.set("k2", {
+		seedNote({
 			siloedNullifier: "k2",
 			profileId: "p1",
 			networkId: "n2",
@@ -1012,7 +1078,7 @@ describe("IncomingTransferService — cleanup wiring", () => {
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -1021,8 +1087,8 @@ describe("IncomingTransferService — cleanup wiring", () => {
 
 		await service.clearChain("p1", "n1")
 
-		expect(records.has("k1")).toBe(false)
-		expect(records.has("k2")).toBe(true)
+		expect(records.has("note:p1|n1|k1")).toBe(false)
+		expect(records.has("note:p1|n2|k2")).toBe(true)
 		expect(trust.has(trustKey("p1", "n1", "0xc"))).toBe(false)
 		expect(trust.has(trustKey("p1", "n2", "0xc"))).toBe(true)
 	})
@@ -1094,7 +1160,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 
 		const persisted = [...records.values()][0]
 		expect(persisted.blockTimestamp).toBeUndefined()
-		expect(persisted.siloedNullifier).toBe(validNullifier(1))
+		expect((persisted as IncomingNoteRecord).siloedNullifier).toBe(validNullifier(1))
 	})
 
 	test("(token-delete wipe) onTokenDeleted purges records + resets trust to unknown", async () => {
@@ -1104,7 +1170,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		const tokenStub = makeTokenStub([tokenA])
 		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
 
-		records.set("k1", {
+		seedNote({
 			siloedNullifier: "k1",
 			profileId: "p1",
 			networkId: "n1",
@@ -1117,12 +1183,12 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 			txHash: "0xtx1",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 			blockTimestamp: 1_700_000_000,
 		})
-		records.set("k2", {
+		seedNote({
 			siloedNullifier: "k2",
 			profileId: "p1",
 			networkId: "n1",
@@ -1135,13 +1201,13 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 			txHash: "0xtx2",
 			l2BlockNumber: 2,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 			blockTimestamp: 1_700_000_036,
 		})
 		// Unrelated contract's records must survive.
-		records.set("kOther", {
+		seedNote({
 			siloedNullifier: "kOther",
 			profileId: "p1",
 			networkId: "n1",
@@ -1154,7 +1220,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 			txHash: "0xtx3",
 			l2BlockNumber: 3,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -1176,9 +1242,9 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		await flushPromises()
 
 		// tokenA's records wiped; tokenB's record untouched.
-		expect(records.has("k1")).toBe(false)
-		expect(records.has("k2")).toBe(false)
-		expect(records.has("kOther")).toBe(true)
+		expect(records.has("note:p1|n1|k1")).toBe(false)
+		expect(records.has("note:p1|n1|k2")).toBe(false)
+		expect(records.has("note:p1|n1|kOther")).toBe(true)
 		expect(deleted).toHaveBeenCalledTimes(2)
 		// Trust row for tokenA flipped to unknown.
 		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("unknown")
@@ -1190,7 +1256,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		const tokenStub = makeTokenStub([tokenA])
 		const { service } = await bootService({ network: network(), account: accountStub, token: tokenStub })
 
-		records.set("k1", {
+		seedNote({
 			siloedNullifier: "k1",
 			profileId: "p1",
 			networkId: "n1",
@@ -1203,7 +1269,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 			txHash: "0xtx1",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -1215,7 +1281,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		tokenStub.onTokenDeleted.invoke(tokenA as never)
 		await flushPromises()
 
-		expect(records.has("k1")).toBe(false)
+		expect(records.has("note:p1|n1|k1")).toBe(false)
 		// No trust row to reset → no emit.
 		expect(trustChanged).not.toHaveBeenCalled()
 	})
@@ -1266,7 +1332,7 @@ describe("IncomingTransferService — Path 2 block-timestamp + token-delete wipe
 		expect(reindexed.l2BlockNumber).toBe(42)
 		// siloedNullifier is identical to the original (cryptographically
 		// stable across delete + re-discover).
-		expect(reindexed.siloedNullifier).toBe(validNullifier(1))
+		expect((reindexed as IncomingNoteRecord).siloedNullifier).toBe(validNullifier(1))
 	})
 })
 
@@ -1556,7 +1622,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		const second = [...records.values()][0]
 		expect(second.blockTimestamp).toBe(1_700_000_050)
 		// Other fields untouched — backfill preserves the original record.
-		expect(second.siloedNullifier).toBe(validNullifier(1))
+		expect((second as IncomingNoteRecord).siloedNullifier).toBe(validNullifier(1))
 		expect(second.l2BlockNumber).toBe(50)
 	})
 
@@ -1610,7 +1676,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 			state: "pending",
 			updatedAt: 0,
 		})
-		records.set("k1", {
+		seedNote({
 			siloedNullifier: "k1",
 			profileId: "p1",
 			networkId: "n1",
@@ -1623,7 +1689,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
@@ -1663,7 +1729,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		// Pre-seed a hidden record (the snapshot will see it; we drop it
 		// from the underlying Map BEFORE setTrustAllow's per-record loop
 		// runs, simulating a mid-flight delete).
-		records.set("k_orphan", {
+		seedNote({
 			siloedNullifier: "k_orphan",
 			profileId: "p1",
 			networkId: "n1",
@@ -1676,7 +1742,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
@@ -1688,7 +1754,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 		const originalList = realRepo.listByContract.bind(realRepo) as (...args: unknown[]) => Promise<unknown[]>
 		realRepo.listByContract = vi.fn().mockImplementation(async (...args: unknown[]) => {
 			const snap = await originalList(...args)
-			records.delete("k_orphan")
+			records.delete("note:p1|n1|k_orphan")
 			return snap
 		})
 
@@ -1699,7 +1765,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 
 		// No Added emit; record stays deleted.
 		expect(added).not.toHaveBeenCalled()
-		expect(records.has("k_orphan")).toBe(false)
+		expect(records.has("note:p1|n1|k_orphan")).toBe(false)
 	})
 
 	test("(Audit-4 High) replayPendingPrompts skips a row whose trust was reset to unknown after the snapshot", async () => {
@@ -1717,7 +1783,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 			state: "pending",
 			updatedAt: 0,
 		})
-		records.set("k1", {
+		seedNote({
 			siloedNullifier: "k1",
 			profileId: "p1",
 			networkId: "n1",
@@ -1730,7 +1796,7 @@ describe("IncomingTransferService — codex post-impl Path-2 audit fixes", () =>
 			txHash: "0xtx",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: true,
 			discoveredAt: 0,
 		})
@@ -1900,7 +1966,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 			token: tokenStub,
 			transaction: txStub,
 		})
-		records.set(validNullifier(1), {
+		seedNote({
 			siloedNullifier: validNullifier(1),
 			profileId: "p1",
 			networkId: "n1",
@@ -1913,7 +1979,7 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 			txHash: "0xtx-shared",
 			l2BlockNumber: 1,
 			txIndexInBlock: 0,
-			noteIndexInTx: 0,
+			indexInTx: 0,
 			hidden: false,
 			discoveredAt: 0,
 		})
@@ -2021,5 +2087,533 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 
 		expect(trustChangedSpy).not.toHaveBeenCalled()
 		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("trusted")
+	})
+})
+
+// ── Public-event scan arm (Phase 2: D3 / D4 write-side / D6) ────────────────
+
+function pubEvent(overrides: Partial<PublicTransferEvent> = {}): PublicTransferEvent {
+	return {
+		from: "0xfrom",
+		to: "0xa",
+		amountRaw: "100",
+		txHash: "0xptx",
+		l2BlockNumber: 5,
+		blockHash: "0xbh5",
+		blockTimestamp: 1_700_000_000,
+		txIndexWithinBlock: 0,
+		logIndexWithinTx: 0,
+		...overrides,
+	}
+}
+
+/** A page whose `scannedThrough` is the last event's position (or null when empty). */
+function pubPage(events: PublicTransferEvent[], hasMore = false): PublicTransferPage {
+	const last = events[events.length - 1]
+	return {
+		events,
+		scannedThrough: last
+			? { blockNumber: last.l2BlockNumber, txIndexWithinBlock: last.txIndexWithinBlock, logIndexWithinTx: last.logIndexWithinTx }
+			: null,
+		hasMore,
+	}
+}
+
+type ReaderResponse = PublicTransferPage | Error | ((args: PublicTransferFetchArgs) => PublicTransferPage)
+
+/** A queue-driven fake public-event reader. `responses` is consumed FIFO; an exhausted queue
+ *  returns an empty page. A response may be an Error (thrown — reorg simulation). */
+function makePublicReader(init?: { tips?: Partial<PublicScanTips>; classStatus?: PublicTokenClassStatus }) {
+	const state = {
+		tips: {
+			checkpointedBlockNumber: 100,
+			checkpointedBlockHash: "0xcheckpoint",
+			finalizedBlockNumber: 50,
+			...init?.tips,
+		} as PublicScanTips,
+		classStatus: (init?.classStatus ?? "standard") as PublicTokenClassStatus,
+		responses: [] as ReaderResponse[],
+		fetchArgs: [] as PublicTransferFetchArgs[],
+		tipsCalls: 0,
+		classCalls: 0,
+		reset() {
+			state.responses.length = 0
+			state.fetchArgs.length = 0
+			state.tipsCalls = 0
+			state.classCalls = 0
+		},
+	}
+	const reader: PublicEventReader = {
+		fetchTransferPage: async (_n, _c, args) => {
+			state.fetchArgs.push(args)
+			const next = state.responses.shift()
+			if (next === undefined) return { events: [], scannedThrough: null, hasMore: false }
+			if (next instanceof Error) throw next
+			if (typeof next === "function") return next(args)
+			return next
+		},
+		getScanTips: async () => {
+			state.tipsCalls++
+			return state.tips
+		},
+		getTokenClassStatus: async () => {
+			state.classCalls++
+			return state.classStatus
+		},
+	}
+	return { reader, state }
+}
+
+async function scanPublic(service: unknown, contract: string = tokenA.contract, networkId = "n1", profileId = "p1"): Promise<void> {
+	await (service as { scanPublicContract: (p: string, n: string, c: string) => Promise<void> }).scanPublicContract(
+		profileId,
+		networkId,
+		contract,
+	)
+}
+
+/** Account stub owning `0xa` on chainId 1 — the recipient the pre-lock filter matches. */
+function publicAccountStub() {
+	return makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+}
+
+/**
+ * Boot the service and DRAIN the scheduler's initial public kick (which runs on an empty reader
+ * queue as a no-op), then wipe the cursor/outbox rows + reset the reader counters it touched — so a
+ * test drives `scanPublicContract` from a clean, controlled state.
+ */
+async function bootPublic(
+	reader: PublicEventReader,
+	state: ReturnType<typeof makePublicReader>["state"],
+	stubs: Parameters<typeof bootService>[0] = {},
+) {
+	const booted = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), ...stubs, publicReader: reader })
+	await flushPromises()
+	cursors.clear()
+	outbox.clear()
+	// The initial kick warmed the finalized-tip class-gate cache; clear it so caching tests start cold.
+	;(booted.service as unknown as { classGateCache: Map<string, unknown> }).classGateCache.clear()
+	state.reset()
+	return booted
+}
+
+const cursorFor = (c: string = tokenA.contract) =>
+	cursors.get(`p1|n1|${c}`) as
+		| {
+				cursor: unknown
+				lastSyncedBlockHash: string | null
+				lastScanFinalized: number | null
+				reconciling?: unknown
+				pendingPage?: unknown
+		  }
+		| undefined
+const outboxFor = (account = "0xa", tokenId = tokenA.id) => outbox.get(`p1|n1|${account}|${tokenId}`) as { dirtyAt: number } | undefined
+
+describe("IncomingTransferService — public-event scan arm (D3)", () => {
+	test("public first-receive: creates a hidden record, trust unknown→pending, emits Pending, writes outbox", async () => {
+		const { reader, state } = makePublicReader()
+		const pending = vi.fn()
+		const { service } = await bootPublic(reader, state)
+		service.onIncomingTransferPending.add(pending)
+		state.responses.push(pubPage([pubEvent({ txHash: "0xp1", amountRaw: "777" })]))
+
+		await scanPublic(service)
+
+		const rec = records.get("pub:p1|n1|0xp1|0")
+		expect(rec?.kind).toBe("public-event")
+		expect(rec?.hidden).toBe(true)
+		expect(rec?.amountRaw).toBe("777")
+		expect(trust.get(trustKey("p1", "n1", tokenA.contract))?.state).toBe("pending")
+		expect(pending).toHaveBeenCalledTimes(1)
+		expect(outboxFor()).toBeDefined()
+	})
+
+	test("auto-trusted token: public receipt inserts VISIBLE + emits Added", async () => {
+		const { reader, state } = makePublicReader()
+		const added = vi.fn()
+		const { service } = await bootPublic(reader, state)
+		service.onIncomingTransferAdded.add(added)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		state.responses.push(pubPage([pubEvent({ txHash: "0xp2" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xp2|0")?.hidden).toBe(false)
+		expect(added).toHaveBeenCalledTimes(1)
+	})
+
+	test("dedupe vs own outgoing public tx: matching txHash → no record, no outbox", async () => {
+		const { reader, state } = makePublicReader()
+		const txStub = makeTransactionStub([{ hash: "0xmine", account: "0xa", chainId: 1 }])
+		const { service } = await bootPublic(reader, state, { transaction: txStub })
+		state.responses.push(pubPage([pubEvent({ txHash: "0xmine" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xmine|0")).toBeUndefined()
+		expect(outboxFor()).toBeUndefined()
+	})
+
+	test("MAGIC (from-private) and zero (mint) senders stored raw; both create records", async () => {
+		const MAGIC = "0x0000000000000000000000000000000000000000000000000000000000001111"
+		const ZERO = "0x0000000000000000000000000000000000000000000000000000000000000000"
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.responses.push(
+			pubPage([pubEvent({ txHash: "0xfromPriv", from: MAGIC }), pubEvent({ txHash: "0xmint", from: ZERO, txIndexWithinBlock: 1 })]),
+		)
+
+		await scanPublic(service)
+
+		const priv = records.get("pub:p1|n1|0xfromPriv|0")
+		const mint = records.get("pub:p1|n1|0xmint|0")
+		expect(priv?.kind === "public-event" && priv.from).toBe(MAGIC)
+		expect(mint?.kind === "public-event" && mint.from).toBe(ZERO)
+	})
+
+	test("non-recipient events advance the cursor but create NO record (pre-lock filter)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.responses.push(pubPage([pubEvent({ txHash: "0xother", to: "0xNOTME" })]))
+
+		await scanPublic(service)
+
+		expect([...records.keys()].filter((k) => k.startsWith("pub:"))).toHaveLength(0)
+		expect(cursorFor()?.cursor).toEqual({ blockNumber: 5, txIndexWithinBlock: 0, logIndexWithinTx: 0 })
+	})
+
+	test("non-standard class → NO scan (fail closed): no fetch, no records", async () => {
+		const { reader, state } = makePublicReader({ classStatus: "non-standard" })
+		const { service } = await bootPublic(reader, state)
+		state.responses.push(pubPage([pubEvent({ txHash: "0xnope" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xnope|0")).toBeUndefined()
+		expect(state.fetchArgs).toHaveLength(0)
+	})
+
+	test("unresolved class → fail closed AND not cached (re-probes next tick)", async () => {
+		const { reader, state } = makePublicReader({ classStatus: "unresolved" })
+		const { service } = await bootPublic(reader, state)
+
+		await scanPublic(service)
+		await scanPublic(service)
+
+		expect(state.classCalls).toBe(2)
+	})
+
+	test("class gate cached by the finalized tip (one getContract per finalized advance)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+
+		await scanPublic(service)
+		await scanPublic(service)
+		expect(state.classCalls).toBe(1)
+
+		state.tips = { ...state.tips, finalizedBlockNumber: 60 }
+		await scanPublic(service)
+		expect(state.classCalls).toBe(2)
+	})
+
+	test("partial-page cursor advance: next tick resumes afterCursor", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.responses.push(pubPage([pubEvent({ txHash: "0xa1", l2BlockNumber: 7, logIndexWithinTx: 3 })], false))
+
+		await scanPublic(service)
+		expect(cursorFor()?.cursor).toEqual({ blockNumber: 7, txIndexWithinBlock: 0, logIndexWithinTx: 3 })
+		expect(records.get("pub:p1|n1|0xa1|3")).toBeDefined()
+
+		await scanPublic(service) // empty page
+		expect(state.fetchArgs[state.fetchArgs.length - 1].afterCursor).toEqual({
+			blockNumber: 7,
+			txIndexWithinBlock: 0,
+			logIndexWithinTx: 3,
+		})
+	})
+
+	test("page-budget: all 5 budgeted pages fetched; cursor at the last page", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		for (let i = 0; i < 5; i++) state.responses.push(pubPage([pubEvent({ txHash: `0xb${i}`, l2BlockNumber: 10 + i })], true))
+
+		await scanPublic(service)
+
+		expect(state.fetchArgs).toHaveLength(5)
+		expect(cursorFor()?.cursor).toEqual({ blockNumber: 14, txIndexWithinBlock: 0, logIndexWithinTx: 0 })
+	})
+
+	test("same-tx note + public event yield TWO records under disjoint PKs", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedNote({ siloedNullifier: "sn-shared", txHash: "0xshared", contract: tokenA.contract, tokenId: tokenA.id, accountAddress: "0xa" })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		state.responses.push(pubPage([pubEvent({ txHash: "0xshared" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("note:p1|n1|sn-shared")).toBeDefined()
+		expect(records.get("pub:p1|n1|0xshared|0")).toBeDefined()
+	})
+
+	test("chain-purge mid-scan (epoch bump via clearChain) → the page's record is NOT persisted", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		state.responses.push(pubPage([pubEvent({ txHash: "0xrace" })]))
+
+		const scanP = scanPublic(service)
+		await service.clearChain("p1", "n1") // bumps serviceEpoch mid-flight
+		await scanP
+
+		expect(records.get("pub:p1|n1|0xrace|0")).toBeUndefined()
+	})
+})
+
+// ── Public-event reorg reconciliation (Phase 2: D6) ────────────────────────
+
+function seedPublic(overrides: Partial<IncomingPublicEventRecord> = {}): IncomingPublicEventRecord {
+	const merged = {
+		kind: "public-event" as const,
+		from: "0xfrom",
+		blockHash: "0xbh",
+		profileId: "p1",
+		networkId: "n1",
+		accountAddress: "0xa",
+		contract: tokenA.contract,
+		tokenId: tokenA.id,
+		amountRaw: "100",
+		txHash: "0xptx",
+		l2BlockNumber: 5,
+		txIndexInBlock: 0,
+		indexInTx: 0,
+		hidden: false,
+		discoveredAt: 0,
+		...overrides,
+	}
+	const rec: IncomingPublicEventRecord = {
+		...merged,
+		id: `pub:${merged.profileId}|${merged.networkId}|${merged.txHash}|${merged.indexInTx}`,
+	}
+	records.set(rec.id, rec)
+	return rec
+}
+
+function seedCursor(overrides: Record<string, unknown> = {}, contract = tokenA.contract): void {
+	cursors.set(`p1|n1|${contract}`, { cursor: null, lastSyncedBlockHash: null, lastScanFinalized: null, startBlock: 0, ...overrides })
+}
+
+describe("IncomingTransferService — public-event reorg reconciliation (D6)", () => {
+	test("referenceBlock throw → reconcile: orphan (blockHash ≠ canonical) deleted, balance refresh enqueued BEFORE delete, rewind to lastScanFinalized", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const orphan = seedPublic({ txHash: "0xorphan", l2BlockNumber: 8, blockHash: "0xoldfork" })
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xoldfork",
+			lastScanFinalized: 5,
+		})
+		state.responses.push(new Error("referenceBlock reorged out")) // forward scan detects the reorg
+		state.responses.push(pubPage([])) // reconcile window has NO canonical event at block 8
+
+		const deleted = vi.fn()
+		service.onIncomingTransferDeleted.add(deleted)
+
+		await scanPublic(service)
+
+		expect(records.get(orphan.id)).toBeUndefined()
+		expect(deleted).toHaveBeenCalledTimes(1)
+		expect(outboxFor()).toBeDefined()
+		expect(state.fetchArgs[1].fromBlock).toBe(6) // lastScanFinalized(5)+1, NOT current finalized(50)
+		expect(state.fetchArgs[1].referenceBlock).toBe("0xcheckpoint")
+		expect(cursorFor()?.reconciling).toBeUndefined()
+	})
+
+	test("still-canonical record (blockHash matches) is KEPT across reconciliation", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const rec = seedPublic({ txHash: "0xkeep", l2BlockNumber: 8, blockHash: "0xcanon8" })
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xanchor",
+			lastScanFinalized: 5,
+		})
+		state.responses.push(new Error("reorg"))
+		state.responses.push(pubPage([pubEvent({ txHash: "0xkeep", l2BlockNumber: 8, blockHash: "0xcanon8" })]))
+
+		await scanPublic(service)
+
+		expect(records.get(rec.id)).toBeDefined()
+	})
+
+	test("deletion driven ONLY by blockHash canonicality — a different-recipient orphan-height still deletes our record", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const orphan = seedPublic({ txHash: "0xorph2", l2BlockNumber: 8, blockHash: "0xoldfork" })
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xoldfork",
+			lastScanFinalized: 5,
+		})
+		state.responses.push(new Error("reorg"))
+		state.responses.push(pubPage([pubEvent({ txHash: "0xelse", to: "0xNOTME", l2BlockNumber: 8, blockHash: "0xnewfork" })]))
+
+		await scanPublic(service)
+
+		expect(records.get(orphan.id)).toBeUndefined() // deleted on hash mismatch (0xoldfork ≠ 0xnewfork)
+	})
+
+	test("mid-reconcile reorg (upperBoundHash gone) → discard + restart (no cross-fork seen mixing)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xoldfork",
+			lastScanFinalized: 5,
+		})
+		state.responses.push(new Error("reorg")) // forward scan detects reorg
+		state.responses.push(new Error("upperBoundHash reorged mid-reconcile")) // reconcile throws → restart
+		state.responses.push(pubPage([])) // restarted reconcile completes
+
+		await scanPublic(service)
+
+		expect(state.fetchArgs.length).toBeGreaterThanOrEqual(3)
+		expect(cursorFor()?.reconciling).toBeUndefined()
+	})
+
+	test("pendingPage crash window: a set pendingPage whose fork is gone triggers reconciliation", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const orphan = seedPublic({ txHash: "0xpp", l2BlockNumber: 8, blockHash: "0xoldfork" })
+		seedCursor({
+			cursor: { blockNumber: 7, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xanchor",
+			lastScanFinalized: 5,
+			pendingPage: {
+				fromCursor: { blockNumber: 7, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+				toScannedThrough: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+				upperHash: "0xoldfork",
+			},
+		})
+		state.responses.push(new Error("pendingPage upperHash reorged")) // probe throws → reconcile
+		state.responses.push(pubPage([])) // reconcile window empty → orphan deleted
+
+		await scanPublic(service)
+
+		expect(records.get(orphan.id)).toBeUndefined()
+		expect(cursorFor()?.pendingPage).toBeUndefined()
+	})
+
+	test("clean pendingPage is cleared; forward scan proceeds", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({
+			cursor: { blockNumber: 7, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xanchor",
+			lastScanFinalized: 5,
+			pendingPage: {
+				fromCursor: null,
+				toScannedThrough: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+				upperHash: "0xgoodfork",
+			},
+		})
+		state.responses.push(pubPage([])) // probe succeeds
+		state.responses.push(pubPage([])) // forward scan: nothing new
+
+		await scanPublic(service)
+
+		expect(cursorFor()?.pendingPage).toBeUndefined()
+	})
+})
+
+describe("IncomingTransferService — public-arm lifecycle (D3)", () => {
+	test("onAccountAdded resets public cursors to null (rescan the new account's history)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xh",
+			lastScanFinalized: 5,
+		})
+
+		await (service as unknown as { onAccountAdded: (a: unknown) => Promise<void> }).onAccountAdded({ chainId: 1, address: "0xnew" })
+
+		expect(cursorFor()?.cursor).toBeNull()
+		expect(cursorFor()?.lastSyncedBlockHash).toBeNull()
+	})
+
+	test("onTokenDeleted deletes the cursor row (re-add re-indexes from startBlock)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({ cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 } })
+		seedPublic({ txHash: "0xtok", l2BlockNumber: 8 })
+
+		await (service as unknown as { onTokenDeleted: (t: unknown) => Promise<void> }).onTokenDeleted({
+			id: tokenA.id,
+			profileId: "p1",
+			chainId: 1,
+			contract: tokenA.contract,
+		})
+
+		expect(cursorFor()).toBeUndefined()
+	})
+
+	test("clearChain wipes the public cursor + outbox rows too", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({ cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 } })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 1 })
+
+		await service.clearChain("p1", "n1")
+
+		expect(cursorFor()).toBeUndefined()
+		expect(outboxFor()).toBeUndefined()
 	})
 })

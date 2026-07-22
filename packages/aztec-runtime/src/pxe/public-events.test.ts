@@ -68,6 +68,10 @@ function makeNode(opts: {
 			if (tip === "finalized") return BlockNumber(opts.finalized ?? 100)
 			return BlockNumber(opts.checkpointed ?? 100)
 		},
+		getBlockData: async () => ({
+			header: { getBlockNumber: () => opts.checkpointed ?? 100 },
+			blockHash: { toString: () => "0xcheckpointtip" },
+		}),
 		getPublicLogsByTags: async (query: unknown) => {
 			opts.onQuery?.(query)
 			if (opts.throwOnQuery) throw opts.throwOnQuery
@@ -238,10 +242,10 @@ describe("fetchPublicTokenTransferEvents — query construction", () => {
 })
 
 describe("getPublicScanTips", () => {
-	test("returns checkpointed + finalized as plain numbers", async () => {
+	test("returns checkpointed number + hash + finalized number", async () => {
 		const node = makeNode({ checkpointed: 30, finalized: 12 })
 		const tips = await getPublicScanTips(node)
-		expect(tips).toEqual({ checkpointedBlockNumber: 30, finalizedBlockNumber: 12 })
+		expect(tips).toEqual({ checkpointedBlockNumber: 30, checkpointedBlockHash: "0xcheckpointtip", finalizedBlockNumber: 12 })
 	})
 })
 

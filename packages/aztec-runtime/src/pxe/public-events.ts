@@ -83,6 +83,9 @@ export interface PublicTransferPage {
 /** Both reorg-relevant tips resolved in one probe (plain `BlockNumber`s, no `getChainTips` structs). */
 export interface PublicScanTips {
 	checkpointedBlockNumber: number
+	/** Hash of the checkpointed tip block — the D6 reconciliation fork anchor (`upperBoundHash`).
+	 *  `null` if the node couldn't resolve the block data (reconciliation then waits a tick). */
+	checkpointedBlockHash: string | null
 	finalizedBlockNumber: number
 }
 
@@ -119,6 +122,7 @@ export const PublicTransferPageSchema = z.object({
 
 export const PublicScanTipsSchema = z.object({
 	checkpointedBlockNumber: z.number().int().nonnegative(),
+	checkpointedBlockHash: z.string().nullable(),
 	finalizedBlockNumber: z.number().int().nonnegative(),
 }) satisfies z.ZodType<PublicScanTips>
 
@@ -294,10 +298,22 @@ function decodePublicTransfer(entry: LogResult, log?: PublicEventLogger): Public
 	}
 }
 
-/** Resolve both reorg-relevant tips (D6): the `checkpointed` index bound + the `finalized` rewind floor. */
+/** Resolve both reorg-relevant tips (D6): the `checkpointed` index bound + fork-anchor hash + the
+ *  `finalized` rewind floor. Number + hash come from the SAME checkpointed block data so they can't
+ *  skew; a `getBlockData` failure falls back to the plain number with a `null` hash. */
 export async function getPublicScanTips(node: AztecNode): Promise<PublicScanTips> {
-	const [checkpointed, finalized] = await Promise.all([node.getBlockNumber("checkpointed"), node.getBlockNumber("finalized")])
-	return { checkpointedBlockNumber: Number(checkpointed), finalizedBlockNumber: Number(finalized) }
+	const [checkpointedData, finalized] = await Promise.all([
+		node.getBlockData("checkpointed").catch(() => undefined),
+		node.getBlockNumber("finalized"),
+	])
+	const checkpointedBlockNumber = checkpointedData
+		? Number(checkpointedData.header.getBlockNumber())
+		: Number(await node.getBlockNumber("checkpointed"))
+	return {
+		checkpointedBlockNumber,
+		checkpointedBlockHash: checkpointedData ? checkpointedData.blockHash.toString() : null,
+		finalizedBlockNumber: Number(finalized),
+	}
 }
 
 /**

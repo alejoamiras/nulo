@@ -6,6 +6,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./pxe": "./src/pxe/index.ts",
+		"./pxe/public-events": "./src/pxe/public-events.ts",
 		"./account": "./src/account/index.ts",
 		"./ports": "./src/ports/index.ts",
 		"./adapters": "./src/adapters/index.ts",
