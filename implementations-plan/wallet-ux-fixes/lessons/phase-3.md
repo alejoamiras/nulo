@@ -32,3 +32,15 @@ id); the import swallows a rejection (never fails the whole import over the poin
 
 **Gate:** those unit/component tests · typecheck:all + lint 0 · build:chrome 0. The export→import→
 same-network smoke round-trip folds into the consolidated e2e pass before the post-impl audit.
+
+## Follow-up (post-impl codex nit) — bound the restored account `index`
+
+Codex flagged that `AccountSchema.index` was `z.number()` — the restore trust boundary would accept a
+negative / fractional / NaN / Infinity / near-2^53 index from a hostile backup. Those either throw in
+`Fr` construction during integrity re-derivation (stranding the import) or, at ~2^53, make
+`array_max(index) + 1 === max` and silently wedge new-account creation. Tightened to
+`z.number().int().nonnegative().lt(Number.MAX_SAFE_INTEGER)` in `spec.ts` (the schema is the shared
+storage codec AND the restore validator, so one change covers both). Tests: reject each bad index +
+accept the `2^53 - 2` upper boundary (`service.test.ts`). Pre-existing hole, orthogonal to the
+index-sort fix; folded in to make the PR whole. Same-shape `chainId: z.number()` was left as-is (a
+bad chainId just matches no network — no derivation throw or counter wedge).

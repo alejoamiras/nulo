@@ -53,6 +53,27 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(Object.keys(raw).some((k) => k.includes("0xdef"))).toBe(false)
 	})
 
+	test("(P3/H) rejects an out-of-bound account index — negative / fractional / NaN / Infinity / >= 2^53", async () => {
+		const badIndices: Array<[string, unknown]> = [
+			["neg", -1],
+			["frac", 1.5],
+			["nan", Number.NaN],
+			["inf", Number.POSITIVE_INFINITY],
+			["unsafe", Number.MAX_SAFE_INTEGER],
+		]
+		for (const [label, index] of badIndices) {
+			const [res] = await accountService.restore([mkAccount(`0xidx-${label}`, { index })])
+			expect(res.restoreError, `index=${String(index)} must be rejected`).toBeDefined()
+		}
+		const raw = await api.storage.local.get(null)
+		expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:accounts@"))).toBe(false)
+	})
+
+	test("(P3) accepts the largest safe index (2^53 - 2) — the bound is < MAX_SAFE_INTEGER, not tighter", async () => {
+		const [res] = await accountService.restore([mkAccount("0xbig", { index: Number.MAX_SAFE_INTEGER - 1 })])
+		expect(res.restoreError).toBeUndefined()
+	})
+
 	test("a well-formed unique account restores cleanly", async () => {
 		const [res] = await accountService.restore([mkAccount("0x111")])
 		expect(res.restoreError).toBeUndefined()
