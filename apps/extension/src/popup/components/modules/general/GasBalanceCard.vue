@@ -5,8 +5,15 @@ import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { TxStatus } from "@/wallet/services/transaction/spec"
 
+/** Services (prices) */
+import { PriceServiceClient } from "@/wallet/services/price/client"
+
+/** Composables */
+import { usePrices } from "@/composables/usePrices"
+
 /** Utils */
 import { formatBaseUnits } from "@/utils/amount"
+import { tokenAmountToUsdMicro, formatUsdMicro } from "@/wallet/services/price/convert"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -25,6 +32,19 @@ const FEE_JUICE_DECIMALS = 18
 const formatBalance = (raw) => formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
 
 const publicFormatted = computed(() => formatBalance(publicFeeJuice.value))
+
+/** D2: fiat under non-zero balances, only with a usable AZTEC quote. */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const fiatFor = (raw) => {
+	const quote = prices.feeJuiceQuote.value
+	if (!quote) return null
+	const rawBig = BigInt(raw ?? "0")
+	if (rawBig === 0n) return null
+	return `≈ ${formatUsdMicro(tokenAmountToUsdMicro(rawBig, FEE_JUICE_DECIMALS, quote.usd))}`
+}
+const publicFiat = computed(() => fiatFor(publicFeeJuice.value))
+const privateFiat = computed(() => fiatFor(privateFeeJuice.value))
 // Treat null (PrivateFPC not yet discovered or query errored) as 0 so the
 // column always renders. Keeps the gas-balance card stable instead of
 // collapsing/expanding mid-load.
@@ -95,6 +115,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
 	executionService.disconnect()
 	transactionService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 })
 </script>
 
@@ -105,12 +127,14 @@ onBeforeUnmount(() => {
 				<span :class="$style.label">Public Juice</span>
 				<span v-if="isLoading" :class="$style.skeleton" />
 				<span v-else :class="$style.amount" data-testid="gas-balance-public">{{ publicFormatted }} FJ</span>
+				<span v-if="!isLoading && publicFiat" :class="$style.fiat" data-testid="gas-fiat-public">{{ publicFiat }}</span>
 			</div>
 
 			<div :class="[$style.col, $style.col_right]">
 				<span :class="$style.label">Private Fee Juice</span>
 				<span v-if="isLoading" :class="$style.skeleton" />
 				<span v-else :class="$style.amount" data-testid="gas-balance-private">{{ privateFormatted }} FJ</span>
+				<span v-if="!isLoading && privateFiat" :class="$style.fiat" data-testid="gas-fiat-private">{{ privateFiat }}</span>
 			</div>
 		</div>
 	</div>
@@ -154,6 +178,12 @@ onBeforeUnmount(() => {
 	font-size: 12px;
 	font-weight: 500;
 	color: var(--nulo-accent);
+}
+
+.fiat {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--nulo-secondary);
 }
 
 .skeleton {

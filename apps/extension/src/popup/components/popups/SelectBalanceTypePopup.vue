@@ -1,6 +1,11 @@
 <script setup>
 /** Services */
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
+
+/** Composables */
+import { usePrices } from "@/composables/usePrices"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store.ts"
@@ -70,16 +75,65 @@ const handleSelectOption = (option) => {
 	emit("onClose")
 }
 
-const amountToPreview = ref("$0.00")
+/** Real fiat aggregates for the three summary options — `—` when nothing is
+ *  priced (never a fake $0.00). Mirrors BalanceView's aggregate math. */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+
+/** With fiat display OFF the three aggregate options are fiat-shaped noise —
+ *  hidden entirely; token options remain. */
+const showFiatValues = ref(true)
+const configService = new ConfigServiceClient()
+configService.getValue("showFiatValues").then((v) => {
+	showFiatValues.value = v !== false
+})
+
+const aggregateFiat = (sides) => {
+	let micro = 0n
+	let priced = 0
+	let holdings = 0
+	for (const tb of tokenBalances.value) {
+		let raw = 0n
+		if (sides.private) raw += BigInt(tb.privateBalance || 0)
+		if (sides.public) raw += BigInt(tb.publicBalance || 0)
+		// Zero-balance rows are worth $0.00 whether priced or not (mirrors
+		// BalanceView's aggregate matrix).
+		if (raw === 0n) continue
+		holdings += 1
+		const value = prices.tokenFiatMicro(tb.token, raw)
+		if (value === undefined) continue
+		micro += value
+		priced += 1
+	}
+	if (priced > 0) return prices.formatUsdMicro(micro)
+	return holdings === 0 ? prices.formatUsdMicro(0n) : "—"
+}
+
+const aggregatePreview = (optionRef) => {
+	if (optionRef === "total_private_balances") return aggregateFiat({ private: true, public: false })
+	if (optionRef === "total_public_balances") return aggregateFiat({ private: false, public: true })
+	return aggregateFiat({ private: true, public: true })
+}
+
+const amountToPreview = ref("—")
 const onHover = (str) => {
 	amountToPreview.value = str
 }
+
+onBeforeUnmount(() => {
+	prices.dispose()
+	priceService.disconnect()
+	configService.disconnect()
+})
 
 watch(
 	() => props.show,
 	async () => {
 		if (props.show) {
-			displayOptions.value = [...defaultDisplayOptions]
+			// Re-read per open — the kill-switch can flip mid-session and this
+			// popup instance outlives the settings change.
+			showFiatValues.value = (await configService.getValue("showFiatValues")) !== false
+			displayOptions.value = showFiatValues.value ? [...defaultDisplayOptions] : []
 			tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
 			for (const tb of tokenBalances.value) {
 				displayOptions.value.push({
@@ -95,7 +149,7 @@ watch(
 			}
 
 			if (!displayOptions.value.map((opt) => opt.ref).includes(appStore.displayOption?.ref)) {
-				amountToPreview.value = "$0.00"
+				amountToPreview.value = aggregatePreview("total_account_value")
 			}
 		} else {
 			tokenBalanceService.disconnect()
@@ -128,7 +182,7 @@ watch(
 						v-for="option in displayOptions"
 						@click="handleSelectOption(option)"
 						@pointerenter="
-							onHover(option.token ? `${comma(option.token?.balance)} ${option.token.symbol}` : '$0.00')
+							onHover(option.token ? `${comma(option.token?.balance)} ${option.token.symbol}` : aggregatePreview(option.ref))
 						"
 						align="center"
 						justify="between"
@@ -155,7 +209,9 @@ watch(
 							</Text>
 						</Flex>
 						<Flex v-else align="center" :class="$style.amount_badge">
-							<Text size="12" weight="600" color="primary"> $0.00 </Text>
+							<Text size="12" weight="600" color="primary" data-testid="balance-type-aggregate">
+								{{ aggregatePreview(option.ref) }}
+							</Text>
 						</Flex>
 					</Flex>
 				</Flex>

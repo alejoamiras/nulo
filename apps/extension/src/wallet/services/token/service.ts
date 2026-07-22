@@ -22,6 +22,8 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { feeJuiceAddress, feeJuiceName, feeJuiceSymbol } from "@/wallet/utils/fee-juice"
 import { simulate } from "@/wallet/utils/fn"
+import { findSeed } from "./default-tokens"
+import { PinMismatchError, TokenSeeder } from "./seeder"
 import {
 	type Token,
 	type TokenInfo,
@@ -58,6 +60,9 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	private readonly tokens: EntityStorage<Token>
 	private readonly lock = new Lock()
+	private readonly browserApi: BrowserApi
+	private readonly seederOverrides?: { getVersion?: () => string; enabled?: boolean }
+	private seeder: TokenSeeder = null!
 
 	private pxeService: ShallowPxeClient = null!
 	private profiles: ProfileService = null!
@@ -70,8 +75,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		logger: ILogger,
 		browserApi: BrowserApi,
 		private readonly pxeClientFactory: ShallowPxeClientFactory = DEFAULT_SHALLOW_PXE_CLIENT_FACTORY,
+		seederOverrides?: { getVersion?: () => string; enabled?: boolean },
 	) {
 		super(TOKEN_SERVICE_NAME, logger)
+		this.browserApi = browserApi
+		this.seederOverrides = seederOverrides
 		this.tokens = new EntityStorage<Token>(TOKEN_STORAGE_ROOT, browserApi.storage.local, (raw) => TokenSchema.parse(raw))
 	}
 
@@ -84,6 +92,39 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		this.journal = services.get(OperationJournalService.name)
 		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile` (D).
 		this.networks.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
+
+		// Default-token seeding: lazy, single-flight, TOFU-pinned (see
+		// default-tokens.ts + seeder.ts). Triggered on unlock and on active-
+		// network change; both handlers coalesce through `seeder.run()`.
+		this.seeder = new TokenSeeder(
+			{
+				getActiveProfile: () => this.profiles.getActiveProfile(),
+				getActiveNetwork: () => this.networks.getActiveNetwork(),
+				getAccounts: async (profileId, chainId) => await this.accounts.getAccounts(profileId, chainId),
+				preview: async (networkId, accountAddress, contract, expectedClassId) =>
+					await this.previewTokenMetadata(networkId, accountAddress, contract, expectedClassId),
+				isTokenPresent: async (profileId, chainId, contract) => (await this.findToken(profileId, chainId, contract)) !== undefined,
+				persist: async (input) => {
+					await this.addSeededToken(input)
+				},
+			},
+			this.browserApi.storage.local,
+			this.logger,
+			this.seederOverrides?.getVersion,
+		)
+		if (this.seederOverrides?.enabled !== false) {
+			this.profiles.onActiveProfileChanged.add(this.onActiveProfileChangedSeed)
+			this.networks.onActiveNetworkChanged.add(this.onActiveNetworkChangedSeed)
+		}
+	}
+
+	private readonly onActiveProfileChangedSeed = (profile: ProfileInfo | undefined): void => {
+		if (!profile) return
+		void this.seeder.run()
+	}
+
+	private readonly onActiveNetworkChangedSeed = (): void => {
+		void this.seeder.run()
 	}
 
 	/**
@@ -93,6 +134,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 */
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
+		// Seeder fence FIRST: it bumps the seeder's purge epoch and waits on
+		// the marker lock, so an in-flight seed pass either aborts or fully
+		// commits BEFORE the row purge below — a commit landing after the row
+		// sweep would resurrect a token on the freshly-purged chain.
+		await this.seeder.onChainPurged(profileId, chainId)
 		const tokens = (await this.tokens.getValues()).filter((t) => t.profileId === profileId && t.chainId === chainId)
 		await purgeRows(
 			tokens,
@@ -221,6 +267,90 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		}
 	}
 
+	/** Test/SW-internal trigger for a seed pass (also driven by the unlock and
+	 *  network-change subscriptions wired in `init`). */
+	public seedDefaultTokens(): Promise<void> {
+		return this.seeder.run()
+	}
+
+	/**
+	 * Seed-only persist path: writes the EXACT snapshot the seeder validated —
+	 * no internal metadata re-fetch, closing the validate-then-refetch TOCTOU a
+	 * hostile RPC could exploit (`addToken` re-simulates metadata; this must
+	 * not). Same lock, same idempotency, same journal machinery as `addToken`,
+	 * with `origin: "seed"` / "Default token" labeling. NOT on the RPC surface.
+	 */
+	public async addSeededToken(input: {
+		profileId: string
+		networkId: string
+		accountAddress: string
+		tokenInterface: TokenInterface
+		name: string
+		symbol: string
+		decimals: number
+	}): Promise<TokenInfo> {
+		await this.ensureInitialized()
+		const { profileId, networkId, accountAddress, tokenInterface, name, symbol, decimals } = input
+
+		const existing = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
+		if (existing) {
+			return getTokenInfo(existing)
+		}
+
+		const journalOp = await this.journal.createOperation({
+			kind: "token_import",
+			origin: "seed",
+			profileId,
+			accountAddress,
+			networkId,
+			contractAddress: tokenInterface.contract,
+			title: symbol,
+			subtitle: "Default token",
+		})
+
+		let holdsLock = false
+		try {
+			await this.lock.enter()
+			holdsLock = true
+			await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
+			let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
+			if (!token) {
+				token = {
+					id: await nextNumericId(this.tokens),
+					profileId,
+					chainId: tokenInterface.chainId,
+					contract: tokenInterface.contract,
+					name,
+					symbol,
+					decimals,
+					getNameFn: tokenInterface.getNameFn,
+					getSymbolFn: tokenInterface.getSymbolFn,
+					getDecimalsFn: tokenInterface.getDecimalsFn,
+					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
+					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
+					transferPublicFn: tokenInterface.transferPublicFn,
+					transferPrivateFn: tokenInterface.transferPrivateFn,
+					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
+					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+				}
+				await this.tokens.set(`${token.id}`, token)
+				this.emit("onTokenAdded", getTokenInfo(token))
+			}
+			const result = getTokenInfo(token)
+			await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
+			return result
+		} catch (error) {
+			await this.journal.transitionOperation(
+				journalOp.id,
+				{ stage: "failed" },
+				normalizeError(error, classifyTokenImportError(error)),
+			)
+			throw error
+		} finally {
+			if (holdsLock) this.lock.leave()
+		}
+	}
+
 	public async updateToken(
 		profileId: string,
 		networkId: string,
@@ -280,7 +410,14 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public async deleteToken(id: number): Promise<TokenInfo> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profiles)
-		requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
+		const token = requireOwnedRow(await this.tokens.get(`${id}`), profile.id, "unknown token id")
+		// An explicit user delete of a DEFAULT token writes a permanent
+		// tombstone: the seeder must never resurrect it — not on the next
+		// unlock, and not after a network remove/re-add (tombstones survive
+		// chain purges; only the attempt bookkeeping resets there).
+		if (findSeed(token.chainId, token.contract)) {
+			await this.seeder.markDeletedByUser(profile.id, token.chainId, token.contract)
+		}
 		return this._deleteTokenById(id)
 	}
 
@@ -387,7 +524,21 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return ti
 	}
 
-	public async parseTokenInterface(networkId: string, contract: string, parentTask?: WrappedTask): Promise<TokenInterface> {
+	/**
+	 * `expectedClassId` is the seeder's TOFU pin: when provided, the FETCHED
+	 * instance must present exactly that `currentContractClassId` (and echo
+	 * the requested address) BEFORE the artifact is fetched or anything is
+	 * registered in the PXE — a rejected seed leaves no artifact behind, and
+	 * the returned interface derives from the SAME fetch that passed the pin
+	 * (no refetch window for a hostile RPC to substitute). Mismatch throws
+	 * `PinMismatchError`. Callers without a pin are unaffected.
+	 */
+	public async parseTokenInterface(
+		networkId: string,
+		contract: string,
+		parentTask?: WrappedTask,
+		expectedClassId?: string,
+	): Promise<TokenInterface> {
 		await this.ensureInitialized()
 		const stepContent = new StepContent("Parsing token interface")
 		const task = parentTask ? parentTask.startSubtask(stepContent) : this.tasks.startNewTask(stepContent)
@@ -403,6 +554,15 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			const instance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(contract))
 			if (!instance) {
 				throw new Error("contract instance not found")
+			}
+
+			if (expectedClassId !== undefined) {
+				if (instance.address.toString().toLowerCase() !== contract.toLowerCase()) {
+					throw new PinMismatchError(`instance address ${instance.address.toString()} ≠ requested ${contract}`)
+				}
+				if (instance.currentContractClassId.toString() !== expectedClassId) {
+					throw new PinMismatchError(`class id ${instance.currentContractClassId.toString()} ≠ pinned ${expectedClassId}`)
+				}
 			}
 
 			const artifact = await pxe.getContractArtifact(instance.currentContractClassId)
@@ -490,10 +650,11 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		networkId: string,
 		accountAddress: string,
 		contract: string,
+		expectedClassId?: string,
 	): Promise<{ name: string; symbol: string; decimals: number; interface: TokenInterface }> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profiles, "Wallet locked")
-		const tokenInterface = await this.parseTokenInterface(networkId, contract)
+		const tokenInterface = await this.parseTokenInterface(networkId, contract, undefined, expectedClassId)
 		const [name, symbol, decimals] = await this.fetchTokenMetadata(profile.id, networkId, accountAddress, tokenInterface)
 		return { name, symbol, decimals, interface: tokenInterface }
 	}
@@ -549,6 +710,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related tokens`)
+		await this.seeder.purgeForProfile(profileId)
+		// The coordinator purged journals BEFORE this method runs, but a seed
+		// commit landing in between creates a fresh `token_import` journal row
+		// that nothing later sweeps. The seeder fence above guarantees no
+		// further commits, so an idempotent journal re-purge here catches
+		// exactly that window.
+		await this.journal.purgeForProfile(profileId)
 		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
 			// SILENT (emit=false): the deletion coordinator awaits token-balance +
 			// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is

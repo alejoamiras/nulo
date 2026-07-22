@@ -29,7 +29,8 @@ export interface GasBalances {
 }
 
 export function formatGasBalance(raw: string | null | undefined): string {
-	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS)
+	// Truncated to 4 decimals — full 18-decimal precision drowned the row.
+	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
 }
 
 export interface BuildSettingsInput {

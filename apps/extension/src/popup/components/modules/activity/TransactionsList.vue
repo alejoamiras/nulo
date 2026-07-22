@@ -22,6 +22,8 @@ import { DateTime } from "luxon"
 import TransactionCard from "./TransactionCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
 import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { usePrices } from "@/composables/usePrices"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
 
 const router = useRouter()
@@ -70,6 +72,12 @@ const handleSelectRow = (row) => {
 	}
 }
 
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+onBeforeUnmount(() => {
+	prices.dispose()
+	priceService.disconnect()
+})
 function incomingCardProps(inc) {
 	const token = props.tokensById[inc.tokenId]
 	return {
@@ -77,6 +85,7 @@ function incomingCardProps(inc) {
 		amountRaw: inc.amountRaw,
 		tokenDecimals: token?.decimals || 0,
 		txHash: inc.txHash,
+		amountFiat: token ? (prices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
 	}
 }
 

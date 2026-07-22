@@ -166,7 +166,7 @@ The full network suite is currently **46 / 66 passing**. The 18 remaining failur
 | Resource | Per-worktree isolated? | How |
 |---|---|---|
 | Anvil PID | Yes | spawned by setup; tracked in lockfile |
-| Aztec sandbox PID | Yes | spawned by setup; tracked in lockfile; data dir `/tmp/nulo-aztec-<pid>-<ts>` |
+| Aztec sandbox PID | Yes | spawned by setup; tracked in lockfile; data dir `~/.cache/nulo-e2e/nulo-aztec-<pid>-<ts>` on real disk (NOT tmpfs — see `lockfile.ts` `E2E_DATA_ROOT`; override `NULO_E2E_DATA_ROOT`). Reap leftovers with `bun run e2e:reap`. |
 | Playground vite PID | Yes | spawned by setup; tracked in lockfile |
 | Ports | Yes | bind-and-release via `resolve-ports.ts`; spawn re-binds |
 | Wallet build artifact | Yes | `dist/chrome/` lives inside the worktree |

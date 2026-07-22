@@ -20,12 +20,30 @@
  *    the reuse path; orphan cleanup is the value there.
  */
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs"
+import { homedir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const E2E_STATE_DIR = path.resolve(__dirname, "../../.e2e-state")
 const LOCK_PATH = path.join(E2E_STATE_DIR, "owned.json")
+
+/**
+ * Real-disk root for per-run aztec data dirs. Deliberately NOT tmpdir()/`/tmp` — that is
+ * RAM-backed tmpfs, so a run killed before teardown orphans a process holding its multi-GB LMDB
+ * store open as a deleted-but-open file, pinning that RAM until the holder dies (fills swap,
+ * thrashes the box, breaks the agent's own tooling). Disk + the OS page cache gives RAM-speed hot
+ * reads adaptively (evicts under pressure instead of OOMing), so it is not meaningfully slower —
+ * and under many parallel agents it is faster, since tmpfs steals RAM from proving/Chrome. Override
+ * with `NULO_E2E_DATA_ROOT` (e.g. a CI runner that wants a specific mount). Reaped by `e2e:reap`.
+ */
+export const E2E_DATA_ROOT = process.env.NULO_E2E_DATA_ROOT ?? path.join(homedir(), ".cache", "nulo-e2e")
+
+/** Per-run aztec data dir path under {@link E2E_DATA_ROOT}. The `<pid>` segment lets `e2e:reap`
+ *  sweep orphaned dirs whose owning process is dead. */
+export function newAztecDataDir(): string {
+	return path.join(E2E_DATA_ROOT, `nulo-aztec-${process.pid}-${Date.now()}`)
+}
 
 export interface OwnedPorts {
 	anvil: number

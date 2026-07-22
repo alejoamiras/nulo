@@ -44,7 +44,7 @@ test.skipIf(!hasLocalNetwork)("networks page lists all 3 defaults", async ({ reg
 	await navigateToSettings(page, "networks")
 
 	// Network names are config-driven and stable across UI redesigns
-	for (const name of ["Alpha Mainnet", "Testnet", "Local Network"]) {
+	for (const name of ["Alpha V5", "Testnet", "Local Network"]) {
 		await page.waitForSelector(`text/${name}`, { visible: true, timeout: 5_000 })
 	}
 
