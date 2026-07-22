@@ -827,12 +827,12 @@ Not scheduled. Extension-internal surface; the trust machine + zod boundaries ar
 the plan's own tests and the standard post-impl audits. Revisit `/harden security` at the next
 release-readiness pass as usual.
 
-## Seeds (DRAFT — finalized post-approval)
+## Seeds (FINALIZED post-approval, 2026-07-22)
 
 ### Recommended: `/goal`
 
 ```
-/goal All 5 phases marked ✓ in implementations-plan/incoming-public-transfers/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md, including the NAMED scenario/unit tests in each gate's pass criteria) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/incoming-public-transfers/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed separately; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue`, `bun run e2e:agent -- incoming-public-transfers.test.ts`, and `bun run e2e:agent -- incoming-transfers.test.ts` all report exit 0 in the transcript.
+/goal Implement implementations-plan/incoming-public-transfers. BEFORE any code: read implementation.md AND plan.md in that dir fully (implementation.md has the verified lessons + rejected paths — do not re-litigate them), then `git merge origin/dev` into this branch (pulls the price service from PR #309 that the Phase-4 dust filter needs) and run `bun install`. Then implement phases 1→5 IN ORDER from plan.md. DONE means: all 5 phases marked ✓ in plan.md (the per-phase headers in the file, not just chat), each ✓ backed by its Validation-gate commands AND the NAMED tests in that gate's pass-criteria reported passing in the transcript; for each phase you printed `LESSONS_FILE=implementations-plan/incoming-public-transfers/lessons/phase-N.md`; `/code-review max --fix` complete with fixes committed separately; codex post-impl audit complete with high/critical findings addressed; and `bun run audit:vue`, `bun run e2e:agent -- incoming-public-transfers.test.ts`, and `bun run e2e:agent -- incoming-transfers.test.ts` all report exit 0 in the transcript. NEVER weaken a quality gate to go green — a red check is a flake (re-run) or real breakage (fix). Log every phase + every codex consult in lessons/phase-N.md.
 ```
 
 ### Alternative: `/loop 15m`
