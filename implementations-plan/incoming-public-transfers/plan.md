@@ -568,7 +568,12 @@ EXPLICITLY in this phase's gate, not deferred to Phase 5. This proves the node s
   live sandbox.
 - Layers: typecheck/lint · unit · build · network-e2e (capability probe only).
 
-### Phase 3 — Balance wiring: persisted outbox (both arms)
+### Phase 3 — Balance wiring: persisted outbox (both arms) ✓
+
+**✓ COMPLETE** (gate green: `bun run audit:vue` exit 0 — typecheck:all/test[287 files, 3468]/lint/build).
+11 named drain tests + the queue seam unit test, all present. The outbox WRITE-side landed in Phase 2;
+this delivered the causal task-anchored DRAIN. Lessons:
+`implementations-plan/incoming-public-transfers/lessons/phase-3.md`.
 
 Outbox table + locked-section writes (outbox-BEFORE-record ordering, note arm AND public arm) +
 `requestBalanceRefresh(tokenId, account) → {taskId}|{busy}` on `TokenBalanceService` (fresh-task
