@@ -98,4 +98,12 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(accounts.map((a) => a.index)).toEqual([0, 1, 2])
 		expect(accounts[0]!.address).toBe("0xa")
 	})
+
+	test("getAccounts is TOTALLY ordered — duplicate indices (hostile backup) break the tie by address, not insertion order", async () => {
+		// Legitimate per-type indices are unique; a crafted backup could carry two rows at the same index.
+		// The address tie-breaker keeps ordering deterministic instead of leaking insertion order.
+		await accountService.restore([mkAccount("0xbbb", { index: 0 }), mkAccount("0xaaa", { index: 0 })])
+		const accounts = await accountService.getAccounts("p1", 1, true)
+		expect(accounts.map((a) => a.address)).toEqual(["0xaaa", "0xbbb"])
+	})
 })
