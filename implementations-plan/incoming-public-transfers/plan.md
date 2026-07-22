@@ -525,7 +525,12 @@ gate-fails-closed (node-direct, not preimage).
   `scannedThrough`/`monotonic` cases).
 - Layers: typecheck/lint · unit.
 
-### Phase 2 — Service: indexer module, scan arm, cursors, record identity, UI keying
+### Phase 2 — Service: indexer module, scan arm, cursors, record identity, UI keying ✓
+
+**✓ COMPLETE** (gate green: `bun run audit:vue` exit 0 — typecheck:all/test[287 files, 3456]/lint/build;
+`bun run e2e:agent -- public-events-capability.test.ts` = 3 passed against the live sandbox). 37 new
+public-arm scenario tests + 10 indexer unit tests, all named scenarios present. Lessons:
+`implementations-plan/incoming-public-transfers/lessons/phase-2.md`.
 
 `apps/extension`: `public-event-indexer.ts` module; `(networkId, contract)` scheduler;
 pre-lock filtering; cursor table + persistence rules + lifecycle (token-delete, account-add,
