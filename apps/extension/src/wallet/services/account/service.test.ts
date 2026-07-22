@@ -88,4 +88,14 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		// after the coordinator releases the id and clobber a successor — audit H3).
 		expect(emit.mock.calls.filter(([e]) => e === "onAccountDeleted")).toHaveLength(0)
 	})
+
+	test("getAccounts returns index-sorted regardless of restore/insertion order (import default-account fix)", async () => {
+		// Restore in reverse-index order, exactly as a full-backup restore can insert rows: the resulting
+		// storage/insertion order is NOT index order. Without the sort, getAccounts[0] would be index 2 →
+		// the LAST account becomes the default active after import. It must return index 0 first.
+		await accountService.restore([mkAccount("0xc", { index: 2 }), mkAccount("0xa", { index: 0 }), mkAccount("0xb", { index: 1 })])
+		const accounts = await accountService.getAccounts("p1", 1, true)
+		expect(accounts.map((a) => a.index)).toEqual([0, 1, 2])
+		expect(accounts[0]!.address).toBe("0xa")
+	})
 })
