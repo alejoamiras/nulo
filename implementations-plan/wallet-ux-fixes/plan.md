@@ -71,7 +71,7 @@ Phase 2 makes an imported profile land on the *primary* network; Phase 3 makes i
 - `bun run --cwd apps/extension build:chrome` then `bun run test:e2e` (smoke round-trip: export a backup while on network X → fresh import → active network is X, not the default).
 - Layers: typecheck/lint · unit/component · build · smoke e2e.
 
-## Phase 4 — Settings Network-list: active badge, no fake radio (item 4 — option B)
+## Phase 4 ✓ — Settings Network-list: active badge, no fake radio (item 4 — option B)
 
 **Chosen (A1 = B):** remove the misleading left `check-circle`/`circle` (`settings/networks/index.vue`); the active row shows a small **status dot + "Active" label** on the right (before the chevron); every row stays a drill-in (chevron → detail, where `network-set-active` lives). Makes the affordance honest with no interaction change.
 

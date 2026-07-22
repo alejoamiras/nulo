@@ -17,25 +17,12 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
-/** Router */
-const router = useRouter()
-
 const networks = computed(() =>
 	[...appStore.networks].sort((a, b) => {
 		const chainPos = getChainPosition(a.chainId) - getChainPosition(b.chainId)
 		return chainPos ? chainPos : stringCompare(a.name, b.name)
 	}),
 )
-
-/**
- * Tapping a row drills into the per-`Network` detail page where rename,
- * endpoints, set-as-active, and delete-chain live. The radio icon on each
- * row reflects whether the row is the active chain — it is informational;
- * activation happens on the detail page.
- */
-const handleOpenDetail = (target) => {
-	router.push(`/popup/settings/networks/${target.id}`)
-}
 </script>
 
 <template>
@@ -48,16 +35,23 @@ const handleOpenDetail = (target) => {
 			<ItemsContainer>
 				<SettingItem
 					v-for="network in networks"
-					@click="handleOpenDetail(network)"
+					:key="network.id"
+					:to="`/popup/settings/networks/${network.id}`"
 					:title="network.name"
-					:icon="appStore.network?.id === network.id ? 'check-circle' : 'circle'"
-					:iconFillColor="appStore.network?.id === network.id ? 'primary' : 'tertiary'"
-					iconBgColor="transparent"
 					data-testid="network-row"
 					:data-network-id="network.id"
 					:data-network-name="network.name"
 				>
 					<template #right>
+						<Flex
+							v-if="appStore.network?.id === network.id"
+							align="center"
+							gap="6"
+							data-testid="network-active-badge"
+						>
+							<div :class="$style.active_dot" />
+							<Text size="12" weight="600" color="primary">Active</Text>
+						</Flex>
 						<MaterialIcon name="chevron_right" :size="18" color="secondary" :class="$style.chevron" />
 					</template>
 				</SettingItem>
@@ -94,5 +88,13 @@ const handleOpenDetail = (target) => {
 .chevron {
 	color: var(--nulo-secondary);
 	transition: color 0.2s var(--bezier);
+}
+
+.active_dot {
+	width: 7px;
+	height: 7px;
+	flex: none;
+	border-radius: 50%;
+	background: var(--nulo-accent);
 }
 </style>
