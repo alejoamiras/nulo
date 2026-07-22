@@ -10,8 +10,6 @@ declare global {
   const AccessLevel: typeof import('../utils/confirmation-policies').AccessLevel
   const CHAIN_IDS: typeof import('../utils/chain-ids').CHAIN_IDS
   const EffectScope: typeof import('vue').EffectScope
-  const FEE_JUICE_PRICING: typeof import('../utils/fee-estimation').FEE_JUICE_PRICING
-  const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
   const MAINNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').MAINNET_L1_CHAIN_ID
@@ -46,7 +44,6 @@ declare global {
   const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
-  const ensurePermissions: typeof import('../utils/general').ensurePermissions
   const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits

@@ -13,7 +13,6 @@ import { ref } from "vue"
 
 const openToastMock = vi.fn()
 const pickFileMock = vi.fn()
-const ensurePermissionsMock = vi.fn()
 const popupOpenMock = vi.fn()
 
 const appStoreState: { network: { id: string; name: string } | null } = {
@@ -38,9 +37,6 @@ vi.mock("@/utils", () => ({
 		String(s ?? "")
 			.trim()
 			.slice(0, max),
-}))
-vi.mock("@/utils/general", () => ({
-	ensurePermissions: (...args: unknown[]) => ensurePermissionsMock(...args),
 }))
 vi.mock("@/wallet/services/profile/client", () => ({
 	ProfileServiceClient: vi.fn(function () {
@@ -280,7 +276,6 @@ describe("useContactImportExport — import sender semantics (adds-only)", () =>
 describe("useContactImportExport — export", () => {
 	test("a mixed-case stored contact still exports isSender:true (canonical union compare)", async () => {
 		const { contactService, accountStateService } = makeServices()
-		ensurePermissionsMock.mockResolvedValue(true)
 		accountStateService.getSendersAcrossActiveNetworks.mockResolvedValue([ADDR_A])
 		const { downloadFile } = await import("@/utils")
 		const mixedCase = ADDR_A.toUpperCase().replace("0X", "0x")
@@ -298,7 +293,6 @@ describe("useContactImportExport — export", () => {
 
 	test("isSender flags come from the cross-network sender union", async () => {
 		const { contactService, accountStateService } = makeServices()
-		ensurePermissionsMock.mockResolvedValue(true)
 		accountStateService.getSendersAcrossActiveNetworks.mockResolvedValue([ADDR_A])
 		const { downloadFile } = await import("@/utils")
 		const contacts = ref([

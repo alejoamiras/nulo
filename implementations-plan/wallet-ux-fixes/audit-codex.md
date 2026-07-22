@@ -64,3 +64,15 @@ User approved A1=option B, A2=one PR for items 2+1a+1b+4B with item 3 as a separ
 - **Interaction:** Phase 2's fallback smoke could be masked by Phase 3's new pointer field → the dual-mode smoke MUST use a pointer-ABSENT (legacy) backup.
 - Fix stale chainId/PR-B text.
 - **Verdict: `conditional approve`** — all four conditions ADOPTED into the plan (Phase 3 complete-map + no-`?? raw`; Phase 4 `:to` + keyboard test; Phase 2 pointer-absent smoke; chainId text corrected).
+
+## Post-implementation audit (session 019f8ba3) — VERDICT: approve
+
+Fresh codex audit of the 4-phase implementation diff + the code-review commit. **`approve` — no correctness/security blockers.**
+- Phase 3 guarded correctly: checksum covers the top-level `active-network-id`; resolution is index-paired, successful-row-only, duplicate/unmatched-safe; `requireOwnedRow` prevents cross-profile targeting; write is `nulo:core:active-network@${profileId}` under the network lock before finalization.
+- Phase 2 single-sources fresh + fallback from the same `isPrimaryActive` seed (incl. the e2e flag).
+- Phase 1 still propagates genuine `chrome.downloads.download` failures.
+- Phase 4 preserves selectors + native link keyboard behavior + synthetic-click e2e-helper compatibility.
+- **[Low]** dangling `ensurePermissions` in the generated `auto-imports.d.ts` + obsolete contacts test mock → FIXED (regenerated declarations; removed the mock).
+- **[Informational]** required `downloads` shows Chrome's "Manage your downloads" install warning — pre-production, no upgrade-disable impact; document the export use case for store review.
+
+Prior Anthropic-family `/code-review max` pass: no critical/high; its two cleanups (dead ensurePermissions check + redundant setActiveNetwork) were applied in commit `95f3504`.
