@@ -20,7 +20,7 @@ Validation bar: component/unit + smoke e2e; **all e2e gates build `dist/` first*
 - **Fable-leg (Opus 4.8 fallback — Fable 5 out of credits):** `reject`, corroborating codex on all three blocking findings with sharper file:line evidence. Transcript: `audit-fable.md`.
 - **Gate status:** codex `approve` on Phases 1+2 (items 2+1a); after the A2 scope change (fold 1b+4B in, split item 3 → PR-D), a focused pass returned `conditional approve` on Phases 3+4 — **all four conditions ADOPTED** (Phase 3 complete identity-aware id map + no `?? raw`; Phase 4 `:to` keyboard-activatable rows; Phase 2 pointer-absent fallback smoke; chainId text corrected). Item 3 → separate PR-D.
 
-## Phase 1 — `downloads` as a required permission (item 2)
+## Phase 1 ✓ — `downloads` as a required permission (item 2)
 
 **Root cause (verified):** `utils/files.ts:41` → `utils/general.ts:34-40` calls `chrome.permissions.contains` then `chrome.permissions.request` for `downloads`, which is declared under `optional_permissions` in the SHARED `apps/extension/manifest/manifest.config.ts:40` (both chrome+firefox spread it — one line, not two). The prompt fires AFTER the backup blob is built (on "Download backup"), steals focus, closes the MV3 popup → full restart.
 
