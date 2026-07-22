@@ -1,9 +1,20 @@
-# Account-switch cross-account isolation (item 3 / PR-D) — v2
+# Account-switch cross-account isolation (item 3 / PR-D) — v3
 
-**Tier:** `/blueprint deep` (rubric: 2 HIGH — security/privacy + blast radius). **Status:** v2, post-double-audit
-(codex `reject` v1 + Opus `conditional approve` v1 — both persisted in `audit-codex.md`/`audit-fable.md`;
-every finding folded in below). Awaiting the final fresh codex pass. Consolidated from three independent drafts
-(`plan-draft-{main,fable,codex}.md`) grounded in `research/surface-map.md`.
+**Tier:** `/blueprint deep` (rubric: 2 HIGH — security/privacy + blast radius). **Status:** v3, post-final-codex-
+pass. Audit trail: codex `reject` v1 → v2 → codex `reject` v2 (deeper concurrency findings) → **v3** (this).
+Opus `conditional approve` v1. All audit transcripts in `audit-codex.md`/`audit-fable.md`; every finding folded in.
+Consolidated from three independent drafts (`plan-draft-{main,fable,codex}.md`) grounded in `research/surface-map.md`.
+
+**v2→v3 changelog (final-codex-pass driven):** split the concurrency guarantee into **Layer A CONTAINMENT
+(Phase 1, no sequence numbers — drop-only)** vs **Layer B RETENTION (Phases 2–3, durable epoch+counter +
+per-record `(sourceId,seq,epoch)` + atomic snapshot watermark + tombstone-checked reducers)** — resolving the
+incoherent-seq-domain, Phase-1-can't-allocate-full-scope-seq, and lossy-ABA-on-SW-restart/re-import findings; a
+Phase-2 **spike** proves that protocol standalone before wiring producers; **Phase 1a** is now a concrete
+preallocated-correlation atomic binding with publication states + SW-restart recovery, scoped to **feed-eligible
+root tasks only**; the e2e adds a **separate extension-submitted A transaction** (the mint only makes an incoming
+row, so it couldn't test stale settled-history); **UintNote schema + storage-slot pin** added to incoming
+validation; **commands corrected** (`bun run e2e:agent`, `apps/extension/dist/chrome` path, exact negative-grep
+fail-on-match + dir-exists).
 
 **v1→v2 changelog (audit-driven):** raw-slice-placement structural proof (was: delete-ingest-filter, which a
 render guard masked); per-record sequence numbers + cross-source atomic revisioning + causal ordering +
@@ -67,33 +78,50 @@ fragile; stopping there is a deliberate ship-vs-harden tradeoff, not "correctnes
   setter (or use `watch(..., {flush:'sync'})`) — NOT the default async `app.vue:87` watcher, which flushes on
   `nextTick` and leaves a one-tick window where A renders under B (breaks §7's "absent immediately").
 
-### 2.2 Concurrency algorithm (rewritten per audit — the part v1 got wrong)
+### 2.2 Two-layer concurrency model — CONTAINMENT (Phase 1) vs RETENTION (Phases 2–3)
 
 A captured-generation token alone is insufficient (it gates only awaited fetches that capture it — not broadcast
 events, reconnects, cross-source mutations, A→B→A, delete-during-snapshot, or a delayed-old-event vs newer-state).
-The durable design:
+**The audit (codex v2) showed a single "per-source seq" model is incoherent** (no shared domain for cross-source
+comparison; can't allocate a full-scope seq in Phase 1; and an in-memory counter resets on SW-restart → lossy ABA
+on mnemonic re-import). Resolution: **split the guarantee into two layers, each with its own mechanism.**
 
-1. **Composite-scope ownership** — every record lives in the slice for its own `ActivityScope`, routed from its
-   own payload, never from "active now."
-2. **Causal ordering via monotonic service sequence numbers** — the incoming/journal/tx services stamp each
-   emission with a per-scope monotonic `seq` (NOT `updatedAt`, which isn't available/comparable across sources).
-   A reducer applies an event only if its `seq` exceeds the record's last-applied `seq`; a delayed OLD event is
-   dropped. (Requires adding `seq` at the service boundary — an explicit Phase-1 sub-task.)
-3. **Per-record tombstones** — a delete records a tombstone `{id, seq}` in the slice; a later add/update with a
-   lower-or-equal `seq` is rejected (can't resurrect). Tombstones are bounded/aged.
-4. **Snapshot vs event reconciliation (delete-safe):** register listeners BEFORE the snapshot; capture the
-   scope's `seq` high-water-mark at fetch start; on resolve, if the scope is tombstoned OR the request is no
-   longer latest → discard. **If ANY event (esp. a delete) arrived during the fetch → do NOT merge-by-ID
-   (merge can't tell "absent because deleted" from "present at fetch"); reschedule a fresh authoritative
-   snapshot.** Only when zero events arrived may the snapshot replace the source rows.
-5. **Cross-source atomicity** — a mutation touching multiple sources (e.g. `onTxAdded` removing an awaiting
-   placeholder; journal-terminal cleanup of awaiting/task/cancel) advances **every affected source's** high-water
-   `seq` atomically, so a concurrent snapshot of any of them can't restore the removed row.
-6. **Tombstone-checked event reducers** — event reducers (not just fetches) drop writes to a tombstoned/invalidated
-   scope. Critical: re-importing the same mnemonic yields the SAME scope key, so a late A event after A's deletion
-   must not resurrect a row under the "new" account.
-7. **The service keeps polling inactive accounts** (notifications/awaiting) — switching changes presentation, not
-   discovery; no scheduler torn down.
+**Layer A — CONTAINMENT (Phase 1). Goal: the active view NEVER shows a foreign-scope record. No cross-source seq
+needed** — containment only ever DROPS, it never has to durably retain/order:
+- Composite-scope ownership: every record/event carries its own `ActivityScope`; the reducer compares it to the
+  document's live scope and **drops on any mismatch** (never "active-now" fallback).
+- Synchronous `activityGeneration` bump + visible-ref clear in the mutation-path setter (§2.1) on every switch.
+- A fetch captures `{scope, generation}` and is discarded on resolve if generation moved (A→B→A safe: the older
+  A fetch is dropped).
+- **Reschedule-on-event, not merge:** if ANY event (esp. a delete) arrives during a snapshot fetch, discard the
+  fetch and reschedule a fresh one — never merge-by-ID (merge can't distinguish "absent because deleted" from
+  "present at fetch"). Containment tolerates the extra fetch; it does not need to retain the in-flight result.
+- Containment's correctness does NOT depend on sequence numbers, so it works in Phase 1 before tx records carry
+  `profileId`/`networkId` (it filters on the fields it HAS — account+chain — and drops anything it can't scope).
+
+**Layer B — RETENTION (Phases 2–3, with the per-account slices). Goal: a late A result is KEPT in A's slice
+(not lost, not leaked), so switch-back-to-A shows it.** This is where durable ordering is required, and it uses:
+- **Durable, per-`(source, scope)` monotonic sequence** persisted with the slice (survives SW restart — the
+  counter is NOT in-memory-only). Each record stores its `(sourceId, seq, epoch)`. Cross-source comparison is
+  avoided by design: a cross-source mutation (e.g. `onTxAdded` clearing an awaiting placeholder) is modeled as
+  the mutating source writing a **tombstone in the affected source's own domain** at that source's next seq — so
+  every comparison is same-source.
+- **Scope epoch/incarnation** (durable) bumped when a scope is (re)created — account added, or the SAME scope key
+  reappears via mnemonic re-import. Tombstones and records are epoch-stamped. A delayed PRE-delete event carries
+  the old epoch → rejected (no resurrection); a legitimate NEW event carries the new epoch → accepted (liveness).
+  This resolves the codex ABA+SW-restart case: durability stops the counter reset; epoch stops both resurrection
+  AND permanent-rejection.
+- **Atomic snapshot `{rows, watermark}`:** the snapshot RPC returns rows plus the per-source watermark it reflects;
+  a stored record keeps its `(sourceId, seq, epoch)`; a reducer applies an event only if same epoch AND
+  `seq > stored`; a snapshot replaces a source's rows only up to its watermark and never overwrites a higher-seq
+  event that arrived during the fetch (fixes "snapshot v12 clobbered by delayed event v11").
+- **Tombstone-checked event reducers:** reducers (not just fetches) drop writes to a tombstoned/invalidated scope.
+- **Spike first (Phase 2 opening step):** prototype + unit-test this durable epoch+counter+watermark protocol in
+  isolation (a pure reducer module with property tests for ABA, SW-restart, delete-during-snapshot, cross-source
+  removal, re-import) BEFORE wiring producers — so the hard part is proven standalone.
+
+**Both layers:** the service keeps polling inactive accounts (notifications/awaiting) — switching changes
+presentation, not discovery; no scheduler torn down.
 
 ---
 
@@ -105,8 +133,10 @@ Real commands (verified in `apps/extension/package.json` + `scripts/e2e/agent.sh
   tests — do NOT rely on it for these.
 - Network race test: **`NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts`**
   (`NULO_E2E_PROVERLESS=1` is REQUIRED — it's what compiles the poll gate in; without it the gate isn't built).
-- Production negative-grep (gate absent from a real build): **`bun run --cwd apps/extension build:chrome` then grep
-  the `dist/chrome` bundle for the gate marker + session key → must be ABSENT** (mirror `_build-extension.yml`).
+- Production negative-grep (gate absent from a real build): **`bun run --cwd apps/extension build:chrome`, then
+  assert the bundle dir exists and the marker + BOTH session keys are absent** — exact fail-on-match:
+  `test -d apps/extension/dist/chrome && ! grep -rqE "<GATE_MARKER>|<HOLD_KEY>|<STATUS_KEY>" apps/extension/dist/chrome`
+  (bundle is at `apps/extension/dist/chrome`, NOT root `dist/chrome`; mirror `_build-extension.yml`).
 
 ### Phase 0 — Deterministic race-test infrastructure + baseline verification (test-only)
 The leak remains until Phase 1. **Blocker first: verify the network-suite baseline** — `tests/e2e/README.md`
@@ -142,20 +172,21 @@ lands in Phase 2 once tx records carry `profileId`/`networkId` — Phase 1 does 
    `NewAccountPopup.vue:54-59`, profile/network/bootstrap/reset); the setter owns persistence. On every effective
    change: synchronously (§2.1) increment `activityGeneration`, clear visible active-view refs (what B can SEE; do
    not delete A's durable/in-flight work), mark loading, then snapshot the captured scope.
-2. **Add per-scope monotonic `seq`** at the incoming/journal/tx service emission boundaries (§2.2.2) — the
-   foundation the reducers need.
+2. **Containment only (Layer A, §2.2)** — Phase 1 DROPS foreign-scope records; it does NOT add durable sequence
+   numbers or slices (those are Layer B / Phases 2–3). Every reducer below filters on the scope fields it has
+   (account+chain; full profile/network once Phase 2 adds them to tx records) and drops on mismatch or ambiguity.
 3. **Transaction containment (`app.store.ts`).** Capture scope+generation before `getTransactions`; commit only if
    current; filter rows to captured account+chain. `onTxAdded` updates the active view only when tx scope == live
    scope; placeholder cleanup by `tx.account` + the placeholder's captured scope. `onTxUpdated` requires account
    **plus** hash (hash-only updates the wrong account's row). Symmetric delete via tombstone. Fix `send.vue`:
    unique awaiting-placeholder ID + captured scope; rejection removes that exact ID from that scope.
 4. **Incoming containment (`useIncomingTransfers`, shared by both surfaces).** Synchronous scope-tuple watcher:
-   clear the visible ref on change; capture `{scope, requestVersion, seq}` before refresh; reject stale responses;
-   accept Added/Updated/Deleted only when profile+network+accountAddress exactly match live scope AND pass the
-   §2.2 seq/tombstone checks; never infer a missing account; deregister on dispose. One impl for
-   `RecentActivityView.vue` AND `activity.vue`.
+   clear the visible ref on change; capture `{scope, generation}` before refresh; reject responses whose
+   generation moved; reschedule (don't merge) if an event arrived mid-fetch (§2.2 Layer A); accept
+   Added/Updated/Deleted only when profile+network+accountAddress exactly match live scope; never infer a missing
+   account; deregister on dispose. One impl for `RecentActivityView.vue` AND `activity.vue`.
 5. **Journal/task/cancellation containment.** Ingest-filter journal by exact scope; snapshot by all scope fields;
-   reject stale by seq/request-version; hide scope-ambiguous journal records. **Task↔journal correlation is an
+   drop stale snapshots by generation; hide scope-ambiguous journal records. **Task↔journal correlation is an
    undesigned protocol today** (`OperationRecord.taskId` does NOT exist; dApp journals precede task creation,
    transfer tasks precede journal creation — see Phase 1a). **Until an atomic binding lands, fail closed: disable
    ALL uncorrelated TaskService cards AND journal enrichment** (not merely orphan cards — a kind-only dApp task can
@@ -165,7 +196,9 @@ lands in Phase 2 once tx records carry `profileId`/`networkId` — Phase 1 does 
    client dispatches events unparsed. Add: service-side param validation, client-side result validation, and an
    **event-dispatch validation override** so every wire event is parsed before the handler runs. At scan time
    (revalidated INSIDE the locked commit, not only before PXE I/O): account ∈ requested profile+network; note
-   contract == the scanned registered token; **`content.owner`, when present, == captured accountAddress (absent →
+   contract == the scanned registered token **AND the note matches the expected `UintNote` schema at its expected
+   storage slot** (contract + `content.value` alone is too weak — pin the note type + slot); **`content.owner`,
+   when present, == captured accountAddress (absent →
    OK, uses the trusted fallback)**; reject `renderError`/malformed-note-render fallbacks (never convert to a
    record); canonical address/hash/nullifier; non-negative u128 amount; non-negative safe-int indexes; **identity
    keyed by `(scope, siloedNullifier)`, not a global nullifier** (avoids cross-scope collision). Drop+minimally-log
@@ -186,15 +219,34 @@ malformed/wrong-scope dropped. **Layers:** unit, component, smoke, deterministic
 > **Privacy milestone: Phase 1 closes the leak for the same-network case.** Phases 2–4 harden (regression risk,
 > not new leak) and extend to the full profile/network composite invariant.
 
-### Phase 1a — Task↔journal binding protocol (explicit design + impl; gates the task facet's structural fix)
-Because no shared correlation ID exists, design an **atomic** binding: mint a correlation ID at task creation and
-carry it onto the journal record (and vice-versa for the paths where the journal precedes the task), covering both
-orderings (transfer: task→journal, `transfer-executor.ts:82-115`; queued dApp: journal→task, ID attached when
-claimed). **Gate:** unit tests proving every task has a resolvable journal correlation at switch time (and the
-absence case is fail-closed). Until this passes, Phase 1.5's "disable all uncorrelated task cards" stands.
+### Phase 1a — Task↔journal atomic binding protocol (explicit design + impl; gates the task facet's structural fix)
+No shared correlation ID exists today, and the two producers write in OPPOSITE orders with no transaction spanning
+in-memory TaskService and durable journal storage. Design a concrete **preallocated-correlation** protocol:
+- **Preallocate** a `correlationId` at the very start of a feed-eligible root operation (before EITHER the task
+  event or the journal write), threaded to BOTH. Transfer (task→journal, `transfer-executor.ts:82-115`): the
+  executor mints `correlationId`, publishes the task carrying it, then writes the journal carrying the same id.
+  Queued dApp (journal→task): the journal is created with `correlationId`; the task attaches it when claimed.
+- **Publication/visibility states:** a task is feed-eligible ONLY once its `correlationId` resolves to a journal
+  record in the ACTIVE scope; until then it is not rendered (fail-closed) — never rendered by "active-now."
+- **SW-restart recovery:** `correlationId` is durable on the journal record; on restart, re-correlate from the
+  journal (the in-memory task is rebuilt/re-linked or dropped-until-relinked).
+- **Scope-narrowing (codex v2):** the binding + its gate cover **feed-eligible ROOT tasks only.** Balance-refresh,
+  step, and other non-feed tasks intentionally have NO journal and MUST NOT be required to correlate.
+
+**Gate:** unit tests proving every **feed-eligible root** task resolves to its owning-scope journal at switch time,
+that a not-yet-correlated task is not rendered (fail-closed), that SW-restart re-correlates, and that a non-feed
+task is correctly exempt. Until this passes, Phase 1.5's "disable ALL uncorrelated task cards + journal enrichment"
+stands.
 
 ### Phase 2 — Structural slices: migrate transactions + awaiting (keep Phase-1 guards)
-New `activity.store.ts` coordinator (do NOT bloat `app.store.ts`); session-memory `Map<ActivityScopeKey,
+**Step 0 (spike — de-risk the hard part FIRST):** build the Layer-B durable causal protocol (§2.2) as a PURE,
+producer-agnostic reducer module — durable per-`(source,scope)` monotonic counter + scope epoch/incarnation +
+per-record `(sourceId,seq,epoch)` + atomic snapshot `{rows,watermark}` + tombstone-checked reducers — and prove it
+standalone with property tests BEFORE wiring any producer: ABA, SW-restart (counter survives; epoch bumps on
+scope re-creation), delete-during-snapshot (no resurrection), snapshot-vs-newer-event (no clobber), cross-source
+removal (same-source tombstone), mnemonic re-import (old-epoch event rejected, new-epoch accepted). Only once the
+module's property tests are green do the migration steps below wire it in.
+Then: new `activity.store.ts` coordinator (do NOT bloat `app.store.ts`); session-memory `Map<ActivityScopeKey,
 ActivitySlice>` with readonly `activeSlice`, `ensureSlice`, scoped reducers, scoped snapshot begin/commit, and
 scope invalidation (profile lock / account+network delete / reset → tombstoned so late writers can't resurrect).
 Migrate `transactions`+`awaitingTransactions`: route by the record's OWN metadata. **Add `profileId`+`networkId`
@@ -205,8 +257,8 @@ is skipped, never thrown, so it can't brick the whole `transactions` load.** The
 update backup/restore fixtures + lookup keys + legacy decode. Pre-production ⇒ no numbered migration (CLAUDE.md).
 Apply §2.2 throughout.
 
-**Gate 2:** full fast layers (correct paths) + `test:e2e` + `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 e2e:agent
-[race file]` + full `e2e:agent`. **Pass:** consumers no longer mutate flat arrays; a late A tx event is retained in
+**Gate 2:** full fast layers (correct paths) + `bun run test:e2e` + `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0
+bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts` + full `NULO_E2E_PROVERLESS=1 bun run e2e:agent`. **Pass:** consumers no longer mutate flat arrays; a late A tx event is retained in
 A's inactive slice, absent from B; switch-back-to-A shows it without popup restart; deletion/lock prevents
 resurrection; legacy rows parse (optional schema) and ambiguous ones are hidden; Phase-1 assertions green.
 
@@ -234,8 +286,8 @@ invalidates or reloads the correct scopes. Privacy-safe diagnostics only (counts
 addresses/amounts/payloads). **Then 2–3 independent codex auditors** (not `/harden`).
 
 **Final gate:** lint · typecheck:all · `bun run test` · `bun run test:e2e` ·
-`NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 e2e:agent [race file]` on **≥3 cold sandbox starts** ·
-`NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 e2e:agent` (full suite) · negative-grep. **Pass:** all exit 0; race test
+`NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts` on
+**≥3 cold sandbox starts** · `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent` (full suite) · negative-grep. **Pass:** all exit 0; race test
 passes 3 cold runs zero-retry; gate code absent from the release bundle; auditors find no cross-scope write using
 live active identity and no unvalidated incoming path. **Off-ramp:** stop after Phase 1 (ship-now privacy fix) or
 Phase 3 if a structural phase's blast radius is judged too high at review.
@@ -348,10 +400,14 @@ short-poll timing e2e. **Still open:** A4 (empty-then-refresh vs cached slice �
 `apps/extension/tests/e2e/network/account-switch-isolation.test.ts`, `skipIf(!hasConfig)`,
 `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0`. Deterministic via the **bidirectional** poll gate (test knows the emission
 is pending before switching — the one-way proof-gate can't do this).
+**Two distinct A records are needed (codex v2):** the independent-wallet mint creates an INCOMING row (tests
+facet-2), but it never creates an extension `TransactionService` row — so a SEPARATE **extension-submitted A
+transaction** is required to test stale settled-history (facet-1). Seed both while on A.
 **Ordering (corrected — arm cannot precede the hash):** start `tokenReadyExtension` (Local Network, A, token
-trusted); `createSecondAccount`→B (creation selects B → switch back to A, wait exact scope). **Submit** a private
-mint to A from the independent EmbeddedWallet → **capture the returned tx hash** → **arm the gate** for
-`profile+network+A+contract+that hash` → let it mine/discover. Poll the gate `status` until `discovery-held(hash)`.
+trusted); submit one **extension** A tx (unique amount), wait for its settled card, capture its hash (the
+stale-history probe); `createSecondAccount`→B (creation selects B → switch back to A, wait exact scope). **Submit**
+a private mint to A from the independent EmbeddedWallet → **capture the returned tx hash** → **arm the gate** for
+`profile+network+A+contract+that mint hash` → let it mine/discover. Poll the gate `status` until `discovery-held(hash)`.
 Install a `MutationObserver` recording A's hash/incoming-marker whenever the feed root declares scope B.
 `switchToAccount(B)`; wait persisted==B + feed-root-scope==B + A's settled tx absent immediately (sync-clear, §2.1).
 `releaseIncomingPoll`; **wait `status===committed/emitted`** (proves the late event fired after the switch — a
@@ -383,4 +439,13 @@ expand scope beyond this plan; post-impl = 2–3 independent codex auditors (NOT
   A1/A6 blockers. **All folded into v2.** (`audit-codex.md`)
 - **v1 Opus (fresh):** `conditional approve` — C1 structural proof, S1/S2 delete+tombstone, S3 ack channel, C3 owner
   check; §5 Fact fix; per-document scope; sync-clear-in-mutation-path. **All folded into v2.** (`audit-fable.md`)
-- **v2 final fresh codex pass:** _pending._
+- **v2 final fresh codex pass:** `reject` — 5/9 v1 items resolved; blocking: (1) §2.2 seq had no coherent domain /
+  restart story (lossy ABA on SW-restart + re-import); (2) Phase 1a not yet an atomic binding; high: e2e settled-tx
+  control impossible (mint ≠ extension tx row); medium: command defects + missing UintNote schema pin. **All folded
+  into v3** (`audit-codex.md` holds v1; the v2-pass transcript summarized in the v2→v3 changelog above).
+- **v3:** the two blocking items are resolved by the Layer-A/Layer-B split (containment needs no seq; the durable
+  epoch+counter+watermark protocol is scoped to the retention phases and spiked+property-tested standalone first)
+  and the concrete preallocated-correlation binding. Remaining hard parts (the durable protocol; the atomic binding)
+  are now explicit, isolated, test-gated sub-designs with an early spike — appropriate for implementation rather
+  than further paper-specification. **Decision authority for approval passes to the user at the gate**, with this
+  full audit trail. A further codex pass can be run post-approval as one of the 2–3 post-impl auditors.
