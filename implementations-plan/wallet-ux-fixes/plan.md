@@ -38,7 +38,7 @@ Validation bar: component/unit + smoke e2e; **all e2e gates build `dist/` first*
 
 ---
 
-## Phase 2 — Import network fallback → the primary network (item 1a)
+## Phase 2 ✓ — Import network fallback → the primary network (item 1a)
 
 **Root cause (verified):** `useProfileBootstrap.ts:36` hardcodes the no-active fallback to `kind === "testnet"`; `#305` flipped `DEFAULT_SEEDS` primary-active to Alpha V5 but left this stale → imported profiles (whose active pointer isn't restored — that's item 1b, deferred) fall through to Testnet while fresh profiles get the seed's `isPrimaryActive`.
 

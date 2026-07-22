@@ -17,6 +17,7 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
@@ -773,6 +774,29 @@ describe("NetworkService public API (M4.10)", () => {
 			await service.setActiveNetwork(network.id)
 			const got = await service.getActiveNetwork()
 			expect(got?.id).toBe(network.id)
+		})
+	})
+
+	describe("getPrimaryNetwork", () => {
+		// Unit builds set no VITE_NULO_E2E_DEFAULT_NET flag → the primary seed is Alpha (MAINNET).
+		test("returns the network matching the primary (isPrimaryActive) seed's chainId, regardless of insertion order", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/other": nodeInfoForChain(999_999),
+				"https://rpc.test/mainnet": nodeInfoForChain(CHAIN_IDS.MAINNET),
+			})
+			await service.addNetwork("Other", "https://rpc.test/other")
+			const alpha = await service.addNetwork("Alpha V5", "https://rpc.test/mainnet")
+			const primary = await service.getPrimaryNetwork()
+			expect(primary?.id).toBe(alpha.id)
+			expect(primary?.chainId).toBe(CHAIN_IDS.MAINNET)
+		})
+
+		test("returns null when the primary network is absent (e.g. user deleted Alpha)", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/other": nodeInfoForChain(999_999),
+			})
+			await service.addNetwork("Other", "https://rpc.test/other")
+			expect(await service.getPrimaryNetwork()).toBeNull()
 		})
 	})
 
