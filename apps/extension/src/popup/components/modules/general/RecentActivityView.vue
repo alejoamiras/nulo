@@ -15,9 +15,11 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 import { OriginType } from "@/wallet/services/transaction/spec"
 
 /** Utils */
+import { usePrices } from "@/composables/usePrices"
 import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
@@ -216,6 +218,8 @@ const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTran
 			: undefined,
 })
 
+const incomingPriceService = new PriceServiceClient()
+const incomingPrices = usePrices(incomingPriceService)
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
 	return {
@@ -223,6 +227,7 @@ function incomingCardProps(inc) {
 		amountRaw: inc.amountRaw,
 		tokenDecimals: token?.decimals || 0,
 		txHash: inc.txHash,
+		amountFiat: token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
 	}
 }
 function handleSelectIncoming(inc) {
@@ -673,6 +678,8 @@ onBeforeUnmount(() => {
 	executionService.disconnect()
 	incomingTransferService.disconnect()
 	configService.disconnect()
+	incomingPrices.dispose()
+	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
 })
 </script>

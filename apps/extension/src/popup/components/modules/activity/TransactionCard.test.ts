@@ -12,12 +12,27 @@
 import { mount } from "@vue/test-utils"
 import { describe, expect, test, vi } from "vitest"
 import { OriginType, TransferType, TxStatus } from "@/wallet/services/transaction/spec"
+import { CHAIN_IDS } from "@/utils/chain-ids"
+import { flushPromises } from "@vue/test-utils"
 
 // Bypass the real Pinia app store + its chrome.storage subscriptions —
 // TransactionCard only reads `network.chainId` + `defaultExplorer` for the
 // explorer URL computed; nothing in the chip-render path needs the store.
 vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ network: { chainId: 1 }, defaultExplorer: "aztecscan" }),
+	useAppStore: () => ({ network: { chainId: CHAIN_IDS.MAINNET }, defaultExplorer: "aztecscan" }),
+}))
+
+// Controllable price feed for the D2 fiat case.
+let mockQuotes: Record<string, unknown> = {}
+vi.mock("@/wallet/services/price/client", () => ({
+	PriceServiceClient: vi.fn(function () {
+		return {
+			disconnect: vi.fn(),
+			onQuotesUpdated: { add: vi.fn(), remove: vi.fn() },
+			onConnected: { add: vi.fn(), remove: vi.fn() },
+			refreshIfStale: vi.fn().mockImplementation(async () => mockQuotes),
+		}
+	}),
 }))
 
 import TransactionCard from "./TransactionCard.vue"
@@ -35,9 +50,21 @@ const STUBS = {
 				<slot name="secondary" />
 				<span class="amount">{{ amount }}</span>
 				<span class="symbol">{{ amountSymbol }}</span>
+				<span v-if="amountFiat" data-testid="activity-fiat">{{ amountFiat }}</span>
 			</div>
 		`,
-		props: ["title", "icon", "amount", "amountSymbol", "testId", "txAmountDisplay", "txTransferTypeLabel", "txStatus", "txHash"],
+		props: [
+			"title",
+			"icon",
+			"amount",
+			"amountSymbol",
+			"amountFiat",
+			"testId",
+			"txAmountDisplay",
+			"txTransferTypeLabel",
+			"txStatus",
+			"txHash",
+		],
 	},
 }
 
@@ -73,5 +100,46 @@ describe("modules/activity/TransactionCard (settled)", () => {
 		// originLabel from tx.origin.name — must NOT be silently dropped by
 		// the `||` template when the call shape ALSO produces a transferType.
 		expect(w.text()).toContain("example.dapp.io")
+	})
+})
+
+describe("TransactionCard fiat (D2 activity rows)", () => {
+	const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
+	const mkTransferTx = (contract: string) =>
+		({
+			hash: "0xfiat1",
+			status: TxStatus.Proposed,
+			origin: { type: OriginType.UI },
+			calls: [
+				{
+					contract,
+					method: "transfer",
+					transfers: [
+						{
+							token: { name: "cUSD", symbol: "cUSD", decimals: 6 },
+							type: TransferType.Private,
+							from: "0xa",
+							to: "0xb",
+							amount: (125n * 10n ** 6n).toString(),
+						},
+					],
+				},
+			],
+		}) as never
+
+	test("priced transfer row renders the ≈ fiat under the amount", async () => {
+		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 1.0, fetchedAt: Date.now(), providerUpdatedAt: null } }
+		const w = mount(TransactionCard, { props: { tx: mkTransferTx(CUSD) }, global: { stubs: STUBS } })
+		await flushPromises()
+		const fiat = w.find('[data-testid="activity-fiat"]')
+		expect(fiat.exists()).toBe(true)
+		expect(fiat.text()).toBe("≈ $125.00")
+	})
+
+	test("unpriced transfer row renders NO fiat element", async () => {
+		mockQuotes = {}
+		const w = mount(TransactionCard, { props: { tx: mkTransferTx("0xunmapped") }, global: { stubs: STUBS } })
+		await flushPromises()
+		expect(w.find('[data-testid="activity-fiat"]').exists()).toBe(false)
 	})
 })

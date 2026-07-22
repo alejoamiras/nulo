@@ -54,6 +54,8 @@ defineProps({
 	iconRotate: { type: [String, Number], default: 0 },
 	amount: { type: String, default: null },
 	amountSymbol: { type: String, default: null },
+	/** `≈ $x.xx` line under the amount — omitted (null) when unpriced. */
+	amountFiat: { type: String, default: null },
 	testId: { type: String, default: undefined },
 	txAmountDisplay: { type: String, default: undefined },
 	txTransferTypeLabel: { type: String, default: undefined },
@@ -128,6 +130,7 @@ function hasActionsContent() {
 		<Flex v-if="amount" direction="column" align="end" gap="2" :class="$style.amount_col">
 			<span :class="$style.amount">{{ amount }}</span>
 			<span v-if="amountSymbol" :class="$style.amount_symbol">{{ amountSymbol }}</span>
+			<span v-if="amountFiat" data-testid="activity-fiat" title="At today's price" :class="$style.amount_fiat">{{ amountFiat }}</span>
 		</Flex>
 
 		<div v-if="hasActionsContent()" :class="$style.actions">
@@ -212,6 +215,12 @@ function hasActionsContent() {
 
 .secondary_row {
 	min-height: 14px;
+}
+
+.amount_fiat {
+	font-family: var(--font-mono);
+	font-size: 9px;
+	color: var(--nulo-secondary);
 }
 
 .amount_col {

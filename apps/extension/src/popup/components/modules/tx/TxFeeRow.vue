@@ -14,6 +14,9 @@ defineProps({
 	estimated: { type: Boolean, default: false },
 	gasBreakdown: { type: Object, default: null },
 	estimatedFee: { type: String, default: null },
+	/** USD of the estimate at today's rate — mirrors the paid row's unit
+	 *  grammar so FJ compares to FJ and $ to $ across adjacent rows. */
+	estimatedFeeUsd: { type: String, default: null },
 	feeSavings: { type: String, default: null },
 })
 
@@ -45,7 +48,9 @@ const expanded = defineModel({ type: Boolean, default: false })
 				<span :class="[$style.detail_value_mono, estimated && $style.detail_value_est]">
 					{{ estimated ? `~${feeAmount}` : feeAmount }} FJ
 				</span>
-				<span :class="$style.detail_value_aux">{{ feeUsd }}</span>
+				<span v-if="feeUsd" :class="$style.detail_value_aux" title="At today's AZTEC price" data-testid="tx-fee-usd">{{
+					feeUsd
+				}}</span>
 			</Flex>
 		</button>
 
@@ -69,7 +74,13 @@ const expanded = defineModel({ type: Boolean, default: false })
 			</div>
 			<Flex v-if="estimatedFee" wide justify="between" align="center" :class="$style.fee_breakdown_divider">
 				<span :class="$style.fee_grid_key">Estimated</span>
-				<span :class="$style.fee_grid_val">{{ estimatedFee }} FJ</span>
+				<!-- fee_grid_num carries the mono face — without it this row
+				     renders in the default font and clashes with FEE PAID. -->
+				<span :class="[$style.fee_grid_num, $style.fee_grid_val]"
+					>{{ estimatedFee }} FJ<template v-if="estimatedFeeUsd">
+						<span :class="$style.fee_grid_aux" title="At today's AZTEC price" data-testid="tx-estimate-usd"> ({{ estimatedFeeUsd }})</span>
+					</template></span
+				>
 			</Flex>
 			<Flex v-if="feeSavings" wide justify="end">
 				<span :class="$style.fee_savings">{{ feeSavings }}</span>

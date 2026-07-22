@@ -38,6 +38,7 @@ import { JournalGC } from "./services/operation-journal/gc"
 import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
+import { PriceService } from "./services/price/service"
 import { ProfileService } from "./services/profile/service"
 import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
 import { derivePxeStoreKey } from "@nulo/wallet-crypto"
@@ -188,6 +189,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new NetworkService(logger, browserApi))
 		services.add(new NoteService(logger))
 		services.add(new OperationJournalService(logger, browserApi))
+		services.add(new PriceService(logger, browserApi))
 		// Passing `browserApi` threads the storage port into ProfileService AND, because the port
 		// carries alarms, ACTIVATES SessionManager's proactive TTL auto-lock (dormant pre-arc when the
 		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the

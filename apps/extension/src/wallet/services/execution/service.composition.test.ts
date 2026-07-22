@@ -29,6 +29,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
 import { ContactService } from "@/wallet/services/contact/service"
 import { TokenService } from "@/wallet/services/token/service"
+import { PriceService } from "@/wallet/services/price/service"
 import { FpcService } from "@/wallet/services/fpc/service"
 import { TransactionService, TransferType } from "@/wallet/services/transaction/service"
 import { OriginType } from "@/wallet/services/transaction/spec"
@@ -137,6 +138,7 @@ async function makeHarness() {
 	const fakeTask = { complete: vi.fn(), fail: vi.fn(), cancel: vi.fn(), startSubtask: vi.fn() }
 	fakeTask.startSubtask.mockReturnValue(fakeTask)
 	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
+	collection.add(svc(PriceService.name, { getUsableQuote: async () => undefined }))
 
 	const service = new ExecutionService(logger, ctrl.gate, () => fakePxeClient)
 	collection.add(service)
