@@ -2,26 +2,45 @@
  *  bounds `unwrapParams` so a hostile params object can't drive a huge loop. */
 const MAX_RPC_ARITY = 256
 
-export const wrapParams = (params: unknown[]): Record<number, unknown> => {
-	return params.reduce<Record<number, unknown>>((acc, v, i) => {
+/**
+ * Positional params wrapped with an EXPLICIT arity in `n`.
+ *
+ * The arity field exists because the wire is JSON: `JSON.stringify` DROPS
+ * object keys whose value is `undefined`, so a call like `f(a, undefined, c)`
+ * wrapped as `{0: a, 1: undefined, 2: c}` arrives as `{0: a, 2: c}` — and a
+ * gap-stopping reader then truncates EVERY argument after the hole (observed
+ * live: `exportPlain(id, undefined, credentialData)` reached the service as
+ * `exportPlain(id)`). `n` preserves the true length so holes survive the
+ * round-trip as `undefined`, which is what optional parameters expect.
+ */
+export const wrapParams = (params: unknown[]): Record<number, unknown> & { n: number } => {
+	const acc: Record<number, unknown> & { n: number } = { n: Math.min(params.length, MAX_RPC_ARITY) }
+	params.slice(0, MAX_RPC_ARITY).forEach((v, i) => {
 		acc[i] = v
-		return acc
-	}, {})
+	})
+	return acc
 }
 
 /**
- * Reverse `wrapParams`: read the contiguous `0..n` prefix into an array.
+ * Reverse `wrapParams`: read `0..n-1` (missing keys → `undefined`), capped at
+ * `MAX_RPC_ARITY`.
  *
- * Hardened against hostile input. The previous implementation took
- * `max(keys)` and looped `0..max`, so a crafted `{999999999: "x"}` (which
- * passes the service's typeof-object guard) drove a ~10^9-iteration loop — a
- * trivial internal DoS. This reads only the contiguous prefix and stops at the
- * first gap, capped at `MAX_RPC_ARITY`, so sparse / oversized key sets degrade
- * to a short array instead of a runaway loop.
+ * Hardened against hostile input, same posture as before: a crafted
+ * `{999999999: "x"}` or a bogus/huge `n` cannot drive a runaway loop — `n` is
+ * honored only when it's a sane integer within the cap. Payloads WITHOUT `n`
+ * (a hostile hand-rolled object, or a stale pre-`n` sender) degrade to the
+ * old contiguous-prefix read, which stops at the first gap.
  */
 export const unwrapParams = <T>(params: T): T => {
-	const obj = params as Record<number, unknown>
+	const obj = params as Record<number, unknown> & { n?: unknown }
 	const res: unknown[] = []
+	const n = typeof obj.n === "number" && Number.isInteger(obj.n) && obj.n >= 0 && obj.n <= MAX_RPC_ARITY ? obj.n : undefined
+	if (n !== undefined) {
+		for (let i = 0; i < n; i++) {
+			res.push(Object.hasOwn(obj, i) ? obj[i] : undefined)
+		}
+		return res as T
+	}
 	for (let i = 0; i < MAX_RPC_ARITY && Object.hasOwn(obj, i); i++) {
 		res.push(obj[i])
 	}

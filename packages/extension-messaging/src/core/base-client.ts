@@ -114,7 +114,7 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		const content = {
 			requestId,
 			method,
-			params: jsonSanitize(wrapParams(params)) as Parameters<TRequests[T]>,
+			params: jsonSanitize(wrapParams(params)) as unknown as Parameters<TRequests[T]>,
 		}
 		const timeoutMs = this.getRequestTimeoutMs(method)
 		this.logDebug(`→ ${methodName}`)
