@@ -148,6 +148,11 @@ async function handleBackup() {
 		[COMPAT_EPOCH_FIELD]: CURRENT_COMPAT_EPOCH,
 		[BACKUP_SCHEMA_VERSION_FIELD]: CURRENT_BACKUP_SCHEMA_VERSION,
 		"master-key": key,
+		// Item 1b: preserve the user's ACTIVE-network selection (a top-level raw network id, like
+		// `master-key` — NOT a slice). Restore resolves it against the restored rows; absent (older
+		// backups / no active network) → the import falls back to the primary network. `undefined`
+		// is dropped by JSON.stringify, so the field is simply absent when there's no active network.
+		"active-network-id": appStore.network?.id,
 		data: {},
 	}
 

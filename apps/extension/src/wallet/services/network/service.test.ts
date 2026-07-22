@@ -800,6 +800,26 @@ describe("NetworkService public API (M4.10)", () => {
 		})
 	})
 
+	describe("setActiveForProfile (item 1b — restore active selection before finalizeRestore)", () => {
+		// The harness's profileService returns profile "p1"; addNetwork stamps rows with p1.
+		test("writes the active pointer for a profile-owned network without an active session", async () => {
+			const { service } = setupServiceWithStorage({ "https://rpc.test/1": nodeInfoForChain(1) })
+			const net = await service.addNetwork("A", "https://rpc.test/1")
+			const written = await service.setActiveForProfile("p1", net.id)
+			expect(written).toBe(net.id)
+			expect((await service.getActiveNetwork())?.id).toBe(net.id)
+		})
+
+		test("rejects a hostile/unowned networkId (requireOwnedRow)", async () => {
+			const { service } = setupServiceWithStorage({ "https://rpc.test/1": nodeInfoForChain(1) })
+			const net = await service.addNetwork("A", "https://rpc.test/1")
+			// A network owned by p1, but a DIFFERENT profileId → rejected.
+			await expect(service.setActiveForProfile("someone-else", net.id)).rejects.toThrow()
+			// A networkId that doesn't exist at all → rejected.
+			await expect(service.setActiveForProfile("p1", "no-such-network")).rejects.toThrow()
+		})
+	})
+
 	describe("deleteNetwork", () => {
 		test("rejects ACTIVE_NETWORK when target is the current active id", async () => {
 			const { service } = setupServiceWithStorage({

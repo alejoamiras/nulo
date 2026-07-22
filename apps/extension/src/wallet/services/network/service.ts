@@ -155,6 +155,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		"setActiveNetwork",
 		"getActiveNetwork",
 		"getPrimaryNetwork",
+		"setActiveForProfile",
 		"addEndpoint",
 		"updateEndpoint",
 		"deleteEndpoint",
@@ -280,6 +281,21 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		if (!PRIMARY_SEED) return null
 		const rows = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 		return rows.find((n) => n.chainId === PRIMARY_SEED.chainId) ?? null
+	}
+
+	public async setActiveForProfile(profileId: string, networkId: string): Promise<string> {
+		validateParams(NetworkMethodSchemas.setActiveForProfile.params, [profileId, networkId], "setActiveForProfile")
+		await this.ensureInitialized()
+		try {
+			await this.lock.enter()
+			// `requireOwnedRow` rejects a networkId that isn't a row of THIS profile — the id comes from
+			// an attacker-controlled backup, so it must resolve only within the profile's restored rows.
+			requireOwnedRow(await this.storage.get(networkId), profileId)
+			await this._writeActive(profileId, networkId)
+			return networkId
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	// ── Network mutations ────────────────────────────────────────────────

@@ -234,6 +234,10 @@ export const NetworkMethodSchemas = {
 		params: z.tuple([]),
 		result: NetworkSchema.nullable(),
 	},
+	setActiveForProfile: {
+		params: z.tuple([z.string().min(1), z.string().min(1)]),
+		result: z.string(),
+	},
 	addEndpoint: {
 		params: z.tuple([z.string().min(1), z.string().optional(), RpcUrlSchema]),
 		result: NetworkEndpointSchema,
@@ -294,6 +298,14 @@ export type Methods = {
 	 * `DEFAULT_SEEDS` (a hardcoded `kind` check in the composable would break the e2e flag).
 	 */
 	getPrimaryNetwork(): Network | null
+	/**
+	 * Writes the active-network pointer for a SPECIFIC profile without requiring it to be the active
+	 * session — used by full-backup import to restore the user's active-network selection BEFORE
+	 * `finalizeRestore` activates the profile. `networkId` must be a network owned by `profileId`
+	 * (rejects an unowned/hostile id — the value comes from an attacker-controlled backup). Returns
+	 * the written networkId.
+	 */
+	setActiveForProfile(profileId: string, networkId: string): string
 	/**
 	 * Adds an endpoint to an existing network. Probes the RPC; rejects
 	 * `ENDPOINT_CHAIN_MISMATCH` if the URL's chainId doesn't match.

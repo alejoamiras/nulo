@@ -37,6 +37,7 @@ const profileClient = {
 }
 const networkClient = {
 	restore: vi.fn(),
+	setActiveForProfile: vi.fn(),
 	disconnect: vi.fn(),
 }
 const accountClient = {
@@ -224,6 +225,7 @@ beforeEach(() => {
 	profileClient.deleteProfile.mockReset().mockResolvedValue(undefined)
 	profileClient.disconnect.mockReset()
 	networkClient.restore.mockReset()
+	networkClient.setActiveForProfile.mockReset().mockResolvedValue("new-net-1")
 	networkClient.disconnect.mockReset()
 	accountClient.restore.mockReset()
 	accountClient.disconnect.mockReset()
@@ -296,6 +298,70 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		expect(c.isRestoreHasErrors.value).toBe(false)
 		expect(profileClient.disconnect).toHaveBeenCalled()
 		expect(networkClient.disconnect).toHaveBeenCalled()
+	})
+
+	it("item 1b: restores the ACTIVE-network selection (new id) BEFORE finalizeRestore", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			"active-network-id": "src-net-1",
+			data: {
+				network: [
+					{
+						id: "src-net-1",
+						profileId: "src-profile-id",
+						name: "Testnet",
+						rpcUrl: "https://t/",
+						chainId: 1,
+						kind: "custom",
+						endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
+						primaryEndpointId: "src-ep-1",
+					},
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		// src-net-1 restored under a NEW id → the resolver must pair by index and write the new id.
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		expect(networkClient.setActiveForProfile).toHaveBeenCalledWith("new-id", "new-net-1")
+		// The setter is profileId-parameterized precisely because the profile isn't active until finalize.
+		expect(networkClient.setActiveForProfile.mock.invocationCallOrder[0]).toBeLessThan(
+			profileClient.finalizeRestore.mock.invocationCallOrder[0],
+		)
+	})
+
+	it("item 1b: a legacy backup with NO active-network-id sets nothing (bootstrap picks the primary)", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [
+					{
+						id: "src-net-1",
+						profileId: "src-profile-id",
+						name: "Testnet",
+						rpcUrl: "https://t/",
+						chainId: 1,
+						kind: "custom",
+						endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
+						primaryEndpointId: "src-ep-1",
+					},
+				],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		expect(networkClient.setActiveForProfile).not.toHaveBeenCalled()
 	})
 
 	it("restores account-state AFTER finalizeRestore (store key needs an open session; 5.0.1 regression fix)", async () => {

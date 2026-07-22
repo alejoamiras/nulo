@@ -25,7 +25,14 @@ import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
-import { type BackupSelection, collectRestoreErrors, normalizeAllIds, readBackupFile, remapByMap } from "@/utils/full-backup-helpers"
+import {
+	type BackupSelection,
+	collectRestoreErrors,
+	normalizeAllIds,
+	readBackupFile,
+	remapByMap,
+	resolveRestoredActiveNetworkId,
+} from "@/utils/full-backup-helpers"
 import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, isSupportedCompatEpoch } from "@/wallet/services/backup/backup-migration-registry"
 import { maxBackupSchemaVersion, migrateBackupData } from "@/wallet/services/backup/backup-migrator"
 
@@ -214,6 +221,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			"compat-epoch"?: unknown
 			"backup-schema-version"?: unknown
 			"master-key"?: string
+			"active-network-id"?: string
 			data: Record<string, unknown>
 		}
 		const { checksum, ...backup } = fullBackup
@@ -390,7 +398,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				id: string
 				name: string
 				rpcUrl: string
-				chainId: string
+				chainId: number
 				restoreError?: string
 			}>
 			const createdNetworks = newNetworks.filter((n) => !n.restoreError)
@@ -433,6 +441,22 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// id can't cascade-rewrite already-remapped rows (finding E).
 			remapByMap(data, "networkId", oldToNew)
 			recordRestoreErrors(NETWORK_SERVICE_NAME, newNetworks)
+
+			// Item 1b: restore the user's ACTIVE-network selection. The exported `active-network-id` is
+			// a RAW old id resolved through the COMPLETE source→successful-result pairing (identity for
+			// unchanged ids — the changed-only `oldToNew` above can't be reused). Write it for the NEW
+			// profile via the profileId-parameterized setter BEFORE `finalizeRestore` (the profile isn't
+			// active yet). Absent / hostile / unmatched → skip; the bootstrap primary fallback applies.
+			const restoredActiveId = resolveRestoredActiveNetworkId(backup["active-network-id"], newNetworks, oldNetworks)
+			if (restoredActiveId) {
+				try {
+					await networkService.setActiveForProfile(newProfile.id, restoredActiveId)
+				} catch (activeErr) {
+					// `requireOwnedRow` rejection or a write hiccup — leave the pointer unset; the bootstrap
+					// picks the primary network. Never fail the whole import over the active-network pointer.
+					console.warn("[full-backup] could not restore active-network selection:", activeErr)
+				}
+			}
 
 			// Hoisted above the account try so the token re-link's chain-equality
 			// check (after the try) can see which (chainId, address) pairs were imported.

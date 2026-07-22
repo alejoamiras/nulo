@@ -55,7 +55,7 @@ Validation bar: component/unit + smoke e2e; **all e2e gates build `dist/` first*
 
 ---
 
-## Phase 3 — Preserve the ACTUAL active network across export/import (item 1b)
+## Phase 3 ✓ — Preserve the ACTUAL active network across export/import (item 1b)
 
 Phase 2 makes an imported profile land on the *primary* network; Phase 3 makes it land on *the network you were actually on*. Security-sensitive (backup-format change over attacker-controlled input) — spec'd carefully; gets a focused codex confirm before implementation and again in the post-impl audit.
 
