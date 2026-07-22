@@ -3,7 +3,6 @@ import path from "node:path"
 import fs from "node:fs"
 import http from "node:http"
 import { execSync, spawn, type ChildProcess } from "node:child_process"
-import { tmpdir } from "node:os"
 import type { TestProject } from "vitest/node"
 import {
 	type AztecTestConfig,
@@ -14,7 +13,7 @@ import {
 	createSponsoredFeeOptions,
 	LOCAL_NODE_URL,
 } from "./fixtures/aztec"
-import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, readLock, writeLock } from "./lockfile"
+import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, newAztecDataDir, readLock, writeLock } from "./lockfile"
 import { markBootReady, markBootStarted } from "./sentinel"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -54,10 +53,11 @@ const FAUCET_URL = FAUCET_PORT ? `http://localhost:${FAUCET_PORT}/` : undefined
 
 /** Per-run aztec data directory. Mandatory even for in-memory mode because
  *  some aztec subsystems still write to ~/.aztec/data by default — two
- *  agents writing there at the same time will corrupt LMDB. The path is
- *  recorded in the ownership lockfile so a future run can clean it up
- *  if this run is killed before teardown. */
-let AZTEC_DATA_DIR = path.join(tmpdir(), `nulo-aztec-${process.pid}-${Date.now()}`)
+ *  agents writing there at the same time will corrupt LMDB. On real disk (see
+ *  `newAztecDataDir`/`E2E_DATA_ROOT`), NOT tmpfs. The path is recorded in the
+ *  ownership lockfile so a future run — or `e2e:reap` — can clean it up if this
+ *  run is killed before teardown. */
+let AZTEC_DATA_DIR = newAztecDataDir()
 
 let anvilProcess: ChildProcess | null = null
 /** True only when THIS run wrote `.e2e-state/owned.json` (fresh sandbox or progressive partial
