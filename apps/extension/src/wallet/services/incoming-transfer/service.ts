@@ -11,6 +11,9 @@ import { TransactionService, type Tx } from "@/wallet/services/transaction/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { NoteService, type RawNote } from "@/wallet/services/note/service"
 import { ConfigService } from "@/wallet/services/config/service"
+import { TokenBalanceService } from "@/wallet/services/token-balance/service"
+import { TaskService } from "@/wallet/services/task/service"
+import { TaskStatus } from "@/wallet/services/task/spec"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { PublicEventCursor, PublicScanTips, PublicTokenClassStatus, PublicTransferEvent } from "@nulo/aztec-runtime/pxe/public-events"
 import { IncomingTransferRepository } from "./repository"
@@ -18,6 +21,7 @@ import { PublicEventIndexer, type PublicEventReader } from "./public-event-index
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
 	type Events,
+	type IncomingBalanceOutboxRow,
 	type IncomingPublicEventRecord,
 	type IncomingTransferPending,
 	type IncomingTransferRecord,
@@ -91,6 +95,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		OperationJournalService.name,
 		NoteService.name,
 		ConfigService.name,
+		// D4 balance wiring: TokenBalanceService supplies the causal-ack refresh request; TaskService
+		// supplies the anchored task's terminal state. Declaring both also starts TokenBalance first
+		// (verified acyclic — TokenBalance does not depend on incoming-transfer).
+		TokenBalanceService.name,
+		TaskService.name,
 	]
 
 	public readonly onIncomingTransferAdded = new EventHandler<IncomingTransferRecord>()
@@ -108,6 +117,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private operationJournalService: OperationJournalService = null!
 	private noteService: NoteService = null!
 	private configService: ConfigService = null!
+	private tokenBalanceService: TokenBalanceService = null!
+	private taskService: TaskService = null!
 
 	/** Singleflight scheduler per `(networkId, accountAddress)`. The interval
 	 *  id keeps each scheduler one-at-a-time. */
@@ -185,6 +196,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.operationJournalService = services.get(OperationJournalService.name)
 		this.noteService = services.get(NoteService.name)
 		this.configService = services.get(ConfigService.name)
+		this.tokenBalanceService = services.get(TokenBalanceService.name)
+		this.taskService = services.get(TaskService.name)
 
 		// Public-event scan arm (D3): its own PXE client + the injected indexer collaborator.
 		// The reader curries `networkId → NetworkInfo` (via the same `networkInfoFrom` the note arm
@@ -243,6 +256,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// before resuming any polling — which never fires for tokens
 		// added in a prior session.
 		await this.hydrateSchedulers()
+
+		// D4: drain any balance-refresh outbox rows that survived an SW death (pull-based recovery —
+		// re-requests the refresh, no lost or mis-attributed enqueue).
+		await this.drainBalanceOutbox().catch((err) => this.logWarn(`init drain failed: ${getErrorMessage(err)}`))
 	}
 
 	private onActiveProfileChanged = async (): Promise<void> => {
@@ -551,6 +568,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const target = this.publicWatched.get(key)
 			if (!target) return
 			await this.scanPublicContract(target.profileId, target.networkId, target.contract)
+			await this.drainBalanceOutbox()
 		} catch (error) {
 			this.logWarn(`Public scan failed for ${key}: ${getErrorMessage(error)}`)
 		} finally {
@@ -692,14 +710,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.polling.add(key)
 		try {
 			const contracts = this.watchedContracts.get(key)
-			if (!contracts || contracts.size === 0) return
-			for (const contract of contracts) {
-				try {
-					await this.scanContract(profileId, networkId, accountAddress, contract)
-				} catch (error) {
-					this.logWarn(`Scan failed for ${contract}: ${getErrorMessage(error)}`)
+			if (contracts && contracts.size > 0) {
+				for (const contract of contracts) {
+					try {
+						await this.scanContract(profileId, networkId, accountAddress, contract)
+					} catch (error) {
+						this.logWarn(`Scan failed for ${contract}: ${getErrorMessage(error)}`)
+					}
 				}
 			}
+			// D4: drain the balance-refresh outbox each tick (both arms). The drain is service-global +
+			// active-profile-scoped, so any scheduler tick makes progress on the causal ack.
+			await this.drainBalanceOutbox()
 		} finally {
 			this.polling.delete(key)
 		}
@@ -813,6 +835,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					trustState,
 					blockTimestamp,
 				})
+				// D4 write-side (both arms): the outbox row is written BEFORE the record. A discovered
+				// note changed the chain-factual balance regardless of trust/display state.
+				await this.markBalanceDirty(profileId, networkId, accountAddress, token.id)
 				await this.repo.upsertRecord(record)
 
 				if (trustState === "trusted" && (await this.isVisibilityEnabled())) {
@@ -1372,6 +1397,83 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 */
 	private async markBalanceDirty(profileId: string, networkId: string, account: string, tokenId: number): Promise<void> {
 		await this.repo.setOutbox(profileId, networkId, account, tokenId, { dirtyAt: Date.now() })
+	}
+
+	/**
+	 * Causal task-anchored drain of the balance-refresh outbox (D4/L17). Runs on init + every scan
+	 * tick. ACTIVE-PROFILE-SCOPED — `TokenBalanceService`'s balance map is active-profile-only, so
+	 * draining a background profile's row would look up a missing balance and false-classify it
+	 * stale. Per row (re-read under the lock so a concurrent receipt's `dirtyAt` overwrite / anchor
+	 * clear wins):
+	 *  - anchored + terminal-SUCCESS → the task was minted strictly after this `dirtyAt`, so its
+	 *    projection read chain state INCLUDING the receipt → delete the row (causal).
+	 *  - anchored + terminal-FAILURE/MISSING → clear the anchor; the next drain re-requests.
+	 *  - no anchor → `requestBalanceRefresh`: `{taskId}` (a FRESH task) → anchor it; `{busy}` → keep
+	 *    the row unanchored (a later drain, after the in-flight task drains, mints a fresh one).
+	 *  - `requestBalanceRefresh` throws (no balance row — token/account gone) → delete the stale row.
+	 */
+	private async drainBalanceOutbox(): Promise<void> {
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		let rows: Array<[string, IncomingBalanceOutboxRow]>
+		try {
+			rows = await this.repo.listOutbox()
+		} catch (error) {
+			this.logWarn(`drainBalanceOutbox: listOutbox failed: ${getErrorMessage(error)}`)
+			return
+		}
+		for (const [key] of rows) {
+			const parts = key.split("|")
+			if (parts.length !== 4) continue
+			const [profileId, networkId, accountAddress, tokenIdStr] = parts
+			if (profileId !== profile.id) continue // active-profile-scoped (codex R2-followup-2 #1)
+			const tokenId = Number(tokenIdStr)
+			if (!Number.isInteger(tokenId)) continue
+			await this.withServiceLock(async () => {
+				const current = await this.repo.getOutbox(profileId, networkId, accountAddress, tokenId)
+				if (!current) return
+				if (current.pendingTaskId) {
+					const state = this.readTaskState(current.pendingTaskId)
+					if (state === "success") {
+						await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
+					} else if (state === "failure" || state === "missing") {
+						await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, { dirtyAt: current.dirtyAt })
+					}
+					// pending → keep waiting for the anchored task.
+					return
+				}
+				let result: { taskId: string } | { busy: true }
+				try {
+					result = await this.tokenBalanceService.requestBalanceRefresh(tokenId, accountAddress)
+				} catch {
+					// No balance record for the pair (stale row — token/account removed). Classify + delete.
+					await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
+					return
+				}
+				if ("taskId" in result) {
+					await this.repo.setOutbox(profileId, networkId, accountAddress, tokenId, {
+						dirtyAt: current.dirtyAt,
+						pendingTaskId: result.taskId,
+					})
+				}
+				// busy → keep the row unanchored; a later drain mints a fresh post-`dirtyAt` task.
+			})
+		}
+	}
+
+	/** Terminal state of an anchored refresh task via the TaskService ledger (`missing` = expired/gone). */
+	private readTaskState(taskId: string): "success" | "failure" | "pending" | "missing" {
+		let status: TaskStatus
+		let finished: boolean
+		try {
+			const task = this.taskService.getTaskSync(taskId)
+			status = task.status
+			finished = task.finishedAt !== undefined
+		} catch {
+			return "missing"
+		}
+		if (!finished) return "pending"
+		return status === TaskStatus.Completed ? "success" : "failure"
 	}
 
 	private buildRecord(params: {

@@ -35,6 +35,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { IncomingTransferService } from "./service"
 import { noteRecordId } from "./spec"
 import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
+import { TaskStatus } from "@/wallet/services/task/spec"
 import type { PublicEventReader } from "./public-event-indexer"
 import type {
 	PublicScanTips,
@@ -248,6 +249,45 @@ function makeConfigStub(initialVisibility: boolean = true) {
 	}
 }
 
+/** TokenBalanceService stub with a configurable `requestBalanceRefresh` result (D4). */
+function makeTokenBalanceStub() {
+	const state = { result: { busy: true } as { taskId: string } | { busy: true }, throwOnRequest: false }
+	const requestBalanceRefresh = vi.fn(async (_tokenId: number, _account: string) => {
+		if (state.throwOnRequest) throw new Error("no balance for token")
+		return state.result
+	})
+	return {
+		name: "token-balance",
+		dependencies: [],
+		requestBalanceRefresh,
+		setResult(r: { taskId: string } | { busy: true }) {
+			state.result = r
+		},
+		setThrow(t: boolean) {
+			state.throwOnRequest = t
+		},
+		async start() {},
+	}
+}
+
+/** TaskService stub — `getTaskSync` reads from a settable in-memory ledger (D4 causal ack). */
+function makeTaskStub() {
+	const tasks = new Map<string, { status: number; finishedAt?: number }>()
+	return {
+		name: "task",
+		dependencies: [],
+		getTaskSync: vi.fn((id: string) => {
+			const t = tasks.get(id)
+			if (!t) throw new Error("Invalid task id")
+			return { id, status: t.status, finishedAt: t.finishedAt }
+		}),
+		setTask(id: string, status: number, finishedAt?: number) {
+			tasks.set(id, { status, finishedAt })
+		},
+		async start() {},
+	}
+}
+
 // ── Service bootstrap ───────────────────────────────────────────────────
 
 async function bootService(
@@ -260,6 +300,8 @@ async function bootService(
 		journal?: ReturnType<typeof makeJournalStub>
 		note?: ReturnType<typeof makeNoteStub>
 		config?: ReturnType<typeof makeConfigStub>
+		tokenBalance?: ReturnType<typeof makeTokenBalanceStub>
+		task?: ReturnType<typeof makeTaskStub>
 		publicReader?: PublicEventReader
 	} = {},
 ) {
@@ -272,6 +314,8 @@ async function bootService(
 		journal: stubs.journal ?? makeJournalStub(),
 		note: stubs.note ?? makeNoteStub(),
 		config: stubs.config ?? makeConfigStub(),
+		tokenBalance: stubs.tokenBalance ?? makeTokenBalanceStub(),
+		task: stubs.task ?? makeTaskStub(),
 	}
 	const logger = new LoggerStore(new ConfigStore())
 	// Huge poll interval so scheduler doesn't fire during tests; we exercise
@@ -2207,7 +2251,8 @@ const cursorFor = (c: string = tokenA.contract) =>
 				pendingPage?: unknown
 		  }
 		| undefined
-const outboxFor = (account = "0xa", tokenId = tokenA.id) => outbox.get(`p1|n1|${account}|${tokenId}`) as { dirtyAt: number } | undefined
+const outboxFor = (account = "0xa", tokenId = tokenA.id) =>
+	outbox.get(`p1|n1|${account}|${tokenId}`) as { dirtyAt: number; pendingTaskId?: string } | undefined
 
 describe("IncomingTransferService — public-event scan arm (D3)", () => {
 	test("public first-receive: creates a hidden record, trust unknown→pending, emits Pending, writes outbox", async () => {
@@ -2615,5 +2660,212 @@ describe("IncomingTransferService — public-arm lifecycle (D3)", () => {
 
 		expect(cursorFor()).toBeUndefined()
 		expect(outboxFor()).toBeUndefined()
+	})
+})
+
+// ── Balance-refresh outbox drain (Phase 3: D4 causal task-anchored ack) ─────
+
+async function drain(service: unknown): Promise<void> {
+	await (service as { drainBalanceOutbox: () => Promise<void> }).drainBalanceOutbox()
+}
+
+describe("IncomingTransferService — balance-refresh outbox (D4 write-side)", () => {
+	test("outbox written regardless of trust state (a BLOCKED receipt still marks the balance dirty)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "blocked",
+			updatedAt: 0,
+		})
+		state.responses.push(pubPage([pubEvent({ txHash: "0xblocked" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xblocked|0")?.hidden).toBe(true)
+		expect(outboxFor()).toBeDefined()
+	})
+
+	test("coalescing: N receipts for one (account, token) → ONE outbox row", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		state.responses.push(pubPage([pubEvent({ txHash: "0xr1" }), pubEvent({ txHash: "0xr2", txIndexWithinBlock: 1 })]))
+
+		await scanPublic(service)
+
+		expect([...outbox.keys()].filter((k) => k.startsWith("p1|n1|0xa|"))).toHaveLength(1)
+	})
+
+	test("private-arm parity: a discovered NOTE marks the balance dirty too", async () => {
+		const noteStub = makeNoteStub({ [tokenA.contract]: [note({ content: { value: "1000" } })] })
+		const { service } = await bootService({
+			account: publicAccountStub(),
+			token: makeTokenStub([tokenA]),
+			note: noteStub,
+		})
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service, tokenA.contract)
+
+		expect(outbox.get("p1|n1|0xa|1")).toBeDefined()
+	})
+})
+
+describe("IncomingTransferService — balance-refresh drain (D4 causal ack)", () => {
+	test("row deleted ONLY on its pendingTaskId's terminal-SUCCESS, NOT on the enqueue return", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const task = makeTaskStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance, task })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.setResult({ taskId: "T1" })
+
+		await drain(service) // requests refresh, anchors T1 — row REMAINS
+		expect(outboxFor()?.pendingTaskId).toBe("T1")
+
+		task.setTask("T1", TaskStatus.Processing) // not terminal
+		await drain(service)
+		expect(outboxFor()).toBeDefined() // still there
+
+		task.setTask("T1", TaskStatus.Completed, Date.now()) // terminal-success
+		await drain(service)
+		expect(outboxFor()).toBeUndefined() // NOW deleted
+	})
+
+	test("in-flight-coalescing interleave: T1 succeeds while B is busy → B's row survives until a FRESH T2 succeeds", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const task = makeTaskStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance, task })
+
+		// Receipt A: drain anchors a fresh T1.
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.setResult({ taskId: "T1" })
+		await drain(service)
+		expect(outboxFor()?.pendingTaskId).toBe("T1")
+
+		// Receipt B arrives (clears the anchor, newer dirtyAt); the drain finds T1 still pending → busy.
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 200 })
+		tokenBalance.setResult({ busy: true })
+		await drain(service)
+		expect(outboxFor()).toEqual({ dirtyAt: 200 }) // unanchored
+
+		// T1 completes on pre-B chain state — but B's row has NO anchor, so it is NOT deleted.
+		task.setTask("T1", TaskStatus.Completed, Date.now())
+		await drain(service)
+		expect(outboxFor()).toBeDefined()
+
+		// A later drain (T1 drained) mints a FRESH T2 (created after dirtyAt=200) and anchors it.
+		tokenBalance.setResult({ taskId: "T2" })
+		await drain(service)
+		expect(outboxFor()?.pendingTaskId).toBe("T2")
+
+		// T2 succeeds → its projection saw receipt B → row deletes.
+		task.setTask("T2", TaskStatus.Completed, Date.now())
+		await drain(service)
+		expect(outboxFor()).toBeUndefined()
+	})
+
+	test("a new receipt CLEARS the prior anchor + OVERWRITES dirtyAt", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.setResult({ taskId: "T1" })
+		await drain(service)
+		expect(outboxFor()?.pendingTaskId).toBe("T1")
+
+		// markBalanceDirty (via a fresh receipt) overwrites the whole row.
+		await (service as unknown as { markBalanceDirty: (p: string, n: string, a: string, t: number) => Promise<void> }).markBalanceDirty(
+			"p1",
+			"n1",
+			"0xa",
+			1,
+		)
+		expect(outboxFor()?.pendingTaskId).toBeUndefined()
+		expect(outboxFor()?.dirtyAt).toBeGreaterThan(100)
+	})
+
+	test("task terminal-FAILURE → clear anchor + re-request next drain", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const task = makeTaskStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance, task })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.setResult({ taskId: "T1" })
+		await drain(service)
+
+		task.setTask("T1", TaskStatus.Failed, Date.now())
+		await drain(service)
+		expect(outboxFor()?.pendingTaskId).toBeUndefined() // anchor cleared
+
+		tokenBalance.setResult({ taskId: "T2" })
+		await drain(service)
+		expect(outboxFor()?.pendingTaskId).toBe("T2") // re-requested
+	})
+
+	test("task MISSING (expired / never existed) → clear anchor + re-request", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const task = makeTaskStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance, task })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100, pendingTaskId: "GONE" }) // anchor to a task the ledger doesn't have
+		tokenBalance.setResult({ taskId: "T2" })
+
+		await drain(service) // GONE is missing → clear anchor
+		expect(outboxFor()?.pendingTaskId).toBeUndefined()
+		await drain(service) // re-request
+		expect(outboxFor()?.pendingTaskId).toBe("T2")
+	})
+
+	test("active-profile-scoped: a BACKGROUND profile's outbox row is NOT drained", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p2|n1|0xa|1", { dirtyAt: 100 }) // p2 is NOT the active profile (p1)
+
+		await drain(service)
+
+		expect(tokenBalance.requestBalanceRefresh).not.toHaveBeenCalled()
+		expect(outbox.get("p2|n1|0xa|1")).toBeDefined() // untouched
+	})
+
+	test("stale-row tolerance: a missing balance (requestBalanceRefresh throws) → row deleted, never throws", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.setThrow(true)
+
+		await drain(service)
+
+		expect(outboxFor()).toBeUndefined()
+	})
+
+	test("drain-on-init after simulated SW death: the row survives + a refresh is re-requested", async () => {
+		// Seed a persisted outbox row BEFORE boot (as if the SW died with a pending refresh).
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		const tokenBalance = makeTokenBalanceStub()
+		tokenBalance.setResult({ taskId: "T1" })
+		await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), tokenBalance })
+		await flushPromises()
+
+		expect(tokenBalance.requestBalanceRefresh).toHaveBeenCalledWith(1, "0xa")
+		expect(outboxFor()?.pendingTaskId).toBe("T1")
 	})
 })

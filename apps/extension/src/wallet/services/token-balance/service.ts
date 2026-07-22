@@ -147,6 +147,27 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		this.queue.enqueue(balance)
 	}
 
+	/**
+	 * Causal-ack refresh request for the incoming-transfer balance outbox (D4). Enqueues a
+	 * re-projection for `(tokenId, accountAddress)` and returns a task id ONLY when it minted a
+	 * FRESH task — one created strictly after this call, so its projection is guaranteed to read
+	 * chain state including the just-discovered receipt. When a task is already pending/processing
+	 * (the queue COALESCES), the value still refreshes but this returns `{ busy: true }` WITHOUT a
+	 * task id — reusing the coalesced task's id would false-ack a receipt it may have preceded.
+	 * Throws when no balance row exists for the pair (the caller treats that as a stale outbox row).
+	 */
+	public async requestBalanceRefresh(tokenId: number, accountAddress: string): Promise<{ taskId: string } | { busy: true }> {
+		const balance = (await this.repo.getAll()).find((x) => x.token === tokenId && x.account === accountAddress)
+		if (!balance) {
+			throw new Error(`requestBalanceRefresh: no balance for token ${tokenId} account ${accountAddress}`)
+		}
+		const hadPending = this.queue.hasPendingTask(balance.id)
+		this.queue.enqueue(balance)
+		if (hadPending) return { busy: true }
+		const taskId = this.queue.getPendingTaskId(balance.id)
+		return taskId ? { taskId } : { busy: true }
+	}
+
 	public async refreshAccountBalances(account: string): Promise<void> {
 		for (const balance of (await this.repo.getAll()).filter((x) => x.account === account)) {
 			this.queue.enqueue(balance)
