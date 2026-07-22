@@ -77,7 +77,7 @@ test("makes get task request", async () => {
 			type: MessageType.Request,
 			content: expect.objectContaining({
 				method: "getTask",
-				params: { 0: taskId },
+				params: { 0: taskId, n: 1 },
 			}),
 		}),
 	)
@@ -93,7 +93,7 @@ test("makes get all tasks request", async () => {
 			type: MessageType.Request,
 			content: expect.objectContaining({
 				method: "getTasks",
-				params: {},
+				params: { n: 0 },
 			}),
 		}),
 	)
