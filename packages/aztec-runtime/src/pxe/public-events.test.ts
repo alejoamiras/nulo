@@ -15,7 +15,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { LogResult } from "@aztec/stdlib/logs"
 import { TxHash } from "@aztec/stdlib/tx"
 import { TokenContract, TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { afterEach, beforeEach, describe, expect, test } from "vitest"
+import { describe, expect, test } from "vitest"
 import {
 	_resetPublicEventMemosForTests,
 	fetchPublicTokenTransferEvents,
@@ -88,8 +88,10 @@ const ADDR_A = AztecAddress.fromBigIntUnsafe(0xa1n).toString()
 const ADDR_B = AztecAddress.fromBigIntUnsafe(0xb2n).toString()
 const ZERO_ADDR = AztecAddress.ZERO.toString()
 
-beforeEach(() => _resetPublicEventMemosForTests())
-afterEach(() => _resetPublicEventMemosForTests())
+// The tag + bundled-Token-class-id memos stay WARM across tests on purpose: each is a heavy bb.js
+// Poseidon compute (the class id hashes every function in the Token artifact), and recomputing per
+// test multiplied the bb.js load ~10× — which corrupted the shared bb.js WASM (`std::bad_cast`)
+// under the concurrent full-suite run. The one reset-behavior test resets inline instead.
 
 describe("getTransferLogTag (memo)", () => {
 	test("returns the same memoized promise across calls", () => {
