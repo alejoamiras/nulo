@@ -48,3 +48,17 @@ reject (with blocking findings: Phase 1 is not demonstrably privacy-complete, co
 - Keeping inactive-account polling.
 - Guards-first staging and the Phase-1 off-ramp.
 - Listener-before-snapshot, ABA request versions, retry-zero execution, mutation observation, and switch-back positive controls—once the missing semantics above are fixed.
+---
+
+## v3 confirmation pass (narrow) — CONDITIONAL APPROVE
+- Layer A coherently removes Phase 1's need for a full-scope sequence domain (scope filtering + sync clear +
+  generation checks + event-triggered resnapshot suffice for drop-only containment).
+- Layer B resolves the v2 ordering blockers: durable per-(source,scope) counters prevent restart regression;
+  durable incarnation epochs distinguish deleted/re-imported scopes; same-domain tombstones avoid cross-source
+  seq comparison; atomic watermarks prevent stale snapshot/event clobber. **ABA+restart design sound as written.**
+- Preallocated correlation implementable for both task→journal and journal→task; publication gating covers the
+  intermediate state; durable journal supports restart re-linking; feed-eligible-root-only avoids requiring
+  journals for internal tasks.
+- Sole condition: move Gate 1's `old-seq` assertion to Gate 2 (Phase 1 has no seq). **APPLIED in v3.**
+
+## v1→v2→v3 arc: reject → reject → conditional-approve. USER APPROVED v3 (2026-07-22); A4 = instant-from-cache.

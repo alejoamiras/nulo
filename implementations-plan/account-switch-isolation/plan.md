@@ -206,10 +206,11 @@ lands in Phase 2 once tx records carry `profileId`/`networkId` — Phase 1 does 
 8. **Fail-closed visibility.** Change `isVisibilityEnabled` (`service.ts:692-701`) from fail-open to **fail-closed
    for UI emission/read while retaining records** for recovery. (Promoted from Ask A2 to adopted.)
 
-**Gate 1:** lint · typecheck:all · `bun run test <store/composable/component test paths>` (late A snapshot after
-A→B can't change B; A→B→A rejects the older request; onTxUpdated account+hash; scoped placeholder cleanup;
-delete-during-snapshot does NOT resurrect (reschedule path); a late old-`seq` event is dropped; cross-source
-placeholder-removal survives a concurrent awaiting snapshot; wire-event validation drops malformed) ·
+**Gate 1** (Layer-A containment — NO sequence numbers; seq/cross-source assertions live in Gate 2)**:** lint ·
+typecheck:all · `bun run test <store/composable/component test paths>` (late A snapshot after A→B can't change B
+via the generation check; A→B→A rejects the older request by generation; an event arriving mid-fetch triggers a
+reschedule, not a merge; onTxUpdated account+hash; scoped placeholder cleanup; a foreign-scope event is dropped at
+ingest; wire-event validation drops malformed) ·
 `bun run test:e2e` (both switch entry points) ·
 `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts`
 (**RED before, GREEN after**) · full `NULO_E2E_PROVERLESS=1 bun run e2e:agent` · negative-grep.
@@ -267,6 +268,10 @@ Route every incoming/journal/task event from its PAYLOAD scope into the owning s
 checked, §2.2.6). Move `journalOps`/task-enrichment/subtasks/`pendingCancelJobIds` into the coordinator; migrate
 `activity.vue` to the same store (kill duplicate reload paths). Exact correlation `journalOpId ↔ taskId ↔
 cancelJobId` (from Phase 1a). Keep ingest filtering + guards as permanent defense-in-depth.
+
+Also assert here (moved from Gate 1 per the v3 codex nit — these are Layer-B/seq properties): a late old-`seq`
+event is dropped by the durable protocol; cross-source placeholder-removal survives a concurrent awaiting snapshot
+(same-domain tombstone); the ABA/SW-restart/re-import property tests from the Phase-2 spike stay green.
 
 **Gate 3 (raw-slice-placement structural proof — the v2 fix):** the isolation test asserts **which slice each
 record lands in** (a metamorphic placement invariant: for an arbitrary mix of A/B records + events + a switch, the
@@ -363,8 +368,9 @@ as the more-dangerous proverless proof gate; safety timeout bounds any stall. No
   + side panel legitimately diverge and each must stay self-consistent.
 - **A2 [adopted → Phase 1.8]** `isVisibilityEnabled` fail-closed for UI while retaining records. (Confirm product intent.)
 - **A3 [adopted → Phase 2]** Add `profileId`+`networkId` to new tx records with optional schema + per-row-tolerant codec.
-- **A4 [open]** On switch, show B's records immediately from the per-account slice (Phase 3) or accept brief
-  empty-then-refresh (Phase 1)? UX call — affects whether Phase 3 is hardening or required UX.
+- **A4 [ADOPTED — instant-from-cache]** On switch, B's records show immediately from the per-account slice cache
+  (refreshing in the background). **This makes Phase 3 REQUIRED UX, not optional hardening** — the off-ramp at
+  Phase 1 ships the privacy fix but with empty-then-load, i.e. it does NOT satisfy the approved switch UX.
 - **A5 [adopted → Phase 1.5/4]** Hide scope-ambiguous legacy records from account feeds.
 - **A6 [Phase 0 blocker]** Verify the current green network-suite baseline (README describes a partially-failing one)
   before declaring any gate green.
@@ -391,7 +397,7 @@ disable ALL uncorrelated task cards until atomic — ADOPTED (both audits; the I
 channel + arm-ordering + per-surface runs — ADOPTED from the audits (proof-gate is one-way; v1's "exactly" was
 wrong). Phase-2 optional-schema + per-row-tolerant codec — ADOPTED (Opus). A1 per-document scope — ADOPTED (both).
 **Rejected:** big-bang; account-only keying; generation-token-alone; merge-by-ID under an intervening delete;
-short-poll timing e2e. **Still open:** A4 (empty-then-refresh vs cached slice — affects the Phase-3 boundary).
+short-poll timing e2e. **A4 resolved (user):** instant-from-cache → Phase 3 is required UX (see §5 A4). No open Asks.
 
 ---
 
@@ -443,9 +449,11 @@ expand scope beyond this plan; post-impl = 2–3 independent codex auditors (NOT
   restart story (lossy ABA on SW-restart + re-import); (2) Phase 1a not yet an atomic binding; high: e2e settled-tx
   control impossible (mint ≠ extension tx row); medium: command defects + missing UintNote schema pin. **All folded
   into v3** (`audit-codex.md` holds v1; the v2-pass transcript summarized in the v2→v3 changelog above).
-- **v3:** the two blocking items are resolved by the Layer-A/Layer-B split (containment needs no seq; the durable
-  epoch+counter+watermark protocol is scoped to the retention phases and spiked+property-tested standalone first)
-  and the concrete preallocated-correlation binding. Remaining hard parts (the durable protocol; the atomic binding)
-  are now explicit, isolated, test-gated sub-designs with an early spike — appropriate for implementation rather
-  than further paper-specification. **Decision authority for approval passes to the user at the gate**, with this
-  full audit trail. A further codex pass can be run post-approval as one of the 2–3 post-impl auditors.
+- **v3 confirmation codex pass:** `conditional approve` — "Layer A coherently removes Phase 1's need for a full-scope
+  sequence domain"; "Layer B resolves the v2 ordering blockers … The ABA+restart design is sound as written";
+  "Preallocated correlation is implementable for both … orderings." Sole condition: move the `old-seq` assertion
+  from Gate 1 to Gate 2 (Phase 1 has no seq) — **applied.** (`audit-codex.md` appended.)
+- **APPROVED by the user (2026-07-22):** v3 approved for implementation; A4 resolved = instant-from-cache (Phase 3
+  now required UX). Codex arc: reject v1 → reject v2 → conditional-approve v3 (condition applied). The remaining
+  hard sub-designs (durable protocol, atomic binding) are spike-first + property-test-gated during implementation,
+  and re-audited by the 2–3 post-impl codex auditors.

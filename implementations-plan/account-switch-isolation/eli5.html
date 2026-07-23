@@ -120,13 +120,16 @@
   <p>Also: the popup and the side panel are two separate windows that don't share their "active account" — so the
   fix scopes each window on its <em>own</em> state, not one global value.</p>
 
-  <h2>Open questions for you</h2>
+  <h2>Open questions — all resolved</h2>
   <ul>
-    <li><strong>A4 — feed on switch:</strong> when you switch to B, should we instantly show B's cached activity
-      (needs Phase 3) or briefly show empty then reload (fine after Phase 1)? A UX taste call.</li>
-    <li>A1/A2/A3/A5/A6 are resolved in the plan (per-document scope; privacy-first defaults; verify the test
-      baseline first) — listed there for the record.</li>
+    <li><strong>A4 — feed on switch: DECIDED → instant-from-cache.</strong> Switching to B shows B's cached
+      activity immediately (refreshing in the background). This makes Phase 3 <em>required</em> UX, not optional
+      hardening — the off-ramp at Phase 1 would only give empty-then-load.</li>
+    <li>A1/A2/A3/A5/A6 resolved in the plan (per-document scope; privacy-first defaults; verify the test baseline
+      first). No open questions remain.</li>
   </ul>
+  <p class="muted"><strong>Status: APPROVED.</strong> Codex arc reject v1 → reject v2 → conditional-approve v3
+  (condition applied); Opus conditional-approve. Implementation starting at Phase 0.</p>
 
   <div class="approval">
     <h2 style="margin-top:0">What I need you to approve</h2>
