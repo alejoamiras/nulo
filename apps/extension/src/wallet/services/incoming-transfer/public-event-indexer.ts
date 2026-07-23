@@ -142,11 +142,12 @@ export class PublicEventIndexer {
 	public async probe(
 		networkId: string,
 		contract: string,
-		args: { afterCursor?: PublicEventCursor | null; referenceBlock?: string },
+		args: { afterCursor?: PublicEventCursor | null; referenceBlock?: string; verifyAncestorHash?: string },
 	): Promise<void> {
 		await this.reader.fetchTransferPage(networkId, contract, {
 			afterCursor: args.afterCursor ?? undefined,
 			referenceBlock: args.referenceBlock,
+			verifyAncestorHash: args.verifyAncestorHash,
 		})
 	}
 }

@@ -61,7 +61,13 @@ function makeNode(opts: {
 	onQuery?: (query: unknown) => void
 	throwOnQuery?: Error
 	contractInstance?: { currentContractClassId: Fr } | undefined
+	/** Overrides `contractInstance` for the "checkpointed" anchor only (dual-anchor gate — codex R3 #7). */
+	checkpointedInstance?: { currentContractClassId: Fr } | undefined
 	getContractThrows?: boolean
+	/** `getBlockHashMembershipWitness` result: truthy = the queried hash IS an archive member
+	 *  (ancestor); `undefined` (default when unset & `membershipWitness` omitted) → non-member. */
+	membershipWitness?: unknown
+	onMembershipQuery?: (referenceBlock: unknown, blockHash: unknown) => void
 }): AztecNode {
 	return {
 		getBlockNumber: async (tip?: string) => {
@@ -72,13 +78,18 @@ function makeNode(opts: {
 			header: { getBlockNumber: () => opts.checkpointed ?? 100 },
 			blockHash: { toString: () => "0xcheckpointtip" },
 		}),
+		getBlockHashMembershipWitness: async (referenceBlock: unknown, blockHash: unknown) => {
+			opts.onMembershipQuery?.(referenceBlock, blockHash)
+			return opts.membershipWitness
+		},
 		getPublicLogsByTags: async (query: unknown) => {
 			opts.onQuery?.(query)
 			if (opts.throwOnQuery) throw opts.throwOnQuery
 			return [opts.page ?? []]
 		},
-		getContract: async () => {
+		getContract: async (_addr: unknown, anchor?: unknown) => {
 			if (opts.getContractThrows) throw new Error("node RPC timeout")
+			if (anchor === "checkpointed" && "checkpointedInstance" in opts) return opts.checkpointedInstance
 			return opts.contractInstance
 		},
 	} as unknown as AztecNode
@@ -281,6 +292,48 @@ describe("fetchPublicTokenTransferEvents — query construction", () => {
 	})
 })
 
+describe("fetchPublicTokenTransferEvents — boundary-ancestry probe (codex R3 #1)", () => {
+	test("member witness → returns empty (no log query); queries membership with (referenceBlock, boundaryHash)", async () => {
+		let logQueried = false
+		let membershipArgs: { ref?: unknown; hash?: unknown } = {}
+		const node = makeNode({
+			checkpointed: 100,
+			membershipWitness: { leafIndex: 5n }, // truthy → the boundary IS an ancestor of the checkpoint
+			onQuery: () => {
+				logQueried = true
+			},
+			onMembershipQuery: (ref, hash) => {
+				membershipArgs = { ref, hash }
+			},
+		})
+		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, {
+			referenceBlock: BlockHash.random().toString(),
+			verifyAncestorHash: BlockHash.random().toString(),
+		})
+		expect(result).toEqual({ events: [], scannedThrough: null, hasMore: false, dropped: false })
+		expect(logQueried).toBe(false) // pure verification — no getPublicLogsByTags
+		expect(membershipArgs.ref).toBeDefined()
+		expect(membershipArgs.hash).toBeDefined()
+	})
+
+	test("NON-member (undefined witness) → THROWS (boundary is on a different fork than the checkpoint)", async () => {
+		const node = makeNode({ checkpointed: 100, membershipWitness: undefined })
+		await expect(
+			fetchPublicTokenTransferEvents(node, CONTRACT, {
+				referenceBlock: BlockHash.random().toString(),
+				verifyAncestorHash: BlockHash.random().toString(),
+			}),
+		).rejects.toThrow(/not an ancestor/)
+	})
+
+	test("verifyAncestorHash without a referenceBlock anchor → throws (misuse guard)", async () => {
+		const node = makeNode({ checkpointed: 100, membershipWitness: { leafIndex: 1n } })
+		await expect(fetchPublicTokenTransferEvents(node, CONTRACT, { verifyAncestorHash: BlockHash.random().toString() })).rejects.toThrow(
+			/requires a referenceBlock/,
+		)
+	})
+})
+
 describe("getPublicScanTips", () => {
 	test("returns checkpointed number + hash + finalized number", async () => {
 		const node = makeNode({ checkpointed: 30, finalized: 12 })
@@ -315,6 +368,33 @@ describe("class gate (D2)", () => {
 	test("node getContract throw → unresolved (transient, fail closed, not cached)", async () => {
 		const node = makeNode({ getContractThrows: true })
 		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("unresolved")
+	})
+
+	test("(codex R3 #7) standard at finalized but MALICIOUS at checkpointed → non-standard (dual-anchor)", async () => {
+		const bundled = await getBundledTokenClassId()
+		const node = makeNode({
+			contractInstance: { currentContractClassId: bundled }, // finalized: still the standard Token
+			checkpointedInstance: { currentContractClassId: Fr.random() }, // checkpointed: upgraded to a foreign class
+		})
+		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("non-standard")
+	})
+
+	test("(codex R3 #7) unresolvable at checkpointed (undefined) → unresolved (fail closed at either anchor)", async () => {
+		const bundled = await getBundledTokenClassId()
+		const node = makeNode({
+			contractInstance: { currentContractClassId: bundled },
+			checkpointedInstance: undefined,
+		})
+		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("unresolved")
+	})
+
+	test("(codex R3 #7) bundled class at BOTH anchors → standard", async () => {
+		const bundled = await getBundledTokenClassId()
+		const node = makeNode({
+			contractInstance: { currentContractClassId: bundled },
+			checkpointedInstance: { currentContractClassId: bundled },
+		})
+		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("standard")
 	})
 })
 

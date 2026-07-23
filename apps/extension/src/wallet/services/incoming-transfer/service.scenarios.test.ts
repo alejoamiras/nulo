@@ -2383,17 +2383,23 @@ describe("IncomingTransferService — public-event scan arm (D3)", () => {
 		expect(state.classCalls).toBe(2)
 	})
 
-	test("class gate cached by the finalized tip (one getContract per finalized advance)", async () => {
+	test("class gate cached by BOTH tips: re-resolves on a finalized OR a checkpointed advance (codex R3 #7)", async () => {
 		const { reader, state } = makePublicReader()
 		const { service } = await bootPublic(reader, state)
 
 		await scanPublic(service)
 		await scanPublic(service)
-		expect(state.classCalls).toBe(1)
+		expect(state.classCalls).toBe(1) // same tips across both ticks → cached
 
 		state.tips = { ...state.tips, finalizedBlockNumber: 60 }
 		await scanPublic(service)
-		expect(state.classCalls).toBe(2)
+		expect(state.classCalls).toBe(2) // finalized advanced → re-resolve
+
+		// A checkpointed advance ALSO re-resolves — else a mid-cache malicious upgrade at checkpointed
+		// would be served a stale "standard".
+		state.tips = { ...state.tips, checkpointedBlockNumber: 120 }
+		await scanPublic(service)
+		expect(state.classCalls).toBe(3)
 	})
 
 	test("partial-page cursor advance: next tick resumes afterCursor", async () => {
@@ -2704,7 +2710,7 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 		expect(state.fetchArgs).toHaveLength(1) // capped to one atomic page (no blind multi-fork splice)
 	})
 
-	test("(codex R2 #1) forward scan probes the BOUNDARY anchor first; a boundary reorg → reconcile", async () => {
+	test("(codex R2/R3 #1) forward scan runs an ATOMIC boundary-ancestry probe first; a non-ancestor → reconcile", async () => {
 		const { reader, state } = makePublicReader()
 		const { service } = await bootPublic(reader, state)
 		trust.set(trustKey("p1", "n1", tokenA.contract), {
@@ -2720,12 +2726,15 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 			lastSyncedBlockHash: "0xoldfork",
 			lastScanFinalized: 5,
 		})
-		state.responses.push(new Error("boundary anchor reorged out")) // the up-front boundary probe throws
+		state.responses.push(new Error("boundary is not an ancestor of the checkpoint")) // the ancestry probe throws
 		state.responses.push(pubPage([])) // reconcile window empty → orphan deleted
 
 		await scanPublic(service)
 
-		expect(state.fetchArgs[0].referenceBlock).toBe("0xoldfork") // boundary probe used the LOW anchor
+		// The boundary probe is anchored to the CHECKPOINT hash and proves the boundary is its ancestor
+		// (one atomic membership query — not two independent "canonical now" probes; codex R3 #1).
+		expect(state.fetchArgs[0].referenceBlock).toBe("0xcheckpoint")
+		expect(state.fetchArgs[0].verifyAncestorHash).toBe("0xoldfork")
 		expect(records.get(orphan.id)).toBeUndefined()
 	})
 

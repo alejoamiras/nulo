@@ -143,7 +143,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private readonly publicWatched = new Map<string, { profileId: string; networkId: string; contract: string }>()
 	/** D2 class-gate verdict cached by the FINALIZED tip — one `getContract` per finalized advance,
 	 *  not per tick. Keyed `${profileId}|${networkId}|${contract}`; `unresolved` is never cached. */
-	private readonly classGateCache = new Map<string, { finalizedTip: number; status: PublicTokenClassStatus }>()
+	private readonly classGateCache = new Map<string, { finalizedTip: number; checkpointedTip: number; status: PublicTokenClassStatus }>()
 	private pxeService: PxeServiceClient = null!
 	private indexer: PublicEventIndexer = null!
 	/** Single global lock serializing every writer on this service's storage
@@ -1002,12 +1002,16 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		networkId: string,
 		contract: string,
 		finalizedTip: number,
+		checkpointedTip: number,
 	): Promise<PublicTokenClassStatus> {
+		// Cache by BOTH tips: the gate now resolves the class at the finalized AND checkpointed anchors
+		// (codex R3 #7), so a checkpointed advance must re-resolve — else a mid-cache malicious upgrade
+		// at checkpointed would be served a stale "standard".
 		const key = `${profileId}|${networkId}|${contract}`
 		const cached = this.classGateCache.get(key)
-		if (cached && cached.finalizedTip === finalizedTip) return cached.status
+		if (cached && cached.finalizedTip === finalizedTip && cached.checkpointedTip === checkpointedTip) return cached.status
 		const status = await this.indexer.getClassStatus(networkId, contract)
-		if (status !== "unresolved") this.classGateCache.set(key, { finalizedTip, status })
+		if (status !== "unresolved") this.classGateCache.set(key, { finalizedTip, checkpointedTip, status })
 		return status
 	}
 
@@ -1050,7 +1054,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return
 		}
 
-		const classStatus = await this.resolvePublicClassGate(profileId, networkId, contract, tips.finalizedBlockNumber)
+		const classStatus = await this.resolvePublicClassGate(
+			profileId,
+			networkId,
+			contract,
+			tips.finalizedBlockNumber,
+			tips.checkpointedBlockNumber,
+		)
 		if (classStatus !== "standard") return // fail closed (non-standard / upgraded / unresolvable)
 
 		const cursor = (await this.repo.getCursor(profileId, networkId, contract)) ?? this.freshCursor(0)
@@ -1108,12 +1118,22 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		tips: PublicScanTips,
 		epochAtStart: number,
 	): Promise<void> {
-		// Reorg detection has TWO independent anchors (codex R2 #1):
-		// (1) BOUNDARY — the last-committed block. Probe it up front; a throw means it was reorged out
-		//     across ticks → escalate to reconciliation. This is the LOW anchor the forward pages below
-		//     no longer carry (they pin the HIGH anchor instead).
+		// Reorg detection has TWO anchors (codex R2 #1 / R3 #1):
+		// (1) BOUNDARY — the last-committed block. Prove it is an ANCESTOR of the checkpoint we're about
+		//     to scan toward, via ONE atomic archive-membership query anchored to `checkpointedBlockHash`
+		//     (NOT two independent "currently canonical" probes — those don't establish ancestry across a
+		//     flapping/lying node, so fork-A rows below the cursor could be orphaned undetected). A
+		//     non-member throws → reconcile. When the checkpoint hash is unavailable this tick, fall back
+		//     to a best-effort canonicity probe of the boundary itself (the scan also caps to 1 page).
 		if (cursor.cursor !== null && cursor.lastSyncedBlockHash) {
-			await this.indexer.probe(networkId, contract, { afterCursor: cursor.cursor, referenceBlock: cursor.lastSyncedBlockHash })
+			if (tips.checkpointedBlockHash) {
+				await this.indexer.probe(networkId, contract, {
+					referenceBlock: tips.checkpointedBlockHash,
+					verifyAncestorHash: cursor.lastSyncedBlockHash,
+				})
+			} else {
+				await this.indexer.probe(networkId, contract, { afterCursor: cursor.cursor, referenceBlock: cursor.lastSyncedBlockHash })
+			}
 		}
 		// (2) IN-RANGE — pin EVERY page to the checkpoint FORK HASH captured at tick start. A reorg any
 		//     time during the multi-page scan makes a page read off the wrong fork throw immediately
