@@ -84,3 +84,13 @@ guard + lock-serialized deletion + captured-fence threading, 4537796) is the HEA
 effort "dapp-session execution-lane profile-fence atomicity", which adds the atomic-fence-capture then re-enables
 the cards. NOT rushed AFK. All that work is real + tested (3516 suite) — it just isn't airtight until the
 atomic-fence primitive lands.
+
+## Phase-1a completion: atomic execution-fence primitive (codex r4 blocker).
+captureExecutionFence(expectedProfileId?) now checks active==expected INSIDE the existing runExclusive (same
+lock profileSwitch/deleteProfile take) → atomic, no TOCTOU. Threaded: ExecutionService.captureFence(expected)
+→ executeOperations(...authorizedProfileId) gates BOTH aztec_sendTx (:479) + send_transaction (:415→607);
+dapp-interaction executeAndResolve + silentInteraction pass payload.session.profileId. UI transfer +
+auth-registry live-initiated paths left ungated (undefined). End-to-end: fence.profileId == authorized profile
+or the send aborts before any journal/task → claim scope is the authorized profile. +3 tests; 3519 suite.
+Audit flags: task-created-before-fence is inert on abort (no journal → isFeedEligible never publishes);
+RPC-direct 2-arg executeOperations ungated (dApp sends flow through dapp-interaction, which gates).

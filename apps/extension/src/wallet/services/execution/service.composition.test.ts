@@ -83,7 +83,9 @@ function svc(name: string, methods: Record<string, unknown>) {
 	return { name, dependencies: [], async start() {}, ...methods } as never
 }
 
-async function makeHarness() {
+async function makeHarness(
+	opts: { captureExecutionFence?: (expectedProfileId?: string) => Promise<{ profileId: string; epoch: number }> } = {},
+) {
 	// Per-harness state — no module-level mutable singletons, so the rollout can
 	// call makeHarness() in many tests without cross-contamination.
 	const stages: string[] = []
@@ -116,7 +118,17 @@ async function makeHarness() {
 		svc(ProfileService.name, {
 			getActiveProfile: async () => ({ id: "p1" }),
 			getDeletionState: () => deletionState,
-			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+			// Default honors the atomic Phase 1a contract: capture only if the
+			// expected (authorizing) profile is still active ("p1"), else abort.
+			// Tests override to spy or to force the P2→P1 switch abort.
+			captureExecutionFence:
+				opts.captureExecutionFence ??
+				(async (expectedProfileId?: string) => {
+					if (expectedProfileId !== undefined && expectedProfileId !== "p1") {
+						throw new Error("Active profile changed since approval; aborting execution fence")
+					}
+					return { profileId: "p1", epoch: deletionState.capture("p1") }
+				}),
 		}),
 	)
 	collection.add(svc(NetworkService.name, { getNetwork: async () => NETWORK, getNode: async () => fakeNode }))
@@ -309,4 +321,50 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
 		held2.release()
 	}, 15_000)
+})
+
+describe("ExecutionService composition — fence bound to the authorizing profile (Phase 1a)", () => {
+	test("executeOperations threads authorizedProfileId into captureExecutionFence", async () => {
+		const seen: Array<string | undefined> = []
+		const { service } = await makeHarness({
+			captureExecutionFence: async (expectedProfileId?: string) => {
+				seen.push(expectedProfileId)
+				return { profileId: "p1", epoch: 0 }
+			},
+		})
+		const origin = { type: OriginType.DAPP, name: "test-dapp" } as never
+		const aztecSendOp = {
+			kind: "aztec_sendTx",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fpc" } },
+		} as never
+		// Authorized under p1 (matches active), so the fence captures; we only assert
+		// the value threaded in. (Downstream build is not exercised here.)
+		await service.executeOperations([aztecSendOp], origin, undefined, undefined, "p1").catch(() => {})
+		expect(seen).toContain("p1")
+	})
+
+	test("authorize under P2 → switch to P1 before fence capture → ABORTS: no journal record, no in-flight card", async () => {
+		// Default harness fence: active is p1, so an expected p2 aborts atomically.
+		const { service, journal, getJournalId } = await makeHarness()
+		const origin = { type: OriginType.DAPP, name: "test-dapp" } as never
+		const aztecSendOp = {
+			kind: "aztec_sendTx",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fpc" } },
+		} as never
+
+		// The dApp approved under P2; the user switched back to P1 before fence capture.
+		const results = await service.executeOperations([aztecSendOp], origin, undefined, undefined, "p2")
+
+		// The send did NOT execute: it aborted at the fence, before the dapp-send
+		// executor and thus before any journal write.
+		expect(results[0]?.status).not.toBe("ok")
+		// CRITICAL: no dapp_execute journal record was created for the P2 request —
+		// the journal is the scoped, renderable artifact and it never exists here.
+		expect(getJournalId()).toBe("")
+		expect(await journal.getOperations()).toHaveLength(0)
+	})
 })

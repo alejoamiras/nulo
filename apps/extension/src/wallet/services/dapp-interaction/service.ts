@@ -154,7 +154,20 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the
 			// popup handoff because we stash them on the interaction record.
-			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks)
+			// The pre-check above is advisory (non-atomic vs a switch during
+			// refreshSession/execute); the authorizing profile is threaded so the
+			// fence capture inside executeOperations re-checks it ATOMICALLY under
+			// the profile lock (Phase 1a). Session payloads carry the authorized
+			// profile; non-session payloads pass undefined (no approval-outlives-
+			// switch scenario).
+			const authorizedProfileId = "session" in payload ? payload.session.profileId : undefined
+			const result = await this.executionService.executeOperations(
+				operations,
+				origin,
+				undefined,
+				interaction.hooks,
+				authorizedProfileId,
+			)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
@@ -340,6 +353,10 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			},
 			undefined,
 			hooks,
+			// Bind the fence to the session's authorizing profile — the silent
+			// path also `await refreshSession()`s, so a switch could land between
+			// the line-261 check and fence capture (Phase 1a).
+			payload.session.profileId,
 		)
 	}
 

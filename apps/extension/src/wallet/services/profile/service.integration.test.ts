@@ -350,6 +350,21 @@ describe("ProfileService integration", () => {
 			await expect(service.captureExecutionFence()).rejects.toThrow(/Wallet locked/)
 		}, 30_000)
 
+		test("(Phase 1a) captureExecutionFence(expectedProfileId) binds the fence to the AUTHORIZING profile (atomic abort on switch)", async () => {
+			const { service } = await makeService()
+			const p2 = await service.createProfile("P2", "pass1234") // becomes active
+			const p1 = await service.createProfile("P1", "pass1234") // active is now P1 (switched)
+
+			// Authorized under P2, but active is P1 now → abort rather than fence P1.
+			await expect(service.captureExecutionFence(p2.id)).rejects.toThrow(/Active profile changed since approval/)
+			// Expecting the currently-active profile → captures normally.
+			const fence = await service.captureExecutionFence(p1.id)
+			expect(fence.profileId).toBe(p1.id)
+			// No expected profile (UI transfer / internal) → captures whatever is active (prior behavior).
+			const anyFence = await service.captureExecutionFence()
+			expect(anyFence.profileId).toBe(p1.id)
+		}, 30_000)
+
 		test("exportPlain for passkey profile returns credentialId", async () => {
 			const { service } = await makeService()
 			const profile = await service.createPasskeyProfile("PK")

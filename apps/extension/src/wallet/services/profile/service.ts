@@ -219,13 +219,27 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  + reserve) runs under the SAME lock, so this either captures the pre-delete
 	 *  epoch (then the later addTransaction assert fails) or sees the id already
 	 *  reserved and rejects. Composing getActiveProfile + capture across separate
-	 *  lock acquisitions would let a delete slip between them (codex TOCTOU). */
-	public async captureExecutionFence(): Promise<ExecutionFence> {
+	 *  lock acquisitions would let a delete slip between them (codex TOCTOU).
+	 *
+	 *  Phase 1a (account-switch isolation): `expectedProfileId` binds the fence to
+	 *  the profile that AUTHORIZED the interaction. A dApp approval popup (or a
+	 *  self-paid silent send) can outlive a profile switch — the caller approved
+	 *  under P2, then the user switches to P1 before the fence is captured. Because
+	 *  `profileSwitch` runs under this SAME `runExclusive`, checking
+	 *  `session.profile.id === expectedProfileId` HERE (not before the lock) is
+	 *  atomic with the switch: the fence is captured only while the authorizing
+	 *  profile is still active, else the whole execution aborts before any
+	 *  journal/task is created for the request. Undefined (UI transfers, internal
+	 *  ops) keeps the prior behavior — capture whatever is active. */
+	public async captureExecutionFence(expectedProfileId?: string): Promise<ExecutionFence> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
 			const session = await this.sessionManager.getActive()
 			if (!session || this.deletionState.isReserved(session.profile.id)) {
 				throw new Error("Wallet locked")
+			}
+			if (expectedProfileId !== undefined && session.profile.id !== expectedProfileId) {
+				throw new Error("Active profile changed since approval; aborting execution fence")
 			}
 			return { profileId: session.profile.id, epoch: this.deletionState.capture(session.profile.id) }
 		})

@@ -308,8 +308,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  was deleted meanwhile (D13). Delegates to ProfileService so the active-read +
 	 *  reserved-check + epoch-capture are ATOMIC under the facade lock — composing
 	 *  requireActiveProfile + capture here would leave a TOCTOU (codex verify). */
-	private async captureFence(): Promise<ExecutionFence> {
-		return this.profileService.captureExecutionFence()
+	private async captureFence(expectedProfileId?: string): Promise<ExecutionFence> {
+		return this.profileService.captureExecutionFence(expectedProfileId)
 	}
 
 	public async executeTransfer(
@@ -371,6 +371,13 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
+		/** Phase 1a: the profile that AUTHORIZED this dApp interaction (the
+		 *  session's `profileId`). Threaded into every send-op fence capture so the
+		 *  fence binds atomically to the authorizing profile — a P2→P1 switch
+		 *  between approval and fence capture aborts the whole execution instead of
+		 *  fencing (and journaling) under the wrong profile. Undefined for the RPC
+		 *  direct path + non-session callers (preserves prior behavior). */
+		authorizedProfileId?: string,
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
 		const results: OperationResult[] = []
@@ -412,7 +419,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "send_transaction": {
-						result = await this.executeSendTransaction(operation, origin, operationTask)
+						result = await this.executeSendTransaction(operation, origin, operationTask, authorizedProfileId)
 						break
 					}
 					case "simulate_transaction": {
@@ -468,8 +475,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						// Hooks forwarded ONLY to aztec_sendTx; other ops don't need them.
 						// Capture the deletion fence HERE (a send op that writes a tx),
 						// not at the batch top — read-only ops must not trip the
-						// unlock check, and this is still before the prove (D13).
-						const fence = await this.captureFence()
+						// unlock check, and this is still before the prove (D13). Bound
+						// to the authorizing profile (Phase 1a) — aborts on a switch.
+						const fence = await this.captureFence(authorizedProfileId)
 						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence)
 						break
 					}
@@ -594,9 +602,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		await this.tokenService.addToken(profile.id, op.networkId, op.accountAddress, ti, opContext)
 	}
 
-	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
+	public async executeSendTransaction(
+		op: SendTransactionOperation,
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+		/** Phase 1a: the authorizing profile for a dApp `send_transaction` (threaded
+		 *  from `executeOperations`). Binds the fence to that profile — a switch
+		 *  since approval aborts. Undefined for internal callers (auth-registry
+		 *  grant/enable flows, initiated live), preserving prior behavior. */
+		expectedProfileId?: string,
+	): Promise<string> {
 		await this.ensureInitialized()
-		const fence = await this.captureFence()
+		const fence = await this.captureFence(expectedProfileId)
 		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence)
 	}
 
