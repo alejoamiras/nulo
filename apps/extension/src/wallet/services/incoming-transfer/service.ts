@@ -28,6 +28,7 @@ import {
 	type Events,
 	type IncomingBalanceOutboxRow,
 	type IncomingPublicEventRecord,
+	type IncomingSyncState,
 	type IncomingTransferPending,
 	type IncomingTransferRecord,
 	type IncomingTrustRecord,
@@ -85,6 +86,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		"getIncomingTransferById",
 		"getReceiptFee",
 		"getTrustState",
+		"getSyncState",
 		"setTrustAllow",
 		"setTrustReject",
 		"clearProfile",
@@ -116,6 +118,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public readonly onIncomingTransferDeleted = new EventHandler<IncomingTransferRecord>()
 	public readonly onIncomingTransferPending = new EventHandler<IncomingTransferPending>()
 	public readonly onIncomingTrustChanged = new EventHandler<IncomingTrustRecord>()
+	public readonly onIncomingSyncStateChanged = new EventHandler<{ networkId: string; contract: string; state: IncomingSyncState }>()
 
 	private readonly repo: IncomingTransferRepository
 	private profileService: ProfileService = null!
@@ -173,6 +176,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  simply never read again); only VIEWED public receipts populate it, so it stays tiny. Evicted on
 	 *  chain/profile purge, and never persisted (no storage bloat). */
 	private readonly feeCache = new Map<string, string>()
+
+	/** Last emitted public-scan sync state per `${networkId}|${contract}` (§3 "Catching up…"). Derived,
+	 *  in-memory only (never persisted); backs both the transition-only emit and the getSyncState snapshot. */
+	private readonly syncState = new Map<string, IncomingSyncState>()
 
 	/** E2E-only deterministic race lever. `undefined` in production (the ctor
 	 *  arg is only ever passed inside `if (E2E_PROVERLESS)` in runtime.ts), so
@@ -470,6 +477,25 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
+	/** Current public-scan sync state for `(networkId, contract)` — the token card's mount-time snapshot.
+	 *  `caught-up` for an unknown/never-scanned key (fail toward "no indicator"). */
+	public async getSyncState(networkId: string, contract: string): Promise<IncomingSyncState> {
+		await this.ensureInitialized()
+		return this.syncState.get(`${networkId}|${contract}`) ?? "caught-up"
+	}
+
+	/** Emit `onIncomingSyncStateChanged` ONLY on a transition (dedup by last-emitted per key), so a steady
+	 *  poll — which re-derives `caught-up` every tick — doesn't spam the popup. Guarded by the scan's
+	 *  start-epoch: a purge/delete that bumped the epoch mid-scan makes this emit obsolete — drop it so it
+	 *  can't repopulate state for a token being torn down. */
+	private emitSyncStateIfChanged(networkId: string, contract: string, state: IncomingSyncState, epochAtStart: number): void {
+		if (this.serviceEpoch !== epochAtStart) return
+		const key = `${networkId}|${contract}`
+		if (this.syncState.get(key) === state) return
+		this.syncState.set(key, state)
+		this.emit("onIncomingSyncStateChanged", { networkId, contract, state })
+	}
+
 	/**
 	 * D8 USD-value dust filter, applied at read time. Fails OPEN at every gap (config unavailable,
 	 * filter off, no token, no CoinGecko mapping, stale/absent quote) so a receipt is only ever
@@ -587,6 +613,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
 			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
 			this.feeCache.clear()
+			// Sync-state is keyed by networkId too, so drop it all — a purged profile's tokens are gone, and
+			// a stale entry would only mislead getSyncState (which fails toward caught-up anyway).
+			this.syncState.clear()
 			try {
 				await this.repo.clearProfile(profileId)
 				// Lock held across the wipe AND scheduler rebuild so a queued poll
@@ -614,6 +643,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// leave them dangling for the worker's lifetime.
 			const evict = () => {
 				for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
+				for (const key of this.syncState.keys()) if (key.startsWith(`${networkId}|`)) this.syncState.delete(key)
 			}
 			evict()
 			try {
@@ -725,6 +755,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (interval) clearInterval(interval)
 		this.publicSchedulers.delete(key)
 		this.publicWatched.delete(key)
+		// §3: the contract is no longer scanned (token removed / account gone) → drop its sync state so a
+		// stale `backfilling` can't linger for the worker's lifetime.
+		this.syncState.delete(key)
 	}
 
 	/** Single-flight public poll for one `(networkId, contract)` stream. */
@@ -791,6 +824,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!network) return
 
 		await this.withServiceLock(async () => {
+			// Bump the epoch FIRST — before the scheduler teardown / sync-state eviction / any await — so an
+			// in-flight off-lock scan holding the old epoch can't emit a sync state (or otherwise write) that
+			// repopulates rows for the token we're deleting. (A late bump left a window: stopPublicScheduler
+			// deletes the sync-state entry, then an old scan re-adds it before the bump — codex §3 R2 #3.)
+			this.bumpServiceEpoch()
 			// Scheduler teardown + row mutations both inside the lock so a
 			// concurrent scan can't slip a row in between teardown + wipe.
 			const accounts = await this.accountService.getAccounts(profileId, network.chainId)
@@ -830,9 +868,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				const updated = await this.repo.setTrust(profileId, network.id, token.contract, "unknown")
 				this.emit("onIncomingTrustChanged", updated)
 			}
-
-			// Invalidate any in-flight scans whose PXE snapshot predates this wipe.
-			this.bumpServiceEpoch()
+			// (Epoch already bumped at the top of this lock body — see the note above.)
 		})
 	}
 
@@ -1176,6 +1212,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			tips = await this.indexer.getTips(networkId)
 		} catch (error) {
+			// §3: deliberately DO NOT emit here — a tips/RPC failure can't confirm coverage. Leaving the last
+			// state is correct: flipping to caught-up on a transient blip would wrongly clear the indicator
+			// mid-backfill, and a persistent failure means the node is down (everything is stale, not just this).
 			this.logWarn(`public tips failed for ${contract}: ${getErrorMessage(error)}`)
 			return
 		}
@@ -1187,7 +1226,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			tips.finalizedBlockNumber,
 			tips.checkpointedBlockHash,
 		)
-		if (classStatus !== "standard") return // fail closed (non-standard / upgraded / unresolvable)
+		if (classStatus !== "standard") {
+			// §3: a non-standard / unresolvable token is not scanned for public events → there's nothing to
+			// catch up on. Clear any stale indicator (fail toward "no indicator").
+			this.emitSyncStateIfChanged(networkId, contract, "caught-up", epochAtStart)
+			return // fail closed (non-standard / upgraded / unresolvable)
+		}
 		// `classStatus === "standard"` guarantees a non-null checkpoint hash (the gate fail-closes to
 		// `unresolved` without one). Capture it: it anchors both the pending-page ancestry probe and the
 		// forward scan.
@@ -1199,6 +1243,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// Resume an in-progress reconciliation FIRST (crash / MV3-tick resume) — don't forward-scan
 		// the same tick.
 		if (cursor.reconciling) {
+			// §3: actively reconciling = work in progress → still catching up. NB the caught-up flip comes
+			// from the NEXT tick's forward scan (reconciliation rewinds the cursor, so coverage isn't
+			// re-confirmed until then). Accepted narrow limitation: if reconciliation completes and the node
+			// then fails PERSISTENTLY before that next scan, the indicator stays "catching up" until the node
+			// recovers — the same node-down staleness we accept above, and honest (we can't confirm coverage).
+			this.emitSyncStateIfChanged(networkId, contract, "backfilling", epochAtStart)
 			await this.stepReconciliation(profileId, networkId, contract, network.chainId, epochAtStart)
 			return
 		}
@@ -1207,6 +1257,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (cursor.pendingPage) {
 			const reorged = await this.pendingPageReorged(networkId, contract, cursor.pendingPage, checkpointHash)
 			if (reorged) {
+				this.emitSyncStateIfChanged(networkId, contract, "backfilling", epochAtStart)
 				await this.beginReconciliation(profileId, networkId, contract, network.chainId, cursor, tips, epochAtStart)
 				return
 			}
@@ -1217,7 +1268,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 
 		try {
-			await this.forwardScanOnce(
+			// §3: emit from the pass's COVERAGE — reached the tip (`!hasMore && !dropped`) ⟹ caught up,
+			// budget-incomplete / dropped / degraded ⟹ still backfilling. Independent of the last-event cursor.
+			const reachedTip = await this.forwardScanOnce(
 				profileId,
 				networkId,
 				contract,
@@ -1226,7 +1279,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				tips,
 				epochAtStart,
 			)
+			this.emitSyncStateIfChanged(networkId, contract, reachedTip ? "caught-up" : "backfilling", epochAtStart)
 		} catch (err) {
+			// A reorg throw / transient node error → we did NOT confirm coverage → still catching up.
+			this.emitSyncStateIfChanged(networkId, contract, "backfilling", epochAtStart)
 			if (cursor.lastSyncedBlockHash) {
 				// We had a reorg anchor; a throw means it was reorged out (or a transient node error —
 				// either way rewind + rescan is idempotent, so reconcile).
@@ -1239,7 +1295,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	/** One budgeted forward-scan batch. Persists `pendingPage` before record writes and advances the
-	 *  cursor after; the finalized watermark advances on every tick (even empty ones). */
+	 *  cursor after; the finalized watermark advances on every tick (even empty ones). Returns whether the
+	 *  pass REACHED THE TIP (`!hasMore && !dropped`) — the §3 sync signal (a complete pass covered the
+	 *  whole `(cursor, checkpointed]` window, so it's caught up; a budget-incomplete/dropped/degraded pass
+	 *  is still backfilling). This is coverage, NOT the last-event cursor position — a quiet token with no
+	 *  events still returns `true` on its empty-EOF pass. */
 	private async forwardScanOnce(
 		profileId: string,
 		networkId: string,
@@ -1248,7 +1308,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		cursor: PublicScanCursor,
 		tips: PublicScanTips,
 		epochAtStart: number,
-	): Promise<void> {
+	): Promise<boolean> {
 		// A public scan REQUIRES the checkpoint fork hash: it is the reorg anchor every page pins, the
 		// frame the boundary-ancestry proof is rooted in, AND the committed-fork anchor we persist.
 		// Without it (a degraded tick where `getBlockData("checkpointed")` failed) we cannot scan
@@ -1262,7 +1322,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				{ ...cursor, lastScanFinalized: tips.finalizedBlockNumber },
 				epochAtStart,
 			)
-			return
+			return false // degraded tick — could not scan → not confirmed caught up
 		}
 		const checkpointHash = tips.checkpointedBlockHash
 
@@ -1286,6 +1346,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			referenceBlock: checkpointHash,
 		})
 
+		// §3: a complete pass (not budget-limited, not dropped) covered the whole window up to the pinned
+		// checkpoint — caught up. This is COVERAGE, independent of whether any events landed.
+		const reachedTip = !result.hasMore && !result.dropped
+
 		const watermark = this.finalizedWatermark(cursor, result, tips)
 
 		if (result.scannedThrough === null) {
@@ -1293,7 +1357,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// only as far as we CONTIGUOUSLY scanned (a dropped page scanned nothing, so the floor stays
 			// at the cursor — codex R5 A1). No records are touched.
 			await this.persistCursorLocked(profileId, networkId, contract, { ...cursor, lastScanFinalized: watermark }, epochAtStart)
-			return
+			return reachedTip
 		}
 
 		const recipients = await this.recipientsFor(profileId, chainId)
@@ -1319,7 +1383,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				},
 				epochAtStart,
 			)
-			return
+			return reachedTip
 		}
 
 		// Records to write → persist `pendingPage` BEFORE the writes (D3 crash window). Its fork anchor
@@ -1328,7 +1392,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			...cursor,
 			pendingPage: { fromCursor: cursor.cursor, toScannedThrough: result.scannedThrough, upperHash: checkpointHash },
 		}
-		if (!(await this.persistCursorLocked(profileId, networkId, contract, withPending, epochAtStart))) return
+		if (!(await this.persistCursorLocked(profileId, networkId, contract, withPending, epochAtStart))) return false
 
 		for (const ev of matching) {
 			const account = recipients.get(ev.to.toLowerCase())
@@ -1350,6 +1414,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			},
 			epochAtStart,
 		)
+		return reachedTip
 	}
 
 	/** The finalized rewind floor to persist: `min(finalized, the highest block CONTIGUOUSLY scanned
