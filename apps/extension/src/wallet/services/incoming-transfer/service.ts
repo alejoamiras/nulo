@@ -593,6 +593,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// (codex R2 H1). hydrateSchedulers bumps serviceEpoch internally
 			// so any in-flight scan whose snapshot predates this wipe bails.
 			await this.hydrateSchedulers()
+			// Re-clear AFTER hydration: a getReceiptFee that captured the post-first-bump epoch could have
+			// written an entry in the window before hydrate's second bump. Its record is already gone (so
+			// the entry is unreachable anyway), but sweep it to keep the map honest.
+			this.feeCache.clear()
 		})
 	}
 
@@ -604,9 +608,15 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			this.bumpServiceEpoch()
 			// Evict this network's fee-cache entries (keyed `${networkId}|…`) so a chain purge doesn't
 			// leave them dangling for the worker's lifetime.
-			for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
+			const evict = () => {
+				for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
+			}
+			evict()
 			await this.repo.clearChain(profileId, networkId)
 			await this.hydrateSchedulers()
+			// Re-evict AFTER hydration: closes the window where a getReceiptFee holding the post-first-bump
+			// epoch wrote an (already-unreachable) entry before hydrate's second bump. See clearProfile.
+			evict()
 		})
 	}
 

@@ -79,11 +79,15 @@ const networkService = new NetworkServiceClient()
 const prices = usePrices(priceService)
 
 /** If a reorg/reconcile removes THIS receipt while the page is open, drop to the not-found state rather
- *  than keep showing an orphaned receipt. (A re-mine that only rewrites a surviving record's block/fee
+ *  than keep showing an orphaned receipt. `deletedIds` tombstones the delete so one that races the initial
+ *  load (fired while getIncomingTransferById is still awaiting, when `received` is still null) still wins —
+ *  the post-load check in onMounted honors it. (A re-mine that only rewrites a surviving record's block/fee
  *  emits no event yet, so a stale fee on a still-valid record isn't caught here — see the reorg-staleness
  *  follow-up in lessons/phase-6.md.) */
+const deletedIds = new Set()
 const onReceiptDeleted = (rec) => {
-	if (received.value && rec.id === received.value.id) received.value = null
+	deletedIds.add(rec.id)
+	if (received.value?.id === rec.id) received.value = null
 }
 incomingTransferService.onIncomingTransferDeleted.add(onReceiptDeleted)
 
@@ -145,6 +149,9 @@ const copy = async (value, label) => {
 onMounted(async () => {
 	// Resolve the record FIRST; `loaded` gates the not-found state, so flip it as soon as we know.
 	received.value = (await incomingTransferService.getIncomingTransferById(route.params.id).catch(() => null)) ?? null
+	// A delete that fired WHILE this load was in flight tombstoned the id — honor it so the just-loaded
+	// (now stale) record can't paint over a deletion that already happened.
+	if (received.value && deletedIds.has(received.value.id)) received.value = null
 	loaded.value = true
 	const inc = received.value
 	if (!inc) return
