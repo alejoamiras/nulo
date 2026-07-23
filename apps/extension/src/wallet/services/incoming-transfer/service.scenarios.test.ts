@@ -3464,3 +3464,112 @@ describe("IncomingTransferService — D8 dust filter (getIncomingTransfers)", ()
 		expect(calls).toBe(0)
 	})
 })
+
+describe("IncomingTransferService — public-scan sync state (§3 Catching up)", () => {
+	type SyncEvent = { networkId: string; contract: string; state: string }
+	const capture = (service: unknown): SyncEvent[] => {
+		const events: SyncEvent[] = []
+		;(service as { onIncomingSyncStateChanged: { add: (h: (e: SyncEvent) => void) => void } }).onIncomingSyncStateChanged.add((e) =>
+			events.push(e),
+		)
+		return events
+	}
+	const getSync = (service: unknown, contract = tokenA.contract, networkId = "n1") =>
+		(service as { getSyncState: (n: string, c: string) => Promise<string> }).getSyncState(networkId, contract)
+	// bootPublic's initial scheduler kick already emits + seeds the dedup baseline. Clear it so each test
+	// drives from a known-empty state (parity with how bootPublic clears cursors/outbox).
+	const resetSync = (service: unknown) => (service as { syncState: Map<string, string> }).syncState.clear()
+
+	// A budget-INCOMPLETE scan: maxPages(5) full pages with advancing cursors → the indexer aggregates
+	// hasMore=true → the pass did NOT reach the tip → backfilling.
+	const budgetIncomplete = () =>
+		[10, 20, 30, 40, 50].map((blockNumber) => ({
+			events: [],
+			scannedThrough: { blockNumber, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			hasMore: true,
+			dropped: false,
+		}))
+	// A validator-dropped page: nothing confirmed this tick → still backfilling.
+	const droppedPage = { events: [], scannedThrough: null, hasMore: false, dropped: true }
+
+	test("(CRITICAL) a quiet token whose last event is far back but which SCANS THROUGH to the tip → caught-up", async () => {
+		// The regression guard for the cursor-vs-tip bug: cursor sits at block 10 (its last event), the tip
+		// is 100, and the reader returns an empty EOF (nothing new up to the tip). Coverage — not the
+		// last-event cursor — must decide, so this is CAUGHT-UP, not a permanent "Catching up…".
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		resetSync(service)
+		const events = capture(service)
+		seedCursor({ cursor: { blockNumber: 10, txIndexWithinBlock: 0, logIndexWithinTx: 0 } }) // lastSyncedBlockHash null → no probe
+		await scanPublic(service)
+		expect(await getSync(service)).toBe("caught-up")
+		expect(events).toEqual([{ networkId: "n1", contract: tokenA.contract, state: "caught-up" }])
+	})
+
+	test("a budget-incomplete pass (hasMore) → backfilling", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		resetSync(service)
+		const events = capture(service)
+		state.responses.push(...budgetIncomplete())
+		await scanPublic(service)
+		expect(await getSync(service)).toBe("backfilling")
+		expect(events.map((e) => e.state)).toEqual(["backfilling"])
+	})
+
+	test("a dropped/suspect page → backfilling (nothing confirmed this tick)", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		resetSync(service)
+		state.responses.push(droppedPage)
+		await scanPublic(service)
+		expect(await getSync(service)).toBe("backfilling")
+	})
+
+	test("a non-advancing (hostile) page → backfilling, NOT a false caught-up (§3 R2 #1)", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		resetSync(service)
+		seedCursor({ cursor: { blockNumber: 50, txIndexWithinBlock: 0, logIndexWithinTx: 0 } }) // lastSyncedBlockHash null → no probe
+		// A page whose scannedThrough does NOT advance past the cursor: the indexer stops + marks it dropped,
+		// so it must read as still-working, never as "covered to the tip".
+		state.responses.push({
+			events: [],
+			scannedThrough: { blockNumber: 50, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			hasMore: true,
+			dropped: false,
+		})
+		await scanPublic(service)
+		expect(await getSync(service)).toBe("backfilling")
+	})
+
+	test("emits on TRANSITION only — backfilling → caught-up, then no re-emit of caught-up", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		const { service } = await bootPublic(reader, state)
+		resetSync(service)
+		const events = capture(service)
+
+		state.responses.push(droppedPage) // pass 1: dropped → backfilling (cursor stays null)
+		await scanPublic(service)
+		await scanPublic(service) // pass 2: empty EOF → caught-up
+		await scanPublic(service) // pass 3: empty EOF → still caught-up → no re-emit
+
+		expect(events.map((e) => e.state)).toEqual(["backfilling", "caught-up"])
+	})
+
+	test("a non-standard token is not scanned → caught-up (no indicator), never stranded", async () => {
+		const { reader, state } = makePublicReader({ classStatus: "non-standard" })
+		const { service } = await bootPublic(reader, state)
+		resetSync(service)
+		const events = capture(service)
+		await scanPublic(service)
+		expect(await getSync(service)).toBe("caught-up")
+		expect(events.map((e) => e.state)).toEqual(["caught-up"])
+	})
+
+	test("getSyncState fails toward caught-up for an unknown / never-scanned key", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		expect(await getSync(service, "0xneverscanned")).toBe("caught-up")
+	})
+})

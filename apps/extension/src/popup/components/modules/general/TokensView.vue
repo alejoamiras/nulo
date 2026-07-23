@@ -9,6 +9,7 @@ import { ContentKind } from "@/wallet/services/task/spec"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
+import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 
 import { stringCompare } from "@/utils/string"
 
@@ -168,6 +169,12 @@ function onBalanceAdded(tb) {
 		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
 		isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
 	})
+	// §3: seed the newly-added token's sync state (via the same staleness-guarded applySnapshot, so it can't
+	// clobber a newer live event). With zero prior tokens `seedSyncStates` never ran, so the client isn't
+	// connected yet — this getSyncState also connects it so its future events flow.
+	const networkId = appStore.network?.id
+	const contract = tb.token?.contract
+	if (networkId && contract) applySnapshot(contract, networkId)
 }
 function onBalanceUpdated(tb) {
 	const idx = tokenBalances.value.findIndex((_tb) => _tb.id === tb.id)
@@ -211,6 +218,61 @@ async function fetchTokenImports() {
 	}
 }
 
+// §3 "Catching up…": per-contract public-scan sync state for the ACTIVE network. Seeded on mount /
+// account / network change + on port reconnect via getSyncState (the snapshot the SW holds), then kept
+// live by the transition-only event. Keyed by contract because the scan is per (networkId, contract) and
+// this view only ever shows the active network's tokens.
+//
+// Async-ordering guards (a getSyncState snapshot resolves later than a live event / scope change):
+//  - LIVE events are the freshest truth. `liveClock` ticks per event; `lastLiveAt` records each contract's
+//    last event tick. A snapshot captures the clock at REQUEST and applies only if no newer live event for
+//    that contract landed since — so no stale snapshot (seed OR the onBalanceAdded fill) can clobber a
+//    live event.
+//  - `scopeGen` (below) discards any snapshot whose (account, network) scope changed before it resolved.
+const incomingTransferService = new IncomingTransferServiceClient()
+const syncByContract = ref(new Map())
+let liveClock = 0
+const lastLiveAt = new Map()
+// `scopeGen` identifies the current (account, network) scope. The watcher bumps it SYNCHRONOUSLY (before
+// any await) on every scope change; every snapshot captures it at request and drops if it changed by the
+// time it resolves. This closes the A→B→A cycle where an old scope's in-flight snapshot would otherwise
+// pass a bare network-equality check after the user switched back. `liveClock` is monotonic (never reset),
+// so a stale `lastLiveAt` from a prior scope can never falsely block a newer request.
+let scopeGen = 0
+incomingTransferService.onIncomingSyncStateChanged.add(onSyncStateChanged)
+// A SW restart / port reconnect can drop a transition event → resnapshot on reconnect (same pattern as
+// fetchTokenImports above); the transition-only event alone would never re-fire the missed state.
+incomingTransferService.onConnected.add(seedSyncStates)
+function onSyncStateChanged({ networkId, contract, state }) {
+	// The scan runs per (networkId, contract); ignore events for any network other than the one on screen.
+	if (networkId !== appStore.network?.id) return
+	lastLiveAt.set(contract, ++liveClock)
+	syncByContract.value.set(contract, state)
+}
+// Fetch + apply ONE contract's snapshot, dropping it if it's stale by the time it resolves: the scope
+// (account/network) changed since we requested, or a newer live event for this contract landed since.
+async function applySnapshot(contract, networkId) {
+	const scopeAtStart = scopeGen
+	const requestedAt = liveClock
+	let state
+	try {
+		state = await incomingTransferService.getSyncState(networkId, contract)
+	} catch {
+		return // unavailable (port race) — recovered by the next reconnect reseed
+	}
+	if (scopeGen !== scopeAtStart) return // account/network changed (incl. an A→B→A cycle) → stale
+	if ((lastLiveAt.get(contract) ?? 0) > requestedAt) return // a newer live event owns this contract
+	syncByContract.value.set(contract, state)
+}
+// Refresh the current scope's snapshots (called on mount, after a scope change, and on port reconnect).
+// The map is reset synchronously by the watcher on a scope change, so this only fills — it never reassigns.
+async function seedSyncStates() {
+	const networkId = appStore.network?.id
+	if (!networkId) return
+	const contracts = [...new Set(tokenBalances.value.map((tb) => tb.token?.contract).filter(Boolean))]
+	await Promise.all(contracts.map((contract) => applySnapshot(contract, networkId)))
+}
+
 function refreshBalance(tb) {
 	if (tb?.id) {
 		tokenBalanceService.refreshTokenBalance(tb.id)
@@ -220,16 +282,27 @@ function refreshBalance(tb) {
 }
 
 async function fetchTokenBalances() {
-	tokenBalances.value = (await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)).map((tb) => ({
+	// Guard the outer race with the same scope generation: a rapid account/network switch fires two
+	// fetches; the one that RESOLVES last would otherwise write its (older) balances + reseed and win.
+	const scopeAtStart = scopeGen
+	const balances = (await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)).map((tb) => ({
 		...tb,
 		isUpdating: tasks.value.some((t) => t.content.tbId === tb.id && !t.finishedAt),
 		isMinting: tasks.value.some((t) => t.content.name === tb.token.name && t.content.symbol === tb.token.symbol && !t.finishedAt),
 	}))
+	if (scopeGen !== scopeAtStart) return // scope changed since we started → stale
+	tokenBalances.value = balances
+	await seedSyncStates()
 }
 
+// Watch account AND the active network id — a network switch changes both the token list and the
+// per-(networkId, contract) sync scope. Bump `scopeGen` + reset the indicator map SYNCHRONOUSLY here
+// (before any await) so any in-flight snapshot from the prior scope is invalidated, then reseed.
 watch(
-	() => appStore.account,
+	() => [appStore.account?.address, appStore.network?.id],
 	async () => {
+		scopeGen++
+		syncByContract.value = new Map()
 		await fetchTokenBalances()
 	},
 )
@@ -249,6 +322,9 @@ onBeforeUnmount(() => {
 	taskService.disconnect()
 	tokenBalanceService.disconnect()
 	journalService.disconnect()
+	incomingTransferService.onIncomingSyncStateChanged.remove(onSyncStateChanged)
+	incomingTransferService.onConnected.remove(seedSyncStates)
+	incomingTransferService.disconnect()
 })
 </script>
 
@@ -309,6 +385,7 @@ onBeforeUnmount(() => {
 					v-for="tb in sortedTokenBalances"
 					@onRefreshBalance="refreshBalance(tb)"
 					:tokenBalance="tb"
+					:backfilling="syncByContract.get(tb.token.contract) === 'backfilling'"
 				/>
 			</template>
 			<template v-if="!newTokens.length && !sortedTokenBalances.length && !visibleTokenImports.length">

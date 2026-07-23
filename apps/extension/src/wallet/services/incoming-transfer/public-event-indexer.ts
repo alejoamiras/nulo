@@ -104,6 +104,10 @@ export class PublicEventIndexer {
 			if (cursor && comparePublicPositions(res.scannedThrough, cursor) <= 0) {
 				this.log("warn", "public-indexer: page cursor did not advance — stopping scan", { networkId, contract, cursor })
 				hasMore = false
+				// A non-advancing page is a hostile/broken response — nothing was confirmed, so this is NOT a
+				// clean EOF. Surface it as `dropped` so callers don't read it as "covered to the tip" (the §3
+				// sync signal) and the finalized watermark doesn't advance past what we actually scanned.
+				dropped = true
 				break
 			}
 			for (const e of res.events) events.push(e)

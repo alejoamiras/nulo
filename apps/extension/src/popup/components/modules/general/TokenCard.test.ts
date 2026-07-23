@@ -152,3 +152,49 @@ describe("TokenCard — R5 layout (fiat left, dot split right)", () => {
 		expect(w.text()).toContain("3")
 	})
 })
+
+describe("TokenCard — §3 catching-up indicator", () => {
+	const mountCard = (overrides: Record<string, unknown> = {}, backfilling = false, tokenOverrides: Record<string, unknown> = {}) => {
+		const tokenBalance = {
+			id: 42,
+			token: { ...tokenInfo, ...tokenOverrides },
+			account: "0xacct",
+			publicBalance: "0",
+			privateBalance: "0",
+			updatedAt: 0,
+			isUpdating: false,
+			isMinting: false,
+			...overrides,
+		}
+		return mount(TokenCard, { props: { tokenBalance, backfilling } as never, global: { stubs: STUBS } })
+	}
+
+	test("backfilling with a resolved balance → 'Catching up…' caption beside the still-visible balance", () => {
+		mockQuotes = {}
+		const w = mountCard({ updatedAt: 1, publicBalance: (5n * 10n ** 18n).toString() }, true)
+		expect(w.find('[data-testid="token-catching-up"]').exists()).toBe(true)
+		expect(w.text()).toContain("Catching up")
+		// the balance is shown, NOT the loading block
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+		expect(w.text()).toContain("5")
+	})
+
+	test("backfilling AND balance unresolved (updatedAt===0) → escalates to the shimmer, not the spinner", () => {
+		mockQuotes = {}
+		const w = mountCard({ updatedAt: 0 }, true)
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
+		expect(w.find('[data-testid="token-balance-shimmer"]').exists()).toBe(true)
+		expect(w.find('[data-testid="stub-spinner"]').exists()).toBe(false) // spinner escalated away
+		expect(w.text()).toContain("Catching up")
+	})
+
+	test("NOT backfilling: no catching-up caption; updatedAt===0 keeps the plain spinner loader", () => {
+		mockQuotes = {}
+		const resolved = mountCard({ updatedAt: 1, publicBalance: "5" }, false)
+		expect(resolved.find('[data-testid="token-catching-up"]').exists()).toBe(false)
+
+		const loading = mountCard({ updatedAt: 0 }, false)
+		expect(loading.find('[data-testid="token-balance-shimmer"]').exists()).toBe(false)
+		expect(loading.find('[data-testid="stub-spinner"]').exists()).toBe(true)
+	})
+})
