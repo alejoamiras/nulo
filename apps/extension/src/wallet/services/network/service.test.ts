@@ -17,6 +17,7 @@
 
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
@@ -773,6 +774,49 @@ describe("NetworkService public API (M4.10)", () => {
 			await service.setActiveNetwork(network.id)
 			const got = await service.getActiveNetwork()
 			expect(got?.id).toBe(network.id)
+		})
+	})
+
+	describe("getPrimaryNetwork", () => {
+		// Unit builds set no VITE_NULO_E2E_DEFAULT_NET flag → the primary seed is Alpha (MAINNET).
+		test("returns the network matching the primary (isPrimaryActive) seed's chainId, regardless of insertion order", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/other": nodeInfoForChain(999_999),
+				"https://rpc.test/mainnet": nodeInfoForChain(CHAIN_IDS.MAINNET),
+			})
+			await service.addNetwork("Other", "https://rpc.test/other")
+			const alpha = await service.addNetwork("Alpha V5", "https://rpc.test/mainnet")
+			const primary = await service.getPrimaryNetwork()
+			expect(primary?.id).toBe(alpha.id)
+			expect(primary?.chainId).toBe(CHAIN_IDS.MAINNET)
+		})
+
+		test("returns null when the primary network is absent (e.g. user deleted Alpha)", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/other": nodeInfoForChain(999_999),
+			})
+			await service.addNetwork("Other", "https://rpc.test/other")
+			expect(await service.getPrimaryNetwork()).toBeNull()
+		})
+	})
+
+	describe("setActiveForProfile (item 1b — restore active selection before finalizeRestore)", () => {
+		// The harness's profileService returns profile "p1"; addNetwork stamps rows with p1.
+		test("writes the active pointer for a profile-owned network without an active session", async () => {
+			const { service } = setupServiceWithStorage({ "https://rpc.test/1": nodeInfoForChain(1) })
+			const net = await service.addNetwork("A", "https://rpc.test/1")
+			const written = await service.setActiveForProfile("p1", net.id)
+			expect(written).toBe(net.id)
+			expect((await service.getActiveNetwork())?.id).toBe(net.id)
+		})
+
+		test("rejects a hostile/unowned networkId (requireOwnedRow)", async () => {
+			const { service } = setupServiceWithStorage({ "https://rpc.test/1": nodeInfoForChain(1) })
+			const net = await service.addNetwork("A", "https://rpc.test/1")
+			// A network owned by p1, but a DIFFERENT profileId → rejected.
+			await expect(service.setActiveForProfile("someone-else", net.id)).rejects.toThrow()
+			// A networkId that doesn't exist at all → rejected.
+			await expect(service.setActiveForProfile("p1", "no-such-network")).rejects.toThrow()
 		})
 	})
 

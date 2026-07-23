@@ -33,12 +33,16 @@ export function useProfileBootstrap() {
 		if (active) {
 			appStore.network = active
 		} else {
-			appStore.network = appStore.networks.find((n) => n.kind === "testnet") ?? appStore.networks[0]
-			if (appStore.network) {
-				await managers.network.setActiveNetwork(appStore.network.id)
-			}
+			// No active pointer (e.g. a freshly IMPORTED profile — its active-network selection isn't
+			// restored yet; that's item 1b). Fall back to the profile's PRIMARY network from the
+			// service — single-sourced from the `isPrimaryActive` seed (Alpha in prod, Testnet under
+			// the e2e flag), so it can't diverge from a fresh profile's default or break e2e the way a
+			// hardcoded `kind === "testnet"` did (#305 flipped the default to Alpha but left this).
+			const primary = await managers.network.getPrimaryNetwork()
+			appStore.network = primary ?? appStore.networks[0]
 		}
 
+		// Persist the resolved active network (covers both the restored-active and fallback branches).
 		if (appStore.network) {
 			await managers.network.setActiveNetwork(appStore.network.id)
 		}

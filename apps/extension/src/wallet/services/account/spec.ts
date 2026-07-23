@@ -34,7 +34,11 @@ export const AccountSchema: z.ZodType<Account> = z.object({
 	profileId: z.string(),
 	chainId: z.number(),
 	address: z.string(),
-	index: z.number(),
+	// `index` feeds key derivation (poseidon2Hash → Fr) AND the `array_max(index) + 1` next-index math.
+	// A hostile backup could otherwise carry a negative/fractional/NaN/Infinity index that throws during
+	// Fr construction, or one near 2^53 where `max + 1 === max` silently wedges new-account creation.
+	// Bound it to a nonnegative safe integer whose `+ 1` is still exactly representable.
+	index: z.number().int().nonnegative().lt(Number.MAX_SAFE_INTEGER),
 	type: z.nativeEnum(AccountType),
 	name: z.string(),
 	visible: z.boolean(),

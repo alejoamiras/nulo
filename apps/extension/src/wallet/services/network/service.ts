@@ -103,6 +103,11 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 	},
 ]
 
+/** The one seed marked `isPrimaryActive` (Alpha in prod, Testnet under the e2e flag). Single source
+ *  for the primary/default network — consumed by `getOrInitNetworks` (fresh seed) AND
+ *  `getPrimaryNetwork` (the import/bootstrap fallback), so the two can't disagree. */
+const PRIMARY_SEED = DEFAULT_SEEDS.find((s) => s.isPrimaryActive)
+
 /**
  * Strict RPC-URL equality that tolerates trailing-slash and casing differences
  * on the seed-vs-user-input comparison only. Used by the chainId-zero check
@@ -149,6 +154,8 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		"deleteNetwork",
 		"setActiveNetwork",
 		"getActiveNetwork",
+		"getPrimaryNetwork",
+		"setActiveForProfile",
 		"addEndpoint",
 		"updateEndpoint",
 		"deleteEndpoint",
@@ -265,6 +272,30 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const network = await this.storage.get(id)
 		if (network?.profileId !== profile.id) return null
 		return network
+	}
+
+	public async getPrimaryNetwork(): Promise<Network | null> {
+		validateParams(NetworkMethodSchemas.getPrimaryNetwork.params, [], "getPrimaryNetwork")
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		if (!PRIMARY_SEED) return null
+		const rows = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+		return rows.find((n) => n.chainId === PRIMARY_SEED.chainId) ?? null
+	}
+
+	public async setActiveForProfile(profileId: string, networkId: string): Promise<string> {
+		validateParams(NetworkMethodSchemas.setActiveForProfile.params, [profileId, networkId], "setActiveForProfile")
+		await this.ensureInitialized()
+		try {
+			await this.lock.enter()
+			// `requireOwnedRow` rejects a networkId that isn't a row of THIS profile — the id comes from
+			// an attacker-controlled backup, so it must resolve only within the profile's restored rows.
+			requireOwnedRow(await this.storage.get(networkId), profileId)
+			await this._writeActive(profileId, networkId)
+			return networkId
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	// ── Network mutations ────────────────────────────────────────────────

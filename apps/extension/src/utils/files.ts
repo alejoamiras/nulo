@@ -1,5 +1,3 @@
-import { ensurePermissions } from "./general"
-
 const mimeByExtension: Record<string, string> = {
 	".json": "application/json;charset=utf-8",
 	".txt": "text/plain;charset=utf-8",
@@ -38,11 +36,10 @@ export async function downloadFile({
 	saveAs?: boolean
 	compressionFormat?: CompressionFormat
 }): Promise<void> {
-	const hasPermission = await ensurePermissions({ permissions: ["downloads"] })
-	if (!hasPermission) {
-		throw new Error("Permission for downloads not granted by user")
-	}
-
+	// `downloads` is a REQUIRED manifest permission (always granted), so no `chrome.permissions`
+	// check/request here: the runtime prompt used to fire AFTER the backup was generated, steal
+	// focus, and close the MV3 popup — forcing a full restart. Any genuine failure still surfaces
+	// via `chrome.downloads.download`'s `lastError` below.
 	let blob: Blob
 	let finalFilename = filename
 	if (compressionFormat) {

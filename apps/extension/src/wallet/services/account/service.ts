@@ -72,7 +72,17 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	public async getAccounts(profileId: string, chainId: number, all?: boolean): Promise<Account[]> {
 		await this.ensureInitialized()
-		return (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId && (all || x.visible))
+		// Index-sorted, not storage order: `getValues()` returns rows in insertion order, which after a
+		// full-backup restore is NOT index order — so the default active account (accounts[0]) and the
+		// account list would otherwise be arbitrary. Every consumer only iterates/filters, so sorting here
+		// is the single source that keeps the first account deterministic across fresh and imported profiles.
+		return (
+			(await this.storage.getValues())
+				.filter((x) => x.profileId === profileId && x.chainId === chainId && (all || x.visible))
+				// Address is the tie-breaker so ordering is TOTAL even if a hostile backup restored duplicate
+				// indices (legitimate per-type indices are unique) — no reliance on insertion order anywhere.
+				.sort((a, b) => a.index - b.index || (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
+		)
 	}
 
 	public async getAccount(profileId: string, chainId: number, address: string): Promise<Account | undefined> {

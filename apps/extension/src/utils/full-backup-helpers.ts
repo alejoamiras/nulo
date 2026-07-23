@@ -139,3 +139,32 @@ export function remapByMap(data: Record<string, unknown>, idKey: string, oldToNe
 		})
 	}
 }
+
+/**
+ * Resolve a backup's exported active-network id (a RAW old network id) to the restored NEW network
+ * id, for item 1b (preserve the user's active-network selection across import).
+ *
+ * Uses a COMPLETE source→successful-result pairing by RESULT INDEX — including IDENTITY mappings for
+ * networks whose id didn't change (the `remapByMap` `oldToNew` map above deliberately SKIPS those,
+ * so it can't be reused here). Attacker-safe by construction: the exported id must pair, by index,
+ * with a network that RESTORED SUCCESSFULLY and whose source id isn't duplicated; anything absent,
+ * non-string, failed, duplicated, or unmatched returns `undefined`, and the caller then leaves the
+ * active pointer unset so the bootstrap primary fallback applies. NEVER a global-by-value lookup.
+ */
+export function resolveRestoredActiveNetworkId(
+	exportedActiveId: unknown,
+	newNetworks: ReadonlyArray<{ id: string; restoreError?: unknown }>,
+	oldNetworks: ReadonlyArray<{ id: string }>,
+): string | undefined {
+	if (typeof exportedActiveId !== "string") return undefined
+	const sourceIdCounts = new Map<string, number>()
+	for (const n of oldNetworks) sourceIdCounts.set(n.id, (sourceIdCounts.get(n.id) ?? 0) + 1)
+	const complete = new Map<string, string>()
+	for (let i = 0; i < newNetworks.length; i++) {
+		const restored = newNetworks[i]
+		const old = oldNetworks[i]
+		if (!restored || restored.restoreError || !old || (sourceIdCounts.get(old.id) ?? 0) > 1) continue
+		complete.set(old.id, restored.id)
+	}
+	return complete.get(exportedActiveId)
+}

@@ -36,8 +36,7 @@ export default {
 			run_at: "document_start",
 		},
 	],
-	permissions: ["alarms", "offscreen", "storage", "sidePanel", "unlimitedStorage"],
-	optional_permissions: ["downloads"],
+	permissions: ["alarms", "offscreen", "storage", "sidePanel", "unlimitedStorage", "downloads"],
 	content_security_policy: {
 		extension_pages: "script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob:",
 	},
