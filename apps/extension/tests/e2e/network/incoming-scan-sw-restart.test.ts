@@ -11,11 +11,11 @@
  * service.scenarios.test.ts → "a fresh service instance resumes its scan from the PERSISTED cursor".
  *
  * Flow: deliver receipt A (scan runs, cursor advances, D4 auto-refreshes 1000→1010) → snapshot the feed's
- * card count + the SW liveness timestamp → KILL the SW → deliver receipt B while it's dead → reopen, wait
- * for a FRESHER liveness heartbeat (proves a real respawn, not the surviving pre-kill value), unlock (an
- * MV3 recycle drops the in-memory master secret, so strict mode closes the session and the wallet locks —
- * chrome.storage.session itself persists) → assert the feed grew by EXACTLY ONE card (B, discovered by the
- * resumed scan) and the balance advanced to 1020.
+ * card count (after re-waiting for A's chip so the re-mounted feed is hydrated) → KILL the SW → deliver
+ * receipt B while it's dead → reopen and let the popup route to #/popup/auth (an MV3 recycle drops the
+ * in-memory master secret, so strict mode closes the session and the wallet locks — chrome.storage.session
+ * itself persists; the auth route IS the respawn+lock proof), unlock → assert the feed grew by EXACTLY ONE
+ * card (B, discovered by the resumed scan) and the balance advanced to 1020.
  *
  * Limitation (accepted): no deterministic mid-page pause hook exists for the public scan (the e2e
  * incoming-poll-gate wires only the note arm), so the kill lands at a clean post-A-scan boundary. Mid-scan
@@ -46,16 +46,6 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 		// Session dies with the SW; swallow disconnect noise.
 	}
 }
-
-/** The runtime writes `nulo:liveness = clock.now()` on boot + heartbeat (runtime.ts). Read the current one. */
-const readLiveness = (page: Page): Promise<number | undefined> =>
-	page.evaluate(async () => {
-		try {
-			return (await chrome.storage.session.get("nulo:liveness"))["nulo:liveness"] as number | undefined
-		} catch {
-			return undefined
-		}
-	})
 
 const countIncomingCards = (page: Page): Promise<number> =>
 	page.evaluate(() => document.querySelectorAll('[data-testid="tx-incoming-card"]').length)
@@ -97,11 +87,19 @@ test.skipIf(!hasConfig)(
 				{ timeout: 180_000, polling: 1_000 },
 			)
 
-			// Snapshot the STABLE feed size (post-A) + the last liveness beat, BEFORE the restart. The feed
-			// already holds A's record (+ any mint record); B must add EXACTLY one on top.
+			// Snapshot the STABLE feed size (post-A) BEFORE the restart. Re-wait for A's chip first: navigating
+			// back to activity re-mounts the feed, which hydrates its rows asynchronously — counting before that
+			// settles would sample a stale/empty view and make the +1 delta below meaningless. The feed already
+			// holds A's record (+ any mint record); B must add EXACTLY one on top.
 			await navigateByHash(page, "#/popup/activity")
+			await page.waitForFunction(
+				() =>
+					[...document.querySelectorAll('[data-testid="tx-incoming-kind-chip"]')].some(
+						(c) => (c.textContent || "").trim() === "Public → Public",
+					),
+				{ timeout: 60_000, polling: 1_000 },
+			)
 			const cardsBefore = await countIncomingCards(page)
-			const livenessBefore = (await readLiveness(page)) ?? 0
 			console.log(`✓ receipt A scanned; balance 1000 → 1010; feed has ${cardsBefore} card(s) pre-restart`)
 
 			// ── KILL the SW. An MV3 recycle drops the in-memory master (→ strict mode locks the wallet); the
@@ -112,28 +110,20 @@ test.skipIf(!hasConfig)(
 			// ── Receipt B delivered WHILE the SW is dead — only a resumed scan can discover it.
 			await transferPublicTokens(wallet, aztecConfig.tokenAddress, minter, walletAddress, 10n * D, feeOptions)
 
-			// ── Recovery: reopen, wait for a FRESHER liveness beat (a real respawn, not the surviving value),
-			//    then unlock. The respawned scheduler re-hydrates from the persisted cursor.
+			// ── Recovery: reopen the popup. Routing to #/popup/auth is itself the respawn+lock proof — the MV3
+			//    recycle dropped the in-memory master, so the freshly-booted SW evaluates the session as locked
+			//    and the popup lands on auth. (There's no per-boot generation id to assert on, and the liveness
+			//    heartbeat is only a wall-clock timestamp that can't distinguish a stale pre-kill beat from a
+			//    fresh one — so we gate on the recovered ROUTE, not on liveness.) Then unlock — the respawned
+			//    scheduler re-hydrates from the persisted cursor and kicks an immediate poll.
 			const page2 = await openPopup(tokenReadyExtension)
-			await page2.waitForFunction(
-				async (since) => {
-					try {
-						const v = (await chrome.storage.session.get("nulo:liveness"))["nulo:liveness"]
-						return typeof v === "number" && v > (since as number)
-					} catch {
-						return false
-					}
-				},
-				{ timeout: 45_000, polling: 500 },
-				livenessBefore,
-			)
-			await waitForHash(page2, "#/popup/auth", 20_000)
+			await waitForHash(page2, "#/popup/auth", 45_000)
 			await page2.waitForSelector('[data-testid="auth-password-input"]', { visible: true, timeout: 10_000 })
 			await replaceInputValue(page2, '[data-testid="auth-password-input"]', TEST_PASSWORD)
 			await clickByTestId(page2, "auth-submit")
 			await page2.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 20_000 })
 			await waitForHash(page2, "#/popup/general", 15_000)
-			console.log("✓ SW respawned (fresh liveness) + wallet unlocked after restart")
+			console.log("✓ SW respawned (routed to auth) + wallet unlocked after restart")
 
 			// ── The resumed scan must add EXACTLY receipt B's record — cardsBefore + 1 (no more, no fewer:
 			//    catches both a missed B and a spurious re-index of the pre-restart records).

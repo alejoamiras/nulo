@@ -8,25 +8,32 @@ cases 4–5 as conditional "if feasible" extensions. A sonnet-5 harness-feasibil
 Codex round 1 caught that the e2e alone is **false-green** and cannot prove cursor-resume, so Case 4 ships
 as two complementary pieces:
 
-1. **Unit (the cursor-resume proof, deterministic, flake-free):** `service.scenarios.test.ts` →
-   `"a fresh service instance resumes its scan from the PERSISTED cursor, not block 0"`. Seeds a cursor at
-   block 50, boots a FRESH service over the same in-memory storage (`bootService` doesn't clear cursors),
-   and asserts the first reader call pages with `afterCursor == the persisted cursor` (+ `fromBlock`
-   undefined). A restart that dropped the cursor would fetch from block 0 — this pins the exact property
-   the e2e can't (a from-0 rescan + PK-dedup looks identical end-to-end).
+1. **Unit (the cursor-resume proof, deterministic, flake-free):** `service.scenarios.test.ts` → the
+   `"public-scan cursor resume"` describe, two tests for the two resume branches. (a) No anchor
+   (`lastSyncedBlockHash: null`, cold-start): the FIRST reader call pages with `afterCursor == the persisted
+   cursor` (+ `fromBlock` undefined). (b) With a non-null anchor (the real production post-scan state): the
+   anchor triggers a boundary ancestry probe first, and a later reader call still resumes from the exact
+   persisted cursor with no block-0 fallback. Both boot a FRESH service over the same in-memory storage
+   (`bootService` doesn't clear cursors). A restart that dropped the cursor would fetch from block 0 — this
+   pins the exact property the e2e can't (a from-0 rescan + PK-dedup looks identical end-to-end).
 2. **E2E (the integration rehydration smoke):** `apps/extension/tests/e2e/network/incoming-scan-sw-restart.test.ts`.
 
 Feasible + cheap — it reuses proven infra, not new capability:
 - The CDP `stopServiceWorker` helper (`Runtime.terminateExecution`) is already CI-green in
-  `sw-restart-network.test.ts`; an MV3 SW recycle wipes `chrome.storage.session` (→ the wallet locks) but
-  NOT `chrome.storage.local`, where the scan cursor + records + outbox live (`repository.ts:44-59`).
+  `sw-restart-network.test.ts`; an MV3 SW recycle drops the in-memory master secret (→ strict mode closes
+  the session, so the wallet locks), while `chrome.storage.session` itself PERSISTS across suspension — as
+  does `chrome.storage.local`, where the scan cursor + records + outbox live (`repository.ts:44-59`).
 - **Shape (avoids the false-green codex R1 caught):** deliver receipt A → scan runs, cursor advances, D4
-  auto-refreshes 1000→1010 → **snapshot the feed card count `cardsBefore` + the `nulo:liveness` timestamp**
-  → KILL the SW → deliver receipt B while it's dead → reopen, **wait for a FRESHER liveness beat** (a real
-  respawn, not the surviving pre-kill value — `chrome.storage.session` persists across suspension) → unlock
-  → assert the feed grew to **exactly `cardsBefore + 1`** (B, and no spurious re-index of the pre-restart
-  records). A bare `>= 2` was false-green: the fixture mints 1000 pre-import, and zero-sender mints create
-  a record, so {mint, A} already = 2 before B; the `+1` delta is what proves the resumed scan added B.
+  auto-refreshes 1000→1010 → re-wait for A's chip on the activity feed (the re-mounted feed hydrates its
+  rows async — counting before that settles samples a stale view), then **snapshot the feed card count
+  `cardsBefore`** → KILL the SW → deliver receipt B while it's dead → reopen and let the popup **route to
+  `#/popup/auth`** (the respawn+lock proof — the recycle dropped the in-memory master, so the fresh SW
+  evaluates the session as locked; there's no per-boot generation id, and the `nulo:liveness` wall-clock
+  beat can't distinguish a stale pre-kill value from a fresh one, so we gate on the recovered ROUTE, not on
+  liveness) → unlock → assert the feed grew to **exactly `cardsBefore + 1`** (B, and no spurious re-index of
+  the pre-restart records). A bare `>= 2` was false-green: the fixture mints 1000 pre-import, and zero-sender
+  mints create a record, so {mint, A} already = 2 before B; the `+1` delta is what proves the resumed scan
+  added B.
 - **Accepted limitation:** the public scan has no deterministic mid-page pause hook — the e2e
   `incoming-poll-gate` wires only the note arm (`service.ts:951-956` calls it in `scanContract`, not
   `scanPublicContract`). So the kill lands at a clean post-A-scan boundary, not mid-page; the mid-page/
