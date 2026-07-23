@@ -96,12 +96,22 @@ export interface DappSendExecutorLane {
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
 		reuseController?: AbortController,
+		/** Phase 1a FIX-2: the CAPTURED authorizing profile (`fence.profileId`),
+		 *  NOT the mutable active-now profile. The claim requires the queued
+		 *  record's `profileId` to equal this, and any fresh record it creates is
+		 *  scoped to it — so a profile switch during the mutex wait can't accept a
+		 *  stale foreign-profile record when address+network collide. */
+		capturedProfileId?: string,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }>
 	beginJournal(
 		networkId: string,
 		accountAddress: string,
 		origin: LocalTxOrigin,
 		calls?: { method?: string }[],
+		/** Phase 1a FIX-2: the CAPTURED authorizing profile (`fence.profileId`).
+		 *  When provided, the record is scoped to it instead of the active-now
+		 *  profile — so the record belongs to the profile that AUTHORIZED the send. */
+		capturedProfileId?: string,
 	): Promise<string | undefined>
 	markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void>
 	/** Phase 1a: stamp the driving task's preallocated correlation id onto the
@@ -182,6 +192,10 @@ export class DappSendExecutor {
 			 *  `parentTask.correlationId` by the caller). Stamped onto the claimed
 			 *  or freshly-created record the instant its id is known. */
 			correlationId: string | undefined
+			/** Phase 1a FIX-2: the CAPTURED authorizing profile (`fence.profileId`),
+			 *  read BEFORE the mutex wait. The claim requires the queued record's
+			 *  profile to equal this (never the mutable active-now profile). */
+			capturedProfileId: string | undefined
 			// A THUNK, not a value: the primary-method extraction reads the
 			// (potentially large / adversarial) `op.exec.calls`, and must run
 			// AFTER `acquireSlot` — computing it earlier would delay our FIFO
@@ -211,6 +225,7 @@ export class DappSendExecutor {
 				params.getCalls(),
 				params.hooks,
 				preController,
+				params.capturedProfileId,
 			)
 			journalId = claimed.journalId
 			// Bind the task↔journal correlation the instant the record id is
@@ -311,6 +326,9 @@ export class DappSendExecutor {
 			op.accountAddress,
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
+			// Scope the record to the AUTHORIZING profile (captured fence), not the
+			// mutable active-now profile (Phase 1a FIX-2).
+			fence?.profileId,
 		)
 		// Bind the task↔journal correlation immediately after creating the
 		// record, before the first markJournal transition (Phase 1a).
@@ -409,6 +427,7 @@ export class DappSendExecutor {
 				origin,
 				hooks,
 				correlationId: parentTask?.correlationId,
+				capturedProfileId: fence?.profileId,
 				getCalls: () => {
 					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
 					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
@@ -535,6 +554,7 @@ export class DappSendExecutor {
 				origin,
 				hooks,
 				correlationId: parentTask?.correlationId,
+				capturedProfileId: fence?.profileId,
 				getCalls: () => {
 					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
 					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"

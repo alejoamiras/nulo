@@ -101,15 +101,20 @@ export class ExecutionLane {
 		accountAddress: string,
 		origin: LocalTxOrigin,
 		calls?: { method?: string }[],
+		capturedProfileId?: string,
 	): Promise<string | undefined> {
 		try {
-			const profile = await this.deps.getActiveProfile()
-			if (!profile) return undefined
+			// Prefer the CAPTURED authorizing profile (fence.profileId) so the
+			// record belongs to the profile that authorized the send, not whatever
+			// is active-now (Phase 1a FIX-2). Fall back to the active profile for
+			// callers that don't thread a fence.
+			const profileId = capturedProfileId ?? (await this.deps.getActiveProfile())?.id
+			if (!profileId) return undefined
 			const primaryMethod = pickPrimaryMethod(calls)
 			const op = await this.deps.operationJournal.createOperation({
 				kind: "dapp_execute",
 				origin: "dapp",
-				profileId: profile.id,
+				profileId,
 				accountAddress,
 				networkId,
 				title: primaryMethod ?? "Transaction",
@@ -317,23 +322,38 @@ export class ExecutionLane {
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
 		reuseController?: AbortController,
+		capturedProfileId?: string,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
-		// Active profile at CLAIM time — the profile this send actually executes
-		// under. The claim helper compares it against the queued record's
-		// queue-time `profileId` and refuses a cross-profile claim (codex GAP-2).
-		const profileId = (await this.deps.getActiveProfile())?.id
+		// Phase 1a FIX-2: the profile authority is the CAPTURED fence profile
+		// (sampled before the mutex wait, at authorize time), NEVER the mutable
+		// active-now profile. Re-reading `getActiveProfile()` here was defeatable:
+		// queue under P1 → fence captured under P2 → runInSlot waits → user switches
+		// back to P1 → a claim-time read samples P1 and would ACCEPT the stale P1
+		// queued record when account+network collide, letting the P2-authorized task
+		// stamp onto P1's journal. Comparing against the captured fence profile
+		// refuses that record. The fresh-record fallback is scoped to the SAME
+		// captured profile so a superseding record belongs to the authorizing
+		// profile, not active-now.
 		return claimOrCreateDappExecuteJournalImpl(
 			{
 				operationJournal: this.deps.operationJournal,
 				activeControllers: this.activeControllers,
-				createFreshRecord: (n, a, o, c) => this.beginJournal(n, a, o, c),
+				createFreshRecord: (n, a, o, c) => this.beginJournal(n, a, o, c, capturedProfileId),
 				logger: {
 					debug: (msg) => this.deps.logDebug(msg),
 					info: (msg) => this.deps.logInfo(msg),
 					error: (msg, raw) => this.deps.logError(msg, raw),
 				},
 			},
-			{ networkId, accountAddress, profileId, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
+			{
+				networkId,
+				accountAddress,
+				profileId: capturedProfileId,
+				origin,
+				calls,
+				queuedJournalId: hooks?.queuedJournalId,
+				reuseController,
+			},
 		)
 	}
 

@@ -149,7 +149,8 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		const result = await executor.executeSendTransaction(op, ORIGIN)
 
 		expect(result).toBe("0xhash")
-		expect(deps.lane.beginJournal).toHaveBeenCalledWith("net-1", "0xacct", ORIGIN, [{ method: "dapp_method" }])
+		// 5th arg is the captured fence profileId (undefined here — no fence passed).
+		expect(deps.lane.beginJournal).toHaveBeenCalledWith("net-1", "0xacct", ORIGIN, [{ method: "dapp_method" }], undefined)
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "simulating" })
 		const ctx = (proveAndSend.mock.calls[0] as unknown[])[0] as { scopes: unknown[] }
 		expect(ctx.scopes).toEqual([built.account.address])
@@ -180,6 +181,32 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		const stampOrder = (deps.lane.stampCorrelation as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
 		const markOrder = (deps.lane.markJournal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
 		expect(stampOrder).toBeLessThan(markOrder)
+	})
+
+	test("Phase 1a FIX-2: threads the CAPTURED fence.profileId into beginJournal (record scoped to the authorizing profile)", async () => {
+		const { executor, deps } = makeHarness()
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", method: "dapp_method" }],
+		} as never
+		const fence = { profileId: "p-authorizing", epoch: 3 } as never
+		await executor.executeSendTransaction(op, ORIGIN, undefined, fence)
+
+		// 5th arg = the captured profile, NOT the active-now profile.
+		expect(deps.lane.beginJournal).toHaveBeenCalledWith("net-1", "0xacct", ORIGIN, [{ method: "dapp_method" }], "p-authorizing")
+	})
+
+	test("Phase 1a FIX-2: threads the CAPTURED fence.profileId into claimOrCreateJournal (aztec path)", async () => {
+		const { executor, deps } = makeHarness()
+		const fence = { profileId: "p-authorizing", epoch: 3 } as never
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, fence)
+
+		// claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController, capturedProfileId)
+		const call = (deps.lane.claimOrCreateJournal as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(call[6]).toBe("p-authorizing")
 	})
 
 	test("Phase 1a: no correlationId on the parentTask → stampCorrelation is NOT called (nothing to bind)", async () => {

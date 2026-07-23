@@ -323,19 +323,30 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	public async setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): Promise<OperationRecord> {
 		validateParams(OperationJournalMethodSchemas.setOperationMeta.params, [id, meta], "setOperationMeta")
 		await this.ensureInitialized()
-		const existing = await this._loadValidated(id)
-		if (!existing) {
-			throw new Error(`Operation not found: ${id}`)
+		// Load → merge → write, so it MUST take the same global lock the other
+		// mutators use (the `transitionLock` doc calls this out by name). Beyond the
+		// original last-write-wins concern, FIX-1 needs it: without the lock, a
+		// metadata write that already loaded the record could `storage.set` it back
+		// after a concurrent `deleteOperation` — resurrecting a deleted row. Re-read
+		// FRESH inside the lock so we never write a record a racing delete removed.
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) {
+				throw new Error(`Operation not found: ${id}`)
+			}
+			const updated: OperationRecord = {
+				...existing,
+				title: meta.title !== undefined ? meta.title : existing.title,
+				subtitle: meta.subtitle !== undefined ? meta.subtitle : existing.subtitle,
+				updatedAt: Date.now(),
+			}
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return updated
+		} finally {
+			this.transitionLock.leave()
 		}
-		const updated: OperationRecord = {
-			...existing,
-			title: meta.title !== undefined ? meta.title : existing.title,
-			subtitle: meta.subtitle !== undefined ? meta.subtitle : existing.subtitle,
-			updatedAt: Date.now(),
-		}
-		await this.storage.set(id, updated)
-		this.emit("onOperationUpdated", updated)
-		return updated
 	}
 
 	/**
@@ -457,9 +468,26 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	public async deleteOperation(id: string): Promise<void> {
 		validateParams(OperationJournalMethodSchemas.deleteOperation.params, [id], "deleteOperation")
 		await this.ensureInitialized()
-		const existing = await this._loadValidated(id)
-		if (!existing) return
-		await this.storage.delete(id)
-		this.emit("onOperationDeleted", existing)
+		// Serialize under the SAME global lock as `transitionOperation` /
+		// `setOperationCorrelation` / `touchOperation` (Phase 1a FIX-1). Those are
+		// all load → modify → write; without holding the lock here, a delete could
+		// interleave a concurrent transition that already loaded the record and then
+		// `storage.set`s it back AFTER our `storage.delete` — resurrecting a record
+		// the caller (e.g. the claim-helper superseding a mis-scoped queued card)
+		// intended to remove. With the lock, a transition either fully completes
+		// before the delete (delete then removes the transitioned row) or starts
+		// after it — where `_loadValidated` returns undefined and every locked
+		// mutator (`_transitionLocked` throws "not found"; `touchOperation` /
+		// `setOperationCorrelation` early-return on `!existing`) refuses to
+		// re-create the row. No locked writer resurrects a deleted id.
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return
+			await this.storage.delete(id)
+			this.emit("onOperationDeleted", existing)
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 }

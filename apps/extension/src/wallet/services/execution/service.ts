@@ -244,10 +244,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				deleteController: (journalId) => this.lane.deleteController(journalId),
 				acquireSlot: (networkId, queuedJournalId, onEnqueued, originKey) =>
 					this.lane.acquireSlot(networkId, queuedJournalId, onEnqueued, originKey),
-				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController) =>
-					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController),
-				beginJournal: (networkId, accountAddress, origin, calls) =>
-					this.lane.beginJournal(networkId, accountAddress, origin, calls),
+				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController, capturedProfileId) =>
+					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController, capturedProfileId),
+				beginJournal: (networkId, accountAddress, origin, calls, capturedProfileId) =>
+					this.lane.beginJournal(networkId, accountAddress, origin, calls, capturedProfileId),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 				stampCorrelation: async (journalId, correlationId) => {
 					await this.operationJournal.setOperationCorrelation(journalId, correlationId)

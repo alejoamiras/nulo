@@ -55,3 +55,11 @@ now mirrors that (walletAccounts.find over session intersection); no-wallet-in-s
 TOCTOU: claim-helper now validates the FULL composite scope (account+network+profile), refuses + DELETES the
 mis-scoped record + creates fresh on any mismatch; execution-lane threads getActiveProfile()?.id at claim time.
 +10 tests; full suite 3509; typecheck:all 0; lint 0.
+
+## Codex re-audit r3 → fixed 2 concurrency issues (r4 pending). audit-codex-p1a-r3.md.
+FIX1 resurrection race: deleteOperation + setOperationMeta now acquire the transitionLock → a concurrent
+locked mutator either completes before the delete or finds nothing (every locked writer refuses to recreate
+a missing row). claim-helper supersede-delete stays best-effort but resurrection is now structurally impossible.
+FIX2 fence-profile TOCTOU: ExecutionFence.profileId (captured at authorize) threaded through
+dapp-send-executor→execution-lane→claim-helper; removed the claim-time getActiveProfile re-read. Attack
+(queue P1 → fence P2 → switch back P1 → claim) now REFUSES (record P1 vs captured fence P2). +7 tests; 3516 green.

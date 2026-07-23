@@ -379,6 +379,45 @@ describe("OperationJournalService", () => {
 		})
 	})
 
+	describe("deleteOperation vs. transitions — no resurrection (Phase 1a FIX-1)", () => {
+		test("after deleteOperation, NO locked mutator can resurrect the record", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			await service.deleteOperation(rec.id)
+
+			// Every load→modify→write mutator refuses to re-create a deleted row.
+			await expect(service.transitionOperation(rec.id, { stage: "simulating" })).rejects.toThrow(/not found/i)
+			await expect(service.setOperationCorrelation(rec.id, "cid")).rejects.toThrow(/not found/i)
+			await expect(service.setOperationMeta(rec.id, { title: "x" })).rejects.toThrow(/not found/i)
+			await service.touchOperation(rec.id) // no-ops silently, must not resurrect
+
+			expect(await service.getOperation(rec.id)).toBeUndefined()
+		})
+
+		test("delete concurrent with a transition converges to DELETED (serialized under the shared lock)", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+
+			// Fire both against the same record; the shared transitionLock serializes
+			// them so the transition either completes-then-is-deleted, or throws
+			// not-found after the delete — never writes the row back post-delete.
+			const [del] = await Promise.allSettled([
+				service.deleteOperation(rec.id),
+				service.transitionOperation(rec.id, { stage: "simulating" }),
+			])
+
+			expect(del.status).toBe("fulfilled") // the delete always wins the final state
+			expect(await service.getOperation(rec.id)).toBeUndefined() // no resurrection
+		})
+
+		test("deleteOperation emits onOperationDeleted exactly once and is idempotent on a missing id", async () => {
+			const rec = await service.createOperation(VALID_INPUT)
+			const deleted: string[] = []
+			service.onOperationDeleted.add((op) => deleted.push(op.id))
+			await service.deleteOperation(rec.id)
+			await service.deleteOperation(rec.id) // idempotent — no second emit
+			expect(deleted).toEqual([rec.id])
+		})
+	})
+
 	test("getOperations filter accepts `kind` and isolates token_import from on-chain ops", async () => {
 		await service.createOperation(VALID_INPUT) // transfer
 		await service.createOperation({ ...VALID_INPUT, kind: "dapp_execute" })

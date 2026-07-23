@@ -140,9 +140,12 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(activeControllers.has("fresh-id")).toBe(true)
 	})
 
-	test("PROFILE mismatch (TOCTOU: profile switched between queue and dispatch) → REFUSES + supersedes, even when account matches", async () => {
+	test("PROFILE mismatch (FIX-2 fence TOCTOU) → REFUSES + supersedes, even when account+network collide", async () => {
 		const { deps, createFreshRecord, journal } = makeDeps()
-		// Address collides across profiles, but the record is P1 while the send runs under P2.
+		// The record was queued under P1 (address collides across profiles), but the
+		// send was AUTHORIZED under P2 — so `profileId` here is the CAPTURED fence
+		// profile (P2), NOT the mutable active-now profile (which may be P1 again
+		// after a switch-back). The claim must compare against the fence, and refuse.
 		journal.getOperation.mockResolvedValueOnce({
 			progress: { stage: "queued" },
 			accountAddress: "0xabc",
@@ -151,14 +154,14 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		})
 
 		const result = await claimOrCreateDappExecuteJournal(deps, {
-			...INPUT_NO_QUEUED, // accountAddress 0xabc, networkId net1
-			profileId: "p2", // active profile at claim time differs
+			...INPUT_NO_QUEUED, // accountAddress 0xabc, networkId net1 — both collide with the P1 record
+			profileId: "p2", // captured fence profile (authorizing), not active-now
 			queuedJournalId: "cross-profile-id",
 		})
 
-		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		expect(journal.transitionOperation).not.toHaveBeenCalled() // never stamps P2's send onto P1's journal
 		expect(journal.deleteOperation).toHaveBeenCalledWith("cross-profile-id")
-		expect(createFreshRecord).toHaveBeenCalledOnce()
+		expect(createFreshRecord).toHaveBeenCalledOnce() // fresh record is created (scoped to P2 by the lane)
 		expect(result.journalId).toBe("fresh-id")
 	})
 

@@ -237,3 +237,84 @@ describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole prin
 		expect(controller.signal.aborted).toBe(false)
 	})
 })
+
+describe("ExecutionLane.claimOrCreateJournal — captured-profile authority (Phase 1a FIX-2)", () => {
+	test("uses the CAPTURED fence profile (not active-now): refuses a foreign-profile queued record, supersedes it, creates fresh under the captured profile", async () => {
+		const created: Array<{ profileId: string }> = []
+		const deleted: string[] = []
+		const { lane } = makeLane({
+			// Active-now is P1 — the user switched BACK to P1 during the mutex wait.
+			// If the lane re-read this (the defeated Gap-2 approach) it would accept
+			// the P1 queued record. It must instead use the captured fence (P2).
+			getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+			operationJournal: {
+				// The queued record was created under P1 (address+network collide with the send).
+				getOperation: vi.fn(
+					async (id: string) =>
+						({ id, progress: { stage: "queued" }, accountAddress: "0xA", networkId: "net1", profileId: "p1" }) as never,
+				),
+				transitionOperation: vi.fn(async () => ({}) as never),
+				createOperation: vi.fn(async (input: { profileId: string }) => {
+					created.push(input)
+					return { id: "fresh" } as never
+				}),
+				deleteOperation: vi.fn(async (id: string) => {
+					deleted.push(id)
+				}),
+			} as never,
+		})
+
+		const result = await lane.claimOrCreateJournal(
+			"net1",
+			"0xA",
+			{ type: 1, name: "dapp" } as never,
+			undefined,
+			{ queuedJournalId: "q1" } as never,
+			undefined,
+			"p2", // CAPTURED fence profile — the authorizing profile
+		)
+
+		// Never claimed the P1 record; superseded it; created a fresh record scoped
+		// to the CAPTURED profile P2 — NOT active-now P1.
+		expect(deleted).toContain("q1")
+		expect(created).toHaveLength(1)
+		expect(created[0]?.profileId).toBe("p2")
+		expect(result.journalId).toBe("fresh")
+	})
+
+	test("captured profile MATCHES the record → claims it (no supersede)", async () => {
+		const deleted: string[] = []
+		const transitions: unknown[][] = []
+		const { lane } = makeLane({
+			getActiveProfile: vi.fn(async () => ({ id: "p1" }) as never),
+			operationJournal: {
+				getOperation: vi.fn(
+					async (id: string) =>
+						({ id, progress: { stage: "queued" }, accountAddress: "0xA", networkId: "net1", profileId: "p2" }) as never,
+				),
+				transitionOperation: vi.fn(async (...args: unknown[]) => {
+					transitions.push(args)
+					return {} as never
+				}),
+				createOperation: vi.fn(async () => ({ id: "fresh" }) as never),
+				deleteOperation: vi.fn(async (id: string) => {
+					deleted.push(id)
+				}),
+			} as never,
+		})
+
+		const result = await lane.claimOrCreateJournal(
+			"net1",
+			"0xA",
+			{ type: 1, name: "dapp" } as never,
+			undefined,
+			{ queuedJournalId: "q1" } as never,
+			undefined,
+			"p2", // matches the record's profile
+		)
+
+		expect(deleted).toEqual([]) // not superseded
+		expect(transitions[0]).toEqual(["q1", { stage: "pending" }]) // claimed
+		expect(result.journalId).toBe("q1")
+	})
+})
