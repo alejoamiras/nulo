@@ -220,7 +220,7 @@ malformed/wrong-scope dropped. **Layers:** unit, component, smoke, deterministic
 > **Privacy milestone: Phase 1 closes the leak for the same-network case.** Phases 2–4 harden (regression risk,
 > not new leak) and extend to the full profile/network composite invariant.
 
-### Phase 1a — DEFERRED (see lessons/phase-1a.md) — Task↔journal atomic binding protocol (explicit design + impl; gates the task facet's structural fix)
+### Phase 1a — Task↔journal atomic binding protocol (explicit design + impl; gates the task facet's structural fix)
 No shared correlation ID exists today, and the two producers write in OPPOSITE orders with no transaction spanning
 in-memory TaskService and durable journal storage. Design a concrete **preallocated-correlation** protocol:
 - **Preallocate** a `correlationId` at the very start of a feed-eligible root operation (before EITHER the task
