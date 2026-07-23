@@ -164,7 +164,7 @@ baseline (Ask A6) so no later gate is declared green against red.
 (gate absent from `build:chrome`). **Pass:** all exit 0; baseline recorded; no new console/page errors. **Layers:**
 gate unit, component, smoke, real network.
 
-### Phase 1 — Complete containment (FIRST RELEASABLE SECURITY FIX — all four facets)
+### Phase 1 ✓ — Complete containment (FIRST RELEASABLE SECURITY FIX — all four facets)
 Verifies the **account+chain** invariant (the same-network A→B leak). The full profile/network composite invariant
 lands in Phase 2 once tx records carry `profileId`/`networkId` — Phase 1 does not overclaim it.
 1. **Canonical scope + synchronous switch boundary.** Shared `ActivityScope`/scope-key helper (structured, not
