@@ -1,19 +1,25 @@
 /**
  * Case 4 (implementations-plan/incoming-public-transfers, deferred "if feasible"): the public-event scan
- * RESUMES correctly across a service-worker restart. Proves the persisted cursor + records survive an MV3
- * SW recycle and a freshly-respawned scheduler picks up a NEW receipt delivered while it was down — without
- * re-processing or getting stuck.
+ * REHYDRATES + resumes across a service-worker restart. Delivers a NEW receipt while the SW is dead and
+ * proves the respawned scheduler discovers it (exactly one new record) while the pre-restart records
+ * persist — end-to-end, against real chrome.storage + a real MV3 recycle.
  *
- * Flow: deliver receipt A (scan runs, cursor advances, D4 auto-refreshes 1000→1010) → KILL the SW →
- * deliver receipt B while it's dead → reopen + unlock (SW recycle wipes chrome.storage.session, so the
- * wallet locks; the cursor/records in chrome.storage.local survive) → assert the resumed scan discovers B
- * (a 2nd incoming card + balance → 1020) AND A's record persisted (still exactly the first card). If only
- * a resumed, cursor-aware scan runs would B ever appear.
+ * Scope (honest): this is the INTEGRATION half. It proves durable records + scheduler rehydration + a new
+ * receipt getting picked up. It does NOT by itself prove "resume from the PERSISTED cursor without
+ * re-processing" — a buggy restart that rescanned from block 0 and PK-deduped the old records would look
+ * identical here. That cursor-aware-resume property is proved deterministically at the unit layer:
+ * service.scenarios.test.ts → "a fresh service instance resumes its scan from the PERSISTED cursor".
  *
- * Limitation (accepted): the public scan has no deterministic mid-page pause hook (the e2e incoming-poll
- * -gate wires only the note arm), so the kill lands at a clean post-A-scan boundary, not mid-page —
- * mirroring backup-restore-sw-restart.test.ts's race-timed-kill precedent. The mid-scan reorg/crash
- * windows are covered deterministically at the unit layer (service.scenarios.test.ts D6 suite).
+ * Flow: deliver receipt A (scan runs, cursor advances, D4 auto-refreshes 1000→1010) → snapshot the feed's
+ * card count + the SW liveness timestamp → KILL the SW → deliver receipt B while it's dead → reopen, wait
+ * for a FRESHER liveness heartbeat (proves a real respawn, not the surviving pre-kill value), unlock (an
+ * MV3 recycle drops the in-memory master secret, so strict mode closes the session and the wallet locks —
+ * chrome.storage.session itself persists) → assert the feed grew by EXACTLY ONE card (B, discovered by the
+ * resumed scan) and the balance advanced to 1020.
+ *
+ * Limitation (accepted): no deterministic mid-page pause hook exists for the public scan (the e2e
+ * incoming-poll-gate wires only the note arm), so the kill lands at a clean post-A-scan boundary. Mid-scan
+ * / mid-reconcile crash windows are covered at the unit layer (service.scenarios.test.ts D6 suite).
  */
 import { expect, inject } from "vitest"
 import type { Page } from "puppeteer"
@@ -41,25 +47,21 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	}
 }
 
-/** Wait for the cold-respawned SW to write its liveness heartbeat to chrome.storage.session. */
-async function waitForLiveness(page: Page): Promise<void> {
-	await page.waitForFunction(
-		async () => {
-			try {
-				return !!(await chrome.storage.session.get("nulo:liveness"))["nulo:liveness"]
-			} catch {
-				return false
-			}
-		},
-		{ timeout: 30_000, polling: 500 },
-	)
-}
+/** The runtime writes `nulo:liveness = clock.now()` on boot + heartbeat (runtime.ts). Read the current one. */
+const readLiveness = (page: Page): Promise<number | undefined> =>
+	page.evaluate(async () => {
+		try {
+			return (await chrome.storage.session.get("nulo:liveness"))["nulo:liveness"] as number | undefined
+		} catch {
+			return undefined
+		}
+	})
 
-const publicBalanceIncludes = (needle: string) => () =>
-	(document.querySelector('[data-testid="public-balance-value"]')?.textContent || "").replace(/[,\s]/g, "").includes(needle)
+const countIncomingCards = (page: Page): Promise<number> =>
+	page.evaluate(() => document.querySelectorAll('[data-testid="tx-incoming-card"]').length)
 
 test.skipIf(!hasConfig)(
-	"incoming public scan RESUMES across a service-worker restart (persisted cursor + records)",
+	"incoming public scan REHYDRATES + finds a new receipt across a service-worker restart",
 	{ timeout: 900_000 },
 	async ({ tokenReadyExtension }) => {
 		if (!aztecConfig) throw new Error("unreachable — skipIf guards")
@@ -87,44 +89,79 @@ test.skipIf(!hasConfig)(
 			)
 			await navigateByHash(page, "#/popup/general")
 			await navigateToTokenDetail(page)
-			await page.waitForFunction(publicBalanceIncludes("1010"), { timeout: 180_000, polling: 1_000 })
-			console.log("✓ receipt A scanned; balance 1000 → 1010 (cursor advanced past A)")
+			await page.waitForFunction(
+				() =>
+					(document.querySelector('[data-testid="public-balance-value"]')?.textContent || "")
+						.replace(/[,\s]/g, "")
+						.includes("1010"),
+				{ timeout: 180_000, polling: 1_000 },
+			)
 
-			// ── KILL the SW (recycle wipes chrome.storage.session → wallet locks; the cursor + A's record in
-			//    chrome.storage.local survive).
+			// Snapshot the STABLE feed size (post-A) + the last liveness beat, BEFORE the restart. The feed
+			// already holds A's record (+ any mint record); B must add EXACTLY one on top.
+			await navigateByHash(page, "#/popup/activity")
+			const cardsBefore = await countIncomingCards(page)
+			const livenessBefore = (await readLiveness(page)) ?? 0
+			console.log(`✓ receipt A scanned; balance 1000 → 1010; feed has ${cardsBefore} card(s) pre-restart`)
+
+			// ── KILL the SW. An MV3 recycle drops the in-memory master (→ strict mode locks the wallet); the
+			//    cursor + records + outbox in chrome.storage.local survive.
 			await page.close()
 			await stopServiceWorker(tokenReadyExtension)
 
-			// ── Receipt B delivered WHILE the SW is dead — only a resumed, cursor-aware scan can discover it.
+			// ── Receipt B delivered WHILE the SW is dead — only a resumed scan can discover it.
 			await transferPublicTokens(wallet, aztecConfig.tokenAddress, minter, walletAddress, 10n * D, feeOptions)
 
-			// ── Recovery: reopen + unlock. The respawned scheduler re-hydrates from the persisted cursor.
+			// ── Recovery: reopen, wait for a FRESHER liveness beat (a real respawn, not the surviving value),
+			//    then unlock. The respawned scheduler re-hydrates from the persisted cursor.
 			const page2 = await openPopup(tokenReadyExtension)
-			await waitForLiveness(page2)
+			await page2.waitForFunction(
+				async (since) => {
+					try {
+						const v = (await chrome.storage.session.get("nulo:liveness"))["nulo:liveness"]
+						return typeof v === "number" && v > (since as number)
+					} catch {
+						return false
+					}
+				},
+				{ timeout: 45_000, polling: 500 },
+				livenessBefore,
+			)
 			await waitForHash(page2, "#/popup/auth", 20_000)
 			await page2.waitForSelector('[data-testid="auth-password-input"]', { visible: true, timeout: 10_000 })
 			await replaceInputValue(page2, '[data-testid="auth-password-input"]', TEST_PASSWORD)
 			await clickByTestId(page2, "auth-submit")
 			await page2.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 20_000 })
 			await waitForHash(page2, "#/popup/general", 15_000)
-			console.log("✓ SW respawned + wallet unlocked after restart")
+			console.log("✓ SW respawned (fresh liveness) + wallet unlocked after restart")
 
-			// ── The resumed scan must find B: a 2nd incoming card + the public balance advances to 1020.
+			// ── The resumed scan must add EXACTLY receipt B's record — cardsBefore + 1 (no more, no fewer:
+			//    catches both a missed B and a spurious re-index of the pre-restart records).
 			await navigateByHash(page2, "#/popup/activity")
-			await page2.waitForFunction(() => document.querySelectorAll('[data-testid="tx-incoming-card"]').length >= 2, {
-				timeout: 240_000,
-				polling: 1_000,
-			})
-			const cards = await page2.evaluate(() => document.querySelectorAll('[data-testid="tx-incoming-card"]').length)
-			expect(cards).toBeGreaterThanOrEqual(2)
-			console.log(`✓ ${cards} incoming cards — A survived the restart + B was discovered by the resumed scan`)
+			await page2.waitForFunction(
+				(want) => document.querySelectorAll('[data-testid="tx-incoming-card"]').length >= (want as number),
+				{
+					timeout: 240_000,
+					polling: 1_000,
+				},
+				cardsBefore + 1,
+			)
+			const cardsAfter = await countIncomingCards(page2)
+			expect(cardsAfter).toBe(cardsBefore + 1)
+			console.log(`✓ feed ${cardsBefore} → ${cardsAfter} — the resumed scan discovered exactly receipt B`)
 
 			await navigateByHash(page2, "#/popup/general")
 			await navigateToTokenDetail(page2)
-			await page2.waitForFunction(publicBalanceIncludes("1020"), { timeout: 180_000, polling: 1_000 })
+			await page2.waitForFunction(
+				() =>
+					(document.querySelector('[data-testid="public-balance-value"]')?.textContent || "")
+						.replace(/[,\s]/g, "")
+						.includes("1020"),
+				{ timeout: 180_000, polling: 1_000 },
+			)
 			const balances = await getTokenDetailBalances(page2)
 			expect(balances.publicBalance.replace(/[,\s]/g, "")).toBe("1020")
-			console.log("✓ D4 balance auto-refreshed to 1020 across the restart — no manual refresh")
+			console.log("✓ balance 1010 → 1020 after the restart")
 
 			await page2.close()
 		} finally {

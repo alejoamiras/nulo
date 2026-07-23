@@ -3,18 +3,30 @@
 The Phase-5 ship gate shipped the 3 mandatory network-e2e cases (pub→pub, priv→pub, pub→priv) and left
 cases 4–5 as conditional "if feasible" extensions. A sonnet-5 harness-feasibility recon settled both.
 
-## Case 4 — public scan RESUMES across a service-worker restart: **IMPLEMENTED**
+## Case 4 — public scan resumes across a service-worker restart: **IMPLEMENTED (2 layers)**
 
-`apps/extension/tests/e2e/network/incoming-scan-sw-restart.test.ts`.
+Codex round 1 caught that the e2e alone is **false-green** and cannot prove cursor-resume, so Case 4 ships
+as two complementary pieces:
+
+1. **Unit (the cursor-resume proof, deterministic, flake-free):** `service.scenarios.test.ts` →
+   `"a fresh service instance resumes its scan from the PERSISTED cursor, not block 0"`. Seeds a cursor at
+   block 50, boots a FRESH service over the same in-memory storage (`bootService` doesn't clear cursors),
+   and asserts the first reader call pages with `afterCursor == the persisted cursor` (+ `fromBlock`
+   undefined). A restart that dropped the cursor would fetch from block 0 — this pins the exact property
+   the e2e can't (a from-0 rescan + PK-dedup looks identical end-to-end).
+2. **E2E (the integration rehydration smoke):** `apps/extension/tests/e2e/network/incoming-scan-sw-restart.test.ts`.
 
 Feasible + cheap — it reuses proven infra, not new capability:
 - The CDP `stopServiceWorker` helper (`Runtime.terminateExecution`) is already CI-green in
   `sw-restart-network.test.ts`; an MV3 SW recycle wipes `chrome.storage.session` (→ the wallet locks) but
   NOT `chrome.storage.local`, where the scan cursor + records + outbox live (`repository.ts:44-59`).
-- **Shape (proves resume, not just "eventually works"):** deliver receipt A → scan runs, cursor advances,
-  D4 auto-refreshes 1000→1010 → KILL the SW → deliver receipt B while it's dead → reopen + unlock → assert
-  the resumed scan discovers B (a 2nd incoming card + balance→1020) AND A's record survived. B is delivered
-  ONLY while the SW is down, so it can appear only if a cursor-aware scan resumed from the persisted state.
+- **Shape (avoids the false-green codex R1 caught):** deliver receipt A → scan runs, cursor advances, D4
+  auto-refreshes 1000→1010 → **snapshot the feed card count `cardsBefore` + the `nulo:liveness` timestamp**
+  → KILL the SW → deliver receipt B while it's dead → reopen, **wait for a FRESHER liveness beat** (a real
+  respawn, not the surviving pre-kill value — `chrome.storage.session` persists across suspension) → unlock
+  → assert the feed grew to **exactly `cardsBefore + 1`** (B, and no spurious re-index of the pre-restart
+  records). A bare `>= 2` was false-green: the fixture mints 1000 pre-import, and zero-sender mints create
+  a record, so {mint, A} already = 2 before B; the `+1` delta is what proves the resumed scan added B.
 - **Accepted limitation:** the public scan has no deterministic mid-page pause hook — the e2e
   `incoming-poll-gate` wires only the note arm (`service.ts:951-956` calls it in `scanContract`, not
   `scanPublicContract`). So the kill lands at a clean post-A-scan boundary, not mid-page; the mid-page/
@@ -34,7 +46,12 @@ where it belongs.**
   is **completely unused in the repo + unverified** (would a rollback + new tx even mint a *different*-hash
   block at the same height?) and **mutates the shared sandbox** — `incoming-public-transfers.test.ts` runs
   in an ordinary SHA-1 shard, so a rollback would corrupt shard-mates unless first re-plumbed into a
-  dedicated `test_files:` job. High flake + blast-radius risk for a cosmetic gain.
+  dedicated `test_files:` job. High flake + blast-radius risk.
+- **The residual it would uniquely cover (codex R1 #4):** a live reorg is the only thing that validates a
+  REAL rollback/replacement fork produces the tip / block-hash / archive-membership / log-query behavior
+  the D6 unit fakes ASSUME. That's **accepted node-integration risk pending a dedicated isolated harness**
+  — not "cosmetic." The unit suite proves the reconciliation LOGIC; it can't prove the node's fork
+  semantics match the fakes. `public-events-capability.test.ts` covers the healthy-response shape live.
 - **The exact D6 behavior is already exhaustively + deterministically covered at the unit layer** —
   `apps/extension/src/wallet/services/incoming-transfer/service.scenarios.test.ts:2593` (`describe
   "public-event reorg reconciliation (D6)"`): referenceBlock-throw → orphan delete + refresh-before-delete
