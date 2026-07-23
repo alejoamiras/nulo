@@ -1,0 +1,12 @@
+VERDICT — reject
+
+**Blocker 1 — not fully resolved.** Explicit session-authorized `from: B` now correctly creates a B-scoped record, and outside-session `from` is skipped. The claim mismatch guard also prevents task progress from binding to a defined foreign account.
+
+However, two blocking gaps remain:
+
+- For omitted/`NO_FROM`, queued creation chooses `sessionAddresses[0]` ([queued-journal.ts:108](</home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/wallet-sdk/queued-journal.ts:108>)), while dispatch chooses the first wallet account contained in the session ([dispatcher.ts:1376](</home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/packages/wallet-bridge/src/dispatcher.ts:1376>)). Session selection order can differ from wallet-account order. With session `[B,A]` and wallet accounts `[A,B]`, B gets the queued card but A executes. Claim refusal creates A’s fresh record, but leaves B’s wrong queued/pending record visible until reaping ([claim-helper.ts:137](</home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/execution/claim-helper.ts:137>)). That remains a cross-account activity leak.
+- Queued creation and dispatch independently read the active profile ([queued-journal.ts:88](</home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/wallet-sdk/queued-journal.ts:88>), [background.ts:656](</home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/wallet-sdk/background.ts:656>)). The claim validates only account—not profile/network. A switch between those reads can stamp a P2 task onto a P1 journal when the address matches, defeating the strict publication gate after switching back to P1.
+
+**Blocker 2 — resolved.** Publication now requires present, exact profile/network/account scope; composite synchronous reset and both late-snapshot guards are correctly keyed ([RecentActivityView.vue:291](</home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/popup/components/modules/general/RecentActivityView.vue:291>)).
+
+**Deferred issue — agreed non-blocking.** The stale snapshot race can lose enrichment temporarily but cannot make an out-of-scope task publish.

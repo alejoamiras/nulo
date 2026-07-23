@@ -1,0 +1,96 @@
+# Phase 1a — atomic task↔journal correlation (re-enable dApp progress cards, scoped)
+
+## Protocol
+Preallocated `correlationId` (128-bit hex) minted at the START of a feed-eligible ROOT op, threaded to BOTH
+the in-memory task and the durable journal record (journal cid = the durable anchor; task = enrichment).
+- **Transfer (task→journal):** both ids in `transfer-executor.ts` → set at creation, no window.
+- **dApp send (`execution/service.ts` executeOperations):** cid stamped on the root `ExecuteOperationContent`
+  task; `DappSendExecutor` reads `parentTask.correlationId` and stamps the journal the instant its id is known
+  (after `beginJournal`/`claimOrCreateJournal`, before first `markJournal`) via the new idempotent
+  `OperationJournalService.setOperationCorrelation` (first-write-wins, takes transitionLock, emits Updated).
+- **Durable field:** `OperationRecord.correlationId?` (+ Task/WrappedTask/NewOperationInput.correlationId?),
+  ALL optional + Zod `.optional()` → legacy rows/tasks parse unchanged, no migration (pre-production).
+
+## Publication gate (RecentActivityView.vue) — the fail-closed re-enable
+`isExecutingTask` split into a capture gate (`isRawExecutingCandidate`→`rawExecutingTask`) + a reactive
+publication gate: `executingTask` is now a COMPUTED that publishes a dApp task ONLY when its cid resolves to a
+NON-terminal journal in the ACTIVE scope (`journalRecordInScope` = account+network). Reactive → publishes the
+moment the journal arrives (even after the task event); un-publishes synchronously on switch (journalOps
+sync-cleared). UI transfers stay senderAddress-scoped. `isMatchingTask` cid-exact when both carry it.
+SW-restart: durable journal cid renders the card via `renderedInFlightOps` on its own (no task = no leak).
+Scope narrowing: only root feed tasks get a cid; Step/BalanceUpdate/subtasks exempt.
+
+## Verification: 3494 tests (+21), typecheck:all 0, 19 files lint-clean.
+
+## Flagged for the codex audit (subagent-reported uncertainties)
+1. Behavioral narrowing: non-send ExecuteOperation tasks (register_sender/contract/token) no longer render a
+   progress card (no dapp_execute journal → fail-closed). Safer (they carry no account); register_token still
+   surfaces via its token_import journal. Confirm acceptable.
+2. Stamp-after-create is best-effort (swallows errors) → lost stamp = permanently fail-closed (no leak, but no
+   subtask enrichment for that op).
+3. Single-slot rawExecutingTask under concurrent same-account dApp ops (pre-existing single-executingTask limit;
+   both journal CARDS still render; cid-exact isMatchingTask targets the right one).
+4. setOperationCorrelation allowed on terminal records (cid orthogonal to FSM; no stage change).
+5. Reactive-computed forward references (executingTask computed forward-refs isFeedEligible/journalOps —
+   hoisted fn decl + lazy computed; validated by the component test).
+6. Correctness independent of task/journal event ordering (reactive gate re-evaluates on journalOps change).
+
+## Codex Phase-1a audit REJECT → fixed (2 blockers). audit-codex-p1a.md.
+BLOCKER 1 (multi-account misbinding, real leak): queued-journal used dapp.accounts[0], so a session-[A,B]
+send from B bound B's task to A's journal. FIX (b) at root: queued-journal.ts `extractSendFrom(message)`
+derives the record's accountAddress from the actual send `from` (message.args[1].from, dispatcher rules) —
+explicit+authorized from → that account; NO_FROM/omitted → accounts[0]; from outside session → not queued.
+FIX (a) defense-in-depth: claim-helper refuses a claim whose defined accountAddress != the send's account +
+creates a fresh correctly-scoped record. Fixes both journal-card AND cid-enrichment leak.
+BLOCKER 2 (publication fail-open): added strict `journalInActiveScopeStrict` (profile+network+account all
+present+equal) for the isFeedEligible dApp gate; switch-reset watcher + snapshot guards now key on the
+COMPOSITE scope. Lenient display `journalRecordInScope` left as-is (legacy-row leniency, display-only).
+Deferred (non-blocking, enrichment-only): resnapshotJournal stale-snapshot reschedule guard.
+Tests +11 (queued-journal 4, claim-helper 3, strict-scope 4); full suite 3505; typecheck:all 0; lint 0.
+
+## Codex re-audit r2 → fixed 2 remaining gaps (r3 pending). audit-codex-p1a-r2.md.
+GAP1 NO_FROM default mismatch: dispatcher (dispatcher.ts:1349-1385) resolves NO_FROM as
+allAccounts.find(a=>session.has(a.address)) in INDEX-SORTED WALLET order, not session order. queued-journal
+now mirrors that (walletAccounts.find over session intersection); no-wallet-in-session → skip. GAP2 profile
+TOCTOU: claim-helper now validates the FULL composite scope (account+network+profile), refuses + DELETES the
+mis-scoped record + creates fresh on any mismatch; execution-lane threads getActiveProfile()?.id at claim time.
++10 tests; full suite 3509; typecheck:all 0; lint 0.
+
+## Codex re-audit r3 → fixed 2 concurrency issues (r4 pending). audit-codex-p1a-r3.md.
+FIX1 resurrection race: deleteOperation + setOperationMeta now acquire the transitionLock → a concurrent
+locked mutator either completes before the delete or finds nothing (every locked writer refuses to recreate
+a missing row). claim-helper supersede-delete stays best-effort but resurrection is now structurally impossible.
+FIX2 fence-profile TOCTOU: ExecutionFence.profileId (captured at authorize) threaded through
+dapp-send-executor→execution-lane→claim-helper; removed the claim-time getActiveProfile re-read. Attack
+(queue P1 → fence P2 → switch back P1 → claim) now REFUSES (record P1 vs captured fence P2). +7 tests; 3516 green.
+
+## DECISION: Phase 1a DEFERRED (not merged). Rationale + remaining work.
+Codex audited the re-enable across 4 rounds; each REJECT found a real, DEEPER dApp-session/execution-lane
+cross-account/cross-profile leak, each fixed at root + tested:
+  r1 queued-journal accounts[0] misbinding → derive from send `from`
+  r2 no-from default (session-order vs wallet-order) + composite claim guard
+  r3 deleteOperation not lock-serialized (resurrection) + claim re-read active profile (fence TOCTOU)
+  r4 (this) FIX1/FIX2 resolved, but a PRECEDING TOCTOU remains: the execution fence is not atomically bound
+     to the dApp interaction's AUTHORIZED profile — `dapp-interaction/service.ts:147 executeAndResolve` checks
+     profile then awaits refreshSession; `execution/service.ts:472` independently re-captures active-now. A
+     P2→P1 switch in that gap mis-binds. Requires an ATOMIC "capture fence only if still this profile" spanning
+     dapp-interaction → execution.
+That last fix is ARCHITECTURAL (a profile-fenced authorize→execute capture primitive) and is a SEPARATE concern
+from account-switch FEED isolation (arguably outside this plan's scope). Phase 1 already ships the privacy fix;
+Phase 1a is a UX restoration (dApp in-progress CARDS; dApp progress still shows via journal cards while deferred).
+DECISION: do NOT merge Phase 1a. Keep Phase 1's fail-closed dApp cards. The branch
+`worktree-account-switch-isolation-p1a` (correlation infra + queued/dispatcher-consistency fix + composite claim
+guard + lock-serialized deletion + captured-fence threading, 4537796) is the HEAD START for a future scoped
+effort "dapp-session execution-lane profile-fence atomicity", which adds the atomic-fence-capture then re-enables
+the cards. NOT rushed AFK. All that work is real + tested (3516 suite) — it just isn't airtight until the
+atomic-fence primitive lands.
+
+## Phase-1a completion: atomic execution-fence primitive (codex r4 blocker).
+captureExecutionFence(expectedProfileId?) now checks active==expected INSIDE the existing runExclusive (same
+lock profileSwitch/deleteProfile take) → atomic, no TOCTOU. Threaded: ExecutionService.captureFence(expected)
+→ executeOperations(...authorizedProfileId) gates BOTH aztec_sendTx (:479) + send_transaction (:415→607);
+dapp-interaction executeAndResolve + silentInteraction pass payload.session.profileId. UI transfer +
+auth-registry live-initiated paths left ungated (undefined). End-to-end: fence.profileId == authorized profile
+or the send aborts before any journal/task → claim scope is the authorized profile. +3 tests; 3519 suite.
+Audit flags: task-created-before-fence is inert on abort (no journal → isFeedEligible never publishes);
+RPC-direct 2-arg executeOperations ungated (dApp sends flow through dapp-interaction, which gates).

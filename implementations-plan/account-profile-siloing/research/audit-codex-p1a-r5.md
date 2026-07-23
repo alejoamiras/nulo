@@ -1,0 +1,11 @@
+VERDICT — reject
+
+- Fence TOCTOU: resolved. The expected profile is checked inside the shared profile lock ([service.ts](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/profile/service.ts:234)), and both popup and silent paths thread the session profile to both send implementations.
+
+- Flag 1: task behavior is non-blocking. The task is failed and cannot pass the finished/non-terminal correlated-journal publication gate.
+
+- Flag 2: non-blocking within the stated trust boundary; wallet-SDK dApp sends route through `dapp-interaction`.
+
+- New blocker — post-capture drift: after capturing P2, execution can wait while the user switches to P1. The mutex key still re-reads the active profile ([execution-lane.ts](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/execution/execution-lane.ts:193)), and both transaction builders resolve the account from active-now ([tx-request-builder.ts](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/execution/tx-request-builder.ts:113), [NO_FROM](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/execution/tx-request-builder.ts:382)). Thus claim/journal can be P2 while a colliding account is built from P1. The captured profile must govern mutex and build/resource resolution—or execution must safely abort on later switching.
+
+- New blocker — silent abort residue/leak: silent execution advances the P2 queued record to `pending` before fence capture ([service.ts](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/dapp-interaction/service.ts:334)); the background failure cleanup handles only `queued` ([background.ts](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/wallet/services/wallet-sdk/background.ts:687)). A late P2 event is inserted unconditionally while the display filter ignores profile, so it can render under P1 with matching account/network ([RecentActivityView.vue](/home/homelab/Projects/nulo/.claude/worktrees/account-switch-isolation/apps/extension/src/popup/components/modules/general/RecentActivityView.vue:323)).
