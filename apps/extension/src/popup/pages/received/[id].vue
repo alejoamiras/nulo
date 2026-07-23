@@ -252,9 +252,11 @@ onBeforeUnmount(() => {
 						:address="fromDisplay.address"
 						:formatter="(addr) => trimAddress(addr, 6, 4)"
 					/>
-					<span v-else-if="fromDisplay.kind === 'private'" :class="$style.from_soft" data-testid="from-private">Private</span>
-					<span v-else-if="fromDisplay.kind === 'mint'" :class="$style.from_soft" data-testid="from-mint">Mint</span>
-					<span v-else :class="$style.from_soft" data-testid="from-redacted">Not disclosed</span>
+					<!-- Non-address senders render through the SAME <Text> primitive (size/weight/color) that
+					     AddressDisplay uses for the "To" account, so both cards' values look identical. -->
+					<Text v-else-if="fromDisplay.kind === 'private'" size="13" weight="600" color="primary" data-testid="from-private">Private</Text>
+					<Text v-else-if="fromDisplay.kind === 'mint'" size="13" weight="600" color="primary" data-testid="from-mint">Mint</Text>
+					<Text v-else size="13" weight="600" color="primary" data-testid="from-redacted">Not disclosed</Text>
 					<span :class="$style.address_label">From</span>
 				</Flex>
 
@@ -460,15 +462,6 @@ onBeforeUnmount(() => {
 	font-weight: 700;
 	letter-spacing: 0.1em;
 	text-transform: uppercase;
-	color: var(--nulo-secondary);
-}
-
-/* One soft style for every non-address sender (Private / Mint / Not disclosed): same mono weight as the
-   address value above the "From" label, but muted, so all four From states read uniformly. */
-.from_soft {
-	font-family: var(--font-mono);
-	font-size: 13px;
-	font-weight: 600;
 	color: var(--nulo-secondary);
 }
 
