@@ -3260,4 +3260,15 @@ describe("IncomingTransferService — D8 dust filter (getIncomingTransfers)", ()
 		const byId = await service.getIncomingTransferById(rec.id)
 		expect(byId?.id).toBe(rec.id) // but reachable by id for the detail page
 	})
+
+	test("(code-review) getIncomingTransferById is SCOPED to the active profile — a foreign-profile id → undefined", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state) // active profile = "p1"
+		// The record exists in the shared store but belongs to ANOTHER profile. The `id` is a URL route
+		// param, so a stale/crafted foreign id must not surface another profile's receipt.
+		const foreign = seedPublic({ profileId: "pOTHER", txHash: "0xforeign", l2BlockNumber: 5 })
+		expect(await service.getIncomingTransferById(foreign.id)).toBeUndefined()
+		const own = seedPublic({ txHash: "0xown", l2BlockNumber: 5 }) // profileId defaults to "p1"
+		expect((await service.getIncomingTransferById(own.id))?.id).toBe(own.id)
+	})
 })

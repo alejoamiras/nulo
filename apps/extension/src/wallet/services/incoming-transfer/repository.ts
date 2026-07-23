@@ -165,31 +165,33 @@ export class IncomingTransferRepository {
 
 	/** Delete every record / trust / cursor / outbox row belonging to `profileId`. Profile-delete fanout. */
 	public async clearProfile(profileId: string): Promise<void> {
-		await this.deleteWhere(this.records, (r) => r.profileId === profileId)
-		await this.deleteWhere(this.trust, (r) => r.profileId === profileId)
+		// KEY-prefix deletion for ALL four tables — never a value-predicate. `get()` returns `undefined`
+		// for a codec-INVALID row (it KEEPS the row and logs), so a value sweep would silently SKIP it,
+		// leaving on-chain-derived data past the profile-privacy boundary (code-review #3). Record ids
+		// carry a `note:`/`pub:` kind prefix; trust/cursor/outbox keys start with `${profileId}|`.
+		await this.deleteKeysWhere(this.records, (key) => key.startsWith(`note:${profileId}|`) || key.startsWith(`pub:${profileId}|`))
+		await this.deleteKeysWhere(this.trust, (key) => key.startsWith(`${profileId}|`))
 		await this.deleteKeysWhere(this.cursors, (key) => key.startsWith(`${profileId}|`))
 		await this.deleteKeysWhere(this.outbox, (key) => key.startsWith(`${profileId}|`))
 	}
 
 	/** Delete every record / trust / cursor / outbox row belonging to `(profileId, networkId)`. Chain-purge fanout. */
 	public async clearChain(profileId: string, networkId: string): Promise<void> {
-		await this.deleteWhere(this.records, (r) => r.profileId === profileId && r.networkId === networkId)
-		await this.deleteWhere(this.trust, (r) => r.profileId === profileId && r.networkId === networkId)
+		// Key-prefix (not value-predicate) for the same corrupt-row reason as `clearProfile`.
+		await this.deleteKeysWhere(
+			this.records,
+			(key) => key.startsWith(`note:${profileId}|${networkId}|`) || key.startsWith(`pub:${profileId}|${networkId}|`),
+		)
+		await this.deleteKeysWhere(this.trust, (key) => key.startsWith(`${profileId}|${networkId}|`))
 		await this.deleteKeysWhere(this.cursors, (key) => key.startsWith(`${profileId}|${networkId}|`))
 		await this.deleteKeysWhere(this.outbox, (key) => key.startsWith(`${profileId}|${networkId}|`))
 	}
 
-	private async deleteWhere<T extends { profileId: string }>(store: EntityStorage<T>, pred: (row: T) => boolean): Promise<void> {
-		for (const key of await store.getKeys()) {
-			const row = await store.get(key)
-			if (row && pred(row)) await store.delete(key)
-		}
-	}
-
 	/**
-	 * Delete cursor/outbox rows by KEY prefix. Their keys embed `profileId|networkId|…`, so a
-	 * key-prefix match is exact — and it survives a row that failed codec validation (which
-	 * `get` reads as `undefined`), where a value-predicate sweep would silently skip it.
+	 * Delete rows by KEY prefix across all four tables. Every key embeds `profileId|networkId|…` (record
+	 * ids additionally carry a `note:`/`pub:` kind prefix), so a key-prefix match is exact — and it
+	 * survives a row that failed codec validation (which `get` reads as `undefined`), where a
+	 * value-predicate sweep would silently skip it (code-review #3).
 	 */
 	private async deleteKeysWhere<T>(store: EntityStorage<T>, pred: (key: string) => boolean): Promise<void> {
 		for (const key of await store.getKeys()) {

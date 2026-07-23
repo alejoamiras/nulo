@@ -1,4 +1,4 @@
-import { onScopeDispose, ref, type Ref } from "vue"
+import { onScopeDispose, ref, watch, type Ref } from "vue"
 import type { EventHandler } from "@nulo/wallet-core/utils"
 import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
@@ -58,23 +58,41 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 
 	const incomingTransfers = ref<IncomingTransferRecord[]>([])
 	let disposed = false
+	// Monotonic in-flight token: the service scans ALL accounts in the profile, so quotes/config/scope
+	// changes can overlap `refresh()` calls; only the newest may write the ref (else an older account's
+	// slower fetch clobbers a newer one — code-review #6).
+	let requestId = 0
 
 	const refresh = async (): Promise<void> => {
 		const s = scope()
 		if (!s) return
-		incomingTransfers.value = await incomingTransferService.getIncomingTransfers(s.profileId, s.networkId, s.account)
+		const token = ++requestId
+		const rows = await incomingTransferService.getIncomingTransfers(s.profileId, s.networkId, s.account)
+		if (token !== requestId || disposed) return // a newer refresh (or dispose) superseded this one
+		incomingTransfers.value = rows
 	}
 
+	// The service emits add/update for ANY account it scanned in the profile (one stream serves all
+	// accounts), so live events MUST be filtered to the on-screen scope — else another account's receipt
+	// (its amount + sender) leaks into the active account's feed (code-review #1).
+	const inScope = (inc: IncomingTransferRecord): boolean => {
+		const s = scope()
+		return !!s && inc.profileId === s.profileId && inc.networkId === s.networkId && inc.accountAddress === s.account
+	}
 	const onAdded = (inc: IncomingTransferRecord) => {
+		if (!inScope(inc)) return
 		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
 		if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
 		else incomingTransfers.value[idx] = inc
 	}
 	const onUpdated = (inc: IncomingTransferRecord) => {
+		if (!inScope(inc)) return
 		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
 		if (idx !== -1) incomingTransfers.value[idx] = inc
 	}
 	const onDeleted = (inc: IncomingTransferRecord) => {
+		// Delete is keyed by id (unique across accounts) — safe to apply unconditionally; a foreign
+		// record simply isn't in the list.
 		incomingTransfers.value = incomingTransfers.value.filter((x) => x.id !== inc.id)
 	}
 	const onConfigUpdate = (prop: ConfigProp) => {
@@ -91,9 +109,21 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	configService.onUpdate.add(onConfigUpdate)
 	priceService?.onQuotesUpdated.add(onQuotesUpdated)
 
+	// Re-fetch when the active account/network/profile changes (an account switch is a pure store
+	// mutation — no remount, no reconnect — so nothing else triggers a reload; the feed would otherwise
+	// keep showing the previous account's receipts — code-review #2).
+	const scopeKey = () => {
+		const s = scope()
+		return s ? `${s.profileId}|${s.networkId}|${s.account}` : undefined
+	}
+	const stopScopeWatch = watch(scopeKey, () => {
+		void refresh()
+	})
+
 	const dispose = () => {
 		if (disposed) return
 		disposed = true
+		stopScopeWatch()
 		incomingTransferService.onIncomingTransferAdded.remove(onAdded)
 		incomingTransferService.onIncomingTransferUpdated.remove(onUpdated)
 		incomingTransferService.onIncomingTransferDeleted.remove(onDeleted)

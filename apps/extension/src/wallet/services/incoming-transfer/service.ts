@@ -395,12 +395,18 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	/**
 	 * Read-by-id for the received-detail page (`/popup/received/:id`). Deliberately UNFILTERED (no
-	 * dust / visibility gate) — the page shows the specific record the user navigated to. `id` is the
-	 * profile+network-scoped PK, so this can only ever return the caller's own record.
+	 * dust / visibility gate) — the page shows the specific record the user navigated to. Scoped to the
+	 * ACTIVE profile: `id` is a URL route param and all profiles' records share one store, so a
+	 * stale/crafted id (e.g. after a profile switch, or a bookmarked link) must NOT surface another
+	 * profile's receipt — a cross-profile isolation boundary. A non-active-profile id → `undefined`.
 	 */
 	public async getIncomingTransferById(id: string): Promise<IncomingTransferRecord | undefined> {
 		await this.ensureInitialized()
-		return this.repo.getRecord(id)
+		const record = await this.repo.getRecord(id)
+		if (!record) return undefined
+		const active = await this.profileService.getActiveProfile()
+		if (!active || record.profileId !== active.id) return undefined
+		return record
 	}
 
 	/**
