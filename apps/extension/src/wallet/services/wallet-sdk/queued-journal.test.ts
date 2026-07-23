@@ -51,6 +51,7 @@ function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
 	profile: ReturnType<typeof makeProfileStub>
 	dappSession: ReturnType<typeof makeDappSessionStub>
 	networkSvc: ReturnType<typeof makeNetworkStub>
+	accountService: ReturnType<typeof makeAccountStub>
 } {
 	const api = new FakeBrowserApi()
 	api.reset()
@@ -63,22 +64,33 @@ function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
 	const profile = makeProfileStub()
 	const dappSession = makeDappSessionStub()
 	const networkSvc = makeNetworkStub()
+	const accountService = makeAccountStub()
 
 	const deps: TryCreateQueuedJournalDeps = {
 		journal,
 		profile: profile as never,
 		dappSession: dappSession as never,
 		networkSvc: networkSvc as never,
+		accountService: accountService as never,
 		logger,
 		...overrides,
 	}
-	return { deps, journal, api, profile, dappSession, networkSvc }
+	return { deps, journal, api, profile, dappSession, networkSvc, accountService }
 }
 
 function makeProfileStub() {
 	return {
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		getActiveProfile: vi.fn<() => Promise<any>>(async () => ({ id: "profile-1" })),
+	}
+}
+
+/** Wallet-account service stub. `getAccounts` returns rows in wallet (index)
+ *  order — the NO_FROM default must follow THIS order, not the session array. */
+function makeAccountStub(addresses: string[] = ["0xabc"]) {
+	return {
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		getAccounts: vi.fn<() => Promise<any[]>>(async () => addresses.map((address, index) => ({ address, index }))),
 	}
 }
 
@@ -155,23 +167,64 @@ describe("tryCreateQueuedJournal", () => {
 		expect(rec?.accountAddress).toBe("0xBBB")
 	})
 
-	test("NO explicit `from` → falls back to the session's first authorized account", async () => {
-		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
+	test("NO explicit `from` → falls back to the first WALLET account contained in the session", async () => {
+		const { deps, journal } = makeDeps({
+			dappSession: twoAccountSession() as never,
+			accountService: makeAccountStub(["0xAAA", "0xBBB"]) as never,
+		})
 		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps) // opts = {}
 		const rec = await journal.getOperation(id as string)
 		expect(rec?.accountAddress).toBe("0xAAA")
 	})
 
-	test("NO_FROM sentinel → falls back to the session's first authorized account (not treated as an address)", async () => {
-		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
+	test("NO_FROM sentinel → falls back to the first WALLET account contained in the session (not treated as an address)", async () => {
+		const { deps, journal } = makeDeps({
+			dappSession: twoAccountSession() as never,
+			accountService: makeAccountStub(["0xAAA", "0xBBB"]) as never,
+		})
 		const id = await tryCreateQueuedJournal(makeSendTxFrom("NO_FROM"), makeSession(), deps)
 		const rec = await journal.getOperation(id as string)
 		expect(rec?.accountAddress).toBe("0xAAA")
 	})
 
+	// codex GAP-1: session array order can DIFFER from wallet-account order. The
+	// NO_FROM default must follow the wallet (dispatcher) order, or the queued
+	// card scopes the wrong account while the other executes.
+	test("NO_FROM with session order != wallet order → uses the DISPATCHER's account (first wallet in session), no wrong-account card", async () => {
+		// Session lists [B, A]; wallet (getAccounts index order) is [A, B]. The
+		// dispatcher picks A (first wallet account in session); the queued card MUST too.
+		const sessionBA = {
+			// biome-ignore lint/suspicious/noExplicitAny: test stub
+			tryGetDappSessionByOriginAndChain: vi.fn<() => Promise<any>>(async () => ({
+				accounts: ["aztec:1338:0xBBB", "aztec:1338:0xAAA"],
+				capabilityGrants: [{ capability: { type: "transaction" } }],
+				dappMetadata: { name: "Example Dapp" },
+			})),
+		}
+		const { deps, journal } = makeDeps({
+			dappSession: sessionBA as never,
+			accountService: makeAccountStub(["0xAAA", "0xBBB"]) as never, // wallet order A,B
+		})
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		const rec = await journal.getOperation(id as string)
+		expect(rec?.accountAddress).toBe("0xAAA") // dispatcher's choice — NOT sessionAddresses[0] (0xBBB)
+		// Exactly one queued record was created — the right one, no lingering wrong-account card.
+		expect(await journal.countOperations({ stage: "queued" })).toBe(1)
+	})
+
 	test("an explicit `from` OUTSIDE the session is NOT queued (dispatcher will reject it; never mis-scope onto accounts[0])", async () => {
 		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
 		const id = await tryCreateQueuedJournal(makeSendTxFrom("0xCCC"), makeSession(), deps)
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("NO_FROM with NO wallet account authorized in the session → not queued (mirrors dispatcher's rejection)", async () => {
+		const { deps, journal } = makeDeps({
+			dappSession: twoAccountSession() as never, // session [AAA, BBB]
+			accountService: makeAccountStub(["0xZZZ"]) as never, // wallet has none of them
+		})
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
 		expect(id).toBeUndefined()
 		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
 	})

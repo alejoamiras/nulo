@@ -318,6 +318,10 @@ export class ExecutionLane {
 		hooks: ExecutionHooks | undefined,
 		reuseController?: AbortController,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
+		// Active profile at CLAIM time — the profile this send actually executes
+		// under. The claim helper compares it against the queued record's
+		// queue-time `profileId` and refuses a cross-profile claim (codex GAP-2).
+		const profileId = (await this.deps.getActiveProfile())?.id
 		return claimOrCreateDappExecuteJournalImpl(
 			{
 				operationJournal: this.deps.operationJournal,
@@ -329,7 +333,7 @@ export class ExecutionLane {
 					error: (msg, raw) => this.deps.logError(msg, raw),
 				},
 			},
-			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
+			{ networkId, accountAddress, profileId, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
 		)
 	}
 

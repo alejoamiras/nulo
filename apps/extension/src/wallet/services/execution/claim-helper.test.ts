@@ -41,7 +41,8 @@ function makeDeps(overrides: Partial<ClaimHelperDeps> = {}): {
 function makeJournal() {
 	const getOperation = vi.fn(async (_id: string) => null as unknown)
 	const transitionOperation = vi.fn(async (_id: string, _progress: unknown, _error?: unknown) => undefined as unknown)
-	return { getOperation, transitionOperation }
+	const deleteOperation = vi.fn(async (_id: string) => undefined as unknown)
+	return { getOperation, transitionOperation, deleteOperation }
 }
 
 const INPUT_NO_QUEUED = {
@@ -100,31 +101,86 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(activeControllers.has("queued-id")).toBe(true)
 	})
 
-	// ── BLOCKER-1 (fix a): cross-account claim refusal (fail-closed) ──
+	// ── BLOCKER-1/GAP-2 (fix a): cross-SCOPE claim refusal (fail-closed) ──
 
-	test("queued record account MATCHES the send → claims normally (check does not over-fire)", async () => {
+	test("queued record scope MATCHES the send (account+network+profile) → claims normally (check does not over-fire)", async () => {
 		const { deps, createFreshRecord, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" }, accountAddress: "0xabc" })
+		journal.getOperation.mockResolvedValueOnce({
+			progress: { stage: "queued" },
+			accountAddress: "0xabc",
+			networkId: "net1",
+			profileId: "p1",
+		})
 
-		const result = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" })
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			profileId: "p1",
+			queuedJournalId: "queued-id",
+		})
 
 		expect(journal.transitionOperation).toHaveBeenCalledWith("queued-id", { stage: "pending" })
 		expect(createFreshRecord).not.toHaveBeenCalled()
+		expect(journal.deleteOperation).not.toHaveBeenCalled()
 		expect(result.journalId).toBe("queued-id")
 	})
 
-	test("queued record account MISMATCHES the send → REFUSES the claim, creates a fresh correctly-scoped record", async () => {
+	test("ACCOUNT mismatch → REFUSES + supersedes (deletes) the mis-scoped record + creates a fresh correctly-scoped one", async () => {
 		const { deps, createFreshRecord, activeControllers, journal } = makeDeps()
-		// Session [A,B] mis-scoped this queued record to A (0xB), but the send is from 0xabc.
+		// The queued record is scoped to 0xB, but this send is from 0xabc.
 		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" }, accountAddress: "0xB" })
 
 		const result = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "mis-scoped-id" })
 
 		// Never transitions the foreign record → foreign card never shows this send's progress.
 		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		// Supersede: the wrong-scope card is removed, not left lingering until reaping.
+		expect(journal.deleteOperation).toHaveBeenCalledWith("mis-scoped-id")
 		expect(createFreshRecord).toHaveBeenCalledOnce()
 		expect(result.journalId).toBe("fresh-id")
 		expect(activeControllers.has("fresh-id")).toBe(true)
+	})
+
+	test("PROFILE mismatch (TOCTOU: profile switched between queue and dispatch) → REFUSES + supersedes, even when account matches", async () => {
+		const { deps, createFreshRecord, journal } = makeDeps()
+		// Address collides across profiles, but the record is P1 while the send runs under P2.
+		journal.getOperation.mockResolvedValueOnce({
+			progress: { stage: "queued" },
+			accountAddress: "0xabc",
+			networkId: "net1",
+			profileId: "p1",
+		})
+
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED, // accountAddress 0xabc, networkId net1
+			profileId: "p2", // active profile at claim time differs
+			queuedJournalId: "cross-profile-id",
+		})
+
+		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		expect(journal.deleteOperation).toHaveBeenCalledWith("cross-profile-id")
+		expect(createFreshRecord).toHaveBeenCalledOnce()
+		expect(result.journalId).toBe("fresh-id")
+	})
+
+	test("NETWORK mismatch → REFUSES + supersedes, even when account+profile match", async () => {
+		const { deps, createFreshRecord, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({
+			progress: { stage: "queued" },
+			accountAddress: "0xabc",
+			networkId: "net-OTHER",
+			profileId: "p1",
+		})
+
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED, // networkId net1
+			profileId: "p1",
+			queuedJournalId: "cross-net-id",
+		})
+
+		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		expect(journal.deleteOperation).toHaveBeenCalledWith("cross-net-id")
+		expect(createFreshRecord).toHaveBeenCalledOnce()
+		expect(result.journalId).toBe("fresh-id")
 	})
 
 	test("mismatch WITH a reuseController → drops the mis-scoped pre-acquire entry before creating fresh", async () => {

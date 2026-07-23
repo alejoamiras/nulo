@@ -56,6 +56,12 @@ export interface ClaimHelperDeps {
 export interface ClaimHelperInput {
 	networkId: string
 	accountAddress: string
+	/** The active profile id at CLAIM/execution time. Compared against the
+	 *  queued record's queue-time `profileId` so a profile switch between queue
+	 *  creation and dispatch (a TOCTOU) can't stamp this send onto a foreign
+	 *  profile's journal (codex GAP-2). Optional so legacy callers/tests that
+	 *  don't thread it fall back to account+network validation only. */
+	profileId?: string
 	origin: LocalTxOrigin
 	calls?: { method?: string }[]
 	queuedJournalId?: string
@@ -77,7 +83,7 @@ export interface ClaimHelperResult {
 
 export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, input: ClaimHelperInput): Promise<ClaimHelperResult> {
 	const { operationJournal, activeControllers, createFreshRecord, logger } = deps
-	const { networkId, accountAddress, origin, calls, queuedJournalId, reuseController } = input
+	const { networkId, accountAddress, profileId, origin, calls, queuedJournalId, reuseController } = input
 
 	if (!queuedJournalId) {
 		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
@@ -118,27 +124,42 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		throw new JobCancelledSentinel(queuedJournalId)
 	}
 
-	// Phase 1a BLOCKER-1 defense-in-depth (fail-closed): NEVER claim a
-	// claimable (queued/pending) record whose account doesn't match THIS send's
-	// actual account. Fix (b) scopes the queued record to the send's `from` at
-	// creation, so a match is the norm; this guards any residual mis-scoping
-	// (e.g. a NO_FROM default resolving to a different account than the queued
-	// record's accounts[0]). Claiming a foreign-account record would drive this
-	// send's execution transitions (simulating→proving→…) onto the WRONG
-	// account's journal card — a cross-account leak. Drop the mis-scoped
-	// pre-acquire controller and create a fresh, correctly-scoped record
-	// instead (the send still proceeds — never cancelled for a scope mismatch).
-	// `accountAddress` is a bare address on both sides (materialize.ts resolves
-	// it; queued-journal parses the CAIP), so the comparison is format-safe.
-	// A record with a DEFINED account that differs is the leak case we refuse;
-	// an `undefined` record account (never produced by queued-journal) is left
-	// to the claim (it renders under no one — the display filter drops a
-	// no-account row anyway).
-	if (record.accountAddress !== undefined && record.accountAddress !== accountAddress) {
+	// Phase 1a BLOCKER-1/GAP-2 defense-in-depth (fail-closed): NEVER claim a
+	// claimable (queued/pending) record whose SCOPE doesn't match THIS send's
+	// actual scope — account (GAP-1) AND network AND profile (GAP-2). The queued
+	// record is created at message arrival by reading "active now" (profile +
+	// resolved account/network); the dispatch/execution path reads "active now"
+	// AGAIN — a switch in between (account via multi-account `from`, or a profile
+	// switch onto a colliding address) can leave the queued record scoped to a
+	// DIFFERENT (profile, network, account) than this send executes under.
+	// Claiming it would drive this send's execution transitions
+	// (simulating→proving→…) onto the WRONG scope's journal card — a
+	// cross-account / cross-profile leak that also defeats the strict publication
+	// gate after switching back. Refuse: SUPERSEDE the mis-scoped record (delete
+	// it so it can't linger visible until reaping — codex GAP-1 note), drop the
+	// mis-scoped pre-acquire controller, and create a fresh correctly-scoped
+	// record so the send still proceeds (never cancelled for a scope mismatch).
+	// All three fields are bare/format-consistent on both sides (materialize.ts
+	// + queued-journal resolve the same way). Each dimension is validated only
+	// when BOTH values are known — an `undefined` on either side (legacy record /
+	// caller that didn't thread the field) can't manufacture a false refusal.
+	const scopeMismatch =
+		(record.accountAddress !== undefined && record.accountAddress !== accountAddress) ||
+		(record.networkId !== undefined && networkId !== undefined && record.networkId !== networkId) ||
+		(record.profileId !== undefined && profileId !== undefined && record.profileId !== profileId)
+	if (scopeMismatch) {
 		if (reuseController) activeControllers.delete(queuedJournalId)
 		logger?.error(
-			`Queued record ${queuedJournalId} account ${record.accountAddress} != send account ${accountAddress}; refusing cross-account claim, creating fresh scoped record`,
+			`Queued record ${queuedJournalId} scope (profile=${record.profileId} net=${record.networkId} acct=${record.accountAddress}) != send scope (profile=${profileId} net=${networkId} acct=${accountAddress}); refusing cross-scope claim, superseding with a fresh scoped record`,
 		)
+		// Supersede the mis-scoped record so its (wrong-scope) card doesn't linger
+		// until the reaper. Best-effort — a delete failure just leaves a stale
+		// queued row the reaper eventually terminalizes; it never blocks the send.
+		try {
+			await operationJournal.deleteOperation(queuedJournalId)
+		} catch {
+			// ignore — supersession is best-effort
+		}
 		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
 		const controller = id ? new AbortController() : undefined
 		if (id && controller) activeControllers.set(id, controller)

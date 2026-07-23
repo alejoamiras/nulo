@@ -47,3 +47,11 @@ present+equal) for the isFeedEligible dApp gate; switch-reset watcher + snapshot
 COMPOSITE scope. Lenient display `journalRecordInScope` left as-is (legacy-row leniency, display-only).
 Deferred (non-blocking, enrichment-only): resnapshotJournal stale-snapshot reschedule guard.
 Tests +11 (queued-journal 4, claim-helper 3, strict-scope 4); full suite 3505; typecheck:all 0; lint 0.
+
+## Codex re-audit r2 → fixed 2 remaining gaps (r3 pending). audit-codex-p1a-r2.md.
+GAP1 NO_FROM default mismatch: dispatcher (dispatcher.ts:1349-1385) resolves NO_FROM as
+allAccounts.find(a=>session.has(a.address)) in INDEX-SORTED WALLET order, not session order. queued-journal
+now mirrors that (walletAccounts.find over session intersection); no-wallet-in-session → skip. GAP2 profile
+TOCTOU: claim-helper now validates the FULL composite scope (account+network+profile), refuses + DELETES the
+mis-scoped record + creates fresh on any mismatch; execution-lane threads getActiveProfile()?.id at claim time.
++10 tests; full suite 3509; typecheck:all 0; lint 0.

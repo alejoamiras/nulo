@@ -287,6 +287,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 								profile: profileService,
 								dappSession: dappSessionService,
 								networkSvc: networkService,
+								accountService,
 								logger,
 							})
 						: Promise.resolve(undefined)

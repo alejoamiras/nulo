@@ -25,6 +25,7 @@ import type { OperationJournalService } from "@/wallet/services/operation-journa
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { DappSessionService } from "@/wallet/services/dapp-session/service"
 import type { NetworkService } from "@/wallet/services/network/service"
+import type { AccountService } from "@/wallet/services/account/service"
 import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
 import { pickPrimaryMethod } from "@/utils/primary-method"
@@ -57,6 +58,10 @@ export interface TryCreateQueuedJournalDeps {
 	profile: ProfileService
 	dappSession: DappSessionService
 	networkSvc: NetworkService
+	/** Wallet-account service — the NO_FROM default account must be resolved in
+	 *  the SAME order the dispatcher uses (accountService index order), not the
+	 *  session array order. */
+	accountService: AccountService
 	logger: ILogger
 }
 
@@ -83,7 +88,7 @@ export async function tryCreateQueuedJournal(
 	session: ActiveSession,
 	deps: TryCreateQueuedJournalDeps,
 ): Promise<string | undefined> {
-	const { journal, profile, dappSession, networkSvc, logger } = deps
+	const { journal, profile, dappSession, networkSvc, accountService, logger } = deps
 	try {
 		const activeProfile = await profile.getActiveProfile()
 		if (!activeProfile) return undefined
@@ -97,37 +102,56 @@ export async function tryCreateQueuedJournal(
 		const hasSendTxGrant = (dapp.capabilityGrants ?? []).some((g) => g.capability.type === "transaction")
 		if (!hasSendTxGrant) return undefined
 
-		// Scope the queued record to the account the send will ACTUALLY use.
-		// DappSession.accounts is string[] of CAIP — parse to bare addresses.
-		// A multi-account session [A,B] with an explicit, session-authorized
-		// `opts.from = B` must produce a B-scoped queued card (so B's later task
-		// CID binds to B's journal), NEVER blindly accounts[0] — that stamped B's
-		// execution onto A's journal and rendered B's progress under A (codex
-		// BLOCKER-1). Mirrors the dispatcher's `resolveNetworkAndAccount`
-		// from-resolution (wallet-bridge dispatcher.ts:643-649).
-		const sessionAddresses = dapp.accounts.map((c) => parseCaipAccount(c as CaipAccount).address)
-		const requestedFrom = extractSendFrom(message)
-		if (requestedFrom !== undefined && !sessionAddresses.includes(requestedFrom)) {
-			// The send names an account outside this session; the dispatcher's
-			// `resolveNetworkAndAccount` will reject it. Don't surface a queued
-			// card for a doomed request — and never fall back to accounts[0],
-			// which would mis-scope it.
-			logger.log(
-				"wallet-sdk-bg",
-				LogLevel.Debug,
-				`queued: requested from ${requestedFrom} not authorized for session ${session.sessionId}; skipping`,
-			)
-			return undefined
-		}
-		// Explicit + authorized `from` → that account; NO_FROM / omitted → the
-		// session default (first authorized account).
-		const accountAddress = requestedFrom ?? sessionAddresses[0]
-
 		// `networkId` for activity-feed scoping must be the INTERNAL network row id
 		// (RecentActivityView.journalRecordInScope filters on `network.id`), NOT
-		// `String(chainId)`. Without this resolution the queued card never renders.
+		// `String(chainId)`. Resolved up-front — its `chainId` is also what the
+		// wallet-account lookup below needs (mirrors the dispatcher).
 		const network = await resolveNetworkByChainId(networkSvc, chainId)
 		if (!network) return undefined
+
+		// Scope the queued record to the account the send will ACTUALLY use, with
+		// the SAME resolution the dispatcher applies (dispatcher.ts:1369-1380), so
+		// the queued card and the executing send agree on the account:
+		//   - explicit, session-authorized `opts.from` → that account;
+		//   - NO_FROM / omitted → the FIRST WALLET account (accountService
+		//     index order) contained in the session — NOT the session array's own
+		//     order, which can differ ([B,A] vs wallet [A,B]) and would card the
+		//     WRONG account while the other one executes (codex GAP-1). A mis-scoped
+		//     queued card is a real cross-account leak: the later task CID would bind
+		//     the executing account's progress onto the carded account's journal.
+		// DappSession.accounts is string[] of CAIP — parse to bare addresses.
+		const sessionAddresses = new Set(dapp.accounts.map((c) => parseCaipAccount(c as CaipAccount).address))
+		const requestedFrom = extractSendFrom(message)
+		let accountAddress: string
+		if (requestedFrom !== undefined) {
+			if (!sessionAddresses.has(requestedFrom)) {
+				// Outside the session; the dispatcher's `resolveNetworkAndAccount`
+				// rejects it. Don't surface a queued card for a doomed request, and
+				// never mis-scope it onto a default account.
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Debug,
+					`queued: requested from ${requestedFrom} not authorized for session ${session.sessionId}; skipping`,
+				)
+				return undefined
+			}
+			accountAddress = requestedFrom
+		} else {
+			// NO_FROM / omitted: the dispatcher's default is the first WALLET account
+			// (index order) contained in the session — `getAccounts` returns rows
+			// index-sorted, so `find` yields the same account the dispatcher resolves.
+			const walletAccounts = await accountService.getAccounts(activeProfile.id, network.chainId)
+			const defaultAccount = walletAccounts.find((a) => sessionAddresses.has(a.address))
+			if (!defaultAccount) {
+				logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Debug,
+					`queued: no wallet account authorized for session ${session.sessionId}; skipping`,
+				)
+				return undefined
+			}
+			accountAddress = defaultAccount.address
+		}
 
 		// Critical section: cap check + record create must be atomic.
 		await queuedCreationLock.enter()
