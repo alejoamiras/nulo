@@ -283,12 +283,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// retroactively) but the activity feed sees an empty list. Useful
 		// for cross-device same-seed users where another device's outgoing
 		// surfaces here as incoming.
-		try {
-			const visible = await this.configService.getValue("incomingTransfersVisible")
-			if (visible === false) return []
-		} catch {
-			// Config service unavailable — fail open (default behaviour).
-		}
+		// Fail CLOSED (matches the emit path): if visibility is off OR the config
+		// is unverifiable, the feed sees an empty list — a reconnect/remount must
+		// not expose receives the user chose to hide while the setting can't be read.
+		if (!(await this.isVisibilityEnabled())) return []
 		const records = await this.repo.listForAccount(profileId, networkId, accountAddress)
 		return records
 			.filter((r) => !r.hidden)
@@ -665,14 +663,6 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				if (inflightTxHashes.has(note.txHash)) return
 				const amountRaw = parseNoteAmount(note)
 				if (amountRaw === null) return
-
-				// Owner trust-boundary (account-switch isolation hardening). `content.owner`
-				// is sender-influenced; `buildRecord` falls it back to the trusted scan
-				// `accountAddress` when absent. PXE only decrypts a note under the account
-				// whose viewing keys match, so a PRESENT owner that disagrees with the account
-				// we scanned under is anomalous — drop it fail-closed. Every scope/dedup/render
-				// path keys on `accountAddress` (trusted) or `siloedNullifier`, NEVER `owner`.
-				if (note.content?.owner !== undefined && note.content.owner !== accountAddress) return
 
 				// Read trust FRESH inside the lock — kills the residual race
 				// codex audit-6 identified (the LOCAL trustState going stale

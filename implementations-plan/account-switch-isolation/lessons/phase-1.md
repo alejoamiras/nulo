@@ -51,9 +51,10 @@ lint · typecheck:all · `bun run test <store/composable/component paths>` · `b
   owner-mismatch dropped; owner-match accepted. 53 scenarios green.
 
 ### Deferred / judged-unnecessary (flag for post-impl auditors)
-- **(scope, siloedNullifier) re-keying — SKIPPED as unnecessary.** A siloed nullifier is globally unique per
-  note (siloed by contract; a note decrypts under exactly one account), so the existing global-nullifier repo
-  key is already collision-free. Re-keying would add churn to a battle-tested repo for no real benefit.
+- **(scope, siloedNullifier) re-keying — DEFERRED (rationale corrected by codex).** A siloed nullifier is unique
+  within ONE rollup's nullifier tree, NOT across independent `networkId` trees — cloned/forked chains can repeat
+  the value, so the global key has a cross-NETWORK collision (data-loss) risk. UI scope filters still prevent
+  DISCLOSURE, so the re-key is a safe FOLLOW-UP for this same-network privacy fix, but must land before multi-net.
 - **Wire-event validation (service param + client result + dispatch override) — DEFERRED** as lower-priority
   defense-in-depth. The cross-account LEAK is already closed at every UI ingress (composable scope-filter +
   store generation/scope guards + component + buildActivityRows), so an unvalidated malformed event is a
@@ -83,3 +84,17 @@ migration fixture; only `agent.sh` does. So a plain local smoke fails this contr
 it (`_smoke-e2e.yml:41`) → green. Orthogonal to account-switch (no migrations/backup/build-config touched).
 Gate-1 account-switch layers are all green: lint · typecheck:all · 3473 unit/component · isolation e2e
 2/2 · negative-grep · 73/73 relevant smoke tests. The migration smoke is a CI concern, unaffected here.
+
+## Codex PRE-MERGE audit — REJECT (blocking; fixing before PR). Consult logged.
+audit-codex-postimpl.md. 3 blocking + regressions + deferral-rationale correction:
+1. BLOCKING journal-detail bypass: `journal/[id].vue` loadOp fetches by id, no scope guard/watch → A's
+   journal detail (amount/recipient/dApp origin) stays under B. FIX: scope-validate + watch account.
+2. BLOCKING read fail-open: `getIncomingTransfers` (service.ts:283-296) returns records on config error;
+   only emit was fail-closed. FIX: fail-closed read via isVisibilityEnabled.
+3. BLOCKING regression: owner-mismatch drop is WRONG — `content.owner` = TRUSTED NoteDao.owner (not sender
+   content); delegated discovery legitimately has owner != accountAddress. REVERT the drop + its 2 tests.
+4. Nullifier claim CORRECTED: siloed nullifiers unique within ONE rollup tree, NOT across networkId trees →
+   cross-network collision risk. Re-key stays a follow-up (UI filters prevent disclosure) but rationale fixed.
+5. Non-blocking (Layer-B / Phase 2-3, don't cause foreign RENDER): event-during-snapshot reschedule absent;
+   journal/task A→B→A address-only guard (stale resurrection). e2e gaps: commits-before-switch (not live race),
+   observer omits tx-card, History has no awaiting cards (vacuous). Noted for hardening/Phase 2-3.
