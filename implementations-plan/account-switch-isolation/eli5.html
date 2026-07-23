@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — account-switch cross-account isolation</title>
+  <style>
+    :root{
+      --bg:#fbfaf7; --ink:#26221c; --muted:#6b6459; --line:#e7e2d8; --card:#ffffff;
+      --accent:#a8480c; --green:#14ae5c; --warn:#b45309; --blue:#2f5fb0;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{ --bg:#100f0d; --ink:#e9e3d6; --muted:#9a9184; --line:#2a2721; --card:#17150f;
+             --accent:#e79457; --green:#3ddc84; --warn:#e0a44a; --blue:#7aa2e0; }
+    }
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+      max-width:760px;margin:0 auto;padding:2.2rem 1.1rem 4rem;color:var(--ink);background:var(--bg);
+      line-height:1.62;-webkit-font-smoothing:antialiased}
+    h1{font-size:1.7rem;letter-spacing:-.02em;margin:0 0 .3rem;text-wrap:balance}
+    .sub{color:var(--muted);font-size:.95rem;margin:0 0 1.8rem}
+    h2{font-size:1.22rem;margin:2.4rem 0 .6rem;letter-spacing:-.01em}
+    h3{font-size:1.02rem;margin:0 0 .3rem}
+    p{margin:.5rem 0}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;
+      background:color-mix(in srgb,var(--ink) 8%,transparent);padding:1px 5px;border-radius:5px}
+    pre{background:var(--card);border:1px solid var(--line);padding:1rem;border-radius:8px;overflow-x:auto;
+      white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,monospace;font-size:.8rem;line-height:1.5}
+    .phase{margin:.9rem 0;padding:.9rem 1.1rem;border-left:3px solid var(--line);background:var(--card);border-radius:0 8px 8px 0}
+    .phase .g{color:var(--muted);font-size:.86rem;margin-top:.35rem}
+    .ship{border-left-color:var(--green)}
+    .tag{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+      padding:2px 7px;border-radius:20px;border:1px solid var(--line);color:var(--muted);vertical-align:middle;margin-left:.4rem}
+    .tag.ship{color:var(--green);border-color:color-mix(in srgb,var(--green) 45%,transparent)}
+    .approval{background:color-mix(in srgb,var(--blue) 8%,transparent);border-left:3px solid var(--blue);
+      padding:1rem 1.15rem;border-radius:0 8px 8px 0;margin:1.4rem 0}
+    .rec{background:color-mix(in srgb,var(--green) 8%,transparent);border-left-color:var(--green)}
+    .warn{color:var(--warn);font-weight:600}
+    ul{padding-left:1.2rem}
+    li{margin:.28rem 0}
+    a{color:var(--accent)}
+    .muted{color:var(--muted);font-size:.9rem}
+    hr{border:none;border-top:1px solid var(--line);margin:2rem 0}
+    table{border-collapse:collapse;width:100%;font-size:.85rem;margin:.6rem 0;display:block;overflow-x:auto}
+    td,th{border:1px solid var(--line);padding:6px 9px;text-align:left}
+  </style>
+</head>
+<body>
+  <h1>Keeping your accounts from leaking into each other</h1>
+  <p class="sub">Account-switch cross-account isolation · <code>/blueprint deep</code> · item 3 / PR-D</p>
+
+  <p><strong>In one paragraph:</strong> The wallet lets you keep several accounts in one profile — often on purpose,
+  to keep them <em>separate</em>. But right now, when you switch from account A to account B, the activity feed can
+  still show A's stuff under B: A's past transactions linger, and worse, money that someone <em>sends</em> to A can
+  pop up in B's feed. That's a privacy leak — a person glancing at your screen while you're "on B" could read A's
+  balance changes, amounts, and timing. This plan fixes it so each account's feed shows only that account's activity,
+  and proves the fix with a test that deliberately triggers the exact race and checks nothing leaks.</p>
+
+  <h2>Why "deep" (the heaviest planning tier)</h2>
+  <p>Two of the six risk dials are HIGH: it's a <strong>privacy/security</strong> bug, and it touches the
+  <strong>core activity feed</strong> that everything reads from (broad blast radius). Two HIGH → deep. So we wrote
+  three independent plans (me, codex, and Opus), merged them, then ran two adversarial audits that
+  <strong>rejected the first draft</strong> and forced a much stronger v2.</p>
+
+  <h2>What's actually broken (plain version)</h2>
+  <ul>
+    <li>The feed keeps its data in "current account" boxes that never get emptied or re-labelled when you switch.</li>
+    <li>A background poller checks <em>all</em> your accounts for incoming money and shouts the results to the whole
+      UI without saying "this is only for account A" — so the UI paints it wherever you happen to be looking.</li>
+    <li>"Cancel" / "in-progress" markers are matched by loose clues, so account A's cancel can clear account B's
+      in-progress card.</li>
+  </ul>
+
+  <h2>The approach: fix it now, harden it in stages</h2>
+  <p>We do <strong>not</strong> rewrite everything at once (that's how you ship new bugs). Instead:</p>
+
+  <div class="phase ship"><h3>Phase 0 — Build the test lever <span class="tag">test-only</span></h3>
+    <p>A switch-controlled "pause button" for the incoming poller (only in test builds, stripped from real ones) so
+    a test can freeze account A's poll <em>mid-flight</em>, switch to B, then release it and check nothing leaks.</p>
+    <p class="g">Proves itself by: the test harness pauses a real note-scan and reports back it's held; the pause code
+    is verified absent from a real Chrome build.</p></div>
+
+  <div class="phase ship"><h3>Phase 1 — Close the leak <span class="tag ship">ship-now fix</span></h3>
+    <p>Every piece of feed data now carries a full "who owns this" label (profile + network + chain + account), and
+    the UI only accepts data whose label matches the account you're looking at — dropping anything that doesn't,
+    rather than guessing. Received-money records are validated at the door. Switching now instantly clears the old
+    account's view.</p>
+    <p class="g">Proves itself by: unit + component tests for the drop-wrong-account logic, and the deterministic
+    network test going from RED to GREEN.</p></div>
+
+  <div class="phase"><h3>Phase 1a — Give tasks a real ID <span class="tag">design</span></h3>
+    <p>Today an "in-progress" task has no reliable link to its journal entry, so we can't safely say which account it
+    belongs to. We design that link properly. Until it exists, we simply hide the ambiguous "in-progress" cards
+    (the journal already shows progress) rather than risk showing the wrong one.</p>
+    <p class="g">Proves itself by: tests showing every task resolves to its owning account, and the ambiguous case
+    fails safe.</p></div>
+
+  <div class="phase"><h3>Phases 2–3 — Move to per-account boxes <span class="tag">hardening</span></h3>
+    <p>Replace the shared "current account" boxes with one box <em>per account</em>. Now a late result for A
+    physically lands in A's box and can never appear under B — the isolation is structural, not just a filter we
+    have to remember to apply. Includes the tricky concurrency rules (ordering, deletes, tombstones) the audits
+    demanded.</p>
+    <p class="g">Proves itself by: a "placement" test that checks which box each record lands in with all the
+    UI-side filters turned OFF — so a filter can't hide a routing bug.</p></div>
+
+  <div class="phase"><h3>Phase 4 — Clean up + re-audit <span class="tag">hardening</span></h3>
+    <p>Delete the old shared state, add guardrails that stop the bug being reintroduced, and hand the finished work
+    to 2–3 independent codex auditors.</p>
+    <p class="g">Proves itself by: full test + lint + typecheck + the race test green on 3 cold runs; auditors find
+    no cross-account write.</p></div>
+
+  <p class="muted"><strong>Off-ramp:</strong> Phase 1 alone is a real, shippable privacy fix. If the deeper
+  restructure (2–4) ever looks too risky at review, we can stop after Phase 1 — as a deliberate ship-now choice,
+  not because guards-forever is the ideal end state.</p>
+
+  <h2>Human context</h2>
+  <p>Aztec notes are like envelopes anyone can send you — the sender controls what's inside, so we never trust any
+  field the sender set. We only trust <em>which account decrypted it</em> (the wallet's own key decides that), and
+  we scope everything on that. The audits caught us almost trusting a sender-set field; v2 forbids reading it at all.</p>
+  <p>Also: the popup and the side panel are two separate windows that don't share their "active account" — so the
+  fix scopes each window on its <em>own</em> state, not one global value.</p>
+
+  <h2>Open questions — all resolved</h2>
+  <ul>
+    <li><strong>A4 — feed on switch: DECIDED → instant-from-cache.</strong> Switching to B shows B's cached
+      activity immediately (refreshing in the background). This makes Phase 3 <em>required</em> UX, not optional
+      hardening — the off-ramp at Phase 1 would only give empty-then-load.</li>
+    <li>A1/A2/A3/A5/A6 resolved in the plan (per-document scope; privacy-first defaults; verify the test baseline
+      first). No open questions remain.</li>
+  </ul>
+  <p class="muted"><strong>Status: APPROVED.</strong> Codex arc reject v1 → reject v2 → conditional-approve v3
+  (condition applied); Opus conditional-approve. Implementation starting at Phase 0.</p>
+
+  <div class="approval">
+    <h2 style="margin-top:0">What I need you to approve</h2>
+    <ul>
+      <li><strong>Scope:</strong> all four facets (stale history, incoming leak, task mis-scoping, the data-model
+        gap), fixed in stages; the leak closes at Phase 1.</li>
+      <li><strong>Tier:</strong> deep (2 HIGH risk dials). Confirm.</li>
+      <li><strong>Validation:</strong> unit + component + smoke + a deterministic network race test as the ship gate.</li>
+      <li><strong>The A4 UX call</strong> above (or defer it to when we reach Phase 3).</li>
+      <li>Approve / conditionally approve / reject — pending the final codex pass verdict (shown in chat).</li>
+    </ul>
+  </div>
+
+  <hr>
+
+  <h2>Implementation seed (draft — finalized after you approve)</h2>
+  <p>One of these starts the autonomous build session (run it <em>inside this worktree</em>). Use exactly ONE —
+  they don't combine.</p>
+  <p class="warn">⚠ Use exactly one per session; setting one replaces the other.</p>
+
+  <div class="phase rec"><h3>Recommended: <code>/goal</code> (completion is checkable from the transcript)</h3>
+  <pre><code>/goal All phases marked ✓ in implementations-plan/account-switch-isolation/plan.md, each ✓ backed by its phase's validation gate reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/account-switch-isolation/lessons/phase-N.md; /code-review max --fix complete with fixes applied and committed; 2–3 independent codex post-impl auditors complete with high/critical findings addressed; `bun run lint` and `bun run test` both exit 0 in the transcript; and NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts reported GREEN. Hard limits: never merge to dev/main, never publish, never weaken a validation gate, never expand scope beyond plan.md.</code></pre></div>
+
+  <h3>Fallback: <code>/loop 15m</code> (interval-driven)</h3>
+  <pre><code>/loop 15m Drive implementations-plan/account-switch-isolation forward. Never idle. Each firing: (1) re-read plan.md + lessons/ (authoritative), run git status + git log --oneline -5, and if a PR exists gh pr view --json statusCheckRollup. (2) No task in hand? take the next pending step from plan.md; after each edit run `bun run lint` + the touched `bun run test <paths>`, then commit+push. (3) Facing a decision? call /codex xhigh, reach a defensible answer, log it in lessons/phase-N.md — but never cross a hard limit (no merge to dev/main, no publish, no gate-weakening, no scope expansion). (4) Same step failed 5×? reassess with codex. (5) Phase green ONLY when THAT phase's validation gate in plan.md passes — paste the result, mark ✓, print LESSONS_FILE=…/lessons/phase-N.md, advance. (6) All phases ✓? run /code-review max --fix (commit separately) → 2–3 codex post-impl audits → address high/critical → write the wrap-up and stop. Keep an ASCII checklist visible.</code></pre>
+
+  <p class="muted" style="margin-top:2rem"><a href="plan.md">Full plan.md</a> ·
+    <a href="./lessons/">Lessons logs</a> · drafts: <a href="plan-draft-main.md">main</a> /
+    <a href="plan-draft-fable.md">fable</a> / <a href="plan-draft-codex.md">codex</a> ·
+    audits: <a href="audit-codex.md">codex</a> / <a href="audit-fable.md">fable</a> ·
+    <a href="research/surface-map.md">surface map</a></p>
+</body>
+</html>

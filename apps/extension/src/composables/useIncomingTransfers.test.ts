@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { effectScope, nextTick, ref } from "vue"
+import { effectScope, ref } from "vue"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
@@ -11,7 +11,9 @@ import {
 } from "./useIncomingTransfers"
 
 // Records default to the READY scope (profile "p", network "n", account "a") so the live
-// scope-filter (onAdded/onUpdated) admits them; override `accountAddress`/`networkId` to test filtering.
+// scope-filter (onAdded/onUpdated) admits them; override `accountAddress`/`networkId`/`profileId` to
+// exercise the foreign-scope drop. Keyed by `id` — the discriminated-union PK (public records have no
+// `siloedNullifier`).
 const rec = (id: string, extra: Record<string, unknown> = {}): IncomingTransferRecord =>
 	({ id, profileId: "p", networkId: "n", accountAddress: "a", ...extra }) as unknown as IncomingTransferRecord
 
@@ -205,37 +207,72 @@ describe("useIncomingTransfers", () => {
 		expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
 	})
 
-	it("onAdded IGNORES a record for a different account (scope filter — no cross-account leak)", () => {
+	// ── Cross-account containment (privacy fix — #314 + code-review, id-keyed) ──
+
+	it("onAdded DROPS a record for a non-active account (the leak the broadcast would otherwise cause)", () => {
 		const incoming = makeIncomingService()
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("foreign", { accountAddress: "OTHER" }))
-		incoming.onIncomingTransferAdded.invoke(rec("foreign-net", { networkId: "OTHERNET" }))
-		expect(incomingTransfers.value).toEqual([]) // neither entered the active-account feed
-		incoming.onIncomingTransferAdded.invoke(rec("mine")) // in-scope
+		incoming.onIncomingTransferAdded.invoke(rec("foreign", { accountAddress: "OTHER_ACCOUNT" }))
+		expect(incomingTransfers.value).toEqual([])
+	})
+
+	it("onAdded DROPS a record for a non-active network or profile", () => {
+		const incoming = makeIncomingService()
+		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
+		incoming.onIncomingTransferAdded.invoke(rec("wrongNet", { networkId: "OTHER_NET" }))
+		incoming.onIncomingTransferAdded.invoke(rec("wrongProfile", { profileId: "OTHER_PROFILE" }))
+		expect(incomingTransfers.value).toEqual([])
+	})
+
+	it("onUpdated DROPS a foreign-account record (never coerces it onto the active view)", () => {
+		const incoming = makeIncomingService()
+		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
+		incoming.onIncomingTransferAdded.invoke(rec("mine"))
+		incoming.onIncomingTransferUpdated.invoke(rec("mine", { accountAddress: "OTHER_ACCOUNT", v: 9 }))
 		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["mine"])
 	})
 
-	it("re-fetches when the active scope (account) changes", async () => {
-		const incoming = makeIncomingService([rec("a")])
+	it("switching the active account SYNCHRONOUSLY clears the view then refetches for the new account", async () => {
 		const account = ref("a")
-		setup({ incoming, config: makeConfigService(), scope: () => ({ profileId: "p", networkId: "n", account: account.value }) })
-		incoming.getIncomingTransfers.mockClear()
-		account.value = "b" // account switch — a pure store mutation, no remount
-		await nextTick()
-		expect(incoming.getIncomingTransfers).toHaveBeenCalledWith("p", "n", "b")
+		const incoming = makeIncomingService([rec("a1")])
+		const scope = () => ({ profileId: "p", networkId: "n", account: account.value })
+		const { incomingTransfers } = setup({ incoming, config: makeConfigService(), scope })
+		incoming.onConnected.invoke()
+		await Promise.resolve()
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a1"])
+
+		incoming.getIncomingTransfers.mockResolvedValueOnce([rec("b1", { accountAddress: "b" })])
+		account.value = "b"
+		expect(incomingTransfers.value).toEqual([]) // cleared synchronously, no A rows linger
+		await Promise.resolve()
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).toHaveBeenLastCalledWith("p", "n", "b")
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b1"])
 	})
 
-	it("in-flight guard: a superseded refresh does not clobber a newer one", async () => {
+	it("a late fetch for a superseded scope (A→B→A) does not clobber the current view", async () => {
+		const account = ref("a")
+		const scope = () => ({ profileId: "p", networkId: "n", account: account.value })
+		let resolveA: (rows: IncomingTransferRecord[]) => void = () => {}
+		const aPending = new Promise<IncomingTransferRecord[]>((r) => {
+			resolveA = r
+		})
 		const incoming = makeIncomingService()
-		let resolveFirst: (v: IncomingTransferRecord[]) => void = () => {}
 		incoming.getIncomingTransfers
-			.mockImplementationOnce(() => new Promise((r) => (resolveFirst = r))) // 1st fetch hangs
-			.mockResolvedValueOnce([rec("newer")]) // 2nd fetch wins
-		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService() })
-		const first = refresh() // token 1 (pending)
-		await refresh() // token 2 resolves → "newer"
-		resolveFirst([rec("stale")]) // token 1 resolves LATE
-		await first
-		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["newer"]) // stale did not clobber
+			.mockReturnValueOnce(aPending)
+			.mockResolvedValueOnce([rec("b1", { accountAddress: "b" })])
+			.mockResolvedValueOnce([rec("a-fresh")])
+		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService(), scope })
+
+		const aFetch = refresh()
+		account.value = "b"
+		await Promise.resolve()
+		account.value = "a"
+		await Promise.resolve()
+		await Promise.resolve()
+		resolveA([rec("a-stale")])
+		await aFetch
+		await Promise.resolve()
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a-fresh"])
 	})
 })

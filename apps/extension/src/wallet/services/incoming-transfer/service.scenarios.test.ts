@@ -417,7 +417,7 @@ function note(
 		noteHash: "0xnh1",
 		l2BlockNumber: 100,
 		txIndexInBlock: 0,
-		noteIndexInTx: 0,
+		indexInTx: 0,
 		contract: tokenA.contract,
 		storageSlot: "0xslot",
 		txHash: "0xtx1",
@@ -482,6 +482,39 @@ describe("IncomingTransferService — public surface gating (P4 visibility)", ()
 		})
 		const out = await service.getIncomingTransfers("p1", "n1", "0xa")
 		expect(out).toHaveLength(1)
+	})
+
+	test("getIncomingTransfers fails CLOSED on a config error (returns [], record stays persisted)", async () => {
+		const config = makeConfigStub()
+		const { service } = await bootService({ config })
+		records.set("k", {
+			kind: "note",
+			id: "note:p1|n1|k",
+			siloedNullifier: "k",
+			profileId: "p1",
+			networkId: "n1",
+			accountAddress: "0xa",
+			contract: "0xc",
+			tokenId: 1,
+			owner: "0xa",
+			amountRaw: "100",
+			noteHash: "0xnh",
+			txHash: "0xtx",
+			l2BlockNumber: 1,
+			txIndexInBlock: 0,
+			indexInTx: 0,
+			hidden: false,
+			discoveredAt: 0,
+		})
+		// Config port hiccup for the visibility key → the READ path must not expose records.
+		config.getValue.mockImplementation(async (key: string) => {
+			if (key === "incomingTransfersVisible") throw new Error("config down")
+			return undefined
+		})
+		const out = await service.getIncomingTransfers("p1", "n1", "0xa")
+		expect(out).toEqual([])
+		// Still persisted — reappears once visibility can be read again.
+		expect(records.size).toBe(1)
 	})
 
 	test("getIncomingTransfers filters hidden records", async () => {
@@ -834,6 +867,35 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 
 		expect(added).toHaveBeenCalledTimes(1)
 		expect([...records.values()][0].hidden).toBe(false)
+	})
+
+	test("visibility fails CLOSED: a config error suppresses the Added emit but persists the record hidden", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+		const config = makeConfigStub()
+		const { service } = await bootService({ network, token, note: noteSvc, config })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		// Config port hiccup ONLY for the visibility key (boot stays clean).
+		config.getValue.mockImplementation(async (key: string) => {
+			if (key === "incomingTransfersVisible") throw new Error("config port down")
+			return undefined
+		})
+		const added = vi.fn()
+		service.onIncomingTransferAdded.add(added)
+
+		await scan(service)
+
+		// Privacy control fails closed: no emit when visibility can't be confirmed…
+		expect(added).not.toHaveBeenCalled()
+		// …but the record is persisted (hidden), so it reappears once visibility resolves.
+		expect(records.size).toBe(1)
 	})
 
 	test("dedupe source 1 (prior records): existing siloedNullifier → skip", async () => {

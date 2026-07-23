@@ -28,6 +28,7 @@ import { DappSessionService } from "./services/dapp-session/service"
 import { ExecutionService } from "./services/execution/service"
 import { E2E_PROVERLESS } from "@/e2e/config"
 import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
+import { ChromeStorageIncomingPollGate } from "@/e2e/chrome-storage-incoming-poll-gate"
 import { FpcService } from "./services/fpc/service"
 import { LogViewerService } from "./services/log-viewer/service"
 import { LoggerService } from "./services/logger/service"
@@ -228,7 +229,17 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
-		services.add(new IncomingTransferService(logger, browserApi))
+		// E2E_PROVERLESS injects the incoming-poll gate (same tree-shaken-in-prod
+		// pattern + negative-grep as the proof gate above). Default poll interval kept.
+		services.add(
+			new IncomingTransferService(
+				logger,
+				browserApi,
+				undefined, // pollIntervalMs (default)
+				undefined, // publicReader (production uses the built-in PXE reader)
+				E2E_PROVERLESS ? new ChromeStorageIncomingPollGate() : undefined,
+			),
+		)
 		services.add(new PasskeyService(logger, windowManager))
 		// Started LAST (declares dependencies on every service it purges) — finding D.
 		const deletionCoordinator = new ProfileDeletionCoordinator(logger)

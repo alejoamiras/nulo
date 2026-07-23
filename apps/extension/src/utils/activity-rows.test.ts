@@ -139,4 +139,57 @@ describe("buildActivityRows — three-source merge", () => {
 		expect(keys).toContain("journal:j1")
 		expect(keys).toContain("incoming:note:p1|net-1|0xn1")
 	})
+
+	// ── Cross-account render-scope filters (defense-in-depth) ──
+
+	test("tx scoping: drops other-account tx when accountAddress is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [{ ...tx(3_000, "0xmine"), account: "0xa" } as Tx, { ...tx(2_000, "0xtheirs"), account: "0xother" } as Tx],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			accountAddress: "0xa",
+		})
+		expect(rows.map((r) => (r.type === "tx" ? r.tx.hash : ""))).toEqual(["0xmine"])
+	})
+
+	test("tx scoping: drops wrong-chain tx when chainId is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [
+				{ ...tx(3_000, "0xright"), account: "0xa", chainId: 1 } as Tx,
+				{ ...tx(2_000, "0xwrong"), account: "0xa", chainId: 2 } as Tx,
+			],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			accountAddress: "0xa",
+			chainId: 1,
+		})
+		expect(rows.map((r) => (r.type === "tx" ? r.tx.hash : ""))).toEqual(["0xright"])
+	})
+
+	test("incoming scoping: drops other-account incoming when accountAddress is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [],
+			terminalJournalOps: [],
+			incomingTransfers: [
+				incoming({ siloedNullifier: "0xmine" }),
+				incoming({ siloedNullifier: "0xtheirs", accountAddress: "0xother" }),
+			],
+			accountAddress: "0xa",
+		})
+		expect(rows.map((r) => (r.type === "incoming" && r.inc.kind === "note" ? r.inc.siloedNullifier : ""))).toEqual(["0xmine"])
+	})
+
+	test("incoming scoping: drops wrong-network incoming when networkId is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [],
+			terminalJournalOps: [],
+			incomingTransfers: [
+				incoming({ siloedNullifier: "0xhere", networkId: "net-1" }),
+				incoming({ siloedNullifier: "0xelsewhere", networkId: "net-2" }),
+			],
+			accountAddress: "0xa",
+			networkId: "net-1",
+		})
+		expect(rows.map((r) => (r.type === "incoming" && r.inc.kind === "note" ? r.inc.siloedNullifier : ""))).toEqual(["0xhere"])
+	})
 })

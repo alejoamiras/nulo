@@ -175,7 +175,10 @@ export async function mintPublicTokens(
 	}
 }
 
-/** Mint private tokens to an address.
+/** Mint private tokens to an address. Returns the mined L2 tx hash as a
+ *  `0x`-prefixed string — the SAME value the extension's note scanner reports
+ *  as `note.txHash` (both are `TxHash.toString()`), so callers can arm the
+ *  incoming-poll gate or correlate a discovered incoming record by hash.
  *
  *  `mint_to_private` is a private execution path, so the test wallet's
  *  PXE must know the token contract (instance + artifact) before it can
@@ -194,7 +197,7 @@ export async function mintPrivateTokens(
 	amount: bigint,
 	minterAddress: string,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
-): Promise<void> {
+): Promise<string> {
 	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
 	const instance = await node.getContract(addr)
 	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
@@ -210,17 +213,22 @@ export async function mintPrivateTokens(
 	// immediately (mintPublicTokens hides this via a follow-up
 	// `balance_of_public.simulate` that implicitly forces a chain query —
 	// no such barrier for the private path). Worth fixing here rather than
-	// at the call site so future callers don't repeat the trap.
-	await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(toAddress), amount).send({
+	// at the call site so future callers don't repeat the trap. Waiting also
+	// gives us a mined `receipt.txHash` to return.
+	const sent = await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(toAddress), amount).send({
 		fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
 		from: AztecAddress.fromStringUnsafe(minterAddress),
 		wait: { timeout: 120 },
 	})
+	return sent.receipt.txHash.toString()
 }
 
 /** Private → private transfer between two addresses the test wallet can
  *  act for (sender must hold private balance — see `mintPrivateTokens`).
- *  Same registration + `wait` traps as the private mint above. */
+ *  Same registration + `wait` traps as the private mint above. Returns the
+ *  mined L2 tx hash (`0x`-prefixed `TxHash.toString()`) — the delivered note
+ *  the recipient discovers carries this exact `txHash`, so callers can arm the
+ *  incoming-poll gate or correlate the incoming record by hash. */
 export async function transferPrivateTokens(
 	wallet: InstanceType<typeof EmbeddedWallet>,
 	node: ReturnType<typeof createAztecNodeClient>,
@@ -229,7 +237,7 @@ export async function transferPrivateTokens(
 	toAddress: string,
 	amount: bigint,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
-): Promise<void> {
+): Promise<string> {
 	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
 	const instance = await node.getContract(addr)
 	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
@@ -240,13 +248,14 @@ export async function transferPrivateTokens(
 	}
 
 	const token = await TokenContract.at(addr, wallet)
-	await token.methods
+	const sent = await token.methods
 		.transfer_private_to_private(AztecAddress.fromStringUnsafe(fromAddress), AztecAddress.fromStringUnsafe(toAddress), amount, 0)
 		.send({
 			fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
 			from: AztecAddress.fromStringUnsafe(fromAddress),
 			wait: { timeout: 120 },
 		})
+	return sent.receipt.txHash.toString()
 }
 
 /** Public → public transfer (`transfer_public_to_public`) — the sender must hold a PUBLIC balance

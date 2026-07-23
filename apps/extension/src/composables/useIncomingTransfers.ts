@@ -8,9 +8,9 @@ import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer
  * Recent-Activity widget, which previously duplicated this verbatim. The
  * parent owns the service clients and their connect/disconnect lifecycle (so
  * the page's `request()`-driven auto-connect timing is unchanged); this only
- * wires the listeners, the optimistic add/update/delete merges, and the
- * `incomingTransfersVisible` toggle reload. `dispose()` removes every handler
- * (also auto-invoked via `onScopeDispose`).
+ * wires the listeners, the optimistic add/update/delete merges, the
+ * `incomingTransfersVisible` toggle reload, and the D8 dust re-filter.
+ * `dispose()` removes every handler (also auto-invoked via `onScopeDispose`).
  */
 
 /** Minimal slice of `IncomingTransferServiceClient` this composable touches. */
@@ -58,49 +58,74 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 
 	const incomingTransfers = ref<IncomingTransferRecord[]>([])
 	let disposed = false
-	// Monotonic in-flight token: the service scans ALL accounts in the profile, so quotes/config/scope
-	// changes can overlap `refresh()` calls; only the newest may write the ref (else an older account's
-	// slower fetch clobbers a newer one — code-review #6).
-	let requestId = 0
+
+	// Stable identity of the active scope ("" when not ready). Drives both the
+	// reset-on-switch watcher and the stale-fetch / foreign-event rejection.
+	const scopeKey = (s: { profileId: string; networkId: string; account: string } | undefined): string =>
+		s ? `${s.profileId} ${s.networkId} ${s.account}` : ""
+
+	// Bumped per refresh so a late fetch for a superseded scope (A→B→A) is
+	// dropped instead of clobbering the current one.
+	let refreshSeq = 0
 
 	const refresh = async (): Promise<void> => {
 		const s = scope()
 		if (!s) return
-		const token = ++requestId
+		const myKey = scopeKey(s)
+		const mySeq = ++refreshSeq
 		const rows = await incomingTransferService.getIncomingTransfers(s.profileId, s.networkId, s.account)
-		if (token !== requestId || disposed) return // a newer refresh (or dispose) superseded this one
+		// Drop if disposed, a newer refresh started, or the active scope changed
+		// during the await — never assign a stale/foreign snapshot.
+		if (disposed || mySeq !== refreshSeq || scopeKey(scope()) !== myKey) return
 		incomingTransfers.value = rows
 	}
 
-	// The service emits add/update for ANY account it scanned in the profile (one stream serves all
-	// accounts), so live events MUST be filtered to the on-screen scope — else another account's receipt
-	// (its amount + sender) leaks into the active account's feed (code-review #1).
-	const inScope = (inc: IncomingTransferRecord): boolean => {
+	// Layer-A containment: a record is accepted into the active view ONLY when it
+	// belongs to the CURRENTLY active (profile, network, account). The service
+	// broadcasts every account's events to every client, so the active account is
+	// enforced HERE — never trusted from the wire, never inferred.
+	const inLiveScope = (inc: IncomingTransferRecord): boolean => {
 		const s = scope()
 		return !!s && inc.profileId === s.profileId && inc.networkId === s.networkId && inc.accountAddress === s.account
 	}
+
 	const onAdded = (inc: IncomingTransferRecord) => {
-		if (!inScope(inc)) return
+		if (!inLiveScope(inc)) return
 		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
 		if (idx === -1) incomingTransfers.value = [inc, ...incomingTransfers.value]
 		else incomingTransfers.value[idx] = inc
 	}
 	const onUpdated = (inc: IncomingTransferRecord) => {
-		if (!inScope(inc)) return
+		if (!inLiveScope(inc)) return
 		const idx = incomingTransfers.value.findIndex((x) => x.id === inc.id)
 		if (idx !== -1) incomingTransfers.value[idx] = inc
 	}
 	const onDeleted = (inc: IncomingTransferRecord) => {
-		// Delete is keyed by id (unique across accounts) — safe to apply unconditionally; a foreign
-		// record simply isn't in the list.
+		// Unscoped by design: a delete is strictly subtractive (filter by the
+		// profile+network-scoped PK). A foreign-scope delete can't remove an
+		// active-scope row (the id won't be present), and applying it unconditionally
+		// avoids dropping a legitimate active-scope delete during a momentary
+		// scope-read gap.
 		incomingTransfers.value = incomingTransfers.value.filter((x) => x.id !== inc.id)
 	}
 	const onConfigUpdate = (prop: ConfigProp) => {
 		// Both the visibility toggle and the dust threshold change the read-time filtered list (D8).
 		if (prop.key === "incomingTransfersVisible" || prop.key === "incomingDustUsdThreshold") refresh()
 	}
-	// A fresh quote can move a receipt across the dust threshold — re-run the read-time filter.
+	// A fresh quote can move a receipt across the dust threshold — re-run the read-time filter (D8).
 	const onQuotesUpdated = () => refresh()
+
+	// Synchronous reset on scope change (account/network/profile switch). `flush:
+	// 'sync'` so B's view clears BEFORE Vue paints the new account — a default
+	// (post-nextTick) watcher leaves a one-tick window rendering A's rows under B.
+	const stopScopeWatch = watch(
+		() => scopeKey(scope()),
+		(key) => {
+			incomingTransfers.value = []
+			if (key) refresh()
+		},
+		{ flush: "sync" },
+	)
 
 	incomingTransferService.onIncomingTransferAdded.add(onAdded)
 	incomingTransferService.onIncomingTransferUpdated.add(onUpdated)
@@ -108,17 +133,6 @@ export function useIncomingTransfers(options: UseIncomingTransfersOptions): UseI
 	incomingTransferService.onConnected.add(refresh)
 	configService.onUpdate.add(onConfigUpdate)
 	priceService?.onQuotesUpdated.add(onQuotesUpdated)
-
-	// Re-fetch when the active account/network/profile changes (an account switch is a pure store
-	// mutation — no remount, no reconnect — so nothing else triggers a reload; the feed would otherwise
-	// keep showing the previous account's receipts — code-review #2).
-	const scopeKey = () => {
-		const s = scope()
-		return s ? `${s.profileId}|${s.networkId}|${s.account}` : undefined
-	}
-	const stopScopeWatch = watch(scopeKey, () => {
-		void refresh()
-	})
 
 	const dispose = () => {
 		if (disposed) return
