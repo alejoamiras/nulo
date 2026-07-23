@@ -79,7 +79,23 @@ the `@aztec/stdlib` doc). Found two more High issues:
   tag) and key the cache by that hash. Threaded the checkpoint hash through the `getPublicTokenClassStatus`
   RPC. A null hash → `unresolved` (fail closed).
 
-## Fixes applied (rounds 1–4)
+## Codex round 5 — verify the round-4 fixes (same session)
+CONFIRMED Fix B (class-gate hash pin + hash-keyed cache closes the TOCTOU + same-height hole). Found
+two more High in the forward/pending-page arm:
+- **A1 — watermark outran the cursor.** `lastScanFinalized` advanced to `finalized` every tick, even
+  when the forward scan was budget-INCOMPLETE (`hasMore`) or DROPPED and the cursor lagged finality.
+  A later reorg then reconciled `[finalized+1..checkpointed]` and jumped the cursor forward, PERMANENTLY
+  skipping the unscanned logs in the `(cursor, finalized]` gap. **Fix:** a `finalizedWatermark` helper
+  = `min(finalized, highest-contiguously-scanned-block)` — capped at `scannedThrough` when `hasMore`,
+  at the cursor when `dropped`, at `checkpointed` only when the scan actually reached it.
+- **A2 — pending-page recovery TOCTOU.** `pendingPageReorged` used a standalone canonicity probe of
+  the stale `upperHash` (same flaw the forward boundary already fixed) — a flapping/lying node exposes
+  the old fork here, the new one during the scan, the marker clears, orphan survives. **Fix:** the same
+  atomic ancestry membership proof — `upperHash ∈ archive(current checkpoint hash)` — and set
+  `pendingPage.upperHash` to the pinned checkpoint hash. Also fixed the Low (capability e2e test now
+  passes the checkpoint hash to `resolveTokenClassStatus`).
+
+## Fixes applied (rounds 1–5)
 - **Critical #1** (final): per-page checkpoint-fork-hash pin + `toBlock` bound + 1-page cap when null +
   an ATOMIC boundary-ancestry membership proof (`verifyAncestorHash`).
 - **Critical #2**: `dropped` discriminator; reconcile defers on a dropped page, never finishes.

@@ -20,7 +20,7 @@ import { isReceiptAboveDustThreshold, usdThresholdToMicro } from "@/utils/incomi
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { PublicEventCursor, PublicScanTips, PublicTokenClassStatus, PublicTransferEvent } from "@nulo/aztec-runtime/pxe/public-events"
 import { IncomingTransferRepository } from "./repository"
-import { PublicEventIndexer, type PublicEventReader } from "./public-event-indexer"
+import { PublicEventIndexer, type PublicEventReader, type PublicScanResult } from "./public-event-indexer"
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
 	type Events,
@@ -949,7 +949,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const trustRecords = await this.repo.listTrust()
 		const pending = trustRecords.filter((t) => t.profileId === profileId && t.networkId === networkId && t.state === "pending")
 		if (pending.length === 0) return
-		let network
+		let network: Network
 		try {
 			network = await this.networkService.getNetwork(networkId)
 		} catch {
@@ -1070,6 +1070,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			tips.checkpointedBlockHash,
 		)
 		if (classStatus !== "standard") return // fail closed (non-standard / upgraded / unresolvable)
+		// `classStatus === "standard"` guarantees a non-null checkpoint hash (the gate fail-closes to
+		// `unresolved` without one). Capture it: it anchors both the pending-page ancestry probe and the
+		// forward scan.
+		const checkpointHash = tips.checkpointedBlockHash
+		if (!checkpointHash) return
 
 		const cursor = (await this.repo.getCursor(profileId, networkId, contract)) ?? this.freshCursor(0)
 
@@ -1082,7 +1087,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 		// Resume a pending page (normal-scan record-before-cursor crash window, D3).
 		if (cursor.pendingPage) {
-			const reorged = await this.pendingPageReorged(networkId, contract, cursor.pendingPage)
+			const reorged = await this.pendingPageReorged(networkId, contract, cursor.pendingPage, checkpointHash)
 			if (reorged) {
 				await this.beginReconciliation(profileId, networkId, contract, network.chainId, cursor, tips, epochAtStart)
 				return
@@ -1163,17 +1168,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			referenceBlock: checkpointHash,
 		})
 
+		const watermark = this.finalizedWatermark(cursor, result, tips)
+
 		if (result.scannedThrough === null) {
-			// Nothing new — still advance the finalized watermark so a later reorg rewinds no further
-			// than necessary. (A dropped/suspect page also lands here; the watermark comes from `tips`,
-			// not the page, so advancing it is safe — no records are touched.)
-			await this.persistCursorLocked(
-				profileId,
-				networkId,
-				contract,
-				{ ...cursor, lastScanFinalized: tips.finalizedBlockNumber },
-				epochAtStart,
-			)
+			// Nothing new (empty EOF) OR a dropped/suspect page — advance the finalized rewind floor, but
+			// only as far as we CONTIGUOUSLY scanned (a dropped page scanned nothing, so the floor stays
+			// at the cursor — codex R5 A1). No records are touched.
+			await this.persistCursorLocked(profileId, networkId, contract, { ...cursor, lastScanFinalized: watermark }, epochAtStart)
 			return
 		}
 
@@ -1196,7 +1197,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					...cursor,
 					cursor: result.scannedThrough,
 					lastSyncedBlockHash: nextSyncedHash,
-					lastScanFinalized: tips.finalizedBlockNumber,
+					lastScanFinalized: watermark,
 				},
 				epochAtStart,
 			)
@@ -1226,24 +1227,44 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				...cursor,
 				cursor: result.scannedThrough,
 				lastSyncedBlockHash: nextSyncedHash,
-				lastScanFinalized: tips.finalizedBlockNumber,
+				lastScanFinalized: watermark,
 				pendingPage: undefined,
 			},
 			epochAtStart,
 		)
 	}
 
-	/** Probe whether a pending page's fork is still canonical (D3): a `referenceBlock=upperHash`
-	 *  page fetch that throws ⇒ the fork was reorged out. */
+	/** The finalized rewind floor to persist: `min(finalized, the highest block CONTIGUOUSLY scanned
+	 *  this tick)`. A budget-INCOMPLETE (`hasMore`) or validator-DROPPED scan did not reach the pinned
+	 *  `checkpointed`, so the floor must not outrun the cursor — else a later reconcile
+	 *  `[floor+1..checkpointed]` would jump the cursor past the unscanned `(cursor, floor]` gap and
+	 *  permanently skip its logs (codex R5 A1). A COMPLETE scan (`hasMore` false, not dropped) covered
+	 *  the whole `(cursor, checkpointed]` window, so the floor may advance to `finalized`. */
+	private finalizedWatermark(cursor: PublicScanCursor, result: PublicScanResult, tips: PublicScanTips): number {
+		const cursorBlock = cursor.cursor?.blockNumber ?? cursor.startBlock
+		const scannedUpTo = result.dropped
+			? cursorBlock // suspect page — nothing scanned this tick
+			: result.hasMore && result.scannedThrough
+				? result.scannedThrough.blockNumber // budget-limited — only through the last page
+				: tips.checkpointedBlockNumber // reached the pinned checkpoint (empty tail or full window)
+		return Math.min(tips.finalizedBlockNumber, scannedUpTo)
+	}
+
+	/** Probe whether a pending page's fork survived (D3): an ATOMIC ancestry proof that
+	 *  `pendingPage.upperHash` is still in the archive rooted at the CURRENT checkpoint hash. A throw
+	 *  (non-member / gone) ⇒ the fork was reorged out. Uses the membership witness — NOT a standalone
+	 *  canonicity probe — so a flapping/lying node can't momentarily expose the old fork here and the
+	 *  new one during the forward scan (codex R5 A2). */
 	private async pendingPageReorged(
 		networkId: string,
 		contract: string,
 		pendingPage: NonNullable<PublicScanCursor["pendingPage"]>,
+		checkpointHash: string,
 	): Promise<boolean> {
 		try {
 			await this.indexer.probe(networkId, contract, {
-				afterCursor: pendingPage.toScannedThrough,
-				referenceBlock: pendingPage.upperHash,
+				referenceBlock: checkpointHash,
+				verifyAncestorHash: pendingPage.upperHash,
 			})
 			return false
 		} catch {

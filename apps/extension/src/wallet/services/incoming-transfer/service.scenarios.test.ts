@@ -2606,6 +2606,32 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 		expect(cursorFor()?.reconciling).toBeUndefined()
 	})
 
+	test("(codex R5 A1) a budget-incomplete forward scan CAPS the finalized watermark at the scanned block (no reconcile-gap)", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		state.tips = { checkpointedBlockNumber: 100, checkpointedBlockHash: "0xcheckpoint", finalizedBlockNumber: 90 }
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		seedCursor({ cursor: null, lastSyncedBlockHash: null, lastScanFinalized: 0, startBlock: 0 })
+		// 5 FULL pages (budget exhausted → hasMore) whose last log sits at block 10, far below finality
+		// (90): the scan is BEHIND. Non-recipient events so they only advance the cursor.
+		for (let i = 0; i < 5; i++) {
+			state.responses.push(pubPage([pubEvent({ txHash: `0x${i}`, to: "0xNOTME", l2BlockNumber: 6 + i, logIndexWithinTx: i })], true))
+		}
+
+		await scanPublic(service)
+
+		// The watermark must NOT jump to finalized(90) — that would let a later reconcile [91..100] skip
+		// the unscanned logs in (10, 90]. It is capped at the highest CONTIGUOUSLY-scanned block (10).
+		expect(cursorFor()?.cursor).toEqual({ blockNumber: 10, txIndexWithinBlock: 0, logIndexWithinTx: 4 })
+		expect(cursorFor()?.lastScanFinalized).toBe(10)
+	})
+
 	test("pendingPage crash window: a set pendingPage whose fork is gone triggers reconciliation", async () => {
 		const { reader, state } = makePublicReader()
 		const { service } = await bootPublic(reader, state)
@@ -2627,11 +2653,15 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 				upperHash: "0xoldfork",
 			},
 		})
-		state.responses.push(new Error("pendingPage upperHash reorged")) // probe throws → reconcile
+		state.responses.push(new Error("pendingPage upperHash not an ancestor")) // ancestry probe throws → reconcile
 		state.responses.push(pubPage([])) // reconcile window empty → orphan deleted
 
 		await scanPublic(service)
 
+		// The pendingPage recovery is an ATOMIC ancestry probe rooted at the CURRENT checkpoint hash
+		// (not a standalone canonicity fetch of the stale upperHash) — codex R5 A2.
+		expect(state.fetchArgs[0].referenceBlock).toBe("0xcheckpoint")
+		expect(state.fetchArgs[0].verifyAncestorHash).toBe("0xoldfork")
 		expect(records.get(orphan.id)).toBeUndefined()
 		expect(cursorFor()?.pendingPage).toBeUndefined()
 	})

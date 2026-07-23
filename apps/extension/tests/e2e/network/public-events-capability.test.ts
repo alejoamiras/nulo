@@ -55,7 +55,11 @@ test.skipIf(!hasConfig)(
 	{ timeout: 60_000 },
 	async () => {
 		const node = createAztecNodeClient(aztecConfig!.nodeUrl)
-		const status = await resolveTokenClassStatus(node, aztecConfig!.tokenAddress)
+		// The dual-anchor gate resolves the class at the EXACT pinned checkpoint hash (codex R4 #7), so
+		// pass the live checkpoint hash from the tips probe.
+		const tips = await getPublicScanTips(node)
+		expect(tips.checkpointedBlockHash).not.toBeNull()
+		const status = await resolveTokenClassStatus(node, aztecConfig!.tokenAddress, tips.checkpointedBlockHash!)
 		// The sandbox token IS the aztec-standards Token, so the gate must never report `non-standard`.
 		// `unresolved` is tolerated here (the finalized anchor can lag a freshly-deployed sandbox); the
 		// full scan-through-finality path is exercised by the Phase 5 behavioral e2e.
