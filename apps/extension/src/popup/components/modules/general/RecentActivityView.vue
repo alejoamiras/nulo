@@ -93,17 +93,31 @@ const recentActivityRows = computed(() => {
 	const inFlightCount = journalCount + orphanCount + (fallbackRendered ? 1 : 0)
 	const remaining = Math.max(0, ROW_BUDGET - inFlightCount)
 	if (remaining === 0) return []
+	// Layer-A containment (defense-in-depth): scope tx rows to the active
+	// account + chain and incoming rows to the active account + network, exactly
+	// as `buildActivityRows` does — so both feed surfaces make identical scope
+	// decisions. The store (`syncTransactions`/`onTxAdded`) and the incoming
+	// composable already ingest-filter; a foreign-scope row reaching here would
+	// be a second missed guard, so it is dropped anyway. Tolerant when a scope
+	// field is unknown (mirrors `buildActivityRows`), never "active-now".
+	const activeAccountAddress = appStore.account?.address
+	const activeChainId = appStore.network?.chainId
+	const activeNetworkId = appStore.network?.id
 	const rows = []
 	for (const op of recentlyTerminalJournalOps.value) {
 		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt ?? 0, op })
 	}
 	for (const tx of filteredRecentTransactions.value) {
+		if (activeAccountAddress !== undefined && tx.account !== activeAccountAddress) continue
+		if (activeChainId !== undefined && tx.chainId !== activeChainId) continue
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
 	for (const inc of incomingTransfers.value) {
 		// Token-scoped views (token-detail page) only show incoming for the
 		// active token. The home view shows all.
 		if (props.token && inc.tokenId !== props.token.id) continue
+		if (activeAccountAddress !== undefined && inc.accountAddress !== activeAccountAddress) continue
+		if (activeNetworkId !== undefined && inc.networkId !== activeNetworkId) continue
 		// Path 2: prefer block timestamp (chain-derived, survives remove+re-add).
 		// Fall back to discoveredAt for legacy records or when PXE didn't
 		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
@@ -426,6 +440,12 @@ function cardSubtitleFor(op) {
  *  pre-W5 stragglers after SW restart, etc.). */
 const hasOrphanExecutingTask = computed(() => {
 	if (!executingTask.value) return false
+	// Account-switch containment: only surface an orphan card when the
+	// executingTask still belongs in THIS view. `isExecutingTask` re-validates
+	// the active account (transfer via senderAddress) and fails closed on
+	// uncorrelated dApp tasks, so a task set just before a switch can't render as
+	// a foreign-account orphan card under the new account.
+	if (!isExecutingTask(executingTask.value)) return false
 	const account = appStore.account?.address
 	return !renderedInFlightOps.value.some((op) => isMatchingTask(executingTask.value, op, account))
 })
@@ -480,6 +500,11 @@ function clearExecutingTaskIfRecentTerminalMatch() {
 function clearExecutingTaskIfPendingCancelTerminal(op) {
 	if (!pendingCancelJobIds.value.has(op.id)) return
 	if (op.terminalAt === null) return
+	// Scope guard: a terminal cancel for account A must never clear account B's
+	// executingTask. `pendingCancelJobIds` is already cleared on switch (the
+	// account-switch reset watcher below), so this is defense-in-depth against a
+	// terminal event racing the switch — the jobId set alone is not account-scoped.
+	if (op.accountAddress !== appStore.account?.address) return
 	pendingCancelJobIds.value.delete(op.id)
 	executingTask.value = null
 	executingSubtasks.value = []
@@ -552,7 +577,12 @@ journalService.onOperationDeleted.add(onJournalDeleted)
  */
 async function resnapshotJournal() {
 	try {
-		const ops = await journalService.getOperations({ accountAddress: appStore.account?.address })
+		// Captured-account guard: snapshot the account we FETCH for and drop the
+		// result if the active account changed during the await (A→B, A→B→A). A late
+		// A snapshot must never clobber B's journal view.
+		const captured = appStore.account?.address
+		const ops = await journalService.getOperations({ accountAddress: captured })
+		if (captured !== appStore.account?.address) return
 		journalOps.value = ops.sort((a, b) => b.createdAt - a.createdAt)
 		// v4 cancel-dupe (snapshot path): catches close-popup-mid-cancel-and-
 		// reopen + SW disconnect mid-cancel. Uses 30s window to avoid
@@ -567,18 +597,16 @@ journalService.onConnected.add(resnapshotJournal)
 
 function isExecutingTask(task) {
 	if (task.finishedAt) return false
-	// Dapp-initiated send operation
-	if (
-		task.content.kind === ContentKind.ExecuteOperation &&
-		task.origin?.type === OriginType.DAPP &&
-		(task.content.operationKind === "send_transaction" || task.content.operationKind === "aztec_sendTx")
-	) {
-		// Token-mode pages skip dapp tasks (TransferContent carries the token id we'd
-		// filter on; ExecuteOperation can't be cheaply scoped to a single token here).
-		if (props.token) return false
-		return true
-	}
-	// UI-initiated transfer — must match active account AND (in token-mode) the page's token.
+	// Account-switch containment — fail closed on dApp tasks. A dApp-initiated
+	// `ExecuteOperation` task carries NO account/network (`ExecuteOperationContent`
+	// in task/spec.ts) so it is UNCORRELATED and cannot be scoped to the active
+	// account. Surfacing it would let account A's dApp task render as an in-progress
+	// card under account B. We therefore do NOT surface dApp TaskService cards; the
+	// durable journal records (`renderedInFlightOps`) remain the dApp progress
+	// source. Re-enabled once the Phase-1a task↔journal atomic binding lands.
+	//
+	// UI-initiated transfer — account-correlated via `senderAddress`, so it stays
+	// (matches the active account AND, in token-mode, the page's token).
 	if (task.content.kind === ContentKind.Transfer && task.origin?.type === OriginType.UI) {
 		if (task.content.senderAddress !== appStore.account?.address) return false
 		if (props.token && task.content.tokenId !== props.token.id) return false
@@ -632,6 +660,58 @@ const handleSelectTerminal = (op) => {
 	router.push(`/popup/journal/${op.id}`)
 }
 
+/** Snapshot the active account's in-flight executingTask from TaskService.
+ *  Shared by mount and the account-switch reset watcher. Captured-account guard:
+ *  a late snapshot for the previous account (A→B) is dropped, never assigned into
+ *  the new account's view. `isExecutingTask` already fails closed on uncorrelated
+ *  dApp tasks and scopes UI transfers by `senderAddress`. */
+async function loadExecutingTaskSnapshot() {
+	const captured = appStore.account?.address
+	try {
+		// Newest-first replay — otherwise concurrent tasks could surface the older one.
+		const allTasks = await taskService.getTasks()
+		if (captured !== appStore.account?.address) return
+		const matching = allTasks.filter((t) => isExecutingTask(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+		const activeExec = matching[0]
+		if (activeExec) {
+			executingTask.value = activeExec
+			executingSubtasks.value = activeExec.subtasks || []
+		}
+	} catch {
+		// Non-fatal; a later task event or reconnect re-snapshots.
+	}
+}
+
+/** Account-switch containment (Layer A, drop-only). This component holds
+ *  view-local state that is NOT remounted on switch (no account `:key` on the
+ *  feed root), so a switch A→B must synchronously clear what B could SEE of A's
+ *  progress, then reload for B. `flush: 'sync'` clears BEFORE Vue paints the new
+ *  account — a default (post-nextTick) watcher would leave a one-tick window
+ *  rendering A's journal/task rows under B. The reload is captured-account
+ *  guarded (see `resnapshotJournal` / `loadExecutingTaskSnapshot`). Keyed on
+ *  address so a rename (same address) does not reset the feed. Incoming transfers
+ *  are reset separately by `useIncomingTransfers`' own sync scope watcher. */
+watch(
+	() => appStore.account?.address,
+	(nv, ov) => {
+		if (nv === ov) return
+		journalOps.value = []
+		executingTask.value = null
+		executingSubtasks.value = []
+		pendingCancelJobIds.value = new Set()
+		if (!nv) return
+		resnapshotJournal()
+		loadExecutingTaskSnapshot()
+	},
+	{ flush: "sync" },
+)
+
+/** Exposed for Layer-A containment component tests: assert the switch-reset +
+ *  captured-account guards at the STATE level (a render filter alone can mask a
+ *  containment gap). Placed after the declarations it references (temporal dead
+ *  zone) rather than in the macro block. */
+defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows })
+
 onMounted(async () => {
 	await loadTokens()
 
@@ -651,25 +731,13 @@ onMounted(async () => {
 		// Non-fatal; the widget will still render outgoing rows.
 	}
 
-	// Newest-first replay — otherwise concurrent tasks could surface the older one.
-	const allTasks = await taskService.getTasks()
-	const matching = allTasks.filter((t) => isExecutingTask(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
-	const activeExec = matching[0]
-	if (activeExec) {
-		executingTask.value = activeExec
-		executingSubtasks.value = activeExec.subtasks || []
-	}
+	// Snapshot the active account's executingTask (captured-account guarded).
+	await loadExecutingTaskSnapshot()
 
-	// Load persisted in-flight ops. Sort newest-first so the most recent
-	// operation is the one we surface via inFlightJournalOps[0].
-	journalOps.value = (await journalService.getOperations({ accountAddress: appStore.account?.address })).sort(
-		(a, b) => b.createdAt - a.createdAt,
-	)
-	// v4 cancel-dupe (mount snapshot path): clears if there's a recently-
-	// terminal record matching executingTask. 30s window — recent enough
-	// to catch close-popup-mid-cancel-and-reopen; not so wide it sweeps
-	// in an old cancelled record from earlier in the session.
-	clearExecutingTaskIfRecentTerminalMatch()
+	// Load persisted in-flight ops for the active account (captured-account
+	// guarded). `resnapshotJournal` also runs the v4 cancel-dupe mount check
+	// (`clearExecutingTaskIfRecentTerminalMatch`, 30s window) after assigning.
+	await resnapshotJournal()
 })
 onBeforeUnmount(() => {
 	taskService.disconnect()
@@ -689,6 +757,8 @@ onBeforeUnmount(() => {
 		v-if="token && (executingTask || showJournalAwaiting || isTokenAwaitingTx || recentActivityRows.length)"
 		direction="column"
 		gap="16"
+		data-testid="activity-feed-root"
+		:data-active-account="appStore.account?.address"
 	>
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
@@ -752,6 +822,8 @@ onBeforeUnmount(() => {
 		v-else-if="!token && (executingTask || showJournalAwaiting || recentActivityRows.length || awaitingAccountTxs.length)"
 		direction="column"
 		gap="16"
+		data-testid="activity-feed-root"
+		:data-active-account="appStore.account?.address"
 	>
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
@@ -799,7 +871,7 @@ onBeforeUnmount(() => {
 			</template>
 		</div>
 	</Flex>
-	<Flex v-else-if="token" direction="column" gap="16">
+	<Flex v-else-if="token" direction="column" gap="16" data-testid="activity-feed-root" :data-active-account="appStore.account?.address">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
 		</Flex>

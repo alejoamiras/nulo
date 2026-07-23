@@ -181,6 +181,22 @@ async function loadOp() {
 		notFound.value = true
 		return
 	}
+	// Cross-account isolation: a journal detail belongs to exactly one
+	// (profile, network, account). `getOperation` fetches by id alone, so if this
+	// record isn't the ACTIVE scope — e.g. the user switched accounts while on this
+	// page — refuse to render it (it would leak the other account's amount /
+	// recipient / dApp origin / error). The scope watcher below re-runs loadOp on
+	// any switch, flipping the page to not-found immediately.
+	if (
+		record.accountAddress !== appStore.account?.address ||
+		record.networkId !== appStore.network?.id ||
+		record.profileId !== appStore.profile?.id
+	) {
+		op.value = null
+		notFound.value = true
+		return
+	}
+	notFound.value = false
 	op.value = record
 }
 
@@ -192,6 +208,19 @@ function onOperationDeleted(deleted) {
 }
 
 journalService.onOperationDeleted.add(onOperationDeleted)
+
+// Re-validate the record's scope whenever the active profile/network/account
+// changes — a switch while viewing A's journal detail must not keep it on-screen.
+// `flush: 'sync'` + the synchronous `op` clear close the window where A's detail
+// would otherwise linger under B during the async `loadOp()` re-fetch.
+watch(
+	() => `${appStore.profile?.id}|${appStore.network?.id}|${appStore.account?.address}`,
+	() => {
+		op.value = null
+		loadOp()
+	},
+	{ flush: "sync" },
+)
 
 onMounted(async () => {
 	if (appStore.profile && appStore.network) {

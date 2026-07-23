@@ -11,6 +11,7 @@ import { TransactionService, type Tx } from "@/wallet/services/transaction/servi
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { NoteService, type RawNote } from "@/wallet/services/note/service"
 import { ConfigService } from "@/wallet/services/config/service"
+import type { IncomingPollGate } from "@/e2e/incoming-poll-gate"
 import { IncomingTransferRepository } from "./repository"
 import {
 	INCOMING_TRANSFER_SERVICE_NAME,
@@ -125,11 +126,22 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 	private readonly pollIntervalMs: number
 
-	public constructor(logger: ILogger, browserApi: BrowserApi, pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS) {
+	/** E2E-only deterministic race lever. `undefined` in production (the ctor
+	 *  arg is only ever passed inside `if (E2E_PROVERLESS)` in runtime.ts), so
+	 *  every call site is a no-op `?.` in prod. */
+	private readonly incomingPollGate?: IncomingPollGate
+
+	public constructor(
+		logger: ILogger,
+		browserApi: BrowserApi,
+		pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS,
+		incomingPollGate?: IncomingPollGate,
+	) {
 		super(INCOMING_TRANSFER_SERVICE_NAME, logger)
 		this.repo = new IncomingTransferRepository(browserApi)
 		this.pollIntervalMs = pollIntervalMs
 		this.serviceLock = new Lock(INCOMING_TRANSFER_SERVICE_NAME, logger)
+		this.incomingPollGate = incomingPollGate
 	}
 
 	/** Run `fn` inside the service lock. Acquire → try → finally release. */
@@ -271,12 +283,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// retroactively) but the activity feed sees an empty list. Useful
 		// for cross-device same-seed users where another device's outgoing
 		// surfaces here as incoming.
-		try {
-			const visible = await this.configService.getValue("incomingTransfersVisible")
-			if (visible === false) return []
-		} catch {
-			// Config service unavailable — fail open (default behaviour).
-		}
+		// Fail CLOSED (matches the emit path): if visibility is off OR the config
+		// is unverifiable, the feed sees an empty list — a reconnect/remount must
+		// not expose receives the user chose to hide while the setting can't be read.
+		if (!(await this.isVisibilityEnabled())) return []
 		const records = await this.repo.listForAccount(profileId, networkId, accountAddress)
 		return records
 			.filter((r) => !r.hidden)
@@ -589,6 +599,19 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return
 		}
 
+		// E2E-only deterministic race lever (prod: `incomingPollGate` is undefined →
+		// this is a no-op `?.`). Parks the scan AFTER PXE discovery and BEFORE the
+		// locked commit — the exact in-flight window the account-switch isolation
+		// test needs — and NEVER under `serviceLock`.
+		const heldTxHash =
+			(await this.incomingPollGate?.waitIfArmed({
+				profileId,
+				networkId,
+				accountAddress,
+				contract,
+				txHashes: notes.map((n) => n.txHash),
+			})) ?? null
+
 		const network = await this.networkService.getNetwork(networkId)
 
 		// Block-timestamp cache scoped to this scan. Lazy lookup inside the
@@ -687,17 +710,23 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// pending / blocked: record persisted hidden, no Added emit.
 			})
 		}
+
+		// Tell the test the parked scan's locked commit is done (the late emission,
+		// if any, has fired) — its precondition before asserting cross-account isolation.
+		if (heldTxHash) await this.incomingPollGate?.markCommitted(heldTxHash)
 	}
 
 	/** Visibility check used by both initial-load (`getIncomingTransfers`)
-	 *  and live-event emit paths. Fails OPEN (returns true) if the config
-	 *  service is unreachable so a transient port hiccup doesn't silently
-	 *  suppress events. */
+	 *  and live-event emit paths. **Fails CLOSED** (returns false) if the config
+	 *  service is unreachable: the toggle is a privacy control, so a transient
+	 *  port hiccup must NOT surface receives the user chose to hide. Records are
+	 *  still persisted (hidden), so they reappear once visibility resolves —
+	 *  fail-closed here suppresses only the EMISSION, never the data. */
 	private async isVisibilityEnabled(): Promise<boolean> {
 		try {
 			return (await this.configService.getValue("incomingTransfersVisible")) !== false
 		} catch {
-			return true
+			return false
 		}
 	}
 

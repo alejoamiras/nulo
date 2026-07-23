@@ -308,7 +308,12 @@ const handleSend = async () => {
 		precomputedEstimateId,
 	]
 
+	// Unique id captured with the placeholder's full scope so the rejection path
+	// removes exactly THIS placeholder — not a by-destination/contract search that
+	// could remove a same-recipient sibling or another account's row after a switch.
+	const awaitingId = crypto.randomUUID()
 	appStore.awaitingTransactions.push({
+		id: awaitingId,
 		account: appStore.account.address,
 		destination,
 		contract,
@@ -320,8 +325,7 @@ const handleSend = async () => {
 			openToast({ label: "Transaction submitted", icon: "check-circle" })
 		})
 		.catch((err) => {
-			const idx = appStore.awaitingTransactions.findIndex((t) => t.destination === destination && t.contract === contract)
-			if (idx !== -1) appStore.awaitingTransactions.splice(idx, 1)
+			appStore.removeAwaitingTransaction(awaitingId)
 
 			// User-initiated cancel: the terminal card in RecentActivityView
 			// already says "Cancelled" — a failure toast would be a wrong
