@@ -300,6 +300,18 @@ export type Methods = {
 	/** Read ONE record by its `id` PK (for the received-detail page). Unfiltered — no dust/visibility
 	 *  gate; `id` is profile+network-scoped so it only returns the caller's own record. */
 	getIncomingTransferById(id: string): IncomingTransferRecord | undefined
+	/**
+	 * Lazily fetch the network fee (fee juice, paid by the sender) for a receipt's parent tx, valued at
+	 * display time on the detail page. Takes the record `id` (NOT a raw txHash) so the gate is enforced
+	 * server-side: the record is resolved active-profile-scoped, and ONLY a `public-event` receipt ever
+	 * reaches the node. A public receipt's recipient is already on-chain, so its residual node-query
+	 * correlation is far smaller than a private receive's; a note (private) receipt returns `null` WITHOUT
+	 * any node call, so its tx hash is never handed to the node even if a UI bug called this. NOT persisted
+	 * — cached in-memory by `(networkId, txHash, blockHash)` since a mined tx's fee is block-derived and a
+	 * reorg re-mine changes it. Returns `null` when the record is absent/note-kind, the tx has no recorded
+	 * fee, or the node lookup fails.
+	 */
+	getReceiptFee(id: string): { feeJuice: string } | null
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState

@@ -19,6 +19,7 @@ export * from "./spec"
 const INCOMING_TRANSFER_METHODS = [
 	"getIncomingTransfers",
 	"getIncomingTransferById",
+	"getReceiptFee",
 	"getTrustState",
 	"setTrustAllow",
 	"setTrustReject",

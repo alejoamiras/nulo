@@ -70,13 +70,23 @@ const settings = {
 	},
 }
 
-async function updateDustThreshold(raw) {
-	const n = Number.parseFloat(raw)
-	const value = Number.isFinite(n) && n >= 0 ? n : 0
+async function updateDustThreshold(event) {
+	const el = event.target
+	const raw = el.value.trim()
+	// Strict decimal parse: reject "1,000", "0,5", "1.2junk", "abc", "" rather than coercing them — the old
+	// parseFloat clamp turned "0,5" into 0, silently DISABLING the filter. On invalid input, snap the field
+	// back to the last saved value and change nothing.
+	if (!/^(\d+\.?\d*|\.\d+)$/.test(raw) || !Number.isFinite(Number(raw))) {
+		el.value = dustThreshold.value
+		return
+	}
+	const value = Number(raw)
 	try {
 		await configService.setValue("incomingDustUsdThreshold", value)
 		dustThreshold.value = String(value)
+		el.value = dustThreshold.value // normalize the display (e.g. "1.50" → "1.5")
 	} catch (err) {
+		el.value = dustThreshold.value // save failed → snap the field back to the last saved value
 		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
 	}
 }
@@ -210,25 +220,26 @@ onBeforeUnmount(() => {
 				/>
 			</Flex>
 
-			<!-- D8 dust filter: hide incoming receipts worth less than this USD value (0 = off). -->
+			<!-- D8 dust filter: hide incoming receipts worth less than this USD value. -->
 			<Flex justify="between" align="center" gap="12">
 				<Flex direction="column" gap="6">
 					<Text size="13" weight="600" color="primary"> Hide dust receipts </Text>
-					<Text size="12" weight="500" color="tertiary">
-						Hide incoming receipts worth less than this USD value (0 = off; unpriced tokens always show)
-					</Text>
+					<Text size="12" weight="500" color="tertiary">Hide receipts below this value. 0 turns it off.</Text>
 				</Flex>
 
-				<input
-					:class="$style.dust_input"
-					type="number"
-					min="0"
-					step="0.01"
-					inputmode="decimal"
-					data-testid="dust-threshold-input"
-					:value="dustThreshold"
-					@change="updateDustThreshold($event.target.value)"
-				/>
+				<!-- type="text" (not number) so there are no spinner arrows widening the field; the $ prefix
+				     lives in the wrapper and updateDustThreshold parseFloat-normalizes any input on change. -->
+				<label :class="$style.dust_field">
+					<span :class="$style.dust_prefix">$</span>
+					<input
+						:class="$style.dust_input"
+						type="text"
+						inputmode="decimal"
+						data-testid="dust-threshold-input"
+						:value="dustThreshold"
+						@change="updateDustThreshold($event)"
+					/>
+				</label>
 			</Flex>
 		</Flex>
 
@@ -275,14 +286,45 @@ onBeforeUnmount(() => {
 	transition: transform 0.2s var(--bezier);
 }
 
+.dust_field {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+
+	width: 72px;
+	padding: 6px 8px;
+
+	background: var(--nulo-surface-low);
+	border: 1px solid var(--nulo-border);
+
+	transition: border-color 0.2s var(--bezier);
+
+	&:focus-within {
+		border-color: var(--nulo-outline);
+	}
+}
+
+.dust_prefix {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	color: var(--nulo-secondary);
+}
+
 .dust_input {
-	width: 88px;
+	width: 100%;
+	min-width: 0;
 	text-align: right;
+
 	font-family: var(--font-mono);
 	font-size: 13px;
 	color: var(--txt-primary);
-	background: var(--nulo-surface-low);
-	border: 1px solid var(--nulo-border);
-	padding: 6px 8px;
+
+	background: transparent;
+	border: none;
+	padding: 0;
+
+	&:focus {
+		outline: none;
+	}
 }
 </style>

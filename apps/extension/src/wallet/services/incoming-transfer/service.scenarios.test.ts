@@ -141,12 +141,33 @@ function makeProfileStub(activeProfile: { id: string } | null = { id: "p1" }) {
 	}
 }
 
-function makeNetworkStub(networks: { id: string; chainId: number }[] = [{ id: "n1", chainId: 1 }]) {
+function makeNetworkStub(
+	networks: { id: string; chainId: number; endpoints?: { id: string; rpcUrl: string }[]; primaryEndpointId?: string }[] = [
+		{ id: "n1", chainId: 1, endpoints: [{ id: "e1", rpcUrl: "http://n1" }], primaryEndpointId: "e1" },
+	],
+) {
 	let purgeSub: ((profileId: string, chainId: number, networkId: string) => Promise<void>) | null = null
+	// getReceiptFee reaches through getNodeForUrl(endpoint).getTxReceipt(txHash) (or getNode(chainId) as a
+	// fallback); tests inject the receipt via setReceiptImpl. Unset → the node throws (unreachable), which
+	// getReceiptFee swallows to null. The receipt's blockHash gates caching (reorg-safety).
+	type FakeReceipt = { transactionFee?: bigint; blockHash?: { toString(): string } }
+	let receiptImpl: ((txHashStr: string) => Promise<FakeReceipt>) | null = null
+	const fakeNode = {
+		getTxReceipt: async (txHash: { toString(): string }) => {
+			if (!receiptImpl) throw new Error("no node receipt configured")
+			return receiptImpl(txHash.toString())
+		},
+	}
 	return {
 		name: "network",
 		dependencies: [],
 		networks,
+		// Real networks carry endpoints; getReceiptFee pins the fetch to the primary endpoint's URL.
+		getNode: vi.fn().mockImplementation(async (_chainId: number) => fakeNode),
+		getNodeForUrl: vi.fn().mockImplementation(async (_url: string) => fakeNode),
+		setReceiptImpl(fn: ((txHashStr: string) => Promise<FakeReceipt>) | null) {
+			receiptImpl = fn
+		},
 		getNetworks: vi.fn().mockImplementation(async (chainId?: number) => {
 			if (chainId === undefined) return networks
 			return networks.filter((n) => n.chainId === chainId)
@@ -3332,5 +3353,114 @@ describe("IncomingTransferService — D8 dust filter (getIncomingTransfers)", ()
 		expect(await service.getIncomingTransferById(foreign.id)).toBeUndefined()
 		const own = seedPublic({ txHash: "0xown", l2BlockNumber: 5 }) // profileId defaults to "p1"
 		expect((await service.getIncomingTransferById(own.id))?.id).toBe(own.id)
+	})
+
+	const hash = (s: string) => ({ toString: () => s })
+	// TxHash.fromString field-validates (BN254), so test tx hashes MUST be in-range — validNullifier
+	// zero-pads to a tiny value that always parses. A high-nibble hash (0x55…) would throw in fromString
+	// and mask the behaviour under test.
+	const txh = (n: number) => validNullifier(n)
+
+	test("getReceiptFee returns the sender-paid fee juice for a public receipt + caches it (one node call)", async () => {
+		const network = makeNetworkStub()
+		const { service } = await bootService({ network })
+		const rec = seedPublic({ txHash: txh(0x1001), blockHash: "0xbh" })
+		let calls = 0
+		network.setReceiptImpl(async () => {
+			calls++
+			return { transactionFee: 12345n, blockHash: hash("0xbh") }
+		})
+
+		expect(await service.getReceiptFee(rec.id)).toEqual({ feeJuice: "12345" })
+		// A mined tx's fee is immutable (block matches) → the second call is served from the cache, no node hit.
+		expect(await service.getReceiptFee(rec.id)).toEqual({ feeJuice: "12345" })
+		expect(calls).toBe(1)
+	})
+
+	test("getReceiptFee → null (uncached) when the receipt has no fee, and null (soft) when the node throws", async () => {
+		const network = makeNetworkStub()
+		const { service } = await bootService({ network })
+
+		const noFee = seedPublic({ txHash: txh(0x1002), blockHash: "0xbh" })
+		network.setReceiptImpl(async () => ({ transactionFee: undefined, blockHash: hash("0xbh") }))
+		expect(await service.getReceiptFee(noFee.id)).toBeNull()
+		// Not cached: a later retry that DOES find a fee must not be shadowed by the null.
+		network.setReceiptImpl(async () => ({ transactionFee: 7n, blockHash: hash("0xbh") }))
+		expect(await service.getReceiptFee(noFee.id)).toEqual({ feeJuice: "7" })
+
+		const throws = seedPublic({ txHash: txh(0x1003), blockHash: "0xbh" })
+		let called = false
+		network.setReceiptImpl(async () => {
+			called = true
+			throw new Error("node down")
+		})
+		expect(await service.getReceiptFee(throws.id)).toBeNull()
+		expect(called).toBe(true) // the null came from the NODE throwing, not a fromString parse error
+	})
+
+	test("getReceiptFee is reorg-safe — a receipt/record blockHash MISMATCH returns null (never a wrong-block fee)", async () => {
+		const network = makeNetworkStub()
+		const { service } = await bootService({ network })
+		const rec = seedPublic({ txHash: txh(0x1005), blockHash: "0xblockA" })
+		let calls = 0
+		// The node reports the tx in a DIFFERENT block than the record currently names (reconciler lagging).
+		network.setReceiptImpl(async () => {
+			calls++
+			return { transactionFee: 100n, blockHash: hash("0xblockB") }
+		})
+		// Mismatch → null: the page shows the record's block, so a fee from another block must not appear.
+		expect(await service.getReceiptFee(rec.id)).toBeNull()
+		expect(await service.getReceiptFee(rec.id)).toBeNull()
+		expect(calls).toBe(2) // never cached → refetched every time
+
+		// The reconciler catches up: the record's blockHash becomes the node's block → now it matches → fee + cache.
+		seedPublic({ txHash: txh(0x1005), blockHash: "0xblockB" }) // same id (indexInTx 0), new blockHash
+		expect(await service.getReceiptFee(rec.id)).toEqual({ feeJuice: "100" })
+		const after = calls
+		expect(await service.getReceiptFee(rec.id)).toEqual({ feeJuice: "100" })
+		expect(calls).toBe(after) // cached now that receipt.blockHash === record.blockHash
+	})
+
+	test("getReceiptFee skips the cache write when a purge bumped the epoch mid-fetch (no stale repopulation)", async () => {
+		const network = makeNetworkStub()
+		const { service } = await bootService({ network })
+		seedPublic({ txHash: txh(0x1006), blockHash: "0xbh" })
+		const id = `pub:p1|n1|${txh(0x1006)}|0`
+		let calls = 0
+		network.setReceiptImpl(async () => {
+			calls++
+			// A concurrent purge lands while we're off-lock fetching: clearChain bumps the epoch (+ wipes the chain).
+			await service.clearChain("p1", "n1")
+			return { transactionFee: 50n, blockHash: hash("0xbh") }
+		})
+		expect(await service.getReceiptFee(id)).toEqual({ feeJuice: "50" }) // fee still shown for THIS open
+
+		// Re-seed (the purge wiped it) + swap in a non-clearing impl. Had the first fetch poisoned the cache,
+		// this would be served from it (calls stays 1); the epoch guard forces a real refetch instead.
+		seedPublic({ txHash: txh(0x1006), blockHash: "0xbh" })
+		network.setReceiptImpl(async () => {
+			calls++
+			return { transactionFee: 50n, blockHash: hash("0xbh") }
+		})
+		expect(await service.getReceiptFee(id)).toEqual({ feeJuice: "50" })
+		expect(calls).toBe(2)
+	})
+
+	test("getReceiptFee is GATED to public receipts — a note id (or bogus/foreign id) → null with NO node call", async () => {
+		const network = makeNetworkStub()
+		const { service } = await bootService({ network })
+		let calls = 0
+		network.setReceiptImpl(async () => {
+			calls++
+			return { transactionFee: 999n }
+		})
+
+		// A private (note) receipt must never hand its tx hash to the node — the server-side kind gate
+		// short-circuits BEFORE any getNode/getTxReceipt.
+		const noteRec = seedNote({ txHash: txh(0x1004) })
+		expect(await service.getReceiptFee(noteRec.id)).toBeNull()
+		// A bogus / foreign id also yields null (getIncomingTransferById returns undefined) — no node call.
+		expect(await service.getReceiptFee("pub:pX|nX|0xdead|0")).toBeNull()
+		expect(calls).toBe(0)
 	})
 })

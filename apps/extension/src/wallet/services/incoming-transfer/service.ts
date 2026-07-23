@@ -18,6 +18,7 @@ import { PriceService } from "@/wallet/services/price/service"
 import { getPriceMapEntry } from "@/wallet/services/price/price-map"
 import { isReceiptAboveDustThreshold, usdThresholdToMicro } from "@/utils/incoming-dust"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
+import { TxHash } from "@aztec/stdlib/tx"
 import type { PublicEventCursor, PublicScanTips, PublicTokenClassStatus, PublicTransferEvent } from "@nulo/aztec-runtime/pxe/public-events"
 import type { IncomingPollGate } from "@/e2e/incoming-poll-gate"
 import { IncomingTransferRepository } from "./repository"
@@ -82,6 +83,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	protected readonly rpcMethods = defineRpcMethods<Methods>()(
 		"getIncomingTransfers",
 		"getIncomingTransferById",
+		"getReceiptFee",
 		"getTrustState",
 		"setTrustAllow",
 		"setTrustReject",
@@ -165,6 +167,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	/** Test seam: inject a fake public-event reader (unit tests drive the scan arm without a real
 	 *  PXE transport). Production leaves it undefined and `init` builds the real client-backed one. */
 	private readonly injectedPublicReader?: PublicEventReader
+
+	/** In-memory receipt-fee cache keyed `${networkId}|${txHash}` (D5 lazy fee). A mined tx's fee is
+	 *  immutable, so a hit is served forever within the SW lifetime; only VIEWED receipts populate it,
+	 *  so it stays tiny. Never persisted (no storage bloat). */
+	private readonly feeCache = new Map<string, string>()
 
 	/** E2E-only deterministic race lever. `undefined` in production (the ctor
 	 *  arg is only ever passed inside `if (E2E_PROVERLESS)` in runtime.ts), so
@@ -416,6 +423,53 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	/**
+	 * Lazily fetch the network fee (fee juice) the SENDER paid for a receipt's parent tx. Keyed on the
+	 * record `id`, resolved active-profile-scoped via `getIncomingTransferById`. The fee row is a
+	 * PUBLIC-event feature — the record carries the block hash the reorg-safe cache needs, and a
+	 * sender-paid fee is a public-transfer concept — so a note (private) receipt returns `null` with no
+	 * node call. Not persisted — cached in-memory by `(networkId, txHash, blockHash)`: a mined tx's fee is
+	 * block-derived, and a reorg re-mine under a new block hash changes it, so the block hash is part of
+	 * the key. Returns `null` when the record is absent/note-kind, the tx has no recorded fee, the
+	 * receipt's block no longer matches the record's (reorg mid-flight — show nothing until the reconciler
+	 * catches up), or the node lookup fails (page shows a dash).
+	 */
+	public async getReceiptFee(id: string): Promise<{ feeJuice: string } | null> {
+		const epochAtStart = this.serviceEpoch
+		const record = await this.getIncomingTransferById(id)
+		if (record?.kind !== "public-event") return null
+		// The reconciler rewrites `record.blockHash` on re-mine, so keying on it busts a stale cached fee.
+		const cacheKey = `${record.networkId}|${record.txHash}|${record.blockHash}`
+		const cached = this.feeCache.get(cacheKey)
+		if (cached !== undefined) return { feeJuice: cached }
+		try {
+			const network = await this.networkService.getNetwork(record.networkId)
+			// Pin the fetch to the RECORD's own endpoint (getNodeForUrl), NOT the active profile's chainId
+			// node: a profile switch mid-call could otherwise route this tx hash to another profile's RPC
+			// provider (a cross-profile leak) — the same footgun the pending-tx poller avoids. A malformed
+			// network with no primary endpoint fails soft (dash) rather than falling back to that global node.
+			const primary = network.endpoints?.find((e) => e.id === network.primaryEndpointId)
+			if (!primary) return null
+			const node = await this.networkService.getNodeForUrl(primary.rpcUrl)
+			const receipt = await node.getTxReceipt(TxHash.fromString(record.txHash))
+			const fee = receipt.transactionFee
+			if (fee === undefined) return null
+			// The receipt must belong to the block the record (and thus the page) names. Before the
+			// reconciler rewrites a re-mined record, the receipt reflects the NEW block while the record
+			// still names the OLD one — showing that fee would pair it with the wrong block on the page, so
+			// return nothing until they agree.
+			if (receipt.blockHash?.toString() !== record.blockHash) return null
+			const feeJuice = fee.toString()
+			// Skip the cache write if a purge/clear bumped the epoch while we were off-lock fetching — else a
+			// concurrent clearChain/clearProfile that already wiped the cache would be silently repopulated.
+			if (this.serviceEpoch === epochAtStart) this.feeCache.set(cacheKey, feeJuice)
+			return { feeJuice }
+		} catch (err) {
+			this.logDebug(`getReceiptFee failed for ${record.txHash.slice(0, 10)}: ${getErrorMessage(err)}`)
+			return null
+		}
+	}
+
+	/**
 	 * D8 USD-value dust filter, applied at read time. Fails OPEN at every gap (config unavailable,
 	 * filter off, no token, no CoinGecko mapping, stale/absent quote) so a receipt is only ever
 	 * HIDDEN when it provably falls below a fresh USD threshold. Never gates the balance-refresh
@@ -524,6 +578,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public async clearProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		await this.withServiceLock(async () => {
+			// The fee cache is keyed by networkId (not profileId), so a profile's networkIds aren't
+			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
+			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
+			this.feeCache.clear()
 			await this.repo.clearProfile(profileId)
 			// Lock held across the wipe AND scheduler rebuild so a queued poll
 			// can't fire between the two and repopulate state we just cleared
@@ -536,6 +594,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public async clearChain(profileId: string, networkId: string): Promise<void> {
 		await this.ensureInitialized()
 		await this.withServiceLock(async () => {
+			// Evict this network's fee-cache entries (keyed `${networkId}|…`) so a chain purge doesn't
+			// leave them dangling for the worker's lifetime.
+			for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
 			await this.repo.clearChain(profileId, networkId)
 			await this.hydrateSchedulers()
 		})
