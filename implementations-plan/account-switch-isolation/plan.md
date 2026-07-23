@@ -138,7 +138,7 @@ Real commands (verified in `apps/extension/package.json` + `scripts/e2e/agent.sh
   `test -d apps/extension/dist/chrome && ! grep -rqE "<GATE_MARKER>|<HOLD_KEY>|<STATUS_KEY>" apps/extension/dist/chrome`
   (bundle is at `apps/extension/dist/chrome`, NOT root `dist/chrome`; mirror `_build-extension.yml`).
 
-### Phase 0 — Deterministic race-test infrastructure + baseline verification (test-only)
+### Phase 0 ✓ — Deterministic race-test infrastructure + baseline verification (test-only)
 The leak remains until Phase 1. **Blocker first: verify the network-suite baseline** — `tests/e2e/README.md`
 describes a partially-failing baseline; run the current required network suite and record the actual green
 baseline (Ask A6) so no later gate is declared green against red.
