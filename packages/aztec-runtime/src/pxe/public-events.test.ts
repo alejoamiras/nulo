@@ -141,12 +141,13 @@ describe("fetchPublicTokenTransferEvents — decode", () => {
 		expect(result.events[2].logIndexWithinTx).toBe(2)
 	})
 
-	test("empty page → scannedThrough null, hasMore false", async () => {
+	test("empty page → scannedThrough null, hasMore false, dropped false (genuine EOF)", async () => {
 		const node = makeNode({ page: [], checkpointed: 10 })
 		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, {})
 		expect(result.events).toEqual([])
 		expect(result.scannedThrough).toBeNull()
 		expect(result.hasMore).toBe(false)
+		expect(result.dropped).toBe(false) // EOF, NOT a validator drop (codex R1 Critical #2)
 	})
 
 	test("partial page (< MAX) advances scannedThrough to the last log; hasMore false", async () => {
@@ -199,6 +200,7 @@ describe("fetchPublicTokenTransferEvents — hostile-page validation", () => {
 		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, {})
 		expect(result.events).toEqual([])
 		expect(result.scannedThrough).toBeNull()
+		expect(result.dropped).toBe(true) // a DROP, not EOF — reconciliation must not treat it as complete
 	})
 
 	test("first log at/before afterCursor is rejected (whole page dropped)", async () => {
@@ -209,6 +211,7 @@ describe("fetchPublicTokenTransferEvents — hostile-page validation", () => {
 		})
 		expect(result.events).toEqual([])
 		expect(result.scannedThrough).toBeNull()
+		expect(result.dropped).toBe(true)
 	})
 
 	test("cursor/log beyond the checkpointed tip is rejected (whole page dropped)", async () => {
@@ -217,6 +220,7 @@ describe("fetchPublicTokenTransferEvents — hostile-page validation", () => {
 		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, {})
 		expect(result.events).toEqual([])
 		expect(result.scannedThrough).toBeNull()
+		expect(result.dropped).toBe(true)
 	})
 
 	test("a referenceBlock-reorg throw propagates (D6 detection, not swallowed)", async () => {
@@ -240,6 +244,40 @@ describe("fetchPublicTokenTransferEvents — query construction", () => {
 		await fetchPublicTokenTransferEvents(node, CONTRACT, { fromBlock: 7 })
 		expect(Number(captured?.fromBlock)).toBe(7)
 		expect(Number(captured?.toBlock)).toBe(43)
+	})
+
+	test("a PINNED toBlock (< checkpointed) bounds the query to it, not the live checkpointed", async () => {
+		// The whole multi-page scan must page against ONE fixed tip (codex R1 Critical #1 / High #3).
+		let captured: { toBlock?: number } | undefined
+		const node = makeNode({ page: [], checkpointed: 100, onQuery: (q) => (captured = q as { toBlock?: number }) })
+		await fetchPublicTokenTransferEvents(node, CONTRACT, { toBlock: 60 })
+		expect(Number(captured?.toBlock)).toBe(61) // exclusive: pinned 60 + 1
+	})
+
+	test("a PINNED toBlock ABOVE the node's checkpointed → DEFERRED (dropped), no truncated query (codex R2 #3)", async () => {
+		// The old code clamped to checkpointed and scanned a truncated window — during reconciliation
+		// that EOFs early and DELETES canonical records in the unscanned tail. Now we defer instead.
+		let queried = false
+		const node = makeNode({
+			page: [],
+			checkpointed: 40,
+			onQuery: () => {
+				queried = true
+			},
+		})
+		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, { toBlock: 999 })
+		expect(result.dropped).toBe(true)
+		expect(result.scannedThrough).toBeNull()
+		expect(queried).toBe(false) // never issued the truncated query
+	})
+
+	test("a log beyond the PINNED toBlock (but ≤ checkpointed) drops the page", async () => {
+		const page = [makeLog({ from: ADDR_A, to: ADDR_B, amount: 1n, blockNumber: 70, txIndexWithinBlock: 0, logIndexWithinTx: 0 })]
+		const node = makeNode({ page, checkpointed: 100 })
+		const result = await fetchPublicTokenTransferEvents(node, CONTRACT, { toBlock: 60 })
+		expect(result.events).toEqual([])
+		expect(result.scannedThrough).toBeNull()
+		expect(result.dropped).toBe(true)
 	})
 })
 

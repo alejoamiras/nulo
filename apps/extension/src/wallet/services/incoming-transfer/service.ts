@@ -286,6 +286,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				const networks = await this.networkService.getNetworks(account.chainId)
 				const tokens = await this.tokenService.getTokensRaw(profile.id, account.chainId)
 				await this.withServiceLock(async () => {
+					// Invalidate in-flight scans BEFORE the reset, inside the SAME critical section: an
+					// old scan (holding the pre-reset epoch) that acquires the lock AFTER us now fails its
+					// `persistCursorLocked` epoch check, so it can't overwrite the reset and skip the new
+					// account's history. Deferring the bump to `hydrateSchedulers` (below) left that gap
+					// (codex R1 High #4).
+					this.bumpServiceEpoch()
 					for (const network of networks) {
 						for (const contract of new Set(tokens.map((t) => t.contract))) {
 							const existing = await this.repo.getCursor(profile.id, network.id, contract)
@@ -1102,15 +1108,30 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		tips: PublicScanTips,
 		epochAtStart: number,
 	): Promise<void> {
+		// Reorg detection has TWO independent anchors (codex R2 #1):
+		// (1) BOUNDARY — the last-committed block. Probe it up front; a throw means it was reorged out
+		//     across ticks → escalate to reconciliation. This is the LOW anchor the forward pages below
+		//     no longer carry (they pin the HIGH anchor instead).
+		if (cursor.cursor !== null && cursor.lastSyncedBlockHash) {
+			await this.indexer.probe(networkId, contract, { afterCursor: cursor.cursor, referenceBlock: cursor.lastSyncedBlockHash })
+		}
+		// (2) IN-RANGE — pin EVERY page to the checkpoint FORK HASH captured at tick start. A reorg any
+		//     time during the multi-page scan makes a page read off the wrong fork throw immediately
+		//     (defeats even a transient A→B→A excursion — the B page can't validate against H_A). When
+		//     the tip hash is unavailable this tick, cap the scan to ONE page: a single page is atomic
+		//     against one fork, so it can never splice two.
 		const result = await this.indexer.scan(networkId, contract, {
 			fromBlock: cursor.cursor === null ? cursor.startBlock : undefined,
+			toBlock: tips.checkpointedBlockNumber,
 			afterCursor: cursor.cursor,
-			referenceBlock: cursor.lastSyncedBlockHash ?? undefined,
+			referenceBlock: tips.checkpointedBlockHash ?? cursor.lastSyncedBlockHash ?? undefined,
+			maxPages: tips.checkpointedBlockHash ? undefined : 1,
 		})
 
 		if (result.scannedThrough === null) {
 			// Nothing new — still advance the finalized watermark so a later reorg rewinds no further
-			// than necessary.
+			// than necessary. (A dropped/suspect page also lands here; the watermark comes from `tips`,
+			// not the page, so advancing it is safe — no records are touched.)
 			await this.persistCursorLocked(
 				profileId,
 				networkId,
@@ -1241,6 +1262,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		try {
 			result = await this.indexer.scan(networkId, contract, {
 				fromBlock: marker.lowerBound,
+				// PIN the reconcile scan to the marker's captured checkpoint — NOT the node's live
+				// checkpointed (which may have advanced). Without this the scan reads + `seen`-accumulates
+				// past `upperBound`, the cursor advances beyond it while the anchor stays `upperBoundHash`
+				// (low), and a later reorg of those higher blocks strands orphans (codex R1 High #3).
+				toBlock: marker.upperBound,
 				afterCursor: marker.progress,
 				referenceBlock: marker.upperBoundHash,
 			})
@@ -1266,6 +1292,15 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			return
 		}
 
+		if (result.dropped) {
+			// A validator-DROPPED page (non-monotonic / beyond-bound — a compromised RPC node is in the
+			// threat model), NOT a genuine EOF. Treating it as "window complete" would run
+			// finishReconciliation and DELETE records not yet in `seen`. Leave the marker untouched and
+			// retry next tick (codex R1 Critical #2).
+			this.logWarn(`reconcile page dropped for ${contract} — retrying next tick, not finishing`)
+			return
+		}
+
 		// Re-insert canonical receipts addressed to us (idempotent; updates a MOVED receipt's block).
 		const recipients = await this.recipientsFor(profileId, chainId)
 		for (const ev of this.indexer.filterToRecipients(result.events, recipients)) {
@@ -1274,8 +1309,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			await this.commitPublicEvent(profileId, networkId, contract, chainId, account, ev, epochAtStart, { reconcile: true })
 		}
 
-		const seen: Array<[number, string]> = [...marker.seen]
-		for (const ev of result.events) seen.push([ev.l2BlockNumber, ev.blockHash])
+		// Accumulate `seen` deduped by HEIGHT (one canonical hash per block) — the reconcile window is
+		// pinned to one fork, so height→hash is 1:1, and this bounds the persisted marker to
+		// (upperBound − lowerBound) entries instead of one-per-event (codex R1 Med #6).
+		const seenByHeight = new Map<number, string>(marker.seen)
+		for (const ev of result.events) seenByHeight.set(ev.l2BlockNumber, ev.blockHash)
+		const seen: Array<[number, string]> = [...seenByHeight]
 
 		if (result.hasMore && result.scannedThrough) {
 			// More window remains — persist progress + seen, resume next tick.
@@ -1467,8 +1506,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *    projection read chain state INCLUDING the receipt → delete the row (causal).
 	 *  - anchored + terminal-FAILURE/MISSING → clear the anchor; the next drain re-requests.
 	 *  - no anchor → `requestBalanceRefresh`: `{taskId}` (a FRESH task) → anchor it; `{busy}` → keep
-	 *    the row unanchored (a later drain, after the in-flight task drains, mints a fresh one).
-	 *  - `requestBalanceRefresh` throws (no balance row — token/account gone) → delete the stale row.
+	 *    the row unanchored (a later drain, after the in-flight task drains, mints a fresh one);
+	 *    `{missing}` (the balance pair is positively gone — token/account removed) → delete the row.
+	 *  - `requestBalanceRefresh` THROWS (a transient storage/task failure, NOT a missing pair) → KEEP
+	 *    the row and retry next drain; deleting on a transient throw would discard the sole durable
+	 *    refresh marker (codex R1 High #4).
 	 */
 	private async drainBalanceOutbox(): Promise<void> {
 		const profile = await this.profileService.getActiveProfile()
@@ -1500,11 +1542,17 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 					// pending → keep waiting for the anchored task.
 					return
 				}
-				let result: { taskId: string } | { busy: true }
+				let result: { taskId: string } | { busy: true } | { missing: true }
 				try {
 					result = await this.tokenBalanceService.requestBalanceRefresh(tokenId, accountAddress)
-				} catch {
-					// No balance record for the pair (stale row — token/account removed). Classify + delete.
+				} catch (error) {
+					// TRANSIENT failure (storage/task), NOT a missing pair — keep the row + retry next
+					// drain. Deleting here would lose the only durable refresh marker (codex R1 High #4).
+					this.logWarn(`drainBalanceOutbox: refresh request failed transiently, keeping row: ${getErrorMessage(error)}`)
+					return
+				}
+				if ("missing" in result) {
+					// The (token, account) balance pair is positively gone (removed) → delete the stale row.
 					await this.repo.deleteOutbox(profileId, networkId, accountAddress, tokenId)
 					return
 				}

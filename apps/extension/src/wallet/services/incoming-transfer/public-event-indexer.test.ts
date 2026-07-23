@@ -34,7 +34,13 @@ function page(events: PublicTransferEvent[], hasMore = false): PublicTransferPag
 			? { blockNumber: last.l2BlockNumber, txIndexWithinBlock: last.txIndexWithinBlock, logIndexWithinTx: last.logIndexWithinTx }
 			: null,
 		hasMore,
+		dropped: false,
 	}
+}
+
+/** A validator-DROPPED page (non-monotonic / beyond-bound): empty result, `dropped:true`. */
+function droppedPage(): PublicTransferPage {
+	return { events: [], scannedThrough: null, hasMore: false, dropped: true }
 }
 
 function makeReader(responses: Array<PublicTransferPage | Error>) {
@@ -43,7 +49,7 @@ function makeReader(responses: Array<PublicTransferPage | Error>) {
 		fetchTransferPage: async (_n, _c, args) => {
 			fetchArgs.push(args)
 			const next = responses.shift()
-			if (next === undefined) return { events: [], scannedThrough: null, hasMore: false }
+			if (next === undefined) return { events: [], scannedThrough: null, hasMore: false, dropped: false }
 			if (next instanceof Error) throw next
 			return next
 		},
@@ -101,28 +107,56 @@ describe("PublicEventIndexer.scan", () => {
 		expect(res.hasMore).toBe(true)
 	})
 
+	test("a per-call maxPages override caps the scan below the instance budget (codex R2 #1)", async () => {
+		const responses = Array.from({ length: 4 }, (_, i) => page([ev({ txHash: `0x${i}`, l2BlockNumber: 5 + i })], true))
+		const { reader, fetchArgs } = makeReader(responses)
+		const idx = new PublicEventIndexer(reader, noop)
+		const res = await idx.scan("n", "c", { maxPages: 1 })
+		expect(fetchArgs).toHaveLength(1) // capped to ONE atomic page
+		expect(res.hasMore).toBe(true)
+	})
+
 	test("empty first page → null cursor, no events, hasMore=false", async () => {
 		const { reader } = makeReader([page([])])
 		const idx = new PublicEventIndexer(reader, noop)
 		const res = await idx.scan("n", "c", {})
-		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, topBlockHash: null })
+		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, topBlockHash: null, dropped: false })
 	})
 
-	test("threads afterCursor + referenceBlock to the reader; advances afterCursor per page", async () => {
+	test("threads fromBlock + toBlock + referenceBlock to EVERY page; advances afterCursor per page", async () => {
 		const { reader, fetchArgs } = makeReader([page([ev({ l2BlockNumber: 5 })], true), page([ev({ l2BlockNumber: 6 })], false)])
 		const idx = new PublicEventIndexer(reader, noop)
 		await idx.scan("n", "c", {
 			afterCursor: { blockNumber: 4, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
 			referenceBlock: "0xref",
 			fromBlock: 3,
+			toBlock: 100,
 		})
 		expect(fetchArgs[0]).toEqual({
 			fromBlock: 3,
+			toBlock: 100,
 			afterCursor: { blockNumber: 4, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
 			referenceBlock: "0xref",
 		})
-		expect(fetchArgs[1].afterCursor).toEqual({ blockNumber: 5, txIndexWithinBlock: 0, logIndexWithinTx: 0 })
+		// The PINNED toBlock + referenceBlock must be identical on page 2 (one fixed tip for the whole
+		// multi-page scan — codex R1 Critical #1 / High #3).
+		expect(fetchArgs[1].toBlock).toBe(100)
 		expect(fetchArgs[1].referenceBlock).toBe("0xref")
+		expect(fetchArgs[1].afterCursor).toEqual({ blockNumber: 5, txIndexWithinBlock: 0, logIndexWithinTx: 0 })
+	})
+
+	test("a validator-DROPPED page surfaces dropped=true (distinct from an empty EOF page)", async () => {
+		const { reader } = makeReader([droppedPage()])
+		const idx = new PublicEventIndexer(reader, noop)
+		const res = await idx.scan("n", "c", {})
+		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, topBlockHash: null, dropped: true })
+	})
+
+	test("an empty EOF page surfaces dropped=false", async () => {
+		const { reader } = makeReader([page([])])
+		const idx = new PublicEventIndexer(reader, noop)
+		const res = await idx.scan("n", "c", {})
+		expect(res.dropped).toBe(false)
 	})
 
 	test("stops (no advance) when a page's cursor does not strictly advance (hostile node)", async () => {

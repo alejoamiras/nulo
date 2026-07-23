@@ -254,18 +254,20 @@ function makeConfigStub(initialVisibility: boolean = true) {
 	}
 }
 
-/** TokenBalanceService stub with a configurable `requestBalanceRefresh` result (D4). */
+/** TokenBalanceService stub with a configurable `requestBalanceRefresh` result (D4). `setResult` can
+ *  return `{missing:true}` (the balance pair is positively gone → drain deletes the row); `setThrow`
+ *  simulates a TRANSIENT storage/task failure (a real throw → drain KEEPS the row — codex R1 High #4). */
 function makeTokenBalanceStub() {
-	const state = { result: { busy: true } as { taskId: string } | { busy: true }, throwOnRequest: false }
+	const state = { result: { busy: true } as { taskId: string } | { busy: true } | { missing: true }, throwOnRequest: false }
 	const requestBalanceRefresh = vi.fn(async (_tokenId: number, _account: string) => {
-		if (state.throwOnRequest) throw new Error("no balance for token")
+		if (state.throwOnRequest) throw new Error("transient storage failure")
 		return state.result
 	})
 	return {
 		name: "token-balance",
 		dependencies: [],
 		requestBalanceRefresh,
-		setResult(r: { taskId: string } | { busy: true }) {
+		setResult(r: { taskId: string } | { busy: true } | { missing: true }) {
 			state.result = r
 		},
 		setThrow(t: boolean) {
@@ -2181,7 +2183,13 @@ function pubPage(events: PublicTransferEvent[], hasMore = false): PublicTransfer
 			? { blockNumber: last.l2BlockNumber, txIndexWithinBlock: last.txIndexWithinBlock, logIndexWithinTx: last.logIndexWithinTx }
 			: null,
 		hasMore,
+		dropped: false,
 	}
+}
+
+/** A validator-DROPPED page (non-monotonic / beyond pinned bound): empty, `dropped:true`. */
+function pubDroppedPage(): PublicTransferPage {
+	return { events: [], scannedThrough: null, hasMore: false, dropped: true }
 }
 
 type ReaderResponse = PublicTransferPage | Error | ((args: PublicTransferFetchArgs) => PublicTransferPage)
@@ -2212,7 +2220,7 @@ function makePublicReader(init?: { tips?: Partial<PublicScanTips>; classStatus?:
 		fetchTransferPage: async (_n, _c, args) => {
 			state.fetchArgs.push(args)
 			const next = state.responses.shift()
-			if (next === undefined) return { events: [], scannedThrough: null, hasMore: false }
+			if (next === undefined) return { events: [], scannedThrough: null, hasMore: false, dropped: false }
 			if (next instanceof Error) throw next
 			if (typeof next === "function") return next(args)
 			return next
@@ -2405,14 +2413,18 @@ describe("IncomingTransferService — public-event scan arm (D3)", () => {
 		})
 	})
 
-	test("page-budget: all 5 budgeted pages fetched; cursor at the last page", async () => {
+	test("page-budget: all 5 budgeted pages fetched; cursor at the last page; every page pins the checkpoint hash", async () => {
 		const { reader, state } = makePublicReader()
 		const { service } = await bootPublic(reader, state)
 		for (let i = 0; i < 5; i++) state.responses.push(pubPage([pubEvent({ txHash: `0xb${i}`, l2BlockNumber: 10 + i })], true))
 
 		await scanPublic(service)
 
+		// Fresh cursor (no boundary probe) → exactly 5 page fetches, each pinned to the checkpoint FORK
+		// HASH so a mid-scan reorg throws on the offending page (codex R2 #1).
 		expect(state.fetchArgs).toHaveLength(5)
+		expect(state.fetchArgs.every((a) => a.referenceBlock === "0xcheckpoint")).toBe(true)
+		expect(state.fetchArgs[0].toBlock).toBe(100) // pinned to tips.checkpointedBlockNumber
 		expect(cursorFor()?.cursor).toEqual({ blockNumber: 14, txIndexWithinBlock: 0, logIndexWithinTx: 0 })
 	})
 
@@ -2637,6 +2649,117 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 
 		expect(cursorFor()?.pendingPage).toBeUndefined()
 	})
+
+	test("(codex R1/R2 Critical #1) intra-scan reorg: a page read off the wrong fork throws on the pinned checkpoint hash → reconcile, mixed-fork batch NEVER committed", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		seedCursor({
+			cursor: { blockNumber: 4, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xboundary",
+			lastScanFinalized: 3,
+		})
+		// (0) boundary probe: the low anchor is still canonical. (1) page 1 fetched OK against the
+		// pinned checkpoint hash. (2) page 2 THROWS — the checkpoint fork was rewritten mid-scan, so the
+		// second page can't validate against H_checkpoint. (3) restarted reconcile window is empty.
+		state.responses.push(pubPage([])) // boundary probe OK
+		state.responses.push(pubPage([pubEvent({ txHash: "0xp1e", l2BlockNumber: 6 })], true))
+		state.responses.push(new Error("checkpoint hash reorged mid-scan")) // page 2 pinned-anchor throw
+		state.responses.push(pubPage([])) // reconcile window
+
+		await scanPublic(service)
+
+		// page 1's event was NEVER committed (the scan threw before the commit loop)…
+		expect(records.get("pub:p1|n1|0xp1e|0")).toBeUndefined()
+		// …every forward page pinned the checkpoint hash…
+		expect(state.fetchArgs[1].referenceBlock).toBe("0xcheckpoint")
+		// …and reconciliation ran to completion (marker cleared).
+		expect(cursorFor()?.reconciling).toBeUndefined()
+	})
+
+	test("(codex R2 #1) when the checkpoint tip hash is unavailable, the forward scan is capped to ONE atomic page", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockHash: null } })
+		const { service } = await bootPublic(reader, state)
+		state.tips.checkpointedBlockHash = null // bootPublic's initial kick may have cleared/reset; re-assert
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		seedCursor({ cursor: null, lastSyncedBlockHash: null, lastScanFinalized: 3 })
+		// Two full pages queued, but with no fork anchor the scan must stop after ONE.
+		state.responses.push(pubPage([pubEvent({ txHash: "0xc1", l2BlockNumber: 6 })], true))
+		state.responses.push(pubPage([pubEvent({ txHash: "0xc2", l2BlockNumber: 7 })], true))
+
+		await scanPublic(service)
+
+		expect(state.fetchArgs).toHaveLength(1) // capped to one atomic page (no blind multi-fork splice)
+	})
+
+	test("(codex R2 #1) forward scan probes the BOUNDARY anchor first; a boundary reorg → reconcile", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const orphan = seedPublic({ txHash: "0xbnd", l2BlockNumber: 8, blockHash: "0xoldfork" })
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xoldfork",
+			lastScanFinalized: 5,
+		})
+		state.responses.push(new Error("boundary anchor reorged out")) // the up-front boundary probe throws
+		state.responses.push(pubPage([])) // reconcile window empty → orphan deleted
+
+		await scanPublic(service)
+
+		expect(state.fetchArgs[0].referenceBlock).toBe("0xoldfork") // boundary probe used the LOW anchor
+		expect(records.get(orphan.id)).toBeUndefined()
+	})
+
+	test("(codex R1 Critical #2) a DROPPED reconcile page does NOT finish reconciliation (no deletion) — retries next tick", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const rec = seedPublic({ txHash: "0xkeepme", l2BlockNumber: 7, blockHash: "0xcanon7" })
+		// A reconciliation already staged over [6..8].
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xanchor",
+			lastScanFinalized: 5,
+			reconciling: { lowerBound: 6, upperBound: 8, upperBoundHash: "0xcheckpoint", progress: null, seen: [] },
+		})
+		// The reconcile scan returns a validator-DROPPED page (hostile/glitched node), NOT a genuine EOF.
+		state.responses.push(pubDroppedPage())
+
+		const deleted = vi.fn()
+		service.onIncomingTransferDeleted.add(deleted)
+
+		await scanPublic(service)
+
+		// A dropped page is NOT "window complete": the record must survive and the marker must remain.
+		expect(records.get(rec.id)).toBeDefined()
+		expect(deleted).not.toHaveBeenCalled()
+		expect(cursorFor()?.reconciling).toBeDefined()
+	})
 })
 
 describe("IncomingTransferService — public-arm lifecycle (D3)", () => {
@@ -2653,6 +2776,42 @@ describe("IncomingTransferService — public-arm lifecycle (D3)", () => {
 
 		expect(cursorFor()?.cursor).toBeNull()
 		expect(cursorFor()?.lastSyncedBlockHash).toBeNull()
+	})
+
+	test("(codex R1 High #4) onAccountAdded bumps the epoch DURING the reset — a pre-reset persist is rejected", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		seedCursor({
+			cursor: { blockNumber: 8, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xh",
+			lastScanFinalized: 5,
+		})
+		const svc = service as unknown as {
+			serviceEpoch: number
+			onAccountAdded: (a: unknown) => Promise<void>
+			persistCursorLocked: (p: string, n: string, c: string, cur: unknown, e: number) => Promise<boolean>
+		}
+		const epochBefore = svc.serviceEpoch
+
+		await svc.onAccountAdded({ chainId: 1, address: "0xnew" })
+
+		// The reset ran under a bumped epoch, so a persist carrying the PRE-reset epoch (an in-flight
+		// scan) is now rejected — closing the window where it could overwrite the cursor reset.
+		expect(svc.serviceEpoch).toBeGreaterThan(epochBefore)
+		const persisted = await svc.persistCursorLocked(
+			"p1",
+			"n1",
+			tokenA.contract,
+			{
+				cursor: { blockNumber: 99, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+				lastSyncedBlockHash: "0xstale",
+				lastScanFinalized: 5,
+				startBlock: 0,
+			},
+			epochBefore,
+		)
+		expect(persisted).toBe(false)
+		expect(cursorFor()?.cursor).toBeNull() // still the reset value, not the stale 99
 	})
 
 	test("onTokenDeleted deletes the cursor row (re-add re-indexes from startBlock)", async () => {
@@ -2866,16 +3025,29 @@ describe("IncomingTransferService — balance-refresh drain (D4 causal ack)", ()
 		expect(outbox.get("p2|n1|0xa|1")).toBeDefined() // untouched
 	})
 
-	test("stale-row tolerance: a missing balance (requestBalanceRefresh throws) → row deleted, never throws", async () => {
+	test("stale-row tolerance: a POSITIVELY-missing balance ({missing:true}) → row deleted, never throws", async () => {
 		const { reader, state } = makePublicReader()
 		const tokenBalance = makeTokenBalanceStub()
 		const { service } = await bootPublic(reader, state, { tokenBalance })
 		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
-		tokenBalance.setThrow(true)
+		tokenBalance.setResult({ missing: true })
 
 		await drain(service)
 
 		expect(outboxFor()).toBeUndefined()
+	})
+
+	test("(codex R1 High #4) a TRANSIENT refresh throw KEEPS the row (never discards the durable marker)", async () => {
+		const { reader, state } = makePublicReader()
+		const tokenBalance = makeTokenBalanceStub()
+		const { service } = await bootPublic(reader, state, { tokenBalance })
+		outbox.set("p1|n1|0xa|1", { dirtyAt: 100 })
+		tokenBalance.setThrow(true) // a transient storage/task failure, NOT a missing pair
+
+		await drain(service) // must not throw
+
+		expect(outboxFor()).toBeDefined() // row preserved for the next drain
+		expect(outboxFor()?.pendingTaskId).toBeUndefined() // and left unanchored
 	})
 
 	test("drain-on-init after simulated SW death: the row survives + a refresh is re-requested", async () => {

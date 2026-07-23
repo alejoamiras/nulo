@@ -39,6 +39,10 @@ export interface PublicScanResult {
 	hasMore: boolean
 	/** Block hash of the last decoded event's block — the reorg/pendingPage fork anchor; `null` if no events. */
 	topBlockHash: string | null
+	/** True when the scan stopped because a page was DROPPED by hostile-response validation (as opposed
+	 *  to a genuine empty/EOF page). The reconciliation caller must NOT treat this as "window complete"
+	 *  (codex R1 Critical #2). */
+	dropped: boolean
 }
 
 export const DEFAULT_MAX_PAGES_PER_SCAN = 5
@@ -66,31 +70,41 @@ export class PublicEventIndexer {
 	}
 
 	/**
-	 * Page forward from `afterCursor` (optionally lower-bounded by `fromBlock`; the RPC upper-bounds
-	 * to the checkpointed tip), up to the page budget. Passes `referenceBlock` on EVERY page so a
-	 * reorg that dropped the anchor throws (and propagates). Stops early on an empty/dropped page,
-	 * on a non-advancing cursor (hostile), or on the first non-full page.
+	 * Page forward from `afterCursor` (optionally lower-bounded by `fromBlock`; upper-bounded by a
+	 * PINNED `toBlock` when given, else the RPC's live checkpointed tip), up to the page budget.
+	 * Passes `toBlock` + `referenceBlock` on EVERY page so the whole multi-page scan reads ONE fixed
+	 * tip and a reorg that dropped the anchor throws (and propagates). Stops early on an empty/dropped
+	 * page, on a non-advancing cursor (hostile), or on the first non-full page; surfaces `dropped` so
+	 * the caller can tell a suspect drop from a genuine EOF.
 	 */
 	public async scan(
 		networkId: string,
 		contract: string,
-		args: { fromBlock?: number; afterCursor?: PublicEventCursor | null; referenceBlock?: string },
+		args: { fromBlock?: number; toBlock?: number; afterCursor?: PublicEventCursor | null; referenceBlock?: string; maxPages?: number },
 	): Promise<PublicScanResult> {
 		const events: PublicTransferEvent[] = []
 		let cursor: PublicEventCursor | null = args.afterCursor ?? null
 		let scannedThrough: PublicEventCursor | null = null
 		let topBlockHash: string | null = null
 		let hasMore = false
+		let dropped = false
+		// A per-call cap (e.g. 1) lets the caller bound the scan when it can't pin a fork anchor — a
+		// single `getPublicLogsByTags` page is atomic against one fork, so it can never splice two
+		// (codex R2 #1).
+		const limit = Math.min(args.maxPages ?? this.maxPages, this.maxPages)
 
-		for (let page = 0; page < this.maxPages; page++) {
+		for (let page = 0; page < limit; page++) {
 			const fetchArgs: PublicTransferFetchArgs = {
 				fromBlock: args.fromBlock,
+				toBlock: args.toBlock,
 				afterCursor: cursor ?? undefined,
 				referenceBlock: args.referenceBlock,
 			}
 			const res = await this.reader.fetchTransferPage(networkId, contract, fetchArgs)
 			if (res.scannedThrough === null) {
-				// Empty page, or a page the offscreen validator dropped — nothing to advance.
+				// Empty page (EOF) OR a validator-dropped page — surface WHICH so reconciliation can
+				// distinguish "window complete" from "suspect page, retry" (codex R1 Critical #2).
+				dropped = res.dropped
 				hasMore = false
 				break
 			}
@@ -110,10 +124,10 @@ export class PublicEventIndexer {
 				break
 			}
 			// Page was full; if this was the last budgeted page, more work remains for the next tick.
-			hasMore = page === this.maxPages - 1
+			hasMore = page === limit - 1
 		}
 
-		return { events, scannedThrough, hasMore, topBlockHash }
+		return { events, scannedThrough, hasMore, topBlockHash, dropped }
 	}
 
 	/** Filter a page's events to those addressed to one of `recipients` (lower-cased compare). */

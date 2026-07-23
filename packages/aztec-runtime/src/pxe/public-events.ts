@@ -78,6 +78,13 @@ export interface PublicTransferPage {
 	events: PublicTransferEvent[]
 	scannedThrough: PublicEventCursor | null
 	hasMore: boolean
+	/** True when the WHOLE page was rejected by hostile-response validation (a log beyond the pinned
+	 *  upper bound, or a non-strictly-increasing position). ALWAYS paired with `scannedThrough:null`,
+	 *  but semantically distinct from a genuine empty page (EOF, also `scannedThrough:null`): a drop is
+	 *  a SUSPECT/transient signal, not end-of-stream. The reconciliation caller must never treat a
+	 *  dropped page as "window fully scanned" — that would delete not-yet-re-seen records on a single
+	 *  malicious/glitched RPC page (codex R1 Critical #2). */
+	dropped: boolean
 }
 
 /** Both reorg-relevant tips resolved in one probe (plain `BlockNumber`s, no `getChainTips` structs). */
@@ -118,6 +125,7 @@ export const PublicTransferPageSchema = z.object({
 	events: z.array(PublicTransferEventSchema),
 	scannedThrough: PublicEventCursorSchema.nullable(),
 	hasMore: z.boolean(),
+	dropped: z.boolean(),
 }) satisfies z.ZodType<PublicTransferPage>
 
 export const PublicScanTipsSchema = z.object({
@@ -131,12 +139,19 @@ export const PublicTokenClassStatusSchema = z.enum(["standard", "non-standard", 
 /** Args accepted by {@link fetchPublicTokenTransferEvents} (already-parsed offscreen-side). */
 export interface PublicTransferFetchArgs {
 	fromBlock?: number
+	/** PINNED inclusive upper bound (block number). When set, the page is bounded to THIS block and
+	 *  the beyond-bound validation compares against it — NOT a per-call fresh `checkpointed` read — so
+	 *  a multi-page forward scan / a staged reconciliation pages against ONE fixed tip instead of a
+	 *  moving one (codex R1 Critical #1 / High #3). Omitted (capability probe / tests) → the node's
+	 *  current `checkpointed` is read and used. Never read past the node's own checkpointed either way. */
+	toBlock?: number
 	afterCursor?: PublicEventCursor
 	referenceBlock?: string
 }
 
 export const PublicTransferFetchArgsSchema = z.object({
 	fromBlock: z.number().int().nonnegative().optional(),
+	toBlock: z.number().int().nonnegative().optional(),
 	afterCursor: PublicEventCursorSchema.optional(),
 	referenceBlock: z.string().optional(),
 }) satisfies z.ZodType<PublicTransferFetchArgs>
@@ -212,7 +227,23 @@ export async function fetchPublicTokenTransferEvents(
 ): Promise<PublicTransferPage> {
 	const contractAddress = await AztecAddress.schema.parseAsync(contract)
 	const tag = await getTransferLogTag()
-	const checkpointed = Number(await node.getBlockNumber("checkpointed"))
+	// A PINNED `toBlock` bounds the whole (multi-page) scan to ONE fixed tip. Without it we fall back
+	// to the node's live checkpointed.
+	const nodeCheckpointed = Number(await node.getBlockNumber("checkpointed"))
+	if (args.toBlock !== undefined && args.toBlock > nodeCheckpointed) {
+		// The caller pinned a window that extends BEYOND what the node currently reports as checkpointed
+		// (a lagging / regressed / inconsistent backend). Do NOT silently truncate to `nodeCheckpointed`:
+		// for a reconciliation pinned to `[lowerBound..upperBound]` that would EOF early and let
+		// `finishReconciliation` DELETE the canonical records in the unscanned tail. Signal a suspect
+		// DROP so the caller defers this tick instead of finishing (codex R2 #3).
+		log?.("warn", "public-events: pinned toBlock exceeds node checkpointed — deferring", {
+			contract,
+			toBlock: args.toBlock,
+			nodeCheckpointed,
+		})
+		return { events: [], scannedThrough: null, hasMore: false, dropped: true }
+	}
+	const checkpointed = args.toBlock ?? nodeCheckpointed
 
 	const afterLog =
 		args.afterCursor !== undefined
@@ -235,7 +266,7 @@ export async function fetchPublicTokenTransferEvents(
 	})
 
 	if (!logsForTag || logsForTag.length === 0) {
-		return { events: [], scannedThrough: null, hasMore: false }
+		return { events: [], scannedThrough: null, hasMore: false, dropped: false }
 	}
 
 	// Page-level validation — any violation drops the WHOLE page with no cursor advance.
@@ -248,7 +279,7 @@ export async function fetchPublicTokenTransferEvents(
 				pos,
 				checkpointed,
 			})
-			return { events: [], scannedThrough: null, hasMore: false }
+			return { events: [], scannedThrough: null, hasMore: false, dropped: true }
 		}
 		if (prev !== undefined && comparePositions(pos, prev) <= 0) {
 			log?.("warn", "public-events: page is not strictly increasing (or precedes cursor) — dropping page", {
@@ -256,7 +287,7 @@ export async function fetchPublicTokenTransferEvents(
 				prev,
 				pos,
 			})
-			return { events: [], scannedThrough: null, hasMore: false }
+			return { events: [], scannedThrough: null, hasMore: false, dropped: true }
 		}
 		prev = pos
 	}
@@ -270,7 +301,7 @@ export async function fetchPublicTokenTransferEvents(
 	// `scannedThrough` advances past EVERY examined log — including any skipped-as-malformed —
 	// so the tail can never livelock; `hasMore` mirrors an exactly-full node page.
 	const scannedThrough = positionOf(logsForTag[logsForTag.length - 1])
-	return { events, scannedThrough, hasMore: logsForTag.length === MAX_LOGS_PER_TAG }
+	return { events, scannedThrough, hasMore: logsForTag.length === MAX_LOGS_PER_TAG, dropped: false }
 }
 
 /** Decode a single `Transfer` log, or `undefined` (with a warn) on any per-item failure. */
