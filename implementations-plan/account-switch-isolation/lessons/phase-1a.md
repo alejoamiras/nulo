@@ -63,3 +63,24 @@ a missing row). claim-helper supersede-delete stays best-effort but resurrection
 FIX2 fence-profile TOCTOU: ExecutionFence.profileId (captured at authorize) threaded through
 dapp-send-executor→execution-lane→claim-helper; removed the claim-time getActiveProfile re-read. Attack
 (queue P1 → fence P2 → switch back P1 → claim) now REFUSES (record P1 vs captured fence P2). +7 tests; 3516 green.
+
+## DECISION: Phase 1a DEFERRED (not merged). Rationale + remaining work.
+Codex audited the re-enable across 4 rounds; each REJECT found a real, DEEPER dApp-session/execution-lane
+cross-account/cross-profile leak, each fixed at root + tested:
+  r1 queued-journal accounts[0] misbinding → derive from send `from`
+  r2 no-from default (session-order vs wallet-order) + composite claim guard
+  r3 deleteOperation not lock-serialized (resurrection) + claim re-read active profile (fence TOCTOU)
+  r4 (this) FIX1/FIX2 resolved, but a PRECEDING TOCTOU remains: the execution fence is not atomically bound
+     to the dApp interaction's AUTHORIZED profile — `dapp-interaction/service.ts:147 executeAndResolve` checks
+     profile then awaits refreshSession; `execution/service.ts:472` independently re-captures active-now. A
+     P2→P1 switch in that gap mis-binds. Requires an ATOMIC "capture fence only if still this profile" spanning
+     dapp-interaction → execution.
+That last fix is ARCHITECTURAL (a profile-fenced authorize→execute capture primitive) and is a SEPARATE concern
+from account-switch FEED isolation (arguably outside this plan's scope). Phase 1 already ships the privacy fix;
+Phase 1a is a UX restoration (dApp in-progress CARDS; dApp progress still shows via journal cards while deferred).
+DECISION: do NOT merge Phase 1a. Keep Phase 1's fail-closed dApp cards. The branch
+`worktree-account-switch-isolation-p1a` (correlation infra + queued/dispatcher-consistency fix + composite claim
+guard + lock-serialized deletion + captured-fence threading, 4537796) is the HEAD START for a future scoped
+effort "dapp-session execution-lane profile-fence atomicity", which adds the atomic-fence-capture then re-enables
+the cards. NOT rushed AFK. All that work is real + tested (3516 suite) — it just isn't airtight until the
+atomic-fence primitive lands.
