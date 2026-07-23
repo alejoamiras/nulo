@@ -666,6 +666,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				const amountRaw = parseNoteAmount(note)
 				if (amountRaw === null) return
 
+				// Owner trust-boundary (account-switch isolation hardening). `content.owner`
+				// is sender-influenced; `buildRecord` falls it back to the trusted scan
+				// `accountAddress` when absent. PXE only decrypts a note under the account
+				// whose viewing keys match, so a PRESENT owner that disagrees with the account
+				// we scanned under is anomalous — drop it fail-closed. Every scope/dedup/render
+				// path keys on `accountAddress` (trusted) or `siloedNullifier`, NEVER `owner`.
+				if (note.content?.owner !== undefined && note.content.owner !== accountAddress) return
+
 				// Read trust FRESH inside the lock — kills the residual race
 				// codex audit-6 identified (the LOCAL trustState going stale
 				// across PXE await chains in the prior design).
@@ -719,14 +727,16 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	/** Visibility check used by both initial-load (`getIncomingTransfers`)
-	 *  and live-event emit paths. Fails OPEN (returns true) if the config
-	 *  service is unreachable so a transient port hiccup doesn't silently
-	 *  suppress events. */
+	 *  and live-event emit paths. **Fails CLOSED** (returns false) if the config
+	 *  service is unreachable: the toggle is a privacy control, so a transient
+	 *  port hiccup must NOT surface receives the user chose to hide. Records are
+	 *  still persisted (hidden), so they reappear once visibility resolves —
+	 *  fail-closed here suppresses only the EMISSION, never the data. */
 	private async isVisibilityEnabled(): Promise<boolean> {
 		try {
 			return (await this.configService.getValue("incomingTransfersVisible")) !== false
 		} catch {
-			return true
+			return false
 		}
 	}
 

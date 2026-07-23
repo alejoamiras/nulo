@@ -40,3 +40,27 @@
 lint · typecheck:all · `bun run test <store/composable/component paths>` · `bun run test:e2e` ·
 `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts`
 (extend the harness test with the full isolation assertions) · full `e2e:agent` · negative-grep.
+
+## Service hardening (Phase 1.6/1.8) — done + deliberate deferrals
+- **isVisibilityEnabled fail-CLOSED** (`service.ts` ~733): config-error catch now returns `false` (was `true`).
+  A privacy toggle must not surface hidden receives on a port hiccup; the record persists hidden → reappears
+  when visibility resolves. Test: config throws for the visibility key → no Added emit, record still persisted.
+- **Owner trust-boundary drop** (`scanContract`, after the amount parse): if `note.content.owner` is PRESENT
+  and ≠ the scan `accountAddress`, DROP the note (PXE only decrypts under the scan account; a disagreeing owner
+  is anomalous). Every scope/dedup/render path keys on `accountAddress`/`siloedNullifier`, never `owner`. Tests:
+  owner-mismatch dropped; owner-match accepted. 53 scenarios green.
+
+### Deferred / judged-unnecessary (flag for post-impl auditors)
+- **(scope, siloedNullifier) re-keying — SKIPPED as unnecessary.** A siloed nullifier is globally unique per
+  note (siloed by contract; a note decrypts under exactly one account), so the existing global-nullifier repo
+  key is already collision-free. Re-keying would add churn to a battle-tested repo for no real benefit.
+- **Wire-event validation (service param + client result + dispatch override) — DEFERRED** as lower-priority
+  defense-in-depth. The cross-account LEAK is already closed at every UI ingress (composable scope-filter +
+  store generation/scope guards + component + buildActivityRows), so an unvalidated malformed event is a
+  robustness concern, not a privacy leak. It touches the shared extension-messaging dispatch layer (broad blast
+  radius on a stable system) — deferring keeps Phase 1 low-risk. Revisit as a follow-up / let the auditors weigh.
+
+## Phase 1 CONTAINMENT complete (all four facets closed at the UI/store layer). Next: Gate 1.
+Extend `tests/e2e/network/account-switch-isolation.test.ts` from the Phase-0 harness to the FULL isolation
+assertions (a real note lands on A while B is active → never surfaces in B; + a settled A tx via an
+extension-submitted tx; positive control switch-back), then run the network gate + full suite.

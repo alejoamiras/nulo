@@ -703,6 +703,75 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 		expect([...records.values()][0].hidden).toBe(false)
 	})
 
+	test("owner mismatch (account-switch hardening): a note whose content.owner ≠ the scan account is dropped", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		// PXE only decrypts under the scan account "0xa"; a PRESENT owner disagreeing is anomalous.
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ content: { value: "1000", owner: "0xEVIL" } })] })
+		const { service } = await bootService({ network, token, note: noteSvc })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		const added = vi.fn()
+		service.onIncomingTransferAdded.add(added)
+
+		await scan(service)
+
+		expect(records.size).toBe(0)
+		expect(added).not.toHaveBeenCalled()
+	})
+
+	test("owner match: a note whose content.owner equals the scan account is accepted", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ content: { value: "1000", owner: "0xa" } })] })
+		const { service } = await bootService({ network, token, note: noteSvc })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+
+		await scan(service)
+
+		expect(records.size).toBe(1)
+	})
+
+	test("visibility fails CLOSED: a config error suppresses the Added emit but persists the record hidden", async () => {
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+		const config = makeConfigStub()
+		const { service } = await bootService({ network, token, note: noteSvc, config })
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		// Config port hiccup ONLY for the visibility key (boot stays clean).
+		config.getValue.mockImplementation(async (key: string) => {
+			if (key === "incomingTransfersVisible") throw new Error("config port down")
+			return undefined
+		})
+		const added = vi.fn()
+		service.onIncomingTransferAdded.add(added)
+
+		await scan(service)
+
+		// Privacy control fails closed: no emit when visibility can't be confirmed…
+		expect(added).not.toHaveBeenCalled()
+		// …but the record is persisted (hidden), so it reappears once visibility resolves.
+		expect(records.size).toBe(1)
+	})
+
 	test("dedupe source 1 (prior records): existing siloedNullifier → skip", async () => {
 		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
 		const token = makeTokenStub([tokenA])
