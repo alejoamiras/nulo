@@ -27,78 +27,125 @@ import { z } from "zod"
 
 export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
 
-/** Persisted shape per discovered incoming note. */
-export type IncomingTransferRecord = {
-	/** Cryptographically-unique key (`Fr` string). Same record under
-	 *  multiple inserts is a no-op via the upsert layer. */
-	siloedNullifier: string
+import { type PublicEventCursor, PublicEventCursorSchema } from "@nulo/aztec-runtime/pxe/public-events"
+export type { PublicEventCursor }
+
+/** Discriminates the two receipt arms: privately-delivered notes vs public `Transfer` events. */
+export type IncomingTransferKind = "note" | "public-event"
+
+/** Fields common to BOTH record kinds. */
+type IncomingTransferRecordCommon = {
+	/**
+	 * PRIMARY KEY + storage key. Profile+network scoped so the same seed in two profiles (or two
+	 * networkIds on one chainId) can never collide. Built via {@link noteRecordId} /
+	 * {@link publicRecordId}.
+	 */
+	id: string
 	/** Profile owning the discovery surface. */
 	profileId: string
-	/** Network id (internal row id, not chainId) the note was discovered
-	 *  on — matches `network.id` used by `appStore.transactions` scoping. */
+	/** Network id (internal row id, not chainId) — matches `network.id` scoping. */
 	networkId: string
-	/** The user's account that owns the note. */
+	/** The user's account that received the transfer. */
 	accountAddress: string
 	/** Token contract address. */
 	contract: string
-	/** Token id in the local TokenService catalogue. Optional because the
-	 *  user may have removed the token between discovery and read; the
-	 *  renderer falls back gracefully. */
+	/** Token id in the local TokenService catalogue. Optional (user may remove the token). */
 	tokenId?: number
-	/** Note's owner (the user's account at note-encoded time). */
-	owner: string
-	/** Decoded `UintNote.value` as a u128 stringified decimal. */
+	/** Amount as a u128 stringified decimal. */
 	amountRaw: string
-	/** Note's commitment hash (additional identity field; not the primary key). */
-	noteHash: string
-	/** The tx that minted this note (for dedupe against outgoing). */
+	/** The tx that produced this receipt (dedupe against outgoing + late-delete). */
 	txHash: string
 	/** Block height of the parent tx. Ordering field. */
 	l2BlockNumber: number
-	/** Index of the parent tx within the block. */
+	/** Index of the parent tx within the block. Ordering field. */
 	txIndexInBlock: number
-	/** Index of the note within the parent tx. */
-	noteIndexInTx: number
-	/** When `true`, the record is suppressed from rendering — either the
-	 *  contract is `pending` (first-receive friction not yet resolved) or
-	 *  `blocked`. Trust-state transitions flip this flag. */
+	/**
+	 * Index within the parent tx — `noteIndexInTx` for notes, `logIndexWithinTx` for public
+	 * events. Different index spaces, so within-tx ordering of a mixed note+public pair is
+	 * arbitrary; the block+txIndex prefix keeps cross-tx ordering correct.
+	 */
+	indexInTx: number
+	/** When `true`, suppressed from rendering (contract `pending` or `blocked`). */
 	hidden: boolean
-	/** Local Date.now() at first discovery. Fallback ordering when
-	 *  multiple records share the same block-index tuple. */
+	/** Local Date.now() at first discovery. Fallback ordering tiebreak. */
 	discoveredAt: number
 	/**
-	 * Chain-derived UTC seconds for the block that minted this note.
-	 * Populated at scanContract-time via `noteService.getBlockTimestamp`.
-	 * Optional because:
-	 *   - Legacy records persisted before this field existed don't have it.
-	 *   - PXE may transiently fail to resolve the block; we still persist
-	 *     the record so the user doesn't lose discovery state.
-	 * Activity-feed sort prefers `blockTimestamp ?? discoveredAt` so the
-	 * order survives token remove + re-add (re-indexed records get
-	 * identical chain timestamps from PXE).
+	 * Chain-derived UTC seconds for the parent block. Optional (transient resolve failure /
+	 * legacy). Activity-feed sort prefers `blockTimestamp ?? discoveredAt` so order survives
+	 * token remove + re-add.
 	 */
 	blockTimestamp?: number
 }
 
-/** Storage codec row schema — mirrors `IncomingTransferRecord` exactly. */
-export const IncomingTransferRecordSchema: z.ZodType<IncomingTransferRecord> = z.object({
-	siloedNullifier: z.string(),
+/** A privately-delivered note receipt (the pre-existing arm). */
+export type IncomingNoteRecord = IncomingTransferRecordCommon & {
+	kind: "note"
+	/** Cryptographically-unique nullifier (`Fr` string) — the note's identity. */
+	siloedNullifier: string
+	/** Note's commitment hash (additional identity field). */
+	noteHash: string
+	/** Note's owner (the user's account at note-encoded time). */
+	owner: string
+}
+
+/** A public `Transfer` event receipt (the new arm). */
+export type IncomingPublicEventRecord = IncomingTransferRecordCommon & {
+	kind: "public-event"
+	/**
+	 * Sender address. `PRIVATE_ADDRESS_MAGIC_VALUE` = came-from-private (private→public); the
+	 * zero address = mint. Display-only — never an authz input.
+	 */
+	from: string
+	/** Block hash — the D6 reorg-reconciliation key. */
+	blockHash: string
+}
+
+/** Persisted shape per discovered incoming receipt (discriminated on `kind`). */
+export type IncomingTransferRecord = IncomingNoteRecord | IncomingPublicEventRecord
+
+/** Build the profile+network-scoped PK for a note record. */
+export function noteRecordId(profileId: string, networkId: string, siloedNullifier: string): string {
+	return `note:${profileId}|${networkId}|${siloedNullifier}`
+}
+
+/** Build the profile+network-scoped PK for a public-event record. */
+export function publicRecordId(profileId: string, networkId: string, txHash: string, logIndexWithinTx: number): string {
+	return `pub:${profileId}|${networkId}|${txHash}|${logIndexWithinTx}`
+}
+
+const incomingTransferRecordCommonShape = {
+	id: z.string(),
 	profileId: z.string(),
 	networkId: z.string(),
 	accountAddress: z.string(),
 	contract: z.string(),
 	tokenId: z.number().optional(),
-	owner: z.string(),
 	amountRaw: z.string(),
-	noteHash: z.string(),
 	txHash: z.string(),
 	l2BlockNumber: z.number(),
 	txIndexInBlock: z.number(),
-	noteIndexInTx: z.number(),
+	indexInTx: z.number(),
 	hidden: z.boolean(),
 	discoveredAt: z.number(),
 	blockTimestamp: z.number().optional(),
-})
+} as const
+
+/** Storage codec row schema — a discriminated union mirroring `IncomingTransferRecord` exactly. */
+export const IncomingTransferRecordSchema: z.ZodType<IncomingTransferRecord> = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("note"),
+		...incomingTransferRecordCommonShape,
+		siloedNullifier: z.string(),
+		noteHash: z.string(),
+		owner: z.string(),
+	}),
+	z.object({
+		kind: z.literal("public-event"),
+		...incomingTransferRecordCommonShape,
+		from: z.string(),
+		blockHash: z.string(),
+	}),
+])
 
 /** Trust-state row keyed by `(profileId, networkId, contract)`. */
 export type IncomingTrustRecord = {
@@ -117,6 +164,98 @@ export const IncomingTrustRecordSchema: z.ZodType<IncomingTrustRecord> = z.objec
 	contract: z.string(),
 	state: z.enum(["unknown", "pending", "trusted", "blocked"]),
 	updatedAt: z.number(),
+})
+
+/**
+ * Per-`(profileId, networkId, contract)` public-event scan cursor (D3/D6). The service is the SOLE
+ * writer, only inside the service lock + epoch check.
+ */
+export type PublicScanCursor = {
+	/** Last committed page position; `null` = never scanned (start from `startBlock`). */
+	cursor: PublicEventCursor | null
+	/** D6 reorg anchor — passed as `referenceBlock`; the node throws if this block was reorged out. */
+	lastSyncedBlockHash: string | null
+	/** D6 rewind FLOOR — the finalized tip AT the last successful scan (NOT the current finalized). */
+	lastScanFinalized: number | null
+	/** Retrofit seam for a future per-token backfill window. `0` in v1. */
+	startBlock: number
+	/**
+	 * Closes the normal-scan record-before-cursor crash window (D3): written BEFORE a page's record
+	 * writes, cleared after the cursor advance. On resume, the range is re-queried with
+	 * `referenceBlock = upperHash` to detect a crash+reorg that stranded records on an orphaned fork.
+	 */
+	pendingPage?: {
+		fromCursor: PublicEventCursor | null
+		toScannedThrough: PublicEventCursor
+		upperHash: string
+	}
+	/**
+	 * Staged, resumable reorg-reconciliation marker (D6). Written BEFORE any mutation; `progress`
+	 * resumes a multi-tick/crashed comparison, `seen` accumulates canonical (height, blockHash)
+	 * pairs, `upperBoundHash` pins the fork so a mid-reconcile reorg is caught + restarts cleanly.
+	 */
+	reconciling?: {
+		lowerBound: number
+		upperBound: number
+		upperBoundHash: string
+		progress: PublicEventCursor | null
+		seen: Array<[height: number, blockHash: string]>
+	}
+}
+
+/** Build the storage key for a public-scan cursor row. */
+export function publicCursorKey(profileId: string, networkId: string, contract: string): string {
+	return `${profileId}|${networkId}|${contract}`
+}
+
+const pendingPageSchema = z.object({
+	fromCursor: PublicEventCursorSchema.nullable(),
+	toScannedThrough: PublicEventCursorSchema,
+	upperHash: z.string(),
+})
+
+const reconcilingSchema = z.object({
+	lowerBound: z.number(),
+	upperBound: z.number(),
+	upperBoundHash: z.string(),
+	progress: PublicEventCursorSchema.nullable(),
+	seen: z.array(z.tuple([z.number(), z.string()])),
+})
+
+/** Storage codec row schema — mirrors `PublicScanCursor` exactly. */
+export const PublicScanCursorSchema: z.ZodType<PublicScanCursor> = z.object({
+	cursor: PublicEventCursorSchema.nullable(),
+	lastSyncedBlockHash: z.string().nullable(),
+	lastScanFinalized: z.number().nullable(),
+	startBlock: z.number(),
+	pendingPage: pendingPageSchema.optional(),
+	reconciling: reconcilingSchema.optional(),
+})
+
+/**
+ * Balance-refresh outbox row (D4), keyed `${profileId}|${networkId}|${accountAddress}|${tokenId}`
+ * (natural coalescing — N receipts for one balance = one row). Written for BOTH arms regardless of
+ * trust state (a hidden receipt still changed the chain balance).
+ */
+export type IncomingBalanceOutboxRow = {
+	/** When the balance was last marked dirty by a receipt. Overwritten by every new receipt. */
+	dirtyAt: number
+	/**
+	 * The id of the FRESH refresh task anchored to this row (D4 causal ack). Present only when a
+	 * fresh post-`dirtyAt` task was minted; the row deletes on THAT task's terminal-success.
+	 */
+	pendingTaskId?: string
+}
+
+/** Build the storage key for a balance-outbox row. */
+export function balanceOutboxKey(profileId: string, networkId: string, accountAddress: string, tokenId: number): string {
+	return `${profileId}|${networkId}|${accountAddress}|${tokenId}`
+}
+
+/** Storage codec row schema — mirrors `IncomingBalanceOutboxRow` exactly. */
+export const IncomingBalanceOutboxRowSchema: z.ZodType<IncomingBalanceOutboxRow> = z.object({
+	dirtyAt: z.number(),
+	pendingTaskId: z.string().optional(),
 })
 
 /** Lightweight pending-prompt payload. The popup subscribes and prompts the
@@ -158,6 +297,21 @@ export type Methods = {
 	 * filtered out by default.
 	 */
 	getIncomingTransfers(profileId: string, networkId: string, accountAddress: string, tokenId?: number): IncomingTransferRecord[]
+	/** Read ONE record by its `id` PK (for the received-detail page). Unfiltered — no dust/visibility
+	 *  gate; `id` is profile+network-scoped so it only returns the caller's own record. */
+	getIncomingTransferById(id: string): IncomingTransferRecord | undefined
+	/**
+	 * Lazily fetch the network fee (fee juice, paid by the sender) for a receipt's parent tx, valued at
+	 * display time on the detail page. Takes the record `id` (NOT a raw txHash) so the gate is enforced
+	 * server-side: the record is resolved active-profile-scoped, and ONLY a `public-event` receipt ever
+	 * reaches the node. A public receipt's recipient is already on-chain, so its residual node-query
+	 * correlation is far smaller than a private receive's; a note (private) receipt returns `null` WITHOUT
+	 * any node call, so its tx hash is never handed to the node even if a UI bug called this. NOT persisted
+	 * — cached in-memory by `(networkId, txHash, blockHash)` since a mined tx's fee is block-derived and a
+	 * reorg re-mine changes it. Returns `null` when the record is absent/note-kind, the tx has no recorded
+	 * fee, or the node lookup fails.
+	 */
+	getReceiptFee(id: string): { feeJuice: string } | null
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState

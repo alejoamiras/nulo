@@ -18,6 +18,8 @@ export * from "./spec"
  *  the two drift guards below keep it locked to the `Methods` surface. */
 const INCOMING_TRANSFER_METHODS = [
 	"getIncomingTransfers",
+	"getIncomingTransferById",
+	"getReceiptFee",
 	"getTrustState",
 	"setTrustAllow",
 	"setTrustReject",

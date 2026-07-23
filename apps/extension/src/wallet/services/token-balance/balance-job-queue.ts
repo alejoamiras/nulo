@@ -83,6 +83,17 @@ export class BalanceJobQueue {
 		this.queue.priorityPass(balance)
 	}
 
+	/** Whether a task is already pending/processing for this balance id (i.e. an `enqueue` would
+	 *  COALESCE rather than mint a fresh task). Used by the causal balance-refresh ack (D4). */
+	public hasPendingTask(id: number): boolean {
+		return this.pendingTasks.has(id)
+	}
+
+	/** The current TaskService id anchored to this balance id, or `undefined` if none is pending. */
+	public getPendingTaskId(id: number): string | undefined {
+		return this.pendingTasks.get(id)
+	}
+
 	/** Run a single tick: drain the queue until empty, batching by the
 	 *  first-queued account's chain, max 12 per batch. Public for tests
 	 *  (the production adapter invokes it via the ticker subscription). */

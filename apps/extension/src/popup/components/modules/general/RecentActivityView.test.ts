@@ -200,6 +200,12 @@ const dappExecuteTask = (id = "task-dapp") => ({
 })
 
 const incomingRecord = (over: Record<string, unknown>) => ({
+	// Discriminated-union NOTE record: `kind` is required (resolveReceivedType, called during the card
+	// render, early-returns on it — without it a note falls into the public branch and dereferences the
+	// absent `from`), and `id` is the row key.
+	kind: "note",
+	id: `note:p1|net-1|${(over.siloedNullifier as string) ?? "sn"}`,
+	profileId: "p1",
 	accountAddress: ACCT_A,
 	networkId: "net-1",
 	tokenId: undefined,

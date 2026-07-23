@@ -44,6 +44,18 @@ const balance = (id: number, token: number, overrides: Partial<TokenBalanceRaw> 
 // getTokenBalanceInfo never reaches into the tokens map.
 const tokenInfo = (id: number) => ({ id, chainId: 1, name: `T${id}`, symbol: `T${id}`, decimals: 18, contract: `0xtok${id}` }) as never
 
+describe("TokenBalanceService.requestBalanceRefresh — missing-pair contract (codex R1 High #4)", () => {
+	test("an absent (token, account) balance pair returns {missing:true} (NOT a throw)", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
+		// Empty repo → no balance row for the pair. The old contract THREW here; the drain could not
+		// distinguish that from a transient storage failure and would discard the durable outbox row.
+		const result = await service.requestBalanceRefresh(999, "0xnobody")
+		expect(result).toEqual({ missing: true })
+	})
+})
+
 describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 	let service: TokenBalanceService
 	let seedRepo: BalanceRepository

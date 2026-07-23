@@ -24,6 +24,7 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { stageSubtitle } from "@/utils/card-subtitle"
 import { ACTIVITY_FEED_KINDS, buildJournalTerminalCardProps, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { formatTransferType, humanizeMethodName } from "@/utils/tx-enrichment"
+import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
 import { buildCancelHandler, filterPendingDoubleRender, isMatchingTask } from "./recent-activity-handlers"
 
 /** Composables */
@@ -122,7 +123,7 @@ const recentActivityRows = computed(() => {
 		// Fall back to discoveredAt for legacy records or when PXE didn't
 		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
 		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
+		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
 	}
 	rows.sort((a, b) => b.sortKey - a.sortKey)
 	return rows.slice(0, remaining)
@@ -223,17 +224,17 @@ const journalOps = ref([])
 // `incomingTransfersVisible` toggle reload. Shared verbatim with activity.vue.
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
+const incomingPriceService = new PriceServiceClient()
+const incomingPrices = usePrices(incomingPriceService)
 const { incomingTransfers, dispose: disposeIncomingTransfers } = useIncomingTransfers({
 	incomingTransferService,
 	configService,
+	priceService: incomingPriceService,
 	scope: () =>
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
 			: undefined,
 })
-
-const incomingPriceService = new PriceServiceClient()
-const incomingPrices = usePrices(incomingPriceService)
 function incomingCardProps(inc) {
 	const token = inc.tokenId !== undefined ? tokenById(inc.tokenId) : undefined
 	return {
@@ -242,10 +243,12 @@ function incomingCardProps(inc) {
 		tokenDecimals: token?.decimals || 0,
 		txHash: inc.txHash,
 		amountFiat: token ? (incomingPrices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
+		receivedLabel: receivedLabel(resolveReceivedType(inc)),
 	}
 }
 function handleSelectIncoming(inc) {
-	if (inc.tokenId !== undefined) router.push(`/popup/tokens/${inc.tokenId}`)
+	// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
+	router.push(`/popup/received/${inc.id}`)
 }
 
 /** Phase 2 follow-up: execution-service client for Cancel surface.

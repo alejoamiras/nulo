@@ -59,6 +59,10 @@ export default defineConfig({
 			// Node-only (fs + import.meta.url file resolution — jsdom's URL isn't file-scheme).
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/pxe/opfs-store.test.ts",
+			// Live bb.js WASM poseidon2 (computeLogTag for the Transfer tag + the class-id hash in the
+			// D2 gate), which crashes under jsdom (`BBApiException: std::bad_cast` — same limitation as
+			// the account vectors above). Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/pxe/public-events.test.ts",
 		],
 		// Inline workspace @nulo/* packages so vite processes their TS
 		// source entry points instead of externalizing them (default

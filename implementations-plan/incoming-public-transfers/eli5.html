@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — incoming-public-transfers</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>incoming-public-transfers</h1>
+  <p>Today the wallet only notices tokens that arrive <em>privately</em> (as encrypted notes). If someone sends you tokens <em>publicly</em>, nothing happens: no "Received" row in Activity, and your balance number doesn't move until you press refresh. This plan fixes both. The token contract already announces every public transfer with a little on-chain "event" (like a receipt stapled to the block); we'll read those receipts from the network node, page by page with a bookmark (a "cursor") so we never re-read what we've seen, show them as "Received" rows exactly like private ones, and — for BOTH private and public receives — automatically refresh the balance so the number is right without you touching anything.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong><code>mid</code></strong>. Rubric: 0 HIGH dimensions (novelty MODERATE — our first event-indexer, but the whole surface was mapped up front; blast radius MODERATE — activity feed + balances; irreversibility LOW — no production users, storage can change freely; migration LOW; external coupling MODERATE — one new node API that's already in our libraries; security MODERATE — spam/dusting, handled by the existing trust prompt). It spans three areas (runtime package, wallet services, UI), so <code>light</code> was out; nothing scored high enough for <code>deep</code>. The plan then went through the full mid ceremony: a competing design, TWO independent audits (Claude "fable" + codex), all 24 findings folded or rejected with verified reasons, and a final fresh codex pass.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: Teach the runtime to fetch public transfer receipts</h3>
+    <p>One new low-level call: "give me the next page of Transfer events for this token, after my bookmark." It only trusts what it can verify: pages must be in order, never past the chain's <em>proven</em> tip, and one garbled entry can't break the rest.</p>
+    <p class="muted">Proves itself by: named unit tests (page decoding, bookmark math, hostile-page rejection) + lint + typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: The scanner — find receipts meant for you (+ handle reorgs)</h3>
+    <p>Every 30 seconds, for each of your tokens, read the next pages of receipts (at most 5 per tick, so it never hogs the node), keep only the ones addressed to you, and file them through the same "do you trust this token?" flow private receives use. Because we index fast-but-reversible <em>checkpointed</em> blocks, this phase also handles chain reorganizations: the node tells us (via a block-hash anchor) when something we indexed got reverted, and we clean up the affected rows, re-refresh the balance, and re-scan — crash-safely, so an interruption mid-cleanup just resumes. The feed's internal row IDs are upgraded here so private and public rows share one identity scheme.</p>
+    <p class="muted">Proves itself by: the full repo check (typecheck → tests → lint → build) with ~12 NAMED scenario tests (crash recovery, remove/re-add, mid-scan account add, reorg cleanup, mid-reconcile reorg…) + a live-node capability probe.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Balances that update themselves</h3>
+    <p>When a receive is discovered (private OR public), a tiny persistent "to-do note" is written alongside it: "refresh this token's balance." The service works through those notes and only crosses them off once the refresh is queued — so even if the browser kills the extension mid-way, the note survives and the balance still gets fixed on next wake-up.</p>
+    <p class="muted">Proves itself by: the full repo check + named tests including a simulated crash-and-recover.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Show it nicely — detail view + dust filter</h3>
+    <p>Received rows get their own detail page (today they just bounce to the token page). It shows a chip for how the tokens arrived (Received privately / Public → Public / Private → Public / Minted), an honest "From" (a real address only when we actually have one, otherwise clearly redacted), and an explorer link. Plus a Settings option to hide dust below a dollar value you set, using the live price service (unpriced tokens are shown, marked "price unavailable").</p>
+    <p class="muted">Proves itself by: the full repo check + component tests (chip + From per type, dust-filter behavior) + the no-network smoke e2e suite.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: The real-world proof</h3>
+    <p>A full end-to-end test on a live local network: a second wallet sends you tokens publicly → the Received row appears with the right chip AND the balance updates <em>without anyone clicking refresh</em>. Plus a re-run of the existing private-receive e2e to prove nothing regressed.</p>
+    <p class="muted">Proves itself by: the network e2e suite green on both test files + the full repo check.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>Three background facts explain most decisions. (1) On Aztec, <em>private</em> transfers deliver encrypted notes only you can see — the wallet already scans those. <em>Public</em> transfers just change a number in public storage, so there's nothing to "receive" — but the standard token announces each one with a public event, and the node indexes those events per token, so reading them is cheap and precise. (2) Your address can receive tokens before anything about it ever touches the chain, so "start indexing from when the account was created" would silently miss real money — that's why we index each token's full history, with a saved bookmark so it's paid only once. (3) The extension can be killed by the browser at any moment, so every step (bookmark, refresh to-do notes) is written to disk in a way where crashing mid-step just means redoing a little work, never losing a receipt.</p>
+
+  <h2>Audit trail (what the reviewers changed)</h2>
+  <p>This plan was hardened hard: a Claude "fable" audit, then a fresh codex pass, then several codex re-checks as fixes and your design decisions landed. Real gaps caught and now designed in: the bookmark could get stuck on a partial page; it wasn't cleaned up when you remove a token; record IDs could collide across profiles; the self-updating balance took four designs before one was provably correct (fire-and-forget → lost on crash; timestamp compare → a stale refresh could falsely mark a receipt done; task-anchored → a coalesced task could mis-attribute; final: each refresh anchored to its own freshly-created task). Your two steers reshaped it further: <strong>checkpointed</strong> blocks (seconds, not minutes) with full reorg <em>reconciliation</em> — and hardening that took three rounds (rewind must use the finalized mark <em>as of the last scan</em>, every reconciliation page is fork-pinned by hash, and a crash between writing a receipt and its bookmark is caught on resume); and your pub→priv insight, which turned out to be observable-but-not-provably-yours, so we <strong>drop</strong> the sender rather than show a spoofable one. Two codex demands were rejected with receipts (an alpha SLA; a duplicate retry ledger). And you caught me citing a stale <code>dev</code> — the price service the dust filter needs <em>is</em> merged. Full trail: the decision ledger in <a href="plan.md">plan.md</a> + <a href="audit-codex.md">audit-codex.md</a> + <a href="audit-fable.md">audit-fable.md</a>.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>None blocking — but three audit-surfaced decisions are restated for your explicit sign-off below (reorg policy, dust acceptance, backfill speed), because the audits flagged them as product calls that shouldn't pass silently.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>All the design decisions below are <strong>already settled with you</strong> — this box now just confirms the whole package. Nothing here is still open.</li>
+      <li>Confirm scope and exclusions (non-standard tokens out; no backfill settings in v1; storage dust-cap as a named fast-follow — the USD dust <em>filter</em> IS in v1).</li>
+      <li>Confirm tier <code>mid</code>.</li>
+      <li>Confirm the validation plan: full repo check every phase; smoke e2e at Phase 4; live network e2e at Phase 5; a live-node price/API probe in Phase 2.</li>
+      <li><strong>Reorg (settled: checkpointed + reconciliation):</strong> ~seconds latency; node-driven reorg detection + cleanup. Your latency call.</li>
+      <li><strong>Dust (settled: USD filter in v1):</strong> Settings "hide receipts under $X", live price service, fails open for unpriced tokens.</li>
+      <li><strong>pub→priv sender (settled: dropped):</strong> shown as "Received privately", no sender — not provably attributable.</li>
+      <li><strong>Backfill pace (settled):</strong> full history at ≤100 events per 30s of uptime, no SLA (alpha).</li>
+      <li><strong>Baseline note:</strong> implementation rebases onto current <code>dev</code> to pick up the merged price service (PR #309).</li>
+      <li>No <code>/harden</code> scheduled (extension-internal surface).</li>
+      <li>Both audits (Claude "fable" + codex) landed at <strong>conditional approve</strong>; every condition is folded into the plan.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and is the official primitive for "work until the condition holds"; recurring <code>/loop</code> tasks fire on their interval until they expire after 7 days. Pick the one matching whether the completion condition is observable in the transcript.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other. Run it INSIDE the plan's worktree (<code>agent-worktree resume incoming-public-transfers</code>).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All 5 phases marked ✓ in implementations-plan/incoming-public-transfers/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md, including the NAMED scenario/unit tests in each gate's pass criteria) reported passing in the transcript; for each phase the agent has printed `LESSONS_FILE=implementations-plan/incoming-public-transfers/lessons/phase-N.md` in the transcript; `/code-review max --fix` complete with findings applied and committed separately; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue`, `bun run e2e:agent -- incoming-public-transfers.test.ts`, and `bun run e2e:agent -- incoming-transfers.test.ts` all report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/incoming-public-transfers forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/incoming-public-transfers/plan.md and lessons/ (authoritative state — not the chat); run `git status` and `git log --oneline -5`. If a PR exists, `gh pr view --json statusCheckRollup` (no --watch).
+2. Waiting on CI is fine — confirm it's progressing (`gh run watch <run-id>` up to 10 minutes); use the wait to review the diff or prep the next phase.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run `bun run lint` + the touched package's tests — catch mistakes in-step. Then commit → push.
+4. Stuck, or facing a decision you'd normally bring to me? Call /codex xhigh with full context, reach a defensible decision, act on it, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never expand scope beyond plan.md.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? "Green" = THE PHASE'S VALIDATION GATE as written in plan.md, INCLUDING its named tests (commands + pass criteria). Run it, paste the result, mark ✓ in plan.md, file lessons, print `LESSONS_FILE=implementations-plan/incoming-public-transfers/lessons/phase-N.md`, advance.
+7. All phases ✓? Post-impl sequence: /code-review max --fix → commit fixes separately → codex post-impl audit (net diff + code-review commit summary + adversarial ask) → address high/critical → wrap-up report → surface and stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">Codex audits</a> · <a href="audit-fable.md">Fable audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

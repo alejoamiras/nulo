@@ -135,6 +135,25 @@ describe("BalanceJobQueue", () => {
 		expect(tasks.createNewTask).toHaveBeenCalledTimes(1)
 	})
 
+	test("hasPendingTask / getPendingTaskId reflect the freshly-minted task (D4 causal-ack seam)", () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, {
+			onBalanceUpdated: vi.fn(),
+		})
+
+		expect(queue.hasPendingTask(1)).toBe(false)
+		expect(queue.getPendingTaskId(1)).toBeUndefined()
+
+		queue.enqueue(raw(1))
+		expect(queue.hasPendingTask(1)).toBe(true)
+		expect(typeof queue.getPendingTaskId(1)).toBe("string")
+		// A second enqueue COALESCES — the anchored task id is unchanged.
+		const first = queue.getPendingTaskId(1)
+		queue.enqueue(raw(1))
+		expect(queue.getPendingTaskId(1)).toBe(first)
+	})
+
 	test("tick drains queue until empty (not one-batch-per-tick)", async () => {
 		const ticker = new FakeBackgroundTicker()
 		const repo = makeRepo(Array.from({ length: 30 }, (_, i) => raw(i + 1)))

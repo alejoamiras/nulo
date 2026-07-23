@@ -163,7 +163,8 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 	await seedPage.evaluate(
 		async ([profileId, nid, chainId, addr, contract, siloedNullifier]) => {
 			const trustKey = `nulo:core:incoming-trust@${profileId}|${nid}|${contract}`
-			const recordKey = `nulo:core:incoming-transfers@${siloedNullifier}`
+			const recordId = `note:${profileId}|${nid}|${siloedNullifier}`
+			const recordKey = `nulo:core:incoming-transfers@${recordId}`
 			// `replayPendingPrompts` skips a pending row whose contract has no
 			// matching token registration (service.ts: `tokens.find` by contract +
 			// chainId). Seed the token so the replay actually fires the prompt —
@@ -187,6 +188,8 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 					updatedAt: Date.now(),
 				}),
 				[recordKey]: JSON.stringify({
+					kind: "note",
+					id: recordId,
 					siloedNullifier,
 					profileId,
 					networkId: nid,
@@ -199,7 +202,7 @@ test.skipIf(!hasConfig)("C2 — trust prompt re-fires after popup close + reopen
 					txHash: "0xtx",
 					l2BlockNumber: 1,
 					txIndexInBlock: 0,
-					noteIndexInTx: 0,
+					indexInTx: 0,
 					hidden: true,
 					discoveredAt: Date.now(),
 				}),
