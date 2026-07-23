@@ -111,6 +111,8 @@ const activityRows = computed(() =>
 		terminalJournalOps: terminalJournalOps.value,
 		incomingTransfers: incomingTransfers.value,
 		accountAddress: appStore.account?.address,
+		chainId: appStore.network?.chainId,
+		networkId: appStore.network?.id,
 	}),
 )
 
