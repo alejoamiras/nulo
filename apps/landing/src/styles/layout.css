@@ -150,6 +150,26 @@
 	}
 }
 
+.nav__actions {
+	display: flex;
+	align-items: center;
+	gap: var(--s-4);
+}
+
+.nav__link {
+	font-family: var(--font-headline);
+	font-size: 0.875rem;
+	letter-spacing: -0.04em;
+	text-transform: uppercase;
+	color: var(--c-secondary);
+	padding: var(--s-2) var(--s-4);
+	transition: color var(--dur-fast);
+
+	&:hover {
+		color: var(--c-on-surface);
+	}
+}
+
 /* ── Footer ── */
 
 .footer {
