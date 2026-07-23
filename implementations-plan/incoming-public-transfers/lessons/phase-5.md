@@ -95,7 +95,26 @@ two more High in the forward/pending-page arm:
   `pendingPage.upperHash` to the pinned checkpoint hash. Also fixed the Low (capability e2e test now
   passes the checkpoint hash to `resolveTokenClassStatus`).
 
-## Fixes applied (rounds 1–5)
+## Codex round 6 — convergence check (same session)
+CONFIRMED A2. Two more class-(a) (honest-node reachable) issues:
+- **A1 off-by-one.** A budget-limited scan stops MID-block, so `scannedThrough.blockNumber` is only
+  PARTIALLY scanned; the safe floor is `scannedThrough.blockNumber − 1` (else a reconcile skips the
+  rest of that block). Also made the floor MONOTONIC (`max(oldFloor, …)`) and dropped-safe (a dropped
+  scan confirms nothing new → floor unchanged).
+- **Checkpoint ROLLBACK.** Aztec prunes the checkpointed tip back to the proven tip; a rollback (100→90)
+  correctly fails the ancestry probe, but reconcile `[..90]` left records at 91–100 (above the new tip)
+  undeleted, and a cursor stranded above 90 skipped the replacement chain. **Fix:** `finishReconciliation`
+  now DELETES records above `marker.upperBound` (stale/rolled-back), and rewinds a stranded cursor to
+  `null` (re-scan from `startBlock` as the checkpoint re-advances). The finalized guarantee (checkpointed
+  never rolls below finalized) keeps `lastScanFinalized ≤ new checkpointed`, so the reconcile window stays
+  valid.
+
+Codex's convergence call: no Critical since round 2; the ONLY remaining residuals are class-(b) —
+lying-node log omission/mangling, an upgrade→emit→restore squeezed between the two gate samples, and a
+persistently-null-checkpoint-hash scanning stall. All are malicious/degraded-node, display-only (never a
+forged balance — balances are independently simulated) and ACCEPTED for a display-integrity feature.
+
+## Fixes applied (rounds 1–6)
 - **Critical #1** (final): per-page checkpoint-fork-hash pin + `toBlock` bound + 1-page cap when null +
   an ATOMIC boundary-ancestry membership proof (`verifyAncestorHash`).
 - **Critical #2**: `dropped` discriminator; reconcile defers on a dropped page, never finishes.

@@ -1237,17 +1237,21 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	/** The finalized rewind floor to persist: `min(finalized, the highest block CONTIGUOUSLY scanned
 	 *  this tick)`. A budget-INCOMPLETE (`hasMore`) or validator-DROPPED scan did not reach the pinned
 	 *  `checkpointed`, so the floor must not outrun the cursor — else a later reconcile
-	 *  `[floor+1..checkpointed]` would jump the cursor past the unscanned `(cursor, floor]` gap and
-	 *  permanently skip its logs (codex R5 A1). A COMPLETE scan (`hasMore` false, not dropped) covered
-	 *  the whole `(cursor, checkpointed]` window, so the floor may advance to `finalized`. */
+	 *  `[floor+1..checkpointed]` would jump the cursor past the unscanned gap and permanently skip its
+	 *  logs (codex R5 A1). Crucially a budget-limited scan stops MID-block, so the last FULLY-scanned
+	 *  block is `scannedThrough.blockNumber - 1`, not `.blockNumber` (the tail of that block may hold
+	 *  more logs beyond the budget — codex R6 A1). A COMPLETE scan (`hasMore` false, not dropped)
+	 *  covered the whole `(cursor, checkpointed]` window, so the floor may reach `finalized`. A DROPPED
+	 *  scan confirmed nothing new → the floor stays where it was. The floor is monotonic (`finalized`
+	 *  only advances), so we never regress below the persisted value. */
 	private finalizedWatermark(cursor: PublicScanCursor, result: PublicScanResult, tips: PublicScanTips): number {
-		const cursorBlock = cursor.cursor?.blockNumber ?? cursor.startBlock
-		const scannedUpTo = result.dropped
-			? cursorBlock // suspect page — nothing scanned this tick
+		const oldFloor = cursor.lastScanFinalized ?? -1
+		const fullyScanned = result.dropped
+			? Number.NEGATIVE_INFINITY // suspect page — confirmed nothing new this tick
 			: result.hasMore && result.scannedThrough
-				? result.scannedThrough.blockNumber // budget-limited — only through the last page
+				? result.scannedThrough.blockNumber - 1 // stopped MID-block; that block is only partial
 				: tips.checkpointedBlockNumber // reached the pinned checkpoint (empty tail or full window)
-		return Math.min(tips.finalizedBlockNumber, scannedUpTo)
+		return Math.max(oldFloor, Math.min(tips.finalizedBlockNumber, fullyScanned))
 	}
 
 	/** Probe whether a pending page's fork survived (D3): an ATOMIC ancestry proof that
@@ -1410,10 +1414,16 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			const records = await this.repo.listByContract(profileId, networkId, contract)
 			for (const record of records) {
 				if (record.kind !== "public-event") continue
-				if (record.l2BlockNumber < marker.lowerBound || record.l2BlockNumber > marker.upperBound) continue
-				if (canonicalByHeight.get(record.l2BlockNumber) === record.blockHash) continue // still canonical
-				// Orphaned (reversed) receipt: enqueue the balance refresh BEFORE deleting (delete-first
-				// would lose the refresh on MV3 suspension), never driven by the recipient filter.
+				if (record.l2BlockNumber < marker.lowerBound) continue // finalized (≤ floor) — safe, never touched
+				// A record ABOVE the reconciled checkpoint (`upperBound`) is stale: Aztec prunes the
+				// checkpointed tip back to the proven tip, so a rollback (old checkpoint 100 → new 90)
+				// leaves records at 91–100 no longer checkpointed and possibly on a pruned fork. Delete
+				// them unconditionally; the forward scan re-indexes if the checkpoint re-advances past them
+				// (codex R6). Within the window, delete only on a blockHash mismatch (a reversed receipt).
+				const aboveCheckpoint = record.l2BlockNumber > marker.upperBound
+				if (!aboveCheckpoint && canonicalByHeight.get(record.l2BlockNumber) === record.blockHash) continue // still canonical
+				// Enqueue the balance refresh BEFORE deleting (delete-first would lose the refresh on MV3
+				// suspension), never driven by the recipient filter.
 				if (record.tokenId !== undefined) await this.markBalanceDirty(profileId, networkId, record.accountAddress, record.tokenId)
 				await this.repo.deleteRecord(record.id)
 				this.emit("onIncomingTransferDeleted", record)
@@ -1424,6 +1434,13 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// re-throw on a stale referenceBlock (which would loop reconciliation).
 		const cursorRow = await this.repo.getCursor(profileId, networkId, contract)
 		if (cursorRow) {
+			// If the cursor sits ABOVE the reconciled checkpoint (a rollback stranded it) and reconcile
+			// found nothing to resume from, reset it to `null` so the next forward scan re-covers from
+			// `startBlock` as the checkpoint re-advances — otherwise it would forever query the empty
+			// `(oldCursor, newCheckpoint]` backwards range and the deleted rollback rows never re-index
+			// (codex R6). A full re-scan is heavy but rollbacks are rare + commits are idempotent.
+			const strandedAboveCheckpoint = cursorRow.cursor !== null && cursorRow.cursor.blockNumber > marker.upperBound
+			const nextCursor = reconciledThrough ?? (strandedAboveCheckpoint ? null : cursorRow.cursor)
 			await this.persistCursorLocked(
 				profileId,
 				networkId,
@@ -1431,7 +1448,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				{
 					...cursorRow,
 					reconciling: undefined,
-					cursor: reconciledThrough ?? cursorRow.cursor,
+					cursor: nextCursor,
 					lastSyncedBlockHash: marker.upperBoundHash,
 				},
 				epochAtStart,

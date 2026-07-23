@@ -2626,10 +2626,50 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 
 		await scanPublic(service)
 
-		// The watermark must NOT jump to finalized(90) — that would let a later reconcile [91..100] skip
-		// the unscanned logs in (10, 90]. It is capped at the highest CONTIGUOUSLY-scanned block (10).
+		// The watermark must NOT jump to finalized(90) — that would let a later reconcile skip the
+		// unscanned logs in (9, 90]. It is capped at the last FULLY-scanned block: block 10 is only
+		// PARTIALLY scanned (the budget stopped mid-block), so the floor is block 10 − 1 = 9 (codex R6 A1).
 		expect(cursorFor()?.cursor).toEqual({ blockNumber: 10, txIndexWithinBlock: 0, logIndexWithinTx: 4 })
-		expect(cursorFor()?.lastScanFinalized).toBe(10)
+		expect(cursorFor()?.lastScanFinalized).toBe(9)
+	})
+
+	test("(codex R6) checkpoint ROLLBACK: records above the new (rolled-back) tip are deleted + cursor rewinds", async () => {
+		const { reader, state } = makePublicReader()
+		const { service } = await bootPublic(reader, state)
+		trust.set(trustKey("p1", "n1", tokenA.contract), {
+			profileId: "p1",
+			networkId: "n1",
+			contract: tokenA.contract,
+			state: "trusted",
+			updatedAt: 0,
+		})
+		// Records committed when the checkpoint was 100 — now stranded above a rolled-back tip of 90.
+		const above1 = seedPublic({ txHash: "0xrb1", l2BlockNumber: 95, blockHash: "0xh95" })
+		const above2 = seedPublic({ txHash: "0xrb2", l2BlockNumber: 100, blockHash: "0xh100" })
+		const belowFloor = seedPublic({ txHash: "0xfin", l2BlockNumber: 50, blockHash: "0xh50" }) // finalized — kept
+		seedCursor({
+			cursor: { blockNumber: 100, txIndexWithinBlock: 0, logIndexWithinTx: 0 },
+			lastSyncedBlockHash: "0xoldcheckpoint",
+			lastScanFinalized: 60,
+		})
+		// The node has rolled the checkpoint back to 90 (proven tip). The boundary ancestry probe fails
+		// (old anchor not in the new archive) → reconcile over [61..90], which is empty.
+		state.tips = { checkpointedBlockNumber: 90, checkpointedBlockHash: "0xnewcheckpoint", finalizedBlockNumber: 60 }
+		state.responses.push(new Error("old checkpoint not an ancestor")) // boundary ancestry throws
+		state.responses.push(pubPage([])) // reconcile window [61..90] empty
+
+		const deleted = vi.fn()
+		service.onIncomingTransferDeleted.add(deleted)
+
+		await scanPublic(service)
+
+		// Stranded rows above the new tip (90) are deleted; the finalized row (≤ floor) is kept.
+		expect(records.get(above1.id)).toBeUndefined()
+		expect(records.get(above2.id)).toBeUndefined()
+		expect(records.get(belowFloor.id)).toBeDefined()
+		// The cursor (was 100, above the new tip) is rewound to null so a re-advancing checkpoint re-indexes.
+		expect(cursorFor()?.cursor).toBeNull()
+		expect(cursorFor()?.reconciling).toBeUndefined()
 	})
 
 	test("pendingPage crash window: a set pendingPage whose fork is gone triggers reconciliation", async () => {
