@@ -20,20 +20,26 @@ as two complementary pieces:
 
 Feasible + cheap — it reuses proven infra, not new capability:
 - The CDP `stopServiceWorker` helper (`Runtime.terminateExecution`) is already CI-green in
-  `sw-restart-network.test.ts`; an MV3 SW recycle drops the in-memory master secret (→ strict mode closes
-  the session, so the wallet locks), while `chrome.storage.session` itself PERSISTS across suspension — as
-  does `chrome.storage.local`, where the scan cursor + records + outbox live (`repository.ts:44-59`).
+  `sw-restart-network.test.ts`. **An MV3 SW recycle does NOT lock the wallet** — the session mirror (a
+  `SessionSecretBox`) in `chrome.storage.session` survives the recycle and is silently restored on respawn,
+  by design, so the popup reconnects mid-session without re-prompting (`session-manager.ts`; the 30-min
+  `sessionTtl` far exceeds the ~2-min test). The CI signal that corrected this: gating the reopen on
+  `#/popup/auth` **timed out at 45s** because the wallet was never locked — it routed to `#/popup/general`.
+  What must survive for the resume is the scan cursor + records + outbox in `chrome.storage.local`
+  (`repository.ts:44-59`).
 - **Shape (avoids the false-green codex R1 caught):** deliver receipt A → scan runs, cursor advances, D4
   auto-refreshes 1000→1010 → re-wait for A's chip on the activity feed (the re-mounted feed hydrates its
   rows async — counting before that settles samples a stale view), then **snapshot the feed card count
   `cardsBefore`** → KILL the SW → deliver receipt B while it's dead → reopen and let the popup **route to
-  `#/popup/auth`** (the respawn+lock proof — the recycle dropped the in-memory master, so the fresh SW
-  evaluates the session as locked; there's no per-boot generation id, and the `nulo:liveness` wall-clock
-  beat can't distinguish a stale pre-kill value from a fresh one, so we gate on the recovered ROUTE, not on
-  liveness) → unlock → assert the feed grew to **exactly `cardsBefore + 1`** (B, and no spurious re-index of
-  the pre-restart records). A bare `>= 2` was false-green: the fixture mints 1000 pre-import, and zero-sender
-  mints create a record, so {mint, A} already = 2 before B; the `+1` delta is what proves the resumed scan
-  added B.
+  `#/popup/general`** — the recycle did NOT lock the wallet (session restored from `chrome.storage.session`),
+  so there's no re-auth; reaching general requires the fresh SW to have booted + completed the session check,
+  which IS the respawn proof. The service's init-time `hydrateSchedulers()` then rebuilds the scan
+  schedulers from the tokens in storage (service.ts: "resume polling without waiting for an onTokenAdded
+  event") — the exact SW-restart resume path — so the scan resumes from the persisted cursor with **no popup
+  interaction and no unlock** → assert the feed grew to **exactly `cardsBefore + 1`** (B, and no spurious
+  re-index of the pre-restart records). A bare `>= 2` was false-green: the fixture mints 1000 pre-import, and
+  zero-sender mints create a record, so {mint, A} already = 2 before B; the `+1` delta is what proves the
+  resumed scan added B.
 - **Accepted limitation:** the public scan has no deterministic mid-page pause hook — the e2e
   `incoming-poll-gate` wires only the note arm (`service.ts:951-956` calls it in `scanContract`, not
   `scanPublicContract`). So the kill lands at a clean post-A-scan boundary, not mid-page; the mid-page/

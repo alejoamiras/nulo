@@ -12,10 +12,12 @@
  *
  * Flow: deliver receipt A (scan runs, cursor advances, D4 auto-refreshes 1000→1010) → snapshot the feed's
  * card count (after re-waiting for A's chip so the re-mounted feed is hydrated) → KILL the SW → deliver
- * receipt B while it's dead → reopen and let the popup route to #/popup/auth (an MV3 recycle drops the
- * in-memory master secret, so strict mode closes the session and the wallet locks — chrome.storage.session
- * itself persists; the auth route IS the respawn+lock proof), unlock → assert the feed grew by EXACTLY ONE
- * card (B, discovered by the resumed scan) and the balance advanced to 1020.
+ * receipt B while it's dead → reopen. An MV3 recycle does NOT lock the wallet — the session mirror in
+ * chrome.storage.session survives and is restored on respawn (well within the 30-min TTL), so the popup
+ * routes straight to #/popup/general with no re-auth; reaching general is the respawn proof, and the
+ * service's init-time hydrateSchedulers() resumes the scan from the persisted cursor with no popup
+ * interaction. Then assert the feed grew by EXACTLY ONE card (B, discovered by the resumed scan) and the
+ * balance advanced to 1020.
  *
  * Limitation (accepted): no deterministic mid-page pause hook exists for the public scan (the e2e
  * incoming-poll-gate wires only the note arm), so the kill lands at a clean post-A-scan boundary. Mid-scan
@@ -23,8 +25,7 @@
  */
 import { expect, inject } from "vitest"
 import type { Page } from "puppeteer"
-import { TEST_PASSWORD } from "../fixtures/constants"
-import { clickByTestId, openPopup, replaceInputValue, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
+import { openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
 import { getAccountAddress, getTokenDetailBalances, navigateByHash, navigateToTokenDetail, switchToLocalNetwork } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -102,28 +103,26 @@ test.skipIf(!hasConfig)(
 			const cardsBefore = await countIncomingCards(page)
 			console.log(`✓ receipt A scanned; balance 1000 → 1010; feed has ${cardsBefore} card(s) pre-restart`)
 
-			// ── KILL the SW. An MV3 recycle drops the in-memory master (→ strict mode locks the wallet); the
-			//    cursor + records + outbox in chrome.storage.local survive.
+			// ── KILL the SW. An MV3 recycle does NOT lock the wallet: the session mirror (a SessionSecretBox) in
+			//    chrome.storage.session survives the recycle and is silently restored on respawn — by design, so
+			//    the popup reconnects mid-session without re-prompting (session-manager.ts). What must survive
+			//    for the resume is the scan cursor + records + outbox in chrome.storage.local.
 			await page.close()
 			await stopServiceWorker(tokenReadyExtension)
 
 			// ── Receipt B delivered WHILE the SW is dead — only a resumed scan can discover it.
 			await transferPublicTokens(wallet, aztecConfig.tokenAddress, minter, walletAddress, 10n * D, feeOptions)
 
-			// ── Recovery: reopen the popup. Routing to #/popup/auth is itself the respawn+lock proof — the MV3
-			//    recycle dropped the in-memory master, so the freshly-booted SW evaluates the session as locked
-			//    and the popup lands on auth. (There's no per-boot generation id to assert on, and the liveness
-			//    heartbeat is only a wall-clock timestamp that can't distinguish a stale pre-kill beat from a
-			//    fresh one — so we gate on the recovered ROUTE, not on liveness.) Then unlock — the respawned
-			//    scheduler re-hydrates from the persisted cursor and kicks an immediate poll.
+			// ── Recovery: reopen the popup. The respawned SW restores the session from chrome.storage.session
+			//    (well within the 30-min TTL) and routes straight to #/popup/general — no re-auth. Reaching
+			//    general is the respawn proof: it requires the fresh SW to have booted and completed the session
+			//    check. On that init the service's hydrateSchedulers() rebuilds the scan schedulers from the
+			//    tokens in storage — the exact SW-restart resume path (service.ts: "resume polling without
+			//    waiting for an onTokenAdded event") — so the scan resumes from the persisted cursor and
+			//    discovers B with no popup interaction and no unlock.
 			const page2 = await openPopup(tokenReadyExtension)
-			await waitForHash(page2, "#/popup/auth", 45_000)
-			await page2.waitForSelector('[data-testid="auth-password-input"]', { visible: true, timeout: 10_000 })
-			await replaceInputValue(page2, '[data-testid="auth-password-input"]', TEST_PASSWORD)
-			await clickByTestId(page2, "auth-submit")
-			await page2.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 20_000 })
-			await waitForHash(page2, "#/popup/general", 15_000)
-			console.log("✓ SW respawned (routed to auth) + wallet unlocked after restart")
+			await waitForHash(page2, "#/popup/general", 60_000)
+			console.log("✓ SW respawned + session restored (routed to general) after restart")
 
 			// ── The resumed scan must add EXACTLY receipt B's record — cardsBefore + 1 (no more, no fewer:
 			//    catches both a missed B and a spurious re-index of the pre-restart records).
