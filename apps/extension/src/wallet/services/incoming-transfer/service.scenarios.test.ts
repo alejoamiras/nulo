@@ -2395,9 +2395,10 @@ describe("IncomingTransferService — public-event scan arm (D3)", () => {
 		await scanPublic(service)
 		expect(state.classCalls).toBe(2) // finalized advanced → re-resolve
 
-		// A checkpointed advance ALSO re-resolves — else a mid-cache malicious upgrade at checkpointed
-		// would be served a stale "standard".
-		state.tips = { ...state.tips, checkpointedBlockNumber: 120 }
+		// A checkpoint HASH change ALSO re-resolves — including a SAME-HEIGHT reorg (a number-keyed
+		// cache would miss it) — else a mid-cache malicious upgrade at checkpointed would be served a
+		// stale "standard" (codex R4 #7).
+		state.tips = { ...state.tips, checkpointedBlockHash: "0xcheckpoint-reorged" }
 		await scanPublic(service)
 		expect(state.classCalls).toBe(3)
 	})
@@ -2689,10 +2690,10 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 		expect(cursorFor()?.reconciling).toBeUndefined()
 	})
 
-	test("(codex R2 #1) when the checkpoint tip hash is unavailable, the forward scan is capped to ONE atomic page", async () => {
+	test("(codex R4 #1/#7) no checkpoint hash → class gate is UNRESOLVED → nothing scanned (fail-closed defer)", async () => {
 		const { reader, state } = makePublicReader({ tips: { checkpointedBlockHash: null } })
 		const { service } = await bootPublic(reader, state)
-		state.tips.checkpointedBlockHash = null // bootPublic's initial kick may have cleared/reset; re-assert
+		state.tips.checkpointedBlockHash = null // bootPublic's initial kick may have reset; re-assert
 		trust.set(trustKey("p1", "n1", tokenA.contract), {
 			profileId: "p1",
 			networkId: "n1",
@@ -2701,13 +2702,16 @@ describe("IncomingTransferService — public-event reorg reconciliation (D6)", (
 			updatedAt: 0,
 		})
 		seedCursor({ cursor: null, lastSyncedBlockHash: null, lastScanFinalized: 3 })
-		// Two full pages queued, but with no fork anchor the scan must stop after ONE.
 		state.responses.push(pubPage([pubEvent({ txHash: "0xc1", l2BlockNumber: 6 })], true))
-		state.responses.push(pubPage([pubEvent({ txHash: "0xc2", l2BlockNumber: 7 })], true))
 
 		await scanPublic(service)
 
-		expect(state.fetchArgs).toHaveLength(1) // capped to one atomic page (no blind multi-fork splice)
+		// Without the pinned checkpoint hash the class gate can't verify the checkpointed anchor → it
+		// returns `unresolved` (fail closed) and the whole tick short-circuits: no class fetch, no page
+		// fetch, no records. A blind scan is never attempted (codex R4 #1/#7).
+		expect(state.classCalls).toBe(0)
+		expect(state.fetchArgs).toHaveLength(0)
+		expect(records.get("pub:p1|n1|0xc1|0")).toBeUndefined()
 	})
 
 	test("(codex R2/R3 #1) forward scan runs an ATOMIC boundary-ancestry probe first; a non-ancestor → reconcile", async () => {

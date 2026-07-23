@@ -83,7 +83,7 @@ describe("comparePublicPositions", () => {
 })
 
 describe("PublicEventIndexer.scan", () => {
-	test("accumulates events across full pages up to a non-full page; tracks topBlockHash", async () => {
+	test("accumulates events across full pages up to a non-full page", async () => {
 		const { reader } = makeReader([
 			page([ev({ txHash: "0x1", l2BlockNumber: 5, blockHash: "0xb5" })], true),
 			page([ev({ txHash: "0x2", l2BlockNumber: 6, blockHash: "0xb6" })], false),
@@ -93,7 +93,6 @@ describe("PublicEventIndexer.scan", () => {
 		expect(res.events.map((e) => e.txHash)).toEqual(["0x1", "0x2"])
 		expect(res.scannedThrough).toEqual({ blockNumber: 6, txIndexWithinBlock: 0, logIndexWithinTx: 0 })
 		expect(res.hasMore).toBe(false)
-		expect(res.topBlockHash).toBe("0xb6")
 	})
 
 	test("stops at the page budget with hasMore=true when every page is full", async () => {
@@ -107,20 +106,11 @@ describe("PublicEventIndexer.scan", () => {
 		expect(res.hasMore).toBe(true)
 	})
 
-	test("a per-call maxPages override caps the scan below the instance budget (codex R2 #1)", async () => {
-		const responses = Array.from({ length: 4 }, (_, i) => page([ev({ txHash: `0x${i}`, l2BlockNumber: 5 + i })], true))
-		const { reader, fetchArgs } = makeReader(responses)
-		const idx = new PublicEventIndexer(reader, noop)
-		const res = await idx.scan("n", "c", { maxPages: 1 })
-		expect(fetchArgs).toHaveLength(1) // capped to ONE atomic page
-		expect(res.hasMore).toBe(true)
-	})
-
 	test("empty first page → null cursor, no events, hasMore=false", async () => {
 		const { reader } = makeReader([page([])])
 		const idx = new PublicEventIndexer(reader, noop)
 		const res = await idx.scan("n", "c", {})
-		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, topBlockHash: null, dropped: false })
+		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, dropped: false })
 	})
 
 	test("threads fromBlock + toBlock + referenceBlock to EVERY page; advances afterCursor per page", async () => {
@@ -149,7 +139,7 @@ describe("PublicEventIndexer.scan", () => {
 		const { reader } = makeReader([droppedPage()])
 		const idx = new PublicEventIndexer(reader, noop)
 		const res = await idx.scan("n", "c", {})
-		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, topBlockHash: null, dropped: true })
+		expect(res).toEqual({ events: [], scannedThrough: null, hasMore: false, dropped: true })
 	})
 
 	test("an empty EOF page surfaces dropped=false", async () => {

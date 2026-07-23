@@ -95,7 +95,7 @@ export type Methods = {
 	 * the bundled aztec-standards Token? `unresolved` = transient (fail closed, do not cache);
 	 * `non-standard` = a resolved non-Token / upgraded class (fail closed, cacheable).
 	 */
-	getPublicTokenClassStatus(network: NetworkInfo, contract: string): PublicTokenClassStatus
+	getPublicTokenClassStatus(network: NetworkInfo, contract: string, checkpointHash: string): PublicTokenClassStatus
 	/**
 	 * Dispose any active runtime for `(profileId, chainId)` and delete its
 	 * IndexedDB at `pxe/${profileId}/${chainId}`. Called by the SW-side

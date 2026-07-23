@@ -306,8 +306,12 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 	}
 
 	/** Node-direct class gate (D2): whether `contract` is the bundled Token at the finalized anchor. */
-	public async getPublicTokenClassStatus(network: NetworkInfo, contract: string): Promise<PublicTokenClassStatus> {
-		const result = await this.request("getPublicTokenClassStatus", network, contract)
+	public async getPublicTokenClassStatus(
+		network: NetworkInfo,
+		contract: string,
+		checkpointHash: string,
+	): Promise<PublicTokenClassStatus> {
+		const result = await this.request("getPublicTokenClassStatus", network, contract, checkpointHash)
 		return await PublicTokenClassStatusSchema.parseAsync(result)
 	}
 

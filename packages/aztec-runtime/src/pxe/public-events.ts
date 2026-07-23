@@ -373,23 +373,34 @@ export async function getPublicScanTips(node: AztecNode): Promise<PublicScanTips
  * Node-direct class gate (D2). Resolves the contract's CURRENT class — NOT the PXE cascade, which
  * short-circuits on a preimage hit and would report the original class for an upgraded registered
  * token — and requires it to be the bundled Token class at BOTH the `finalized` (stable) anchor AND
- * the `checkpointed` anchor (the range we actually index). Gating at `finalized` alone left an upgrade
- * window: a contract standard-at-finalized but MALICIOUS-at-checkpointed would have its checkpointed
- * logs indexed as fake receipts impersonating an already-trusted, price-mapped token (codex R3 #7).
- * `undefined`/throw at EITHER anchor → `unresolved` (transient, fail closed, do NOT cache); a mismatch
- * at either → `non-standard`.
+ * the EXACT checkpoint hash the scan is pinned to. Gating at `finalized` alone left an upgrade window:
+ * a contract standard-at-finalized but MALICIOUS-at-checkpointed would have its checkpointed logs
+ * indexed as fake receipts impersonating an already-trusted, price-mapped token (codex R3 #7). The
+ * checkpoint anchor is the pinned HASH, not the symbolic `"checkpointed"` tag, so the node can't show
+ * standard fork A for the class query then serve malicious fork B (matching the pinned hash) for the
+ * scan — a TOCTOU (codex R4 #7). `undefined`/throw at EITHER anchor → `unresolved` (transient, fail
+ * closed, do NOT cache); a mismatch at either → `non-standard`.
  */
-export async function resolveTokenClassStatus(node: AztecNode, contract: string, log?: PublicEventLogger): Promise<PublicTokenClassStatus> {
+export async function resolveTokenClassStatus(
+	node: AztecNode,
+	contract: string,
+	checkpointHash: string,
+	log?: PublicEventLogger,
+): Promise<PublicTokenClassStatus> {
 	const expected = await getBundledTokenClassId()
 	const contractAddress = await AztecAddress.schema.parseAsync(contract)
-	for (const anchor of ["finalized", "checkpointed"] as const) {
+	const anchors: Array<{ label: string; param: "finalized" | BlockHash }> = [
+		{ label: "finalized", param: "finalized" },
+		{ label: "checkpointed", param: BlockHash.fromString(checkpointHash) },
+	]
+	for (const { label, param } of anchors) {
 		let instance: Awaited<ReturnType<AztecNode["getContract"]>>
 		try {
-			instance = await node.getContract(contractAddress, anchor)
+			instance = await node.getContract(contractAddress, param)
 		} catch (err) {
 			log?.(
 				"debug",
-				`public-events: class gate unresolved (node getContract threw at ${anchor})`,
+				`public-events: class gate unresolved (node getContract threw at ${label})`,
 				err instanceof Error ? err.message : String(err),
 			)
 			return "unresolved"

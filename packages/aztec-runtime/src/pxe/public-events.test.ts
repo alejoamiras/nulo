@@ -29,6 +29,8 @@ import {
 } from "./public-events"
 
 const CONTRACT = AztecAddress.fromBigIntUnsafe(0xc0ffeen).toString()
+/** A pinned checkpoint hash for the dual-anchor class gate (codex R4 #7). Small field element. */
+const CHECKPOINT_HASH = BlockHash.fromString(`0x${"0".repeat(62)}c1`).toString()
 
 /** A well-formed `Transfer` log at a given position. `logData = [tag, from, to, amount]`. */
 function makeLog(opts: {
@@ -89,7 +91,8 @@ function makeNode(opts: {
 		},
 		getContract: async (_addr: unknown, anchor?: unknown) => {
 			if (opts.getContractThrows) throw new Error("node RPC timeout")
-			if (anchor === "checkpointed" && "checkpointedInstance" in opts) return opts.checkpointedInstance
+			// "finalized" is the symbolic tag; the checkpointed anchor is now the pinned BlockHash object.
+			if (anchor !== "finalized" && "checkpointedInstance" in opts) return opts.checkpointedInstance
 			return opts.contractInstance
 		},
 	} as unknown as AztecNode
@@ -352,22 +355,22 @@ describe("class gate (D2)", () => {
 	test("standard token (current class == bundled) → standard", async () => {
 		const bundled = await getBundledTokenClassId()
 		const node = makeNode({ contractInstance: { currentContractClassId: bundled } })
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("standard")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("standard")
 	})
 
 	test("upgraded/foreign class (current class != bundled) → non-standard (node-direct)", async () => {
 		const node = makeNode({ contractInstance: { currentContractClassId: Fr.random() } })
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("non-standard")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("non-standard")
 	})
 
 	test("unresolvable contract (node returns undefined) → unresolved (fail closed)", async () => {
 		const node = makeNode({ contractInstance: undefined })
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("unresolved")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("unresolved")
 	})
 
 	test("node getContract throw → unresolved (transient, fail closed, not cached)", async () => {
 		const node = makeNode({ getContractThrows: true })
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("unresolved")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("unresolved")
 	})
 
 	test("(codex R3 #7) standard at finalized but MALICIOUS at checkpointed → non-standard (dual-anchor)", async () => {
@@ -376,7 +379,7 @@ describe("class gate (D2)", () => {
 			contractInstance: { currentContractClassId: bundled }, // finalized: still the standard Token
 			checkpointedInstance: { currentContractClassId: Fr.random() }, // checkpointed: upgraded to a foreign class
 		})
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("non-standard")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("non-standard")
 	})
 
 	test("(codex R3 #7) unresolvable at checkpointed (undefined) → unresolved (fail closed at either anchor)", async () => {
@@ -385,7 +388,7 @@ describe("class gate (D2)", () => {
 			contractInstance: { currentContractClassId: bundled },
 			checkpointedInstance: undefined,
 		})
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("unresolved")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("unresolved")
 	})
 
 	test("(codex R3 #7) bundled class at BOTH anchors → standard", async () => {
@@ -394,7 +397,7 @@ describe("class gate (D2)", () => {
 			contractInstance: { currentContractClassId: bundled },
 			checkpointedInstance: { currentContractClassId: bundled },
 		})
-		expect(await resolveTokenClassStatus(node, CONTRACT)).toBe("standard")
+		expect(await resolveTokenClassStatus(node, CONTRACT, CHECKPOINT_HASH)).toBe("standard")
 	})
 })
 

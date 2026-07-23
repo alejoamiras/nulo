@@ -61,7 +61,25 @@ CONFIRMED #3 fixed and the in-scan splice closed. Found two more:
   fall behind a >20-event/tick token. It fails SLOW (1 page/tick progress), not corrupt; only a
   degraded node triggers it. Documented, not fixed.
 
-## Fixes applied (rounds 1–3)
+## Codex round 4 — verify the round-3 fixes (same session)
+Confirmed the ancestry primitive is correct (Aztec's `getBlockHashMembershipWitness(referenceBlock,
+blockHash)` proves `blockHash ∈ archive(referenceBlock)` ⇔ ancestry — verified independently against
+the `@aztec/stdlib` doc). Found two more High issues:
+- **#1 anchor/cursor skew.** `scannedThrough` advances past malformed/skipped tail logs, but the
+  committed anchor was the last DECODED event's block hash → a malformed tail left the persisted hash
+  lagging the cursor; the next ancestry proof then validated a stale sub-cursor block and could miss a
+  reorg above it. **Fix:** anchor the committed fork on the PINNED CHECKPOINT HASH (which every page
+  validated against), never a decoded-events hash. Removed `topBlockHash` (now unused). Also switched
+  the null-checkpoint-hash path from a 1-page cap to a full DEFER (the class gate already fail-closes
+  that tick — see #7 — so the forward-scan defer is a defensive fallback).
+- **#7 same-height reorg + TOCTOU.** The class-gate cache was keyed by tip NUMBERS (a same-height
+  checkpointed reorg served a stale "standard"), and the checkpointed anchor was resolved via the
+  SYMBOLIC `"checkpointed"` tag (the node could show fork A for the class query then serve fork B for
+  the scan). **Fix:** pass the EXACT pinned checkpoint hash into `getContract` (a `BlockHash`, not the
+  tag) and key the cache by that hash. Threaded the checkpoint hash through the `getPublicTokenClassStatus`
+  RPC. A null hash → `unresolved` (fail closed).
+
+## Fixes applied (rounds 1–4)
 - **Critical #1** (final): per-page checkpoint-fork-hash pin + `toBlock` bound + 1-page cap when null +
   an ATOMIC boundary-ancestry membership proof (`verifyAncestorHash`).
 - **Critical #2**: `dropped` discriminator; reconcile defers on a dropped page, never finishes.

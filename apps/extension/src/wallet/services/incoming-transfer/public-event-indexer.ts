@@ -26,7 +26,7 @@ export type PublicIndexerLogger = (level: "warn" | "debug", msg: string, ...rest
 export interface PublicEventReader {
 	fetchTransferPage(networkId: string, contract: string, args: PublicTransferFetchArgs): Promise<PublicTransferPage>
 	getScanTips(networkId: string): Promise<PublicScanTips>
-	getTokenClassStatus(networkId: string, contract: string): Promise<PublicTokenClassStatus>
+	getTokenClassStatus(networkId: string, contract: string, checkpointHash: string): Promise<PublicTokenClassStatus>
 }
 
 /** The accumulated result of a bounded, multi-page forward scan. */
@@ -37,8 +37,6 @@ export interface PublicScanResult {
 	scannedThrough: PublicEventCursor | null
 	/** True when the budget was exhausted while the final page was still full (more work remains). */
 	hasMore: boolean
-	/** Block hash of the last decoded event's block — the reorg/pendingPage fork anchor; `null` if no events. */
-	topBlockHash: string | null
 	/** True when the scan stopped because a page was DROPPED by hostile-response validation (as opposed
 	 *  to a genuine empty/EOF page). The reconciliation caller must NOT treat this as "window complete"
 	 *  (codex R1 Critical #2). */
@@ -65,8 +63,8 @@ export class PublicEventIndexer {
 		return this.reader.getScanTips(networkId)
 	}
 
-	public getClassStatus(networkId: string, contract: string): Promise<PublicTokenClassStatus> {
-		return this.reader.getTokenClassStatus(networkId, contract)
+	public getClassStatus(networkId: string, contract: string, checkpointHash: string): Promise<PublicTokenClassStatus> {
+		return this.reader.getTokenClassStatus(networkId, contract, checkpointHash)
 	}
 
 	/**
@@ -80,20 +78,15 @@ export class PublicEventIndexer {
 	public async scan(
 		networkId: string,
 		contract: string,
-		args: { fromBlock?: number; toBlock?: number; afterCursor?: PublicEventCursor | null; referenceBlock?: string; maxPages?: number },
+		args: { fromBlock?: number; toBlock?: number; afterCursor?: PublicEventCursor | null; referenceBlock?: string },
 	): Promise<PublicScanResult> {
 		const events: PublicTransferEvent[] = []
 		let cursor: PublicEventCursor | null = args.afterCursor ?? null
 		let scannedThrough: PublicEventCursor | null = null
-		let topBlockHash: string | null = null
 		let hasMore = false
 		let dropped = false
-		// A per-call cap (e.g. 1) lets the caller bound the scan when it can't pin a fork anchor — a
-		// single `getPublicLogsByTags` page is atomic against one fork, so it can never splice two
-		// (codex R2 #1).
-		const limit = Math.min(args.maxPages ?? this.maxPages, this.maxPages)
 
-		for (let page = 0; page < limit; page++) {
+		for (let page = 0; page < this.maxPages; page++) {
 			const fetchArgs: PublicTransferFetchArgs = {
 				fromBlock: args.fromBlock,
 				toBlock: args.toBlock,
@@ -113,10 +106,7 @@ export class PublicEventIndexer {
 				hasMore = false
 				break
 			}
-			for (const e of res.events) {
-				events.push(e)
-				topBlockHash = e.blockHash
-			}
+			for (const e of res.events) events.push(e)
 			scannedThrough = res.scannedThrough
 			cursor = res.scannedThrough
 			if (!res.hasMore) {
@@ -124,10 +114,10 @@ export class PublicEventIndexer {
 				break
 			}
 			// Page was full; if this was the last budgeted page, more work remains for the next tick.
-			hasMore = page === limit - 1
+			hasMore = page === this.maxPages - 1
 		}
 
-		return { events, scannedThrough, hasMore, topBlockHash, dropped }
+		return { events, scannedThrough, hasMore, dropped }
 	}
 
 	/** Filter a page's events to those addressed to one of `recipients` (lower-cased compare). */

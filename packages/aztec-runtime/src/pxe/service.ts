@@ -587,9 +587,13 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	/** Node-direct contract-class gate (D2). Node-only read. */
-	public async getPublicTokenClassStatus(network: NetworkInfo, contract: string): Promise<PublicTokenClassStatus> {
+	public async getPublicTokenClassStatus(
+		network: NetworkInfo,
+		contract: string,
+		checkpointHash: string,
+	): Promise<PublicTokenClassStatus> {
 		return this.withPxeRead("getPublicTokenClassStatus", network, (_pxe, node) =>
-			resolveTokenClassStatus(node, contract, (level, msg, ...rest) =>
+			resolveTokenClassStatus(node, contract, checkpointHash, (level, msg, ...rest) =>
 				level === "warn" ? this.logWarn(msg, ...rest) : this.logDebug(msg, ...rest),
 			),
 		)
