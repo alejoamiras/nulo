@@ -81,12 +81,17 @@ async function updateDustThreshold(event) {
 		return
 	}
 	const value = Number(raw)
+	const prev = dustThreshold.value // last saved value, for rollback
 	try {
 		await configService.setValue("incomingDustUsdThreshold", value)
 		dustThreshold.value = String(value)
 		el.value = dustThreshold.value // normalize the display (e.g. "1.50" → "1.5")
 	} catch (err) {
-		el.value = dustThreshold.value // save failed → snap the field back to the last saved value
+		// ConfigStore emits onUpdate (which bumps `dustThreshold` to the attempted value) BEFORE it
+		// persists, so on a persist failure BOTH the ref and the field show the unsaved value — restore
+		// both to the last saved value.
+		dustThreshold.value = prev
+		el.value = prev
 		openToast({ label: "Failed to update setting", icon: "warning" }, TOAST_DURATION.LONG)
 	}
 }

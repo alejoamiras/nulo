@@ -168,9 +168,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  PXE transport). Production leaves it undefined and `init` builds the real client-backed one. */
 	private readonly injectedPublicReader?: PublicEventReader
 
-	/** In-memory receipt-fee cache keyed `${networkId}|${txHash}` (D5 lazy fee). A mined tx's fee is
-	 *  immutable, so a hit is served forever within the SW lifetime; only VIEWED receipts populate it,
-	 *  so it stays tiny. Never persisted (no storage bloat). */
+	/** In-memory receipt-fee cache keyed `${networkId}|${txHash}|${blockHash}` (D5 lazy fee). A mined tx's
+	 *  fee is block-derived, so a reorg re-mine under a new block hash mints a new key (the old entry is
+	 *  simply never read again); only VIEWED public receipts populate it, so it stays tiny. Evicted on
+	 *  chain/profile purge, and never persisted (no storage bloat). */
 	private readonly feeCache = new Map<string, string>()
 
 	/** E2E-only deterministic race lever. `undefined` in production (the ctor
@@ -578,6 +579,10 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public async clearProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		await this.withServiceLock(async () => {
+			// Bump the epoch FIRST (before any eviction or await): an off-lock getReceiptFee that started
+			// before this clear must observe the change so its post-fetch cache write is skipped — otherwise
+			// it could repopulate the cache during the repo-delete await, after we've evicted.
+			this.bumpServiceEpoch()
 			// The fee cache is keyed by networkId (not profileId), so a profile's networkIds aren't
 			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
 			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
@@ -594,6 +599,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	public async clearChain(profileId: string, networkId: string): Promise<void> {
 		await this.ensureInitialized()
 		await this.withServiceLock(async () => {
+			// Bump the epoch FIRST (before eviction or any await) so an in-flight off-lock getReceiptFee
+			// can't repopulate the cache after we evict — see clearProfile for the full rationale.
+			this.bumpServiceEpoch()
 			// Evict this network's fee-cache entries (keyed `${networkId}|…`) so a chain purge doesn't
 			// leave them dangling for the worker's lifetime.
 			for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)

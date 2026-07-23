@@ -78,6 +78,15 @@ const priceService = new PriceServiceClient()
 const networkService = new NetworkServiceClient()
 const prices = usePrices(priceService)
 
+/** If a reorg/reconcile removes THIS receipt while the page is open, drop to the not-found state rather
+ *  than keep showing an orphaned receipt. (A re-mine that only rewrites a surviving record's block/fee
+ *  emits no event yet, so a stale fee on a still-valid record isn't caught here — see the reorg-staleness
+ *  follow-up in lessons/phase-6.md.) */
+const onReceiptDeleted = (rec) => {
+	if (received.value && rec.id === received.value.id) received.value = null
+}
+incomingTransferService.onIncomingTransferDeleted.add(onReceiptDeleted)
+
 /** Derived — token + amount */
 const token = computed(() => {
 	const inc = received.value
@@ -168,6 +177,7 @@ onMounted(async () => {
 	await Promise.allSettled(tasks)
 })
 onBeforeUnmount(() => {
+	incomingTransferService.onIncomingTransferDeleted.remove(onReceiptDeleted)
 	incomingTransferService.disconnect()
 	tokenService.disconnect()
 	configService.disconnect()

@@ -22,17 +22,18 @@ cached).** Rationale: eager fetch would pay a node call per receipt during the 3
 the hot path — for receipts that are mostly never opened, and would bloat storage. Lazy = one call,
 only for VIEWED receipts, page never blocked (only the fee row shimmers), nothing persisted.
 
-Implementation: `IncomingTransferService.getReceiptFee(id)` →
-`getNetwork(networkId).chainId` → `getNode(chainId).getTxReceipt(TxHash.fromString(txHash))` →
-`{ feeJuice }`. In-memory cache keyed `${networkId}|${txHash}` (immutable fee ⟹ cache forever within
-SW lifetime; only viewed receipts populate it ⟹ tiny; never persisted).
+Implementation (final, after the codex rounds below): `IncomingTransferService.getReceiptFee(id)` →
+resolve the record active-profile-scoped → pin the fetch to the record network's OWN primary endpoint
+(`getNodeForUrl`, not the active-profile `getNode(chainId)`) → `getTxReceipt` → `{ feeJuice }`. In-memory
+cache keyed `${networkId}|${txHash}|${blockHash}` (the fee is block-derived, so a reorg re-mine mints a
+new key; a receipt/record block mismatch returns null; an epoch guard skips the write across a purge;
+only viewed public receipts populate it ⟹ tiny; never persisted).
 
-### Privacy hardening — the id-keyed, server-side gate
+### The id-keyed, server-side scope gate
 
-Fetching a receipt for a PUBLIC receipt leaks nothing (recipiency is already on-chain — we indexed
-the public `Transfer{from,to}` naming us as `to`). But a NOTE (private) receipt's tx hash must NOT be
-handed to the active node on view — that would be a fresh deanonymization association. Rather than
-gate only in the popup (bypassable by a UI bug), the method takes the record **`id`**, resolves it
+The fee row is a PUBLIC-event feature (the record carries the block hash the reorg-safe cache needs, and
+a sender-paid fee is a public-transfer concept). Rather than gate only in the popup (bypassable by a UI
+bug), the method takes the record **`id`**, resolves it
 `getIncomingTransferById`-scoped-to-the-active-profile, and returns `null` for any non-`public-event`
 record **before any `getNode`/`getTxReceipt`**. The popup still gates the row render on kind for UI
 honesty, but the node-contact gate is server-side. Pinned by a test asserting a note id → null with
@@ -46,7 +47,7 @@ First artifact pass used `--nulo-accent: #a8480c` (burnt orange) for the dark de
 `--txt-primary`, not green (`--good`). Fixed the artifact (device accent pinned to the dark cream
 regardless of page theme) and the page (`+` in primary text, no green).
 
-## Codex consult (2 rounds, gpt-5.6-sol xhigh)
+## Codex consult (3 rounds, gpt-5.6-sol xhigh)
 
 **Round 1** flagged real bugs, all fixed with tests:
 - **Reorg cache staleness** — fee was cached hash-only, but Aztec derives the fee from the block's gas
@@ -73,6 +74,27 @@ regardless of page theme) and the page (`+` in primary text, no green).
   changed (test simulates the race by clearing mid-fetch).
 - **Dust save-failure display** — reset the field on a failed RPC save too.
 - Doc/comment corrections.
+
+**Round 3** (verifying round 2) caught that two of the round-2 fixes were incomplete:
+- **Epoch guard bumped too LATE** — `clearChain`/`clearProfile` evicted, then `await`ed the repo delete,
+  and only bumped the epoch at the end (via `hydrateSchedulers`), leaving a window where an in-flight
+  fetch still saw the old epoch. Fix: `bumpServiceEpoch()` FIRST in each clear (before eviction/await).
+- **Dust save-failure was a no-op** — `ConfigStore.set` emits `onUpdate` (→ moves `dustThreshold` to the
+  attempted value) BEFORE it persists, so resetting the field to `dustThreshold` reset it to the unsaved
+  value. Fix: capture `prev` before the call, restore BOTH the ref and the field on failure. (The deeper
+  emit-before-persist is a pre-existing ConfigStore behavior shared by every setting — not fixed here.)
+- Confirmed clean: the rollback, mismatch→null, no-fallback, `inc.profileId`, allSettled lifecycle.
+
+### Reorg-staleness of an open detail page (codex round-3 NEW-ISSUE — partly fixed, partly deferred)
+
+An already-open received-detail page holds a snapshot, so a reorg/reconcile touching its record while it's
+open wasn't reflected. **Fixed the delete half:** the page subscribes to `onIncomingTransferDeleted` and
+drops to the not-found state if its own record is removed (reconcile rollback at service.ts:1529 emits it).
+**Deferred the re-mine half:** a reorg that only rewrites a SURVIVING record's block/fee calls
+`upsertRecord` but emits NO event (there is currently no `onIncomingTransferUpdated` emit anywhere), so a
+still-open page keeps a slightly-stale fee until reopened. Wiring a re-mine `onIncomingTransferUpdated`
+emit (which would also let the activity feed react to re-mines) is a small D6 follow-up — tracked here,
+not done in this scope to avoid touching the audited reconcile path late.
 
 ## Deferred — "Privacy maxi" setting (future work)
 
