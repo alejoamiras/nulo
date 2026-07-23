@@ -82,14 +82,14 @@ const E2E_DEFAULT_ACTIVE_TESTNET: boolean = (import.meta.env.VITE_NULO_E2E_DEFAU
 const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
 		name: "Alpha V5",
-		rpcUrl: "https://aztec-mainnet.drpc.org",
+		rpcUrl: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		kind: "mainnet",
 		isPrimaryActive: !E2E_DEFAULT_ACTIVE_TESTNET,
 	},
 	{
 		name: "Testnet",
-		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
+		rpcUrl: "https://lb.drpc.live/aztec-testnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 		chainId: CHAIN_IDS.TESTNET,
 		kind: "testnet",
 		isPrimaryActive: E2E_DEFAULT_ACTIVE_TESTNET,

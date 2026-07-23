@@ -317,4 +317,86 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		expect(enabledClick).toHaveBeenCalled()
 		w.unmount()
 	})
+
+	// Regression pin (real-browser lock-up): focus-trap.activate() THROWS when the menu has no
+	// tabbable node — every item disabled, e.g. the fee-source list on a fresh account with zero fee
+	// juice. The open path must survive it: still position + wire outside-click + emit onOpen, and
+	// still close. Pre-fix the throw aborted all of that → menu stuck at y:0 behind an undismissable
+	// backdrop (hard extension lock-up).
+	test("focus-trap throwing (all-disabled menu) does NOT abort open: emits onOpen and still closes", async () => {
+		const { createFocusTrap } = await import("focus-trap")
+		vi.mocked(createFocusTrap).mockReturnValueOnce({
+			activate: vi.fn(() => {
+				throw new Error("your focus-trap must have at least one tabbable node")
+			}),
+			deactivate: vi.fn(),
+			active: false,
+		} as unknown as import("focus-trap").FocusTrap)
+
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: "<span>Menu</span>" },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+
+		// Menu rendered AND the post-activate wiring ran (onOpen fired despite the throw).
+		expect(dropdownRoot.textContent).toContain("Menu")
+		expect(w.emitted("onOpen")).toBeTruthy()
+
+		// And it still closes cleanly (removeOutside was assigned; close doesn't throw).
+		await w.setProps({ forceOpen: false })
+		await flushPromises()
+		expect(w.emitted("onClose")).toBeTruthy()
+		w.unmount()
+	})
+
+	// The primary defense: a focusable container as `fallbackFocus` so the REAL focus-trap
+	// doesn't throw on a no-tabbable menu in the first place (try/catch above is the backstop).
+	test("passes a fallbackFocus so activation survives a no-tabbable menu", async () => {
+		const { createFocusTrap } = await import("focus-trap")
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: "<span>Menu</span>" },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+		expect(vi.mocked(createFocusTrap)).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ fallbackFocus: expect.any(Function) }),
+		)
+		w.unmount()
+	})
+
+	// Backstop cleanup: if activate() throws after partial setup, the candidate trap must be
+	// deactivated so focus isolation / listeners aren't leaked, while the menu still opens.
+	test("late activation failure deactivates the candidate trap (no leaked isolation) and still opens", async () => {
+		const { createFocusTrap } = await import("focus-trap")
+		const deactivate = vi.fn()
+		vi.mocked(createFocusTrap).mockReturnValueOnce({
+			activate: vi.fn(() => {
+				throw new Error("late activation failure")
+			}),
+			deactivate,
+			active: false,
+		} as unknown as import("focus-trap").FocusTrap)
+
+		const w = mount(DropdownRoot, {
+			props: { forceOpen: false },
+			slots: { default: "<button>Open</button>", popup: "<span>Menu</span>" },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		await w.setProps({ forceOpen: true })
+		await flushPromises()
+
+		expect(deactivate).toHaveBeenCalled()
+		expect(dropdownRoot.textContent).toContain("Menu")
+		expect(w.emitted("onOpen")).toBeTruthy()
+		w.unmount()
+	})
 })

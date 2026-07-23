@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/client"
-import { buildFeeMethods, buildSettings, formatGasBalance, settingsForMethod } from "./fee-helpers"
+import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod } from "./fee-helpers"
 
 describe("fee-helpers/formatGasBalance", () => {
 	test("returns '0' for zero raw value", () => {
@@ -181,5 +181,23 @@ describe("fee-helpers/buildFeeMethods", () => {
 		const m = buildFeeMethods(fpcs, { publicFeeJuice: "1000", privateFeeJuice: "1000" })
 		const priv = m.find((x) => x.type === "private_fpc")
 		expect(priv?.disabled).toBeUndefined()
+	})
+
+	test("allowSponsored:false omits the Sponsored FPC row (Alpha/mainnet)", () => {
+		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
+		const m = buildFeeMethods(fpcs, undefined, { allowSponsored: false })
+		expect(m.map((x) => x.type)).toEqual(["fj", "private_fpc"])
+		expect(m.find((x) => x.fpc?.id === "s1")).toBeUndefined()
+	})
+
+	test("allowSponsored defaults true (Sponsored FPC retained)", () => {
+		const fpcs = [{ id: "s1", type: FpcType.DefaultSponsoredFpc, name: "Sponsor" }]
+		expect(buildFeeMethods(fpcs).find((x) => x.fpc?.id === "s1")?.subtitle).toBe("sponsored")
+	})
+})
+
+describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
+	test("defaults to the tools fee-juice bridge", () => {
+		expect(FEE_JUICE_BRIDGE_URL).toBe("https://tools.nulo.sh")
 	})
 })

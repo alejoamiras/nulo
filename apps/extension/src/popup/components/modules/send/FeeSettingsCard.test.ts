@@ -548,3 +548,114 @@ describe("FeeSettingsCard — concurrency", () => {
 		expect(true).toBe(true)
 	})
 })
+
+describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
+	const mainnet = { id: "n1", chainId: 4248422646, kind: "mainnet" }
+	const testnet = { id: "n1", chainId: 1816023401, kind: "testnet" }
+
+	test("mainnet: defaults to Private Fee Juice and hides Sponsored FPC", async () => {
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "p1", type: 2, name: "Private FPC" },
+			{ id: "s1", type: 1, name: "Sponsor" },
+		])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "5000000000000000000" })
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		// Default is the PrivateFPC, not the sponsored one.
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "p1" } })
+		// Sponsored FPC is not offered at all on mainnet.
+		expect(w.find('[data-testid="pick-fpc"]').exists()).toBe(false)
+	})
+
+	test("mainnet with zero private fee juice: no usable settings, emits needsFeeJuice + shows the nudge", async () => {
+		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC" }])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "0" })
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		// Default private_fpc is disabled (0 balance) → no usable settings.
+		expect(lastEmittedSettings(w)).toBeUndefined()
+		// Parent gets the CTA-takeover signal.
+		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
+		expect(needs.at(-1)?.[0]).toBe(true)
+		// The explainer banner renders.
+		expect(w.text()).toContain("You have no fee juice yet")
+		// No fee estimate / priority rows when there's nothing to estimate.
+		expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(false)
+	})
+
+	test("testnet: keeps Sponsored FPC as the default, no nudge", async () => {
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ network: testnet }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		// The nudge signal is never raised (Sponsored FPC needs no fee-juice balance).
+		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
+		expect(needs.some((e) => e[0] === true)).toBe(false)
+		expect(w.text()).not.toContain("You have no fee juice yet")
+		// Sponsored FPC is usable → the fee estimate row is shown.
+		expect(w.find('[data-testid="fee-cost-readout"]').exists()).toBe(true)
+	})
+
+	test("mainnet with NULL private fee juice (read failed / unregistered): no nudge — not a confirmed zero", async () => {
+		mocks.getFpcs.mockResolvedValue([{ id: "p1", type: 2, name: "Private FPC" }])
+		// null = the private read failed or the FPC isn't registered — an unknown state,
+		// not a confirmed empty balance. We must NOT tell a possibly-funded user to bridge.
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: null })
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
+		expect(needs.some((e) => e[0] === true)).toBe(false)
+		expect(w.text()).not.toContain("You have no fee juice yet")
+		// No usable settings (can't send), but no misleading bridge instruction either.
+		expect(lastEmittedSettings(w)).toBeUndefined()
+	})
+
+	test("account+network switch mid-init: the stale completion is discarded (no cross-identity leak)", async () => {
+		// Account A (mainnet) resolves LATE; it would default to Private Fee Juice.
+		const gasA = deferred<{ publicFeeJuice: string; privateFeeJuice: string | null }>()
+		mocks.getGasBalances.mockReturnValueOnce(gasA.promise)
+		// The switched-to identity (B) resolves normally.
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: "1000000000000000000" })
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "p1", type: 2, name: "Private FPC" },
+			{ id: "s1", type: 1, name: "Sponsor" },
+		])
+
+		const w = mount(FeeSettingsCard, { props: baseProps({ network: mainnet }), global: { stubs: STUBS } })
+		await flushPromises() // A's init started, awaiting gasA
+
+		// Switch account (and network) BEFORE A resolves.
+		await w.setProps({ account: { id: "a2", address: "0xB" }, network: testnet })
+
+		// A's stale mainnet result lands now — the identity guard must discard it.
+		gasA.resolve({ publicFeeJuice: "1000000000000000000", privateFeeJuice: "1000000000000000000" })
+		await flushPromises()
+
+		// Final state reflects B/testnet (Sponsored FPC s1), NOT A/mainnet (Private FPC p1).
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+	})
+
+	test("mainnet detected by chainId even WITHOUT `kind` (legacy/custom row): hides Sponsored, defaults Private", async () => {
+		mocks.getFpcs.mockResolvedValue([
+			{ id: "p1", type: 2, name: "Private FPC" },
+			{ id: "s1", type: 1, name: "Sponsor" },
+		])
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "0", privateFeeJuice: "5000000000000000000" })
+		// No `kind` field — only the mainnet chainId. This is the regression Codex flagged:
+		// a kind-less/restored/custom row on the mainnet chain must still get the mainnet policy.
+		const w = mount(FeeSettingsCard, { props: baseProps({ network: { id: "n1", chainId: 4248422646 } }), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "p1" } })
+		expect(w.find('[data-testid="pick-fpc"]').exists()).toBe(false)
+	})
+})
