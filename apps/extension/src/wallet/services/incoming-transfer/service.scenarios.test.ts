@@ -3573,3 +3573,51 @@ describe("IncomingTransferService — public-scan sync state (§3 Catching up)",
 		expect(await getSync(service, "0xneverscanned")).toBe("caught-up")
 	})
 })
+
+describe("IncomingTransferService — public-scan cursor resume (SW-restart, case 4 unit proof)", () => {
+	test("a fresh service instance resumes its scan from the PERSISTED cursor, not block 0", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		// Simulate a PRIOR instance that scanned up to block 50 (cursor persisted; no anchor → no boundary
+		// probe, so the first reader call IS the forward scan).
+		const persisted = { blockNumber: 50, txIndexWithinBlock: 3, logIndexWithinTx: 1 }
+		seedCursor({ cursor: persisted, lastSyncedBlockHash: null })
+
+		// Boot a FRESH service over the SAME persisted storage (bootService does NOT clear cursors — only
+		// bootPublic does). This is the SW restart: a new instance re-hydrating from chrome.storage.local.
+		const { service } = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader })
+		await flushPromises() // let the scheduler's immediate kick run its forward scan
+		void service
+
+		// The resumed scan's FIRST fetch must page from the persisted cursor — NOT null / startBlock 0. A
+		// buggy restart that dropped the cursor would fetch with afterCursor undefined + fromBlock 0, then
+		// re-index everything from scratch. This is the "cursor-aware resume, no re-processing" property the
+		// SW-restart e2e cannot prove on its own (a from-0 rescan + PK-dedup would look identical there).
+		expect(state.fetchArgs.length).toBeGreaterThan(0)
+		expect(state.fetchArgs[0].afterCursor).toEqual(persisted)
+		expect(state.fetchArgs[0].fromBlock).toBeUndefined()
+	})
+
+	test("with a persisted anchor (the production post-scan state), the forward scan still pages from the cursor", async () => {
+		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
+		// Production fidelity: a real prior instance that scanned to block 50 ALSO recorded the anchor hash. On
+		// resume that anchor triggers a boundary ancestry probe (a distinct reader call) BEFORE the forward
+		// scan — so this exercises the probe-present branch the no-anchor case above skips.
+		const persisted = { blockNumber: 50, txIndexWithinBlock: 3, logIndexWithinTx: 1 }
+		seedCursor({ cursor: persisted, lastSyncedBlockHash: "0xanchor" })
+
+		const { service } = await bootService({ account: publicAccountStub(), token: makeTokenStub([tokenA]), publicReader: reader })
+		await flushPromises()
+		void service
+
+		// SOME reader call must resume from the exact persisted cursor with no block-0 fallback. A dropped
+		// cursor would instead page from block 0 (fromBlock set, afterCursor undefined) — no such call exists.
+		const resumed = state.fetchArgs.find(
+			(a) =>
+				a.afterCursor?.blockNumber === persisted.blockNumber &&
+				a.afterCursor?.txIndexWithinBlock === persisted.txIndexWithinBlock &&
+				a.afterCursor?.logIndexWithinTx === persisted.logIndexWithinTx,
+		)
+		expect(resumed).toBeDefined()
+		expect(resumed?.fromBlock).toBeUndefined()
+	})
+})
