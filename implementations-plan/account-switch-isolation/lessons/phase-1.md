@@ -73,3 +73,13 @@ active + observer no-leak; positive control back-to-A reappears). Asserted on th
 3473, typecheck:all 0, smoke re-run. Phase 1 = the SHIPPABLE privacy fix, done.
 Phase 1a (re-enable correlated dApp task cards via an atomic taskId↔journalId binding) is separate/next;
 until then uncorrelated dApp task cards stay disabled (fail-closed).
+
+## Smoke note (NOT a regression) — migration-arming contract
+Local `bun run test:e2e` reports 73 passed / 1 failed: `backup-migration.test.ts > "fixture-arming
+contract: unarmed runs are allowed ONLY against a release artifact"`. This is a PRE-EXISTING guard:
+`if (!HAS_FIXTURE) expect(IS_RELEASE_ARTIFACT_RUN).toBe(true)` where both come from env
+(`NULO_E2E_MIGRATION_FIXTURE`, `NULO_E2E_ARTIFACT_RUN`). `test:e2e` (= `vitest run`) does NOT arm the
+migration fixture; only `agent.sh` does. So a plain local smoke fails this contract BY DESIGN; CI arms
+it (`_smoke-e2e.yml:41`) → green. Orthogonal to account-switch (no migrations/backup/build-config touched).
+Gate-1 account-switch layers are all green: lint · typecheck:all · 3473 unit/component · isolation e2e
+2/2 · negative-grep · 73/73 relevant smoke tests. The migration smoke is a CI concern, unaffected here.
