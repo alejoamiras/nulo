@@ -68,6 +68,9 @@ test.skipIf(!hasConfig)(
 
 			// The wallet started at 1000 public (tokenReadyExtension). D4: it auto-refreshes to 1010
 			// with NO manual refresh click — just the scheduler's scan → outbox → drain.
+			// `waitForKindChip` left us on #/popup/activity; the token card lives on the home page, so
+			// return there before `navigateToTokenDetail` (which clicks the `tokens-card`).
+			await navigateByHash(page, "#/popup/general")
 			await navigateToTokenDetail(page)
 			await page.waitForFunction(
 				() => {
