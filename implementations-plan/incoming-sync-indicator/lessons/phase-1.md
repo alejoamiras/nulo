@@ -39,10 +39,13 @@ POST-scan from that. The block-gap heuristic + threshold constant are gone. Regr
   recovery. Same node-down staleness class; fully closing it means forward-scanning inside the audited D6
   reorg tick — not worth the risk for a cosmetic indicator. — `service.ts` reconciling-branch comment.
 
-## Follow-up (codex-recommended, NOT a blocker)
+## TokensView race tests (codex round-5 recommendation — DONE)
 
-Focused deferred-promise TokensView tests for: live-event-vs-late-snapshot clobber, out-of-order scope
-fetches, and the A→B→A cycle. Added in this plan (see `TokensView.test.ts`) / or tracked here if deferred.
+Added `TokensView.test.ts`: deterministic deferred-promise tests for the three guards — a live event wins
+over a later-resolving snapshot (no stale clobber), the A→B→A scope cycle drops the old-scope snapshot,
+and the baseline event→prop wiring. Mounted `shallow` and asserted via the stubbed `TokenCard`'s
+`backfilling` prop. (`useTicker` is stubbed as a global — an auto-imported custom composable the test
+transform doesn't inject.)
 
 ## Validation
 
