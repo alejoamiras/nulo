@@ -34,3 +34,16 @@ Scope narrowing: only root feed tasks get a cid; Step/BalanceUpdate/subtasks exe
 5. Reactive-computed forward references (executingTask computed forward-refs isFeedEligible/journalOps —
    hoisted fn decl + lazy computed; validated by the component test).
 6. Correctness independent of task/journal event ordering (reactive gate re-evaluates on journalOps change).
+
+## Codex Phase-1a audit REJECT → fixed (2 blockers). audit-codex-p1a.md.
+BLOCKER 1 (multi-account misbinding, real leak): queued-journal used dapp.accounts[0], so a session-[A,B]
+send from B bound B's task to A's journal. FIX (b) at root: queued-journal.ts `extractSendFrom(message)`
+derives the record's accountAddress from the actual send `from` (message.args[1].from, dispatcher rules) —
+explicit+authorized from → that account; NO_FROM/omitted → accounts[0]; from outside session → not queued.
+FIX (a) defense-in-depth: claim-helper refuses a claim whose defined accountAddress != the send's account +
+creates a fresh correctly-scoped record. Fixes both journal-card AND cid-enrichment leak.
+BLOCKER 2 (publication fail-open): added strict `journalInActiveScopeStrict` (profile+network+account all
+present+equal) for the isFeedEligible dApp gate; switch-reset watcher + snapshot guards now key on the
+COMPOSITE scope. Lenient display `journalRecordInScope` left as-is (legacy-row leniency, display-only).
+Deferred (non-blocking, enrichment-only): resnapshotJournal stale-snapshot reschedule guard.
+Tests +11 (queued-journal 4, claim-helper 3, strict-scope 4); full suite 3505; typecheck:all 0; lint 0.

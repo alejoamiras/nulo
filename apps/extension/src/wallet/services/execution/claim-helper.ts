@@ -118,6 +118,33 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		throw new JobCancelledSentinel(queuedJournalId)
 	}
 
+	// Phase 1a BLOCKER-1 defense-in-depth (fail-closed): NEVER claim a
+	// claimable (queued/pending) record whose account doesn't match THIS send's
+	// actual account. Fix (b) scopes the queued record to the send's `from` at
+	// creation, so a match is the norm; this guards any residual mis-scoping
+	// (e.g. a NO_FROM default resolving to a different account than the queued
+	// record's accounts[0]). Claiming a foreign-account record would drive this
+	// send's execution transitions (simulating→proving→…) onto the WRONG
+	// account's journal card — a cross-account leak. Drop the mis-scoped
+	// pre-acquire controller and create a fresh, correctly-scoped record
+	// instead (the send still proceeds — never cancelled for a scope mismatch).
+	// `accountAddress` is a bare address on both sides (materialize.ts resolves
+	// it; queued-journal parses the CAIP), so the comparison is format-safe.
+	// A record with a DEFINED account that differs is the leak case we refuse;
+	// an `undefined` record account (never produced by queued-journal) is left
+	// to the claim (it renders under no one — the display filter drops a
+	// no-account row anyway).
+	if (record.accountAddress !== undefined && record.accountAddress !== accountAddress) {
+		if (reuseController) activeControllers.delete(queuedJournalId)
+		logger?.error(
+			`Queued record ${queuedJournalId} account ${record.accountAddress} != send account ${accountAddress}; refusing cross-account claim, creating fresh scoped record`,
+		)
+		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
+		const controller = id ? new AbortController() : undefined
+		if (id && controller) activeControllers.set(id, controller)
+		return { journalId: id, controller }
+	}
+
 	// Happy path: claim. The journal mutex serializes us against any
 	// concurrent cancelJob — whichever acquires first wins.
 	if (stage === "queued") {

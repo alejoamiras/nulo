@@ -209,9 +209,12 @@ const dappExecuteTaskCorrelated = (correlationId: string, id = "task-dapp") => (
 	subtasks: [],
 })
 
-/** In-flight dapp_execute journal record (the durable card the task binds to). */
+/** In-flight dapp_execute journal record (the durable card the task binds to).
+ *  Carries the full composite scope (profileId + networkId + accountAddress) so
+ *  the STRICT publication gate (BLOCKER-2) can resolve it. */
 const inFlightDappOp = (account: string, correlationId: string, over: Record<string, unknown> = {}) => ({
 	id: "op-dapp",
+	profileId: "p1",
 	accountAddress: account,
 	networkId: "net-1",
 	kind: "dapp_execute",
@@ -496,6 +499,59 @@ describe("RecentActivityView — dApp task↔journal correlation gate (Phase 1a)
 		H.store.current.account = { address: ACCT_B }
 		// Synchronous: journalOps cleared + rawExecutingTask cleared by the flush:'sync'
 		// watcher → the gated computed collapses to null before B can paint.
+		expect(vm.executingTask).toBeNull()
+		expect(renderedIds(vm)).not.toContain("op-dapp")
+	})
+})
+
+describe("RecentActivityView — STRICT publication scope (Phase 1a BLOCKER-2)", () => {
+	test("a correlated journal missing networkId is NOT published (strict fail-closed on undefined)", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_A, "cid-noNet", { networkId: undefined })])
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-noNet")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		// Strict gate requires networkId present + equal — undefined = out of scope.
+		expect(vm.rawExecutingTask).not.toBeNull() // captured (cid present)
+		expect(vm.executingTask).toBeNull() // NOT published
+	})
+
+	test("a correlated journal from a FOREIGN profile is NOT published (strict profileId gate)", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_A, "cid-foreignProfile", { profileId: "p-OTHER" })])
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-foreignProfile")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeNull() // foreign profile → fail-closed
+	})
+
+	test("a correlated journal on a FOREIGN network is NOT published (strict networkId gate)", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_A, "cid-foreignNet", { networkId: "net-OTHER" })])
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-foreignNet")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeNull()
+	})
+
+	test("a NETWORK switch onto the SAME account address resets + un-publishes (composite-scope watcher)", async () => {
+		H.getOperations.mockResolvedValueOnce([inFlightDappOp(ACCT_A, "cid-netswitch")])
+		H.getTasks.mockResolvedValueOnce([dappExecuteTaskCorrelated("cid-netswitch")])
+		H.getOperations.mockImplementation(() => new Promise(() => {})) // post-switch reload hangs
+		H.getTasks.mockImplementation(() => new Promise(() => {}))
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).not.toBeNull()
+
+		// Same account address, DIFFERENT network — account-only keying would have
+		// missed this; the composite-scope watcher must reset synchronously.
+		H.store.current.network = { id: "net-2", chainId: 2 }
+		expect(vm.journalOps).toEqual([])
 		expect(vm.executingTask).toBeNull()
 		expect(renderedIds(vm)).not.toContain("op-dapp")
 	})

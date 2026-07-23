@@ -100,6 +100,50 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(activeControllers.has("queued-id")).toBe(true)
 	})
 
+	// ── BLOCKER-1 (fix a): cross-account claim refusal (fail-closed) ──
+
+	test("queued record account MATCHES the send → claims normally (check does not over-fire)", async () => {
+		const { deps, createFreshRecord, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" }, accountAddress: "0xabc" })
+
+		const result = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" })
+
+		expect(journal.transitionOperation).toHaveBeenCalledWith("queued-id", { stage: "pending" })
+		expect(createFreshRecord).not.toHaveBeenCalled()
+		expect(result.journalId).toBe("queued-id")
+	})
+
+	test("queued record account MISMATCHES the send → REFUSES the claim, creates a fresh correctly-scoped record", async () => {
+		const { deps, createFreshRecord, activeControllers, journal } = makeDeps()
+		// Session [A,B] mis-scoped this queued record to A (0xB), but the send is from 0xabc.
+		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" }, accountAddress: "0xB" })
+
+		const result = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "mis-scoped-id" })
+
+		// Never transitions the foreign record → foreign card never shows this send's progress.
+		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		expect(createFreshRecord).toHaveBeenCalledOnce()
+		expect(result.journalId).toBe("fresh-id")
+		expect(activeControllers.has("fresh-id")).toBe(true)
+	})
+
+	test("mismatch WITH a reuseController → drops the mis-scoped pre-acquire entry before creating fresh", async () => {
+		const { deps, createFreshRecord, activeControllers, journal } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" }, accountAddress: "0xB" })
+		const preController = new AbortController()
+		activeControllers.set("mis-scoped-id", preController)
+
+		const result = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			queuedJournalId: "mis-scoped-id",
+			reuseController: preController,
+		})
+
+		expect(createFreshRecord).toHaveBeenCalledOnce()
+		expect(activeControllers.has("mis-scoped-id")).toBe(false) // orphaned controller dropped
+		expect(result.journalId).toBe("fresh-id")
+	})
+
 	// v3: pre-acquire controller reuse.
 	test("reuseController set + record at queued → REUSES the pre-acquire controller (not a fresh one)", async () => {
 		const { deps, activeControllers, journal } = makeDeps()

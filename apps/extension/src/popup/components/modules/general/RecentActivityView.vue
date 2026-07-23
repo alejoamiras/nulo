@@ -282,6 +282,42 @@ const executionService = new ExecutionServiceClient()
 const pendingCancelJobIds = ref(new Set())
 const onCancelInFlight = buildCancelHandler(executionService, (jobId) => pendingCancelJobIds.value.add(jobId))
 
+/** Composite active scope (profile + network + account). `undefined` until all
+ *  three are ready. Phase 1a BLOCKER-2: the publication gate + the snapshot
+ *  capture + the synchronous switch reset all key on the COMPOSITE scope, never
+ *  account alone — a profile or network switch that happens to land on the same
+ *  account address MUST still reset the feed and re-gate (fail-closed), and a
+ *  same-address rename must NOT. */
+function activeCompositeScope() {
+	const profileId = appStore.profile?.id
+	const networkId = appStore.network?.id
+	const accountAddress = appStore.account?.address
+	if (!profileId || !networkId || !accountAddress) return undefined
+	return { profileId, networkId, accountAddress }
+}
+function activeScopeKey() {
+	const s = activeCompositeScope()
+	return s ? `${s.profileId} ${s.networkId} ${s.accountAddress}` : ""
+}
+
+/** STRICT publication scope (BLOCKER-2, fail-closed): a journal record is in the
+ *  active feed scope for PUBLISHING a correlated task ONLY when profileId,
+ *  networkId AND accountAddress are ALL present on the record and equal to the
+ *  active composite scope. A missing value = out of scope. This is the opposite
+ *  of the lenient DISPLAY filter `journalRecordInScope` below, whose
+ *  undefined-network tolerance is intentional for showing legacy journal rows —
+ *  do NOT reuse that leniency for publication. */
+function journalInActiveScopeStrict(op) {
+	const s = activeCompositeScope()
+	if (!s) return false
+	if (op.profileId !== s.profileId) return false
+	if (op.networkId !== s.networkId) return false
+	if (op.accountAddress !== s.accountAddress) return false
+	// Token-mode still constrains which op may publish on the token-detail page.
+	if (props.token && op.tokenId !== props.token.id) return false
+	return true
+}
+
 /** Shared account / network / token scoping for journal-record filters.
  *  Same rules apply to in-flight and recently-terminal surfaces. */
 function journalRecordInScope(op) {
@@ -594,12 +630,18 @@ journalService.onOperationDeleted.add(onJournalDeleted)
  */
 async function resnapshotJournal() {
 	try {
-		// Captured-account guard: snapshot the account we FETCH for and drop the
-		// result if the active account changed during the await (A→B, A→B→A). A late
-		// A snapshot must never clobber B's journal view.
-		const captured = appStore.account?.address
-		const ops = await journalService.getOperations({ accountAddress: captured })
-		if (captured !== appStore.account?.address) return
+		// Captured-SCOPE guard (BLOCKER-2): snapshot the COMPOSITE scope we FETCH
+		// for and drop the result if the active scope changed during the await
+		// (A→B, A→B→A, or a profile/network switch onto the same address). A late A
+		// snapshot must never clobber B's journal view. Fetch is filtered by
+		// account + profile (networkId isn't an OperationFilter field; the strict
+		// publication gate + display filter enforce it downstream).
+		const captured = activeScopeKey()
+		const scope = activeCompositeScope()
+		const ops = await journalService.getOperations(
+			scope ? { accountAddress: scope.accountAddress, profileId: scope.profileId } : undefined,
+		)
+		if (captured !== activeScopeKey()) return
 		journalOps.value = ops.sort((a, b) => b.createdAt - a.createdAt)
 		// v4 cancel-dupe (snapshot path): catches close-popup-mid-cancel-and-
 		// reopen + SW disconnect mid-cancel. Uses 30s window to avoid
@@ -638,11 +680,12 @@ function isRawExecutingCandidate(task) {
 
 /** PUBLICATION gate (Phase 1a): is the captured raw task feed-eligible in the
  *  ACTIVE scope RIGHT NOW? Fail-closed — a dApp task renders ONLY once its
- *  `correlationId` resolves to a NON-terminal journal record in the active
- *  scope (`journalRecordInScope` = account + network). Reactive over
- *  `journalOps`, so the task publishes the instant its journal is
- *  created/stamped and un-publishes the instant the account switches. UI
- *  transfers are account-correlated via `senderAddress` and need no journal. */
+ *  `correlationId` resolves to a NON-terminal journal record in the STRICT
+ *  composite active scope (`journalInActiveScopeStrict` = profile + network +
+ *  account, all present + equal). Reactive over `journalOps`, so the task
+ *  publishes the instant its journal is created/stamped and un-publishes the
+ *  instant the scope changes. UI transfers are account-correlated via
+ *  `senderAddress` and need no journal. */
 function isFeedEligible(task) {
 	if (!task || task.finishedAt) return false
 	if (task.content.kind === ContentKind.Transfer && task.origin?.type === OriginType.UI) {
@@ -656,7 +699,10 @@ function isFeedEligible(task) {
 		const journal = journalOps.value.find((op) => op.correlationId === cid)
 		if (!journal) return false // not yet correlated → fail-closed
 		if (journal.terminalAt !== null) return false // op finished → not in-flight
-		return journalRecordInScope(journal) // active account + network
+		// STRICT composite scope (BLOCKER-2): profile + network + account must ALL
+		// be present and match — a missing value fails closed. Never the lenient
+		// DISPLAY filter here.
+		return journalInActiveScopeStrict(journal)
 	}
 	return false
 }
@@ -719,11 +765,13 @@ const handleSelectTerminal = (op) => {
  *  own (no task = no enrichment, but no leak). A fresh task minted post-restart
  *  re-correlates through its journal's durable `correlationId`. */
 async function loadExecutingTaskSnapshot() {
-	const captured = appStore.account?.address
+	const captured = activeScopeKey()
 	try {
 		// Newest-first replay — otherwise concurrent tasks could surface the older one.
 		const allTasks = await taskService.getTasks()
-		if (captured !== appStore.account?.address) return
+		// Captured-SCOPE guard (BLOCKER-2): drop a late snapshot if the composite
+		// scope moved during the await.
+		if (captured !== activeScopeKey()) return
 		const matching = allTasks.filter((t) => isRawExecutingCandidate(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
 		const activeExec = matching[0]
 		if (activeExec) {
@@ -737,15 +785,17 @@ async function loadExecutingTaskSnapshot() {
 
 /** Account-switch containment (Layer A, drop-only). This component holds
  *  view-local state that is NOT remounted on switch (no account `:key` on the
- *  feed root), so a switch A→B must synchronously clear what B could SEE of A's
- *  progress, then reload for B. `flush: 'sync'` clears BEFORE Vue paints the new
- *  account — a default (post-nextTick) watcher would leave a one-tick window
- *  rendering A's journal/task rows under B. The reload is captured-account
- *  guarded (see `resnapshotJournal` / `loadExecutingTaskSnapshot`). Keyed on
- *  address so a rename (same address) does not reset the feed. Incoming transfers
- *  are reset separately by `useIncomingTransfers`' own sync scope watcher. */
+ *  feed root), so a scope change A→B must synchronously clear what B could SEE of
+ *  A's progress, then reload for B. `flush: 'sync'` clears BEFORE Vue paints the
+ *  new scope — a default (post-nextTick) watcher would leave a one-tick window
+ *  rendering A's journal/task rows under B. The reload is captured-scope guarded
+ *  (see `resnapshotJournal` / `loadExecutingTaskSnapshot`). BLOCKER-2: keyed on
+ *  the COMPOSITE scope (profile + network + account), so a profile/network switch
+ *  onto the same account address also resets, while a same-address rename does
+ *  NOT (the key is unchanged). Incoming transfers are reset separately by
+ *  `useIncomingTransfers`' own sync scope watcher. */
 watch(
-	() => appStore.account?.address,
+	() => activeScopeKey(),
 	(nv, ov) => {
 		if (nv === ov) return
 		journalOps.value = []

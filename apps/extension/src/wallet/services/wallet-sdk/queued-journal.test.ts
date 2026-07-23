@@ -124,6 +124,58 @@ describe("tryCreateQueuedJournal", () => {
 		expect(rec?.progress.stage).toBe("queued")
 	})
 
+	// ── BLOCKER-1 (fix b): queued record scoped to the send's actual `from` ──
+
+	function makeSendTxFrom(from: string): WalletMessage {
+		return {
+			messageId: "msg-from",
+			type: "sendTx",
+			args: [{ calls: [{ name: "drip_to_public" }] }, { from }],
+		} as unknown as WalletMessage
+	}
+
+	function twoAccountSession() {
+		return {
+			// biome-ignore lint/suspicious/noExplicitAny: test stub
+			tryGetDappSessionByOriginAndChain: vi.fn<() => Promise<any>>(async () => ({
+				accounts: ["aztec:1338:0xAAA", "aztec:1338:0xBBB"],
+				capabilityGrants: [{ capability: { type: "transaction" } }],
+				dappMetadata: { name: "Example Dapp" },
+			})),
+		}
+	}
+
+	test("multi-account session: an explicit session-authorized `from` scopes the queued record to THAT account (not accounts[0])", async () => {
+		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
+		// Session [A=0xAAA, B=0xBBB]; send from B.
+		const id = await tryCreateQueuedJournal(makeSendTxFrom("0xBBB"), makeSession(), deps)
+		expect(id).toBeDefined()
+		const rec = await journal.getOperation(id as string)
+		// Must be B's journal — the old `accounts[0]` derivation bound B's send onto A (leak).
+		expect(rec?.accountAddress).toBe("0xBBB")
+	})
+
+	test("NO explicit `from` → falls back to the session's first authorized account", async () => {
+		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps) // opts = {}
+		const rec = await journal.getOperation(id as string)
+		expect(rec?.accountAddress).toBe("0xAAA")
+	})
+
+	test("NO_FROM sentinel → falls back to the session's first authorized account (not treated as an address)", async () => {
+		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
+		const id = await tryCreateQueuedJournal(makeSendTxFrom("NO_FROM"), makeSession(), deps)
+		const rec = await journal.getOperation(id as string)
+		expect(rec?.accountAddress).toBe("0xAAA")
+	})
+
+	test("an explicit `from` OUTSIDE the session is NOT queued (dispatcher will reject it; never mis-scope onto accounts[0])", async () => {
+		const { deps, journal } = makeDeps({ dappSession: twoAccountSession() as never })
+		const id = await tryCreateQueuedJournal(makeSendTxFrom("0xCCC"), makeSession(), deps)
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
 	test("subtitle falls back to 'Unknown dapp' when session has no dappMetadata.name", async () => {
 		// QA-reported: subtitle previously used `session.origin` (the full URL),
 		// surfacing raw URLs in the activity-card chip when the second tx hit

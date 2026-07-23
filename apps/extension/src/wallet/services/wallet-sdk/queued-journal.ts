@@ -97,9 +97,31 @@ export async function tryCreateQueuedJournal(
 		const hasSendTxGrant = (dapp.capabilityGrants ?? []).some((g) => g.capability.type === "transaction")
 		if (!hasSendTxGrant) return undefined
 
-		// DappSession.accounts is string[] of CAIP. Parse to get the bare address.
-		const firstCaipAccount = dapp.accounts[0] as CaipAccount
-		const { address: accountAddress } = parseCaipAccount(firstCaipAccount)
+		// Scope the queued record to the account the send will ACTUALLY use.
+		// DappSession.accounts is string[] of CAIP — parse to bare addresses.
+		// A multi-account session [A,B] with an explicit, session-authorized
+		// `opts.from = B` must produce a B-scoped queued card (so B's later task
+		// CID binds to B's journal), NEVER blindly accounts[0] — that stamped B's
+		// execution onto A's journal and rendered B's progress under A (codex
+		// BLOCKER-1). Mirrors the dispatcher's `resolveNetworkAndAccount`
+		// from-resolution (wallet-bridge dispatcher.ts:643-649).
+		const sessionAddresses = dapp.accounts.map((c) => parseCaipAccount(c as CaipAccount).address)
+		const requestedFrom = extractSendFrom(message)
+		if (requestedFrom !== undefined && !sessionAddresses.includes(requestedFrom)) {
+			// The send names an account outside this session; the dispatcher's
+			// `resolveNetworkAndAccount` will reject it. Don't surface a queued
+			// card for a doomed request — and never fall back to accounts[0],
+			// which would mis-scope it.
+			logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Debug,
+				`queued: requested from ${requestedFrom} not authorized for session ${session.sessionId}; skipping`,
+			)
+			return undefined
+		}
+		// Explicit + authorized `from` → that account; NO_FROM / omitted → the
+		// session default (first authorized account).
+		const accountAddress = requestedFrom ?? sessionAddresses[0]
 
 		// `networkId` for activity-feed scoping must be the INTERNAL network row id
 		// (RecentActivityView.journalRecordInScope filters on `network.id`), NOT
@@ -161,6 +183,25 @@ export async function tryCreateQueuedJournal(
 		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
 		return undefined
 	}
+}
+
+/**
+ * Extract the send's requested `from` account (bare address) from a sendTx
+ * wallet message, or `undefined` for NO_FROM / omitted. `message.args[1]` is
+ * the sendTx `opts` bag; `opts.from` names the sending account when the dApp
+ * chose one explicitly. Mirrors the dispatcher's `requestedFrom` derivation
+ * (`isNoFromRequest` + the null/omitted guard) so the queued record scopes to
+ * the SAME account the dispatcher will resolve.
+ */
+export function extractSendFrom(message: WalletMessage): string | undefined {
+	if (message.type !== "sendTx") return undefined
+	const args = message.args as unknown[] | undefined
+	if (!Array.isArray(args)) return undefined
+	const opts = args[1] as { from?: unknown } | undefined
+	const from = opts?.from
+	// `NO_FROM` is the DefaultEntrypoint sentinel; null/omitted = no explicit choice.
+	if (from == null || from === "NO_FROM") return undefined
+	return String(from)
 }
 
 /**
