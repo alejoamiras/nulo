@@ -114,6 +114,12 @@ lying-node log omission/mangling, an upgrade→emit→restore squeezed between t
 persistently-null-checkpoint-hash scanning stall. All are malicious/degraded-node, display-only (never a
 forged balance — balances are independently simulated) and ACCEPTED for a display-integrity feature.
 
+## Codex round 7 — final verdict: SATISFIED
+Both round-6 fixes CONFIRMED-FIXED. Codex's exact words: **"No class-(a) Critical/High remain —
+satisfied."** 7 rounds, ~14 real issues found + fixed on the D6 reorg/reconcile/class-gate/outbox arm.
+The remaining residuals are all class-(b) (lying/degraded-node, display-only — never a forged balance,
+since balances are independently simulated) and are accepted + documented above.
+
 ## Fixes applied (rounds 1–6)
 - **Critical #1** (final): per-page checkpoint-fork-hash pin + `toBlock` bound + 1-page cap when null +
   an ATOMIC boundary-ancestry membership proof (`verifyAncestorHash`).
