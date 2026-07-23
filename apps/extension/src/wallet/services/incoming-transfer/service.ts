@@ -587,16 +587,20 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// recoverable here — clear it wholesale. It's tiny (only viewed public receipts) and a stale
 			// entry is harmless anyway (its record is gone, so getReceiptFee returns null before the cache).
 			this.feeCache.clear()
-			await this.repo.clearProfile(profileId)
-			// Lock held across the wipe AND scheduler rebuild so a queued poll
-			// can't fire between the two and repopulate state we just cleared
-			// (codex R2 H1). hydrateSchedulers bumps serviceEpoch internally
-			// so any in-flight scan whose snapshot predates this wipe bails.
-			await this.hydrateSchedulers()
-			// Re-clear AFTER hydration: a getReceiptFee that captured the post-first-bump epoch could have
-			// written an entry in the window before hydrate's second bump. Its record is already gone (so
-			// the entry is unreachable anyway), but sweep it to keep the map honest.
-			this.feeCache.clear()
+			try {
+				await this.repo.clearProfile(profileId)
+				// Lock held across the wipe AND scheduler rebuild so a queued poll
+				// can't fire between the two and repopulate state we just cleared
+				// (codex R2 H1). hydrateSchedulers bumps serviceEpoch internally
+				// so any in-flight scan whose snapshot predates this wipe bails.
+				await this.hydrateSchedulers()
+			} finally {
+				// Re-clear AFTER hydration (in finally so it's absolute even if the wipe/rebuild threw): a
+				// getReceiptFee that captured the post-first-bump epoch could have written an entry in the
+				// window before hydrate's second bump. Its record is already gone (so the entry is
+				// unreachable anyway), but sweep it to keep the map honest.
+				this.feeCache.clear()
+			}
 		})
 	}
 
@@ -612,11 +616,15 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				for (const key of this.feeCache.keys()) if (key.startsWith(`${networkId}|`)) this.feeCache.delete(key)
 			}
 			evict()
-			await this.repo.clearChain(profileId, networkId)
-			await this.hydrateSchedulers()
-			// Re-evict AFTER hydration: closes the window where a getReceiptFee holding the post-first-bump
-			// epoch wrote an (already-unreachable) entry before hydrate's second bump. See clearProfile.
-			evict()
+			try {
+				await this.repo.clearChain(profileId, networkId)
+				await this.hydrateSchedulers()
+			} finally {
+				// Re-evict AFTER hydration (in finally so it's absolute even if the wipe/rebuild threw):
+				// closes the window where a getReceiptFee holding the post-first-bump epoch wrote an
+				// (already-unreachable) entry before hydrate's second bump. See clearProfile.
+				evict()
+			}
 		})
 	}
 
