@@ -1,0 +1,209 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account + Profile Siloing — ELI5</title>
+<style>
+  :root{
+    --bg:#f7f6f3; --panel:#fffdfa; --ink:#1c1a17; --muted:#5c574f; --line:#e4ded3;
+    --accent:#b4531f; --accent-soft:#f0d9c8; --good:#2f7d4f; --warn:#9a6a12; --bad:#a8321f;
+    --code:#eef4f0;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#16150f; --panel:#1f1d16; --ink:#ece7dc; --muted:#a49c8c; --line:#332f24;
+      --accent:#e08a4e; --accent-soft:#3a2a1c; --good:#7bc79b; --warn:#dcb15a; --bad:#e98a76; --code:#20241f; }
+  }
+  :root[data-theme="dark"]{ --bg:#16150f; --panel:#1f1d16; --ink:#ece7dc; --muted:#a49c8c; --line:#332f24;
+    --accent:#e08a4e; --accent-soft:#3a2a1c; --good:#7bc79b; --warn:#dcb15a; --bad:#e98a76; --code:#20241f; }
+  :root[data-theme="light"]{ --bg:#f7f6f3; --panel:#fffdfa; --ink:#1c1a17; --muted:#5c574f; --line:#e4ded3;
+    --accent:#b4531f; --accent-soft:#f0d9c8; --good:#2f7d4f; --warn:#9a6a12; --bad:#a8321f; --code:#eef4f0; }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:820px;margin:0 auto;padding:48px 22px 90px}
+  h1{font-size:2.05rem;line-height:1.12;margin:0 0 .3em;letter-spacing:-.02em;text-wrap:balance}
+  h2{font-size:1.32rem;margin:2.4em 0 .5em;letter-spacing:-.01em;border-bottom:2px solid var(--accent-soft);padding-bottom:.25em}
+  h3{font-size:1.02rem;margin:1.6em 0 .3em}
+  p{margin:.6em 0}
+  .lede{font-size:1.12rem;color:var(--muted)}
+  .tag{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--accent);background:var(--accent-soft);padding:.25em .6em;border-radius:999px;margin-bottom:1.2em}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:1.1em 0}
+  code{background:var(--code);padding:.12em .4em;border-radius:5px;font:.86em ui-monospace,SFMono-Regular,Menlo,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;
+    font:.82rem/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+  a{color:var(--accent);text-decoration:none;border-bottom:1px solid var(--accent-soft)}
+  a:hover{border-bottom-color:var(--accent)}
+  ul{padding-left:1.25em} li{margin:.3em 0}
+  .grid{display:grid;gap:12px}
+  .phase{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;padding:14px 16px}
+  .phase b{color:var(--accent)}
+  .gate{font-size:.85rem;color:var(--muted);margin-top:.4em}
+  .gate::before{content:"✓ proves itself by: ";color:var(--good);font-weight:600}
+  .fork{border-left-color:var(--warn)}
+  .fork b{color:var(--warn)}
+  table{width:100%;border-collapse:collapse;margin:1em 0;font-size:.9rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:.5em 0;font-size:.8rem}
+  .flow span{background:var(--code);border:1px solid var(--line);border-radius:6px;padding:4px 8px;white-space:nowrap}
+  .flow em{color:var(--accent);font-style:normal;font-weight:700}
+  .kpi{display:flex;gap:10px;flex-wrap:wrap;margin:1em 0}
+  .kpi div{flex:1;min-width:130px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .kpi b{display:block;font-size:1.5rem;color:var(--accent);line-height:1}
+  .kpi small{color:var(--muted)}
+  .muted{color:var(--muted)}
+  .foot{margin-top:2.5em;padding-top:1.2em;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem}
+</style>
+
+<div class="wrap">
+  <span class="tag">Blueprint · deep tier</span>
+  <h1>Siloing profiles &amp; accounts</h1>
+  <p class="lede">Make the wallet's <b>active scope</b> — which profile, which network, which account — the one
+  and only thing that decides what activity you see and what a transaction is allowed to sign as. So one
+  profile's money and history can <b>never</b> bleed into another's, and switching feels instant.</p>
+
+  <h2>The one-sentence version</h2>
+  <p>Today, activity state is a single flat pile keyed on "whoever's active right now," and an in-flight
+  transaction re-reads "active right now" while it works — so a background event or a mid-send switch can paint
+  Account A's data under Account B, or even sign under the wrong profile. This arc replaces the flat pile with
+  <b>one labelled drawer per scope</b> (a "slice"), makes every producer drop its record into <em>its own</em>
+  drawer (never the active one), and <b>binds a transaction to the profile that authorized it</b> — if you
+  switch away mid-send, it aborts cleanly instead of signing under the wrong identity.</p>
+
+  <div class="kpi">
+    <div><b>3</b><small>independent plans drafted in parallel (main + codex + Opus)</small></div>
+    <div><b>3</b><small>adversarial review rounds (fresh hostile + ultra + verify)</small></div>
+    <div><b>~10</b><small>serious bugs caught before a line was written — all in one over-built half, which we then cut</small></div>
+    <div><b>1</b><small>big PR, internally staged into 7 gated phases</small></div>
+  </div>
+
+  <h2>Why "deep" and not something lighter</h2>
+  <p>The blueprint rubric scores six risk dimensions. This lit up <b>four</b>: high <b>blast radius</b> (it
+  touches the shared send path used by <em>every</em> transaction), high <b>security sensitivity</b> (it's a
+  cross-profile privacy + signing-authority boundary), real <b>concurrency</b> (service-worker restarts, races
+  between switching and sending), and a novel <b>durable protocol</b>. Two-or-more highs → deep. Deep means three
+  people plan it from scratch in parallel, then two rounds of reviewers try to break the merged result.</p>
+
+  <h2>The one that would have hurt</h2>
+  <div class="panel">
+    <p>The first merged plan closed the "don't sign under the wrong profile" window by <b>holding the wallet's
+    main lock across the network send</b>. Sounds safe. It isn't: that lock <b>auto-releases itself after 5
+    minutes</b> as a safety net, and a stuck network send can take ~4 minutes — under the ceiling with zero
+    margin. If it ever tipped over, the lock would hand itself to a queued profile-switch <em>while the send was
+    still running</em> — re-opening the exact leak it was meant to close, and corrupting the lock for the whole
+    wallet. It would also freeze the emergency "lock wallet" button for minutes.</p>
+    <p class="muted">A fresh reviewer with no stake in the plan found this by reading the actual lock code. The
+    fix is smaller and safer: don't hold any long lock across the network. Verify-and-dispatch the send in one
+    atomic beat, then wait for the network <em>outside</em> the lock, and record the result unconditionally
+    (a transaction that's already on-chain is a fact — you never drop it). This is why the deep tier exists.</p>
+  </div>
+
+  <h2>How it works, in three moves</h2>
+
+  <h3>1 · One drawer per scope (structural isolation)</h3>
+  <p>A single coordinator owns a map of <b>slices</b>, one per <code>(profile, network, chain, account)</code>.
+  The screen only ever reads the <em>active</em> slice. Every producer writes into the slice for the record's
+  <em>own</em> scope — computed from the record, never from "active now." A foreign record therefore <b>cannot
+  reach your view</b>; it's in a different drawer. Switching is just pointing at a different drawer → the last
+  view you had reappears instantly (no clear-then-reload flicker).</p>
+
+  <h3>2 · A durable "which-came-first" protocol (proven before it's wired)</h3>
+  <p>Events, background fetches, and service-worker restarts arrive out of order. A small pure module decides,
+  for each record, whether an update actually applies — using a per-source counter, a "committed-through"
+  watermark, per-record tombstones (so a deleted row can't resurrect), and a monotonic <b>lineage</b> number (so
+  a re-imported or reset scope can't be painted by its own ghost). It's built and <b>property-tested in isolation
+  first</b> — thousands of random event orderings thrown at it — before it touches any UI.</p>
+
+  <h3>3 · Don't let the ground move under a send (never mis-sign)</h3>
+  <div class="flow">
+    <span>send starts</span><em>→</em><span>🔒 switching is blocked</span><em>→</em>
+    <span>prove</span><em>→</em><span>send</span><em>→</em><span>record</span><em>→</em><span>🔓 switching allowed</span>
+  </div>
+  <p>The mis-sign danger is: you switch profiles <em>while</em> a transaction is being built, so it gets built
+  under the wrong account. The simplest fix that fully closes it is to <b>not let you switch while a send is in
+  flight</b> — a "finish or cancel your pending transaction first" guard. If the ground can't move, nothing can
+  be built on the wrong ground. (Locking the wallet is always allowed; a send in flight when you lock is simply
+  abandoned, exactly as today.)</p>
+  <div class="panel" style="border-left:3px solid var(--good)">
+    <p style="margin:.2em 0"><b>Why this replaced a much bigger design.</b> The first plan tried to let the
+    switch happen and <em>abort</em> the send — which needed a fence, a session counter, an atomic hand-off, an
+    orphan ledger, and a crash-recovery path. Three review rounds found ~10 serious bugs, all in that machinery,
+    each fix spawning the next. Blocking the switch deletes all of it and covers the same hazard. This was a
+    deliberate scope call, made <em>because</em> the reviews proved the fancy version wasn't worth it.</p>
+  </div>
+
+  <h2>The plan, phase by phase</h2>
+  <p class="muted">One PR, but built and reviewed in this order — each phase must pass its gate before the next.</p>
+  <div class="grid">
+    <div class="phase"><b>Phase 0 — Pin the current behavior.</b> Write tests that capture how things work today
+      (including the bugs), so nothing regresses silently.
+      <div class="gate">unit tests + typecheck + lint</div></div>
+    <div class="phase"><b>Phase 1 — Build the protocol alone.</b> The pure "which-came-first" module + its
+      property tests. No app wiring yet.
+      <div class="gate">≥1000 random-ordering property runs green</div></div>
+    <div class="phase"><b>Phase 2a — Storage plumbing.</b> Composite keys, optional scope fields, the durable
+      coordinator, the single lock order. No fence yet.
+      <div class="gate">service + codec + isolation unit tests</div></div>
+    <div class="phase"><b>Phase 2b — Stamp every record with its scope.</b> The execution fence + producers
+      labelling each transaction/note with its true scope. Must land before the slices, or real records can't be
+      routed.
+      <div class="gate">every send path stamps scope + lineage</div></div>
+    <div class="phase"><b>Phase 3 — The drawers (slices) + instant switch.</b> Move the UI onto the active slice;
+      prove a foreign record can't reach it, using <em>real</em> stamped records.
+      <div class="gate">store/component tests + smoke e2e</div></div>
+    <div class="phase"><b>Phase 4 — The switch guard + account-labelling fixes.</b> Block switching while a send
+      is in flight; fix which account a dApp send is journaled under. The small half (was the tar pit).
+      <div class="gate">guard blocks/allows correctly + queued-journal unit tests</div></div>
+    <div class="phase"><b>Phase 5 — Prove it on a real network.</b> Two profiles sharing an address. Case 1: a
+      note lands on one, switch, assert zero cross-profile cards. Case 2: start a send, try to switch mid-send,
+      assert the switch is blocked and the send completes under the right profile.
+      <div class="gate">multi-profile network e2e (proverless)</div></div>
+    <div class="phase"><b>Phase 6 — Regression + security sweep.</b> All the shared-send-path e2es stay green;
+      then <code>/harden security</code> over the whole diff.
+      <div class="gate">full suite + build + /harden clean</div></div>
+  </div>
+
+  <h2>Open questions for you (the forks I won't decide alone)</h2>
+  <div class="grid">
+    <div class="phase fork"><b>Instant switch-back vs. clearing on lock.</b> Today a profile switch <em>is</em> a
+      lock→unlock. So "clear everything on lock" and "instant switch-back" fight each other. Recommendation:
+      accept that switch-back after a lock is a normal reload for now (instant-cache then only helps a future
+      in-session switcher). The alternative is building a whole authenticated switch lifecycle. Your call.</div>
+    <div class="phase fork"><b>Drop the dApp spinner cards — confirm.</b> The in-progress dApp "spinner" cards
+      stay hidden (dApp progress still shows via the durable journal cards). This removes the single biggest
+      source of past leak-bugs. Planned as dropped; just confirming.</div>
+    <div class="phase fork"><b>One big PR — confirm.</b> It touches the shared send path. Mitigated by internal
+      staging + keeping the old guards as a safety net until the new ones are proven. You chose one PR; re-confirm
+      given the regression list.</div>
+    <div class="phase fork"><b>Account storage re-key — deferred?</b> Two same-address profiles overwrite one
+      stored row today. The signing fence makes that <em>safe</em> (no mis-sign), so a full account-storage
+      migration is proposed as a follow-up, not this PR. Confirm out of scope.</div>
+  </div>
+
+  <h2>The seeds (finalized after you approve)</h2>
+  <p class="muted">Paste-ready <code>/goal</code> and <code>/loop</code> strings that drive the autonomous build.
+  These are the DRAFT versions embedded here; the finalized ones are delivered in chat at approval.</p>
+  <h3>/goal (draft)</h3>
+  <pre>Ship the Account+Profile Siloing arc (implementations-plan/account-profile-siloing/plan.md)
+as ONE signed PR into dev. Deliver: (1) a durable causal activity protocol as a pure,
+property-tested module FIRST; (2) per-(profile,network,chain,account) slices for structural
+cross-scope render isolation + instant-from-cache switching; (3) an in-flight-send switch
+guard (block a voluntary profile/account switch while a send is in flight, so active-scope
+can't drift and nothing mis-signs) + the queued-journal account-derivation fixes. Keep dApp
+spinner cards fail-closed hidden. Follow the 7 phases; each phase's Validation gate must be
+green before the next. Finish with a multi-profile+multi-account network e2e proving no
+cross-profile render + that a mid-send switch is blocked, then /harden security. Sign commits.</pre>
+  <h3>/loop (draft)</h3>
+  <pre>Implement the next unstarted phase of implementations-plan/account-profile-siloing/plan.md.
+Run that phase's Validation-gate commands verbatim; do NOT mark the phase done until they
+pass. Log every meaningful attempt in implementations-plan/account-profile-siloing/lessons/
+phase-N.md; after 3 failures on one step, stop and reassess. Never weaken a gate to pass.
+Sign commits.</pre>
+
+  <div class="foot">
+    Full plan: <a href="plan.md">plan.md</a> · decision ledger with provenance in §16 · audit transcripts:
+    <a href="audit-codex-round1.md">codex r1</a>, <a href="audit-fable-round1.md">Opus r1</a>,
+    <a href="audit-codex-round2-ultra.md">ultra</a> · the three source plans in
+    <a href="research/">research/</a>.
+  </div>
+</div>

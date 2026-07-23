@@ -28,12 +28,11 @@ row. A producer may mutate **only** the slice named by its own trusted scope env
 3. **Snapshot safety:** a snapshot finishing after a switch updates *its requested scope's* slice, never
    whichever slice is active at completion; it never resurrects a deleted row, clobbers a newer event, or crosses
    an incarnation boundary after SW-restart / re-import.
-4. **Execution binding:** a dApp send binds to its authorized profile and its actual `from` account (the builder
-   consumes `fence.profileId`, never active-now). Profile drift before the irreversible `node.sendTx` boundary
-   aborts with a typed error, a durable `failed` journal card, and a scope-aware user warning. **No tx is
-   submitted after detected drift** (a brief-hold commit-to-submit CAS closes the check→send window without
-   holding any lock across the network call); once `node.sendTx` is entered, the tx is recorded UNCONDITIONALLY
-   under the captured scope (an on-chain fact is never dropped).
+4. **Execution binding (via prevention, not detection):** while a send is in flight, a voluntary
+   profile/account switch is **blocked** (§9 guard) — so active-scope cannot drift and the builder's active-now
+   reads are always correct. No tx can build/sign under a scope other than the one it was authorized in. A send
+   completes under the profile that started it, or the user cancels it (the guard's escape hatch). Lock-wallet is
+   never blocked; a lock/SW-death mid-send abandons the send (existing reaper behavior, unchanged).
 5. **Queued/dispatch consistency:** queued-journal creation and dispatch use the *same* account-selection
    function, including the wallet-index-ordered `NO_FROM` fallback.
 6. **Journal integrity:** every journal load-modify-write / delete / supersede shares one lock and emits a causal
@@ -46,12 +45,11 @@ row. A producer may mutate **only** the slice named by its own trusted scope env
 
 Canonical execution sequence:
 ```
-session authorization
-  → atomic fence capture(expected profile, authorized account, scope)
-  → drift check → enqueue on captured-profile lane → drift check after grant
-  → composite journal claim → builder(consumes fence)/resource drift checks → prove
-  → post-prove drift check → brief-hold commit-to-submit CAS + durable `submitting` marker → node.sendTx
-  → UNCONDITIONALLY record tx in captured scope → terminal journal transition in captured scope
+session authorization → journal record created (send now "in flight")
+  → [ §9 GUARD: any voluntary profile/account switch is BLOCKED for this whole span → active-scope is CONSTANT ]
+  → enqueue on lane → composite journal claim → build from active-now (== authorized, guaranteed by the guard)
+  → prove → node.sendTx → record tx + terminal journal transition (active scope == authorized scope throughout)
+  → record terminal → guard clears → switch now allowed
 ```
 
 ## 2. Scope
@@ -60,8 +58,9 @@ session authorization
 Pure durable causal protocol + property model · composite frontend activity slices · tx/journal/incoming scoped
 snapshots + mutation envelopes · durable incarnations + per-source counters + snapshot watermarks + tombstones ·
 tx/incoming composite persistence keys · profile-aware rendering + residual filters · queued-journal derivation /
-claiming / deletion / residue cleanup · atomic authorized-profile fence · abort-on-drift through the last
-reversible point · dedicated multi-profile/multi-account network e2e · final `/harden security`.
+claiming / delete-serialization (H1/H2/H3) · **the in-flight-send switch guard (§9)** — block a voluntary switch
+while a send is in flight, so active-scope can't drift · dedicated multi-profile/multi-account network e2e ·
+final `/harden security`.
 
 ### Out of scope (state explicitly)
 - dApp task↔journal correlation + re-enabling dApp `ExecuteOperation` spinner cards (**Decision D2**).
@@ -383,140 +382,64 @@ activity epoch/counter values** (strip/re-stamp through the coordinator), reject
 preserve per-row failure reporting. New causal-clock/tombstone roots are local protocol metadata, not backup
 content.
 
-## 9. Execution fencing + abort semantics
+## 9. In-flight-send switch guard (replaces the abort-on-drift machinery)
 
-### 9.1 Fence contract — a MONOTONIC session generation (ABA-safe), not identity comparison
-> **Audit ultra-B1 (ABA):** identity comparison (profileId + deletion epoch + incarnation) is ABA-blind — a
-> P1→P2→P1 switch (or lock→unlock-P1) during proof leaves all three identical, so the CAS would broadcast despite
-> the user having switched away and back. `capturedAt` is not monotonic-comparable. Fix: a monotonic
-> `sessionGeneration` bumped on EVERY session open/close/switch.
-```ts
-interface ExecutionScopeFence {
-  profileId: string; profileDeletionEpoch: number
-  sessionGeneration: DecimalCounter          // monotonic; bumped on every open/close/switch (ABA-safe, ultra-B1)
-  authorizedAccounts: readonly string[]; scope: ActivityScope; activityIncarnation: ActivityIncarnation
-  capturedAt: number                         // diagnostic only
-}
-ProfileService.captureExecutionFence(expectedProfileId, authorizedAccounts, scope): Promise<ExecutionScopeFence>
-```
-Inside the same `runExclusive` lock lock/open/delete take: require active profile; require
-`active.id === expectedProfileId`; reject reserved/deleting; validate scope profile; freeze the authorized
-account set; capture deletion epoch; capture the **current `sessionGeneration`**; capture the activity
-incarnation. Every drift checkpoint AND the commit-to-submit CAS compare `fence.sessionGeneration` to the live
-one — an intervening switch-and-return is caught even when the identity triple is unchanged. **The authorized
-account is the dispatcher's actual `from`, NOT `appStore.account`** — a multi-account dApp session may validly
-send from B while the home screen shows A; treating popup-selected account as the principal would break
-`multi-account-from`. **Incarnation ordering (audit ultra-S6):** `activityIncarnation.generation` is a durable
-**monotonic decimal lineage** maintained by the activity coordinator per scope — NOT `pxeGeneration`, which is
-128-bit RANDOM hex (`profile/spec.ts:28-33`, not comparable with `>`); `pxeGeneration` is carried only as the
-incarnation `nonce`. A snapshot/reset advancing the incarnation must move the monotonic lineage forward so a
-delayed OLD snapshot cannot re-establish a lower lineage (ultra-S6 rollback).
+> **Why this replaces the fence/CAS/recovery apparatus (three audit rounds, ~10 blocking bugs, all here).** The
+> abort-on-drift design had to detect a scope change *during* a send and unwind it — which forced a monotonic
+> session fence, an atomic commit-to-submit hand-off, an unconditional capability-bound record, and a
+> reconcile-before-reaper restart path, each fighting the non-reentrant self-force-releasing facade lock, the
+> batch-queuing RPC client (`node.sendTx` only enqueues — `safe_json_rpc_client.ts:208`), and the aggressive boot
+> reaper (`operation-journal/reaper.ts:121`). The simpler, correct move is to **prevent the drift instead of
+> detecting it**: if the active scope cannot change while a send is in flight, the builder reading active-now is
+> *always* correct, and H4/H5/H6 evaporate with no fence at all. (User decision, superseding the earlier
+> abort-on-switch choice once the audits proved abort was the over-architecting.)
 
-### 9.2 Propagate authorized profile
-Both approved + silent paths pass `payload.session.profileId` to `ExecutionService.executeOperations`. Replace
-`check active → await refreshSession → capture active-now` with `captureExecutionFence(expectedProfileId,
-[operation.accountAddress], operationScope)` **after** materialization resolved the authorized account and
-**before** mutex/build/prove.
+### 9.1 The invariant
+**While a send is in flight for the active profile, a voluntary profile/account switch is blocked.** "In flight"
+= there exists a non-terminal execution journal record (`queued`/`pending`/`proving`/`submitting`) for the active
+profile. With switching blocked, `active` is constant for the send's lifetime → every active-now read in
+`resolveExecutionMutexKey` (`execution-lane.ts:189`) and both builders (`tx-request-builder.ts:113/382`) resolves
+the profile/account the send was authorized under. No fence, no session-generation, no CAS, no unconditional
+record, no orphan ledger, no restart-recovery beyond what exists today.
 
-### 9.3 Drift checkpoints — the builder CONSUMES the fence (no assert-then-read-active TOCTOU)
-The primary H5 closure is that the builder + ALL resource resolution take their profile/account **from the
-fence**, never re-derive from active-now. `buildStandard`/`buildNoFrom` today call `requireActiveProfile` (a
-separate facade-lock acquisition) then `getAccountContract(profile.id, …)` (`tx-request-builder.ts:113/115`,
-`:382/:387`) — asserting-equal-then-reading-active is the *same* two-acquisition window the plan condemns as H4
-(audit finding S2). So the builder signature takes `fence.profileId` + `fence.authorizedAccounts` and resolves
-the account contract from **those**, with `assertExecutionFenceCurrent(fence)` as a *supplementary* liveness
-check, not the source of the profile id. One typed check `assertExecutionFenceCurrent(fence)` (active profile +
-deletion epoch + **`sessionGeneration`** + activity incarnation still current). Call it: (1) after capture;
-(2) before enqueue; (3) after mutex grant; (4) before journal claim/create; (5) at `buildStandard` entry; (6) at
-`buildNoFrom` entry; (7) after slow contract/authwit discovery; (8) before proof; (9) after proof before
-`toTx`/submitting; (10) at the commit-to-submit checkpoint (§9.4). Mutex key = captured profile. Fee-strategy
-chain carries the fence (`fee/{fee-strategy,embedded-strategy,fee-juice-strategy,fee-juice-with-claim-strategy,
-fpc-strategy}.ts`), each resolving accounts from the fence, not active-now. **Do NOT port correlation from
-`a6ed183`.**
+### 9.2 The guard (small, one chokepoint)
+- A single reactive predicate `hasInFlightSend(activeProfileId)` derived from the operation-journal (a
+  non-terminal `transfer`/`dapp_execute` record exists for the active profile). Expose it from the journal
+  client the popup already consumes.
+- The **profile-switch intent** — today `lock → profile selector → unlock` (`Header.vue:22`) — checks the guard
+  BEFORE tearing down the session: if `hasInFlightSend`, block with a toast ("Finish or cancel your pending
+  transaction before switching accounts.") and a link to the pending card. The account-switch control (same
+  shell) checks the same predicate.
+- **Cancel is the escape hatch:** the existing cancel-in-flight path (`cancel-mid-prove` contract) lets the user
+  abandon the send, which terminalizes the record → the guard clears → the switch proceeds. So the user is never
+  trapped; they either let it finish (seconds) or cancel.
 
-> **Audit ultra-S8 — split PREVIEW vs AUTHORIZED builders.** `estimateOperationFee` runs the SAME builder with no
-> session fence (`dapp-send-executor.ts:208`); making the fence *required* on the builder breaks fee preview,
-> making it *optional* is fail-open. So there are two builder entry points: a **preview** path (no fence, no
-> drift abort, no scope stamping — read-only, cannot submit) and an **authorized** path (fence-consuming, drift
-> checks, stamps scope). The `SendPrincipal` (§17/D16) selects the path; a `kind:"dapp"` authorized build with no
-> `expectedProfileId` rejects. Preview never reaches the commit-to-submit boundary.
+### 9.3 What is deliberately NOT guarded
+- **Emergency lock-wallet is NEVER blocked** — it is a security action and must always work. Locking during a
+  send abandons it; the existing reaper fails the record at SW boot (unchanged today's behavior). The guard is on
+  the *switch-to-another-profile* intent only, not on lock.
+- **SW death / TTL auto-lock mid-send** is not a voluntary switch and is out of the guard's scope — the existing
+  reaper (`reaper.ts:121`) already terminalizes non-terminal records at boot. This arc does not change the reaper
+  or the batch-RPC boundary. There is no attempt to make a send *survive* a lock/restart (that was the entire
+  source of the tar pit and is explicitly dropped).
 
-### 9.4 The commit-to-submit boundary — brief-hold CAS, NOT a lock held across `node.sendTx`
-> **This supersedes the rejected "hold the profile-facade `Lock` across `node.sendTx`" design.** That design is
-> broken (audit B1/B2, verified): the facade `Lock` force-releases after `MAX_HOLD_MS = 5min` *while the holder
-> runs* (`packages/wallet-core/src/utils/lock.ts:4,37-44`), and a hanging `node.sendTx` worst case is ~246s
-> (4 attempts × 60s + [1,2,3]s backoff — `aztec-runtime/src/utils/fetch.ts:18`), under 5min with **zero margin**;
-> SW-timer throttling or one extra await pushes it over → force-release fires → a queued switch acquires the lock
-> (H5 reintroduced) → the holder's `finally leave()` double-releases and corrupts the lock wallet-wide. That lock
-> also gates the popup poll, `refreshSession`, and the emergency **lock-wallet** action, so holding it across a
-> multi-minute send is a wallet-wide availability + security regression.
+### 9.4 Queued-journal account correctness stays (H1/H2/H3 — independent of switching)
+The guard does not touch *which account a send is journaled under*; that is a separate correctness bug fixed in
+§10 (dispatcher-consistent `NO_FROM` derivation, lock-serialized delete). Those fixes stay.
 
-Since the builder already binds everything to `fence.profileId` (§9.3), *nothing is ever built under the wrong
-profile* regardless of active-now — a mid-prove switch cannot mis-bind. The only residual is the tiny
-check→`sendTx` window, closed **without** a long-held lock:
+### 9.5 dApp-facing behavior
+A dApp send is never silently mis-scoped (the guard keeps `active` stable for its lifetime) and there is no new
+`EXECUTION_SCOPE_CHANGED` error path — the send simply runs to completion or the user cancels it. No typed
+scope-changed error, no scope-aware abort warning, no submission bundle. (All of §9's former error/warning
+machinery is dropped.)
 
-1. **Commit-to-submit (atomic hand-off — audit ultra-B2):** at the existing pre-send `checkCancelled`
-   (`execution-coordinator.ts:174`), under a **private lock-held** critical section (a `*_locked` fence-check
-   helper — the facade `Lock` is non-reentrant, so a *public* lock-taking check called from here self-deadlocks,
-   ultra-Minor): (a) re-verify the fence current INCLUDING `sessionGeneration` (§9.1); (b) persist the durable
-   submission bundle (§9.7); (c) **synchronously invoke `node.sendTx(tx)` and capture its Promise WITHOUT
-   awaiting it** inside the critical section; then (d) **release the lock and `await` the Promise OUTSIDE**. This
-   closes the release→send gap: a queued switch cannot interleave between "fence verified" and "send dispatched"
-   because the send is *dispatched* under the lock; only its network wait happens outside. **The returned Promise
-   must NOT flow back through `runExclusive`** (`profile/service.ts:160`'s `return await fn()` would hold the lock
-   across the network — ultra-B2). If the fence is stale at (a) → abort (no send).
-2. **The switch never waits on the network:** a switch acquiring the facade lock after our critical section
-   proceeds immediately; one that held it before makes (a) fail → abort.
-3. **Record via a ONE-SHOT capability, not a blanket bypass (audit ultra-B4 + S1):** post-`sendTx`, the tx +
-   terminal journal are recorded under `fence.scope`. This write bypasses the §5.5 incarnation-current gate
-   **only** via a one-shot capability bound to `(marker id, scope, incarnation, txHash)` minted at step-1 — the
-   normal producer APIs must **never** accept an "omit fence" flag (else a genuinely-stale write sneaks through).
-   An accepted on-chain tx is irreversible and must never be dropped; but if the scope was RETIRED (profile
-   delete) between capture and the record write, the row cannot enter the deleted profile's feed (privacy) — it
-   goes to a **non-rendering orphan ledger**, and profile deletion stays **reserved until all armed submissions
-   reconcile** (then a final purge), so a purge can neither erase the on-chain record nor race the recreate
-   (ultra-B4). Never reported as `EXECUTION_SCOPE_CHANGED`.
+### 9.6 Residual + honest limits
+- A send in flight when the user hits **lock** is abandoned (reaper-failed at boot) — same as today; acceptable
+  and not a regression.
+- The guard is a **UX constraint** (you can't switch for the seconds a send proves+submits). This is standard
+  wallet behavior and far cheaper than the abort machinery. If a future in-session switcher makes this annoying,
+  revisit — but the guard is correct and leak-free as-is.
 
-Wire via an optional coordinator hook `commitSubmission?: (fence, sendThunk) => Promise<void>`. **Submission
-recovery (§9.7) applies to ALL sends** (a UI transfer can also SW-die post-accept — `transfer-executor.ts:199`,
-ultra-S8); only the drift-ABORT is dApp-only. No wallet-wide freeze; no 5-min-force-release hazard.
-
-### 9.7 Restart reconciliation — a versioned bundle, reconciled BEFORE the reaper
-> **Audit ultra-B5:** the existing journal reaper's boot sweep transitions EVERY non-terminal record to `failed`
-> at SW startup (`operation-journal/reaper.ts:121-128`, "recovery is impossible"). A naive `submitting` marker
-> would be reaped to `failed` before any reconciler ran — and `failed→succeeded` is illegal. And `{scope,txHash,
-> fence}` lacks the journal id, endpoint, `Tx` draft, and public-authwit tail the send callbacks need
-> (`transaction/service.ts:115`).
-
-The durable marker is a **versioned, runtime-validated submission bundle** `{ version, journalId, scope, fence,
-endpointUrl, txHash, txDraft, authwitTail }` persisted *before* the synchronous send-dispatch (§9.4 step-1c). On
-SW restart: (1) a `submission_unknown` journal state (NOT `failed`) is stamped for any record with a live marker;
-(2) the **reconciler runs BEFORE the reaper** — it re-checks each marker's tx against the marker's **pinned
-endpoint** (a transport timeout is ambiguous — NOT proof of rejection), and on a found tx records `succeeded`
-under the captured scope via the one-shot capability, on a confirmed-absent tx after a bounded grace →
-`failed`; (3) every step is idempotent and the **marker is deleted LAST**; (4) only then may the reaper sweep the
-remaining (marker-less) non-terminal records as today. This inverts the current boot ordering (reconcile →
-reap) and adds the `submission_unknown` non-terminal state so the reaper skips armed records.
-
-### 9.5 Error + warning UX (typed, no-leak, durable card)
-Add `ExecutionScopeChangedError` (`packages/extension-messaging/src/errors.ts`, code `EXECUTION_SCOPE_CHANGED`,
-"Wallet scope changed; the transaction was not sent."). Map in `wallet-sdk/error-envelope.ts` to JSON-RPC
-`-32000` + `data.walletErrorCode="EXECUTION_SCOPE_CHANGED"`. **Not EIP-1193 `4001`** (this was not an explicit
-user rejection). **Never** include profile/account/network/origin/builder-phase in the dApp envelope. Journal:
-pre-claim drift → `failIfUnclaimed` terminalizes `queued`/unclaimed-`pending`; post-claim drift → executor catch
-transitions its owned record to `failed` with `error.kind="scope_changed"`; **keep the failed record — do NOT
-tombstone it — the durable failed card IS the warning + audit trail**; never leave `pending` residue. Immediate
-warning: emit `onExecutionScopeAborted{journalId, scope}`; a popup shows a toast **only when its current scope ==
-the event scope** ("Transaction stopped because the wallet profile changed."), dedup by journalId, no retries; a
-popup on another profile shows nothing. On return to the authorizing scope the durable failed card is visible.
-
-### 9.6 Abort DoS analysis
-A dApp cannot switch the wallet profile — abort is a user action. Per-origin/lane caps stay 8/32; one drift →
-one terminal journal row + one warning; no auto-retry; warning copy is wallet-controlled (never dApp
-title/subtitle); a dApp can't cancel another origin's request. **The facade lock is held only for the
-milliseconds of the commit-to-submit CAS (§9.4), NEVER across `node.sendTx`** — so a switch is never delayed by a
-network call and a hung endpoint cannot freeze profile switching or the emergency lock-wallet action (this is the
-correction of the rejected design's wallet-wide freeze, audit B1/B2).
 
 ## 10. Queued-journal + dispatcher consistency
 Shared pure helper `packages/wallet-bridge/src/account-resolution.ts`:
@@ -534,16 +457,11 @@ session's authorized profile (active equality is still verified via the atomic f
 global order in §5.6 (`queuedCreationLock → facade → activity-scope → transitionLock → …`), never reversed.
 
 ## 11. Deterministic multi-profile / multi-account network e2e
-Files: `tests/e2e/network/account-profile-siloing.test.ts`, `tests/e2e/fixtures/profiles.ts`,
-`tests/e2e/fixtures/execution-scope-gate.ts`, `apps/extension/src/e2e/execution-scope-gate.ts`. Extend the
+Files: `tests/e2e/network/account-profile-siloing.test.ts`, `tests/e2e/fixtures/profiles.ts`. Extend the
 playground with a real account selector so `opts.from` can pick the 2nd granted account (also upgrades
-`multi-account-from.test.ts` past its first-account-only limitation).
-
-**Test-only gate** (`ExecutionScopeGate`, mirrors the proof-gate DCE pattern): placed **after
-`ExecutionScopeFence` capture, before `ExecutionLane.acquireSlot`** — the exact H5 interleaving (authorized, but
-before any active-now lane/builder read). Injected only when `E2E_PROVERLESS` is statically true; static import,
-no dynamic chunk; storage-key + class-marker absent from a normal prod bundle (negative-grep gate); no
-release/publish change.
+`multi-account-from.test.ts` past its first-account-only limitation). The existing **proof gate** (no new prod
+seam needed — the fence/scope gate is dropped with §9) parks a send at `proving` to hold it "in flight"
+deterministically.
 
 **Fixture topology** (respects the verified account-global-key + random-networkId facts): one browser; P1 from a
 deterministic mnemonic; **P2 imported from the SAME mnemonic** (→ different profileId, but `P1.A===P2.A` and
@@ -552,32 +470,23 @@ differ. **Because account storage is globally keyed by address, the fixture recr
 profile's A/B rows after each switch and asserts the stored row's `profileId` — it does NOT assume both profiles'
 rows coexist.**
 
-**Authoritative no-submit proof (audit codex-nb4):** the test installs an observable **`node.sendTx` invocation
-counter** (e2e-only hook) — the no-submit assertion is `sendTxCount === 0`, NOT "balances unchanged / no tx row"
-(both of which can pass for reasons other than a real abort). **Arm the `MutationObserver` on the destination
-activity root BEFORE the switch begins**, not after P2 activation — arming after misses a one-frame leak during
-the switch tick.
+**Case 1 — the render-isolation win (H0/H7):** a real incoming note lands on P1/A while P1 is active; assert it
+renders under P1 and, after switching to P2 (no send in flight), **zero** P1 cards appear under P2 (a
+`MutationObserver` armed BEFORE the switch records any transient leak); switch back → P1's own activity reappears
+instantly. This is the core privacy assertion.
 
-**Sequence:** activate P1 + ensure A/B belong to P1 → connect playground under P1 → grant the tx bundle for both
-accounts in order `[B,A]` → select explicit `from=B` → fund B → **arm the `MutationObserver` + reset the sendTx
-counter** → start `sendTx`, approve → wait until the scope gate reports the P1/B fence captured → in a separate
-wallet page lock/switch/unlock P2, select Local Network, ensure/create B (global address row now belongs to P2),
-assert visible active scope is P2/local/B → release the gate → assert: the dApp gets error status + JSON-RPC
-`-32000` + `walletErrorCode==="EXECUTION_SCOPE_CHANGED"` + **no** scope details; **`sendTxCount === 0`**; **no**
-tx row under P1 or P2; the observer recorded **zero** P1 card ids under P2; no P2 journal bound to P1's request;
-P1 has no queued/pending residue → switch back to P1 (recreate/ensure A/B), activate B, assert exactly one
-`failed` `scope_changed` card carrying P1's scope → switch A→B→A in P1, verify cached rows return without
-cross-account assignment → assert no console/page errors.
+**Case 2 — the in-flight-send guard (§9, replaces the abort case):** activate P1 + ensure A/B belong to P1 →
+connect playground under P1 → grant the tx bundle `[B,A]` → `from=B` → fund B → install an observable
+**`node.sendTx` invocation counter** → hold the proof gate → start `sendTx`, approve (now a `proving` record
+exists = in flight) → **attempt to switch to P2 → assert the switch is BLOCKED** (guard toast asserted via
+`waitForToast`; active scope stays P1) → release the proof gate → assert the send **completes under P1**
+(`sendTxCount === 1`, the tx row lands under P1/B, never P2) → now that the record is terminal, **the switch to
+P2 succeeds** → assert P2 shows zero P1 cards. Also assert **lock-wallet is NOT blocked** during the in-flight
+send (locking abandons it; reaper-failed at boot — unchanged behavior).
 
-**Second case IN THE SAME dedicated network e2e (not a separate composition test) — the post-prove/pre-submit
-closure (D10):** use the existing **proof gate** to hold *after* the builder has proved but *before* the
-commit-to-submit CAS; switch to P2; release → assert the CAS drift-check aborts, `sendTxCount === 0` (the proof
-is dropped, `node.sendTx` is never entered), and one `failed` card under P1. This is the case the pre-`acquireSlot`
-gate CANNOT prove; both gates are required to cover the full drift window.
-
-**Must-stay-green regressions:** `concurrent-sendtx{,-approve,-confirm}.test.ts`, `cancel-mid-prove.test.ts`,
-`transfers.test.ts`, `multi-account-from.test.ts`, `account-switch-isolation.test.ts` (the H0 gate),
-`incoming-transfers.test.ts`.
+**Must-stay-green regressions:** `concurrent-sendtx{,-approve,-confirm}.test.ts`, `cancel-mid-prove.test.ts`
+(the guard's escape hatch), `transfers.test.ts`, `multi-account-from.test.ts`, `account-switch-isolation.test.ts`
+(the H0 gate), `incoming-transfers.test.ts`.
 
 ## 12. Phases + validation gates (one PR, staged reviewable commits — no product wiring before the spike passes)
 
@@ -596,25 +505,25 @@ New `packages/wallet-core/src/activity/{scope,causal,model,index}.ts` + `causal.
 --cwd packages/wallet-core typecheck` · `bun run typecheck:all` · `bun run lint`. **No wiring lands before this
 is green.**
 
-### Phase 2a — Durable protocol storage primitives (§5.4, §6 storage) — NO execution-fence dependency
-> Split out of the old Phase 2 (audit codex-c2 / Opus-M1): the old Phase 2 depended on Phase 4's
-> `ExecutionScopeFence`, so it could not stand alone. 2a is the fence-free half.
+### Phase 2a — Durable protocol storage primitives (§5.4, §6 storage)
+> Split out of the old Phase 2 (audit codex-c2 / Opus-M1): storage primitives first, producer stamping (2b)
+> second, so each half is independently reviewable and 2b's stamping lands before Phase 3's slices need it.
 
 Activity-protocol repo/coordinator + runtime singleton + the ONE lock order (§5.6); tx/journal/incoming optional
 composite fields + codecs + composite storage keys + `getActivitySnapshot` read-consistent paths; scope
 lifecycle/retirement; profile-deletion by profile/scope (not address); legacy dual-read + unique-attribution
-quarantine; backup re-stamp; per-row codec tests. Producers do NOT yet stamp incarnation from a fence.
+quarantine; backup re-stamp; per-row codec tests. Producers do NOT yet stamp their records (that's 2b).
 **Gate:** `bun run --cwd apps/extension test src/wallet/services/{activity-protocol,transaction,operation-journal,
 incoming-transfer,backup} src/wallet/services/storage-codecs.test.ts src/wallet/services/cross-profile-isolation.test.ts`
 · `bun run --cwd packages/wallet-core test src/activity` · `typecheck:all` · `lint` · `bun run test`.
 
-### Phase 2b — Execution scope fence + producer scope-stamping (§9.1–9.2, §5.5) — MUST precede Phase 3
-The `ExecutionScopeFence` capture (atomic, §9.1) + `SendPrincipal` discriminator (§17/D16) + `ActivityWriteFence`
-(§5.5) + producers emitting COMPLETE causal envelopes (tx/journal/incoming stamp `scope` + `activityIncarnation`
-from the fence). This is the half Phase 3 depends on: only once every real tx/journal producer stamps its scope
-can the slices route real records (else a colliding-address tx with no `profileId` is quarantined and vanishes —
-audit Opus-M1). Abort/drift semantics do NOT land here (Phase 4).
-**Gate:** `bun run --cwd apps/extension test src/wallet/services/{profile,execution,transaction,operation-journal,
+### Phase 2b — Producer scope-stamping (§6, §5.5) — MUST precede Phase 3
+Producers emit COMPLETE causal envelopes (tx/journal/incoming stamp `scope` + `activityIncarnation`) from the
+active scope at write-time (which the §9 guard keeps stable for a send's lifetime — no execution fence needed).
+`ActivityWriteFence` (§5.5) still applies to long-running producers (incoming polling). This is the half Phase 3
+depends on: only once every real tx/journal producer stamps its scope can the slices route real records (else a
+colliding-address tx with no `profileId` is quarantined and vanishes — audit Opus-M1).
+**Gate:** `bun run --cwd apps/extension test src/wallet/services/{execution,transaction,operation-journal,
 incoming-transfer}` — assert every send path stamps scope+incarnation · `typecheck:all` · `lint` · `bun run test`.
 
 ### Phase 3 — Composite frontend slices + instant cache (§7)
@@ -630,32 +539,28 @@ admission + unique attribution · dApp orphan cards stay hidden.
 src/popup/components/modules/general src/popup/pages/activity.vue src/utils/activity-rows.test.ts` · `bun run
 test:e2e` · `typecheck:all` · `lint` · `bun run test`.
 
-### Phase 4 — Queued-claim correctness + abort-on-drift execution (§9.3–9.7, §10)
-Shared wallet-bridge resolver + actual-`from` extraction + exact `NO_FROM`; composite queued record + claim token
-+ lock-serialized supersede + `failIfUnclaimed`; builder CONSUMES `fence.profileId` + **PREVIEW/AUTHORIZED split**
-(§9.3, no TOCTOU, no broken fee-estimate); all drift checkpoints comparing **`sessionGeneration`**;
-captured-profile lane key; fee-strategy fence propagation; **atomic commit-to-submit hand-off (sync-dispatch under
-private lock-held check, await outside) + versioned submission bundle + one-shot-capability unconditional record +
-orphan ledger + reconcile-BEFORE-reaper restart recovery** (§9.4/9.7 — NOT a lock held across `node.sendTx`);
-typed `-32000` dApp error; scope-aware warning; pending-residue cleanup. **No correlation from `a6ed183`.**
-Tests: capture-vs-switch atomic · **ABA `P1→P2→P1` + `lock→unlock-P1` during proof both ABORT** (ultra-B1) ·
-switch before-enqueue/while-mutex-waiting/during-builder/during-proof aborts · switch at the commit-to-submit CAS
-aborts before send · switch AFTER the sync-dispatch does NOT falsely report abort + records captured scope via the
-one-shot capability · scope-retirement between capture and record → the on-chain tx lands in the orphan ledger,
-never dropped, deletion waits (ultra-B4) · **SW-death after dispatch → the reconciler runs BEFORE the reaper and
-recovers from the submission bundle; the reaper never fails an armed `submission_unknown` record** (ultra-B5) ·
-`estimateOperationFee` (preview) still works with no fence · happy paths keep lane ordering.
+### Phase 4 — In-flight-send switch guard + queued-journal correctness (§9, §10)
+The small half. (a) **Guard (§9):** `hasInFlightSend(activeProfileId)` derived from the journal; the profile-
+switch + account-switch intents block (toast + link to the pending card) when it's true; lock-wallet is NEVER
+blocked; cancel-in-flight clears the guard. (b) **Queued-journal correctness (§10, H1/H2/H3):** shared
+wallet-bridge `resolveAuthorizedSessionAccount` used by dispatch + queued-create; actual-`from` extraction; exact
+index-sorted `NO_FROM`; lock-serialized `deleteOperation`/`setOperationMeta` + tombstone. **No fence, no CAS, no
+recovery machinery — the guard makes active-scope constant for a send's lifetime, so the builder's active-now
+reads are always correct (H4/H5/H6 evaporate).** Tests: guard blocks a switch while a `proving` record exists +
+allows it after cancel/terminal · lock-wallet is never blocked · `[A,B]` explicit-B queues+claims B · session
+`[B,A]`/wallet `[A,B]` `NO_FROM` → A · racing delete+transition doesn't resurrect · happy send under a fixed
+profile is byte-unchanged.
 **Gate:** `bun run --cwd packages/wallet-bridge test` · `bun run --cwd apps/extension test
-src/wallet/services/{profile,dapp-interaction,execution,wallet-sdk,operation-journal} src/popup/utils` · `bun run
+src/wallet/services/{operation-journal,wallet-sdk,execution} src/popup/components src/components` · `bun run
 test:e2e` · `typecheck:all` · `lint` · `bun run test`.
 
 ### Phase 5 — Multi-profile/multi-account network harness (§11)
-Fixture helpers + real playground account selector + execution-scope gate + the dedicated test + strengthened
-`multi-account-from`.
+Fixture helpers + real playground account selector + the dedicated test (Case 1 render-isolation + Case 2
+in-flight-send guard, both via the existing proof gate) + strengthened `multi-account-from`.
 **Gate:** `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/account-profile-siloing.test.ts` ·
 `… tests/e2e/network/multi-account-from.test.ts tests/e2e/network/cancel-mid-prove.test.ts` · `bun run --cwd
-apps/extension build:chrome` · `! rg -n "nulo:e2e:execution-scope-gate|ChromeStorageExecutionScopeGate"
-apps/extension/dist/chrome` · `typecheck:all` · `lint`.
+apps/extension build:chrome` · `typecheck:all` · `lint`. (No new prod seam to negative-grep — the §9 guard
+reuses the existing proof gate for determinism; the fence/scope-gate is dropped.)
 
 ### Phase 6 — One-PR integration, regression, security gate
 Remove the now-redundant Phase-1 clear/generation code **only after** slice tests prove equal-or-stronger
@@ -673,9 +578,9 @@ product ask:** confirm once more the dApp `ExecuteOperation` spinner re-enable s
 | H1 queued account from `accounts[0]` | parse actual `from`; shared resolver | explicit-from-B unit/e2e |
 | H2 wrong `NO_FROM` order | one wallet-bridge helper for queue + dispatch | `[B,A]` session / `[A,B]` wallet test |
 | H3 delete/meta resurrection | all journal writes/deletes under one lock + durable tombstones | adversarial deferred-promise races |
-| H4 non-atomic authorized profile | `captureExecutionFence(expectedProfileId, …)` under facade lock | capture-vs-switch test |
-| H5 post-capture drift | builder CONSUMES `fence.profileId` + **monotonic `sessionGeneration`** (ABA-safe) at every checkpoint + captured lane key + **atomic commit-to-submit hand-off** (sync-dispatch under lock, await outside) + one-shot-capability record + reconcile-before-reaper recovery | scope-gate e2e (pre-acquireSlot) + proof-gate case (post-prove/pre-submit) + **ABA P1→P2→P1** unit, all asserting `sendTxCount===0` |
-| H6 silent pending residue | claim token distinguishes prepared/claimed; `failIfUnclaimed` handles queued+unclaimed-pending | background-cleanup tests |
+| H4 non-atomic authorized profile | **PREVENTED by the §9 guard** — active-scope can't change during a send, so there is no non-atomic window to close | guard-blocks-switch-during-send test |
+| H5 post-capture drift | **PREVENTED by the §9 guard** — no drift is possible while a send is in flight; the builder's active-now read is always correct | in-flight-send e2e (Case 2): switch blocked, send completes under P1 |
+| H6 silent pending residue | **N/A under the guard** — no fence-abort path exists to leave residue; the send runs to completion or the user cancels (terminalizing the record) | cancel-clears-guard test |
 | H7 profile-less display filter | profile+network+chain+account present-and-equal | P1/P2 colliding-address render test |
 | H8 restart/ABA/snapshot/reincarnation | durable incarnation (keyed on `pxeGeneration`; covers chain-purge + same-address re-add + **same-id backup restore** — NOT mnemonic re-import into an occupied slot, which mints a new profileId → new scope key) + per-source counter + coverage watermark + per-record tombstone + composite incoming key | property suite (P1–P11) |
 
@@ -691,13 +596,15 @@ dispatcher account authorization, wallet-owned network/account rows after exact 
 profile facade lock, the incarnation coordinator. **Untrusted:** dApp `from`/titles/method names, active-now
 reads after authorization, optional legacy scope fields without unique attribution, any record routed merely
 because the UI happens to match. **Note provenance:** `NoteDao.owner` is the trusted owner — decoded content is
-not a replacement authority; **do NOT restore the reverted owner-mismatch filter.** **Abort UX/DoS:** §9.6.
-**Storage tampering:** a corrupt high counter can suppress activity (local availability loss) but must **never**
-redirect rows to another scope; on malformed clock/incarnation metadata fail closed for that scope + quarantine +
-reconstruct only from valid row/tombstone revisions under an explicit repair path (never silently reset counters
-+ reuse an old incarnation). **Supply chain:** `fast-check` dev-only, 7-day min-age, `bun.lock` committed,
-frozen-lockfile CI; no crypto rolled. **Test seam:** the `ExecutionScopeGate` is DCE'd out of prod (negative-grep
-gate), same posture as the accepted proof gate.
+not a replacement authority; **do NOT restore the reverted owner-mismatch filter.** **Mis-sign prevention:** the
+§9 in-flight-send guard keeps active-scope constant for a send's lifetime, so a tx can never build/sign under a
+scope other than the one it was authorized in (H4/H5) — enforced by prevention, not detection. **Guard DoS:** a
+dApp cannot switch the wallet or force the guard; the guard blocks only the user's own voluntary switch and
+cancel is always available; lock-wallet is never blocked. **Storage tampering:** a corrupt high counter can
+suppress activity (local availability loss) but must **never** redirect rows to another scope; on malformed
+clock/incarnation metadata fail closed for that scope + quarantine + reconstruct only from valid row/tombstone
+revisions under an explicit repair path (never silently reset counters + reuse an old incarnation). **Supply
+chain:** `fast-check` dev-only, 7-day min-age, `bun.lock` committed, frozen-lockfile CI; no crypto rolled.
 
 ## 15. Assumptions
 **Facts** — see §3 (all verified file:line this session): accounts keyed by address (colliding profiles overwrite)
@@ -715,22 +622,21 @@ active-now mutex/builder reads · empty real-migration registry (pre-production)
   id (`nextUnreservedId`, `:837-841,993-999`) → a different scope key. Either way the incarnation must key on
   `pxeGeneration` + be included in the profile-deletion purge set. **Highest-risk wiring point — dedicated store
   test for the same-id-restore-bumps-pxeGeneration → old-incarnation-events-dropped path.**
-- (I2 — pin in Phase 0, don't infer) Locking a profile does NOT synchronously abort in-flight controllers (a held
-  job survives until its next `checkCancelled`, verified `execution-lane.ts:136-180`); the design uses the scope
-  gate + the commit-to-submit CAS, never lock-mid-prove. **Characterize this contract in Phase 0** rather than
-  resting on inference.
-- (I3 — CORRECTED) `refreshSession()` cannot switch to P2, but it is **not** side-effect-free: it calls
-  `getActive()` which can close a TTL-expired session (`session-manager.ts:159-166,259-277`). The H4 drift vector
-  (concurrent switch between the `:149` check and SW-side capture) is still closed by the atomic fence; just don't
-  assume `refreshSession` is a no-op.
+- (I2 — pin in Phase 0) Locking a profile does NOT synchronously abort in-flight controllers (a held job survives
+  until its next `checkCancelled`, verified `execution-lane.ts:136-180`). Under Option 1 this matters only for the
+  guard's edge (lock-during-send abandons the send → reaper-failed at boot, unchanged today). **Characterize in
+  Phase 0.**
+- (I3) `refreshSession()` calls `getActive()` which can close a TTL-expired session
+  (`session-manager.ts:159-166,259-277`). Under Option 1 a TTL close during a send is the same as a lock (send
+  abandoned, reaper-failed) — no new handling needed; just don't assume `refreshSession` is a no-op.
 - (I4 — measure, don't assume) The 32-slice cap is per LIVE popup — a popup teardown loses the cache (cold repaint
   on reopen), and slice size is otherwise unbounded. **Measure memory + define the cold-paint UX**; don't assert
   no regression.
 
 **Asks.** Audit note (codex): A1/A2/A3/A5/A6 are baked into implementation phases → they are **approval
 PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface all at the gate:
-- (A1 — precondition) The `ExecutionScopeGate` prod seam (DCE'd, negative-grep-guarded) is assumed built — or
-  accept a less-deterministic mutex-wait-only repro.
+- (A1 — resolved by Option 1) No new prod seam. The §9 guard's e2e reuses the EXISTING proof gate; the
+  `ExecutionScopeGate` is dropped.
 - (A2 — DECISION FORK, ultra-S7) **Inactive-profile cache vs the lock-based switch.** Today a profile switch IS
   lock→unlock (`Header.vue:22`), so "clear on lock" and "instant switch-back" are in direct conflict. Two options
   to pick between: (i) **switch-back is cold after a lock** (simplest, safe; instant-cache benefits only a future
@@ -743,20 +649,26 @@ PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface a
   overwrite on switch) but not a signing leak.
 - (A4) **Abort semantics** = the dispatcher-authorized `from` governs execution (popup-selected `appStore.account`
   is presentation state, not an SW authority) — binding.
-- (A5 — CORRECTED, precondition) **Commit-to-submit is a brief-hold CAS + durable `submitting` marker (§9.4),
-  NOT a lock held across `node.sendTx`.** The rejected "hold the facade lock across the bounded node request"
-  answer was wrong (audit B1/B2): the bound is *minutes* (≈246s worst case, under the lock's 5-min force-release
-  with zero margin) and would freeze every profile op wallet-wide including emergency lock. Confirm the corrected
-  design.
+- (A5 — resolved by Option 1) No commit-to-submit CAS, no `submitting` marker, no lock-across-send. The §9 guard
+  keeps active-scope stable for the send's lifetime, so the send just runs to completion under the profile that
+  started it. The whole execution-abort/recovery apparatus is dropped.
 - (A6 — precondition) `fast-check` as the property lib (dev-only, 7-day-min-age policy-subject).
 - (A7) Final confirm: dApp `ExecuteOperation` spinner cards stay **dropped** (D2) — binding.
-- (A6) Confirm `fast-check` as the property lib (dev-only, policy-subject).
-- (A7) Final confirm: dApp `ExecuteOperation` spinner cards stay **dropped** (Decision D2).
+- (A8 — Option-1 tradeoff) The guard is a UX constraint: you cannot switch profile/account for the seconds a
+  send proves+submits (cancel is the escape hatch). Standard wallet behavior; confirm acceptable.
 
 ## 16. Decision ledger (with provenance)
+> **SUPERSEDING NOTE (Option 1, user decision after the audits).** Three audit rounds put ~10 blocking bugs
+> entirely in the abort-on-drift machinery. The user chose the **in-flight-send guard** (§9) instead: block a
+> voluntary switch while a send is in flight, so active-scope can't drift and no fence is needed. This
+> **supersedes** the execution-abort decisions below — kept for provenance (they document a real path explored
+> and rejected for cause): **D1 (now block-not-abort), D7's execution use, D10, D11, D16's fence use, D22, D25,
+> D26, D28, D29, D31.** Still LIVE (they're protocol/slice decisions, unaffected): D3, D4, D5, D6, D8, D9, D12,
+> D13(as the guard's cancel→failed card), D14, D15, D20, D21, D23/D30 (incarnation), D27, D32, D33, D17, D18, D19.
+
 | # | Decision | Chosen | Rejected | Source / rationale |
 |---|---|---|---|---|
-| D1 | Mid-switch execution | **abort before broadcast + warn** | continue under captured profile | **User binding**; smaller execution trust surface (all 3 planners agreed). |
+| D1 | Mid-switch execution | **BLOCK the switch while a send is in flight (§9 guard)** | ~~abort-on-drift~~ (superseded) → ~~continue under captured profile~~ | **User (Option 1) after audits** — abort-done-correctly was the over-architecting; the guard prevents drift instead of detecting it, deleting the whole fence/CAS/recovery stack. |
 | D2 | dApp in-progress cards | **keep fail-closed hidden** | re-enable correlation cards | **User binding**; drops the biggest audit-pain surface (all 3). |
 | D3 | Activity isolation | **composite slices** | more active-now guards | all 3; guards can be omitted, slice routing is structural. |
 | D4 | Snapshot ordering | **coverage watermark + per-record revision; `maxEventSeen` diagnostic-only** | **per-source global-max-seq threshold** | **codex correction — supersedes the main + Opus drafts** (counterexample §5.1: a global max loses out-of-order distinct records). |
@@ -794,27 +706,23 @@ PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface a
 First commit = tests only (Phase 0). Second = the standalone property-tested protocol (Phase 1). Backend APIs
 additive before old feed APIs are removed; raw legacy service events remain for non-feed consumers (the new
 bridge uses causal events). Phase-1 containment stays until the new slices pass unit+component+mocked-e2e+network.
-The execution entrypoint takes a **discriminated `SendPrincipal`** (D16, hardened per audit codex-c3): `{kind:
-"dapp"; expectedProfileId: string}` vs `{kind: "wallet"}`. A `kind:"dapp"` send with no profile **rejects**
-(fail-closed) — an `expectedProfileId===undefined` sentinel would let one missed dApp call-site silently bypass
-the fence + captured lane + commit-to-submit. Only the *drift-abort* behavior is inert for `kind:"wallet"` sends;
-**activity scope + revision STAMPING applies to ALL sends** (a wallet transfer must still land in its own slice).
-So UI transfers / `executeTransfer` / read-only simulate / `estimateOperationFee` keep their behavior (no abort,
-no captured-lane change) but DO stamp scope. The shared coordinator gets an *optional*
-`commitSubmission` hook; unrelated send paths preserve behavior until explicitly opted in. `a6ed183` is evidence
-only (correlation excluded). Each internal commit passes targeted typecheck/tests. `/harden security` is the
-final blocking review, not a follow-up. The merge condition is not "tests pass" — it is: no durable producer has
-an active-scope write API, every ambiguous legacy row fails closed, every queued claim is composite + serialized,
-and the last reversible execution boundary is demonstrably fenced.
+**Under Option 1 the execution side barely changes** — no `SendPrincipal` discriminator, no fence threading, no
+`commitSubmission` hook. The only execution-side changes are: (a) the §9 guard (a switch chokepoint reading
+`hasInFlightSend`); (b) producers stamping their scope (which they'd do regardless — the slices need it); (c) the
+queued-journal account fixes (§10). All existing send paths (`executeTransfer`, dApp sends, `estimateOperationFee`,
+simulate) run their current code UNCHANGED except that they now stamp scope on the records they write.
+`a6ed183` is evidence only (correlation + fence both excluded). Each internal commit passes targeted
+typecheck/tests. `/harden security` is the final blocking review, not a follow-up. The merge condition is not
+"tests pass" — it is: no durable producer has an active-scope write API, every ambiguous legacy row fails closed,
+every queued claim is composite + serialized, and the guard provably blocks a switch while any send is in flight.
 
 ## 18. Critical files
 `packages/wallet-core/src/activity/{scope,causal,model}.ts` (new — pure protocol + property tests) ·
 `apps/extension/src/wallet/services/activity-protocol/*` (new — durable coordinator/repo) ·
 `apps/extension/src/stores/activity.store.ts` + `src/activity/source-bridge.ts` (new — slices + producer bridge) ·
-`profile/service.ts` (`captureExecutionFence(expectedProfileId, accounts, scope)` + `submitIfExecutionFenceCurrent`) ·
-`execution/{tx-request-builder,execution-lane,execution-coordinator}.ts` + `fee/*` (drift checks, captured lane
-key, serialized submit hook) · `wallet-sdk/{queued-journal,background}.ts` + `packages/wallet-bridge/src/
-account-resolution.ts` (shared resolver, H1/H2, H6) · `operation-journal/service.ts` (locked mutations, claim
-token, tombstones) · `incoming-transfer/{repository,service}.ts` + `transaction/{spec,service}.ts` (composite
-keys, scope fields) · `RecentActivityView.vue`/`activity.vue`/`activity-rows.ts` (profile-aware render) ·
-`src/e2e/execution-scope-gate.ts` + `tests/e2e/network/account-profile-siloing.test.ts` (deterministic H5 e2e).
+the profile/account-**switch chokepoint** (`Header.vue` + the switch control) reading `hasInFlightSend` from the
+journal client (§9 guard) · `wallet-sdk/{queued-journal,background}.ts` + `packages/wallet-bridge/src/
+account-resolution.ts` (shared resolver, H1/H2) · `operation-journal/service.ts` (locked mutations, tombstones,
+`hasInFlightSend` selector) · `incoming-transfer/{repository,service}.ts` + `transaction/{spec,service}.ts`
+(composite keys, scope fields) · `RecentActivityView.vue`/`activity.vue`/`activity-rows.ts` (profile-aware render) ·
+`tests/e2e/network/account-profile-siloing.test.ts` (render-isolation + in-flight-guard e2e).
