@@ -1,33 +1,84 @@
 /**
- * P12 test pin: RecentActivityView calls
- * `IncomingTransferServiceClient.prototype.connect` on mount. Closes
- * codex Low #2 (the prior arc's post-impl audit) — "the explicit
- * connect path is the exact glue that already broke once" — without
- * mounting the full 700+ LoC RecentActivityView component.
+ * RecentActivityView component tests.
  *
- * Scope: just the connect call. The widget's rendering, row merge,
- * triple-key dedup, etc. are tested via the parent arcs' suites.
+ * Two concerns:
+ *  1. Service-client wiring — the widget calls `IncomingTransferServiceClient`
+ *     + `ConfigServiceClient` `.connect()` on mount (closes a prior-arc codex
+ *     Low: "the explicit connect path is the exact glue that already broke once").
+ *  2. Account-switch containment (Layer A, drop-only — account-switch-isolation
+ *     plan §Phase 1). Asserted at the STATE level via `defineExpose`d refs, not
+ *     just render: a render guard alone can mask a containment gap, so the switch
+ *     reset + the captured-account guards are checked on `journalOps` /
+ *     `executingTask` / `recentActivityRows` directly.
+ *
+ * Drives switches with the reactive `app-store-harness` (the widget captures the
+ * store ref once at setup, so tests MUTATE the same reactive instance rather than
+ * swapping it).
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { nextTick } from "vue"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 
-// ── Service-client mocks ─────────────────────────────────────────────
+import { createAppStoreHarness } from "../../../../../tests/helpers/app-store-harness"
 
-const incomingTransferConnect = vi.fn().mockResolvedValue(undefined)
-const configConnect = vi.fn().mockResolvedValue(undefined)
-const noopEvent = { add: vi.fn(), remove: vi.fn() }
+// ── Controllable mock surface (hoisted so vi.mock factories can read it) ──────
+const H = vi.hoisted(() => {
+	const makeEvent = () => {
+		const handlers = new Set<(x?: unknown) => void>()
+		return {
+			add: (fn: (x?: unknown) => void) => handlers.add(fn),
+			remove: (fn: (x?: unknown) => void) => handlers.delete(fn),
+			emit: (x?: unknown) => {
+				for (const fn of [...handlers]) fn(x)
+			},
+			handlers,
+		}
+	}
+	return {
+		makeEvent,
+		// enum shapes shared by the service-spec mocks AND the fixtures below
+		ContentKind: { Step: 0, BalanceUpdate: 1, TokenMint: 2, ExecuteOperation: 3, Transfer: 4, RevokeAuthwits: 5 },
+		TaskStatus: { Pending: 0, Processing: 1, Finished: 2 },
+		OriginType: { UI: 0, DAPP: 1 },
+		TxStatus: { Pending: 0, Dropped: 1, Proposed: 2, Checkpointed: 3, Proven: 4, Finalized: 5 },
+		// per-call-controllable data fns
+		getOperations: vi.fn(),
+		getTasks: vi.fn(),
+		getIncomingTransfers: vi.fn(),
+		incomingConnect: vi.fn(),
+		configConnect: vi.fn(),
+		// event emitters (the mocked clients don't fire them; tests emit explicitly)
+		journalAdded: makeEvent(),
+		journalUpdated: makeEvent(),
+		journalDeleted: makeEvent(),
+		journalConnected: makeEvent(),
+		incomingAdded: makeEvent(),
+		incomingUpdated: makeEvent(),
+		incomingDeleted: makeEvent(),
+		incomingConnected: makeEvent(),
+		configUpdate: makeEvent(),
+		taskCreated: makeEvent(),
+		taskUpdated: makeEvent(),
+		taskDeleted: makeEvent(),
+		tokenAdded: makeEvent(),
+		// mutable reactive-store holder (set in beforeEach)
+		store: { current: null as unknown as ReturnType<typeof createAppStoreHarness> },
+	}
+})
+
+// ── Service-client mocks ──────────────────────────────────────────────────────
 
 vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 	IncomingTransferServiceClient: vi.fn(function () {
 		return {
-			connect: incomingTransferConnect,
+			connect: H.incomingConnect,
 			disconnect: vi.fn(),
-			onIncomingTransferAdded: noopEvent,
-			onIncomingTransferUpdated: noopEvent,
-			onIncomingTransferDeleted: noopEvent,
-			onConnected: noopEvent,
-			getIncomingTransfers: vi.fn().mockResolvedValue([]),
+			onIncomingTransferAdded: H.incomingAdded,
+			onIncomingTransferUpdated: H.incomingUpdated,
+			onIncomingTransferDeleted: H.incomingDeleted,
+			onConnected: H.incomingConnected,
+			getIncomingTransfers: H.getIncomingTransfers,
 		}
 	}),
 }))
@@ -35,9 +86,9 @@ vi.mock("@/wallet/services/incoming-transfer/client", () => ({
 vi.mock("@/wallet/services/config/client", () => ({
 	ConfigServiceClient: vi.fn(function () {
 		return {
-			connect: configConnect,
+			connect: H.configConnect,
 			disconnect: vi.fn(),
-			onUpdate: noopEvent,
+			onUpdate: H.configUpdate,
 			getValue: vi.fn().mockResolvedValue(true),
 		}
 	}),
@@ -47,10 +98,10 @@ vi.mock("@/wallet/services/task/client", () => ({
 	TaskServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			onTaskCreated: noopEvent,
-			onTaskUpdated: noopEvent,
-			onTaskDeleted: noopEvent,
-			getTasks: vi.fn().mockResolvedValue([]),
+			onTaskCreated: H.taskCreated,
+			onTaskUpdated: H.taskUpdated,
+			onTaskDeleted: H.taskDeleted,
+			getTasks: H.getTasks,
 		}
 	}),
 }))
@@ -59,11 +110,11 @@ vi.mock("@/wallet/services/operation-journal/client", () => ({
 	OperationJournalServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			onConnected: noopEvent,
-			onOperationAdded: noopEvent,
-			onOperationUpdated: noopEvent,
-			onOperationDeleted: noopEvent,
-			getOperations: vi.fn().mockResolvedValue([]),
+			onConnected: H.journalConnected,
+			onOperationAdded: H.journalAdded,
+			onOperationUpdated: H.journalUpdated,
+			onOperationDeleted: H.journalDeleted,
+			getOperations: H.getOperations,
 		}
 	}),
 }))
@@ -72,7 +123,7 @@ vi.mock("@/wallet/services/execution/client", () => ({
 	ExecutionServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			cancelOperation: vi.fn().mockResolvedValue(undefined),
+			cancelJob: vi.fn().mockResolvedValue(undefined),
 		}
 	}),
 }))
@@ -82,62 +133,220 @@ vi.mock("@/wallet/services/token/client", () => ({
 		return {
 			disconnect: vi.fn(),
 			getTokens: vi.fn().mockResolvedValue([]),
-			onTokenAdded: { add: vi.fn(), remove: vi.fn() },
+			onTokenAdded: H.tokenAdded,
 		}
 	}),
 }))
 
 vi.mock("@/wallet/services/task/spec", () => ({
-	ContentKind: { Step: 0, BalanceUpdate: 1, TokenMint: 2, ExecuteOperation: 3, Transfer: 4, RevokeAuthwits: 5 },
-	TaskStatus: { Pending: 0, Processing: 1, Finished: 2 },
+	ContentKind: H.ContentKind,
+	TaskStatus: H.TaskStatus,
 }))
 
 vi.mock("@/wallet/services/transaction/spec", () => ({
-	OriginType: { UI: 0, DAPP: 1 },
+	OriginType: H.OriginType,
+	TxStatus: H.TxStatus,
 }))
 
-// ── Store mocks ──────────────────────────────────────────────────────
+// ── Store mock — reactive harness, mutated per test to drive switches ─────────
 
-vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({
-		profile: { id: "p1" },
-		network: { id: "net-1", chainId: 1 },
-		account: { address: "0xacct" },
-		transactions: [],
-		awaitingTransactions: [],
-	}),
-}))
+vi.mock("@/stores/app.store", () => ({ useAppStore: () => H.store.current }))
 
 vi.mock("vue-router", async (importOriginal) => {
 	const mod = await importOriginal<typeof import("vue-router")>()
-	return {
-		...mod,
-		useRouter: () => ({ push: vi.fn() }),
-	}
+	return { ...mod, useRouter: () => ({ push: vi.fn() }) }
 })
 
-// ── Test ─────────────────────────────────────────────────────────────
+// ── Fixtures + helpers ────────────────────────────────────────────────────────
 
 import RecentActivityView from "./RecentActivityView.vue"
 
-beforeEach(() => {
-	incomingTransferConnect.mockClear()
-	configConnect.mockClear()
+const ACCT_A = "0xacct" // matches the harness default active account
+const ACCT_B = "0xB"
+const ACCT_FOREIGN = "0xOTHER"
+
+function deferred<T>() {
+	let resolve!: (v: T) => void
+	const promise = new Promise<T>((r) => {
+		resolve = r
+	})
+	return { promise, resolve }
+}
+
+const inFlightTransferOp = (account: string, id = "op-a") => ({
+	id,
+	accountAddress: account,
+	networkId: "net-1",
+	kind: "transfer",
+	terminalAt: null,
+	createdAt: 1,
+	progress: { stage: "proving" },
 })
 
-afterEach(() => {
-	vi.restoreAllMocks()
+const uiTransferTask = (sender: string, id = "task-a") => ({
+	id,
+	createdAt: 1,
+	content: { kind: H.ContentKind.Transfer, senderAddress: sender, tokenId: undefined },
+	origin: { type: H.OriginType.UI },
+	subtasks: [],
 })
+
+const dappExecuteTask = (id = "task-dapp") => ({
+	id,
+	createdAt: 1,
+	content: { kind: H.ContentKind.ExecuteOperation, operationKind: "send_transaction" },
+	origin: { type: H.OriginType.DAPP },
+	subtasks: [],
+})
+
+const incomingRecord = (over: Record<string, unknown>) => ({
+	accountAddress: ACCT_A,
+	networkId: "net-1",
+	tokenId: undefined,
+	amountRaw: "1",
+	txHash: "0xh",
+	discoveredAt: 1000,
+	...over,
+})
+
+const mountView = () => mount(RecentActivityView, { shallow: true })
+
+// biome-ignore lint/suspicious/noExplicitAny: JS SFC exposes untyped refs via defineExpose.
+const vmOf = (wrapper: ReturnType<typeof mountView>) => wrapper.vm as any
+
+beforeEach(() => {
+	H.getOperations.mockReset().mockResolvedValue([])
+	H.getTasks.mockReset().mockResolvedValue([])
+	H.getIncomingTransfers.mockReset().mockResolvedValue([])
+	H.incomingConnect.mockReset().mockResolvedValue(undefined)
+	H.configConnect.mockReset().mockResolvedValue(undefined)
+	for (const ev of [
+		H.journalAdded,
+		H.journalUpdated,
+		H.journalDeleted,
+		H.journalConnected,
+		H.incomingAdded,
+		H.incomingUpdated,
+		H.incomingDeleted,
+		H.incomingConnected,
+		H.configUpdate,
+		H.taskCreated,
+		H.taskUpdated,
+		H.taskDeleted,
+		H.tokenAdded,
+	]) {
+		ev.handlers.clear()
+	}
+	H.store.current = createAppStoreHarness()
+})
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("RecentActivityView — service-client wiring", () => {
 	test("calls IncomingTransferServiceClient.connect() on mount", async () => {
-		mount(RecentActivityView, { shallow: true })
+		mountView()
 		await flushPromises()
-		expect(incomingTransferConnect).toHaveBeenCalledTimes(1)
+		expect(H.incomingConnect).toHaveBeenCalledTimes(1)
 	})
 	test("calls ConfigServiceClient.connect() on mount (sibling explicit-connect path)", async () => {
-		mount(RecentActivityView, { shallow: true })
+		mountView()
 		await flushPromises()
-		expect(configConnect).toHaveBeenCalledTimes(1)
+		expect(H.configConnect).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("RecentActivityView — account-switch containment (Layer A)", () => {
+	test("switching account synchronously clears journalOps + executingTask + subtasks", async () => {
+		H.getOperations.mockResolvedValueOnce([inFlightTransferOp(ACCT_A)])
+		H.getTasks.mockResolvedValueOnce([uiTransferTask(ACCT_A)])
+		// The post-switch reload never resolves, so ONLY the synchronous
+		// (flush:'sync') reset watcher can empty the refs — proving the clear
+		// rather than the reload.
+		H.getOperations.mockImplementation(() => new Promise(() => {}))
+		H.getTasks.mockImplementation(() => new Promise(() => {}))
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.journalOps).toHaveLength(1)
+		expect(vm.executingTask).not.toBeNull()
+
+		H.store.current.account = { address: ACCT_B }
+		// Assert SYNCHRONOUSLY (no tick) — the flush:'sync' reset watcher must have
+		// cleared before B can paint; a default (post-nextTick) watcher would fail here.
+		expect(vm.journalOps).toEqual([])
+		expect(vm.executingTask).toBeNull()
+		expect(vm.executingSubtasks).toEqual([])
+		await nextTick()
+		expect(vm.journalOps).toEqual([]) // reload is pending → stays cleared
+	})
+
+	test("drops a late getOperations resolving for the previous account after a switch", async () => {
+		const opsA = deferred<unknown[]>()
+		H.getOperations.mockReturnValueOnce(opsA.promise) // mount fetch for A (stays pending)
+		H.getOperations.mockResolvedValue([]) // post-switch reload fetch for B
+
+		const wrapper = mountView()
+		await flushPromises() // onMounted suspends awaiting A's getOperations (captured = A)
+		const vm = vmOf(wrapper)
+
+		H.store.current.account = { address: ACCT_B } // switch → sync clear + B reload ([])
+		await flushPromises()
+		expect(vm.journalOps).toEqual([])
+
+		opsA.resolve([inFlightTransferOp(ACCT_A)]) // A's mount fetch resolves LATE, under B
+		await flushPromises()
+		expect(vm.journalOps).toEqual([]) // captured-account guard dropped the stale A snapshot
+	})
+
+	test("fails closed on a dApp (uncorrelated) executingTask — no orphan card", async () => {
+		H.getTasks.mockResolvedValue([dappExecuteTask()])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeNull()
+		expect(vm.hasOrphanExecutingTask).toBe(false)
+	})
+
+	test("does not surface a foreign-account UI transfer executingTask", async () => {
+		H.getTasks.mockResolvedValue([uiTransferTask(ACCT_FOREIGN)])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeNull()
+		expect(vm.hasOrphanExecutingTask).toBe(false)
+	})
+
+	test("still surfaces the active account's own UI transfer as an orphan card (positive control)", async () => {
+		H.getTasks.mockResolvedValue([uiTransferTask(ACCT_A)])
+		H.getOperations.mockResolvedValue([]) // no matching journal record → orphan
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).not.toBeNull()
+		expect(vm.hasOrphanExecutingTask).toBe(true)
+	})
+
+	test("excludes foreign-account + foreign-network incoming rows from recentActivityRows", async () => {
+		H.getIncomingTransfers.mockResolvedValue([
+			incomingRecord({ accountAddress: ACCT_A, networkId: "net-1", siloedNullifier: "sn-active", discoveredAt: 2000 }),
+			incomingRecord({ accountAddress: ACCT_FOREIGN, networkId: "net-1", siloedNullifier: "sn-foreign-acct", discoveredAt: 1000 }),
+			incomingRecord({ accountAddress: ACCT_A, networkId: "net-OTHER", siloedNullifier: "sn-foreign-net", discoveredAt: 1500 }),
+		])
+
+		const wrapper = mountView()
+		await flushPromises()
+		// The mocked connect() doesn't fire onConnected, so emit it to drive the
+		// composable's refresh (which assigns the raw service snapshot verbatim —
+		// the inline recentActivityRows filter is what must drop the foreign rows).
+		H.incomingConnected.emit()
+		await flushPromises()
+
+		const vm = vmOf(wrapper)
+		const incoming = vm.recentActivityRows.filter((r: { type: string }) => r.type === "incoming")
+		expect(incoming.map((r: { inc: { siloedNullifier: string } }) => r.inc.siloedNullifier)).toEqual(["sn-active"])
 	})
 })
