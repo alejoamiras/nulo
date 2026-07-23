@@ -196,6 +196,7 @@ async function loadOp() {
 		notFound.value = true
 		return
 	}
+	notFound.value = false
 	op.value = record
 }
 
@@ -210,9 +211,15 @@ journalService.onOperationDeleted.add(onOperationDeleted)
 
 // Re-validate the record's scope whenever the active profile/network/account
 // changes — a switch while viewing A's journal detail must not keep it on-screen.
+// `flush: 'sync'` + the synchronous `op` clear close the window where A's detail
+// would otherwise linger under B during the async `loadOp()` re-fetch.
 watch(
 	() => `${appStore.profile?.id}|${appStore.network?.id}|${appStore.account?.address}`,
-	() => loadOp(),
+	() => {
+		op.value = null
+		loadOp()
+	},
+	{ flush: "sync" },
 )
 
 onMounted(async () => {
