@@ -64,3 +64,12 @@ lint · typecheck:all · `bun run test <store/composable/component paths>` · `b
 Extend `tests/e2e/network/account-switch-isolation.test.ts` from the Phase-0 harness to the FULL isolation
 assertions (a real note lands on A while B is active → never surfaces in B; + a settled A tx via an
 extension-submitted tx; positive control switch-back), then run the network gate + full suite.
+
+## Gate 1 GREEN — Phase 1 complete (network-proven)
+`NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 e2e:agent account-switch-isolation.test.ts` → 2/2 passed (94s):
+the Phase-0 harness + the full isolation test (A's incoming + settled tx render 0 cards in B while B is
+active + observer no-leak; positive control back-to-A reappears). Asserted on the History surface
+(deterministic root; the general RecentActivityView root vanishes for a contained fresh B). Full suite
+3473, typecheck:all 0, smoke re-run. Phase 1 = the SHIPPABLE privacy fix, done.
+Phase 1a (re-enable correlated dApp task cards via an atomic taskId↔journalId binding) is separate/next;
+until then uncorrelated dApp task cards stay disabled (fail-closed).
