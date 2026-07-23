@@ -166,7 +166,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex v-if="appStore.isLogined" direction="column" :class="$style.wrapper">
+	<Flex
+		v-if="appStore.isLogined"
+		direction="column"
+		:class="$style.wrapper"
+		data-testid="activity-feed-root"
+		:data-active-account="appStore.account?.address"
+	>
 		<div :class="[$style.page_title_bar, !heroVisible && $style.page_title_bar_visible]">
 			<span :class="$style.page_title_label">HISTORY</span>
 		</div>

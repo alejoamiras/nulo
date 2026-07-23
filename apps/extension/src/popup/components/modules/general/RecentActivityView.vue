@@ -689,6 +689,8 @@ onBeforeUnmount(() => {
 		v-if="token && (executingTask || showJournalAwaiting || isTokenAwaitingTx || recentActivityRows.length)"
 		direction="column"
 		gap="16"
+		data-testid="activity-feed-root"
+		:data-active-account="appStore.account?.address"
 	>
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
@@ -752,6 +754,8 @@ onBeforeUnmount(() => {
 		v-else-if="!token && (executingTask || showJournalAwaiting || recentActivityRows.length || awaitingAccountTxs.length)"
 		direction="column"
 		gap="16"
+		data-testid="activity-feed-root"
+		:data-active-account="appStore.account?.address"
 	>
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
@@ -799,7 +803,7 @@ onBeforeUnmount(() => {
 			</template>
 		</div>
 	</Flex>
-	<Flex v-else-if="token" direction="column" gap="16">
+	<Flex v-else-if="token" direction="column" gap="16" data-testid="activity-feed-root" :data-active-account="appStore.account?.address">
 		<Flex align="end" justify="between" :class="$style.section_header">
 			<span :class="$style.header_title">RECENT TRANSACTIONS</span>
 		</Flex>
