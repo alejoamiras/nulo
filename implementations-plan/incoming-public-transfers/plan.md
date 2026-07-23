@@ -594,7 +594,15 @@ parity (a discovered note refreshes too); token/account-delete + purge wipe rows
 - Pass: exit 0; the named outbox tests present and green.
 - Layers: typecheck/lint · unit · build.
 
-### Phase 4 — UI: received detail view + dust filter
+### Phase 4 — UI: received detail view + dust filter ✓
+
+**✓ COMPLETE** (gate green: `bun run audit:vue` exit 0 — typecheck:all/test[290 files, 3501]/lint/build;
+`bun run test:e2e` exit 0 — 23 files / 80 tests passed, 1 file / 6 skipped, 320s, built + run with CI's
+smoke env `VITE_NULO_E2E_DEFAULT_NET=testnet` + migration fixture armed per `_smoke-e2e.yml`). The named
+component/unit tests are present + green (chip per resolved type; From card per type; testid pins;
+always-link vs sandbox copy-hash; dust filter raise/lower/fail-open/never-bypass-visibility;
+getIncomingTransferById unfiltered; composable re-fetch on quotes + threshold). Smoke-triage (a build-env
+mismatch decoy, not this phase's code) logged in `lessons/phase-4.md`.
 
 Substantially larger than the original "add a chip" (design settled with the user against the
 `received-detail-design` artifact, 2026-07-22):
