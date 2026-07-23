@@ -16,6 +16,7 @@ declare module 'vue' {
     AddressDisplay: typeof import('./../components/AddressDisplay.vue')['default']
     AddressInput: typeof import('./../components/composite/general/AddressInput.vue')['default']
     AmountCard: typeof import('./../components/composite/send/AmountCard.vue')['default']
+    Badge: typeof import('@nulo/design')['Badge']
     Banner: typeof import('@nulo/design')['Banner']
     BrutalistTitle: typeof import('@nulo/design')['BrutalistTitle']
     Button: typeof import('./../components/ui/Button.vue')['default']
