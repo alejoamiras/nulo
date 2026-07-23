@@ -25,6 +25,19 @@ export type Task = {
 	finishedAt?: number
 	result?: ITaskResult
 	error?: string
+	/**
+	 * Preallocated task↔journal correlation id (account-switch isolation
+	 * Phase 1a). Minted at the very start of a feed-eligible ROOT operation
+	 * (before either this task event or the journal write) and threaded onto
+	 * BOTH this task and its `OperationRecord.correlationId`. It is the ONLY
+	 * reliable account correlation a dApp `ExecuteOperation` task has —
+	 * `ExecuteOperationContent` carries no account/network — so the activity
+	 * feed treats a dApp task as feed-eligible ONLY once this id resolves to an
+	 * in-scope journal record (fail-closed until then). Set only on root feed
+	 * tasks; subtasks and internal/non-feed tasks (Step, BalanceUpdate) leave
+	 * it undefined and are exempt from the correlation gate.
+	 */
+	correlationId?: string
 }
 
 export enum ContentKind {

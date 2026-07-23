@@ -99,6 +99,7 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 				claimOrCreateJournal: acquireSpy as never,
 				beginJournal: vi.fn(async () => "job-1"),
 				markJournal: vi.fn(async () => {}),
+				stampCorrelation: vi.fn(async () => {}),
 			},
 			buildAndEstimate: vi.fn(async () => ({
 				txRequest: { txContext: { gasSettings } },

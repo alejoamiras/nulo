@@ -124,6 +124,23 @@ export interface OperationRecord {
 	 * Private → Private chip).
 	 */
 	transferType?: TransferType
+	/**
+	 * Account-switch isolation Phase 1a: preallocated task↔journal correlation
+	 * id. Minted at the start of a feed-eligible ROOT operation and stamped
+	 * onto BOTH this record and the driving `Task.correlationId`. The activity
+	 * feed uses it to bind a dApp `ExecuteOperation` task (which carries no
+	 * account/network) to THIS record's scope — the task is feed-eligible only
+	 * once its correlationId resolves to a record in the active scope.
+	 *
+	 * Set at create-time for the transfer flow (both ids known in one place)
+	 * and stamped post-creation by the dApp-send executor for `dapp_execute`
+	 * records (the journal is created/claimed deep inside the send path). A
+	 * queued dApp record starts life WITHOUT it and gets it on claim.
+	 *
+	 * Optional: legacy rows + records that never bind a task (e.g. token_import,
+	 * internal ops) leave it undefined. Never used for dedup or delete.
+	 */
+	correlationId?: string
 }
 
 /**
@@ -152,6 +169,10 @@ export type NewOperationInput = {
 	recipientAddress?: string
 	contractAddress?: string
 	transferType?: TransferType
+	/** Preallocated task↔journal correlation id (Phase 1a). Set by the transfer
+	 *  flow at create-time; `dapp_execute` records get it stamped post-creation
+	 *  via `setOperationCorrelation`. */
+	correlationId?: string
 	/**
 	 * Optional initial-stage override. Defaults to `{ stage: "pending" }`.
 	 * Restricted to non-terminal pre-execution stages so callers can't
@@ -217,6 +238,7 @@ export const OperationRecordSchema: z.ZodType<OperationRecord> = z.object({
 	recipientAddress: z.string().optional(),
 	contractAddress: z.string().optional(),
 	transferType: z.nativeEnum(TransferType).optional(),
+	correlationId: z.string().optional(),
 })
 
 /**
@@ -246,6 +268,7 @@ export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z
 		recipientAddress: z.string().optional(),
 		contractAddress: z.string().optional(),
 		transferType: z.nativeEnum(TransferType).optional(),
+		correlationId: z.string().optional(),
 		initialStage: InitialStageSchema.optional(),
 	})
 	.refine(
@@ -332,6 +355,18 @@ export const OperationJournalMethodSchemas = {
 		]),
 		result: OperationRecordSchema,
 	},
+	/**
+	 * Phase 1a: stamp the preallocated task↔journal correlation id onto an
+	 * existing record. First-write-wins (idempotent — a record already
+	 * carrying a correlationId is left untouched), never moves the FSM stage,
+	 * and is safe on terminal records. Used by the dApp-send executor to bind
+	 * a freshly-created or just-claimed `dapp_execute` record to its driving
+	 * task's correlationId.
+	 */
+	setOperationCorrelation: {
+		params: z.tuple([z.string().min(1), z.string().min(1)]),
+		result: OperationRecordSchema,
+	},
 	getOperation: {
 		params: z.tuple([z.string().min(1)]),
 		result: OperationRecordSchema.optional(),
@@ -354,6 +389,7 @@ export type Methods = {
 	createOperation(input: NewOperationInput): OperationRecord
 	transitionOperation(id: string, progress: JobProgress, error?: JobError | null): OperationRecord
 	setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): OperationRecord
+	setOperationCorrelation(id: string, correlationId: string): OperationRecord
 	getOperation(id: string): OperationRecord | undefined
 	getOperations(filter?: OperationFilter): OperationRecord[]
 	countOperations(filter: OperationCountFilter): number

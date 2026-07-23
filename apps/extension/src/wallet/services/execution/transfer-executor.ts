@@ -22,6 +22,7 @@ import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { getRandomHex } from "@/wallet/utils"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import type { Network } from "@/wallet/services/network/service"
@@ -79,8 +80,14 @@ export class TransferExecutor {
 	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }
+		// Preallocate the task↔journal correlation id (Phase 1a) BEFORE creating
+		// either the task or the journal, then stamp it onto both. The transfer
+		// task is already account-correlated via `senderAddress`, but carrying
+		// the same id lets the feed bind this task to its owning-scope journal
+		// (switch-time correctness) and target subtask enrichment exactly.
+		const correlationId = getRandomHex(32)
 		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount)
-		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
+		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin, correlationId)
 
 		// Durable record of this in-flight operation. Survives SW restart
 		// and popup close/reopen so consumers can recover a consistent view
@@ -107,6 +114,8 @@ export class TransferExecutor {
 					// card can render the Private/Public chip the settled card
 					// shows. Resolved via `formatTransferType()` consumer-side.
 					transferType,
+					// Same preallocated id stamped on `transferTask` above.
+					correlationId,
 				})
 			}
 		} catch (error) {

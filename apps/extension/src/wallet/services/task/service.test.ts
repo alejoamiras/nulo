@@ -166,6 +166,24 @@ describe("Task Tree Implementation", () => {
 			expect(subtask.origin).toBe(origin)
 			expect(subtask.task.origin).toBe(origin)
 		})
+
+		test("Phase 1a: correlationId lands on the ROOT task only, never on subtasks", async () => {
+			const { service } = await createTestSetup()
+
+			const rootTask = service.startNewTask(new StepContent("Root"), undefined, undefined, "cid-root")
+			expect(rootTask.correlationId).toBe("cid-root")
+			expect(rootTask.task.correlationId).toBe("cid-root")
+
+			// Subtasks derive scope from the parent and never surface via getTasks,
+			// so they are deliberately left uncorrelated.
+			const subtask = rootTask.startSubtask(new StepContent("Subtask"))
+			expect(subtask.correlationId).toBeUndefined()
+			expect(subtask.task.correlationId).toBeUndefined()
+
+			// A root created without an id stays undefined (backward-compatible).
+			const bare = service.startNewTask(new StepContent("Bare"))
+			expect(bare.correlationId).toBeUndefined()
+		})
 	})
 
 	describe("Task Status Management", () => {

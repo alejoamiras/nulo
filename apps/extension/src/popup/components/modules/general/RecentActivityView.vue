@@ -138,9 +138,24 @@ const awaitingAccountTxs = computed(() => {
 
 /** Unified in-flight task: covers both dapp-initiated (ExecuteOperation) and
  *  UI-initiated (Transfer) sends. The backend emits task+subtasks with progress
- *  labels; we surface them through a single awaiting card with live subtitle. */
-const executingTask = ref(null)
-const executingSubtasks = ref([])
+ *  labels; we surface them through a single awaiting card with live subtitle.
+ *
+ *  Phase 1a (account-switch isolation): the raw task/subtasks are CAPTURED from
+ *  TaskService events (`rawExecutingTask`/`rawExecutingSubtasks`), but what the
+ *  view treats as the visible `executingTask` is the raw task PUBLISHED through
+ *  the feed-eligibility gate (`isFeedEligible`). A dApp `ExecuteOperation` task
+ *  carries no account/network, so it becomes visible ONLY once its preallocated
+ *  `correlationId` resolves to an in-flight journal record in the ACTIVE scope —
+ *  fail-closed until then, never "active-now". Because the gate is a computed
+ *  over `journalOps`, the task appears REACTIVELY the moment its journal is
+ *  created/stamped (which can arrive AFTER the task event), and disappears the
+ *  moment the account switches (journalOps is sync-cleared) — no manual
+ *  re-trigger needed. UI transfers stay account-correlated via `senderAddress`
+ *  (already reliable) and don't wait on a journal. */
+const rawExecutingTask = ref(null)
+const rawExecutingSubtasks = ref([])
+const executingTask = computed(() => (isFeedEligible(rawExecutingTask.value) ? rawExecutingTask.value : null))
+const executingSubtasks = computed(() => (executingTask.value ? rawExecutingSubtasks.value : []))
 
 /** Tokens lookup — UI Transfer tasks carry a tokenId; we resolve to symbol +
  *  decimals so the awaiting card can mirror TransactionCard (icon + amount). */
@@ -439,15 +454,17 @@ function cardSubtitleFor(op) {
  *  has an active task without a corresponding journal entry (legacy paths,
  *  pre-W5 stragglers after SW restart, etc.). */
 const hasOrphanExecutingTask = computed(() => {
-	if (!executingTask.value) return false
-	// Account-switch containment: only surface an orphan card when the
-	// executingTask still belongs in THIS view. `isExecutingTask` re-validates
-	// the active account (transfer via senderAddress) and fails closed on
-	// uncorrelated dApp tasks, so a task set just before a switch can't render as
-	// a foreign-account orphan card under the new account.
-	if (!isExecutingTask(executingTask.value)) return false
+	// `executingTask` is already the PUBLISHED (feed-eligible, in-scope) task —
+	// a dApp task only survives the gate once its correlationId resolves to an
+	// in-scope journal, and a foreign-account/uncorrelated task computes null
+	// here. So the orphan check reduces to "published task with no matching
+	// journal card". For dApp that effectively never fires (the correlating
+	// journal IS a rendered in-flight card); it remains for the UI-transfer
+	// straggler case (task present, journal not yet / no longer listed).
+	const task = executingTask.value
+	if (!task) return false
 	const account = appStore.account?.address
-	return !renderedInFlightOps.value.some((op) => isMatchingTask(executingTask.value, op, account))
+	return !renderedInFlightOps.value.some((op) => isMatchingTask(task, op, account))
 })
 
 /**
@@ -473,23 +490,23 @@ const hasOrphanExecutingTask = computed(() => {
 const SNAPSHOT_TERMINAL_WINDOW_MS = 30_000
 
 function clearExecutingTaskIfThisIsTerminalMatch(op) {
-	if (!executingTask.value) return
+	if (!rawExecutingTask.value) return
 	if (op.terminalAt === null) return
-	if (!isMatchingTask(executingTask.value, op, appStore.account?.address)) return
-	executingTask.value = null
-	executingSubtasks.value = []
+	if (!isMatchingTask(rawExecutingTask.value, op, appStore.account?.address)) return
+	rawExecutingTask.value = null
+	rawExecutingSubtasks.value = []
 }
 
 function clearExecutingTaskIfRecentTerminalMatch() {
-	if (!executingTask.value) return
+	if (!rawExecutingTask.value) return
 	const account = appStore.account?.address
 	const cutoff = Date.now() - SNAPSHOT_TERMINAL_WINDOW_MS
 	const match = journalOps.value.find(
-		(op) => op.terminalAt !== null && op.terminalAt >= cutoff && isMatchingTask(executingTask.value, op, account),
+		(op) => op.terminalAt !== null && op.terminalAt >= cutoff && isMatchingTask(rawExecutingTask.value, op, account),
 	)
 	if (match) {
-		executingTask.value = null
-		executingSubtasks.value = []
+		rawExecutingTask.value = null
+		rawExecutingSubtasks.value = []
 	}
 }
 
@@ -506,8 +523,8 @@ function clearExecutingTaskIfPendingCancelTerminal(op) {
 	// terminal event racing the switch — the jobId set alone is not account-scoped.
 	if (op.accountAddress !== appStore.account?.address) return
 	pendingCancelJobIds.value.delete(op.id)
-	executingTask.value = null
-	executingSubtasks.value = []
+	rawExecutingTask.value = null
+	rawExecutingSubtasks.value = []
 }
 
 /**
@@ -595,58 +612,87 @@ async function resnapshotJournal() {
 }
 journalService.onConnected.add(resnapshotJournal)
 
-function isExecutingTask(task) {
-	if (task.finishedAt) return false
-	// Account-switch containment — fail closed on dApp tasks. A dApp-initiated
-	// `ExecuteOperation` task carries NO account/network (`ExecuteOperationContent`
-	// in task/spec.ts) so it is UNCORRELATED and cannot be scoped to the active
-	// account. Surfacing it would let account A's dApp task render as an in-progress
-	// card under account B. We therefore do NOT surface dApp TaskService cards; the
-	// durable journal records (`renderedInFlightOps`) remain the dApp progress
-	// source. Re-enabled once the Phase-1a task↔journal atomic binding lands.
-	//
-	// UI-initiated transfer — account-correlated via `senderAddress`, so it stays
-	// (matches the active account AND, in token-mode, the page's token).
+/** CAPTURE gate (Phase 1a): should this ROOT task be tracked as the raw
+ *  in-flight candidate? Deliberately does NOT decide visibility — that is the
+ *  publication gate below. We capture eagerly so subtasks accumulate against the
+ *  root from their first event, even before the correlating journal exists.
+ *
+ *  - UI transfer: captured only when `senderAddress` matches the active account
+ *    (+ the page's token in token-mode). A foreign transfer is never captured.
+ *  - dApp `ExecuteOperation`: captured only when it carries a `correlationId`
+ *    (the preallocated task↔journal binding). Its ACCOUNT scope is unknowable
+ *    from the task alone, so publication is deferred to `isFeedEligible`.
+ *  - Everything else (internal Step / BalanceUpdate / etc.): not a feed root. */
+function isRawExecutingCandidate(task) {
+	if (!task || task.finishedAt) return false
 	if (task.content.kind === ContentKind.Transfer && task.origin?.type === OriginType.UI) {
 		if (task.content.senderAddress !== appStore.account?.address) return false
 		if (props.token && task.content.tokenId !== props.token.id) return false
 		return true
 	}
+	if (task.content.kind === ContentKind.ExecuteOperation) {
+		return typeof task.correlationId === "string" && task.correlationId.length > 0
+	}
+	return false
+}
+
+/** PUBLICATION gate (Phase 1a): is the captured raw task feed-eligible in the
+ *  ACTIVE scope RIGHT NOW? Fail-closed — a dApp task renders ONLY once its
+ *  `correlationId` resolves to a NON-terminal journal record in the active
+ *  scope (`journalRecordInScope` = account + network). Reactive over
+ *  `journalOps`, so the task publishes the instant its journal is
+ *  created/stamped and un-publishes the instant the account switches. UI
+ *  transfers are account-correlated via `senderAddress` and need no journal. */
+function isFeedEligible(task) {
+	if (!task || task.finishedAt) return false
+	if (task.content.kind === ContentKind.Transfer && task.origin?.type === OriginType.UI) {
+		if (task.content.senderAddress !== appStore.account?.address) return false
+		if (props.token && task.content.tokenId !== props.token.id) return false
+		return true
+	}
+	if (task.content.kind === ContentKind.ExecuteOperation) {
+		const cid = task.correlationId
+		if (!cid) return false
+		const journal = journalOps.value.find((op) => op.correlationId === cid)
+		if (!journal) return false // not yet correlated → fail-closed
+		if (journal.terminalAt !== null) return false // op finished → not in-flight
+		return journalRecordInScope(journal) // active account + network
+	}
 	return false
 }
 function onExecutingTaskCreated(task) {
-	if (isExecutingTask(task)) {
-		executingTask.value = task
-		executingSubtasks.value = task.subtasks || []
+	if (isRawExecutingCandidate(task)) {
+		rawExecutingTask.value = task
+		rawExecutingSubtasks.value = task.subtasks || []
 		return
 	}
-	if (task.parentId && executingTask.value && task.parentId === executingTask.value.id) {
-		executingSubtasks.value.push(task)
+	if (task.parentId && rawExecutingTask.value && task.parentId === rawExecutingTask.value.id) {
+		rawExecutingSubtasks.value.push(task)
 	}
 }
 function onExecutingTaskUpdated(task) {
-	if (executingTask.value && task.id === executingTask.value.id) {
+	if (rawExecutingTask.value && task.id === rawExecutingTask.value.id) {
 		if (task.finishedAt) {
-			executingTask.value = null
-			executingSubtasks.value = []
+			rawExecutingTask.value = null
+			rawExecutingSubtasks.value = []
 		} else {
-			executingTask.value = task
+			rawExecutingTask.value = task
 		}
 		return
 	}
-	if (task.parentId && executingTask.value && task.parentId === executingTask.value.id) {
-		const idx = executingSubtasks.value.findIndex((s) => s.id === task.id)
+	if (task.parentId && rawExecutingTask.value && task.parentId === rawExecutingTask.value.id) {
+		const idx = rawExecutingSubtasks.value.findIndex((s) => s.id === task.id)
 		if (idx !== -1) {
-			executingSubtasks.value[idx] = task
+			rawExecutingSubtasks.value[idx] = task
 		} else {
-			executingSubtasks.value.push(task)
+			rawExecutingSubtasks.value.push(task)
 		}
 	}
 }
 function onExecutingTaskDeleted(task) {
-	if (executingTask.value && task.id === executingTask.value.id) {
-		executingTask.value = null
-		executingSubtasks.value = []
+	if (rawExecutingTask.value && task.id === rawExecutingTask.value.id) {
+		rawExecutingTask.value = null
+		rawExecutingSubtasks.value = []
 	}
 }
 
@@ -660,22 +706,29 @@ const handleSelectTerminal = (op) => {
 	router.push(`/popup/journal/${op.id}`)
 }
 
-/** Snapshot the active account's in-flight executingTask from TaskService.
+/** Snapshot the active account's in-flight raw candidate task from TaskService.
  *  Shared by mount and the account-switch reset watcher. Captured-account guard:
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
- *  the new account's view. `isExecutingTask` already fails closed on uncorrelated
- *  dApp tasks and scopes UI transfers by `senderAddress`. */
+ *  the new account's view. Captures via `isRawExecutingCandidate` (transfers
+ *  scoped by `senderAddress`; dApp tasks require a `correlationId`); the
+ *  publication gate (`isFeedEligible` → `executingTask`) then decides visibility
+ *  reactively against `journalOps`.
+ *
+ *  On SW restart the in-memory TaskService map is empty, so this snapshots
+ *  nothing — the durable journal records still render the dApp card on their
+ *  own (no task = no enrichment, but no leak). A fresh task minted post-restart
+ *  re-correlates through its journal's durable `correlationId`. */
 async function loadExecutingTaskSnapshot() {
 	const captured = appStore.account?.address
 	try {
 		// Newest-first replay — otherwise concurrent tasks could surface the older one.
 		const allTasks = await taskService.getTasks()
 		if (captured !== appStore.account?.address) return
-		const matching = allTasks.filter((t) => isExecutingTask(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+		const matching = allTasks.filter((t) => isRawExecutingCandidate(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
 		const activeExec = matching[0]
 		if (activeExec) {
-			executingTask.value = activeExec
-			executingSubtasks.value = activeExec.subtasks || []
+			rawExecutingTask.value = activeExec
+			rawExecutingSubtasks.value = activeExec.subtasks || []
 		}
 	} catch {
 		// Non-fatal; a later task event or reconnect re-snapshots.
@@ -696,8 +749,8 @@ watch(
 	(nv, ov) => {
 		if (nv === ov) return
 		journalOps.value = []
-		executingTask.value = null
-		executingSubtasks.value = []
+		rawExecutingTask.value = null
+		rawExecutingSubtasks.value = []
 		pendingCancelJobIds.value = new Set()
 		if (!nv) return
 		resnapshotJournal()
@@ -708,9 +761,21 @@ watch(
 
 /** Exposed for Layer-A containment component tests: assert the switch-reset +
  *  captured-account guards at the STATE level (a render filter alone can mask a
- *  containment gap). Placed after the declarations it references (temporal dead
- *  zone) rather than in the macro block. */
-defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows })
+ *  containment gap). `executingTask`/`executingSubtasks` are the PUBLISHED
+ *  (feed-eligibility-gated) computeds; `rawExecutingTask` is the pre-gate
+ *  capture, exposed so the Phase-1a correlation gate can be asserted directly
+ *  (captured-but-not-yet-published vs published). Placed after the declarations
+ *  it references (temporal dead zone) rather than in the macro block. */
+defineExpose({
+	journalOps,
+	executingTask,
+	executingSubtasks,
+	rawExecutingTask,
+	pendingCancelJobIds,
+	hasOrphanExecutingTask,
+	renderedInFlightOps,
+	recentActivityRows,
+})
 
 onMounted(async () => {
 	await loadTokens()

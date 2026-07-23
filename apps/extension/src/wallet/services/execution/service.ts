@@ -29,7 +29,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { classifyOperationCatch } from "./rpc-cancel"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { getErrorMessage, getRandomHex } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import {
 	EXECUTION_SERVICE_NAME,
@@ -249,6 +249,9 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				beginJournal: (networkId, accountAddress, origin, calls) =>
 					this.lane.beginJournal(networkId, accountAddress, origin, calls),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
+				stampCorrelation: async (journalId, correlationId) => {
+					await this.operationJournal.setOperationCorrelation(journalId, correlationId)
+				},
 			},
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
@@ -380,8 +383,18 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			const traceId = crypto.randomUUID().slice(0, 8)
 			this.logDebug(`[${traceId}] executeOperations: starting ${operation.kind}`)
 
+			// Preallocate the task↔journal correlation id (Phase 1a) for this
+			// feed-eligible ROOT operation, BEFORE the task event or any journal
+			// write. The dApp-send executor reads it back off `operationTask`
+			// (WrappedTask.correlationId) and stamps the same id onto the created
+			// or claimed `dapp_execute` record — the only reliable account
+			// correlation a dApp `ExecuteOperation` task has. Only the root task
+			// carries it; a subtask (parentTask present) leaves it unset.
+			const correlationId = getRandomHex(32)
 			const content = new ExecuteOperationContent(operation.kind, this.planner.extractPrimaryMethod(operation))
-			const operationTask = parentTask ? parentTask.startSubtask(content) : this.taskService.startNewTask(content, undefined, origin)
+			const operationTask = parentTask
+				? parentTask.startSubtask(content)
+				: this.taskService.startNewTask(content, undefined, origin, correlationId)
 
 			try {
 				let result: unknown

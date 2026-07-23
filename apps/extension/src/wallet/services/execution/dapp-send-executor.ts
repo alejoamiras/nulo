@@ -34,6 +34,7 @@ import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { collectOffchainEffects } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
+import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 import { formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
@@ -103,6 +104,10 @@ export interface DappSendExecutorLane {
 		calls?: { method?: string }[],
 	): Promise<string | undefined>
 	markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void>
+	/** Phase 1a: stamp the driving task's preallocated correlation id onto the
+	 *  created/claimed `dapp_execute` record (first-write-wins, non-terminal or
+	 *  terminal). Best-effort — a failure here never blocks the send. */
+	stampCorrelation(journalId: string, correlationId: string): Promise<void>
 }
 
 export interface DappSendExecutorDeps {
@@ -127,6 +132,25 @@ export interface DappSendExecutorDeps {
 
 export class DappSendExecutor {
 	public constructor(private readonly deps: DappSendExecutorDeps) {}
+
+	/**
+	 * Phase 1a: bind the driving task's preallocated correlation id to its
+	 * journal record. Called immediately after a `dapp_execute` record is
+	 * created (`beginJournal`) or claimed (`claimOrCreateJournal`) — the record
+	 * carries account + network, so stamping the task's id onto it lets the
+	 * activity feed treat the (account-less) dApp task as feed-eligible only
+	 * once it resolves to this in-scope record. Best-effort: a stamp failure
+	 * degrades to the pre-Phase-1a behavior (the journal still renders on its
+	 * own; the task just stays fail-closed) and never blocks the send.
+	 */
+	private async stampTaskCorrelation(journalId: string | undefined, correlationId: string | undefined): Promise<void> {
+		if (!journalId || !correlationId) return
+		try {
+			await this.deps.lane.stampCorrelation(journalId, correlationId)
+		} catch (error) {
+			this.deps.logDebug(`stampTaskCorrelation skipped: ${getErrorMessage(error)}`)
+		}
+	}
 
 	/**
 	 * Shared execution-slot scaffold for the two slot-taking dApp-send paths
@@ -154,6 +178,10 @@ export class DappSendExecutor {
 			accountAddress: string
 			origin: LocalTxOrigin
 			hooks: ExecutionHooks | undefined
+			/** Phase 1a: the driving task's preallocated correlation id (read off
+			 *  `parentTask.correlationId` by the caller). Stamped onto the claimed
+			 *  or freshly-created record the instant its id is known. */
+			correlationId: string | undefined
 			// A THUNK, not a value: the primary-method extraction reads the
 			// (potentially large / adversarial) `op.exec.calls`, and must run
 			// AFTER `acquireSlot` — computing it earlier would delay our FIFO
@@ -185,6 +213,10 @@ export class DappSendExecutor {
 				preController,
 			)
 			journalId = claimed.journalId
+			// Bind the task↔journal correlation the instant the record id is
+			// known — before any markJournal transition — so the feed can
+			// resolve the dApp task to this in-scope record (Phase 1a).
+			await this.stampTaskCorrelation(journalId, params.correlationId)
 			const controller = claimed.controller
 			const checkCancelled = (): void => {
 				if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
@@ -280,6 +312,9 @@ export class DappSendExecutor {
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
 		)
+		// Bind the task↔journal correlation immediately after creating the
+		// record, before the first markJournal transition (Phase 1a).
+		await this.stampTaskCorrelation(journalId, parentTask?.correlationId)
 
 		const controller = journalId ? new AbortController() : undefined
 		if (journalId && controller) this.deps.lane.registerController(journalId, controller)
@@ -373,6 +408,7 @@ export class DappSendExecutor {
 				accountAddress: op.accountAddress,
 				origin,
 				hooks,
+				correlationId: parentTask?.correlationId,
 				getCalls: () => {
 					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
 					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
@@ -498,6 +534,7 @@ export class DappSendExecutor {
 				accountAddress: op.accountAddress,
 				origin,
 				hooks,
+				correlationId: parentTask?.correlationId,
 				getCalls: () => {
 					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
 					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"

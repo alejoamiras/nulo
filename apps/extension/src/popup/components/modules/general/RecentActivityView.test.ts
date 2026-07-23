@@ -199,6 +199,40 @@ const dappExecuteTask = (id = "task-dapp") => ({
 	subtasks: [],
 })
 
+/** dApp ExecuteOperation task carrying the Phase-1a preallocated correlationId. */
+const dappExecuteTaskCorrelated = (correlationId: string, id = "task-dapp") => ({
+	id,
+	correlationId,
+	createdAt: 1,
+	content: { kind: H.ContentKind.ExecuteOperation, operationKind: "send_transaction" },
+	origin: { type: H.OriginType.DAPP },
+	subtasks: [],
+})
+
+/** In-flight dapp_execute journal record (the durable card the task binds to). */
+const inFlightDappOp = (account: string, correlationId: string, over: Record<string, unknown> = {}) => ({
+	id: "op-dapp",
+	accountAddress: account,
+	networkId: "net-1",
+	kind: "dapp_execute",
+	terminalAt: null,
+	createdAt: 1,
+	correlationId,
+	title: "swap_tokens",
+	subtitle: "example.com",
+	progress: { stage: "proving" },
+	...over,
+})
+
+/** A non-feed internal task (balance refresh): must be exempt from the gate. */
+const balanceTask = (id = "task-balance") => ({
+	id,
+	createdAt: 1,
+	content: { kind: H.ContentKind.BalanceUpdate, account: ACCT_A, tbId: 1 },
+	origin: { type: H.OriginType.UI },
+	subtasks: [],
+})
+
 const incomingRecord = (over: Record<string, unknown>) => ({
 	accountAddress: ACCT_A,
 	networkId: "net-1",
@@ -348,5 +382,121 @@ describe("RecentActivityView — account-switch containment (Layer A)", () => {
 		const vm = vmOf(wrapper)
 		const incoming = vm.recentActivityRows.filter((r: { type: string }) => r.type === "incoming")
 		expect(incoming.map((r: { inc: { siloedNullifier: string } }) => r.inc.siloedNullifier)).toEqual(["sn-active"])
+	})
+})
+
+// biome-ignore lint/suspicious/noExplicitAny: JS SFC exposes untyped refs via defineExpose.
+const renderedIds = (vm: any) => vm.renderedInFlightOps.map((o: { id: string }) => o.id)
+
+describe("RecentActivityView — dApp task↔journal correlation gate (Phase 1a)", () => {
+	test("correlated dApp task for the ACTIVE account is published AND its journal card renders", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_A, "cid-1")])
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-1")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		// Captured (carries a correlationId) AND published (resolves to an in-scope journal).
+		expect(vm.rawExecutingTask).not.toBeNull()
+		expect(vm.executingTask).not.toBeNull()
+		// The durable journal record renders the in-flight card.
+		expect(renderedIds(vm)).toContain("op-dapp")
+	})
+
+	test("the SAME dApp task whose journal is a FOREIGN account is NOT published and renders no card", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_FOREIGN, "cid-1")])
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-1")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		// Task is captured (cid present) but the correlating journal is out of the
+		// active scope → fail-closed: not published, and no foreign card renders.
+		expect(vm.rawExecutingTask).not.toBeNull()
+		expect(vm.executingTask).toBeNull()
+		expect(vm.hasOrphanExecutingTask).toBe(false)
+		expect(renderedIds(vm)).not.toContain("op-dapp")
+	})
+
+	test("a dApp task whose correlationId resolves to NO journal is not published (fail-closed, no orphan)", async () => {
+		H.getOperations.mockResolvedValue([]) // no journal to correlate against
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-orphan")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.rawExecutingTask).not.toBeNull()
+		expect(vm.executingTask).toBeNull()
+		expect(vm.hasOrphanExecutingTask).toBe(false)
+	})
+
+	test("REACTIVE publication: task captured before its journal, publishes the instant the matching journal arrives", async () => {
+		H.getOperations.mockResolvedValue([]) // journal not created yet at mount
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-late")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeNull() // captured, not yet correlated
+
+		// The journal record is created/stamped later (the real ordering: task
+		// event precedes the journal event) with the matching correlationId.
+		H.journalAdded.emit(inFlightDappOp(ACCT_A, "cid-late"))
+		await nextTick()
+		expect(vm.executingTask).not.toBeNull() // published reactively — no re-trigger needed
+		expect(renderedIds(vm)).toContain("op-dapp")
+	})
+
+	test("a terminal correlated journal un-publishes the task (op finished → not in-flight)", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_A, "cid-term", { terminalAt: 123, progress: { stage: "succeeded" } })])
+		H.getTasks.mockResolvedValue([dappExecuteTaskCorrelated("cid-term")])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeNull() // terminal journal → not feed-eligible
+	})
+
+	test("SW-restart: journal survives (correlationId durable) with NO task — card renders, no enrichment, no leak", async () => {
+		H.getOperations.mockResolvedValue([inFlightDappOp(ACCT_A, "cid-restart")])
+		H.getTasks.mockResolvedValue([]) // in-memory TaskService cleared on SW restart
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.rawExecutingTask).toBeNull() // no task to re-link
+		expect(vm.executingTask).toBeNull() // no enrichment
+		expect(renderedIds(vm)).toContain("op-dapp") // durable journal still renders the card
+	})
+
+	test("a non-feed internal task (balance refresh) is exempt — never captured, never gated", async () => {
+		H.getTasks.mockResolvedValue([balanceTask()])
+		H.getOperations.mockResolvedValue([])
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.rawExecutingTask).toBeNull()
+		expect(vm.executingTask).toBeNull()
+		expect(vm.hasOrphanExecutingTask).toBe(false)
+	})
+
+	test("switch away un-publishes a correlated dApp task synchronously (journalOps sync-cleared)", async () => {
+		H.getOperations.mockResolvedValueOnce([inFlightDappOp(ACCT_A, "cid-switch")])
+		H.getTasks.mockResolvedValueOnce([dappExecuteTaskCorrelated("cid-switch")])
+		// Post-switch reload never resolves — only the sync reset can un-publish.
+		H.getOperations.mockImplementation(() => new Promise(() => {}))
+		H.getTasks.mockImplementation(() => new Promise(() => {}))
+
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).not.toBeNull()
+
+		H.store.current.account = { address: ACCT_B }
+		// Synchronous: journalOps cleared + rawExecutingTask cleared by the flush:'sync'
+		// watcher → the gated computed collapses to null before B can paint.
+		expect(vm.executingTask).toBeNull()
+		expect(renderedIds(vm)).not.toContain("op-dapp")
 	})
 })

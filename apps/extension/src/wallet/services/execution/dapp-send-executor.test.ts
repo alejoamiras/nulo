@@ -113,6 +113,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 			claimOrCreateJournal: vi.fn(async () => ({ journalId: "j1", controller: new AbortController() })),
 			beginJournal: vi.fn(async () => "j1"),
 			markJournal: vi.fn(async () => {}),
+			stampCorrelation: vi.fn(async () => {}),
 		},
 		buildAndEstimate: vi.fn(async () => built as never),
 		addTransaction: vi.fn(async () => ({}) as never),
@@ -158,6 +159,40 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		expect(txArgs[3]).toBe(built.txCalls)
 		expect(txArgs[4]).toBe("42")
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+	})
+
+	test("Phase 1a: stamps the parentTask's correlationId onto the created journal, before the first markJournal", async () => {
+		const { executor, deps } = makeHarness()
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", method: "dapp_method" }],
+		} as never
+		// A minimal WrappedTask stand-in carrying the preallocated correlation id.
+		const parentTask = { id: "task-root", correlationId: "cid-x" } as never
+		await executor.executeSendTransaction(op, ORIGIN, parentTask)
+
+		expect(deps.lane.stampCorrelation).toHaveBeenCalledWith("j1", "cid-x")
+		// Binding is established BEFORE the first FSM transition so the feed can
+		// resolve the task the instant the record exists.
+		const stampOrder = (deps.lane.stampCorrelation as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+		const markOrder = (deps.lane.markJournal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+		expect(stampOrder).toBeLessThan(markOrder)
+	})
+
+	test("Phase 1a: no correlationId on the parentTask → stampCorrelation is NOT called (nothing to bind)", async () => {
+		const { executor, deps } = makeHarness()
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", method: "dapp_method" }],
+		} as never
+		await executor.executeSendTransaction(op, ORIGIN) // no parentTask
+		expect(deps.lane.stampCorrelation).not.toHaveBeenCalled()
 	})
 
 	test("records the SUBMITTING network's primary endpoint URL (C3 recording-site pin)", async () => {
@@ -254,6 +289,17 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
 	})
 
+	test("Phase 1a: stamps the parentTask's correlationId onto the claimed record, right after the claim", async () => {
+		const { executor, deps } = makeHarness()
+		const parentTask = { id: "task-root", correlationId: "cid-aztec" } as never
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, parentTask)
+
+		expect(deps.lane.stampCorrelation).toHaveBeenCalledWith("j1", "cid-aztec")
+		const claimOrder = (deps.lane.claimOrCreateJournal as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+		const stampOrder = (deps.lane.stampCorrelation as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
+		expect(claimOrder).toBeLessThan(stampOrder) // stamp after the id is known
+	})
+
 	test("opts.from mismatch: frozen error, failed journal, slot still released", async () => {
 		const { executor, deps, releaseSlot } = makeHarness()
 		const op = makeAztecOp({ opts: { from: addr("0xother"), additionalScopes: [], wait: "NO_WAIT" } })
@@ -274,6 +320,7 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 				claimOrCreateJournal: vi.fn(async () => ({ journalId: "j1", controller: aborted })),
 				beginJournal: vi.fn(),
 				markJournal: vi.fn(async () => {}),
+				stampCorrelation: vi.fn(async () => {}),
 			},
 		})
 		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toBeInstanceOf(JobCancelledSentinel)
@@ -506,6 +553,7 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 				}),
 				beginJournal: vi.fn(),
 				markJournal: vi.fn(async () => {}),
+				stampCorrelation: vi.fn(async () => {}),
 			},
 		})
 		await expect(executor.executeAztecSendTx(makeAztecOp(), ORIGIN)).rejects.toThrow("claim broke")

@@ -39,6 +39,7 @@ function makeExecutor(): DappSendExecutor {
 			claimOrCreateJournal: unreachable as never,
 			beginJournal: unreachable as never,
 			markJournal: unreachable as never,
+			stampCorrelation: unreachable as never,
 		},
 		buildAndEstimate: unreachable as never,
 		addTransaction: unreachable as never,

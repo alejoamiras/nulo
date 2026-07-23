@@ -118,6 +118,31 @@ describe("isMatchingTask", () => {
 		expect(isMatchingTask(null, makeOp(), "0xabc")).toBe(false)
 		expect(isMatchingTask(transferTask, null as never, "0xabc")).toBe(false)
 	})
+
+	// Phase 1a: strict correlationId identity when BOTH sides carry it.
+	test("both carry correlationId + equal → match (exact identity beats kind heuristic)", () => {
+		const task = { correlationId: "cid-1", content: { kind: ContentKind.ExecuteOperation } }
+		expect(isMatchingTask(task, makeOp({ kind: "dapp_execute", correlationId: "cid-1" }), "0xabc")).toBe(true)
+	})
+
+	test("both carry correlationId but differ → NO match, even with same kind+account", () => {
+		const task = { correlationId: "cid-1", content: { kind: ContentKind.ExecuteOperation } }
+		// Two concurrent dApp ops: the kind-only heuristic would have matched; cid disambiguates.
+		expect(isMatchingTask(task, makeOp({ kind: "dapp_execute", correlationId: "cid-2" }), "0xabc")).toBe(false)
+	})
+
+	test("only ONE side has a correlationId → falls back to the kind/tokenId heuristic (SW-restart window)", () => {
+		const task = { correlationId: "cid-1", content: { kind: ContentKind.ExecuteOperation } }
+		// Journal survived a restart without a paired task-cid, or vice-versa.
+		expect(isMatchingTask(task, makeOp({ kind: "dapp_execute" }), "0xabc")).toBe(true)
+	})
+
+	test("correlationId equal but account differs → still no match (account gate is first)", () => {
+		const task = { correlationId: "cid-1", content: { kind: ContentKind.ExecuteOperation } }
+		expect(isMatchingTask(task, makeOp({ kind: "dapp_execute", correlationId: "cid-1", accountAddress: "0xother" }), "0xabc")).toBe(
+			false,
+		)
+	})
 })
 
 // Disappearing-card regression: T1 transitions to `succeeded` while T2 is

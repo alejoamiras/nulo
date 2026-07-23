@@ -45,6 +45,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		"createOperation",
 		"transitionOperation",
 		"setOperationMeta",
+		"setOperationCorrelation",
 		"getOperation",
 		"getOperations",
 		"countOperations",
@@ -204,6 +205,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			recipientAddress: input.recipientAddress,
 			contractAddress: input.contractAddress,
 			transferType: input.transferType,
+			correlationId: input.correlationId,
 		}
 		await this.storage.set(record.id, record)
 		this.emit("onOperationAdded", record)
@@ -334,6 +336,46 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		await this.storage.set(id, updated)
 		this.emit("onOperationUpdated", updated)
 		return updated
+	}
+
+	/**
+	 * Phase 1a: stamp the preallocated task↔journal correlation id onto a
+	 * record (account-switch isolation). First-write-wins: if the record
+	 * already carries a `correlationId`, the existing value is preserved (a
+	 * differing incoming id is logged and ignored — defends against a double
+	 * stamp on a raced retry). Never moves the FSM stage, so it is safe on
+	 * terminal records and needs no `assertCanTransition`.
+	 *
+	 * Takes the global `transitionLock`: this is a load → merge → write on the
+	 * row, so without the lock a concurrent `transitionOperation` /
+	 * `cancelJob` could clobber the stamp (or vice-versa). The critical section
+	 * is a single load + write, matching `transitionOperation`'s footprint.
+	 *
+	 * Emits `onOperationUpdated` so the activity feed re-evaluates whether the
+	 * now-correlated dApp task becomes feed-eligible.
+	 */
+	public async setOperationCorrelation(id: string, correlationId: string): Promise<OperationRecord> {
+		validateParams(OperationJournalMethodSchemas.setOperationCorrelation.params, [id, correlationId], "setOperationCorrelation")
+		await this.ensureInitialized()
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) {
+				throw new Error(`Operation not found: ${id}`)
+			}
+			if (existing.correlationId !== undefined) {
+				if (existing.correlationId !== correlationId) {
+					this.logError(`setOperationCorrelation: record ${id} already correlated (keeping first-write) — ignoring differing id`)
+				}
+				return existing
+			}
+			const updated: OperationRecord = { ...existing, correlationId, updatedAt: Date.now() }
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return updated
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 
 	/**

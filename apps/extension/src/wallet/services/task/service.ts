@@ -43,7 +43,13 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 		this.profileService.onActiveProfileChanged.add(this.onActiveProfileChanged)
 	}
 
-	private createTask(content: ITaskContent, parentId?: string, origin?: TxOrigin, status: TaskStatus = TaskStatus.Pending): WrappedTask {
+	private createTask(
+		content: ITaskContent,
+		parentId?: string,
+		origin?: TxOrigin,
+		status: TaskStatus = TaskStatus.Pending,
+		correlationId?: string,
+	): WrappedTask {
 		let taskId: string
 		do {
 			taskId = getRandomHex(8)
@@ -66,6 +72,10 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 			finishedAt: undefined,
 			result: undefined,
 			error: undefined,
+			// Preallocated task↔journal correlation (Phase 1a). Only root feed
+			// tasks carry it; subtasks derive their scope from the parent and
+			// never surface via `getTasks`, so they are deliberately left unset.
+			correlationId: parent ? undefined : correlationId,
 		}
 
 		if (status !== TaskStatus.Pending) {
@@ -79,7 +89,7 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 			parent.subtasks.push(newTask)
 			this.emit("onTaskUpdated", parent)
 		}
-		return new WrappedTask(newTask.id, this, origin)
+		return new WrappedTask(newTask.id, this, origin, newTask.correlationId)
 	}
 
 	/**
@@ -87,10 +97,12 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 	 * @param content - Task content
 	 * @param parentId - Optional parent task ID
 	 * @param origin - Optional origin of the task
+	 * @param correlationId - Optional preallocated task↔journal correlation id
+	 *   (Phase 1a). Ignored for subtasks (a `parentId` was supplied).
 	 * @returns Created task wrapper
 	 */
-	public createNewTask(content: ITaskContent, parentId?: string, origin?: TxOrigin): WrappedTask {
-		return this.createTask(content, parentId, origin, TaskStatus.Pending)
+	public createNewTask(content: ITaskContent, parentId?: string, origin?: TxOrigin, correlationId?: string): WrappedTask {
+		return this.createTask(content, parentId, origin, TaskStatus.Pending, correlationId)
 	}
 
 	/**
@@ -98,10 +110,12 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 	 * @param content - Task content
 	 * @param parentId - Optional parent task ID
 	 * @param origin - Optional origin of the task
+	 * @param correlationId - Optional preallocated task↔journal correlation id
+	 *   (Phase 1a). Ignored for subtasks (a `parentId` was supplied).
 	 * @returns Created task wrapper
 	 */
-	public startNewTask(content: ITaskContent, parentId?: string, origin?: TxOrigin): WrappedTask {
-		return this.createTask(content, parentId, origin, TaskStatus.Processing)
+	public startNewTask(content: ITaskContent, parentId?: string, origin?: TxOrigin, correlationId?: string): WrappedTask {
+		return this.createTask(content, parentId, origin, TaskStatus.Processing, correlationId)
 	}
 
 	private validateTaskBeforeFinish(task: Task): void {

@@ -7,6 +7,11 @@ export class WrappedTask {
 		public readonly id: string,
 		private readonly taskService: TaskService,
 		public readonly origin?: TxOrigin,
+		/** Preallocated task↔journal correlation id (Phase 1a). Set only on
+		 *  root feed tasks; read by the dApp-send executor to stamp the same id
+		 *  onto the created/claimed journal record so the activity feed can
+		 *  bind this task to its owning-scope journal. */
+		public readonly correlationId?: string,
 	) {}
 
 	public createSubtask(content: ITaskContent): WrappedTask {

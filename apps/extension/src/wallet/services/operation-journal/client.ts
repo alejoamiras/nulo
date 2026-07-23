@@ -44,6 +44,12 @@ export class OperationJournalServiceClient extends ServiceClient<Methods, Events
 		return validateResult(OperationJournalMethodSchemas.setOperationMeta.result, result, "setOperationMeta")
 	}
 
+	public async setOperationCorrelation(id: string, correlationId: string): Promise<OperationRecord> {
+		validateParams(OperationJournalMethodSchemas.setOperationCorrelation.params, [id, correlationId], "setOperationCorrelation")
+		const result = await this.request("setOperationCorrelation", id, correlationId)
+		return validateResult(OperationJournalMethodSchemas.setOperationCorrelation.result, result, "setOperationCorrelation")
+	}
+
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
 		validateParams(OperationJournalMethodSchemas.getOperation.params, [id], "getOperation")
 		const result = await this.request("getOperation", id)

@@ -118,6 +118,20 @@ describe("TransferExecutor.execute", () => {
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
 	})
 
+	test("Phase 1a: threads ONE preallocated correlationId onto BOTH the task and the journal", async () => {
+		const { executor, deps } = makeHarness()
+		await executor.execute(makeReq())
+
+		// startNewTask(content, undefined, origin, correlationId) — 4th positional arg.
+		const taskArgs = (deps.tasks.startNewTask as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		const taskCid = taskArgs[3] as string
+		expect(typeof taskCid).toBe("string")
+		expect(taskCid.length).toBeGreaterThan(0)
+
+		const journalInput = (deps.createJournalOperation as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as { correlationId?: string }
+		expect(journalInput.correlationId).toBe(taskCid) // SAME id on both sides
+	})
+
 	test("reuse path: snapshot consumed, planner + buildAndEstimate skipped, snapshot shapes the record", async () => {
 		const snapshot = {
 			txRequest: makeTxRequest(),

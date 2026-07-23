@@ -64,19 +64,26 @@ export interface CancelExecutor {
  * Match an executingTask against a journal record for the cancel-dupe fix.
  * Returns true iff the task likely refers to the same operation.
  *
- * KNOWN LIMITATION (codex audit Nice): matches by kind + tokenId for
- * transfers, kind alone for dapp_execute. For concurrent same-account
- * dApp ops (rare — dApp approval windows serialize at the user level),
- * a terminal event on op A could false-clear executingTask when it's
- * currently B. Consequence: brief flicker before TaskService re-syncs.
+ * Phase 1a: when BOTH sides carry the preallocated `correlationId`, match on
+ * it EXACTLY — the strict identity the old kind/tokenId heuristic couldn't
+ * give. This is what makes a dApp task bind to precisely its owning-scope
+ * record (and lets subtask enrichment target one card instead of every
+ * same-account dApp card). The heuristic below stays as the fallback for
+ * records/tasks minted before this arc, and for the SW-restart window where a
+ * durable journal survives but its (in-memory) task — and thus the correlation
+ * pairing — is gone.
  *
- * If concurrency-driven flicker shows up in QA, strengthen by plumbing
- * a journalId onto task content for strict identity match.
+ * Legacy fallback (either side missing a correlationId): kind + tokenId for
+ * transfers, kind alone for dapp_execute. For concurrent same-account dApp ops
+ * a terminal event on op A could false-clear executingTask when it's currently
+ * B; consequence is a brief flicker before TaskService re-syncs.
  */
 // biome-ignore lint/suspicious/noExplicitAny: TaskService spec is JS; importing the concrete TaskRecord type would create a circular Vue/TS dep here.
 export function isMatchingTask(task: any, op: OperationRecord, activeAccount: string | undefined): boolean {
 	if (!task || !op) return false
 	if (op.accountAddress !== activeAccount) return false
+	// Strict identity when both carry the preallocated correlation id.
+	if (task.correlationId && op.correlationId) return task.correlationId === op.correlationId
 	if (op.kind === "transfer") {
 		return task.content?.kind === ContentKind.Transfer && task.content?.tokenId === op.tokenId
 	}

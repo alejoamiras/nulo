@@ -324,6 +324,61 @@ describe("OperationJournalService", () => {
 		})
 	})
 
+	describe("setOperationCorrelation (Phase 1a task↔journal binding)", () => {
+		// A queued dapp_execute record — mirrors the wallet-sdk message-arrival
+		// surface: it starts life WITHOUT a correlationId (stamped later on claim).
+		const QUEUED_DAPP: NewOperationInput = {
+			kind: "dapp_execute",
+			origin: "dapp",
+			profileId: "profile-a",
+			sessionId: "sess-1",
+			initialStage: { stage: "queued" },
+		}
+
+		test("stamps correlationId, preserves stage, persists, emits onOperationUpdated", async () => {
+			const rec = await service.createOperation(QUEUED_DAPP)
+			expect(rec.correlationId).toBeUndefined()
+			const updated: string[] = []
+			service.onOperationUpdated.add((op) => updated.push(op.id))
+
+			const out = await service.setOperationCorrelation(rec.id, "cid-1")
+			expect(out.correlationId).toBe("cid-1")
+			expect(out.progress.stage).toBe("queued") // stage untouched
+			const persisted = await service.getOperation(rec.id)
+			expect(persisted?.correlationId).toBe("cid-1")
+			expect(updated).toEqual([rec.id]) // feed re-evaluates the now-correlated task
+		})
+
+		test("first-write-wins: a second (differing) stamp is ignored, no re-emit", async () => {
+			const rec = await service.createOperation(QUEUED_DAPP)
+			await service.setOperationCorrelation(rec.id, "cid-first")
+			const updated: string[] = []
+			service.onOperationUpdated.add((op) => updated.push(op.id))
+
+			const out = await service.setOperationCorrelation(rec.id, "cid-second")
+			expect(out.correlationId).toBe("cid-first") // kept
+			expect(updated).toEqual([]) // no-op → no churn
+		})
+
+		test("correlationId survives a claim FSM transition (…existing spread)", async () => {
+			const rec = await service.createOperation(QUEUED_DAPP)
+			await service.setOperationCorrelation(rec.id, "cid-keep")
+			await service.transitionOperation(rec.id, { stage: "pending" }) // claim queued→pending
+			const after = await service.getOperation(rec.id)
+			expect(after?.correlationId).toBe("cid-keep")
+			expect(after?.progress.stage).toBe("pending")
+		})
+
+		test("createOperation carries correlationId at create-time (transfer path)", async () => {
+			const rec = await service.createOperation({ ...VALID_INPUT, correlationId: "cid-transfer" })
+			expect(rec.correlationId).toBe("cid-transfer")
+		})
+
+		test("throws when the record is gone", async () => {
+			await expect(service.setOperationCorrelation("nope", "cid")).rejects.toThrow(/not found/)
+		})
+	})
+
 	test("getOperations filter accepts `kind` and isolates token_import from on-chain ops", async () => {
 		await service.createOperation(VALID_INPUT) // transfer
 		await service.createOperation({ ...VALID_INPUT, kind: "dapp_execute" })
