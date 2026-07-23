@@ -1,10 +1,17 @@
 /**
- * Account-switch cross-account isolation — Phase 0 HARNESS.
+ * Account-switch cross-account isolation — Phase 0 HARNESS + Phase 1 GATE.
  *
- * This file will grow the full isolation assertions in Phase 1 (a real
- * third-party note lands under account A while account B is active and must
- * NOT surface in B's feed). Phase 0 proves ONLY that the deterministic
- * race harness itself works end-to-end, so Phase 1 can trust it:
+ * Two tests live here. The FIRST (Phase 0) proves the deterministic race
+ * harness works end-to-end. The SECOND (Phase 1 — Gate 1, plan §7) uses that
+ * harness to prove the real containment invariant: account A's incoming note
+ * AND A's settled extension transaction never render in account B's feed, and
+ * reappear when we switch back to A (a positive control that proves we
+ * suppressed a leak, not the feature). Containment is UI-side — a foreign
+ * record still PERSISTS in `chrome.storage.local`; the assertion is on the
+ * rendered feed cards, never on storage.
+ *
+ * Phase 0 proves ONLY that the deterministic race harness itself works
+ * end-to-end, so Phase 1 can trust it:
  *
  *   - a real private note is delivered to account A and mined,
  *   - the bidirectional incoming-poll gate parks A's scan AFTER PXE discovery
@@ -23,7 +30,15 @@
  */
 import { expect, inject } from "vitest"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
-import { getAccountAddress, refreshBalances } from "../fixtures/helpers"
+import {
+	createSecondAccount,
+	getAccountAddress,
+	refreshBalances,
+	sendTransfer,
+	switchAccountByAddress,
+	waitForBalance,
+	waitForTxConfirmation,
+} from "../fixtures/helpers"
 import { holdIncomingPoll, readIncomingPollStatus, releaseIncomingPoll, waitForIncomingPollPhase } from "../fixtures/incoming-poll-gate"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import type { Page } from "puppeteer"
@@ -59,7 +74,7 @@ async function findIncomingRecordByHash(page: Page, txHash: string): Promise<Sto
 
 test.skipIf(!hasConfig)(
 	"phase-0 harness: incoming-poll gate holds A's scan after discovery, releases into a committed record",
-	{ timeout: 300_000, retry: 0 },
+	{ timeout: 600_000, retry: 0 },
 	async ({ tokenReadyExtension }) => {
 		if (!aztecConfig) throw new Error("unreachable — skipIf guards hasConfig")
 
@@ -168,6 +183,257 @@ test.skipIf(!hasConfig)(
 		console.log("✓ A's incoming record committed after release (correlated by tx hash)")
 
 		// Repo convention: no unexpected console / page errors across the flow.
+		expect(tokenReadyExtension.consoleErrors).toEqual([])
+		expect(tokenReadyExtension.pageErrors).toEqual([])
+
+		await page.close()
+	},
+)
+
+/** Resolve the active `(profileId, networkId, accountAddress)` triple the gate
+ *  arms on, from the same persisted keys the Phase-0 harness reads. Throws with
+ *  the observed shape if any leg is missing. */
+async function resolveActiveTriple(page: Page): Promise<{ profileId: string; networkId: string; account: string }> {
+	const triple = await page.evaluate(async () => {
+		const profileId = (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"]
+		const account = (await chrome.storage.local.get("nulo:ui:activeAccount"))["nulo:ui:activeAccount"]
+		let networkId: string | null = null
+		if (typeof profileId === "string") {
+			const activeKey = `nulo:core:active-network@${profileId}`
+			const activeId = (await chrome.storage.local.get(activeKey))[activeKey]
+			if (typeof activeId === "string") networkId = activeId
+		}
+		return {
+			profileId: typeof profileId === "string" ? profileId : null,
+			account: typeof account === "string" ? account : null,
+			networkId,
+		}
+	})
+	if (!triple.profileId || !triple.networkId || !triple.account) {
+		throw new Error(`could not resolve active (profile, network, account): ${JSON.stringify(triple)}`)
+	}
+	return { profileId: triple.profileId, networkId: triple.networkId, account: triple.account }
+}
+
+/** Deliver a real private note to `toAddress` from an independent EmbeddedWallet
+ *  (a genuine third-party sender) and return the mined tx hash — the SAME value
+ *  the extension's note scanner reports as `note.txHash`, so the caller can arm
+ *  the incoming-poll gate for it. */
+async function deliverPrivateNoteTo(
+	nodeUrl: string,
+	contract: string,
+	toAddress: string,
+	amount: bigint,
+	minterAddress: string,
+): Promise<string> {
+	const { createTestWallet, createSponsoredFeeOptions, mintPrivateTokens } = await import("../fixtures/aztec")
+	const { wallet, node, cleanup } = await createTestWallet(nodeUrl)
+	try {
+		const feeOptions = await createSponsoredFeeOptions(wallet)
+		return await mintPrivateTokens(wallet, node, contract, toAddress, amount, minterAddress, feeOptions)
+	} finally {
+		await cleanup()
+	}
+}
+
+/** Wait until the rendered activity-feed root declares `address` as its active
+ *  account (`data-active-account`).
+ *
+ *  Surface choice: the History page (`activity.vue`) feed root is gated ONLY on
+ *  `appStore.isLogined`, so it deterministically reflects the switched account
+ *  in BOTH the leaking (pre-fix) and contained (post-fix) states. The home
+ *  Recent-Activity widget's root is instead conditional on there being activity
+ *  and VANISHES for a contained fresh account — waiting on it for account B
+ *  would false-timeout once containment lands. This surface therefore can't
+ *  invert the gate's meaning. (The Recent-Activity surface + the `tx-awaiting`
+ *  in-flight card are a SEPARATE parametrized run per plan §7; the History page
+ *  does not render awaiting cards.) */
+async function waitForFeedScope(page: Page, address: string, timeoutMs = 30_000): Promise<void> {
+	try {
+		await page.waitForFunction(
+			(want: string) => document.querySelector('[data-testid="activity-feed-root"]')?.getAttribute("data-active-account") === want,
+			{ timeout: timeoutMs, polling: 150 },
+			address,
+		)
+	} catch {
+		const observed = await page
+			.evaluate(
+				() => document.querySelector('[data-testid="activity-feed-root"]')?.getAttribute("data-active-account") ?? "<no feed root>",
+			)
+			.catch(() => "<read failed>")
+		throw new Error(`feed root data-active-account: expected "${address}" but observed "${observed}" after ${timeoutMs}ms`)
+	}
+}
+
+/** Navigate the popup to the History page and wait for its route + feed root to
+ *  reflect `expectScope`. Hash-nav (not a nav-tab click) mirrors
+ *  `incoming-transfers.test.ts` and avoids depending on the bottom-nav layout. */
+async function gotoHistory(page: Page, expectScope: string): Promise<void> {
+	await page.evaluate(() => {
+		window.location.hash = "#/popup/activity"
+	})
+	await waitForHash(page, "#/popup/activity", 10_000)
+	await waitForFeedScope(page, expectScope)
+}
+
+test.skipIf(!hasConfig)(
+	"cross-account isolation: A's incoming + settled tx never render in B's feed",
+	{ timeout: 600_000, retry: 0 },
+	async ({ tokenReadyExtension }) => {
+		if (!aztecConfig) throw new Error("unreachable — skipIf guards hasConfig")
+		const contract = aztecConfig.tokenAddress
+
+		const page = await openPopup(tokenReadyExtension)
+		await waitForHash(page, "#/popup/general", 30_000)
+
+		const accountA = await getAccountAddress(page)
+		expect(accountA).toBe(tokenReadyExtension.accountAddress)
+
+		// ── (1) Seed a real EXTENSION-side settled tx for A. The independent-
+		//    wallet mint below only makes an INCOMING row (never a
+		//    TransactionService row), so a separate extension tx is required to
+		//    test that stale SETTLED history is contained too (plan §7). A
+		//    public→public self-transfer is the proven-cheap shape on the
+		//    `tokenReadyExtension` fixture (see `transfers.test.ts`) — no FeeJuice
+		//    needed (SponsoredFPC pays). The unique amount `7` keys the settled
+		//    `tx-card`.
+		const SETTLED_AMOUNT = "7"
+		await waitForBalance(page, "1,000", 60_000)
+		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA })
+		await waitForTxConfirmation(page, { amount: SETTLED_AMOUNT, fromType: "public", toType: "public" })
+		console.log(`✓ A has a settled extension tx (amount ${SETTLED_AMOUNT})`)
+
+		// ── (2) Create account B (creation self-selects B), then switch back to A
+		//    so the note below is delivered + discovered while A is active.
+		const accountB = await createSecondAccount(page)
+		expect(accountB).not.toBe(accountA)
+		await page.evaluate(() => {
+			window.location.hash = "#/popup/general"
+		})
+		await waitForHash(page, "#/popup/general", 10_000)
+		await switchAccountByAddress(page, accountA)
+		console.log(`✓ Created B (${accountB.slice(0, 10)}…) and switched back to A`)
+
+		// ── (3) Deliver a real private note to A from an independent wallet and
+		//    drive it to `committed` via the gate — the exact proven Phase-0 flow.
+		//    We commit while A is active (option b), NOT across the switch: the
+		//    gate's safety timeout is only 15s and an account switch can restart
+		//    the SW (dropping the parked scan), which would make a hold-across-
+		//    switch race flaky. Committing first, then switching, tests the same
+		//    privacy invariant (a persisted foreign record must not surface in B)
+		//    without that fragility. The live-broadcast-during-switch race is the
+		//    zero-timing unit pin's job (`useIncomingTransfers.test.ts`, plan §7).
+		const triple = await resolveActiveTriple(page)
+		expect(triple.account).toBe(accountA)
+
+		const AMOUNT = 31n * 10n ** 18n
+		const txHash = await deliverPrivateNoteTo(aztecConfig.nodeUrl, contract, accountA, AMOUNT, aztecConfig.minterAddress)
+		expect(txHash).toMatch(/^0x[0-9a-fA-F]+$/)
+		console.log(`✓ Delivered private note to A in tx ${txHash}`)
+
+		await holdIncomingPoll(page, {
+			profileId: triple.profileId,
+			networkId: triple.networkId,
+			accountAddress: accountA,
+			contract,
+			txHash,
+		})
+
+		let held = false
+		for (let i = 0; i < 40 && !held; i++) {
+			await refreshBalances(page)
+			for (let j = 0; j < 15 && !held; j++) {
+				const status = await readIncomingPollStatus(page)
+				if (status?.phase === "discovery-held" && status.txHash === txHash) {
+					held = true
+					break
+				}
+				await new Promise((r) => setTimeout(r, 300))
+			}
+		}
+		expect(held).toBe(true)
+		await waitForIncomingPollPhase(page, "discovery-held", txHash, 5_000)
+		await releaseIncomingPoll(page)
+		await waitForIncomingPollPhase(page, "committed", txHash, 20_000)
+
+		let record: StoredIncomingRecord | null = null
+		for (let i = 0; i < 25 && !record; i++) {
+			record = await findIncomingRecordByHash(page, txHash)
+			if (record) break
+			await new Promise((r) => setTimeout(r, 200))
+		}
+		expect(record?.accountAddress).toBe(accountA)
+		expect(record?.hidden).toBe(false)
+		console.log("✓ A's incoming note committed (persisted, visible)")
+
+		// ── (4) BASELINE on A: both cards MUST render on A's History feed. This
+		//    proves the data is present + renderable, so a later 0-count on B is
+		//    genuine containment (not "the card never rendered" for some other
+		//    reason). It also brackets the positive control at step 8.
+		await gotoHistory(page, accountA)
+		await page.waitForSelector('[data-testid="tx-incoming-card"]', { visible: true, timeout: 30_000 })
+		await page.waitForSelector('[data-testid="tx-card"]', { visible: true, timeout: 30_000 })
+		expect((await page.$$('[data-testid="tx-incoming-card"]')).length).toBeGreaterThanOrEqual(1)
+		expect((await page.$$('[data-testid="tx-card"]')).length).toBeGreaterThanOrEqual(1)
+		console.log("✓ Baseline: A's incoming + settled cards render on A's feed")
+
+		// ── (5) Arm a MutationObserver (plan §7) that records any incoming/awaiting
+		//    card present WHILE the feed root declares a given scope. It runs
+		//    across the switch, so it catches a created-then-removed flash under B
+		//    (the one-tick window the synchronous switch-clear must eliminate) — a
+		//    plain post-settle count can't. Installed while A is active, so A-scope
+		//    hits are expected + ignored; only B-scope hits are leaks.
+		await page.evaluate(() => {
+			const w = window as unknown as { __isoLeaks: string[]; __isoObserver?: MutationObserver }
+			w.__isoLeaks = []
+			const record = () => {
+				const scope = document.querySelector('[data-testid="activity-feed-root"]')?.getAttribute("data-active-account")
+				if (!scope) return
+				for (const sel of ["tx-incoming-card", "tx-awaiting-card"]) {
+					if (document.querySelector(`[data-testid="${sel}"]`)) w.__isoLeaks.push(`${sel}@${scope}`)
+				}
+			}
+			w.__isoObserver = new MutationObserver(record)
+			w.__isoObserver.observe(document.body, {
+				childList: true,
+				subtree: true,
+				attributes: true,
+				attributeFilter: ["data-active-account"],
+			})
+			record()
+		})
+
+		// ── (6) Switch to B and assert containment. B is fresh, so its feed shows
+		//    NO cards — A's incoming + settled are contained UI-side even though
+		//    both still persist in `chrome.storage.local`.
+		await switchAccountByAddress(page, accountB)
+		await waitForFeedScope(page, accountB)
+		// Let any reconnect-replay / late broadcast settle before the counts.
+		await new Promise((r) => setTimeout(r, 3_000))
+
+		expect((await page.$$('[data-testid="tx-incoming-card"]')).length).toBe(0)
+		expect((await page.$$('[data-testid="tx-awaiting-card"]')).length).toBe(0)
+		expect((await page.$$('[data-testid="tx-card"]')).length).toBe(0)
+
+		const leaks = await page.evaluate(() => {
+			const w = window as unknown as { __isoLeaks: string[]; __isoObserver?: MutationObserver }
+			w.__isoObserver?.disconnect()
+			return w.__isoLeaks ?? []
+		})
+		expect(leaks.filter((e) => e.endsWith(`@${accountB}`))).toEqual([])
+		console.log("✓ B's feed shows NO A activity (incoming + settled contained)")
+
+		// ── (7) POSITIVE CONTROL: switch back to A — both cards MUST reappear.
+		//    Proves we suppressed a leak, not the feature itself.
+		await switchAccountByAddress(page, accountA)
+		await waitForFeedScope(page, accountA)
+		await page.waitForSelector('[data-testid="tx-incoming-card"]', { visible: true, timeout: 30_000 })
+		await page.waitForSelector('[data-testid="tx-card"]', { visible: true, timeout: 30_000 })
+		expect((await page.$$('[data-testid="tx-incoming-card"]')).length).toBeGreaterThanOrEqual(1)
+		expect((await page.$$('[data-testid="tx-card"]')).length).toBeGreaterThanOrEqual(1)
+		console.log("✓ Positive control: A's cards reappear on switch-back")
+
+		// ── (8) No unexpected console / page errors across the whole flow.
 		expect(tokenReadyExtension.consoleErrors).toEqual([])
 		expect(tokenReadyExtension.pageErrors).toEqual([])
 
