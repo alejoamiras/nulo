@@ -256,7 +256,7 @@ onBeforeUnmount(() => {
 					     AddressDisplay uses for the "To" account, so both cards' values look identical. -->
 					<Text v-else-if="fromDisplay.kind === 'private'" size="13" weight="600" color="primary" data-testid="from-private">Private</Text>
 					<Text v-else-if="fromDisplay.kind === 'mint'" size="13" weight="600" color="primary" data-testid="from-mint">Mint</Text>
-					<Text v-else size="13" weight="600" color="primary" data-testid="from-redacted">Not disclosed</Text>
+					<Text v-else size="13" weight="600" color="primary" data-testid="from-redacted">Private</Text>
 					<span :class="$style.address_label">From</span>
 				</Flex>
 
