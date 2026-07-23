@@ -3,48 +3,59 @@
 The Phase-5 ship gate shipped the 3 mandatory network-e2e cases (pub→pub, priv→pub, pub→priv) and left
 cases 4–5 as conditional "if feasible" extensions. A sonnet-5 harness-feasibility recon settled both.
 
-## Case 4 — public scan resumes across a service-worker restart: **IMPLEMENTED (2 layers)**
+## Case 4 — public scan resumes across a service-worker restart: **UNIT-ONLY (owner decision)**
 
-Codex round 1 caught that the e2e alone is **false-green** and cannot prove cursor-resume, so Case 4 ships
-as two complementary pieces:
+Case 4 ships as a deterministic **unit** proof. An integration e2e was attempted through THREE codex rounds
++ one real CI run and rejected: the harness cannot force a *faithful* SW recycle without a heavyweight,
+flake-prone browser relaunch, and every lighter shape is a false-green. Rather than ship the flakiest e2e
+category for coverage that's largely redundant, Case 4 is unit-only — matching the Case-5 resolution below
+and the owner's standing "no flakes" priority.
 
-1. **Unit (the cursor-resume proof, deterministic, flake-free):** `service.scenarios.test.ts` → the
-   `"public-scan cursor resume"` describe, two tests for the two resume branches. (a) No anchor
-   (`lastSyncedBlockHash: null`, cold-start): the FIRST reader call pages with `afterCursor == the persisted
-   cursor` (+ `fromBlock` undefined). (b) With a non-null anchor (the real production post-scan state): the
-   anchor triggers a boundary ancestry probe first, and a later reader call still resumes from the exact
-   persisted cursor with no block-0 fallback. Both boot a FRESH service over the same in-memory storage
-   (`bootService` doesn't clear cursors). A restart that dropped the cursor would fetch from block 0 — this
-   pins the exact property the e2e can't (a from-0 rescan + PK-dedup looks identical end-to-end).
-2. **E2E (the integration rehydration smoke):** `apps/extension/tests/e2e/network/incoming-scan-sw-restart.test.ts`.
+### The unit proof (deterministic, flake-free) — the shipped coverage
 
-Feasible + cheap — it reuses proven infra, not new capability:
-- The CDP `stopServiceWorker` helper (`Runtime.terminateExecution`) is already CI-green in
-  `sw-restart-network.test.ts`. **An MV3 SW recycle does NOT lock the wallet** — the session mirror (a
-  `SessionSecretBox`) in `chrome.storage.session` survives the recycle and is silently restored on respawn,
-  by design, so the popup reconnects mid-session without re-prompting (`session-manager.ts`; the 30-min
-  `sessionTtl` far exceeds the ~2-min test). The CI signal that corrected this: gating the reopen on
-  `#/popup/auth` **timed out at 45s** because the wallet was never locked — it routed to `#/popup/general`.
-  What must survive for the resume is the scan cursor + records + outbox in `chrome.storage.local`
-  (`repository.ts:44-59`).
-- **Shape (avoids the false-green codex R1 caught):** deliver receipt A → scan runs, cursor advances, D4
-  auto-refreshes 1000→1010 → re-wait for A's chip on the activity feed (the re-mounted feed hydrates its
-  rows async — counting before that settles samples a stale view), then **snapshot the feed card count
-  `cardsBefore`** → KILL the SW → deliver receipt B while it's dead → reopen and let the popup **route to
-  `#/popup/general`** — the recycle did NOT lock the wallet (session restored from `chrome.storage.session`),
-  so there's no re-auth; reaching general requires the fresh SW to have booted + completed the session check,
-  which IS the respawn proof. The service's init-time `hydrateSchedulers()` then rebuilds the scan
-  schedulers from the tokens in storage (service.ts: "resume polling without waiting for an onTokenAdded
-  event") — the exact SW-restart resume path — so the scan resumes from the persisted cursor with **no popup
-  interaction and no unlock** → assert the feed grew to **exactly `cardsBefore + 1`** (B, and no spurious
-  re-index of the pre-restart records). A bare `>= 2` was false-green: the fixture mints 1000 pre-import, and
-  zero-sender mints create a record, so {mint, A} already = 2 before B; the `+1` delta is what proves the
-  resumed scan added B.
-- **Accepted limitation:** the public scan has no deterministic mid-page pause hook — the e2e
-  `incoming-poll-gate` wires only the note arm (`service.ts:951-956` calls it in `scanContract`, not
-  `scanPublicContract`). So the kill lands at a clean post-A-scan boundary, not mid-page; the mid-page/
-  mid-reconcile crash windows are covered at the unit layer (below). Same race-timed-kill precedent as
-  `backup-restore-sw-restart.test.ts`.
+`service.scenarios.test.ts` → the `"public-scan cursor resume"` describe, two tests for the two resume
+branches:
+
+- **(a) No anchor** (`lastSyncedBlockHash: null`, cold-start): the FIRST reader call pages with
+  `afterCursor == the persisted cursor` (+ `fromBlock` undefined).
+- **(b) With a non-null anchor** (the real production post-scan state): the anchor triggers a boundary
+  ancestry probe first, and a later reader call still resumes from the exact persisted cursor with no
+  block-0 fallback.
+
+Both boot a FRESH service over the same in-memory storage (`bootService` doesn't clear cursors) — the SW
+restart modeled as a new instance re-hydrating from `chrome.storage.local`. A restart that dropped the
+cursor would fetch from block 0; this pins the exact "resume from persisted cursor, no re-processing"
+property. It is the ONLY layer that can prove it: a from-0 rescan + primary-key dedup looks byte-identical
+to a correct resume from the outside, so no e2e can distinguish them anyway.
+
+### Why NOT an e2e (what the codex loop + CI actually proved)
+
+The abandoned e2e (`incoming-scan-sw-restart.test.ts`, removed) went through three failing shapes. Each
+failure is a durable lesson about this harness:
+
+1. **`>= 2` cards was false-green (codex R1).** The fixture mints 1000 pre-import and zero-sender mints
+   create a record, so `{mint, A}` already = 2 before B ever arrives. Fixed to a `cardsBefore + 1` delta.
+2. **Gating recovery on `#/popup/general` is a false-green (codex R3 + verified).** It assumes the SW
+   recycle leaves the wallet unlocked. But **`strictSecurityMode` defaults to `true`** (`config.ts:26`) and
+   the fixtures don't opt out, so `SessionManager.open()` persists **no bearer** (`session-manager.ts:213`:
+   `persistBearer = passhash !== undefined && !strictSecurityMode && type === "password"`). A genuine
+   recycle therefore `silentClose`s and the wallet **locks** → routes to `auth`. Accepting `general` means
+   accepting a run where the worker never died and the *old* scheduler's ordinary 30s poll found B — proving
+   nothing about restart-resume.
+3. **Gating on `#/popup/auth` timed out in CI (the decisive signal).** `Runtime.terminateExecution` (the
+   only in-process SW-kill lever) leaves an **unrevivable zombie SW** — documented in the harness itself
+   (`fixtures/extension.ts:23`). It does not reliably produce a fresh respawn, so the popup never settled
+   onto a recovery route. The repo's own faithful SW-restart pattern is a **browser relaunch on a persistent
+   `userDataDir`** (`backup-restore-sw-restart.test.ts` → `launchExtension({ userDataDir })`), which clears
+   `chrome.storage.session` → deterministic lock → auth → settle-loop unlock.
+
+A correct e2e would thus need: a manual persistent `userDataDir` + full token setup (the `tokenReadyExtension`
+fixture doesn't expose a relaunchable dir), a real browser relaunch, and a settle-loop unlock — ~200 lines
+of the flakiest e2e machinery there is. **Owner decision (2026-07-23): not worth it.** The integration half
+it would add (real `chrome.storage` survives a restart + the wallet recovers) is **already covered** by
+`backup-restore-sw-restart.test.ts` and `sw-restart-network.test.ts`; the scan-resumes-end-to-end half by
+`incoming-public-transfers.test.ts`; and the cursor-resume core by the unit proof above. The union leaves no
+real gap.
 
 ## Case 5 — forced reorg triggers D6 reconciliation: **NOT an e2e — covered at the unit layer**
 
@@ -79,13 +90,13 @@ capability smoke test are the standing coverage for reorg reconciliation.
 
 ## Validation
 
-- **Local `e2e:agent` runs were blocked by machine resource state, NOT test logic** (3 attempts on a
-  marathon-session box): the aztec sandbox hit the recurring `EADDRINUSE` node-boot race, and on the run
-  that DID boot, the test executed for 250s before Chrome's popup frame detached — a memory-pressure crash
-  (swap ~80% full, tmpfs `/tmp` ~70%, Chrome + sandbox competing for RAM). No run produced a wrong
-  assertion; the failures are all boot/crash symptoms of the environment.
-- The test is composed entirely of **proven CI-green pieces**: the `waitForKindChip`/balance-poll pattern
-  from the passing `incoming-public-transfers.test.ts`, and the `stopServiceWorker`/`waitForLiveness`/
-  auth-unlock pattern from the passing `sw-restart-network.test.ts`.
-- **Authoritative validation = CI** (isolated runner, proper resources, rerun-on-flake gate) on the PR,
-  plus a `gpt-5.6-sol` static review of the Case-4 test logic + this Case-5 resolution.
+- **Case 4 unit proof:** `service.scenarios.test.ts` `"public-scan cursor resume"` (both branches) green;
+  the full `incoming-transfer` service suite is 136 tests green; `typecheck` + `lint` clean.
+- **The e2e loop is the lesson, not a shipped artifact.** Three `gpt-5.6-sol` rounds + one real CI run
+  progressively falsified every non-relaunch e2e shape (`>= 2` → `cardsBefore+1`; `general`-gate →
+  false-green; `auth`-gate → CI timeout from the zombie-SW `terminateExecution`). The codex loop working as
+  intended: it (and CI) refused to let a false-green ship. The faithful browser-relaunch alternative was
+  rejected on flake-cost vs. the redundant coverage (see "Why NOT an e2e" above).
+- **Coverage owned elsewhere:** real-`chrome.storage`-survives-restart + wallet-recovers →
+  `backup-restore-sw-restart.test.ts` + `sw-restart-network.test.ts`; scan-works-end-to-end →
+  `incoming-public-transfers.test.ts`; cursor-resume core → the unit proof above.
