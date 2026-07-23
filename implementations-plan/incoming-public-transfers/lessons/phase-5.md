@@ -3,6 +3,24 @@
 Log for Phase 5 (behavioral ship gate) and the iterative codex hardening the user asked for
 ("several rounds … until satisfied … work with your Codex team mate").
 
+## Ship-gate result — GREEN
+`bun run e2e:agent -- incoming-public-transfers.test.ts` → exit 0, 1 test passed (~155s) against the
+live sandbox. The one test drives all three mandatory cases end-to-end: (1) pub→pub → a
+`tx-incoming-card` with the "Public → Public" chip AND the token's public balance auto-refreshes
+1000→1010 with NO manual click (the D4 outbox-drain pin); (2) priv→pub → "Private → Public" chip
+(`from == MAGIC`); (3) pub→priv → "Received privately" via the note arm (D7 dropped). The private-arm
+regression `bun run e2e:agent -- incoming-transfers.test.ts` is also green (no note-arm regression from
+the discriminated-union record reshape). Cases 4–5 (SW-restart / forced reorg) were the plan's
+conditional "if feasible" extensions — not implemented.
+
+**Test-harness gotcha (not a product bug):** the first run reded at `navigateToTokenDetail` (30s
+timeout on `[data-testid="tokens-card"]`). Root cause: `waitForKindChip` leaves the popup on
+`#/popup/activity`, but `navigateToTokenDetail` does NOT navigate — it clicks the `tokens-card` that
+only renders on the home page. The "Public → Public" chip assertion had already PASSED, proving the
+scan→record→chip path works on-chain; only the test's navigation sequence was wrong. Fix: `navigateByHash("#/popup/general")`
+before `navigateToTokenDetail`. (The transient `[aztec-node] Error: Address already in use` at startup
+is an agent.sh bind race that self-recovers — not a real failure.)
+
 ## Codex round 1 — adversarial + correctness review of the core (session 019f8e8c-…, gpt-5.6-sol xhigh)
 Scoped to the highest-risk new code: `public-events.ts` (runtime scan/decode/reorg), the service's
 D6 reconciliation + D4 outbox arm, `public-event-indexer.ts`, `spec.ts`. Prompt asked codex to BREAK

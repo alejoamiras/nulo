@@ -628,7 +628,17 @@ note/public ordering; dust filter — RAISING threshold hides MORE, LOWERING re-
   (UI render paths with the Phase-2-updated fixtures).
 - Layers: typecheck/lint · unit/component · build · smoke e2e.
 
-### Phase 5 — Network e2e (behavioral ship gate)
+### Phase 5 — Network e2e (behavioral ship gate) ✓
+
+**✓ COMPLETE** (gate green: `bun run e2e:agent -- incoming-public-transfers.test.ts` exit 0 — 1 test
+passed against the live sandbox, covering all three cases in one test: pub→pub "Public → Public" chip
++ the D4 public-balance auto-refresh 1000→1010 with no manual click, priv→pub "Private → Public" chip
+via `from == MAGIC`, and pub→priv "Received privately" via the note arm; `bun run e2e:agent --
+incoming-transfers.test.ts` (private-arm regression) also green; `bun run audit:vue` exit 0). Cases 4–5
+(SW-restart / forced reorg) were the plan's conditional "if feasible" extensions — not implemented; the
+mandatory cases 1–3 are the ship gate and pass. A 7-round codex post-impl audit + a `/code-review max`
+pass hardened the reorg/reconcile/class-gate/outbox arm and the peripheral UI/records; see
+`lessons/phase-5.md`.
 
 New `apps/extension/tests/e2e/network/incoming-public-transfers.test.ts` (harness patterns from
 `token-add-auto-trust.test.ts` / `incoming-transfers.test.ts`, parallel-safe runner): second
