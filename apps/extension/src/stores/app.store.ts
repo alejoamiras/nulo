@@ -223,9 +223,27 @@ export const useAppStore = defineStore("app", () => {
 			inFlightJournal.onOperationDeleted.add(dropInFlight)
 			// A reconnect can drop events, so re-read rather than trusting the cache.
 			inFlightJournal.onConnected?.add(() => void refreshInFlight())
-			await inFlightJournal.connect()
+			try {
+				await inFlightJournal.connect()
+			} catch {
+				inFlightOps.value = []
+				inFlightReady.value = true
+				return
+			}
 		}
-		const rows = await inFlightJournal.getOperations({ profileId })
+		let rows: OperationRecord[]
+		try {
+			rows = await inFlightJournal.getOperations({ profileId })
+		} catch {
+			// A journal read can fail transiently (service worker restarting). Not
+			// being able to ask must not make every scope change throw — the caller
+			// would surface that as an outright failure to switch. Treat it as "no
+			// sends known", which is what the pre-guard behavior was; the executor
+			// still binds its own account explicitly.
+			inFlightOps.value = []
+			inFlightReady.value = true
+			return
+		}
 		// Discard a response for a profile that is no longer current: a slow read
 		// for the previous one landing late would replace the live profile's
 		// operations and let a switch through mid-send.
