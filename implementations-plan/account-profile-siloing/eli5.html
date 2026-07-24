@@ -167,12 +167,13 @@
       <div class="gate">full suite + build + /harden clean</div></div>
   </div>
 
-  <h2>Open questions for you (the forks I won't decide alone)</h2>
+  <h2>Decisions made at the gate</h2>
   <div class="grid">
-    <div class="phase fork"><b>Instant switch-back vs. clearing on lock.</b> Today a profile switch <em>is</em> a
-      lock→unlock. So "clear everything on lock" and "instant switch-back" fight each other. Recommendation:
-      accept that switch-back after a lock is a normal reload for now (instant-cache then only helps a future
-      in-session switcher). The alternative is building a whole authenticated switch lifecycle. Your call.</div>
+    <div class="phase" style="border-left-color:var(--good)"><b style="color:var(--good)">Instant switch-back vs.
+      clearing on lock — RESOLVED: clear on lock.</b> Today a profile switch <em>is</em> a lock→unlock, so those
+      two goals fight. Chosen: wipe all cached slices on lock, so switch-back after a lock is a normal cold load
+      — the simplest and most private answer (no other profile's data survives a lock). Instant-from-cache then
+      pays off where it actually applies today: account and network switches within a session.</div>
     <div class="phase fork"><b>Drop the dApp spinner cards — confirm.</b> The in-progress dApp "spinner" cards
       stay hidden (dApp progress still shows via the durable journal cards). This removes the single biggest
       source of past leak-bugs. Planned as dropped; just confirming.</div>

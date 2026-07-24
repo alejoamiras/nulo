@@ -394,17 +394,17 @@ fixture drops its "recreate/ensure the active profile's rows after each switch" 
   keep dApp orphan-task publication fail-closed (no correlation). **Retain Phase-1's present-and-equal display
   filters as defense-in-depth** until the full PR is proven.
 - **Cache lifetime:** keep ≤32 recently-used slices in the popup process; never evict active; eviction drops only
-  in-memory cache (durable data remains); clear deleted-profile slices immediately (deletion tombstone so a late
-  refresh can't recreate them); **cap-enforce on EVERY refresh completion** (not just on activation) so a late
-  snapshot can't recreate an evicted/cleared slice past the cap (ultra-S7). Expose only `activeSlice`, never the
-  map. A fresh popup / evicted slice is cold → snapshots.
-  > **Audit ultra-S7 — "clear-all on hard lock" CONTRADICTS the switch UX, which today IS lock→unlock**
-  > (`Header.vue:22`: profile switch = lock → profile selector → unlock). So clearing on lock destroys the very
-  > cache instant-switch-back needs; retaining across lock crosses the lock/privacy boundary. This is a real
-  > design fork (Ask A2): either (i) accept that switch-back after a lock is **cold** (simplest; instant-cache
-  > then only benefits within one unlocked session — of which there is currently none, so effectively a no-op
-  > until an in-session switcher exists), or (ii) build a distinct **authenticated switch lifecycle** separate
-  > from lock, with cache/request epochs. Surfaced, not silently assumed.
+  in-memory cache (durable data remains); **`clearAll()` on wallet lock** (A2 — no inactive-profile data survives
+  a lock); clear deleted-profile slices immediately (deletion tombstone so a late refresh can't recreate them);
+  **cap-enforce on EVERY refresh completion** (not just on activation) so a late snapshot can't recreate an
+  evicted/cleared slice past the cap (ultra-S7). Expose only `activeSlice`, never the map. A fresh popup /
+  post-lock / evicted slice is cold → snapshots.
+  > **A2 RESOLVED — clear ALL slices on lock; switch-back after a lock is COLD.** (Fork surfaced by ultra-S7:
+  > a profile switch today IS lock→unlock (`Header.vue:22`), so clearing-on-lock and instant-switch-back
+  > conflict.) Chosen option (i): the simplest and most private answer — no inactive-profile feed data survives
+  > a lock. Instant-from-cache therefore serves **within-session** scope changes (account + network switches,
+  > plus any future in-session profile switcher), which is where the O(1) slice swap pays off today. Option (ii)
+  > — a distinct authenticated switch lifecycle with cache/request epochs — is explicitly deferred.
 
 ## 8. Legacy attribution (no numbered migration; additive optional fields)
 Frontend leniency is **not** permission to guess scope: a populated field must exactly equal the requested scope;
@@ -690,13 +690,13 @@ active-now mutex/builder reads · empty real-migration registry (pre-production)
 PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface all at the gate:
 - (A1 — resolved by Option 1) No new prod seam. The §9 guard's e2e reuses the EXISTING proof gate; the
   `ExecutionScopeGate` is dropped.
-- (A2 — DECISION FORK, ultra-S7) **Inactive-profile cache vs the lock-based switch.** Today a profile switch IS
-  lock→unlock (`Header.vue:22`), so "clear on lock" and "instant switch-back" are in direct conflict. Two options
-  to pick between: (i) **switch-back is cold after a lock** (simplest, safe; instant-cache benefits only a future
-  in-session switcher — effectively inert now), or (ii) build a **distinct authenticated switch lifecycle** with
-  cache/request epochs that retains slices across the switch but not across a true wallet-lock. Recommend (i) for
-  this PR (defer the switcher), but this is a genuine product call — not silently assumed. Confidentiality: any
-  retained inactive-profile feed data lives in a trusted extension document; the store exposes only `activeSlice`.
+- (A2 — RESOLVED at the gate: **option (i), cold switch-back after a lock**) Today a profile switch IS
+  lock→unlock (`Header.vue:22`), so "clear on lock" and "instant switch-back" conflict. **Chosen: clear ALL
+  slices on lock** — switch-back after a lock is a normal cold load. Instant-from-cache therefore benefits
+  within-session scope changes (account/network switches, and any future in-session profile switcher), not
+  across a lock. Rejected: building a distinct authenticated switch lifecycle with cache/request epochs (larger
+  surface, defers to a future switcher). **Privacy upside:** no inactive-profile feed data survives a lock at
+  all, which is the safer default.
 - (A3 — RESOLVED at the gate: **in scope**) **AccountService composite re-key** is now Phase 2a′ (§6.5). Deferral
   was justified only by migration cost; pre-production zeroes it, and post-launch it becomes permanently
   expensive. Confirmed by the user.
@@ -744,7 +744,7 @@ PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface a
 | D29 | Restart recovery | **versioned submission bundle + `submission_unknown` state + reconcile BEFORE the reaper + pinned endpoint + marker-deleted-last** | `{scope,txHash,fence}` marker reconciled after boot | **ultra-B5** — the existing reaper (`reaper.ts:121`) fails every non-terminal record at boot; `failed→succeeded` is illegal; the thin marker lacks the send-callback inputs. |
 | D30 | Incarnation ordering | **durable MONOTONIC decimal lineage (coordinator-maintained); `pxeGeneration` is only the nonce** | order incarnations by `pxeGeneration` | **ultra-S6** — `pxeGeneration` is 128-bit RANDOM hex (`profile/spec.ts:28`), not comparable; a delayed old snapshot could rollback. |
 | D31 | Shared builder | **split PREVIEW (no fence) vs AUTHORIZED (fence) builder; submission recovery for ALL sends, drift-abort dApp-only** | one fence-consuming builder for estimate + send | **ultra-S8** — `estimateOperationFee` has no fence (`dapp-send-executor.ts:208`); a UI transfer can also SW-die post-accept (`transfer-executor.ts:199`). |
-| D32 | Cache vs lock | **FORK surfaced (A2): cold-switch-back-after-lock (recommended, inert now) vs a new authenticated switch lifecycle** | "clear on lock + retain across switch" (contradictory today) | **ultra-S7** — profile switch IS lock→unlock (`Header.vue:22`). |
+| D32 | Cache vs lock | **RESOLVED: `clearAll()` on lock → switch-back after a lock is COLD; instant-cache serves within-session account/network switches** | a distinct authenticated switch lifecycle with cache/request epochs (deferred) | **ultra-S7 fork, user-decided at the gate** — simplest + most private (no inactive-profile feed data survives a lock). |
 | D33 | Graduation crash | **startup exact-scope reconciliation re-derives incoming↔tx suppression (P12)** | rely on live `onTxAdded` suppression only | **ultra-S9** — SW death mid-graduation leaves both visible (`incoming-transfer/service.ts:650`). |
 | D11 | Abort error to dApp | **typed `-32000 EXECUTION_SCOPE_CHANGED`, no scope details** | EIP-1193 `4001` | **codex — a scope abort is not an explicit user rejection; no info-leak.** |
 | D12 | Wrong queued claim | **locked delete + tombstone → fresh record; never render wrong failed card** | reuse / show wrong card | codex + main. |
