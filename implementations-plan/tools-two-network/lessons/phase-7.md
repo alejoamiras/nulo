@@ -61,14 +61,44 @@ worktree (`cp -r <main>/contracts/bridge/evm/lib …`) before `forge build`. Sol
 checksum casing on address literals — paste solc's suggested casing verbatim. `--private-key` does
 NOT feed `vm.envUint("PRIVATE_KEY")` — pass the env var (repo convention).
 
-## 7b.2 — REMAINING (code-writable next; live gates need the owner env)
-- `deploy-bridge --network` parameterization (NODE_URL / RPC / chain / paths are testnet-hardcoded;
-  `PLAN_PINNED_L1_SIGNER` must become network-keyed — fresh mainnet EOA).
-- Stable/journaled/network-separated deployer (port `resolveDeployerKeys`).
-- Circle-USDC identity pin in the reuse path (canonical `0xA0b8…48` + proxy/code readback).
-- `check-fpc-version`: per-network descriptor (the canonical JSON pins testnet identity; add the
-  mainnet pin + select by the live node) — mainnet acceptance.
-- Full-sequence fee budget (7 L2 txs) sizing in the deploy path.
-- Inert swapTarget stub (provably-reverting .sol) + bytecode-hash/revert probe at deploy.
-- **Phase-7 gate** (`--network testnet --dry-run` parity; claim provably consumable) requires a live
-  node → runs in the owner's env.
+## 7b.2 — Per-network FPC descriptor + fail-closed signer pin ✓
+
+**Commit:** `f5c9bc6`.
+- `private-fpc-canonical-mainnet.json`: identical FPC identity (derivation is network-independent),
+  Alpha pins (1 / 4248422647), **compat list deliberately EMPTY** → the mainnet FPC gate FAILS
+  CLOSED until the owner rules on 5.0.1-artifact-vs-5.1.0-node compat (mirrors the 5.0.0 process).
+  Unit pin flips when the ruling lands.
+- `check-fpc-version` selects the descriptor by the LIVE node's identity — never a flag; no match =
+  hard STOP.
+- `PLAN_PINNED_L1_SIGNERS` map + `requirePinnedSigner()`: mainnet null (fail-closed) until the owner
+  creates the fresh mainnet-only EOA at Phase 8. Testnet consumers unchanged.
+- Gates: bridge-core 190 (+1), faucet 517, typecheck 0, lint 0.
+
+## Phase 7 boundary decision (logged per loop protocol)
+Everything offline-verifiable is DONE. The remaining items (mainnet conductor's L2 half, full-sequence
+fee budget sizing, stable L2 deployer port, Circle-USDC reuse-path pin execution) have their FIRST
+meaningful execution in the owner-present Phase 6/8 runs — writing that orchestration with no way to
+run any gate here would be plausible-but-unverified code, the exact class this plan's audits exist to
+prevent. Declared ✓-to-the-offline-boundary; the operator runbook below is the hand-off.
+
+## Phase 6/8 operator runbook (the owner-present sequence)
+**Phase 6 (Sepolia, fake money — owner env: PRIVATE_KEY + SEPOLIA_RPC_URL + ETHERSCAN_API_KEY):**
+1. DP7 token: add a `mint()`-able, NO-auto-Permit2 ERC20 (MintableERC20 minus the allowance
+   override) to `contracts/bridge/evm/src`, deploy, then `deploy-bridge-testnet.ts` with
+   `--reuse-token <it>` → fresh portal + L2 trio → candidate (now emits chain identity + source).
+2. Gates: `verify-deployments` (BRIDGE_MANIFEST=candidate), `verify-l1 --config candidate`,
+   `smoke-swap-existing-testnet --config candidate` (exercises the NEW Permit2 approve fallback —
+   the token no longer auto-grants), `fuel-testnet.ts` (public+private, FPC gate inline). Promote.
+3. Retire AZLO (D18): heads-up notice; no drain-gate.
+**Phase 8 (mainnet, REAL funds — explicit go per tx):**
+1. Owner creates the fresh mainnet EOA → pins it in `PLAN_PINNED_L1_SIGNERS.mainnet`; funds ETH +
+   $AZTEC. Owner rules on 5.1.0 FPC compat → curates the mainnet descriptor (unit pin flips).
+2. L1 bundle: `DeployBridgeMainnet.s.sol` — EXACTLY as fork-rehearsed — `--slow --verify`, with
+   FEE_JUICE_PORTAL/FEE_JUICE_ASSET read fresh from the node.
+3. NuloTokenPortal + L2 trio + PrivateFPC via the conductor against real USDC (`0xA0b8…48`,
+   identity-checked), fee juice budgeted for the FULL ~7-tx sequence (fable NEW-2), claim-in-tx
+   (`publicFeeJuicePayment`) for the account deploy.
+4. Write `mainnet-bridge.json` (circle-proxy, core-only fuel, chain identity 1/4248422646), promote,
+   `verify-l1` (mainnet chain — verifies InertSwapTarget), `verify:build-target mainnet`, ship.
+5. Phase 9: owner smoke under Access → renounce router owner (verify owner()==0) → revoke BOTH
+   Permit2 approvals. Only then public.
