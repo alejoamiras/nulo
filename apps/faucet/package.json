@@ -6,6 +6,8 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "vite build",
+		"build:testnet": "vite build --config vite.testnet.config.mts",
+		"build:mainnet": "vite build --config vite.mainnet.config.mts",
 		"preview": "vite preview",
 		"typecheck": "vue-tsc --noEmit",
 		"test": "vitest run",

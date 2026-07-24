@@ -11,8 +11,8 @@
  * app bundle. Today it is pinned to testnet (Sepolia); the two-network build makes it target-driven.
  */
 import type { Chain } from "viem"
-import { sepolia } from "viem/chains"
-import { TESTNET_L1_CHAIN_ID, TESTNET_WALLET_CHAIN_ID } from "./chain-constants"
+import { mainnet, sepolia } from "viem/chains"
+import { resolveFaucetTarget } from "./network-targets"
 
 export interface NetworkConfig {
 	/** L1 (Ethereum) chain id — every viem client + the Permit2 EIP-712 domain bind to this. */
@@ -27,16 +27,21 @@ export interface NetworkConfig {
 	l1ExplorerBaseUrl: string
 }
 
-export const NETWORK: NetworkConfig = {
-	l1ChainId: TESTNET_L1_CHAIN_ID,
-	walletChainId: TESTNET_WALLET_CHAIN_ID,
-	viemChain: sepolia,
-	nodeUrl: import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com",
-	l1ExplorerBaseUrl: "https://sepolia.etherscan.io",
+const target = resolveFaucetTarget()
+
+// The only place viem/chains is allowed. Map the target's L1 chain id to its viem Chain — the lookup
+// is what guarantees viemChain.id === l1ChainId (so viem clients + the Permit2 domain agree).
+const VIEM_CHAINS: Record<number, Chain> = { [sepolia.id]: sepolia, [mainnet.id]: mainnet }
+const viemChain = VIEM_CHAINS[target.l1ChainId]
+if (!viemChain) {
+	throw new Error(`network.ts: no viem Chain for l1ChainId ${target.l1ChainId} (target ${target.key})`)
 }
 
-// The two chain-id sources (the Node-safe constant + the viem Chain) must never diverge — if they
-// do, viem clients and the Permit2 domain would disagree. Cheap fail-closed guard at module load.
-if (NETWORK.viemChain.id !== NETWORK.l1ChainId) {
-	throw new Error(`network.ts: viemChain.id (${NETWORK.viemChain.id}) !== l1ChainId (${NETWORK.l1ChainId}) — chain-id sources drifted`)
+export const NETWORK: NetworkConfig = {
+	l1ChainId: target.l1ChainId,
+	walletChainId: target.walletChainId,
+	viemChain,
+	// VITE_AZTEC_NODE_URL still overrides for dev/e2e; otherwise the target's committed node URL.
+	nodeUrl: import.meta.env.VITE_AZTEC_NODE_URL ?? target.nodeUrl,
+	l1ExplorerBaseUrl: target.l1ExplorerBaseUrl,
 }

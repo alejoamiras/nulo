@@ -6,7 +6,7 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { parseCandidateManifest } from "@nulo/bridge-core"
-import rawConfig from "../../public/testnet-bridge.json"
+import rawTestnetConfig from "../../public/testnet-bridge.json"
 
 /*
  * testnet-bridge.json is DEPLOY METADATA, not registerable instances. We rebuild each L2
@@ -18,10 +18,18 @@ import rawConfig from "../../public/testnet-bridge.json"
  * the faucet loudly at boot instead of shipping a broken lane (the rc.2 arc shipped a stale
  * carried feeJuicePortal precisely because this file used to cast an untyped `fuel` block).
  */
-const config = parseCandidateManifest(rawConfig)
+// The bridge manifest is injected per build target via vite `define` (import.meta.env). Falls back to
+// the static testnet import under vitest (no define) and the default `vite build` — so tests + the
+// legacy testnet build are unchanged. The mainnet build injects public/mainnet-bridge.json.
+const injectedManifest = import.meta.env.VITE_BRIDGE_MANIFEST_JSON
+const config = parseCandidateManifest(injectedManifest ? JSON.parse(injectedManifest) : rawTestnetConfig)
 
 export const L1_USDC = config.l1.usdc as `0x${string}`
 export const L1_PORTAL = config.l1.portal as `0x${string}`
+
+/** The chain identity this manifest declares — consumed by the build-integrity assertion (fail-closed
+ *  target↔manifest↔node check). `undefined` on a legacy manifest without the fields ⇒ a hard error there. */
+export const MANIFEST_CHAIN = { l1ChainId: config.l1ChainId, walletChainId: config.walletChainId }
 
 /**
  * Router + Permit2 are REQUIRED bridge config (bridge-only + fuel-only both go through the router's
