@@ -127,7 +127,7 @@
     <p>① The <strong>config file</strong> that picks the network is committed to git, never a dashboard setting.<br>
     ② The <strong>manifest states its own chain</strong>, and the app refuses to load unless the build target, the manifest, and the live node <em>all three agree</em>.<br>
     ③ The old <code>?chainId=</code> URL trick that could repoint the app is <strong>switched off outside tests</strong>.<br>
-    ④ CI <strong>verifies each build's addresses on-chain</strong> before it can ship — it's no longer optional.<br>
+    ④ CI checks — offline, no network — that a build <strong>bundles the manifest it claims to</strong> (its addresses match what the build says). The <em>live</em> on-chain checks run at <strong>deploy time</strong> instead, where the real money actually moves.<br>
     ⑤ Each build knows <strong>which hostname it belongs at</strong> and refuses to run elsewhere — so a testnet build can't quietly sit at the mainnet address (this one was found in the final audit pass).</p>
   </div>
 
@@ -165,11 +165,11 @@
     </tbody>
   </table>
 
-  <h2>Three things to confirm at the gate</h2>
-  <p>None block starting the safe phases. A3 is already resolved (the mainnet RPC host is the dRPC Alpha host already in the extension). A4 has a mandatory fund-safety part regardless of your answer.</p>
-  <div class="ask"><span class="n">A4</span><span><strong>Before testnet moves to the new test USDC, any in-flight AZLO deposit must be drained/settled</strong> — the final audit caught that re-pointing would otherwise strand people's token recovery. That part is non-negotiable. Your call is only the cosmetic one: retire the old AZLO token, or keep it visible alongside?</span></div>
-  <div class="ask"><span class="n">A6</span><span>For the Access-gated mainnet site, do you want a Cloudflare service token so CI can auto-verify it's live, or is manual checking fine? (Safe to defer — the new hostname check ⑤ already catches a mis-hosted build.)</span></div>
-  <div class="ask"><span class="n">A7</span><span>Who owns the second Cloudflare project's build config, and how do we detect if its dashboard setting drifts from the committed script? (Also safe to defer behind check ⑤.)</span></div>
+  <h2>Open questions — all resolved</h2>
+  <p>Nothing left to decide before starting.</p>
+  <div class="ask"><span class="n">A3</span><span>Mainnet RPC host → the dRPC Alpha host already in the extension (<code>lb.drpc.live</code>). Sets the site's allowed-connections list.</span></div>
+  <div class="ask"><span class="n">A4</span><span><strong>Retire AZLO</strong> — testnet is play money, so we don't guard its old-token recovery; just a "export before the switch" heads-up, no hard gate.</span></div>
+  <div class="ask"><span class="n">A6/A7</span><span>No Cloudflare service token — manual smoke + the hostname check ⑤ is enough. The heavy live-network CI gate was trimmed as non-hermetic and redundant with the deploy-time checks.</span></div>
 
   <h2>How the plan got here</h2>
   <p>This survived two full audit rounds (Codex + an independent Claude reviewer). The disagreements were the point — each round caught real money-loss paths before any code was written.</p>

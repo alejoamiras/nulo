@@ -124,10 +124,17 @@ identity, not just `name/symbol/decimals`.
 on-chain `router.swapTarget()`, **100% of mainnet deposits revert**. Deploy a **provably-reverting**
 swapTarget (DP2/DP8), and **gate** on a readback that manifest swapTarget == `router.swapTarget()`.
 
-### CI verification is mandatory, per target (codex round-2 HIGH)
-`_build-faucet.yml` sets `BRIDGE_MANIFEST` for each target so `verify-deployments` actually verifies
-the bridge; it compares the digest **emitted in the built artifact's `build.json`** (not a
-freshly-recomputed one — codex round-3) + chain/address readbacks, not just rebuilds.
+### CI verification: offline manifest-integrity only (owner-trimmed the on-chain half)
+`_build-faucet.yml` sets `BRIDGE_MANIFEST` per target so `verify-deployments` runs its **offline**
+checks: the built artifact bundles the manifest it claims (digest emitted in `build.json`, not a
+recomputed one — codex round-3) + the committed addresses match the salt/arg derivation. This is the
+part that stops a "labelled mainnet, wrong manifest" ship, and it's hermetic (no RPC). **The live
+on-chain readbacks are NOT a CI ship-gate** — they run at **deploy time** (`verify-l1`, swapTarget
+equality, USDC identity), which is the actual money moment, and the runtime target↔manifest↔node
+assertion fails closed at page load regardless. Owner decision: hard-blocking CI on live RPC is
+non-hermetic + redundant for a manually-smoked <$5 tool; no mainnet fund-safety is lost (the deploy
+gate + runtime fail-closed both remain). Codex's round-2 HIGH (verify-deployments silently skipped) is
+still closed — the offline gate is mandatory + per-target; only its *live-network* portion moved.
 
 ### Deployer + fees (F6 + codex round-2 NEW-2)
 Port `resolveDeployerKeys()` → stable, network-separated, journaled deployer address (recoverable
@@ -162,10 +169,11 @@ Fast layers (`typecheck && lint && test:faucet` for the touched packages) gate e
 4. **Dual build + dual deploy plumbing** — `vite.{testnet,mainnet}.config.mts`; per-target `publicDir`
    (CSP/manifest isolation; mainnet `connect-src https://lb.drpc.live`); **hostname↔target assertion**
    (5th integrity layer); `_build-faucet.yml` `target` input **with `BRIDGE_MANIFEST` set** →
-   verify-deployments runs per target comparing the **digest emitted in the built artifact's
-   `build.json`** (not a rebuilt one) + chain/address readbacks; second CF project + hook; reconcile
-   `faucet.*`→`tools.*`; dual verify-live (open testnet host; mainnet via CF service token OR — the
-   default — the hostname assertion since A6/A7 may be deferred). Mainnet build points at a placeholder
+   verify-deployments runs its **offline** gate per target (artifact-emitted `build.json` digest +
+   committed-vs-derived address match; the live on-chain readbacks stay at deploy-time, NOT CI —
+   owner-trimmed); second CF project + hook; reconcile
+   `faucet.*`→`tools.*`; verify-live is manual for the Access-gated mainnet host (A6/A7 deferred — the
+   hostname layer backstops a mis-hosted build). Mainnet build points at a placeholder
    that fails the startup assertion. Gate: both builds; each `build.json` correct; actionlint;
    placeholder fails closed; a testnet manifest at the mainnet host is caught by the hostname layer.
 5. **App: real-USDC + private-fuel + per-network gating** — Permit2 approve fallback in `useDeposit`
@@ -177,13 +185,14 @@ Fast layers (`typecheck && lint && test:faucet` for the touched packages) gate e
    faucet tokens on mainnet; private-fuel resolves the mainnet PrivateFPC AND rejects an address ≠ the
    derivation) + e2e.
 6. **Testnet rehearsal + real cutover** — deploy the DP7 token (permissionless-mint, no auto-Permit2)
-   on Sepolia; fresh portal + L2 trio; **A4 FIRST (blocker): drain/settle every in-flight AZLO token
-   journal + notify holders to export/claim before the re-point**, because `deploymentMatches`
-   (`useBridgeJournal.ts:300`) + `restoreFile` (`useBridgeBackup.ts:113`) bind TOKEN recovery to the
-   live portal+bridge — re-pointing strands them (fee-juice records bind the canonical FeeJuicePortal
-   → survive); then **promote testnet to it** (real cutover); rehearse the full mainnet path incl.
-   **private** fuel + the Permit2 approve. Gate: no unsettled AZLO token record remains; verify-
-   deployments (BRIDGE_MANIFEST) + verify-l1 + canary deposit→claim (public + private) + manual.
+   on Sepolia; fresh portal + L2 trio; **retire AZLO** (owner: testnet is play money — no
+   keep-alongside). NEW-2's stranded-recovery risk relaxes accordingly: re-pointing does break token
+   journal/backup recovery (`deploymentMatches` `useBridgeJournal.ts:300` + `restoreFile`
+   `useBridgeBackup.ts:113` bind to the live portal+bridge; fee-juice records bind the canonical
+   FeeJuicePortal → survive), but AZLO is play money, so this is a **best-effort heads-up, NOT a hard
+   drain-gate** — post a "export/claim before the re-point" notice, then promote. rehearse the full
+   mainnet path incl. **private** fuel + the Permit2 approve. Gate: verify-deployments (offline) +
+   verify-l1 + canary deposit→claim (public + private) + manual.
 7. **Deploy tooling for mainnet** — `deploy-bridge.ts --network`; stable/journaled/network-separated
    deployer; network-keyed signer (fresh EOA) + caps; verify-l1 network + reused-USDC skip + **router
    readbacks (permit2/portal/swapTarget/owner)** + **Circle USDC identity pin (address + proxy/code)**;
@@ -216,8 +225,8 @@ Fast layers (`typecheck && lint && test:faucet` for the touched packages) gate e
   per-target CI verify against the artifact-emitted digest.
 - **Fund-stranding (the real money-loss risk here)** — the private-fuel path targets a *usable*
   mainnet PrivateFPC whose address == the derivation the app uses (DP6/NEW-4); the swapTarget-equality
-  gate prevents 100%-revert deposits; the full-sequence fee budget prevents a mid-deploy stall; the
-  **A4 drain-before-cutover** prevents stranding in-flight AZLO token journals.
+  gate prevents 100%-revert deposits; the full-sequence fee budget prevents a mid-deploy stall. (AZLO
+  token-recovery at the testnet re-point is knowingly NOT protected — play money; see D18.)
 - **Residual signed-witness path (NEW-5, explicit).** `SwapBridgeRouter.sol:244` accepts a
   caller-supplied token portal; a compromised UI could induce a user to sign a Permit2 witness paying
   a malicious portal. No contract change closes this. **The control is low-balance burner wallets** —
@@ -257,14 +266,14 @@ derivation-equality checks).
   A10 → **inert swapTarget + renounce router owner post-smoke** (DP8/NEW-4). A11 → network-separated
   journaled deployer + full 7-tx budget (Phases 7–8). **A3 → resolved: `https://lb.drpc.live`** (the
   Alpha host at `network/service.ts:84`; sets the mainnet CSP `connect-src`).
-- **A4 → BLOCKER, not a cosmetic choice (NEW-2).** Re-pointing testnet strands in-flight AZLO *token*
-  journals/backups (`deploymentMatches`/`restoreFile` bind to the live portal+bridge). Phase 6 must
-  drain/settle them (or ship a legacy recovery route) BEFORE the cutover. Still needs the owner's
-  retire-vs-keep-visible call for the *label*, but the fund-safety step is mandatory regardless.
-- **Deferred behind a hard gate (confirm at the gate):** **A6** CF-Access service token for automated
-  mainnet verify-live, and **A7** second-CF-project build-config ownership + drift detection — both
-  may be deferred ONLY because the **hostname↔target assertion** (5th layer) independently catches a
-  mis-hosted build; without it they'd block.
+- **A4 → resolved: RETIRE AZLO** (owner: testnet is play money). NEW-2's stranded-recovery relaxes
+  from a hard drain-gate to a best-effort "export before re-point" notice — re-pointing does break
+  AZLO token recovery, but nobody's protecting testnet play money. (Fee-juice recovery survives a
+  re-point either way.)
+- **A6/A7 → resolved: NO CF service token; manual smoke + the hostname layer.** The owner trimmed the
+  live-network CI gate as non-hermetic + redundant. The **hostname↔target assertion** (5th layer)
+  independently catches a mis-hosted build, so automated verify-live isn't load-bearing. Second-CF-
+  project build-config drift (A7): documented as a manual check, not a CI gate.
 
 ---
 
@@ -280,10 +289,11 @@ derivation-equality checks).
 | D15 | <$5 | Communicated user limit, not on-chain | Owner clarified; deploy gas separate + accepted |
 | D16 | Mis-hosted build | 5th integrity layer: hostname↔target assertion | A coherent testnet build at the mainnet host passes layers 1–4; lets A6/A7 defer (round-3) |
 | D17 | Token identity | `source` discriminant (`permissionless-mint`\|`circle-proxy`); `maxWholePerTx` conditional | Mainnet manifest would otherwise have to lie; verification keys logic off it (round-3 NEW-3) |
-| D18 | AZLO at cutover | Drain/settle in-flight token journals BEFORE re-point (blocker) | Re-pointing strands token recovery; A4 is fund-safety, not naming (round-3 NEW-2) |
+| D18 | AZLO at cutover | RETIRE; best-effort "export before re-point" notice, NOT a drain-gate | Owner: testnet is play money — NEW-2's stranded-recovery risk isn't worth a hard gate |
 | D19 | Router owner | Renounce LAST — after the Phase-9 smoke — then verify `owner()==0` | `live-intent.ts:372` hard-fails post-renounce; a pre-smoke renounce strands a swapTarget fix (round-3 NEW-4) |
+| D20 | CI verify-deployments | Offline manifest-integrity only; on-chain readbacks stay at deploy-time | Owner-trim: hard-blocking CI on live RPC is non-hermetic + redundant with verify-l1 + runtime fail-closed; no mainnet fund-safety lost |
 
-*Resolved this round:* A3 (`lb.drpc.live`). *Open (gate):* A4-label (fund-safety mandatory regardless), A6, A7.
+*Resolved:* A3 (`lb.drpc.live`), A4 (retire), A6/A7 (manual + hostname layer, no service token). *No open asks.*
 
 **Audit trail:** v1 both `reject` → v2 fable `conditional approve` / codex `reject` → **v3-final fable `conditional approve` (round-2) + codex `conditional approve` (round-3, both Criticals closed)**. Conditions all folded above.
 
@@ -291,7 +301,7 @@ derivation-equality checks).
 
 ## Seeds
 
-*(Draft — finalized after the approval gate; note the mainnet-money stop.)*
+*(Finalized. Phases 1–7 autonomous; 8–9 spend REAL mainnet funds → hard stop for explicit go.)*
 
 ```
 /goal All phases ✓ in implementations-plan/tools-two-network/plan.md, each backed by its validation gate reported passing in the transcript; per-phase `LESSONS_FILE=...` printed; `/code-review max --fix` applied + committed; codex post-impl audit high/critical addressed; `bun run test:faucet` + `bun run lint` exit 0. Phases 8–9 spend REAL mainnet funds — never execute a deploy/funding/mainnet tx without my explicit go each time.
