@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { readFileSync, writeFileSync } from "node:fs"
+import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
@@ -71,6 +71,11 @@ function buildMetaPlugin(target: FaucetTarget, manifestJson: string): Plugin {
 				manifestDigest,
 			}
 			writeFileSync(resolve(root, outDir, "build.json"), `${JSON.stringify(meta, null, 2)}\n`)
+			// The active manifest is inlined into the bundle at build; the OTHER target's raw JSON must
+			// not ship (no placeholder mainnet manifest served on the testnet site, and vice-versa).
+			for (const f of readdirSync(resolve(root, outDir))) {
+				if (f.endsWith("-bridge.json") && f !== target.manifestFile) rmSync(resolve(root, outDir, f))
+			}
 		},
 	}
 }
@@ -83,6 +88,46 @@ function createHashHex(s: string): string {
 function readManifest(target: FaucetTarget): string {
 	const p = fileURLToPath(new URL(`./public/${target.manifestFile}`, import.meta.url))
 	return readFileSync(p, "utf8")
+}
+
+/**
+ * Write `dist/_headers` (Cloudflare Pages) with the TARGET's CSP `connect-src` — the mainnet build
+ * must allow `lb.drpc.live` (the Alpha node), which the testnet CSP does not cover. Generated per
+ * build rather than shipped statically so the two deployments can't share one wrong header set (F8).
+ */
+function headersPlugin(target: FaucetTarget): Plugin {
+	let root = process.cwd()
+	let outDir = "dist"
+	const csp = [
+		"default-src 'self'",
+		"img-src 'self' data:",
+		"font-src 'self'",
+		"style-src 'self' 'unsafe-inline'",
+		"script-src 'self' 'wasm-unsafe-eval'",
+		"worker-src 'self' blob:",
+		`connect-src ${target.cspConnectSrc}`,
+		"object-src 'none'",
+		"base-uri 'self'",
+		"frame-ancestors 'none'",
+	].join("; ")
+	const body = `/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+  Content-Security-Policy: ${csp}
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+`
+	return {
+		name: "nulo-headers",
+		apply: "build",
+		configResolved(config) {
+			root = config.root
+			outDir = config.build.outDir
+		},
+		closeBundle() {
+			writeFileSync(resolve(root, outDir, "_headers"), body)
+		},
+	}
 }
 
 /**
@@ -126,6 +171,7 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 				globals: { Buffer: true, global: true, process: true },
 			}),
 			buildMetaPlugin(target, manifestJson),
+			headersPlugin(target),
 		],
 	})
 }

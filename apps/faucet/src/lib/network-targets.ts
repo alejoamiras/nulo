@@ -36,6 +36,8 @@ export interface FaucetTarget {
 	nodeUrl: string
 	/** L1 block-explorer base (Etherscan-style), no trailing slash. */
 	l1ExplorerBaseUrl: string
+	/** CSP `connect-src` for this target — the node host MUST be listed or the app can't reach it. */
+	cspConnectSrc: string
 }
 
 export const TESTNET_TARGET: FaucetTarget = {
@@ -47,6 +49,8 @@ export const TESTNET_TARGET: FaucetTarget = {
 	host: "testnet.tools.nulo.sh",
 	nodeUrl: "https://v5.testnet.rpc.aztec-labs.com",
 	l1ExplorerBaseUrl: "https://sepolia.etherscan.io",
+	// Verbatim the pre-two-network CSP (public/_headers) — the aztec-labs/aztec.network node hosts.
+	cspConnectSrc: "'self' data: blob: https://*.aztec.network wss://*.aztec.network https://*.aztec-labs.com wss://*.aztec-labs.com",
 }
 
 export const MAINNET_TARGET: FaucetTarget = {
@@ -59,6 +63,9 @@ export const MAINNET_TARGET: FaucetTarget = {
 	// The Alpha node — the same dRPC host the extension pins (apps/extension .../network/service.ts).
 	nodeUrl: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 	l1ExplorerBaseUrl: "https://etherscan.io",
+	// The Alpha node lives at lb.drpc.live — it MUST be in connect-src or the mainnet build can't
+	// reach its own node (the testnet CSP's *.aztec-labs.com does NOT cover it).
+	cspConnectSrc: "'self' data: blob: https://lb.drpc.live wss://lb.drpc.live",
 }
 
 export const TARGETS: Record<FaucetTargetKey, FaucetTarget> = {
