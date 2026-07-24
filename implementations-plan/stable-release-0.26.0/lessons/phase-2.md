@@ -1,6 +1,12 @@
 # Phase 2 — promote dev → main (PR #320)
 
-**Status:** ▶ in progress — network-e2e flake, re-running.
+**Status:** ✓ GREEN — merged.
+
+## Resolution
+- Re-run of shard 3 **PASSED** → flake confirmed (not real breakage). All 3 required aggregators green: network-e2e ✓, quality ✓, smoke ✓; 0 failing.
+- Merged PR #320 via `gh pr merge 320 --merge --match-head-commit 4e5435b…` (atomic SHA guard held; `origin/dev` still == `RELEASE_SHA` at merge).
+- Merge commit `e61849cd413c2aee04335b2489840aa9ee438f1e`; **2-parent check = 3 tokens** → true merge-commit, not squash. `origin/main` advanced to it.
+- release-please opened **#321 `chore(main): release 0.26.0`** — correct version.
 
 ## Timeline
 - PR #320 opened at `RELEASE_SHA=4e5435b`. Title 90 chars. 27/28 checks pass.

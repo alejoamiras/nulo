@@ -11,6 +11,15 @@ Cut stable **v0.26.0** by promoting the dev-only commits (**23 total / 21 first-
 
 > **⏱ Timing reality (corrected after codex audit):** this is NOT a quick cut. **Three** separate PRs each incur the **full required CI including live network-e2e (~25–45 min each)** — the promote PR *and* the release-please Release PR (both PRs to `main`, which always runs network-e2e) *and* the sync-back PR (its `apps/extension/package.json` bump matches the `extension-network` path filter). Plus the publish chain (~15–25 min). **Realistic wall-clock ≈ 1.5–2.5 h**, dominated by CI waits — hence the `/loop` seed. No gate is skipped to go faster (hard rule).
 
+## Execution status (live)
+
+- [✓] **Phase 1** — SHA frozen `RELEASE_SHA=4e5435b`; JIT pre-flight green.
+- [✓] **Phase 2** — promote PR #320 merged `e61849c` (merge-commit, 2 parents); network-e2e shard-3 flake re-run→passed; release-please opened #321.
+- [▶] **Phase 3** — Release PR #321 `chore(main): release 0.26.0` — awaiting its own full CI (incl network-e2e).
+- [ ] **Phase 4** — auto-unstick + build + publish + deploy.
+- [ ] **Phase 5** — sync-back PR (full CI).
+- [ ] **Phase 6** — verify live + wrap-up.
+
 ## Why `light`
 
 Phase 0.5 rubric — HIGH count = **0** for the *release-cutting task* (novelty LOW: 6th+ run of a proven runbook, v0.21→v0.25; migration cost LOW: pre-production; external coupling MODERATE but automated; blast/irreversibility MODERATE-bounded: no marketplace publish so no auto-update reaches users, tags are fixable).
