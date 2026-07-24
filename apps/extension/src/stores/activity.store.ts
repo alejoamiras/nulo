@@ -54,19 +54,26 @@ function newSlice(scope: ActivityScope): ActivitySlice {
 }
 
 /**
- * The scope a transaction belongs to.
+ * The scope a transaction belongs to, or `null` if it cannot be established.
  *
- * Rows written before scope stamping carry no profile or network. Those are
- * attributed to the reference scope only when their account and chain match it
- * — the same rule the flat feed used, so nothing regresses — while rows that DO
- * carry a scope are always routed by their own, whatever is active.
+ * A row that carries its own profile and network is always routed by those,
+ * whatever is active. A row written before scope stamping carries neither, and
+ * an address alone is NOT a profile identity: two profiles built from the same
+ * mnemonic derive the same address, so attributing such a row by address and
+ * chain would show one profile's history under the other.
+ *
+ * So an unscoped row is attributed to the reference scope only when the wallet
+ * holds a single profile, where no other owner can exist. With more than one
+ * profile the row is ambiguous and is dropped rather than guessed at — the
+ * quarantine rule, applied to the one case that can actually collide.
  */
-export function txScope(tx: Tx, reference: ActivityScope | null): ActivityScope | null {
+export function txScope(tx: Tx, reference: ActivityScope | null, opts: { soleProfile?: boolean } = {}): ActivityScope | null {
 	if (tx.profileId && tx.networkId) {
 		return { profileId: tx.profileId, networkId: tx.networkId, chainId: tx.chainId, accountAddress: tx.account }
 	}
 	if (!reference) return null
 	if (tx.account !== reference.accountAddress || tx.chainId !== reference.chainId) return null
+	if (opts.soleProfile !== true) return null
 	return { ...reference, accountAddress: tx.account }
 }
 
@@ -156,10 +163,11 @@ export const useActivityStore = defineStore("activity", () => {
 	 * Route a transaction to its own scope.
 	 *
 	 * `reference` only ever supplies the profile/network for a legacy row that
-	 * carries neither; it never overrides a row that knows its own scope.
+	 * carries neither, and only when `soleProfile` says no other profile could
+	 * own it; it never overrides a row that knows its own scope.
 	 */
-	function ingestTransaction(tx: Tx, reference: ActivityScope | null): void {
-		const scope = txScope(tx, reference)
+	function ingestTransaction(tx: Tx, reference: ActivityScope | null, opts: { soleProfile?: boolean } = {}): void {
+		const scope = txScope(tx, reference, opts)
 		if (!scope) return
 		updateSlice(scope, (slice) => {
 			const existing = slice.transactions.findIndex((row) => row.hash === tx.hash && row.account === tx.account)

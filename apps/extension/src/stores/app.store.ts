@@ -165,7 +165,7 @@ export const useAppStore = defineStore("app", () => {
 	const onTxAdded = async (tx: Tx) => {
 		// Routed by the transaction's OWN scope: one settling for another account
 		// lands in that account's slice, never in whatever is on screen.
-		activity.ingestTransaction(tx, activeScope.value)
+		activity.ingestTransaction(tx, activeScope.value, { soleProfile: profiles.value.length <= 1 })
 
 		// Placeholder cleanup keys on the tx's own account plus the placeholder's
 		// captured scope (account + contract + destination). Use the shared
@@ -173,7 +173,7 @@ export const useAppStore = defineStore("app", () => {
 		// filtered out before destination resolution. Without this, a dApp + FPC tx
 		// whose calls[0] is the fee call would compare the FPC's address against the
 		// awaiting placeholder's intended destination — the card would never clear.
-		const scope = txScope(tx, activeScope.value)
+		const scope = txScope(tx, activeScope.value, { soleProfile: profiles.value.length <= 1 })
 		if (!scope) return
 		const call = getPrimaryCall(tx.calls)
 		const destination = (call?.transfers?.length ? call?.transfers[0].to : (call?.args?.[1] as string | undefined)) ?? ""
@@ -181,7 +181,7 @@ export const useAppStore = defineStore("app", () => {
 	}
 
 	const onTxUpdated = (tx: Tx) => {
-		activity.ingestTransaction(tx, activeScope.value)
+		activity.ingestTransaction(tx, activeScope.value, { soleProfile: profiles.value.length <= 1 })
 	}
 
 	const syncTransactions = async () => {
@@ -193,9 +193,12 @@ export const useAppStore = defineStore("app", () => {
 
 		const rows = await managers.transaction.getTransactions(captured.accountAddress)
 
+		// An unscoped legacy row is only this profile's if no other profile could
+		// own the address (see `txScope`); otherwise it is ambiguous and dropped.
+		const soleProfile = profiles.value.length <= 1
 		activity.setTransactions(
 			captured,
-			rows.filter((tx) => tx.account === captured.accountAddress && tx.chainId === captured.chainId),
+			rows.filter((tx) => txScope(tx, captured, { soleProfile }) !== null),
 		)
 	}
 

@@ -114,7 +114,7 @@ describe("activity store — scope routing", () => {
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xnew", "0xold"])
 	})
 
-	test("a legacy row with no scope is attributed only when its account and chain match", () => {
+	test("a legacy row with no scope is attributed only when the wallet holds one profile", () => {
 		const store = useActivityStore()
 		store.activateScope(A)
 
@@ -122,11 +122,33 @@ describe("activity store — scope routing", () => {
 		const legacyForeign = tx(B, "0xforeign", { profileId: undefined, networkId: undefined })
 		const legacyOtherChain = tx(A, "0xotherchain", { profileId: undefined, networkId: undefined, chainId: 999 })
 
-		store.ingestTransaction(legacyMine, A)
-		store.ingestTransaction(legacyForeign, A)
-		store.ingestTransaction(legacyOtherChain, A)
+		for (const row of [legacyMine, legacyForeign, legacyOtherChain]) {
+			store.ingestTransaction(row, A, { soleProfile: true })
+		}
 
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xmine"])
+	})
+
+	test("an unscoped row is dropped when another profile could own the same address", () => {
+		const store = useActivityStore()
+		store.activateScope(A)
+
+		// Two profiles from one mnemonic derive the same address, so an address
+		// alone cannot say who this row belongs to. Showing it would leak whichever
+		// profile's history it really is.
+		const ambiguous = tx(A, "0xambiguous", { profileId: undefined, networkId: undefined })
+		store.ingestTransaction(ambiguous, A, { soleProfile: false })
+
+		expect(store.transactions).toHaveLength(0)
+	})
+
+	test("a row that names its own profile is routed by it regardless of how many profiles exist", () => {
+		const store = useActivityStore()
+		store.activateScope(A)
+
+		store.ingestTransaction(tx(A, "0xscoped"), A, { soleProfile: false })
+
+		expect(store.transactions.map((t) => t.hash)).toEqual(["0xscoped"])
 	})
 
 	test("an update propagates even to a reader that already read the feed", () => {

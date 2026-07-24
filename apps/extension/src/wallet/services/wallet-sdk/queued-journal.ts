@@ -117,7 +117,12 @@ export async function tryCreateQueuedJournal(
 		// `accounts[0]` instead would file a multi-account session's operation
 		// under whichever address the session happened to list first.
 		const sessionAddresses = new Set(dapp.accounts.map((caip: string) => parseCaipAccount(caip as CaipAccount).address))
-		const walletAccounts = await accountSvc.getAccounts(activeProfile.id, chainId, true)
+		// Visible accounts only — the SAME set the dispatcher resolves against
+		// (`resolveNetworkAndAccount`). Including hidden accounts here would let a
+		// hidden lower-index account win the default on this side but not on the
+		// dispatcher's, which is precisely the divergence this shared rule exists
+		// to prevent.
+		const walletAccounts = await accountSvc.getAccounts(activeProfile.id, chainId)
 		const resolved = resolveAuthorizedSessionAccount({
 			walletAccounts,
 			sessionAddresses,
