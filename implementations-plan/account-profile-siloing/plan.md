@@ -60,7 +60,11 @@ row. A producer may mutate **only** the slice named by its own trusted scope env
    function, including the wallet-index-ordered `NO_FROM` fallback.
 6. **Journal integrity:** every journal load-modify-write / delete / supersede shares one lock and emits a causal
    mutation; no resurrection.
-7. **Incoming identity** is `(scope, siloedNullifier)`, never a bare globally-unique nullifier.
+7. **Incoming identity** is never a bare globally-unique nullifier. **Superseded at merge:** `dev` (#315/#316/#318)
+   landed an explicit record `id`, profile+network scoped by construction — a primary key on the record itself
+   rather than a composite storage key. That is strictly better and three features are built on it, so dev's
+   implementation was taken wholesale and this arc's `(scope, siloedNullifier)` re-key was dropped. H8 stays
+   closed; the closing mechanism is dev's, not this plan's.
 8. **Legacy safety:** legacy rows parse independently; ambiguous legacy rows (e.g. a colliding address with no
    stored profile) are *quarantined*, never copied into multiple slices.
 9. **dApp cards stay hidden:** the dApp `ExecuteOperation` task spinner cards remain fail-closed; durable journal
