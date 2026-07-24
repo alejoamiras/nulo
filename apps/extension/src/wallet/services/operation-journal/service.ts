@@ -150,9 +150,22 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
 		await purgeRows(
 			records,
-			(record) => this.storage.delete(record.id),
+			// Serialized like every other delete: an unserialized purge lets a
+			// transition that has already read a row write it back afterwards,
+			// leaving an orphan the reaper can only fail, never remove.
+			(record) => this.deleteRowLocked(record.id),
 			(record) => this.emit("onOperationDeleted", record),
 		)
+	}
+
+	/** Delete a row under the transition lock, without emitting. */
+	private async deleteRowLocked(id: string): Promise<void> {
+		await this.transitionLock.enter()
+		try {
+			await this.storage.delete(id)
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 
 	/** Awaited profile-scoped journal purge — the deletion coordinator calls this
@@ -163,7 +176,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
 		await purgeRows(
 			records,
-			(record) => this.storage.delete(record.id),
+			(record) => this.deleteRowLocked(record.id),
 			(record) => this.emit("onOperationDeleted", record),
 		)
 	}

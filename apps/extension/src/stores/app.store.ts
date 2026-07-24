@@ -13,7 +13,7 @@ import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
 import type { ActivityScope } from "@nulo/wallet-core/activity"
-import { type AwaitingTx, txScope, useActivityStore } from "@/stores/activity.store"
+import { type AwaitingTx, txBelongsToScope, txScope, useActivityStore } from "@/stores/activity.store"
 
 export const useAppStore = defineStore("app", () => {
 	const _isHomeScreenOpened = ref(false)
@@ -129,6 +129,15 @@ export const useAppStore = defineStore("app", () => {
 	 * scope during bootstrap would otherwise key a slice that no record can ever
 	 * match, so the view stays empty until the scope is whole.
 	 */
+	/**
+	 * True only when the wallet is KNOWN to hold exactly one profile.
+	 *
+	 * Gates attribution of unscoped legacy rows. Deliberately not `<= 1`: the
+	 * list is empty before it loads, and reading that as "sole profile" would
+	 * fail open and attribute another profile's row to whoever is looking.
+	 */
+	const soleProfile = computed(() => profiles.value.length === 1)
+
 	const activeScope = computed<ActivityScope | null>(() => {
 		const profileId = profile.value?.id
 		const networkId = network.value?.id
@@ -165,7 +174,7 @@ export const useAppStore = defineStore("app", () => {
 	const onTxAdded = async (tx: Tx) => {
 		// Routed by the transaction's OWN scope: one settling for another account
 		// lands in that account's slice, never in whatever is on screen.
-		activity.ingestTransaction(tx, activeScope.value, { soleProfile: profiles.value.length <= 1 })
+		activity.ingestTransaction(tx, activeScope.value, { soleProfile: soleProfile.value })
 
 		// Placeholder cleanup keys on the tx's own account plus the placeholder's
 		// captured scope (account + contract + destination). Use the shared
@@ -173,7 +182,7 @@ export const useAppStore = defineStore("app", () => {
 		// filtered out before destination resolution. Without this, a dApp + FPC tx
 		// whose calls[0] is the fee call would compare the FPC's address against the
 		// awaiting placeholder's intended destination — the card would never clear.
-		const scope = txScope(tx, activeScope.value, { soleProfile: profiles.value.length <= 1 })
+		const scope = txScope(tx, activeScope.value, { soleProfile: soleProfile.value })
 		if (!scope) return
 		const call = getPrimaryCall(tx.calls)
 		const destination = (call?.transfers?.length ? call?.transfers[0].to : (call?.args?.[1] as string | undefined)) ?? ""
@@ -181,7 +190,7 @@ export const useAppStore = defineStore("app", () => {
 	}
 
 	const onTxUpdated = (tx: Tx) => {
-		activity.ingestTransaction(tx, activeScope.value, { soleProfile: profiles.value.length <= 1 })
+		activity.ingestTransaction(tx, activeScope.value, { soleProfile: soleProfile.value })
 	}
 
 	const syncTransactions = async () => {
@@ -193,12 +202,12 @@ export const useAppStore = defineStore("app", () => {
 
 		const rows = await managers.transaction.getTransactions(captured.accountAddress)
 
-		// An unscoped legacy row is only this profile's if no other profile could
-		// own the address (see `txScope`); otherwise it is ambiguous and dropped.
-		const soleProfile = profiles.value.length <= 1
+		// The fetch is by ADDRESS alone, so it returns every profile's rows for a
+		// shared address. Keep only those whose own scope IS the captured one —
+		// "has a scope" would admit all of them.
 		activity.setTransactions(
 			captured,
-			rows.filter((tx) => txScope(tx, captured, { soleProfile }) !== null),
+			rows.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value })),
 		)
 	}
 

@@ -77,6 +77,26 @@ export function txScope(tx: Tx, reference: ActivityScope | null, opts: { solePro
 	return { ...reference, accountAddress: tx.account }
 }
 
+/**
+ * Whether a transaction belongs to exactly `scope`.
+ *
+ * `txScope` answers "which scope owns this row", which is NOT the same question:
+ * a row carrying another profile's scope gets a perfectly valid, non-null answer.
+ * Filtering a fetch on "has a scope" would therefore admit every profile's rows
+ * for a shared address; the fetch is by address alone, so that is exactly the
+ * set it returns.
+ */
+export function txBelongsToScope(tx: Tx, scope: ActivityScope, opts: { soleProfile?: boolean } = {}): boolean {
+	const owner = txScope(tx, scope, opts)
+	if (!owner) return false
+	return (
+		owner.profileId === scope.profileId &&
+		owner.networkId === scope.networkId &&
+		owner.chainId === scope.chainId &&
+		owner.accountAddress === scope.accountAddress
+	)
+}
+
 export const useActivityStore = defineStore("activity", () => {
 	// `shallowRef` + explicit trigger: slices are mutated in place on a hot event
 	// path, and deep reactivity over every transaction row is pure overhead.

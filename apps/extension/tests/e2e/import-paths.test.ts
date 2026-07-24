@@ -301,4 +301,6 @@ test("full backup: an account address shared with an existing profile imports in
 
 	expect(registeredExtensionPerTest.pageErrors).toEqual([])
 	await page.close()
-}, 90_000)
+	// Importing into an EXISTING install can run the app's own bounded recovery
+	// leg before it routes; the driver waits up to 300s for it.
+}, 320_000)

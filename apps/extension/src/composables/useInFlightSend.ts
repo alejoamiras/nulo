@@ -56,7 +56,13 @@ export function useInFlightSend() {
 
 	return {
 		/** True while the active profile has a send that has not finished. */
-		hasInFlightSend: computed(() => hasInFlightSend(ops.value, appStore.profile?.id)),
+		hasInFlightSend: computed(() =>
+			hasInFlightSend(ops.value, {
+				profileId: appStore.profile?.id,
+				accountAddress: appStore.account?.address,
+				networkId: appStore.network?.id,
+			}),
+		),
 		connect,
 		refresh,
 		dispose,

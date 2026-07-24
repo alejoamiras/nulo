@@ -65,13 +65,20 @@ export interface TryCreateQueuedJournalDeps {
 	logger: ILogger
 }
 
-/** The sender a sendTx message names, if it names one. `NO_FROM` is the
- *  sentinel for "let the wallet pick", i.e. the same as omitting it. */
+/**
+ * The sender a sendTx message names, if it names one.
+ *
+ * Mirrors the dispatcher's normalization exactly (`handleSendTx`): absent or
+ * `NO_FROM` means "let the wallet pick", and anything else is stringified. A
+ * stricter rule here would diverge — a non-string `from` the dispatcher coerces
+ * and honors would be read as no-from on this side, filing the record under the
+ * default account while the send goes out as another.
+ */
 export function extractSendFrom(message: WalletMessage): string | undefined {
 	const opts = (message as { args?: unknown[] }).args?.[1] as Record<string, unknown> | undefined
 	const from = opts?.from
-	if (typeof from !== "string" || from === "NO_FROM") return undefined
-	return from
+	if (from == null || from === "NO_FROM") return undefined
+	return String(from)
 }
 
 /**

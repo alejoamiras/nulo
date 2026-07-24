@@ -20,6 +20,10 @@ const asNetwork = (chainId: number, id = `net-${chainId}`) => ({ id, chainId }) 
 /** Put the store on a complete scope; the feed stays empty until one exists. */
 const scopeTo = (store: ReturnType<typeof useAppStore>, address: string, chainId = 1) => {
 	store.profile = { id: "p1" } as never
+	// The profile LIST gates attribution of unscoped legacy rows: it must be known
+	// to hold exactly one profile, since an empty list means "not loaded yet" and
+	// deliberately fails closed.
+	store.profiles = [{ id: "p1" }] as never
 	store.network = asNetwork(chainId)
 	store.account = asAccount(address)
 }
