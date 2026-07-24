@@ -318,7 +318,7 @@ describe("causal reducer — properties", () => {
 		expect(accepted).toBe(false)
 	})
 
-	test("P10: restart is transparent — rehydrating serialized state reproduces every decision", () => {
+	test("P11: restart is transparent — rehydrating serialized state reproduces every decision", () => {
 		fc.assert(
 			fc.property(mutationsArb, (mutations) => {
 				const straight = applyAll(established(), mutations)
@@ -342,7 +342,7 @@ describe("causal reducer — properties", () => {
 		)
 	})
 
-	test("P11: the reducer only ever touches the state it was handed", () => {
+	test("P12: the reducer only ever touches the state it was handed", () => {
 		fc.assert(
 			fc.property(mutationsArb, (mutations) => {
 				const foreign = established()

@@ -48,8 +48,9 @@ row. A producer may mutate **only** the slice named by its own trusted scope env
    cached slice renders immediately (no clear-then-rebuild flash). A cold/evicted slice snapshots (honest: the
    pointer swap is O(1); DOM render + cold hydration are not).
 3. **Snapshot safety:** a snapshot finishing after a switch updates *its requested scope's* slice, never
-   whichever slice is active at completion; it never resurrects a deleted row, clobbers a newer event, or crosses
-   an incarnation boundary after SW-restart / re-import.
+   whichever slice is active at completion; it never resurrects a deleted row or clobbers a newer event.
+   **Not guaranteed:** a COLD slice adopts whichever snapshot arrives first, so a delayed snapshot from a retired
+   incarnation can establish it — a snapshot cannot judge its own authority (see §5.8 and `applySnapshot`).
 4. **Execution binding (via prevention, not detection):** while a send is in flight, a voluntary
    profile/account switch is **blocked** (§9 guard) — so active-scope cannot drift and the builder's active-now
    reads are always correct. No tx can build/sign under a scope other than the one it was authorized in. A send
@@ -323,7 +324,8 @@ newer event survives an older snapshot · **distinct-record lower event survives
 restart never reuses a revision · old incarnation cannot write after re-import · ABA `upsert→remove→newer-upsert`
 converges · same nullifier on two networks stays two records · drain-events + fresh-snapshot == reference model ·
 **(P3b)** a live pause-after-counter snapshot never drops the later row (committed-through watermark, ultra-B3) ·
-**(P11)** a cold slice buffers a delayed old-incarnation EVENT until the current incarnation is established.
+**(P7/P8)** a cold slice buffers a delayed old-incarnation EVENT until the current incarnation is established,
+then replays only what matches.
 **NOT delivered for snapshots:** a cold slice still accepts whichever snapshot arrives first and adopts its
 incarnation, because a snapshot cannot judge its own authority — that requires the coordinator's persisted
 current-incarnation read, subscribed before hydration, which is only possible once the coordinator is wired into

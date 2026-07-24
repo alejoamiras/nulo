@@ -329,7 +329,17 @@ export class ExecutionLane {
 					error: (msg, raw) => this.deps.logError(msg, raw),
 				},
 			},
-			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
+			{
+				networkId,
+				accountAddress,
+				// The profile execution actually resolved. Without it the claim's
+				// scope check cannot see a profile mismatch at all.
+				profileId: (await this.deps.getActiveProfile())?.id,
+				origin,
+				calls,
+				queuedJournalId: hooks?.queuedJournalId,
+				reuseController,
+			},
 		)
 	}
 

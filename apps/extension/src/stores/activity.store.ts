@@ -161,7 +161,10 @@ export const useActivityStore = defineStore("activity", () => {
 			.sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt)
 		// Dropping an inactive slice only drops a cache: the rows are durable and
 		// the scope re-populates from storage the next time it is activated.
-		for (const [key] of evictable.slice(0, slices.value.size - MAX_CACHED_SLICES)) slices.value.delete(key)
+		for (const [key] of evictable.slice(0, slices.value.size - MAX_CACHED_SLICES)) {
+			slices.value.delete(key)
+			mutationVersion.value.delete(key)
+		}
 	}
 
 	function ensureSlice(scope: ActivityScope): ActivitySlice {
@@ -252,13 +255,17 @@ export const useActivityStore = defineStore("activity", () => {
 	}
 
 	function clearScope(scope: ActivityScope): void {
-		slices.value.delete(activityScopeKey(scope))
+		const key = activityScopeKey(scope)
+		slices.value.delete(key)
+		mutationVersion.value.delete(key)
 		touch()
 	}
 
 	function clearProfile(profileId: string): void {
 		for (const [key, slice] of [...slices.value]) {
-			if (slice.scope.profileId === profileId) slices.value.delete(key)
+			if (slice.scope.profileId !== profileId) continue
+			slices.value.delete(key)
+			mutationVersion.value.delete(key)
 		}
 		touch()
 	}
@@ -272,6 +279,9 @@ export const useActivityStore = defineStore("activity", () => {
 	 */
 	function clearAll(): void {
 		slices.value.clear()
+		// Keyed by scope, so leaving it behind would retain profile + address
+		// identifiers past a lock.
+		mutationVersion.value.clear()
 		activeKey.value = null
 		activeScope.value = null
 		touch()
