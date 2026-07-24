@@ -198,3 +198,37 @@ verified against the code and folded into v3-final below.
   by Phase 4. **A4 blocks promotion** (NEW-2). A6/A7 may defer ONLY behind a hard gate: without
   authenticated verify-live OR a **hostname↔target assertion**, a coherent testnet build at the
   mainnet hostname passes target↔manifest↔node. → add the hostname↔target assertion (Phase 4).
+
+---
+
+# Codex audit — round 4 / POST-IMPLEMENTATION (Phases 1–5 code)
+
+**Session:** `019f94b3-3023-7821-ac1c-f74654c37de2` · fresh context, read the real diff (`dev...HEAD`).
+
+> `blocking` — 4 HIGH, **no CRITICAL**. Verdict on the money path itself: clean ("the Permit2
+> fallback uses the correct token, spender, amount, max approval, and receipt ordering in both legs";
+> the define/build/CSP machinery "coherent").
+
+## Findings → resolution (fixes in `05d604a`)
+- **HIGH-1 — mainnet capability grant omitted the PrivateFPC** (`useWalletConnection.ts` chose
+  `buildBridgeManifest`, which lacks the FPC + `balance_of`/`mint_and_pay_fee`/`pay_fee` scopes,
+  while FPC registration is unconditional → scope-enforcing wallet rejects mainnet connect; private
+  fuel breaks). **FIXED**: `buildCombinedManifest` parameterized — faucet tokens optional; mainnet
+  omits them but keeps bridge + PrivateFPC + FEE_JUICE + auth-registry + private-fuel scopes;
+  `buildBridgeManifest` branch dropped; mainnet-shape test added.
+- **HIGH-2 — prod honoured `VITE_AZTEC_NODE_URL`** (a stale CF override could repoint a real-money
+  build at the wrong Aztec node → deposit lands on L1, claim polls the wrong node). **FIXED** per
+  codex's stated remediation: the override is dev/e2e-only; prod always uses the committed
+  per-target node.
+- **HIGH-3 — deploy scripts emitted no chain identity** (a freshly-promoted candidate would fail the
+  startup assertion → app offline incl. pending claims). **FIXED**: `deploy-bridge-testnet` reads
+  `l1ChainId`/`rollupVersion` from the node (reset-safe) and emits `l1ChainId`/`walletChainId` +
+  `token.source`; `CandidateManifest` type extended.
+- **HIGH-4 — `verify-l1` unconditional `maxWholePerTx`/Sepolia/MintableERC20 verify breaks on a
+  `circle-proxy` manifest.** **DEFERRED → Phase 7** (verify-l1 is a deploy-time script gate; its
+  network-parameterization + reused-USDC skip is exactly Phase 7's listed scope). Tracked.
+
+## Explicitly cleared by the audit
+Permit2 approve fallback (token/spender/amount/ordering, both legs); vite target/manifest defines
+agree with the Node-side target; placeholder mainnet build fails closed; CI two-target matrix +
+digest + mainnet dRPC CSP coherent.
