@@ -38,7 +38,7 @@ narrowing doesn't flow into a closure → pass it as a `recordId: string` param.
 - typecheck 0; faucet 514 + a bridge-deployments pin (symbol/decimals/mintable derive from manifest);
   lint 0; both target builds still green (5b changed no build wiring).
 
-## Required pre-launch follow-up (noted, NOT done)
-- **Per-network COPY.** The Bridge/Fuel hero text still says "test"/"Sepolia"/"Testnet only". On the
-  mainnet site that mislabels a REAL-USDC bridge as testnet — a safety-relevant copy bug. Must go
-  per-network before the mainnet launch (Phase 8/9). Low code risk; behind CF Access meanwhile.
+## Required pre-launch follow-up — DONE (5c, `8920c39`)
+- **Per-network COPY.** The Bridge/Fuel heroes are gated on IS_MAINNET: mainnet says "Real funds —
+  keep amounts under $5" (the D15 communicated cap) / "Real funds"; testnet copy unchanged.
+  MintTestUsdc needed no change (the whole component is gated off on mainnet).
