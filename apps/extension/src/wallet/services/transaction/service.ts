@@ -80,7 +80,10 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// fenced (see `updateTx`) so a mid-poll tx can't resurrect (finding D).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
-		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
+		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending && !x.ambiguous)) {
+			// `ambiguous` rows are excluded here too, not just when they are marked:
+			// otherwise a restart puts them straight back into the poller, against
+			// whichever profile is now active.
 			this.pending.set(tx.hash, tx)
 		}
 
@@ -389,7 +392,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		for (const n of networks) {
 			const accounts = await this.accountService.getAccounts(profile.id, n.chainId)
 			for (const acc of accounts) {
-				txs.push(...(await this.getTransactions(acc.address)))
+				for (const tx of await this.getTransactions(acc.address)) {
+					// The fetch is by address, which two same-seed profiles share, so a
+					// row naming another profile is not ours to export. A row that was
+					// marked unattributable is nobody's, and restore would hand it to
+					// whichever profile imported the backup.
+					if (tx.ambiguous) continue
+					if (tx.profileId !== undefined && tx.profileId !== profile.id) continue
+					if (tx.chainId !== n.chainId) continue
+					txs.push(tx)
+				}
 			}
 		}
 

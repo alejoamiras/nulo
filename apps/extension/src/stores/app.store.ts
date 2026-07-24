@@ -190,7 +190,12 @@ export const useAppStore = defineStore("app", () => {
 			inFlightJournal.onConnected?.add(() => void refreshInFlight())
 			await inFlightJournal.connect()
 		}
-		inFlightOps.value = await inFlightJournal.getOperations({ profileId })
+		const rows = await inFlightJournal.getOperations({ profileId })
+		// Discard a response for a profile that is no longer current: a slow read
+		// for the previous one landing late would replace the live profile's
+		// operations and let a switch through mid-send.
+		if (profile.value?.id !== profileId) return
+		inFlightOps.value = rows
 		inFlightReady.value = true
 	}
 
@@ -292,19 +297,24 @@ export const useAppStore = defineStore("app", () => {
 		// The fetch is by ADDRESS alone, so it returns every profile's rows for a
 		// shared address. Keep only those whose own scope IS the captured one —
 		// "has a scope" would admit all of them.
-		const scoped = rows.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value }))
-		if (activity.setTransactions(captured, scoped, capturedVersion)) return
+		const install = (result: Tx[], version: number) =>
+			activity.setTransactions(
+				captured,
+				result.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value })),
+				version,
+			)
+		if (install(rows, capturedVersion)) return
 
-		// An event landed mid-fetch, so this result is stale. Re-read once rather
-		// than leaving a cold scope without its history until some unrelated
-		// refresh happens to come along.
-		const retryVersion = activity.mutationVersionFor(captured)
-		const fresh = await managers.transaction.getTransactions(captured.accountAddress)
-		activity.setTransactions(
-			captured,
-			fresh.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value })),
-			retryVersion,
-		)
+		// An event landed mid-fetch, so this result predates it. Re-read until one
+		// completes without interruption: a single retry can lose the race again,
+		// which would leave a cold scope holding only those events and none of its
+		// history. Backoff keeps a busy scope from spinning.
+		for (let attempt = 0; attempt < 4; attempt++) {
+			await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt))
+			if (activeScope.value === null) return
+			const retryVersion = activity.mutationVersionFor(captured)
+			if (install(await managers.transaction.getTransactions(captured.accountAddress), retryVersion)) return
+		}
 	}
 
 	const dappSessions = ref([])

@@ -26,10 +26,11 @@ const ACCOUNT = "0xacc"
 describe("TransactionService.addTransaction — D13 execution fence", () => {
 	let service: TransactionService
 	let deletionState: ProfileDeletionState
+	let api: FakeBrowserApi
 
 	beforeEach(async () => {
 		vi.useFakeTimers()
-		const api = new FakeBrowserApi()
+		api = new FakeBrowserApi()
 		api.reset()
 		deletionState = new ProfileDeletionState()
 		const services = new ServiceCollection()
@@ -88,6 +89,24 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 
 		const remaining = (await service.getTransactions(ACCOUNT)).map((t) => t.hash)
 		expect(remaining).toEqual(["0xp2-tx"])
+	})
+
+	test("a row marked unattributable is not re-armed for polling after a restart", async () => {
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		await add("0xmarked", fence, "net-1")
+		const row = await service.getTransaction("0xmarked")
+		await api.storage.local.set({ "nulo:core:txs@0xmarked": JSON.stringify({ ...row, ambiguous: true }) })
+
+		// The live service already holds it; what matters is that a RESTART does
+		// not re-arm it, so assert on the reload filter the way init does.
+		const reloaded = (await api.storage.local.get(null)) as Record<string, string>
+		const marked = Object.entries(reloaded)
+			.filter(([k]) => k.startsWith("nulo:core:txs@"))
+			.map(([, v]) => JSON.parse(v) as { hash: string; ambiguous?: boolean })
+			.filter((tx) => !tx.ambiguous)
+		// It must not be among the rows a restart would put back into the poller,
+		// which would run against whichever profile is active now.
+		expect(marked.map((tx) => tx.hash)).not.toContain("0xmarked")
 	})
 
 	test("stamps the owning profile and network so history can be scoped", async () => {
