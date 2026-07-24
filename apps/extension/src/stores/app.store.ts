@@ -51,21 +51,48 @@ export const useAppStore = defineStore("app", () => {
 	const isSessionChecked = ref<boolean>(false)
 	const pageAwaitingAuth = ref<string>("")
 
-	const setupActiveAccount = async () => {
+	/**
+	 * Point at the remembered account, or the first one.
+	 *
+	 * Reached during bootstrap AND from the network watcher, which runs after
+	 * several awaits — so this is a scope change like any other and commits
+	 * through the guard. During bootstrap there is nothing in flight to protect
+	 * (the journal read comes back empty), so it proceeds normally; mid-send it
+	 * refuses rather than moving the account out from under the send.
+	 */
+	const setupActiveAccount = async (): Promise<boolean> => {
 		const activeAccountResult = await storageLocalGet("nulo:ui:activeAccount")
 		if ("nulo:ui:activeAccount" in activeAccountResult) {
 			const activeAccountAddress = activeAccountResult["nulo:ui:activeAccount"]
-			const activeAccount = accounts.value.find((a) => a.address === activeAccountAddress)
-			if (activeAccount) {
-				account.value = activeAccount
-				return
+			const remembered = accounts.value.find((a) => a.address === activeAccountAddress)
+			if (remembered) {
+				// Re-pointing at the account already active is not a scope change.
+				if (account.value?.address === remembered.address) {
+					account.value = remembered
+					return true
+				}
+				return commitScopeChange(() => {
+					account.value = remembered
+				})
 			}
 		}
 
-		account.value = accounts.value[0]
+		const first = accounts.value[0]
+		if (account.value?.address === first?.address) {
+			account.value = first
+			return true
+		}
+		if (
+			!(await commitScopeChange(() => {
+				account.value = first
+			}))
+		) {
+			return false
+		}
 		await storageLocalSet({
 			"nulo:ui:activeAccount": account.value?.address,
 		})
+		return true
 	}
 	const selectAccount = async (acc: Account) => {
 		account.value = acc
