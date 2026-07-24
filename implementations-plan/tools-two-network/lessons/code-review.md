@@ -1,4 +1,17 @@
-# Code review (`/code-review max --fix`) — Phases 1–5
+# Code review (`/code-review max --fix`)
+
+## Pass 2 — post-audit delta (05d604a..4dbca2b), separate fix commit `8f7f49e`
+Reviewed the commits landed AFTER pass 1 (the codex HIGH fixes + the forge/deploy-tooling units).
+**Found + fixed one forward-looking defect** (committed separately, per the goal's protocol):
+`verify-l1` hardcoded `MintableERC20` for every permissionless-mint token, but the Phase-6 cutover
+token IS `TestUsdc` — the planned Phase-6 verify-l1 gate would have failed against the new token.
+Fix: `token.sourceContract` ("MintableERC20" | "TestUsdc", schema-validated, defaults to the legacy
+contract) drives which source verify-l1 checks. Regression: live-manifest dry-run still 4/4;
+schema pin for accept/reject. Everything else in the delta re-checked clean (descriptor selection
+fails closed on a missing file; deployer-keys derivation domains; the forge script's staticcall
+probe semantics).
+
+# Pass 1 — Phases 1–5
 
 **Scope:** `git diff dev...HEAD` code files (Phases 1–5; deploy phases 6–9 not yet implemented).
 **Outcome:** clean — no defects to fix (`--fix` had nothing to commit).
