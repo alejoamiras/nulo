@@ -4,6 +4,13 @@ import { AccountType } from "@/wallet/services/account/client"
 import { managers } from "@/utils/core"
 import { storageLocalSet } from "@/utils/storage"
 
+/** Composables */
+import { useToast } from "@/composables/toast"
+import { useInFlightSend } from "@/composables/useInFlightSend"
+const { openToast } = useToast()
+const inFlight = useInFlightSend()
+onBeforeMount(() => inFlight.connect())
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
@@ -43,6 +50,13 @@ const isAvailableToCreateAccount = computed(() => {
 
 const handleCreateAccount = async () => {
 	if (!isAvailableToCreateAccount.value) return
+
+	// Creating an account SELECTS it, so it changes the active account exactly
+	// like a switch does — and a send in flight is still reading that.
+	if (inFlight.hasInFlightSend.value) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 
 	const account = await managers.account.createAccount(
 		appStore.profile.id,

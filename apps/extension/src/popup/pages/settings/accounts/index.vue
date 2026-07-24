@@ -14,7 +14,10 @@ import { AccountType } from "@/wallet/services/account/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useInFlightSend } from "@/composables/useInFlightSend"
 const { openToast } = useToast()
+const inFlight = useInFlightSend()
+onBeforeMount(() => inFlight.connect())
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -28,6 +31,13 @@ const accounts = computed(() => appStore.accounts.filter((a) => a.visible).sort(
 const hiddenAccounts = computed(() => appStore.accounts.filter((a) => !a.visible))
 
 const handleSelectAccount = (acc) => {
+	// Same guard as the accounts popup: a send in flight is still reading the
+	// active account as it builds, so switching now would let it finish as the
+	// wrong one. Without this, the popup's guard is just a detour.
+	if (inFlight.hasInFlightSend.value) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 	appStore.selectAccount(acc)
 }
 
