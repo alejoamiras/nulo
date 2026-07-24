@@ -66,4 +66,14 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		delete m.l1.fuel.core
 		expect(() => parseCandidateManifest(m)).toThrow(/core/)
 	})
+
+	// verify-l1 source-verifies a permissionless-mint token against token.sourceContract — the DP7
+	// cutover candidate declares TestUsdc; absent defaults to the legacy MintableERC20; junk rejects.
+	it("accepts token.sourceContract TestUsdc (the DP7 cutover shape) and rejects unknown contracts", () => {
+		const m = liveManifest()
+		m.l1.token.sourceContract = "TestUsdc"
+		expect(() => parseCandidateManifest(m)).not.toThrow()
+		m.l1.token.sourceContract = "EvilToken"
+		expect(() => parseCandidateManifest(m)).toThrow(/sourceContract/)
+	})
 })

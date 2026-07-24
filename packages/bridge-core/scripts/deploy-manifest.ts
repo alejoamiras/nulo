@@ -47,6 +47,7 @@ export interface CandidateManifest {
 			decimals: number
 			maxWholePerTx?: number
 			source?: "permissionless-mint" | "circle-proxy"
+			sourceContract?: "MintableERC20" | "TestUsdc"
 		}
 		fuel?: Record<string, unknown>
 		/** Direct Fee-Juice bridge config — the faucet's Fuel tab reads exactly these keys

@@ -134,10 +134,14 @@ const common = dryRun
 
 let okToken = true
 if (ownToken && tokenArgs) {
-	okToken = runForge(EVM_ROOT, `MintableERC20 @ ${config.l1.usdc}`, [
+	// Which of OUR mintable contracts this deployment used: the legacy auto-Permit2 MintableERC20
+	// (default) or the DP7 TestUsdc (no auto-allowance — the post-cutover testnet token). Both share
+	// the same constructor shape, so tokenArgs applies to either.
+	const tokenContract = (token.sourceContract as string | undefined) ?? "MintableERC20"
+	okToken = runForge(EVM_ROOT, `${tokenContract} @ ${config.l1.usdc}`, [
 		"verify-contract",
 		config.l1.usdc,
-		"src/MintableERC20.sol:MintableERC20",
+		`src/${tokenContract}.sol:${tokenContract}`,
 		"--constructor-args",
 		tokenArgs,
 		...common,

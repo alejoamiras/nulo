@@ -51,6 +51,10 @@ export const candidateManifestSchema = z
 						// `circle-proxy` = the official Circle USDC proxy (no mint, real allowance). Verification
 						// keys the contract-logic path off this — a mainnet manifest need not carry test fields.
 						source: z.enum(["permissionless-mint", "circle-proxy"]).optional(),
+						// WHICH of our mintable contracts a permissionless-mint token is (verify-l1 source-verifies
+						// against it): the legacy auto-Permit2 MintableERC20 (default) or the DP7 TestUsdc (no
+						// auto-allowance). Irrelevant for circle-proxy (never source-verified).
+						sourceContract: z.enum(["MintableERC20", "TestUsdc"]).optional(),
 						// Per-tx display cap — a test-token affordance. A `circle-proxy` (mainnet) token has no
 						// such cap and omits it; required for any other source (see refine).
 						maxWholePerTx: z.number().positive().optional(),
