@@ -200,6 +200,10 @@ export const useAppStore = defineStore("app", () => {
 		const captured = activeScope.value
 		if (!captured) return
 
+		// Captured with the scope: an event landing while this fetch is in flight
+		// makes its result stale, and installing it would erase that event.
+		const capturedVersion = activity.mutationVersionFor(captured)
+
 		const rows = await managers.transaction.getTransactions(captured.accountAddress)
 
 		// The fetch is by ADDRESS alone, so it returns every profile's rows for a
@@ -208,6 +212,7 @@ export const useAppStore = defineStore("app", () => {
 		activity.setTransactions(
 			captured,
 			rows.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value })),
+			capturedVersion,
 		)
 	}
 

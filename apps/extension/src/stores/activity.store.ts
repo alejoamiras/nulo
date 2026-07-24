@@ -103,6 +103,25 @@ export const useActivityStore = defineStore("activity", () => {
 	const slices = shallowRef(new Map<string, ActivitySlice>())
 	const activeKey = ref<string | null>(null)
 	const activeScope = ref<ActivityScope | null>(null)
+	/**
+	 * Per-scope count of live mutations applied.
+	 *
+	 * A fetch captures this before awaiting; if any event landed while it was in
+	 * flight the count moved, and installing that now-stale array wholesale would
+	 * erase the newer record. A refresh counter alone cannot see this — the event
+	 * arrives between the capture and the resolve, with no second refresh to
+	 * invalidate anything.
+	 */
+	const mutationVersion = shallowRef(new Map<string, number>())
+
+	function bumpMutation(key: string): void {
+		mutationVersion.value.set(key, (mutationVersion.value.get(key) ?? 0) + 1)
+	}
+
+	/** The mutation count a fetch should carry, captured before it awaits. */
+	function mutationVersionFor(scope: ActivityScope): number {
+		return mutationVersion.value.get(activityScopeKey(scope)) ?? 0
+	}
 
 	const activeSlice = computed<ActivitySlice>(() => {
 		const key = activeKey.value
@@ -172,11 +191,19 @@ export const useActivityStore = defineStore("activity", () => {
 		touch()
 	}
 
-	/** Replace a scope's transactions wholesale (a completed fetch for that scope). */
-	function setTransactions(scope: ActivityScope, rows: Tx[]): void {
+	/**
+	 * Replace a scope's transactions with the result of a fetch.
+	 *
+	 * `expectedVersion` is what `mutationVersionFor` returned before the fetch
+	 * awaited. If a live event has been applied since, the fetch predates it and
+	 * is dropped rather than overwriting the newer state.
+	 */
+	function setTransactions(scope: ActivityScope, rows: Tx[], expectedVersion?: number): boolean {
+		if (expectedVersion !== undefined && mutationVersionFor(scope) !== expectedVersion) return false
 		updateSlice(scope, (slice) => {
 			slice.transactions = [...rows]
 		})
+		return true
 	}
 
 	/**
@@ -194,6 +221,7 @@ export const useActivityStore = defineStore("activity", () => {
 			if (existing === -1) slice.transactions.push(tx)
 			else slice.transactions.splice(existing, 1, tx)
 		})
+		bumpMutation(activityScopeKey(scope))
 	}
 
 	function addAwaiting(scope: ActivityScope, row: AwaitingTx): void {
@@ -256,6 +284,7 @@ export const useActivityStore = defineStore("activity", () => {
 		awaitingTransactions,
 		activateScope,
 		setTransactions,
+		mutationVersionFor,
 		ingestTransaction,
 		addAwaiting,
 		removeAwaiting,

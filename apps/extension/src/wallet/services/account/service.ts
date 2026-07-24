@@ -57,6 +57,26 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		this.storage = new EntityStorage<Account>(ACCOUNT_STORAGE_ROOT, browserApi.storage.local, (raw) => AccountSchema.parse(raw))
 	}
 
+	/**
+	 * Every account row stored under its canonical composite key.
+	 *
+	 * Rows written before the key included the profile are ignored rather than
+	 * half-honored: the field scans below would otherwise find them while
+	 * `getAccount` / `getAccountContract` (which look up by composite key) would
+	 * not, leaving an account that renders but cannot sign. Ignoring them
+	 * uniformly lets `ensureDefaultAccount` recreate a canonical row instead.
+	 *
+	 * This is deliberately not a migration: the repo is pre-production, where a
+	 * shape change redefines the baseline and a stale install is reinstalled.
+	 */
+	private async liveRows(): Promise<Account[]> {
+		const rows: Account[] = []
+		for (const [key, row] of await this.storage.getAll()) {
+			if (key === accountRowIdOf(row)) rows.push(row)
+		}
+		return rows
+	}
+
 	protected async init(services: ServiceCollection): Promise<void> {
 		this.profileService = services.get(ProfileService.name)
 		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile`,
@@ -72,7 +92,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 */
 	public async clearChainState(profileId: string, chainId: number): Promise<void> {
 		await this.ensureInitialized()
-		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 		await purgeRows(
 			accounts,
 			(account) => this.storage.delete(accountRowIdOf(account)),
@@ -87,7 +107,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// account list would otherwise be arbitrary. Every consumer only iterates/filters, so sorting here
 		// is the single source that keeps the first account deterministic across fresh and imported profiles.
 		return (
-			(await this.storage.getValues())
+			(await this.liveRows())
 				.filter((x) => x.profileId === profileId && x.chainId === chainId && (all || x.visible))
 				// Address is the tie-breaker so ordering is TOTAL even if a hostile backup restored duplicate
 				// indices (legitimate per-type indices are unique) — no reliance on insertion order anywhere.
@@ -119,7 +139,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async ensureDefaultAccount(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
 		await this.ensureInitialized()
 		return this.serializePerTuple(profileId, chainId, type, async () => {
-			const existing = (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+			const existing = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 			if (existing.length > 0) {
 				return existing.sort((a, b) => a.index - b.index)[0]!
 			}
@@ -128,7 +148,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private async createAccountInternal(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
-		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 		const index = accounts.length > 0 ? array_max(accounts.filter((x) => x.type === type).map((x) => +x.index)) + 1 : 0
 		const secret = await this.deriveAccountSecret(profileId, chainId, type, index)
 		if (type !== AccountType.Nulo_v1) {
@@ -284,14 +304,14 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 */
 	public async getAccountsByAddress(address: string): Promise<Account[]> {
 		await this.ensureInitialized()
-		return (await this.storage.getValues()).filter((x) => x.address === address)
+		return (await this.liveRows()).filter((x) => x.address === address)
 	}
 
 	/** Lock-free, profileId-parameterized account read — for the deletion
 	 *  coordinator's snapshot (safe under the facade lock: no requireActiveProfile). */
 	public async getAccountsRaw(profileId: string): Promise<Account[]> {
 		await this.ensureInitialized()
-		return (await this.storage.getValues()).filter((x) => x.profileId === profileId)
+		return (await this.liveRows()).filter((x) => x.profileId === profileId)
 	}
 
 	/** Awaited profile-scoped account purge, called by the deletion coordinator.
@@ -301,7 +321,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related accounts`)
-		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId)
+		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId)
 		// SILENT: the deletion coordinator awaits every dependent purge DIRECTLY
 		// (txs/auth via purgeForAccounts, balances via purgeForTokens, incoming via
 		// clearProfile), so re-emitting onAccountDeleted here is redundant — and its
@@ -319,7 +339,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async backup(): Promise<Account[]> {
 		const profile = await requireActiveProfile(this.profileService)
 
-		return (await this.storage.getValues()).filter((x) => x.profileId === profile.id)
+		return (await this.liveRows()).filter((x) => x.profileId === profile.id)
 	}
 
 	public async restore(accounts: Account[]): Promise<Restored<Account>[]> {
@@ -336,7 +356,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			// Identity is the full row id, not the address alone: two profiles restored
 			// from the same mnemonic legitimately derive the same address, and each owns
 			// its own row.
-			const collides = hasIntersectionByKeys(await this.storage.getValues(), accounts, ["profileId", "chainId", "address"])
+			const collides = hasIntersectionByKeys(await this.liveRows(), accounts, ["profileId", "chainId", "address"])
 			if (collides) throw new Error("Duplicate account")
 
 			const seen = new Set<string>()

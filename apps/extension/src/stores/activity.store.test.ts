@@ -95,6 +95,32 @@ describe("activity store — scope routing", () => {
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xlate"])
 	})
 
+	test("a fetch that predates a live event is dropped, not installed over it", () => {
+		const store = useActivityStore()
+		store.activateScope(A)
+
+		// A fetch captures the version, then an event lands while it is in flight.
+		const captured = store.mutationVersionFor(A)
+		store.ingestTransaction(tx(A, "0xlive", { updatedAt: 5 }), A)
+
+		// The fetch resolves with a view that predates that event.
+		const installed = store.setTransactions(A, [tx(A, "0xold", { updatedAt: 1 })], captured)
+
+		expect(installed).toBe(false)
+		expect(store.transactions.map((t) => t.hash)).toEqual(["0xlive"])
+	})
+
+	test("a fetch with no intervening event installs normally", () => {
+		const store = useActivityStore()
+		store.activateScope(A)
+
+		const captured = store.mutationVersionFor(A)
+		const installed = store.setTransactions(A, [tx(A, "0xfetched")], captured)
+
+		expect(installed).toBe(true)
+		expect(store.transactions.map((t) => t.hash)).toEqual(["0xfetched"])
+	})
+
 	test("an update replaces the row in place rather than duplicating it", () => {
 		const store = useActivityStore()
 		store.activateScope(A)

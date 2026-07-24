@@ -91,6 +91,22 @@ describe("AccountService — composite storage key", () => {
 		expect(await accountService.getAccount("profile-2", CHAIN, SHARED_ADDRESS)).toMatchObject({ profileId: "profile-2" })
 	})
 
+	test("a row left at the old address-only key is ignored, not half-honored", async () => {
+		// Written by a build that keyed rows by address alone. The field scans would
+		// otherwise find it while the composite lookups would not, leaving an
+		// account that renders but cannot sign.
+		await api.storage.local.set({
+			[`nulo:core:accounts@${SHARED_ADDRESS}`]: JSON.stringify(mkAccount("profile-1")),
+		})
+
+		expect(await accountService.getAccounts("profile-1", CHAIN)).toHaveLength(0)
+		expect(await accountService.getAccount("profile-1", CHAIN, SHARED_ADDRESS)).toBeUndefined()
+		// And it does not block writing the canonical row.
+		const [restored] = await accountService.restore([mkAccount("profile-1")])
+		expect(restored?.restoreError).toBeUndefined()
+		expect(await accountService.getAccounts("profile-1", CHAIN)).toHaveLength(1)
+	})
+
 	test("deleting one profile's accounts leaves the colliding profile's row intact", async () => {
 		await accountService.restore([mkAccount("profile-1")])
 		await accountService.restore([mkAccount("profile-2")])
