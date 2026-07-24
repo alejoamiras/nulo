@@ -56,6 +56,9 @@ export interface ClaimHelperDeps {
 export interface ClaimHelperInput {
 	networkId: string
 	accountAddress: string
+	/** The profile execution resolved. Compared against the queued row's, so a
+	 *  row filed under another profile is never reused. */
+	profileId?: string
 	origin: LocalTxOrigin
 	calls?: { method?: string }[]
 	queuedJournalId?: string
@@ -102,6 +105,31 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		if (id && controller) activeControllers.set(id, controller)
 		return { journalId: id, controller }
 	}
+	// The queued row was filed when the message ARRIVED, from the session and the
+	// accounts as they were then. Execution resolves its own account and network,
+	// and the two can disagree — a hidden/visible ordering difference, or the user
+	// changing scope in between. Reusing a row whose scope does not match would
+	// file the operation under one account while sending from another, and put its
+	// cancel card somewhere the user is not looking.
+	const scopeMatches =
+		record.networkId === networkId &&
+		record.accountAddress === accountAddress &&
+		(record.profileId === undefined || input.profileId === undefined || record.profileId === input.profileId)
+	if (!scopeMatches) {
+		logger?.info(
+			`Queued record ${queuedJournalId} was filed under ${record.accountAddress}/${record.networkId} but execution resolved ` +
+				`${accountAddress}/${networkId}; re-filing under the executing scope`,
+		)
+		// Delete rather than fail it: this operation never ran under the old scope,
+		// so a failed card there would be activity that did not happen.
+		await operationJournal.deleteOperation(queuedJournalId).catch(() => {})
+		if (reuseController) activeControllers.delete(queuedJournalId)
+		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
+		const controller = id ? new AbortController() : undefined
+		if (id && controller) activeControllers.set(id, controller)
+		return { journalId: id, controller }
+	}
+
 	// Accept queued OR pending. Queued is the normal claim path; pending
 	// is what the silent-path optimization (in DappInteractionService.execute)
 	// fast-forwards to so the UI doesn't briefly show "Queued..." for a

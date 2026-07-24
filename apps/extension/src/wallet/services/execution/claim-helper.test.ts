@@ -41,7 +41,8 @@ function makeDeps(overrides: Partial<ClaimHelperDeps> = {}): {
 function makeJournal() {
 	const getOperation = vi.fn(async (_id: string) => null as unknown)
 	const transitionOperation = vi.fn(async (_id: string, _progress: unknown, _error?: unknown) => undefined as unknown)
-	return { getOperation, transitionOperation }
+	const deleteOperation = vi.fn(async (_id: string) => undefined as unknown)
+	return { getOperation, transitionOperation, deleteOperation }
 }
 
 const INPUT_NO_QUEUED = {
@@ -54,6 +55,50 @@ const INPUT_NO_QUEUED = {
 describe("claimOrCreateDappExecuteJournal", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+	})
+
+	test("a queued record filed under another account is re-filed, not reused", async () => {
+		// The row was written when the message arrived; execution then resolved a
+		// different account. Reusing it would file the operation under one account
+		// while sending from another, and leave its cancel card out of sight.
+		const { deps, journal, createFreshRecord, activeControllers } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({
+			networkId: "net1",
+			accountAddress: "0xSOMEONE-ELSE",
+			progress: { stage: "queued" },
+		})
+		createFreshRecord.mockResolvedValueOnce("refiled-id")
+		const controller = new AbortController()
+		activeControllers.set("queued-id", controller)
+
+		const res = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			queuedJournalId: "queued-id",
+			reuseController: controller,
+		})
+
+		expect(res.journalId).toBe("refiled-id")
+		// The stale row is removed rather than failed: this operation never ran
+		// under that account, so a failed card there would be false activity.
+		expect(journal.deleteOperation).toHaveBeenCalledWith("queued-id")
+		expect(journal.transitionOperation).not.toHaveBeenCalled()
+		expect(activeControllers.has("queued-id")).toBe(false)
+		expect(activeControllers.has("refiled-id")).toBe(true)
+	})
+
+	test("a queued record filed under another network is re-filed too", async () => {
+		const { deps, journal, createFreshRecord } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({
+			networkId: "net-OTHER",
+			accountAddress: "0xabc",
+			progress: { stage: "queued" },
+		})
+		createFreshRecord.mockResolvedValueOnce("refiled-id")
+
+		const res = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" })
+
+		expect(res.journalId).toBe("refiled-id")
+		expect(journal.deleteOperation).toHaveBeenCalledWith("queued-id")
 	})
 
 	test("no queuedJournalId → calls createFreshRecord, registers controller, returns the new id", async () => {
@@ -87,7 +132,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 
 	test("queuedJournalId set + record at queued stage → claims via transitionOperation, registers controller", async () => {
 		const { deps, createFreshRecord, activeControllers, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 
 		const result = await claimOrCreateDappExecuteJournal(deps, {
 			...INPUT_NO_QUEUED,
@@ -103,7 +148,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 	// v3: pre-acquire controller reuse.
 	test("reuseController set + record at queued → REUSES the pre-acquire controller (not a fresh one)", async () => {
 		const { deps, activeControllers, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 		const preController = new AbortController()
 		// Simulate the pre-acquire registration done by acquireExecutionSlot.
 		activeControllers.set("queued-id", preController)
@@ -141,7 +186,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 
 	test("queuedJournalId set + record at cancelled stage → throws JobCancelledSentinel without transitioning", async () => {
 		const { deps, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "cancelled" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "cancelled" } })
 
 		await expect(claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "cancelled-id" })).rejects.toBeInstanceOf(
 			JobCancelledSentinel,
@@ -151,7 +196,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 
 	test("queuedJournalId set + record at failed stage → throws JobCancelledSentinel", async () => {
 		const { deps, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "failed" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "failed" } })
 
 		await expect(claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "failed-id" })).rejects.toBeInstanceOf(
 			JobCancelledSentinel,
@@ -160,9 +205,9 @@ describe("claimOrCreateDappExecuteJournal", () => {
 
 	test("transition fails + recheck shows cancelled → throws JobCancelledSentinel (cancel won the mutex race)", async () => {
 		const { deps, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 		journal.transitionOperation.mockRejectedValueOnce(new Error("IllegalTransitionError: queued → pending"))
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "cancelled" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "cancelled" } })
 
 		await expect(claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "raced-id" })).rejects.toBeInstanceOf(
 			JobCancelledSentinel,
@@ -174,9 +219,9 @@ describe("claimOrCreateDappExecuteJournal", () => {
 	test("transition fails + recheck shows still queued → re-throws original error (storage failure, NOT cancelled)", async () => {
 		const { deps, journal } = makeDeps()
 		const storageErr = new Error("storage.set() failed: quota exceeded")
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 		journal.transitionOperation.mockRejectedValueOnce(storageErr)
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 
 		await expect(claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "storage-fail" })).rejects.toBe(
 			storageErr,
@@ -187,7 +232,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 
 	test("controller is registered synchronously immediately after the await on transitionOperation resolves", async () => {
 		const { deps, activeControllers, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 		// As soon as transitionOperation's `await` resolves, the next line
 		// MUST be activeControllers.set(...). Test this by checking the map
 		// is populated by the time the helper returns its resolved value.
@@ -210,7 +255,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 
 	test("returned controller is the same one stored in activeControllers (cancelJob path will find it)", async () => {
 		const { deps, activeControllers, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "queued" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "queued" } })
 
 		const result = await claimOrCreateDappExecuteJournal(deps, {
 			...INPUT_NO_QUEUED,
@@ -235,7 +280,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		// state and NOT throw + NOT re-transition + still register the
 		// controller. Opus post-impl F7.
 		const { deps, activeControllers, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "pending" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "pending" } })
 
 		const result = await claimOrCreateDappExecuteJournal(deps, {
 			...INPUT_NO_QUEUED,
@@ -253,7 +298,7 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		// `simulating` is past the pending pre-claim stages. The helper must
 		// reject — silent-path only fast-forwards to pending, never past it.
 		const { deps, journal } = makeDeps()
-		journal.getOperation.mockResolvedValueOnce({ progress: { stage: "simulating" } })
+		journal.getOperation.mockResolvedValueOnce({ networkId: "net1", accountAddress: "0xabc", progress: { stage: "simulating" } })
 		await expect(
 			claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "weird-stage-id" }),
 		).rejects.toBeInstanceOf(JobCancelledSentinel)
