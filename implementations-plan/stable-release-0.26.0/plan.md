@@ -11,14 +11,16 @@ Cut stable **v0.26.0** by promoting the dev-only commits (**23 total / 21 first-
 
 > **⏱ Timing reality (corrected after codex audit):** this is NOT a quick cut. **Three** separate PRs each incur the **full required CI including live network-e2e (~25–45 min each)** — the promote PR *and* the release-please Release PR (both PRs to `main`, which always runs network-e2e) *and* the sync-back PR (its `apps/extension/package.json` bump matches the `extension-network` path filter). Plus the publish chain (~15–25 min). **Realistic wall-clock ≈ 1.5–2.5 h**, dominated by CI waits — hence the `/loop` seed. No gate is skipped to go faster (hard rule).
 
-## Execution status (live)
+## Execution status — ✓ SHIPPED (v0.26.0)
 
 - [✓] **Phase 1** — SHA frozen `RELEASE_SHA=4e5435b`; JIT pre-flight green.
 - [✓] **Phase 2** — promote PR #320 merged `e61849c` (merge-commit, 2 parents); network-e2e shard-3 flake re-run→passed; release-please opened #321.
 - [✓] **Phase 3** — Release PR #321 merged `bffaad2` (merge-commit, 2 parents) = `TAG_SHA`; CHANGELOG verified; first CI batch cancelled/superseded (not breakage), live batch green.
-- [✓] **Phase 4** — release.yml run 30062111294 success: auto-unstick tagged v0.26.0 (→TAG_SHA), 3 assets, isPrerelease=false, real body, landing+faucet deployed, verify-live green, stores skipped.
-- [▶] **Phase 5** — sync-back PR #322 `chore: sync main → dev` — awaiting its own full CI, then merge-commit.
-- [ ] **Phase 6** — verify live + wrap-up (verify-live already green).
+- [✓] **Phase 4** — release.yml run 30062111294 success: auto-unstick tagged v0.26.0 (→TAG_SHA), 3 assets, isPrerelease=false, real git-cliff body, landing+faucet deployed, verify-live green, marketplace publish skipped.
+- [✓] **Phase 5** — sync-back PR #322 merged `1da3377` (merge-commit, 2 parents); dev now 0.26.0, prerelease manifest `{".":"0.26.0"}`.
+- [✓] **Phase 6** — live verified: nulo.sh serves v0.26.0; faucet `buildId=0.1.0+bffaad26` (==TAG_SHA); verify-live job green.
+
+**All `/goal` conditions met:** 3 merges all merge-commits w/ 2 parents (`e61849c`/`bffaad2`/`1da3377`); release has 3 assets + isPrerelease=false + real body; tag→TAG_SHA; sites fresh by SHA; no gate weakened (shard-3 flake re-run, never neutralized); no marketplace publish; no force-push; promote merged only at pinned `RELEASE_SHA` (atomic `--match-head-commit`).
 
 ## Why `light`
 
