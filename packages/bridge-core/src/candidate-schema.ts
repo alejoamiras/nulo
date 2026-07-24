@@ -44,19 +44,33 @@ export const candidateManifestSchema = z
 						maxWholePerTx: z.number().positive(),
 					})
 					.strict(),
+				// Split so a bridge-only (mainnet) deployment validates WITHOUT the swap stack. `core` (the
+				// router + its constructor deps — permit2, swapTarget, feeJuicePortal) is what `bridge()` and
+				// the Permit2 witness need, required whenever `fuel` is present. `swap` (the Uniswap→FeeJuice
+				// quoting stack) is swap-fuel-only and optional — a mainnet manifest carries `core`, omits
+				// `swap` (swap-fuel disabled there, DP2).
 				fuel: z
 					.object({
-						router: evmAddress,
-						swapTarget: evmAddress,
-						poolManager: evmAddress,
-						quoter: evmAddress,
-						permit2: evmAddress,
-						weth: evmAddress,
-						feeJuice: evmAddress,
-						feeJuicePortal: evmAddress,
-						pools: z.record(z.string(), poolSchema),
-						slippageBps: z.number().int().min(0).max(10_000),
-						minFuelFj: decimalString,
+						core: z
+							.object({
+								router: evmAddress,
+								permit2: evmAddress,
+								swapTarget: evmAddress,
+								feeJuicePortal: evmAddress,
+							})
+							.strict(),
+						swap: z
+							.object({
+								poolManager: evmAddress,
+								quoter: evmAddress,
+								weth: evmAddress,
+								feeJuice: evmAddress,
+								pools: z.record(z.string(), poolSchema),
+								slippageBps: z.number().int().min(0).max(10_000),
+								minFuelFj: decimalString,
+							})
+							.strict()
+							.optional(),
 					})
 					.strict()
 					.optional(),
@@ -64,7 +78,8 @@ export const candidateManifestSchema = z
 					.object({
 						portal: evmAddress,
 						asset: evmAddress,
-						feeAssetHandler: evmAddress,
+						// Optional: mainnet has no permissionless FeeAssetHandler (BYO-$AZTEC); testnet mints via one.
+						feeAssetHandler: evmAddress.optional(),
 						minFj: decimalString,
 					})
 					.strict()

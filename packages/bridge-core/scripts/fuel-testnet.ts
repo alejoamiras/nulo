@@ -56,6 +56,9 @@ const CONFIG = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("testnet-bridge.json has no l1.fuel - run the P2 deploy first")
+const core = fuel.core
+const swap = fuel.swap
+if (!swap) throw new Error("testnet-bridge.json has no l1.fuel.swap — this swap-fuel smoke needs the swap stack")
 
 const sepolia = defineChain({
 	id: 11155111,
@@ -95,7 +98,7 @@ async function main() {
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const azlo = CONFIG.l1.usdc as `0x${string}`
 	const erc20 = evmAbi("MintableERC20")
-	console.log("L1 sender", account.address, "| AZLO", azlo, "| router", fuel.router)
+	console.log("L1 sender", account.address, "| AZLO", azlo, "| router", core.router)
 
 	// Mint enough AZLO for both variants (permissionless, Permit2 pre-approved by the token).
 	const PRIVATE_RUNS = Number(process.env.PRIVATE_RUNS ?? 3) // ≥3 for calibration stability; env-tunable
@@ -114,10 +117,10 @@ async function main() {
 
 	const route = buildFuelRoute({
 		token: azlo,
-		weth: fuel.weth,
-		feeJuice: fuel.feeJuice,
-		tokenWeth: fuel.pools.azloWeth,
-		ethFj: fuel.pools.ethFj,
+		weth: swap.weth,
+		feeJuice: swap.feeJuice,
+		tokenWeth: swap.pools.azloWeth,
+		ethFj: swap.pools.ethFj,
 	})
 
 	// ─── L2 (fresh account, real proofs; sponsored pays ONLY the account deploy) ──
@@ -242,17 +245,17 @@ async function main() {
 		// secret would strand the deposit against the recipient-committed claim_private).
 		const tokenClaimSalt = isPrivate ? Fr.random() : undefined
 
-		const quote = await quoteFuelPath(pub as never, fuel.quoter, route, FUEL_SLICE)
-		const minOut = minOutputForSlippage(quote, fuel.slippageBps)
+		const quote = await quoteFuelPath(pub as never, swap.quoter, route, FUEL_SLICE)
+		const minOut = minOutputForSlippage(quote, swap.slippageBps)
 		console.log(`quote: ${FUEL_SLICE} AZLO-wei → ${quote} FJ-wei (floor ${minOut}) (${mins()})`)
 
 		const result = await runSwapBridge(
 			{ pub, wallet, account } as never,
 			{
-				router: fuel.router,
+				router: core.router,
 				routerAbi: evmAbi("SwapBridgeRouter"),
-				permit2: fuel.permit2,
-				swapTarget: fuel.swapTarget,
+				permit2: core.permit2,
+				swapTarget: core.swapTarget,
 				tokenPortal: CONFIG.l1.portal,
 				bridgeToken: azlo,
 				totalAmount: TOTAL,
@@ -408,7 +411,7 @@ async function main() {
 	console.log(`private getFeeLimits : ${privRuns.map((r) => r.ceiling ?? "n/a").join(", ")}`)
 	console.log(`private actual fees  : ${privRuns.map((r) => r.actualFee).join(", ")}`)
 	console.log(
-		`MIN_FUEL_FJ calibration: ${minFuelFj} (${FUEL_FEE_MARGIN}× worst ${worstCeiling !== undefined ? "getFeeLimit" : "actual×4 proxy"}) - update testnet-bridge.json l1.fuel.minFuelFj`,
+		`MIN_FUEL_FJ calibration: ${minFuelFj} (${FUEL_FEE_MARGIN}× worst ${worstCeiling !== undefined ? "getFeeLimit" : "actual×4 proxy"}) - update testnet-bridge.json l1.fuel.swap.minFuelFj`,
 	)
 
 	// --- Phase 3: NO-FUEL-SPEND proof - a tx self-pays from EXISTING private FJ at the FPC via pay_fee. ---

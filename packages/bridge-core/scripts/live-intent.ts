@@ -355,25 +355,28 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 			if (candidate.l1.feeJuice.asset.toLowerCase() !== intent.l1.feeJuice.toLowerCase()) {
 				throw new Error(`candidate feeJuice.asset ${candidate.l1.feeJuice.asset} != intent pin ${intent.l1.feeJuice} — STOP`)
 			}
-			if (candidate.l1.feeJuice.feeAssetHandler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
-				throw new Error(
-					`candidate feeJuice.feeAssetHandler ${candidate.l1.feeJuice.feeAssetHandler} != intent pin ${intent.l1.feeAssetHandler} — STOP`,
-				)
-			}
 			const underlying = cast(["call", candidate.l1.feeJuice.portal, "UNDERLYING()(address)", "--rpc-url", sepolia])
 			if (underlying.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
 				throw new Error(`portal UNDERLYING ${underlying} != manifest asset ${candidate.l1.feeJuice.asset} — STOP`)
 			}
-			const feeAsset = cast(["call", candidate.l1.feeJuice.feeAssetHandler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
-			if (feeAsset.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
-				throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
+			// The FeeAssetHandler is testnet-only (permissionless mint); mainnet is BYO-$AZTEC with no
+			// handler. Verify it (intent-pin + FEE_ASSET readback) only when the manifest declares one.
+			const handler = candidate.l1.feeJuice.feeAssetHandler
+			if (handler) {
+				if (handler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
+					throw new Error(`candidate feeJuice.feeAssetHandler ${handler} != intent pin ${intent.l1.feeAssetHandler} — STOP`)
+				}
+				const feeAsset = cast(["call", handler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
+				if (feeAsset.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
+					throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
+				}
 			}
 		}
 		if (candidate.l1.fuel) {
-			const owner = cast(["call", candidate.l1.fuel.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
+			const owner = cast(["call", candidate.l1.fuel.core.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
 			if (owner !== intent.signer.toLowerCase()) throw new Error(`router owner ${owner} != our signer — STOP (privileged binding)`)
-			const swapTarget = cast(["call", candidate.l1.fuel.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
-			if (swapTarget !== candidate.l1.fuel.swapTarget.toLowerCase())
+			const swapTarget = cast(["call", candidate.l1.fuel.core.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
+			if (swapTarget !== candidate.l1.fuel.core.swapTarget.toLowerCase())
 				throw new Error(`router swapTarget ${swapTarget} != manifest — STOP`)
 		}
 		console.log("✓ candidate strict-valid + privileged readbacks agree")

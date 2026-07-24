@@ -24,15 +24,15 @@ export const L1_USDC = config.l1.usdc as `0x${string}`
 export const L1_PORTAL = config.l1.portal as `0x${string}`
 
 /**
- * Router + Permit2 are REQUIRED bridge config now (bridge-only + fuel-only both go through the
- * router's `bridge()` — C7). They currently live under `l1.fuel`; read them from there but treat
- * them as bridge-level requirements. `undefined` here means the (post-cutover) single-path deposit
+ * Router + Permit2 are REQUIRED bridge config (bridge-only + fuel-only both go through the router's
+ * `bridge()` — C7). They live under `l1.fuel.core` (the router + its constructor deps), present on
+ * BOTH the testnet and the bridge-only mainnet shape. `undefined` here means the single-path deposit
  * cannot run — the deposit code asserts their presence fail-closed.
  */
-export const BRIDGE_ROUTER = (config.l1 as { fuel?: { router?: string } }).fuel?.router as `0x${string}` | undefined
-export const BRIDGE_PERMIT2 = (config.l1 as { fuel?: { permit2?: string } }).fuel?.permit2 as `0x${string}` | undefined
+export const BRIDGE_ROUTER = config.l1.fuel?.core.router as `0x${string}` | undefined
+export const BRIDGE_PERMIT2 = config.l1.fuel?.core.permit2 as `0x${string}` | undefined
 /** The router's current swap target — witness-bound even for a bridge-only deposit (F-004). */
-export const BRIDGE_SWAP_TARGET = (config.l1 as { fuel?: { swapTarget?: string } }).fuel?.swapTarget as `0x${string}` | undefined
+export const BRIDGE_SWAP_TARGET = config.l1.fuel?.core.swapTarget as `0x${string}` | undefined
 
 /**
  * L9 runtime interlock (codex cond. 2): the deposit code REFUSES to build a private deposit unless
@@ -63,24 +63,27 @@ export interface FuelDeployment {
 
 // Fully typed via the strict schema — the pool keys the swap UI needs are asserted here (the
 // schema keeps `pools` an open record; the faucet's swap lane requires these two specifically).
+// The swap-fuel stack. Present ONLY when `l1.fuel.swap` exists (testnet) — a bridge-only mainnet
+// manifest omits `swap`, so BRIDGE_FUEL is undefined and the swap-fuel UI never renders (DP2). The
+// flat shape is preserved (core + swap merged) so every downstream consumer is unchanged.
 const fuelCfg = config.l1.fuel
 const requiredPools = (pools: Record<string, { fee: number; tickSpacing: number }>): FuelDeployment["pools"] => {
 	const { azloWeth, ethFj } = pools
-	if (!azloWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.pools must include azloWeth and ethFj")
+	if (!azloWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.swap.pools must include azloWeth and ethFj")
 	return { azloWeth, ethFj }
 }
-export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
+export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg?.swap
 	? {
-			router: fuelCfg.router as `0x${string}`,
-			swapTarget: fuelCfg.swapTarget as `0x${string}`,
-			permit2: fuelCfg.permit2 as `0x${string}`,
-			poolManager: fuelCfg.poolManager as `0x${string}`,
-			quoter: fuelCfg.quoter as `0x${string}`,
-			weth: fuelCfg.weth as `0x${string}`,
-			feeJuice: fuelCfg.feeJuice as `0x${string}`,
-			pools: requiredPools(fuelCfg.pools),
-			slippageBps: fuelCfg.slippageBps,
-			minFuelFj: BigInt(fuelCfg.minFuelFj),
+			router: fuelCfg.core.router as `0x${string}`,
+			swapTarget: fuelCfg.core.swapTarget as `0x${string}`,
+			permit2: fuelCfg.core.permit2 as `0x${string}`,
+			poolManager: fuelCfg.swap.poolManager as `0x${string}`,
+			quoter: fuelCfg.swap.quoter as `0x${string}`,
+			weth: fuelCfg.swap.weth as `0x${string}`,
+			feeJuice: fuelCfg.swap.feeJuice as `0x${string}`,
+			pools: requiredPools(fuelCfg.swap.pools),
+			slippageBps: fuelCfg.swap.slippageBps,
+			minFuelFj: BigInt(fuelCfg.swap.minFuelFj),
 		}
 	: undefined
 

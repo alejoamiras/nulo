@@ -138,37 +138,45 @@ const okPortal = runForge(L1_ARTIFACTS_ROOT, `${forkedPortal ? "NuloTokenPortal"
 const fuel = config.l1.fuel
 let okFuel = true
 if (fuel) {
-	const swapArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [fuel.poolManager, fuel.feeJuice, fuel.weth])
+	const core = fuel.core
 	const routerArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [
-		fuel.permit2,
-		fuel.feeJuicePortal,
-		fuel.swapTarget,
+		core.permit2,
+		core.feeJuicePortal,
+		core.swapTarget,
 	])
-	const okSwap = runForge(EVM_ROOT, `UniswapFuelSwap @ ${fuel.swapTarget}`, [
+	const okRouter = runForge(EVM_ROOT, `SwapBridgeRouter @ ${core.router}`, [
 		"verify-contract",
-		fuel.swapTarget,
-		"src/UniswapFuelSwap.sol:UniswapFuelSwap",
-		"--constructor-args",
-		swapArgs,
-		...common,
-	])
-	const okRouter = runForge(EVM_ROOT, `SwapBridgeRouter @ ${fuel.router}`, [
-		"verify-contract",
-		fuel.router,
+		core.router,
 		"src/SwapBridgeRouter.sol:SwapBridgeRouter",
 		"--constructor-args",
 		routerArgs,
 		...common,
 	])
-	okFuel = okSwap && okRouter
+	// UniswapFuelSwap is verified ONLY when the swap stack is present (testnet). A bridge-only mainnet
+	// deployment ships an INERT swapTarget stub (its bytecode/revert behaviour is verified in Phase 7/8),
+	// not UniswapFuelSwap — so verifying it here would be wrong.
+	let okSwap = true
+	if (fuel.swap) {
+		const swap = fuel.swap
+		const swapArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [swap.poolManager, swap.feeJuice, swap.weth])
+		okSwap = runForge(EVM_ROOT, `UniswapFuelSwap @ ${core.swapTarget}`, [
+			"verify-contract",
+			core.swapTarget,
+			"src/UniswapFuelSwap.sol:UniswapFuelSwap",
+			"--constructor-args",
+			swapArgs,
+			...common,
+		])
+	}
+	okFuel = okRouter && okSwap
 }
 
 if (!dryRun && okToken && okPortal && okFuel) {
 	console.log(`\nhttps://sepolia.etherscan.io/address/${config.l1.usdc}#code`)
 	console.log(`https://sepolia.etherscan.io/address/${config.l1.portal}#code`)
 	if (fuel) {
-		console.log(`https://sepolia.etherscan.io/address/${fuel.swapTarget}#code`)
-		console.log(`https://sepolia.etherscan.io/address/${fuel.router}#code`)
+		console.log(`https://sepolia.etherscan.io/address/${fuel.core.swapTarget}#code`)
+		console.log(`https://sepolia.etherscan.io/address/${fuel.core.router}#code`)
 	}
 }
 process.exit(okToken && okPortal && okFuel ? 0 : 1)

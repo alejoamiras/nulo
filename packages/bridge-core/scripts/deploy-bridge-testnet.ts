@@ -391,16 +391,22 @@ async function main() {
 	// deploys fresh fuel (DeployFuelLive) and passes FUEL_ROUTER + FUEL_SWAP; the pool config (pools,
 	// quoter, slippage, …) carries forward from the live manifest. Pre-B2 fuel is a hard abort.
 	const prior = existsSync(LIVE_PATH) ? JSON.parse(readFileSync(LIVE_PATH, "utf8")) : null
-	const priorFuel = prior?.l1?.fuel as Record<string, unknown> | undefined
+	const priorFuel = prior?.l1?.fuel as { core?: Record<string, unknown>; swap?: Record<string, unknown> } | undefined
 	const l1a = await nodeL1Addresses()
+	// The router + its constructor deps (permit2/swapTarget/feeJuicePortal) live under `core`; the
+	// swap-quoting stack carries forward untouched under `swap`. The rollup-coupled + env overrides
+	// land INSIDE `core` (they used to be flat).
 	const fuel = priorFuel
 		? {
 				...priorFuel,
-				// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
-				// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
-				feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),
-				...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
-				...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
+				core: {
+					...priorFuel.core,
+					// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
+					// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
+					feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),
+					...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
+					...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
+				},
 			}
 		: undefined
 
@@ -415,9 +421,9 @@ async function main() {
 		feeAssetHandler: l1a.feeAssetHandlerAddress.toLowerCase(),
 		minFj: String(process.env.FUEL_MIN_FJ ?? priorFeeJuice?.minFj ?? "16000000000000000000"),
 	}
-	if (fuel?.router && fuel?.swapTarget) {
+	if (fuel?.core?.router && fuel?.core?.swapTarget) {
 		const router = getContract({
-			address: fuel.router as `0x${string}`,
+			address: fuel.core.router as `0x${string}`,
 			abi: [
 				{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
 				{
@@ -432,7 +438,7 @@ async function main() {
 		})
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const rr = router.read as any
-		assertSame(await rr.swapTarget(), fuel.swapTarget, "router.swapTarget")
+		assertSame(await rr.swapTarget(), fuel.core.swapTarget, "router.swapTarget")
 		const witnessType = (await rr.BRIDGE_WITNESS_TYPE_STRING()) as string
 		if (!witnessType.includes("swapTarget")) {
 			throw new Error(

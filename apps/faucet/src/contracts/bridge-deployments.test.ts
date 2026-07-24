@@ -21,7 +21,7 @@ describe("bridge-deployments — client-pin (witness addresses are manifest-sour
 	const l1 = config.l1 as {
 		usdc: string
 		portal: string
-		fuel: { router: string; permit2: string; swapTarget: string }
+		fuel: { core: { router: string; permit2: string; swapTarget: string } }
 		privateClaimMode?: string
 	}
 
@@ -31,9 +31,9 @@ describe("bridge-deployments — client-pin (witness addresses are manifest-sour
 	})
 
 	it("router + permit2 + swapTarget are the manifest values (not caller input)", () => {
-		expect(BRIDGE_ROUTER?.toLowerCase()).toBe(l1.fuel.router.toLowerCase())
-		expect(BRIDGE_PERMIT2?.toLowerCase()).toBe(l1.fuel.permit2.toLowerCase())
-		expect(BRIDGE_SWAP_TARGET?.toLowerCase()).toBe(l1.fuel.swapTarget.toLowerCase())
+		expect(BRIDGE_ROUTER?.toLowerCase()).toBe(l1.fuel.core.router.toLowerCase())
+		expect(BRIDGE_PERMIT2?.toLowerCase()).toBe(l1.fuel.core.permit2.toLowerCase())
+		expect(BRIDGE_SWAP_TARGET?.toLowerCase()).toBe(l1.fuel.core.swapTarget.toLowerCase())
 	})
 
 	it("SUPPORTS_SALT_V2 reflects the manifest's privateClaimMode (L9 interlock)", () => {

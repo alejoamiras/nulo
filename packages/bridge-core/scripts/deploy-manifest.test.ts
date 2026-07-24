@@ -25,17 +25,21 @@ const manifest: CandidateManifest = {
 		portalSource: "forked-v1",
 		token: { name: "Aztec Nulo", symbol: "AZLO", decimals: 18, maxWholePerTx: 1000 },
 		fuel: {
-			router: "0x0000000000000000000000000000000000000003",
-			swapTarget: "0x0000000000000000000000000000000000000004",
-			poolManager: "0x0000000000000000000000000000000000000005",
-			quoter: "0x0000000000000000000000000000000000000006",
-			permit2: "0x0000000000000000000000000000000000000007",
-			weth: "0x0000000000000000000000000000000000000008",
-			feeJuice: "0x0000000000000000000000000000000000000009",
-			feeJuicePortal: "0x000000000000000000000000000000000000000a",
-			pools: { azloWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
-			slippageBps: 100,
-			minFuelFj: "10000000000000000000",
+			core: {
+				router: "0x0000000000000000000000000000000000000003",
+				permit2: "0x0000000000000000000000000000000000000007",
+				swapTarget: "0x0000000000000000000000000000000000000004",
+				feeJuicePortal: "0x000000000000000000000000000000000000000a",
+			},
+			swap: {
+				poolManager: "0x0000000000000000000000000000000000000005",
+				quoter: "0x0000000000000000000000000000000000000006",
+				weth: "0x0000000000000000000000000000000000000008",
+				feeJuice: "0x0000000000000000000000000000000000000009",
+				pools: { azloWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
+				slippageBps: 100,
+				minFuelFj: "10000000000000000000",
+			},
 		},
 		feeJuice: {
 			portal: "0x000000000000000000000000000000000000000a",
@@ -72,7 +76,7 @@ describe("writeCandidateAtomic", () => {
 		expect(back.l1.usdc).toBe(manifest.l1.usdc)
 		expect(back.l1.portal).toBe(manifest.l1.portal)
 		expect(back.l1.portalSource).toBe("forked-v1")
-		expect(back.l1.fuel.swapTarget).toBe(manifest.l1.fuel?.swapTarget)
+		expect(back.l1.fuel.core.swapTarget).toBe((manifest.l1.fuel?.core as { swapTarget: string }).swapTarget)
 		for (const k of ["proxy", "token", "bridge"] as const) {
 			expect(back.l2[k].address).toBe(manifest.l2[k].address)
 			expect(typeof back.l2[k].salt).toBe("number")

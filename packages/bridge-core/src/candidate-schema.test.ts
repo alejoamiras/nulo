@@ -27,15 +27,15 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		expect(() => parseCandidateManifest(m)).toThrow(/unrecognized|legacyCarriedField/i)
 	})
 
-	it("rejects a malformed portal address in the fuel block", () => {
+	it("rejects a malformed portal address in the fuel core block", () => {
 		const m = liveManifest()
-		m.l1.fuel.feeJuicePortal = "not-an-address"
+		m.l1.fuel.core.feeJuicePortal = "not-an-address"
 		expect(() => parseCandidateManifest(m)).toThrow(/feeJuicePortal/)
 	})
 
 	it("rejects a non-integer minFuelFj (base-unit amounts travel as decimal strings)", () => {
 		const m = liveManifest()
-		m.l1.fuel.minFuelFj = "1.5e18"
+		m.l1.fuel.swap.minFuelFj = "1.5e18"
 		expect(() => parseCandidateManifest(m)).toThrow(/minFuelFj/)
 	})
 
@@ -47,7 +47,23 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 
 	it("rejects an out-of-range slippage", () => {
 		const m = liveManifest()
-		m.l1.fuel.slippageBps = 10_001
+		m.l1.fuel.swap.slippageBps = 10_001
 		expect(() => parseCandidateManifest(m)).toThrow(/slippageBps/)
+	})
+
+	// The core/swap split: a bridge-only (mainnet) deployment carries `fuel.core` + omits `fuel.swap`
+	// and `feeJuice.feeAssetHandler`. Both shapes must validate; `core` must be mandatory when `fuel`
+	// is present.
+	it("accepts a bridge-only (mainnet-shape) manifest: swap + feeAssetHandler omitted", () => {
+		const m = liveManifest()
+		delete m.l1.fuel.swap
+		if (m.l1.feeJuice) delete m.l1.feeJuice.feeAssetHandler
+		expect(() => parseCandidateManifest(m)).not.toThrow()
+	})
+
+	it("rejects fuel without its core block", () => {
+		const m = liveManifest()
+		delete m.l1.fuel.core
+		expect(() => parseCandidateManifest(m)).toThrow(/core/)
 	})
 })

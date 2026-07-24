@@ -48,6 +48,9 @@ if (configArg === -1) throw new Error("pass --config <candidate manifest path>")
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("candidate manifest has no l1.fuel")
+const core = fuel.core
+const swap = fuel.swap
+if (!swap) throw new Error("candidate manifest has no l1.fuel.swap — this swap smoke needs the swap stack")
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -72,7 +75,7 @@ async function main() {
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const azlo = CONFIG.l1.usdc as `0x${string}`
-	console.log(`candidate fuel smoke: portal ${CONFIG.l1.portal} (${CONFIG.l1.portalSource ?? "legacy"}), router ${fuel.router}`)
+	console.log(`candidate fuel smoke: portal ${CONFIG.l1.portal} (${CONFIG.l1.portalSource ?? "legacy"}), router ${core.router}`)
 
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
@@ -84,10 +87,10 @@ async function main() {
 	})
 	const route = buildFuelRoute({
 		token: azlo,
-		weth: fuel.weth,
-		feeJuice: fuel.feeJuice,
-		tokenWeth: fuel.pools.azloWeth,
-		ethFj: fuel.pools.ethFj,
+		weth: swap.weth,
+		feeJuice: swap.feeJuice,
+		tokenWeth: swap.pools.azloWeth,
+		ethFj: swap.pools.ethFj,
 	})
 
 	// ─── L2 (fresh account; sponsored FPC pays ONLY its deploy, fuel pays the claim) ──
@@ -177,17 +180,17 @@ async function main() {
 	}
 
 	// ─── deposit + swap (L1) → self-paying public claim (L2) ─────────
-	const quote = await quoteFuelPath(pub as never, fuel.quoter, route, FUEL_SLICE)
-	const minOut = minOutputForSlippage(quote, fuel.slippageBps)
+	const quote = await quoteFuelPath(pub as never, swap.quoter, route, FUEL_SLICE)
+	const minOut = minOutputForSlippage(quote, swap.slippageBps)
 	console.log(`quote: ${FUEL_SLICE} AZLO-wei → ${quote} FJ-wei (floor ${minOut}) (${mins()})`)
 
 	const result = await runSwapBridge(
 		{ pub, wallet, account } as never,
 		{
-			router: fuel.router,
+			router: core.router,
 			routerAbi: evmAbi("SwapBridgeRouter"),
-			permit2: fuel.permit2,
-			swapTarget: fuel.swapTarget,
+			permit2: core.permit2,
+			swapTarget: core.swapTarget,
 			tokenPortal: CONFIG.l1.portal,
 			bridgeToken: azlo,
 			totalAmount: TOTAL,
