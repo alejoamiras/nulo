@@ -53,12 +53,15 @@ vi.mock("./repository", () => ({
 		constructor() {
 			// biome-ignore lint/correctness/noConstructorReturn: mock ctor returns the in-memory fake
 			return {
-				getRecord: async (k: string) => records.get(k),
-				hasRecord: async (k: string) => records.has(k),
+				// The real repository keys rows by scope + nullifier; this fake keeps
+				// indexing by nullifier alone, since these scenarios exercise service
+				// semantics, not key layout (the composite key has its own test).
+				getRecord: async (_scope: unknown, k: string) => records.get(k),
+				hasRecord: async (_scope: unknown, k: string) => records.has(k),
 				upsertRecord: async (r: IncomingTransferRecord) => {
 					records.set(r.siloedNullifier, r)
 				},
-				deleteRecord: async (k: string) => {
+				deleteRecord: async (_scope: unknown, k: string) => {
 					records.delete(k)
 				},
 				listRecords: async () => [...records.values()],

@@ -260,7 +260,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// can fire this handler for inactive profiles.
 				const records = await this.repo.listForAccount(account.profileId, network.id, account.address)
 				for (const record of records) {
-					await this.repo.deleteRecord(record.siloedNullifier)
+					await this.repo.deleteRecord(record, record.siloedNullifier)
 					this.emit("onIncomingTransferDeleted", record)
 				}
 			}
@@ -326,7 +326,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// Per-iteration getRecord re-check: tests may directly mutate
 				// the records Map (bypassing the service + the lock). Lock
 				// alone can't catch those. Cheap (one repo read per record).
-				const stillThere = await this.repo.getRecord(record.siloedNullifier)
+				const stillThere = await this.repo.getRecord(record, record.siloedNullifier)
 				if (!stillThere) continue
 				const updated = { ...record, hidden: false }
 				await this.repo.upsertRecord(updated)
@@ -513,7 +513,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 			// identical blockTimestamps so activity-feed order is preserved.
 			const records = await this.repo.listByContract(profileId, network.id, token.contract)
 			for (const record of records) {
-				await this.repo.deleteRecord(record.siloedNullifier)
+				await this.repo.deleteRecord(record, record.siloedNullifier)
 				this.emit("onIncomingTransferDeleted", record)
 			}
 			const trustRecord = await this.repo.getTrust(profileId, network.id, token.contract)
@@ -554,9 +554,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// Re-check existence inside the lock — a concurrent path
 				// (rare; tests can mutate the underlying Map directly) may
 				// have already deleted.
-				const stillThere = await this.repo.getRecord(record.siloedNullifier)
+				const stillThere = await this.repo.getRecord(record, record.siloedNullifier)
 				if (!stillThere) continue
-				await this.repo.deleteRecord(record.siloedNullifier)
+				await this.repo.deleteRecord(record, record.siloedNullifier)
 				this.emit("onIncomingTransferDeleted", record)
 			}
 		})
@@ -648,7 +648,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
 
 				// Existing-record branch: backfill blockTimestamp if missing.
-				const existing = await this.repo.getRecord(note.siloedNullifier)
+				const existing = await this.repo.getRecord({ profileId, networkId, accountAddress }, note.siloedNullifier)
 				if (existing) {
 					if (existing.blockTimestamp === undefined) {
 						const ts = await blockTimestampFor(note.l2BlockNumber)

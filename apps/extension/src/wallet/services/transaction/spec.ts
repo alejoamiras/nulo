@@ -97,6 +97,15 @@ export type TxGasDetails = {
 export type Tx = {
 	/** Chain id. */
 	chainId: number
+	/**
+	 * Owning profile. Optional only because rows written before the activity
+	 * scope existed don't carry it; every new row does. Without it, two profiles
+	 * that derive the same address on one chain are indistinguishable at the
+	 * history level.
+	 */
+	profileId?: string
+	/** Owning network row id (not the chain id — a profile can hold several networks on one chain). */
+	networkId?: string
 	/** Sender address. */
 	account: string
 	/** Nonce. */
@@ -155,6 +164,8 @@ const tolerantObject = (v: unknown) => typeof v === "object" && v !== null
  *  `origin` is a wallet-bridge union; results/gas are render-only). */
 export const TxSchema: z.ZodType<Tx> = z.object({
 	chainId: z.number(),
+	profileId: z.string().optional(),
+	networkId: z.string().optional(),
 	account: z.string(),
 	nonce: z.string(),
 	// AccountFeePaymentMethodOptions is a NUMERIC enum in @aztec/entrypoints —

@@ -2,12 +2,13 @@
  * Storage ownership for `IncomingTransferRecord` + `IncomingTrustRecord`.
  *
  * Two independent EntityStorage tables under the injected `browserApi.storage.local`:
- *   - `nulo:core:incoming-transfers` keyed by `siloedNullifier` (Fr string,
- *     cryptographically unique per note).
+ *   - `nulo:core:incoming-transfers` keyed by owning scope + `siloedNullifier`.
  *   - `nulo:core:incoming-trust` keyed by `${profileId}|${networkId}|${contract}`.
  *
- * The records repo uses `siloedNullifier` directly as the storage key — no
- * allocateId / numeric id surface. Idempotent inserts are an emergent property.
+ * A siloed nullifier is unique within ONE rollup tree, not across them, so the
+ * nullifier alone is not a safe key: the same note observed on two networks
+ * would collide on one row. The owning scope is part of the key. Idempotent
+ * inserts remain an emergent property.
  *
  * Cleanup hooks (`clearProfile`, `clearChain`) iterate the full key space
  * and filter — fine at the cardinality we expect (hundreds of records per
@@ -26,6 +27,15 @@ import {
 
 const RECORDS_KEY = "nulo:core:incoming-transfers"
 const TRUST_KEY = "nulo:core:incoming-trust"
+
+/** Owning scope of an incoming record — the part of its identity that isn't the nullifier. */
+export type IncomingRecordScope = Pick<IncomingTransferRecord, "profileId" | "networkId" | "accountAddress">
+
+/** Build a stable key for a record. JSON-encoded so a separator inside an
+ *  identifier can't forge another scope's key. */
+export function recordKey(scope: IncomingRecordScope, siloedNullifier: string): string {
+	return JSON.stringify([scope.profileId, scope.networkId, scope.accountAddress, siloedNullifier])
+}
 
 /** Build a stable key for the trust table. Profile + network + contract are
  *  all stringified to defend against numeric drift. */
@@ -48,20 +58,20 @@ export class IncomingTransferRepository {
 
 	// --- Records ---
 
-	public async getRecord(siloedNullifier: string): Promise<IncomingTransferRecord | undefined> {
-		return this.records.get(siloedNullifier)
+	public async getRecord(scope: IncomingRecordScope, siloedNullifier: string): Promise<IncomingTransferRecord | undefined> {
+		return this.records.get(recordKey(scope, siloedNullifier))
 	}
 
-	public async hasRecord(siloedNullifier: string): Promise<boolean> {
-		return (await this.records.get(siloedNullifier)) !== undefined
+	public async hasRecord(scope: IncomingRecordScope, siloedNullifier: string): Promise<boolean> {
+		return (await this.records.get(recordKey(scope, siloedNullifier))) !== undefined
 	}
 
 	public async upsertRecord(record: IncomingTransferRecord): Promise<void> {
-		await this.records.set(record.siloedNullifier, record)
+		await this.records.set(recordKey(record, record.siloedNullifier), record)
 	}
 
-	public async deleteRecord(siloedNullifier: string): Promise<void> {
-		await this.records.delete(siloedNullifier)
+	public async deleteRecord(scope: IncomingRecordScope, siloedNullifier: string): Promise<void> {
+		await this.records.delete(recordKey(scope, siloedNullifier))
 	}
 
 	public async listRecords(): Promise<IncomingTransferRecord[]> {
