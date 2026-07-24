@@ -28,6 +28,24 @@
 
 ---
 
+## Status (live — updated per phase gate)
+
+| Phase | Status | Evidence |
+|---|---|---|
+| 1 withdraw no-fee | ✓ | `711ea96` — unit pin, 505/505, lint 0 (e2e/manual → network layer) |
+| 2 single-source network | ✓ | `1029a0c` — ban proven firing, F3 domain pin, prod `?chainId=` neutered; 509 |
+| 3 schema + build integrity | ✓ | `52b139f`+`418c6d0`+`8931cc0` — grep-complete migration; both builds distinct; 514 |
+| 4 dual build/deploy plumbing | ✓ | `b03d026` — per-target CSP (+`lb.drpc.live` fix), digest gate, PR matrix; actionlint 0 |
+| 5 app real-USDC + gating | ✓ | `923edb8`+`6a7b985` — approve fallback both legs; per-network grant/tab/mint; 517 |
+| — code-review max --fix | ✓ | clean; define mechanism proven per-target (lessons/code-review.md) |
+| — codex post-impl audit | ✓ | round 4: 4 HIGH, 0 CRITICAL → HIGH-1/2/3 fixed `05d604a`, HIGH-4 fixed `290ff08` |
+| 6 testnet rehearsal + cutover | ⏸ OWNER | needs Sepolia key/funds + live node (DP7 token deploy + canaries) |
+| 7 deploy tooling | ◐ 7a ✓ | `290ff08` verify-l1 network+circle-proxy (dry-run proven both shapes); 7b remaining |
+| 8 mainnet deploy | ⛔ GO REQUIRED | real funds — explicit owner go per tx |
+| 9 ship + harden | ⛔ GO REQUIRED | owner smoke; renounce + revoke LAST |
+
+---
+
 ## Goal
 
 Build + deploy `apps/faucet` twice from one codebase:
