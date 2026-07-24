@@ -4,9 +4,7 @@ import { AccountType } from "@/wallet/services/account/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast.js"
-import { useInFlightSend } from "@/composables/useInFlightSend"
 const { openToast } = useToast()
-const inFlight = useInFlightSend()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store.ts"
@@ -24,23 +22,20 @@ const emit = defineEmits(["onClose"])
 
 const account = computed(() => appStore.account)
 
-onBeforeMount(() => inFlight.connect())
-
 const showAllOtherAccounts = ref(false)
 const accounts = computed(() => {
 	return appStore.accounts.filter((a) => a.visible).sort((a, b) => a.index - b.index)
 })
 
-const handleSelectAccount = (acc) => {
+const handleSelectAccount = async (acc) => {
 	// A send in flight is still reading the active account as it builds and
 	// proves, so switching now would let it finish as the wrong account. Blocked
 	// until it settles; cancelling it also clears this.
-	if (inFlight.hasInFlightSend.value) {
+	const switched = await appStore.withScopeChangeAllowed(() => appStore.selectAccount(acc))
+	if (!switched) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return
 	}
-
-	appStore.selectAccount(acc)
 
 	emit("onClose")
 }

@@ -14,10 +14,7 @@ import { AccountType } from "@/wallet/services/account/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
-import { useInFlightSend } from "@/composables/useInFlightSend"
 const { openToast } = useToast()
-const inFlight = useInFlightSend()
-onBeforeMount(() => inFlight.connect())
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -30,15 +27,13 @@ const cacheStore = useCacheStore()
 const accounts = computed(() => appStore.accounts.filter((a) => a.visible).sort((a, b) => a.index - b.index))
 const hiddenAccounts = computed(() => appStore.accounts.filter((a) => !a.visible))
 
-const handleSelectAccount = (acc) => {
+const handleSelectAccount = async (acc) => {
 	// Same guard as the accounts popup: a send in flight is still reading the
 	// active account as it builds, so switching now would let it finish as the
 	// wrong one. Without this, the popup's guard is just a detour.
-	if (inFlight.hasInFlightSend.value) {
+	if (!(await appStore.withScopeChangeAllowed(() => appStore.selectAccount(acc)))) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
-		return
 	}
-	appStore.selectAccount(acc)
 }
 
 const handleEditAccount = (target) => {
@@ -46,16 +41,14 @@ const handleEditAccount = (target) => {
 	popupStore.open("edit_account")
 }
 
-const handleHideAccount = (acc) => {
+const handleHideAccount = async (acc) => {
 	if (accounts.value.length === 1) return
 	// Hiding ANY account reassigns the active one to the first visible account,
 	// so it changes the signing scope exactly like an explicit switch does.
-	if (inFlight.hasInFlightSend.value) {
+	if (!(await appStore.withScopeChangeAllowed(() => appStore.changeAccountVisibility(acc, false)))) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return
 	}
-
-	appStore.changeAccountVisibility(acc, false)
 	openToast({ label: "Account successfully hidden" })
 }
 

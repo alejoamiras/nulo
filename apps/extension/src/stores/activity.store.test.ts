@@ -110,6 +110,21 @@ describe("activity store — scope routing", () => {
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xlive"])
 	})
 
+	test("installing a fetch invalidates an older one that captured the same version", () => {
+		const store = useActivityStore()
+		store.activateScope(A)
+
+		// Two fetches in flight, both captured the same version.
+		const first = store.mutationVersionFor(A)
+		const second = store.mutationVersionFor(A)
+
+		expect(store.setTransactions(A, [tx(A, "0xnewer")], second)).toBe(true)
+		// The older one must not overwrite what the newer just wrote — restore
+		// writes rows without events, so nothing else would invalidate it.
+		expect(store.setTransactions(A, [tx(A, "0xolder")], first)).toBe(false)
+		expect(store.transactions.map((t) => t.hash)).toEqual(["0xnewer"])
+	})
+
 	test("a fetch with no intervening event installs normally", () => {
 		const store = useActivityStore()
 		store.activateScope(A)
@@ -175,6 +190,18 @@ describe("activity store — scope routing", () => {
 		store.ingestTransaction(tx(A, "0xscoped"), A, { soleProfile: false })
 
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xscoped"])
+	})
+
+	test("a row marked ambiguous is never attributed, even to the last profile standing", () => {
+		const store = useActivityStore()
+		store.activateScope(A)
+
+		// Marked when its other owner was deleted: being the only profile left
+		// does not make the row yours.
+		const marked = tx(A, "0xambiguous", { profileId: undefined, networkId: undefined, ambiguous: true })
+		store.ingestTransaction(marked, A, { soleProfile: true })
+
+		expect(store.transactions).toHaveLength(0)
 	})
 
 	test("an update propagates even to a reader that already read the feed", () => {

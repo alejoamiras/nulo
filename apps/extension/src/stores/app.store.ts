@@ -14,6 +14,9 @@ import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 import { useSyncedRef } from "@/composables/syncedRef.js"
 import type { ActivityScope } from "@nulo/wallet-core/activity"
 import { type AwaitingTx, txBelongsToScope, txScope, useActivityStore } from "@/stores/activity.store"
+import { hasInFlightSend as inFlightHasSend } from "@/utils/in-flight-send"
+import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
+import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
 
 export const useAppStore = defineStore("app", () => {
 	const _isHomeScreenOpened = ref(false)
@@ -136,6 +139,86 @@ export const useAppStore = defineStore("app", () => {
 	 * list is empty before it loads, and reading that as "sole profile" would
 	 * fail open and attribute another profile's row to whoever is looking.
 	 */
+	/**
+	 * Whether the viewed account has a send in flight.
+	 *
+	 * Owned by the store, not by each component: a per-component client can mount
+	 * before the profile exists, read an empty journal, call itself ready, and
+	 * then never look again — which fails OPEN exactly when a send is running.
+	 * One subscription, refreshed whenever the profile changes or the service
+	 * reconnects, and closed until it has an answer.
+	 */
+	const inFlightOps = ref<OperationRecord[]>([])
+	const inFlightReady = ref(false)
+	/** One client for the whole app; components read `hasInFlightSend`. */
+	const inFlightJournal = new OperationJournalServiceClient()
+	let inFlightConnected = false
+
+	const hasInFlightSend = computed(
+		() =>
+			!inFlightReady.value ||
+			inFlightHasSend(inFlightOps.value, {
+				profileId: profile.value?.id,
+				accountAddress: account.value?.address,
+				networkId: network.value?.id,
+			}),
+	)
+
+	const upsertInFlight = (op: OperationRecord) => {
+		const idx = inFlightOps.value.findIndex((row) => row.id === op.id)
+		if (idx === -1) inFlightOps.value.push(op)
+		else inFlightOps.value.splice(idx, 1, op)
+	}
+	const dropInFlight = (op: OperationRecord) => {
+		inFlightOps.value = inFlightOps.value.filter((row) => row.id !== op.id)
+	}
+
+	const refreshInFlight = async () => {
+		const profileId = profile.value?.id
+		if (!profileId) {
+			inFlightOps.value = []
+			// No profile means nothing can be in flight for one, so this IS an answer.
+			inFlightReady.value = true
+			return
+		}
+		if (!inFlightConnected) {
+			inFlightConnected = true
+			inFlightJournal.onOperationAdded.add(upsertInFlight)
+			inFlightJournal.onOperationUpdated.add(upsertInFlight)
+			inFlightJournal.onOperationDeleted.add(dropInFlight)
+			// A reconnect can drop events, so re-read rather than trusting the cache.
+			inFlightJournal.onConnected?.add(() => void refreshInFlight())
+			await inFlightJournal.connect()
+		}
+		inFlightOps.value = await inFlightJournal.getOperations({ profileId })
+		inFlightReady.value = true
+	}
+
+	// The answer belongs to a profile, so it is invalid the moment that changes.
+	watch(
+		() => profile.value?.id,
+		() => {
+			inFlightReady.value = false
+			void refreshInFlight()
+		},
+		{ immediate: true },
+	)
+
+	/**
+	 * Run a scope change only if nothing is in flight.
+	 *
+	 * Re-checked immediately before the change is applied: a send can start
+	 * during any await the caller performed first, and the stale answer would
+	 * wave it through.
+	 */
+	const withScopeChangeAllowed = async (apply: () => Promise<void> | void): Promise<boolean> => {
+		if (hasInFlightSend.value) return false
+		await refreshInFlight()
+		if (hasInFlightSend.value) return false
+		await apply()
+		return true
+	}
+
 	const soleProfile = computed(() => profiles.value.length === 1)
 
 	const activeScope = computed<ActivityScope | null>(() => {
@@ -209,10 +292,18 @@ export const useAppStore = defineStore("app", () => {
 		// The fetch is by ADDRESS alone, so it returns every profile's rows for a
 		// shared address. Keep only those whose own scope IS the captured one —
 		// "has a scope" would admit all of them.
+		const scoped = rows.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value }))
+		if (activity.setTransactions(captured, scoped, capturedVersion)) return
+
+		// An event landed mid-fetch, so this result is stale. Re-read once rather
+		// than leaving a cold scope without its history until some unrelated
+		// refresh happens to come along.
+		const retryVersion = activity.mutationVersionFor(captured)
+		const fresh = await managers.transaction.getTransactions(captured.accountAddress)
 		activity.setTransactions(
 			captured,
-			rows.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value })),
-			capturedVersion,
+			fresh.filter((tx) => txBelongsToScope(tx, captured, { soleProfile: soleProfile.value })),
+			retryVersion,
 		)
 	}
 
@@ -250,6 +341,9 @@ export const useAppStore = defineStore("app", () => {
 		removeNetwork,
 		transactions,
 		activeScope,
+		hasInFlightSend,
+		refreshInFlight,
+		withScopeChangeAllowed,
 		addAwaitingTransaction,
 		removeAwaitingTransaction,
 		clearActivity,

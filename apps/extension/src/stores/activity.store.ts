@@ -72,6 +72,9 @@ export function txScope(tx: Tx, reference: ActivityScope | null, opts: { solePro
 		return { profileId: tx.profileId, networkId: tx.networkId, chainId: tx.chainId, accountAddress: tx.account }
 	}
 	if (!reference) return null
+	// Marked at deletion time as belonging to a profile that can no longer be
+	// determined. Being the last profile standing does not make it yours.
+	if (tx.ambiguous) return null
 	if (tx.account !== reference.accountAddress || tx.chainId !== reference.chainId) return null
 	if (opts.soleProfile !== true) return null
 	return { ...reference, accountAddress: tx.account }
@@ -206,6 +209,10 @@ export const useActivityStore = defineStore("activity", () => {
 		updateSlice(scope, (slice) => {
 			slice.transactions = [...rows]
 		})
+		// Installing IS a change: an older fetch that captured the same version
+		// must not overwrite what this one just wrote. Restore writes rows without
+		// emitting events, so nothing else would invalidate it.
+		bumpMutation(activityScopeKey(scope))
 		return true
 	}
 

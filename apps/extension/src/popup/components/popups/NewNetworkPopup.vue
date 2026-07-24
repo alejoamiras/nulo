@@ -4,10 +4,7 @@ import { managers } from "@/utils/core"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
-import { useInFlightSend } from "@/composables/useInFlightSend"
 const { openToast } = useToast()
-const inFlight = useInFlightSend()
-onBeforeMount(() => inFlight.connect())
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -70,7 +67,7 @@ const handleCreateNetwork = async () => {
 	if (!isAvailableToCreateNetwork.value) return
 	// Creating a network ACTIVATES it, so it moves the scope a send is building
 	// against — same guard as an account switch.
-	if (inFlight.hasInFlightSend.value) {
+	if (appStore.hasInFlightSend) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return
 	}

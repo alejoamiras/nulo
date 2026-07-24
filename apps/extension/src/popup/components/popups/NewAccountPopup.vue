@@ -6,10 +6,7 @@ import { storageLocalSet } from "@/utils/storage"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
-import { useInFlightSend } from "@/composables/useInFlightSend"
 const { openToast } = useToast()
-const inFlight = useInFlightSend()
-onBeforeMount(() => inFlight.connect())
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -53,7 +50,7 @@ const handleCreateAccount = async () => {
 
 	// Creating an account SELECTS it, so it changes the active account exactly
 	// like a switch does — and a send in flight is still reading that.
-	if (inFlight.hasInFlightSend.value) {
+	if (appStore.hasInFlightSend) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return
 	}
@@ -65,8 +62,17 @@ const handleCreateAccount = async () => {
 		name.value.trim(),
 	)
 
-	appStore.account = account
+	// The account is created either way; only SELECTING it moves the scope, so
+	// that part is re-checked after the creation RPC.
 	appStore.accounts.push(account)
+	const selected = await appStore.withScopeChangeAllowed(() => {
+		appStore.account = account
+	})
+	if (!selected) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		emit("onClose")
+		return
+	}
 
 	await storageLocalSet({
 		"nulo:ui:activeAccount": account.address,

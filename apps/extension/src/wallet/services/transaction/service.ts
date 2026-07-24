@@ -229,12 +229,24 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			// profile; a row that names no profile is only safe to remove when this
 			// is the address's sole owner, and is otherwise left alone.
 			const soleOwner = profileId !== undefined ? await this.isSoleOwner(addresses, profileId) : true
-			const txs = (await this.txs.getValues()).filter((x) => {
+			const all = await this.txs.getValues()
+			const txs = all.filter((x) => {
 				if (!set.has(x.account)) return false
 				if (profileId === undefined) return true
 				if (x.profileId !== undefined) return x.profileId === profileId
 				return soleOwner
 			})
+			// An unscoped row shared with another profile is neither deleted (that
+			// would destroy the survivor's history) nor left plain, since deleting
+			// this profile makes the survivor the only owner and the row would
+			// silently become theirs. Mark it instead, permanently.
+			if (profileId !== undefined && !soleOwner) {
+				for (const tx of all) {
+					if (!set.has(tx.account) || tx.profileId !== undefined || tx.ambiguous) continue
+					this.pending.delete(tx.hash)
+					await this.txs.set(tx.hash, { ...tx, ambiguous: true })
+				}
+			}
 			await purgeRows(
 				txs,
 				(tx) => {
