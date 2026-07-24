@@ -3,7 +3,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { assetKindOf, buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import { BRIDGE_FUEL, BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, L1_USDC } from "@/contracts/bridge-deployments"
 
@@ -182,7 +182,7 @@ const isFirstSeal = computed(() => {
 	// Recompute when the journal changes: the first private bridge marks trust mid-session, and
 	// the note must stop promising "two signatures" for the second one.
 	void journal.records.value.length
-	return !isSealTrusted(localStorage, sepolia.id, addr, providerFingerprint())
+	return !isSealTrusted(localStorage, NETWORK.l1ChainId, addr, providerFingerprint())
 })
 
 // A failing balance reader must be VISIBLE, not an eternal "-": surface a hint + the real cause

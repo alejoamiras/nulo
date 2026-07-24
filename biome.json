@@ -318,6 +318,26 @@
 			}
 		},
 		{
+			"includes": ["apps/faucet/src/**", "!apps/faucet/src/lib/network.ts"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noRestrictedImports": {
+							"level": "error",
+							"options": {
+								"patterns": [
+									{
+										"group": ["viem/chains"],
+										"message": "Import chain identity from @/lib/network (NETWORK), not viem/chains directly — single-source the chain so a half-switched two-network build can't sign a Permit2 witness against the wrong chain id"
+									}
+								]
+							}
+						}
+					}
+				}
+			}
+		},
+		{
 			"includes": [
 				"apps/extension/src/components/core/**",
 				"apps/extension/src/components/ui/**",

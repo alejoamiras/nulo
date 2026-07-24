@@ -1,4 +1,4 @@
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { awaitL1Receipt } from "@nulo/bridge-core"
 import { ref, watch } from "vue"
 import { BRIDGE_TOKEN_DECIMALS, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
@@ -112,7 +112,7 @@ export function useL1Usdc() {
 				abi: ERC20_ABI,
 				functionName: "mint",
 				args: [owner, MINT_AMOUNT],
-				chain: sepolia,
+				chain: NETWORK.viemChain,
 				account: owner,
 			})
 			await awaitL1Receipt(l1.publicClient, hash)

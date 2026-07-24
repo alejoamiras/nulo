@@ -12,7 +12,7 @@ import { computeL2ToL1MembershipWitness } from "@aztec/stdlib/messaging"
 import { OutboxContract } from "@aztec/ethereum/contracts"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { decodeFunctionData } from "viem"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import { BRIDGE, BRIDGE_PROXY, BRIDGE_TOKEN, L1_PORTAL } from "@/contracts/bridge-deployments"
 import {
@@ -35,7 +35,7 @@ import { useL1Wallet } from "./useL1Wallet"
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:withdraw]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
+const NODE_URL = NETWORK.nodeUrl
 const PROVEN_TIMEOUT_SEC = 1800
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -127,7 +127,7 @@ function wireWithdrawDeps(): void {
 				account: l1addr,
 			})
 			const hash = await runOnLane("l1", () =>
-				l1wallet.writeContract({ ...(sim.request as object), chain: sepolia, account: l1addr } as never),
+				l1wallet.writeContract({ ...(sim.request as object), chain: NETWORK.viemChain, account: l1addr } as never),
 			)
 			log("consume tx", { id: rec.id, hash })
 			return { consumeTxHash: hash as string }
@@ -208,7 +208,7 @@ export function useWithdrawFlow() {
 			amount: amount.toString(),
 			createdAt: now,
 			updatedAt: now,
-			chainId: sepolia.id,
+			chainId: NETWORK.l1ChainId,
 			portal: L1_PORTAL,
 			bridge: BRIDGE.toString(),
 			recipientL1: l1addr,

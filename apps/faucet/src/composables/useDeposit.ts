@@ -34,7 +34,7 @@ import {
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import {
 	BRIDGE,
@@ -81,7 +81,7 @@ import { readBalance } from "./useTokenBalance"
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
+const NODE_URL = NETWORK.nodeUrl
 
 /**
 
@@ -746,7 +746,7 @@ export function useDepositFlow() {
 				amount: tokenAmount.toString(),
 				createdAt: now,
 				updatedAt: now,
-				chainId: sepolia.id,
+				chainId: NETWORK.l1ChainId,
 				portal: L1_PORTAL,
 				bridge: BRIDGE.toString(),
 				recipient,
@@ -780,7 +780,7 @@ export function useDepositFlow() {
 
 			if (isPrivate) {
 				const provider = providerFingerprint()
-				const trusted = isSealTrusted(localStorage, sepolia.id, from, provider)
+				const trusted = isSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				log(trusted ? "seal: trusted wallet - one signature" : "seal: first private bridge for this wallet - two signatures")
 				setRecordStep(
 					id,
@@ -794,11 +794,11 @@ export function useDepositFlow() {
 				const envelope = { secret: secret.toString(), recipient, amount: tokenAmount.toString(), sealerL1: from }
 				const { blob, key } = await sealDepositRecord({
 					sign,
-					binding: { chainId: sepolia.id, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex: id },
+					binding: { chainId: NETWORK.l1ChainId, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex: id },
 					envelope,
 					trusted,
 				})
-				if (!trusted) markSealTrusted(localStorage, sepolia.id, from, provider)
+				if (!trusted) markSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				sealKeys.set(id, key)
 				cacheSecret(id, secret.toString(), { v: 2, ...envelope })
 				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
@@ -850,7 +850,7 @@ export function useDepositFlow() {
 					{ permitted: { token: L1_USDC, amount }, spender: fuelCfg.router, nonce, deadline },
 					witness,
 					fuelCfg.permit2,
-					sepolia.id,
+					NETWORK.l1ChainId,
 				)
 				const signature = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...typed } as never))
 
@@ -878,7 +878,7 @@ export function useDepositFlow() {
 							},
 							{ nonce, deadline, signature },
 						],
-						chain: sepolia,
+						chain: NETWORK.viemChain,
 						account: from,
 					} as never),
 				)
@@ -990,7 +990,7 @@ export function useDepositFlow() {
 				{ permitted: { token: L1_USDC, amount: tokenAmount }, spender: BRIDGE_ROUTER, nonce, deadline },
 				bridgeWitness,
 				BRIDGE_PERMIT2,
-				sepolia.id,
+				NETWORK.l1ChainId,
 			)
 			const bridgeSig = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...bridgeTyped } as never))
 
@@ -1012,7 +1012,7 @@ export function useDepositFlow() {
 						},
 						{ nonce, deadline, signature: bridgeSig },
 					],
-					chain: sepolia,
+					chain: NETWORK.viemChain,
 					account: from,
 				} as never),
 			)

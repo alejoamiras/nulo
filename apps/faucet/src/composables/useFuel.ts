@@ -15,7 +15,7 @@ import {
 	planPublicFuelDeposit,
 	sealDepositRecord,
 } from "@nulo/bridge-core"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { ref } from "vue"
 import { BRIDGE_PERMIT2, BRIDGE_ROUTER, BRIDGE_SWAP_TARGET, FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
 import { ERC20_ABI } from "./useL1Usdc"
@@ -40,7 +40,7 @@ import { useL1Wallet } from "./useL1Wallet"
 
 const log = (...args: unknown[]) => console.log("[bridge:fuel]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
+const NODE_URL = NETWORK.nodeUrl
 
 /**
  * The Fuel flow: deposit the L1 fee asset straight into the canonical FeeJuicePortal and claim it as
@@ -104,7 +104,7 @@ export function useFuelFlow() {
 				amount: amount.toString(),
 				createdAt: now,
 				updatedAt: now,
-				chainId: sepolia.id,
+				chainId: NETWORK.l1ChainId,
 				portal: FUEL_PORTAL,
 				bridge: feeJuiceAddress,
 				recipient,
@@ -127,7 +127,7 @@ export function useFuelFlow() {
 			// one signature steady-state, two on a wallet's first private bridge (the determinism self-test).
 			if (isPrivate && plan.salt) {
 				const provider = providerFingerprint()
-				const trusted = isSealTrusted(localStorage, sepolia.id, from, provider)
+				const trusted = isSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				setRecordStep(
 					id,
 					"sealing",
@@ -144,11 +144,11 @@ export function useFuelFlow() {
 				}
 				const { blob } = await sealDepositRecord({
 					sign,
-					binding: { chainId: sepolia.id, portal: FUEL_PORTAL, bridge: feeJuiceAddress, secretHashHex: id },
+					binding: { chainId: NETWORK.l1ChainId, portal: FUEL_PORTAL, bridge: feeJuiceAddress, secretHashHex: id },
 					envelope,
 					trusted,
 				})
-				if (!trusted) markSealTrusted(localStorage, sepolia.id, from, provider)
+				if (!trusted) markSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				cacheSecret(id, plan.secret.toString(), { v: 2, ...envelope })
 				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
 			}
@@ -181,7 +181,7 @@ export function useFuelFlow() {
 						abi: ERC20_ABI,
 						functionName: "approve",
 						args: [permit2, (1n << 256n) - 1n],
-						chain: sepolia,
+						chain: NETWORK.viemChain,
 						account: from,
 					}),
 				)
@@ -217,7 +217,7 @@ export function useFuelFlow() {
 				{ permitted: { token: feeAssetAddr, amount }, spender: router, nonce, deadline },
 				fuelWitness,
 				permit2,
-				sepolia.id,
+				NETWORK.l1ChainId,
 			)
 			const fuelSig = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...fuelTyped } as never))
 
@@ -238,7 +238,7 @@ export function useFuelFlow() {
 						},
 						{ nonce, deadline, signature: fuelSig },
 					],
-					chain: sepolia,
+					chain: NETWORK.viemChain,
 					account: from,
 				} as never),
 			)
