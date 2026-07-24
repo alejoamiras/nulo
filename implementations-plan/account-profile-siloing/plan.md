@@ -527,9 +527,12 @@ send (locking abandons it; reaper-failed at boot — unchanged behavior).
 ## 12. Phases + validation gates (one PR, staged reviewable commits — no product wiring before the spike passes)
 
 ### Phase 0 — Characterization + invariant pinning (no behavior change)
-Add characterization tests for: distinct-record event reordering · journal delete-vs-transition resurrection ·
-pending pre-claim cleanup · P1/P2 colliding-account ownership behavior · exact dispatcher `NO_FROM` wallet order ·
-the current one-shot builder drift window · mixed profile/network/account frontend refs fail closed.
+Add characterization tests for: journal delete-vs-transition resurrection (H3) · pending pre-claim cleanup (H6
+residue, queued-only today) · P1/P2 colliding-account ownership under the address-only key (what §6.5 fixes) ·
+exact dispatcher `NO_FROM` wallet order (H2) · **I2: a profile lock/switch does NOT abort in-flight execution
+controllers** (the §9 guard's premise — a send survives until its own `checkCancelled`) · mixed
+profile/network/account frontend refs fail closed. (The old "one-shot builder drift window" item is dropped with
+the abort machinery — under §9 the builder's active-now read is correct by construction.)
 **Gate:** `bun run --cwd apps/extension test src/stores/app.store.test.ts src/composables/useIncomingTransfers.test.ts
 src/popup/components/modules/general/RecentActivityView.test.ts src/utils/activity-rows.test.ts
 src/wallet/services/{execution,operation-journal,wallet-sdk}` · `bun run typecheck:all` · `bun run lint`.

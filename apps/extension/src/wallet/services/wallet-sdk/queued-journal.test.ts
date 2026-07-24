@@ -284,3 +284,60 @@ describe("tryCreateQueuedJournal", () => {
 		expect((await journal.getOperation(id as string))?.title).toBe("Transaction")
 	})
 })
+
+/**
+ * Characterization of the account this record is filed under.
+ *
+ * The record is stamped with `dapp.accounts[0]` — the first address in the
+ * SESSION array — while the dispatcher independently resolves the account it
+ * will really send from (an explicit `from`, else the first WALLET-ordered
+ * session account; pinned in wallet-bridge's `account-order.characterization`).
+ * Those two rules are unrelated, so a multi-account session files the operation
+ * under an account that is not the sender.
+ *
+ * Both tests below assert the WRONG account on purpose: they are the "before"
+ * half of deriving the record's account from the send itself. Flip them when
+ * the shared resolver lands; do not relax them.
+ */
+describe("tryCreateQueuedJournal — record account characterization", () => {
+	const ADDR_A = "0xaaa"
+	const ADDR_B = "0xbbb"
+
+	/** Session lists B first, so `accounts[0]` and "the sender" can disagree. */
+	function depsWithSessionOrder() {
+		return makeDeps({
+			dappSession: {
+				tryGetDappSessionByOriginAndChain: vi.fn(async () => ({
+					accounts: [`aztec:1338:${ADDR_B}`, `aztec:1338:${ADDR_A}`],
+					capabilityGrants: [{ capability: { type: "transaction" } }],
+					dappMetadata: { name: "Example Dapp" },
+				})),
+			} as never,
+		})
+	}
+
+	function sendTxFrom(from: string): WalletMessage {
+		return {
+			messageId: "msg-from",
+			type: "sendTx",
+			args: [{ calls: [{ name: "transfer" }] }, { from }],
+		} as unknown as WalletMessage
+	}
+
+	test("(BUG PIN) an explicit `from` is ignored — the record is filed under session accounts[0]", async () => {
+		const { deps, journal } = depsWithSessionOrder()
+
+		const id = await tryCreateQueuedJournal(sendTxFrom(ADDR_A), makeSession(), deps)
+
+		// The send names A; the record says B purely because B is listed first.
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_B)
+	})
+
+	test("(BUG PIN) a NO_FROM send is filed under session accounts[0], not the wallet-ordered default", async () => {
+		const { deps, journal } = depsWithSessionOrder()
+
+		const id = await tryCreateQueuedJournal(sendTxFrom("NO_FROM"), makeSession(), deps)
+
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_B)
+	})
+})
