@@ -64,8 +64,10 @@ const handleSetActive = async () => {
 	try {
 		// Re-checked after the RPC: a send can start while it is in flight, and
 		// activating the network would move the scope out from under it.
-		const activated = await appStore.withScopeChangeAllowed(async () => {
-			await managers.network.setActiveNetwork(target.id)
+		// Persist first, then commit the in-memory scope with no await in between:
+		// an await there would let a send start after the check and still switch.
+		await managers.network.setActiveNetwork(target.id)
+		const activated = await appStore.commitScopeChange(() => {
 			appStore.network = target
 		})
 		if (!activated) {

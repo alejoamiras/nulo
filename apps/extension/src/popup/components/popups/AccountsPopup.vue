@@ -31,7 +31,7 @@ const handleSelectAccount = async (acc) => {
 	// A send in flight is still reading the active account as it builds and
 	// proves, so switching now would let it finish as the wrong account. Blocked
 	// until it settles; cancelling it also clears this.
-	const switched = await appStore.withScopeChangeAllowed(() => appStore.selectAccount(acc))
+	const switched = await appStore.commitScopeChange(() => appStore.selectAccount(acc))
 	if (!switched) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return

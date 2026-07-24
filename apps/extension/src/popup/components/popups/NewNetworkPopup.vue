@@ -78,8 +78,8 @@ const handleCreateNetwork = async () => {
 		const network = await managers.network.addNetwork(nameTerm.value, urlTerm.value)
 		isCreating.value = false
 
-		const activated = await appStore.withScopeChangeAllowed(async () => {
-			await managers.network.setActiveNetwork(network.id)
+		await managers.network.setActiveNetwork(network.id)
+		const activated = await appStore.commitScopeChange(() => {
 			appStore.network = network
 		})
 		if (!activated) {

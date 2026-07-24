@@ -73,21 +73,29 @@ export const useAppStore = defineStore("app", () => {
 			"nulo:ui:activeAccount": acc.address,
 		})
 	}
-	const changeAccountVisibility = async (acc: Account, value: boolean) => {
-		if (!profile.value || !network.value) return
+	const changeAccountVisibility = async (acc: Account, value: boolean): Promise<boolean> => {
+		if (!profile.value || !network.value) return false
 		const accIdx = accounts.value.findIndex((a) => acc.address === a.address)
 
 		await requireAccount().changeAccountVisibility(profile.value.id, network.value.chainId, acc.address, value)
 		accounts.value[accIdx] = { ...acc, visible: value }
 
-		if (!value) {
-			if (accounts.value.length) {
-				account.value = accounts.value.filter((a) => a.visible).sort((a, b) => a.index - b.index)[0]
-				await storageLocalSet({
-					"nulo:ui:activeAccount": account.value?.address,
-				})
-			}
+		if (!value && accounts.value.length) {
+			// Hiding reassigns the active account, which moves the signing scope —
+			// and the RPC above is exactly the window a send can start in. The
+			// reassignment therefore commits through the guard rather than being
+			// checked by the caller beforehand; the visibility change itself is
+			// already persisted and is harmless to keep.
+			const next = accounts.value.filter((a) => a.visible).sort((a, b) => a.index - b.index)[0]
+			const moved = await commitScopeChange(() => {
+				account.value = next
+			})
+			if (!moved) return false
+			await storageLocalSet({
+				"nulo:ui:activeAccount": account.value?.address,
+			})
 		}
+		return true
 	}
 	const updateAccount = async (address: string, name: string) => {
 		if (!profile.value || !network.value) return
@@ -210,19 +218,30 @@ export const useAppStore = defineStore("app", () => {
 	)
 
 	/**
-	 * Run a scope change only if nothing is in flight.
+	 * Commit a scope change, or refuse it.
 	 *
-	 * Re-checked immediately before the change is applied: a send can start
-	 * during any await the caller performed first, and the stale answer would
-	 * wave it through.
+	 * `commit` MUST be synchronous. That is the whole point: the guarantee is
+	 * "no scope change while a send is in flight", and any await between the
+	 * check and the assignment reopens the window the check just closed — a send
+	 * can start inside it and the assignment still lands. Checking at call sites
+	 * cannot express this; only a check with no suspension point before the
+	 * write can.
+	 *
+	 * Callers do their async preparation FIRST (RPCs, service calls), then hand
+	 * over a function that only assigns.
 	 */
-	const withScopeChangeAllowed = async (apply: () => Promise<void> | void): Promise<boolean> => {
+	const commitScopeChange = async (commit: () => void): Promise<boolean> => {
 		if (hasInFlightSend.value) return false
+		// One read immediately before the commit, so the decision is made on the
+		// freshest answer available rather than on cached event state.
 		await refreshInFlight()
 		if (hasInFlightSend.value) return false
-		await apply()
+		commit()
 		return true
 	}
+
+	/** @deprecated Prefer `commitScopeChange`; an async apply reopens the race. */
+	const withScopeChangeAllowed = commitScopeChange
 
 	const soleProfile = computed(() => profiles.value.length === 1)
 
@@ -353,6 +372,7 @@ export const useAppStore = defineStore("app", () => {
 		activeScope,
 		hasInFlightSend,
 		refreshInFlight,
+		commitScopeChange,
 		withScopeChangeAllowed,
 		addAwaitingTransaction,
 		removeAwaitingTransaction,

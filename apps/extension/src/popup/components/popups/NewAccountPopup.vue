@@ -65,7 +65,7 @@ const handleCreateAccount = async () => {
 	// The account is created either way; only SELECTING it moves the scope, so
 	// that part is re-checked after the creation RPC.
 	appStore.accounts.push(account)
-	const selected = await appStore.withScopeChangeAllowed(() => {
+	const selected = await appStore.commitScopeChange(() => {
 		appStore.account = account
 	})
 	if (!selected) {

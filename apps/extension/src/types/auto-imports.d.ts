@@ -147,6 +147,7 @@ declare global {
   const toValue: typeof import('vue').toValue
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
+  const txBelongsToScope: typeof import('../stores/activity.store').txBelongsToScope
   const txScope: typeof import('../stores/activity.store').txScope
   const unref: typeof import('vue').unref
   const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
@@ -274,6 +275,9 @@ declare global {
   // @ts-ignore
   export type { BackupFileType, BackupSelection, ProcessBackupResult } from '../utils/full-backup-helpers'
   import('../utils/full-backup-helpers')
+  // @ts-ignore
+  export type { InFlightScope } from '../utils/in-flight-send'
+  import('../utils/in-flight-send')
   // @ts-ignore
   export type { JournalTerminalVisualState, JournalTerminalDisplay, CategoricalFailureLabel, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
   import('../utils/journal-state')
@@ -434,6 +438,7 @@ declare module 'vue' {
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
+    readonly txBelongsToScope: UnwrapRef<typeof import('../stores/activity.store')['txBelongsToScope']>
     readonly txScope: UnwrapRef<typeof import('../stores/activity.store')['txScope']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
@@ -454,7 +459,6 @@ declare module 'vue' {
     readonly useFullBackupImport: UnwrapRef<typeof import('../composables/useFullBackupImport')['useFullBackupImport']>
     readonly useFullscreenPopupSetting: UnwrapRef<typeof import('../composables/fullscreenPopupSetting')['useFullscreenPopupSetting']>
     readonly useId: UnwrapRef<typeof import('vue')['useId']>
-    readonly useInFlightSend: UnwrapRef<typeof import('../composables/useInFlightSend')['useInFlightSend']>
     readonly useIncomingTransfers: UnwrapRef<typeof import('../composables/useIncomingTransfers')['useIncomingTransfers']>
     readonly useLink: UnwrapRef<typeof import('vue-router')['useLink']>
     readonly useModel: UnwrapRef<typeof import('vue')['useModel']>

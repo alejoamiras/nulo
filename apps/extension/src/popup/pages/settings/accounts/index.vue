@@ -31,7 +31,7 @@ const handleSelectAccount = async (acc) => {
 	// Same guard as the accounts popup: a send in flight is still reading the
 	// active account as it builds, so switching now would let it finish as the
 	// wrong one. Without this, the popup's guard is just a detour.
-	if (!(await appStore.withScopeChangeAllowed(() => appStore.selectAccount(acc)))) {
+	if (!(await appStore.commitScopeChange(() => appStore.selectAccount(acc)))) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 	}
 }
@@ -45,7 +45,7 @@ const handleHideAccount = async (acc) => {
 	if (accounts.value.length === 1) return
 	// Hiding ANY account reassigns the active one to the first visible account,
 	// so it changes the signing scope exactly like an explicit switch does.
-	if (!(await appStore.withScopeChangeAllowed(() => appStore.changeAccountVisibility(acc, false)))) {
+	if (!(await appStore.changeAccountVisibility(acc, false))) {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return
 	}
