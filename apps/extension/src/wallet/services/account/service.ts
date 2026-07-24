@@ -15,7 +15,17 @@ import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import type { AccountIntegrityBlocked } from "../account-integrity/types"
-import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
+import {
+	ACCOUNT_SERVICE_NAME,
+	ACCOUNT_STORAGE_ROOT,
+	AccountSchema,
+	AccountType,
+	accountRowId,
+	accountRowIdOf,
+	type Account,
+	type Events,
+	type Methods,
+} from "./spec"
 
 export * from "./spec"
 
@@ -36,8 +46,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	private readonly storage: EntityStorage<Account>
 	// Serialises restore() so two concurrent full-backup imports of the same
-	// address can't BOTH pass the intersection check and BOTH write the global
-	// address-keyed row (last-writer-wins ownership flip — audit H4).
+	// account can't BOTH pass the intersection check and BOTH write the same row
+	// (last-writer-wins ownership flip — audit H4).
 	private readonly restoreLock = new Lock()
 
 	private profileService: ProfileService = null!
@@ -65,7 +75,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const accounts = (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 		await purgeRows(
 			accounts,
-			(account) => this.storage.delete(account.address),
+			(account) => this.storage.delete(accountRowIdOf(account)),
 			(account) => this.emit("onAccountDeleted", account),
 		)
 	}
@@ -87,7 +97,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	public async getAccount(profileId: string, chainId: number, address: string): Promise<Account | undefined> {
 		await this.ensureInitialized()
-		const account = await this.storage.get(address)
+		const account = await this.storage.get(accountRowId(profileId, chainId, address))
 		return account?.profileId === profileId && account.chainId === chainId ? account : undefined
 	}
 
@@ -134,7 +144,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			name,
 			visible: true,
 		}
-		await this.storage.set(address, account)
+		await this.storage.set(accountRowIdOf(account), account)
 		this.emit("onAccountAdded", account)
 		return account
 	}
@@ -167,13 +177,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	}
 
 	public async changeAccountName(profileId: string, chainId: number, address: string, name: string): Promise<Account | undefined> {
-		const account = await this.storage.get(address)
+		const account = await this.storage.get(accountRowId(profileId, chainId, address))
 		if (account?.profileId !== profileId || account.chainId !== chainId) {
 			return undefined
 		}
 		if (account.name !== name) {
 			account.name = name
-			await this.storage.set(address, account)
+			await this.storage.set(accountRowIdOf(account), account)
 			this.emit("onAccountUpdated", account)
 		}
 		return account
@@ -185,13 +195,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		address: string,
 		visible: boolean,
 	): Promise<Account | undefined> {
-		const account = await this.storage.get(address)
+		const account = await this.storage.get(accountRowId(profileId, chainId, address))
 		if (account?.profileId !== profileId || account.chainId !== chainId) {
 			return undefined
 		}
 		if (account.visible !== visible) {
 			account.visible = visible
-			await this.storage.set(address, account)
+			await this.storage.set(accountRowIdOf(account), account)
 			this.emit("onAccountUpdated", account)
 		}
 		return account
@@ -199,7 +209,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	public async getAccountContract(profileId: string, chainId: number, address: string): Promise<IAccountContract> {
 		await this.ensureInitialized()
-		const account = await this.storage.get(address)
+		const account = await this.storage.get(accountRowId(profileId, chainId, address))
 		if (account?.profileId !== profileId || account.chainId !== chainId) {
 			throw new Error("unknown account address")
 		}
@@ -289,7 +299,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// their emit; only the profile-wide purge goes silent.
 		await purgeRows(
 			accounts,
-			(account) => this.storage.delete(account.address),
+			(account) => this.storage.delete(accountRowIdOf(account)),
 			() => {},
 		)
 	}
@@ -311,8 +321,11 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 			const result: Restored<Account>[] = []
 
-			const hasIntersectionByAddress = hasIntersectionByKeys(await this.storage.getValues(), accounts, ["address"])
-			if (hasIntersectionByAddress) throw new Error("Duplicate address")
+			// Identity is the full row id, not the address alone: two profiles restored
+			// from the same mnemonic legitimately derive the same address, and each owns
+			// its own row.
+			const collides = hasIntersectionByKeys(await this.storage.getValues(), accounts, ["profileId", "chainId", "address"])
+			if (collides) throw new Error("Duplicate account")
 
 			const seen = new Set<string>()
 			for (const account of accounts) {
@@ -329,9 +342,10 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					// Dedupe within the batch — the storage-intersection check above only
 					// covers pre-existing rows, so two identical addresses in one restore
 					// would otherwise both "succeed" (last write wins).
-					if (seen.has(parsed.address)) throw new Error("duplicate account address in batch")
-					seen.add(parsed.address)
-					await this.storage.set(parsed.address, parsed)
+					const rowId = accountRowIdOf(parsed)
+					if (seen.has(rowId)) throw new Error("duplicate account address in batch")
+					seen.add(rowId)
+					await this.storage.set(rowId, parsed)
 					result.push(parsed)
 				} catch (err) {
 					result.push({
