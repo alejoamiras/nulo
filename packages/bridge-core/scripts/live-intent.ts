@@ -28,7 +28,31 @@ import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
 /** The ONLY L1 signer authorized for this arc — pinned in the PLAN (and here), never derived
  *  from the env being checked. A different env-derived signer is a hard stop. */
-export const PLAN_PINNED_L1_SIGNER = "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5"
+/**
+ * Per-network plan-pinned L1 signers (DP4: keys never cross networks). `mainnet` stays null until
+ * the owner creates the FRESH mainnet-only EOA at Phase 8 and pins it here — until then
+ * `requirePinnedSigner("mainnet")` fails closed, so no mainnet script can broadcast with an
+ * unpinned (or testnet) key.
+ */
+export const PLAN_PINNED_L1_SIGNERS: Record<"testnet" | "mainnet", string | null> = {
+	testnet: "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5",
+	mainnet: null,
+}
+
+/** Fail-closed signer lookup — throws while a network's signer is unpinned. */
+export function requirePinnedSigner(network: "testnet" | "mainnet"): string {
+	const pinned = PLAN_PINNED_L1_SIGNERS[network]
+	if (!pinned) {
+		throw new Error(
+			`no plan-pinned L1 signer for ${network} — create the fresh network-keyed EOA and pin it in ` +
+				"PLAN_PINNED_L1_SIGNERS (live-intent.ts) before any broadcast. STOP.",
+		)
+	}
+	return pinned
+}
+
+/** The testnet pin — the historical single-network export every testnet script asserts against. */
+export const PLAN_PINNED_L1_SIGNER = requirePinnedSigner("testnet")
 
 /** Hard per-arc exposure ceilings (reviewed at the plan gate; rc.2 precedent ~0.09 ETH + seed). */
 export const CAPS = {
