@@ -51,6 +51,7 @@
 // Imports use relative paths because this file IS part of wallet-bridge — the
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
+import { resolveAuthorizedSessionAccount } from "./account-resolution"
 import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
 import type {
 	AccountsCapability,
@@ -1360,22 +1361,14 @@ export class WalletSdkDispatcher {
 
 		if (dappSession?.accounts && dappSession.accounts.length > 0) {
 			const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
-			// Honor an explicit, session-authorized `requestedFrom`: a dApp connected to
-			// multiple accounts may send from any of them. Match it against the
-			// session-authorized set and REJECT anything outside it — never silently fall
-			// back to the first account (that both ignores the dApp's choice and would let a
-			// tx be sent from an account the request did not name). Mirrors the resolution in
-			// `handleGrantPublicAuthwit`.
-			if (requestedFrom !== undefined) {
-				const requested = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedFrom)
-				if (requested) {
-					return [network, requested]
-				}
-				throw new Error(`Requested account ${requestedFrom} is not authorized for this dApp session`)
+			// Shared with the journal's arrival-time resolution, so the account an
+			// operation is FILED under is always the account it is SENT from.
+			const resolved = resolveAuthorizedSessionAccount({ walletAccounts: allAccounts, sessionAddresses, requestedFrom })
+			if (resolved.ok) {
+				return [network, resolved.account]
 			}
-			const sessionAccount = allAccounts.find((acc) => sessionAddresses.has(acc.address))
-			if (sessionAccount) {
-				return [network, sessionAccount]
+			if (resolved.reason === "not-authorized") {
+				throw new Error(`Requested account ${requestedFrom} is not authorized for this dApp session`)
 			}
 			throw new Error("No authorized accounts found for this dApp session")
 		}

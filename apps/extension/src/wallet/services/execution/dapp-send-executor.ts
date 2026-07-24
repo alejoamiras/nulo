@@ -322,6 +322,7 @@ export class DappSendExecutor {
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 						fence,
+						op.networkId,
 					)
 					if (pendingPublicAuthwits.length > 0) {
 						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
@@ -451,6 +452,7 @@ export class DappSendExecutor {
 							getEstimatedFee(txRequest),
 							getGasDetails(txRequest),
 							fence,
+							op.networkId,
 						)
 						if (pendingPublicAuthwits.length > 0) {
 							await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
@@ -617,6 +619,7 @@ export class DappSendExecutor {
 							getEstimatedFee(txRequest),
 							getGasDetails(txRequest),
 							fence,
+							op.networkId,
 						),
 				})
 

@@ -69,12 +69,14 @@ declare global {
   const getTxCategory: typeof import('../utils/tx-enrichment').getTxCategory
   const getTxTitle: typeof import('../utils/tx-enrichment').getTxTitle
   const h: typeof import('vue').h
+  const hasInFlightSend: typeof import('../utils/in-flight-send').hasInFlightSend
   const humanizeErrorKind: typeof import('../utils/journal-state').humanizeErrorKind
   const humanizeMethodName: typeof import('../utils/tx-enrichment').humanizeMethodName
   const initAppServiceContext: typeof import('../utils/core').initAppServiceContext
   const initTransactionService: typeof import('../utils/core').initTransactionService
   const inject: typeof import('vue').inject
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
+  const isInFlightSend: typeof import('../utils/in-flight-send').isInFlightSend
   const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
@@ -149,9 +151,12 @@ declare global {
   const toValue: typeof import('vue').toValue
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
+  const txBelongsToScope: typeof import('../stores/activity.store').txBelongsToScope
+  const txScope: typeof import('../stores/activity.store').txScope
   const unref: typeof import('vue').unref
   const usdThresholdToMicro: typeof import('../utils/incoming-dust').usdThresholdToMicro
   const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
+  const useActivityStore: typeof import('../stores/activity.store').useActivityStore
   const useAppStore: typeof import('../stores/app.store').useAppStore
   const useAttrs: typeof import('vue').useAttrs
   const useCacheStore: typeof import('../stores/cache.store').useCacheStore
@@ -168,6 +173,7 @@ declare global {
   const useFullBackupImport: typeof import('../composables/useFullBackupImport').useFullBackupImport
   const useFullscreenPopupSetting: typeof import('../composables/fullscreenPopupSetting').useFullscreenPopupSetting
   const useId: typeof import('vue').useId
+  const useInFlightSend: typeof import('../composables/useInFlightSend').useInFlightSend
   const useIncomingTransfers: typeof import('../composables/useIncomingTransfers').useIncomingTransfers
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel
@@ -248,6 +254,9 @@ declare global {
   export type { ProfileActivationSubject } from '../composables/waitForProfileActive'
   import('../composables/waitForProfileActive')
   // @ts-ignore
+  export type { AwaitingTx, ActivitySlice } from '../stores/activity.store'
+  import('../stores/activity.store')
+  // @ts-ignore
   export type { NotificationType, NotificationPayload, NotificationItem } from '../stores/notification.store'
   import('../stores/notification.store')
   // @ts-ignore
@@ -271,6 +280,9 @@ declare global {
   // @ts-ignore
   export type { BackupFileType, BackupSelection, ProcessBackupResult } from '../utils/full-backup-helpers'
   import('../utils/full-backup-helpers')
+  // @ts-ignore
+  export type { InFlightScope } from '../utils/in-flight-send'
+  import('../utils/in-flight-send')
   // @ts-ignore
   export type { JournalTerminalVisualState, JournalTerminalDisplay, CategoricalFailureLabel, TokenForCardProps, JournalTerminalCardCtx, JournalTerminalCardProps } from '../utils/journal-state'
   import('../utils/journal-state')
@@ -356,12 +368,14 @@ declare module 'vue' {
     readonly getTxCategory: UnwrapRef<typeof import('../utils/tx-enrichment')['getTxCategory']>
     readonly getTxTitle: UnwrapRef<typeof import('../utils/tx-enrichment')['getTxTitle']>
     readonly h: UnwrapRef<typeof import('vue')['h']>
+    readonly hasInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['hasInFlightSend']>
     readonly humanizeErrorKind: UnwrapRef<typeof import('../utils/journal-state')['humanizeErrorKind']>
     readonly humanizeMethodName: UnwrapRef<typeof import('../utils/tx-enrichment')['humanizeMethodName']>
     readonly initAppServiceContext: UnwrapRef<typeof import('../utils/core')['initAppServiceContext']>
     readonly initTransactionService: UnwrapRef<typeof import('../utils/core')['initTransactionService']>
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
+    readonly isInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['isInFlightSend']>
     readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
@@ -436,9 +450,12 @@ declare module 'vue' {
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
+    readonly txBelongsToScope: UnwrapRef<typeof import('../stores/activity.store')['txBelongsToScope']>
+    readonly txScope: UnwrapRef<typeof import('../stores/activity.store')['txScope']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly usdThresholdToMicro: UnwrapRef<typeof import('../utils/incoming-dust')['usdThresholdToMicro']>
     readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
+    readonly useActivityStore: UnwrapRef<typeof import('../stores/activity.store')['useActivityStore']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
     readonly useCacheStore: UnwrapRef<typeof import('../stores/cache.store')['useCacheStore']>

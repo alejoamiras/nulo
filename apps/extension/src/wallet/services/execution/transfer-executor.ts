@@ -236,6 +236,7 @@ export class TransferExecutor {
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 						fence,
+						network.id,
 					),
 			})
 			transferTask.complete()

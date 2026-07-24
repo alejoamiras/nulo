@@ -74,10 +74,11 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 *   - each transition is fast (a single chrome.storage write)
 	 *   - transition volume is low (a handful per tx lifecycle)
 	 *
-	 * Other journal methods (`createOperation`, `deleteOperation`,
-	 * `getOperation`) don't need this lock — they don't load-then-write on
-	 * the same row. If a future caller introduces another load+merge+write
-	 * path (e.g. metadata updates) it MUST acquire this same lock.
+	 * Every path that reads a row and then writes (or deletes) it takes this
+	 * lock: `transitionOperation`, `touchOperation`, `setOperationMeta` and
+	 * `deleteOperation`. `createOperation` and `getOperation` don't, since
+	 * neither is a load-then-write on an existing row. A new load+merge+write
+	 * path MUST acquire it too.
 	 */
 	private readonly transitionLock: Lock
 
@@ -149,9 +150,22 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
 		await purgeRows(
 			records,
-			(record) => this.storage.delete(record.id),
+			// Serialized like every other delete: an unserialized purge lets a
+			// transition that has already read a row write it back afterwards,
+			// leaving an orphan the reaper can only fail, never remove.
+			(record) => this.deleteRowLocked(record.id),
 			(record) => this.emit("onOperationDeleted", record),
 		)
+	}
+
+	/** Delete a row under the transition lock, without emitting. */
+	private async deleteRowLocked(id: string): Promise<void> {
+		await this.transitionLock.enter()
+		try {
+			await this.storage.delete(id)
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 
 	/** Awaited profile-scoped journal purge — the deletion coordinator calls this
@@ -162,7 +176,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
 		await purgeRows(
 			records,
-			(record) => this.storage.delete(record.id),
+			(record) => this.deleteRowLocked(record.id),
 			(record) => this.emit("onOperationDeleted", record),
 		)
 	}
@@ -321,19 +335,27 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	public async setOperationMeta(id: string, meta: { title?: string; subtitle?: string }): Promise<OperationRecord> {
 		validateParams(OperationJournalMethodSchemas.setOperationMeta.params, [id, meta], "setOperationMeta")
 		await this.ensureInitialized()
-		const existing = await this._loadValidated(id)
-		if (!existing) {
-			throw new Error(`Operation not found: ${id}`)
+		// Load → merge → write on the same row, so it takes the same lock as
+		// `transitionOperation`: otherwise a transition landing in between is
+		// overwritten by this stale snapshot and its stage change is lost.
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) {
+				throw new Error(`Operation not found: ${id}`)
+			}
+			const updated: OperationRecord = {
+				...existing,
+				title: meta.title !== undefined ? meta.title : existing.title,
+				subtitle: meta.subtitle !== undefined ? meta.subtitle : existing.subtitle,
+				updatedAt: Date.now(),
+			}
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return updated
+		} finally {
+			this.transitionLock.leave()
 		}
-		const updated: OperationRecord = {
-			...existing,
-			title: meta.title !== undefined ? meta.title : existing.title,
-			subtitle: meta.subtitle !== undefined ? meta.subtitle : existing.subtitle,
-			updatedAt: Date.now(),
-		}
-		await this.storage.set(id, updated)
-		this.emit("onOperationUpdated", updated)
-		return updated
 	}
 
 	/**
@@ -415,9 +437,16 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	public async deleteOperation(id: string): Promise<void> {
 		validateParams(OperationJournalMethodSchemas.deleteOperation.params, [id], "deleteOperation")
 		await this.ensureInitialized()
-		const existing = await this._loadValidated(id)
-		if (!existing) return
-		await this.storage.delete(id)
-		this.emit("onOperationDeleted", existing)
+		// Serialized against transitions: a transition that has already read the
+		// row would otherwise write it back after the delete and resurrect it.
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return
+			await this.storage.delete(id)
+			this.emit("onOperationDeleted", existing)
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 }

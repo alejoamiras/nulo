@@ -526,14 +526,16 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 					"token-balance(s)",
 				)
 			} catch (err) {
-				// `AccountService` throws `new Error("Duplicate address")`
-				// when an imported account's address collides with one
-				// already in storage. The RPC layer
+				// `AccountService` throws `new Error("Duplicate account")` when an
+				// imported row collides with one already in storage. Rows are keyed
+				// by `(profileId, chainId, address)`, so importing the same mnemonic
+				// into a NEW profile no longer collides — this now fires only for a
+				// genuine repeat of the same account. The RPC layer
 				// (`extension-messaging/client.ts`) reconstructs that as an
 				// `Error` instance on the client — so match on `.message`,
 				// not via string-equality on `err` itself.
 				const msg = err instanceof Error ? err.message : String(err)
-				if (msg === "Duplicate address") {
+				if (msg === "Duplicate account") {
 					try {
 						await profileService.deleteProfile(newProfile.id)
 					} catch (deleteErr) {

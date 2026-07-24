@@ -80,7 +80,10 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// fenced (see `updateTx`) so a mid-poll tx can't resurrect (finding D).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
-		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
+		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending && !x.ambiguous)) {
+			// `ambiguous` rows are excluded here too, not just when they are marked:
+			// otherwise a restart puts them straight back into the poller, against
+			// whichever profile is now active.
 			this.pending.set(tx.hash, tx)
 		}
 
@@ -124,6 +127,10 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
 		fence?: ExecutionFence,
+		/** Owning network row id. Together with the fence's profile this is the
+		 *  row's activity scope — without it, two profiles holding the same
+		 *  address on one chain are indistinguishable in history. */
+		networkId?: string,
 	): Promise<Tx> {
 		// Under the tx lock (codex blocker): serialize the dup-check + write against
 		// restore's create-only check + the coordinator's purge (finding D).
@@ -156,6 +163,8 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			const tx: Tx = {
 				origin,
 				chainId,
+				profileId: fence?.profileId,
+				networkId,
 				account,
 				calls,
 				nonce,
@@ -186,19 +195,61 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {
-		await this.purgeForAccounts([account.address])
+		await this.purgeForAccounts([account.address], account.profileId)
+	}
+
+	/**
+	 * Whether `profileId` is the only profile holding any of `addresses`.
+	 *
+	 * Decides the fate of rows written before transactions carried a profile:
+	 * with a single owner they are unambiguously this profile's, so deletion is
+	 * safe; with more than one they could belong to either, and removing them
+	 * would destroy the surviving profile's history.
+	 */
+	private async isSoleOwner(addresses: readonly string[], profileId: string): Promise<boolean> {
+		const owners = new Set<string>()
+		for (const address of addresses) {
+			for (const account of await this.accountService.getAccountsByAddress(address)) {
+				owners.add(account.profileId)
+			}
+		}
+		owners.delete(profileId)
+		return owners.size === 0
 	}
 
 	/** Awaited tx purge for a SET of accounts — called by the deletion coordinator
 	 *  with the tombstone's authoritative address snapshot (finding D). Runs under
 	 *  the tx lock; idempotent. `onAccountDeleted` delegates here so the single-
 	 *  account (deleteNetwork chain-purge) path shares one implementation. */
-	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+	public async purgeForAccounts(addresses: readonly string[], profileId?: string): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
 		await this.lock.enter()
 		try {
-			const txs = (await this.txs.getValues()).filter((x) => set.has(x.account))
+			// Two profiles built from one mnemonic own the same address, so an
+			// address-only match deletes the OTHER profile's history too. When the
+			// caller knows whose rows these are, a scoped row must match that
+			// profile; a row that names no profile is only safe to remove when this
+			// is the address's sole owner, and is otherwise left alone.
+			const soleOwner = profileId !== undefined ? await this.isSoleOwner(addresses, profileId) : true
+			const all = await this.txs.getValues()
+			const txs = all.filter((x) => {
+				if (!set.has(x.account)) return false
+				if (profileId === undefined) return true
+				if (x.profileId !== undefined) return x.profileId === profileId
+				return soleOwner
+			})
+			// An unscoped row shared with another profile is neither deleted (that
+			// would destroy the survivor's history) nor left plain, since deleting
+			// this profile makes the survivor the only owner and the row would
+			// silently become theirs. Mark it instead, permanently.
+			if (profileId !== undefined && !soleOwner) {
+				for (const tx of all) {
+					if (!set.has(tx.account) || tx.profileId !== undefined || tx.ambiguous) continue
+					this.pending.delete(tx.hash)
+					await this.txs.set(tx.hash, { ...tx, ambiguous: true })
+				}
+			}
 			await purgeRows(
 				txs,
 				(tx) => {
@@ -341,7 +392,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		for (const n of networks) {
 			const accounts = await this.accountService.getAccounts(profile.id, n.chainId)
 			for (const acc of accounts) {
-				txs.push(...(await this.getTransactions(acc.address)))
+				for (const tx of await this.getTransactions(acc.address)) {
+					// The fetch is by address, which two same-seed profiles share, so a
+					// row naming another profile is not ours to export. A row that was
+					// marked unattributable is nobody's, and restore would hand it to
+					// whichever profile imported the backup.
+					if (tx.ambiguous) continue
+					if (tx.profileId !== undefined && tx.profileId !== profile.id) continue
+					if (tx.chainId !== n.chainId) continue
+					txs.push(tx)
+				}
 			}
 		}
 

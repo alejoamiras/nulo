@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { BASELINE_VERSION } from "@/wallet/storage/migrations"
-import { ACCOUNT_STORAGE_ROOT } from "@/wallet/services/account/spec"
+import { ACCOUNT_STORAGE_ROOT, accountRowId } from "@/wallet/services/account/spec"
 import { AUTH_REGISTRY_ENABLED_STORAGE_ROOT, AUTH_REGISTRY_STORAGE_ROOT } from "@/wallet/services/auth-registry/spec"
 import { CONTACT_STORAGE_ROOT } from "@/wallet/services/contact/spec"
 import { FPC_STORAGE_ROOT } from "@/wallet/services/fpc/spec"
@@ -58,7 +58,7 @@ describe("backup-migration-registry", () => {
 	test("normalize writes exact live storage keys (root@id / value key) with JSON-string values", () => {
 		const data = fixture()
 		const { entries } = normalizeOrThrow(data)
-		expect(entries[`${ACCOUNT_STORAGE_ROOT}@0xaaa1`]).toBe(JSON.stringify(data.account[0]))
+		expect(entries[`${ACCOUNT_STORAGE_ROOT}@${accountRowId("p1", 31337, "0xaaa1")}`]).toBe(JSON.stringify(data.account[0]))
 		// Transaction rows are keyed by `hash`, NOT an `id`.
 		expect(entries[`${TRANSACTION_STORAGE_ROOT}@0xh4sh`]).toBe(JSON.stringify(data.transaction[0]))
 		// Numeric ids land under their decimal string.
@@ -176,7 +176,7 @@ describe("backup-migration-registry", () => {
 			return d
 		}
 		const cases: Array<[string, string, Record<string, unknown>, string]> = [
-			["account", ACCOUNT_STORAGE_ROOT, { address: "0xaaa1" }, "0xaaa1"],
+			["account", ACCOUNT_STORAGE_ROOT, { profileId: "p1", chainId: 31337, address: "0xaaa1" }, accountRowId("p1", 31337, "0xaaa1")],
 			["network", NETWORK_STORAGE_ROOT, { id: "n1" }, "n1"],
 			["token", TOKEN_STORAGE_ROOT, { id: 5 }, "5"],
 			["token-balance", TOKEN_BALANCE_STORAGE_ROOT, { id: 9 }, "9"],
@@ -205,7 +205,10 @@ describe("backup-migration-registry", () => {
 
 		const mutated = {
 			...normalized.entries,
-			[`${ACCOUNT_STORAGE_ROOT}@0xaaa1`]: JSON.stringify({ ...data.account[0], address: "0xELSEWHERE" }),
+			[`${ACCOUNT_STORAGE_ROOT}@${accountRowId("p1", 31337, "0xaaa1")}`]: JSON.stringify({
+				...data.account[0],
+				address: "0xELSEWHERE",
+			}),
 		}
 		expect(denormalizeBackupData(mutated, normalized).ok).toBe(false)
 
