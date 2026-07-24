@@ -53,8 +53,35 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 		vi.useRealTimers()
 	})
 
-	const add = (hash: string, fence?: { profileId: string; epoch: number }) =>
-		service.addTransaction({ type: 0 } as never, 1, ACCOUNT, [], "0", 0 as never, hash, undefined, undefined, undefined, fence)
+	const add = (hash: string, fence?: { profileId: string; epoch: number }, networkId?: string) =>
+		service.addTransaction(
+			{ type: 0 } as never,
+			1,
+			ACCOUNT,
+			[],
+			"0",
+			0 as never,
+			hash,
+			undefined,
+			undefined,
+			undefined,
+			fence,
+			networkId,
+		)
+
+	test("stamps the owning profile and network so history can be scoped", async () => {
+		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
+		const tx = await add("0xscoped", fence, "net-1")
+
+		expect(tx).toMatchObject({ profileId: "p1", networkId: "net-1", chainId: 1, account: ACCOUNT })
+	})
+
+	test("a row written without a fence simply carries no scope (legacy-shaped, still valid)", async () => {
+		const tx = await add("0xunscoped")
+
+		expect(tx.profileId).toBeUndefined()
+		expect(tx.networkId).toBeUndefined()
+	})
 
 	test("writes when the captured epoch is still current AND the owning account exists", async () => {
 		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }

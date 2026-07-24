@@ -124,6 +124,10 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
 		fence?: ExecutionFence,
+		/** Owning network row id. Together with the fence's profile this is the
+		 *  row's activity scope — without it, two profiles holding the same
+		 *  address on one chain are indistinguishable in history. */
+		networkId?: string,
 	): Promise<Tx> {
 		// Under the tx lock (codex blocker): serialize the dup-check + write against
 		// restore's create-only check + the coordinator's purge (finding D).
@@ -156,6 +160,8 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			const tx: Tx = {
 				origin,
 				chainId,
+				profileId: fence?.profileId,
+				networkId,
 				account,
 				calls,
 				nonce,
