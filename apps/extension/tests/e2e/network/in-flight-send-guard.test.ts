@@ -16,7 +16,7 @@
 import { expect, inject } from "vitest"
 import type { Page } from "puppeteer"
 import type { AztecTestConfig } from "../fixtures/aztec"
-import { clickByTestId, openPopup, test } from "../fixtures/extension"
+import { clickByTestId, openPopup, test, waitForHash } from "../fixtures/extension"
 import { createSecondAccount, getAccountAddress, refreshBalances, sendTransfer, switchAccountByAddress } from "../fixtures/helpers"
 import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
 
@@ -73,24 +73,55 @@ test.skipIf(!hasConfig)(
 	"an account switch is refused while a send is in flight, and allowed once it settles",
 	{ timeout: 600_000, retry: 0 },
 	async ({ tokenReadyExtension }) => {
-		const page = await openPopup(tokenReadyExtension)
-		await refreshBalances(page)
+		// Each step is announced: when this fails, the last line printed names the
+		// step that broke, instead of a bare Puppeteer timeout with no context.
+		const step = async <T>(label: string, fn: () => Promise<T>): Promise<T> => {
+			const started = Date.now()
+			try {
+				const result = await fn()
+				console.log(`[guard-e2e] ${label} ok (${Date.now() - started}ms)`)
+				return result
+			} catch (err) {
+				console.log(`[guard-e2e] ${label} FAILED after ${Date.now() - started}ms: ${(err as Error).message}`)
+				throw err
+			}
+		}
 
-		const sender = await activeAccount(page)
-		const other = await createSecondAccount(page, "Guard target")
+		const page = await openPopup(tokenReadyExtension)
+		// The popup's own routing has to settle before anything queries its DOM:
+		// the tokens menu is not mounted the instant the page opens, and its
+		// helpers wait only ~2s. Every other send test starts this way.
+		await step("wait for the home screen", () => waitForHash(page, "#/popup/general", 15_000))
+		await step("refreshBalances", () => refreshBalances(page))
+
+		const sender = await step("read active account", () => activeAccount(page))
+		const other = await step("create second account", () => createSecondAccount(page, "Guard target"))
 		expect(other).not.toBe(sender)
-		await switchAccountByAddress(page, sender)
+		await step("switch back to sender", () => switchAccountByAddress(page, sender))
 
 		// Hold the gate BEFORE sending so the transfer parks at `proving` — journaled
 		// and in flight, proof not done — which is the window the guard covers.
-		await holdProofGate(page)
+		// Creating an account navigates into settings; the send flow lives on the
+		// home screen, so go back before firing it.
+		await step("return to the home screen", async () => {
+			await page.evaluate(() => {
+				window.location.hash = "#/popup/general"
+			})
+			await waitForHash(page, "#/popup/general", 10_000)
+			await refreshBalances(page)
+		})
+
+		await step("hold proof gate", () => holdProofGate(page))
 		// Deliberately not awaited: it cannot finish until the gate is released.
-		const sending = sendTransfer(page, { fromType: "public", toType: "public", amount: "1", destination: other })
+		const sending = sendTransfer(page, { fromType: "public", toType: "public", amount: "1", destination: other }).catch((err) => {
+			console.log(`[guard-e2e] sendTransfer rejected: ${(err as Error).message}`)
+			throw err
+		})
 		try {
-			await waitForInFlightSend(page)
+			await step("wait for an in-flight send", () => waitForInFlightSend(page))
 
 			// The guard refuses the switch; the header still shows the sender.
-			expect(await attemptSwitch(page, other)).toBe(false)
+			expect(await step("attempt the blocked switch", () => attemptSwitch(page, other))).toBe(false)
 			expect(await activeAccount(page)).toBe(sender)
 		} finally {
 			await releaseProofGate(page)
