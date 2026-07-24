@@ -49,3 +49,25 @@ diff a reviewer can read as "this is what changed", which a fresh assertion woul
 interleaving test deadlocks: it holds a gated write while the competing call waits for that same lock. The
 rewritten tests start the competing call, release the gate, then await both — asserting the serialized outcome
 instead of the interleaved one.
+
+## Phase 6 — security audit
+
+**Cross-model review caught a bug I introduced *while fixing that exact class of bug*.** The shared account
+resolver exists so the journal and the dispatcher pick the same account. I then called it with
+`getAccounts(profileId, chainId, true)` — `all=true`, which includes hidden accounts — while the dispatcher calls
+it without that flag. A hidden lower-index account would win the default on one side and not the other: the same
+divergence, reintroduced through a different parameter. Sharing a function is not sharing a rule; the INPUTS have
+to match too.
+
+**My own change made a pre-existing weakness reachable.** The legacy-row fallback (attribute an unscoped
+transaction by address + chain) was defensible while two same-mnemonic profiles could not coexist — the account
+re-key is what made them able to. A fix in one layer can promote a dormant issue in another to a live one; audit
+the diff for what it *enables*, not only what it changes.
+
+**An obsolete test is a signal, not an obstacle.** `import-paths.test.ts` asserted that importing a backup whose
+account collides on address is REFUSED. That is precisely the behavior the re-key removes, so the failure was the
+change working. Flipped to assert the new behavior (both profiles coexist, each owning its own row) rather than
+deleted — the diff now records the product change.
+
+**Report the gate, not the wrapper.** A monitor wrapping the smoke suite exited 0 while the suite itself exited 1
+(3 failed). Read the suite's own summary line before calling a gate green.

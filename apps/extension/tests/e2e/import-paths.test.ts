@@ -257,42 +257,48 @@ test("full backup: fresh install → synthetic plain backup → /popup/general",
 	await page.close()
 }, 90_000)
 
-test("full backup: duplicate-address rejection shows the new copy, stays on /popup/import", async ({ registeredExtensionPerTest }) => {
+test("full backup: an account address shared with an existing profile imports into its own profile", async ({
+	registeredExtensionPerTest,
+}) => {
 	const page = await openPopup(registeredExtensionPerTest)
 	await waitForHash(page, "#/popup/general", 15_000)
 	const existingAddress = await readActiveAccount(page)
 	expect(existingAddress.startsWith("0x")).toBe(true)
 
-	// Build a backup colliding on this exact address — accountService.restore
-	// throws "Duplicate address", the catch rolls back via deleteProfile and
-	// surfaces the inline banner.
+	// A backup carrying the SAME account address as the installed profile — what
+	// you get by importing one mnemonic twice. Account rows are keyed by
+	// (profileId, chainId, address), so the imported profile owns its own row
+	// instead of colliding with the existing one; this used to be refused with
+	// "An account from this backup is already in your wallet".
 	const masterBase64 = await makeRandomMasterBase64()
-	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, profileName: "Conflict", accountAddress: existingAddress }))
+	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, profileName: "Second", accountAddress: existingAddress }))
 
 	await page.evaluate(() => {
 		window.location.hash = "#/popup/import"
 	})
 	await waitForHash(page, "#/popup/import", 5_000)
 
-	await importFullBackup(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL, { expectError: true })
+	await importFullBackup(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
 
-	const banner = await page.evaluate(() => document.body.textContent ?? "")
-	expect(banner).toContain("Can't import")
-	expect(banner).toContain("An account from this backup is already in your wallet")
-
-	expect(page.url()).toContain("#/popup/import")
-
-	// Rollback ran: only the original registered profile remains.
-	const profileCount = await page.evaluate(
+	// Both profiles now exist, and each holds its own row for that address.
+	const stored = await page.evaluate(
 		() =>
-			new Promise<number>((resolve) => {
+			new Promise<{ profiles: number; accountRows: string[] }>((resolve) => {
 				chrome.storage.local.get(null, (all) => {
-					const keys = Object.keys(all).filter((k) => k.startsWith("nulo:core:profiles@"))
-					resolve(keys.length)
+					const keys = Object.keys(all)
+					resolve({
+						profiles: keys.filter((k) => k.startsWith("nulo:core:profiles@")).length,
+						accountRows: keys.filter((k) => k.startsWith("nulo:core:accounts@")),
+					})
 				})
 			}),
 	)
-	expect(profileCount).toBe(1)
+	expect(stored.profiles).toBe(2)
 
+	// Two rows, same address, different owning profiles — neither took the other's.
+	const rowsForAddress = stored.accountRows.filter((k) => k.includes(existingAddress))
+	expect(rowsForAddress.length).toBe(2)
+
+	expect(registeredExtensionPerTest.pageErrors).toEqual([])
 	await page.close()
 }, 90_000)
