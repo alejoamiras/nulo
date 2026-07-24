@@ -62,6 +62,7 @@ import {
 	connectJournalDeps,
 	discard,
 	flagRecordError,
+	markApproveOutcome,
 	markSessionLive,
 	isMsgConsumed,
 	resumeSessionWork,
@@ -810,19 +811,39 @@ export function useDepositFlow() {
 				}
 			}
 
-			if (fuelPre && fuelSlice && BRIDGE_FUEL) {
-				const fuelCfg = BRIDGE_FUEL
-				// Fueled leg: ONE Permit2 witness signature + ONE router tx. No approve - the live
-				// token pre-approves Permit2 for every holder (asserted, fail-closed).
-				const permit2Allowance = (await l1.publicClient.readContract({
+			// Real USDC (and the DP7 permissionless-mint test token) start at ZERO Permit2 allowance, so a
+			// deposit must do a one-time approve(Permit2, max) before the witness transfer. The testnet
+			// MintableERC20 auto-grants Permit2 → this short-circuits (no tx) for it; the DP7 token + real
+			// USDC are what exercise the approve (codex F2/F4). Mirrors useFuel's approve leg.
+			const ensurePermit2Approval = async (permit2: `0x${string}`, needed: bigint, recordId: string): Promise<void> => {
+				const allowance = (await l1.publicClient.readContract({
 					address: L1_USDC,
 					abi: ERC20_ABI,
 					functionName: "allowance",
-					args: [from, fuelCfg.permit2],
+					args: [from, permit2],
 				})) as bigint
-				if (permit2Allowance < amount) {
-					throw new Error("This token does not pre-approve Permit2 - fueled bridging is unavailable for it.")
-				}
+				if (allowance >= needed) return
+				setRecordStep(recordId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
+				const approveHash = await runOnLane("l1", () =>
+					wallet.writeContract({
+						address: L1_USDC,
+						abi: ERC20_ABI,
+						functionName: "approve",
+						args: [permit2, (1n << 256n) - 1n],
+						chain: NETWORK.viemChain,
+						account: from,
+					}),
+				)
+				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
+					onStillWaiting: (attempt) => setRecordStep(recordId, "approving", `still waiting for the approval (round ${attempt})`),
+				})
+				markApproveOutcome(recordId, "done")
+			}
+
+			if (fuelPre && fuelSlice && BRIDGE_FUEL) {
+				const fuelCfg = BRIDGE_FUEL
+				// Fueled leg: one-time Permit2 approve (if needed) → ONE Permit2 witness signature + ONE router tx.
+				await ensurePermit2Approval(fuelCfg.permit2, amount, id)
 
 				setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
 				const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
@@ -952,20 +973,12 @@ export function useDepositFlow() {
 			}
 
 			// Single deposit path: bridge-only through the router's Permit2 `bridge()` (fuel fields zeroed).
-			// No approve tx — the live token pre-approves canonical Permit2 (asserted, fail-closed). The
-			// witness pins tokenPortal/token/amount/recipient/secretHash/isPrivate + the router's swapTarget.
+			// A one-time Permit2 approve (if needed) precedes it; the witness pins tokenPortal/token/amount/
+			// recipient/secretHash/isPrivate + the router's swapTarget.
 			if (!BRIDGE_ROUTER || !BRIDGE_PERMIT2 || !BRIDGE_SWAP_TARGET) {
 				throw new Error("Bridge router/permit2 not configured (required for the deposit path).")
 			}
-			const permit2Allowance = (await l1.publicClient.readContract({
-				address: L1_USDC,
-				abi: ERC20_ABI,
-				functionName: "allowance",
-				args: [from, BRIDGE_PERMIT2],
-			})) as bigint
-			if (permit2Allowance < tokenAmount) {
-				throw new Error("This token does not pre-approve Permit2 - bridging is unavailable for it.")
-			}
+			await ensurePermit2Approval(BRIDGE_PERMIT2, tokenAmount, id)
 
 			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
