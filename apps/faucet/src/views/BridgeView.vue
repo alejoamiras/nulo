@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue"
 import { BRIDGE_TOKEN_MINTABLE, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { IS_MAINNET } from "@/lib/network"
 import BridgeAddToken from "@/components/BridgeAddToken.vue"
 import BridgeForm from "@/components/BridgeForm.vue"
 import BridgeJournal from "@/components/BridgeJournal.vue"
@@ -24,7 +25,11 @@ async function onBridgeCompleted() {
 	<div class="bridge-view" :data-testid="TESTIDS.bridgeView">
 		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>BRIDGE</h1>
-			<p class="sub">
+			<p v-if="IS_MAINNET" class="sub">
+				Move {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum and Aztec, 1:1, public or private. Real funds — keep amounts
+				under $5. Connect both wallets, pick a direction, bridge. In-flight transfers persist in this browser.
+			</p>
+			<p v-else class="sub">
 				Move test {{ BRIDGE_TOKEN_SYMBOL }} between Ethereum (Sepolia) and Aztec, 1:1, public or private. Testnet only. Connect
 				both wallets, pick a direction, bridge. In-flight transfers persist in this browser.
 			</p>

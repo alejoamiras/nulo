@@ -6,6 +6,7 @@ import FuelForm from "@/components/FuelForm.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import MintFuelAsset from "@/components/MintFuelAsset.vue"
 import { FUEL_ASSET_HANDLER } from "@/contracts/bridge-deployments"
+import { IS_MAINNET } from "@/lib/network"
 import { TESTIDS } from "@/lib/testids"
 
 // The mint affordance depends on a permissionless FeeAssetHandler — present on testnet, absent on
@@ -27,7 +28,11 @@ async function onFuelCompleted() {
 	<div class="fuel-view" :data-testid="TESTIDS.fuelView">
 		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>FUEL</h1>
-			<p class="sub">
+			<p v-if="IS_MAINNET" class="sub">
+				Bridge your $AZTEC into Aztec Fee Juice, public or private gas, no swap. Real funds.
+				Connect both wallets, choose how the gas arrives, and bridge. In-flight bridges persist in this browser.
+			</p>
+			<p v-else class="sub">
 				Bridge your $AZTEC into Aztec Fee Juice, public or private gas, no swap. Testnet only.
 				Connect both wallets, choose how the gas arrives, and bridge. In-flight bridges persist in this browser.
 			</p>
