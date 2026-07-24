@@ -110,10 +110,14 @@ export const FUEL_MIN_FJ = feeJuiceCfg?.minFj ? BigInt(feeJuiceCfg.minFj) : unde
 export const BRIDGE_PROXY = AztecAddress.fromStringUnsafe(config.l2.proxy.address)
 export const BRIDGE_TOKEN = AztecAddress.fromStringUnsafe(config.l2.token.address)
 
-/** The bridged pair's display identity - ONE source for every surface. The token-identity flip
- *  (AZLO/18) changes these two lines + the deployment config; nothing else. */
-export const BRIDGE_TOKEN_SYMBOL = "AZLO"
-export const BRIDGE_TOKEN_DECIMALS = 18
+/** The bridged pair's display identity — derived from the manifest so each network gets its own
+ *  (testnet AZLO/18, mainnet USDC/6). A wrong decimals here mis-scales every amount, so it is NOT
+ *  hardcoded. */
+export const BRIDGE_TOKEN_SYMBOL = config.l1.token.symbol
+export const BRIDGE_TOKEN_DECIMALS = config.l1.token.decimals
+/** Whether the bridged token is our permissionless-mint test token (has mint()) vs a real
+ *  `circle-proxy` token — gates the MintTestUsdc affordance off on mainnet. */
+export const BRIDGE_TOKEN_MINTABLE = config.l1.token.source !== "circle-proxy"
 export const BRIDGE = AztecAddress.fromStringUnsafe(config.l2.bridge.address)
 
 const common = { publicKeys: PublicKeys.default(), deployer: AztecAddress.ZERO } as const

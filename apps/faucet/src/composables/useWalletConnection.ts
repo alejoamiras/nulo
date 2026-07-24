@@ -13,13 +13,24 @@ import {
 import { DRIPPER, NULO, OLUN, rebuildDripperInstance, rebuildNuloInstance, rebuildOlunInstance } from "@/contracts/deployments"
 import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
-import { buildCombinedManifest } from "@/lib/capabilities"
+import { buildBridgeManifest, buildCombinedManifest } from "@/lib/capabilities"
+import { IS_MAINNET } from "@/lib/network"
 import { createAztecWalletSession } from "./createAztecWalletSession"
 
 const APP_ID = "nulo-faucet"
 
 async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
+	// Mainnet has no faucet — grant only the bridge capabilities (no Dripper/NULO/OLUN). Testnet grants
+	// the combined faucet+bridge manifest (both tabs share one origin/app, so one grant covers both).
+	if (IS_MAINNET) {
+		return buildBridgeManifest({
+			bridgeAddress: BRIDGE,
+			tokenAddress: BRIDGE_TOKEN,
+			proxyAddress: BRIDGE_PROXY,
+			sponsoredFpcAddress: sponsoredFpc.address,
+		})
+	}
 	return buildCombinedManifest({
 		dripperAddress: DRIPPER,
 		usdcAddress: NULO,
@@ -32,17 +43,23 @@ async function buildCapabilityManifest() {
 }
 
 async function registerAllContracts(w: Wallet): Promise<void> {
-	const [dripperInst, nuloInst, olunInst, proxyInst, tokenInst, bridgeInst] = await Promise.all([
-		rebuildDripperInstance(),
-		rebuildNuloInstance(),
-		rebuildOlunInstance(),
+	// The bridge trio + PrivateFPC exist on both networks; the faucet's Dripper/NULO/OLUN are
+	// testnet-only, so skip them on mainnet (they aren't deployed there).
+	const [proxyInst, tokenInst, bridgeInst] = await Promise.all([
 		rebuildBridgeProxyInstance(),
 		rebuildBridgeTokenInstance(),
 		rebuildBridgeInstance(),
 	])
-	await w.registerContract(dripperInst, DripperContractArtifact)
-	await w.registerContract(nuloInst, TokenContractArtifact)
-	await w.registerContract(olunInst, TokenContractArtifact)
+	if (!IS_MAINNET) {
+		const [dripperInst, nuloInst, olunInst] = await Promise.all([
+			rebuildDripperInstance(),
+			rebuildNuloInstance(),
+			rebuildOlunInstance(),
+		])
+		await w.registerContract(dripperInst, DripperContractArtifact)
+		await w.registerContract(nuloInst, TokenContractArtifact)
+		await w.registerContract(olunInst, TokenContractArtifact)
+	}
 	await w.registerContract(proxyInst, bridgeProxyArtifact)
 	await w.registerContract(tokenInst, TokenContractArtifact)
 	await w.registerContract(bridgeInst, tokenBridgeArtifact)

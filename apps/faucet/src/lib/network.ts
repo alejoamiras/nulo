@@ -45,3 +45,11 @@ export const NETWORK: NetworkConfig = {
 	nodeUrl: import.meta.env.VITE_AZTEC_NODE_URL ?? target.nodeUrl,
 	l1ExplorerBaseUrl: target.l1ExplorerBaseUrl,
 }
+
+/** The active target key. */
+export const NETWORK_KEY = target.key
+
+/** True on the mainnet/Alpha build. Gates OFF the faucet tab, the faucet-token registration +
+ *  capabilities, and the testnet-only mint affordances (mainnet bridges real USDC — there is no
+ *  faucet and no permissionless mint). */
+export const IS_MAINNET = target.key === "mainnet"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue"
-import { BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+import { BRIDGE_TOKEN_MINTABLE, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import BridgeAddToken from "@/components/BridgeAddToken.vue"
 import BridgeForm from "@/components/BridgeForm.vue"
 import BridgeJournal from "@/components/BridgeJournal.vue"
@@ -39,7 +39,7 @@ async function onBridgeCompleted() {
 		<div ref="journalAnchor">
 			<BridgeJournal kind="bridge-token" />
 		</div>
-		<MintTestUsdc />
+		<MintTestUsdc v-if="BRIDGE_TOKEN_MINTABLE" />
 		<BridgeAddToken />
 	</div>
 </template>

@@ -5,7 +5,12 @@ import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import FuelForm from "@/components/FuelForm.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import MintFuelAsset from "@/components/MintFuelAsset.vue"
+import { FUEL_ASSET_HANDLER } from "@/contracts/bridge-deployments"
 import { TESTIDS } from "@/lib/testids"
+
+// The mint affordance depends on a permissionless FeeAssetHandler — present on testnet, absent on
+// mainnet (BYO-$AZTEC). Hide it when the manifest declares no handler.
+const canMintFuelAsset = !!FUEL_ASSET_HANDLER
 
 const journalAnchor = ref<HTMLElement | null>(null)
 
@@ -34,7 +39,7 @@ async function onFuelCompleted() {
 		</section>
 
 		<FuelForm @completed="onFuelCompleted" />
-		<MintFuelAsset />
+		<MintFuelAsset v-if="canMintFuelAsset" />
 		<div ref="journalAnchor">
 			<BridgeJournal kind="fee-juice" :toasts="false" title="YOUR FUELS" />
 		</div>
