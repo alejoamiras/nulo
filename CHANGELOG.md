@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.26.0](https://github.com/alejoamiras/nulo/compare/v0.25.0...v0.26.0) (2026-07-24)
+
+
+### Features
+
+* **bridge:** Permit2 everywhere + recipient-committed private claims + testnet cutover ([#260](https://github.com/alejoamiras/nulo/issues/260)) ([d5ecead](https://github.com/alejoamiras/nulo/commit/d5ecead6ab1674b9a0f27c8b8a6e3cd9cbc45bb3))
+* **contacts:** decouple contacts from sender registration (handshake-era delivery) ([#302](https://github.com/alejoamiras/nulo/issues/302)) ([f5ee3be](https://github.com/alejoamiras/nulo/commit/f5ee3bed0a96d5252af30f096435a7f62abfd144))
+* **extension:** alpha mainnet 5.0.1 identity, default network + drop devnet ([#305](https://github.com/alejoamiras/nulo/issues/305)) ([68a856a](https://github.com/alejoamiras/nulo/commit/68a856a0cd010f583ac3df783e8ef77b204132a5))
+* **faucet:** wallet picker — explicit choice over first-wins discovery ([#306](https://github.com/alejoamiras/nulo/issues/306)) ([4cd229f](https://github.com/alejoamiras/nulo/commit/4cd229f88f2aef57bd6db938231f8e724715353b))
+* **prices:** live usd prices, fiat send input, default token seeding ([#309](https://github.com/alejoamiras/nulo/issues/309)) ([c3fa7fc](https://github.com/alejoamiras/nulo/commit/c3fa7fc5c667bbff70b4e3eb73562591d611648c))
+* **send:** per-network fee defaults + get-fee-juice nudge ([#319](https://github.com/alejoamiras/nulo/issues/319)) ([ffda434](https://github.com/alejoamiras/nulo/commit/ffda434e2d064bb13241bc1f64b0d5c154fe1a97))
+* **wallet:** "Catching up…" token sync indicator ([#316](https://github.com/alejoamiras/nulo/issues/316)) ([0d44c39](https://github.com/alejoamiras/nulo/commit/0d44c394255094f1e37396a75ec902be76d433cf))
+* **wallet:** freeze account identity per extension major (artifact, descriptor, regimes) ([#303](https://github.com/alejoamiras/nulo/issues/303)) ([10259cb](https://github.com/alejoamiras/nulo/commit/10259cb6b9b2e8b765985eb00b1f7189220db760))
+* **wallet:** incoming public transfers — receipts, detail page, USD dust filter ([#315](https://github.com/alejoamiras/nulo/issues/315)) ([64d8529](https://github.com/alejoamiras/nulo/commit/64d85291d99adb350b7b92d58419babd67d08ded))
+
+
+### Bug Fixes
+
+* **activity:** contain account-switch cross-account leak (Phase 1, PR-D) ([#314](https://github.com/alejoamiras/nulo/issues/314)) ([780cdec](https://github.com/alejoamiras/nulo/commit/780cdec1403b8692f366d7786107099c10f16213))
+* **faucet:** connect-error UX — status strip, red retry, drop capability subline ([#307](https://github.com/alejoamiras/nulo/issues/307)) ([af9c8ba](https://github.com/alejoamiras/nulo/commit/af9c8ba07bedae1215e8215a37ce09c878c3cd6b))
+* **messaging:** rpc params carry explicit arity — undefined mid-args no longer truncate ([#311](https://github.com/alejoamiras/nulo/issues/311)) ([68f091f](https://github.com/alejoamiras/nulo/commit/68f091fb980d4575ad663289e1df6bda9ca2d509))
+* **received:** align non-address "From" values with the "To" account styling ([#317](https://github.com/alejoamiras/nulo/issues/317)) ([1b5211c](https://github.com/alejoamiras/nulo/commit/1b5211c658625078c18f92bab005ba90621c63de))
+* **wallet:** backup permission, import default network, active-network restore, network-list UX ([#313](https://github.com/alejoamiras/nulo/issues/313)) ([afecc82](https://github.com/alejoamiras/nulo/commit/afecc820b9a06fb4fc1b3fd9aa05b41a3a6b5fc8))
+
+
+### Tests
+
+* **e2e:** move aztec sandbox datadir off tmpfs + add e2e:reap ([#310](https://github.com/alejoamiras/nulo/issues/310)) ([d0c610f](https://github.com/alejoamiras/nulo/commit/d0c610f76d5c25d360e4ef8a73270791f1d8b7d8))
+* **extension:** wire the e2e teardown for real + release-gate artifact skip ([#308](https://github.com/alejoamiras/nulo/issues/308)) ([6ca87a5](https://github.com/alejoamiras/nulo/commit/6ca87a56719b802e7d40c2d8fd7af705fa957aac))
+* **incoming-public-transfers:** case 4 SW-restart resume — unit cursor-resume proof ([#318](https://github.com/alejoamiras/nulo/issues/318)) ([4e5435b](https://github.com/alejoamiras/nulo/commit/4e5435b3b9971f3fd6a8ee1303f174d584290c99))
+
+
+### Misc
+
+* allow the release type in commitlint (used by promote dev → main) ([85a518d](https://github.com/alejoamiras/nulo/commit/85a518d0825260772ec7ac3201d2ed09f6d872ce))
+* **deps:** rename aztec-fee-payment to private-fee-juice (5.0.1) ([#304](https://github.com/alejoamiras/nulo/issues/304)) ([c97e9cd](https://github.com/alejoamiras/nulo/commit/c97e9cd74202601988419f48ae9f1d4afca5dce0))
+* re-baseline prerelease manifest to 0.25.0 (post-stable-release sync) ([36b6f12](https://github.com/alejoamiras/nulo/commit/36b6f1209d302b274a17398acdf403ed3638f6dd))
+* **release:** drop the redundant network-e2e re-run from the push:main publish ([#300](https://github.com/alejoamiras/nulo/issues/300)) ([cff0ba2](https://github.com/alejoamiras/nulo/commit/cff0ba26593a8c86224843477aa49c96d0b6abe3))
+* sync main → dev (v0.25.0 release + prerelease manifest re-baseline) ([#298](https://github.com/alejoamiras/nulo/issues/298)) ([04e5728](https://github.com/alejoamiras/nulo/commit/04e57285b8f0a8bb3cb54b6455e4bc78d9416bbf))
+
+
+### Docs
+
+* **plan:** log R execution — v0.25.0 shipped + recovery lessons ([#299](https://github.com/alejoamiras/nulo/issues/299)) ([568bc16](https://github.com/alejoamiras/nulo/commit/568bc1620d4c872d18e3bb62401d670aa6b30d83))
+
 ## [0.25.0](https://github.com/alejoamiras/nulo/compare/v0.24.0...v0.25.0) (2026-07-20)
 
 

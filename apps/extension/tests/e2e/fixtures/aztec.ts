@@ -258,6 +258,85 @@ export async function transferPrivateTokens(
 	return sent.receipt.txHash.toString()
 }
 
+/** Public → public transfer (`transfer_public_to_public`) — the sender must hold a PUBLIC balance
+ *  (mint one first). Emits `Transfer{from: sender, to, amount}`: the recipient's PUBLIC arm sees a
+ *  "Public → Public" receipt. Public call, so no PXE registration needed (mirrors `mintPublicTokens`). */
+export async function transferPublicTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const from = AztecAddress.fromStringUnsafe(fromAddress)
+	const token = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet)
+	await token.methods
+		.transfer_public_to_public(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
+	const balance = await token.methods
+		.balance_of_public(AztecAddress.fromStringUnsafe(toAddress))
+		.simulate({ from, fee: { gasSettings: E2E_FEE_GAS } })
+	console.log(`[transferPublicTokens] recipient on-chain public balance: ${balance}`)
+}
+
+/** Private → public transfer (`transfer_private_to_public`) — the sender must hold a PRIVATE balance.
+ *  The public-credit leg emits `Transfer{from: PRIVATE_ADDRESS_MAGIC_VALUE, to, amount}`, so the
+ *  recipient's PUBLIC arm sees a "Private → Public" receipt (`from == MAGIC`). Needs PXE registration
+ *  (private execution) + `wait` (same traps as `transferPrivateTokens`). */
+export async function transferPrivateToPublicTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+	const from = AztecAddress.fromStringUnsafe(fromAddress)
+	const token = await TokenContract.at(addr, wallet)
+	await token.methods
+		.transfer_private_to_public(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
+}
+
+/** Public → private transfer (`transfer_public_to_private`) — the sender must hold a PUBLIC balance.
+ *  Delivers a private NOTE to the recipient (discovered by the NOTE arm as "Received privately") and
+ *  emits `Transfer{from: sender, to: PRIVATE_ADDRESS_MAGIC_VALUE}` on the debit leg (to == MAGIC, so
+ *  NOT a public receipt for the recipient — D7 dropped: pub→priv is not distinguished). Needs PXE
+ *  registration (note creation) + `wait`. */
+export async function transferPublicToPrivateTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+	const from = AztecAddress.fromStringUnsafe(fromAddress)
+	const token = await TokenContract.at(addr, wallet)
+	await token.methods
+		.transfer_public_to_private(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
+}
+
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
 
 /**

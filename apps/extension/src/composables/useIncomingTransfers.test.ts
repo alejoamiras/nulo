@@ -3,13 +3,19 @@ import { effectScope, ref } from "vue"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { ConfigProp } from "@/wallet/config"
 import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
-import { type ConfigServiceLike, type IncomingTransferServiceLike, useIncomingTransfers } from "./useIncomingTransfers"
+import {
+	type ConfigServiceLike,
+	type IncomingTransferServiceLike,
+	type PriceServiceLike,
+	useIncomingTransfers,
+} from "./useIncomingTransfers"
 
-// Records default to the READY scope (p, n, a) so they pass the composable's
-// live-scope filter; override profileId/networkId/accountAddress to exercise
-// the foreign-scope drop.
-const rec = (siloedNullifier: string, extra: Record<string, unknown> = {}): IncomingTransferRecord =>
-	({ siloedNullifier, profileId: "p", networkId: "n", accountAddress: "a", ...extra }) as unknown as IncomingTransferRecord
+// Records default to the READY scope (profile "p", network "n", account "a") so the live
+// scope-filter (onAdded/onUpdated) admits them; override `accountAddress`/`networkId`/`profileId` to
+// exercise the foreign-scope drop. Keyed by `id` — the discriminated-union PK (public records have no
+// `siloedNullifier`).
+const rec = (id: string, extra: Record<string, unknown> = {}): IncomingTransferRecord =>
+	({ id, profileId: "p", networkId: "n", accountAddress: "a", ...extra }) as unknown as IncomingTransferRecord
 
 function makeIncomingService(records: IncomingTransferRecord[] = []) {
 	return {
@@ -25,6 +31,10 @@ function makeConfigService() {
 	return { onUpdate: new EventHandler<ConfigProp>() } satisfies ConfigServiceLike
 }
 
+function makePriceService() {
+	return { onQuotesUpdated: new EventHandler<unknown>() } satisfies PriceServiceLike
+}
+
 const READY = () => ({ profileId: "p", networkId: "n", account: "a" })
 
 /** Run the composable inside an effect scope so `onScopeDispose` is valid +
@@ -32,6 +42,7 @@ const READY = () => ({ profileId: "p", networkId: "n", account: "a" })
 function setup(opts: {
 	incoming: ReturnType<typeof makeIncomingService>
 	config: ReturnType<typeof makeConfigService>
+	price?: ReturnType<typeof makePriceService>
 	scope?: () => { profileId: string; networkId: string; account: string } | undefined
 }) {
 	const effect = effectScope()
@@ -39,6 +50,7 @@ function setup(opts: {
 		useIncomingTransfers({
 			incomingTransferService: opts.incoming,
 			configService: opts.config,
+			priceService: opts.price,
 			scope: opts.scope ?? READY,
 		}),
 	)
@@ -52,7 +64,7 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService() })
 		await refresh()
 		expect(incoming.getIncomingTransfers).toHaveBeenCalledWith("p", "n", "a")
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["a", "b"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a", "b"])
 	})
 
 	it("refresh() is a no-op when scope is not ready (no fetch)", async () => {
@@ -78,7 +90,7 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onConnected.invoke()
 		await Promise.resolve()
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["z"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["z"])
 	})
 
 	it("onAdded prepends a new record", () => {
@@ -86,10 +98,10 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("a"))
 		incoming.onIncomingTransferAdded.invoke(rec("b"))
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["b", "a"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b", "a"])
 	})
 
-	it("onAdded replaces in place when the siloedNullifier already exists", () => {
+	it("onAdded replaces in place when the id already exists", () => {
 		const incoming = makeIncomingService()
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("a", { v: 1 }))
@@ -113,32 +125,13 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value).toEqual([])
 	})
 
-	it("onDeleted removes by siloedNullifier", () => {
+	it("onDeleted removes by id", () => {
 		const incoming = makeIncomingService()
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("a"))
 		incoming.onIncomingTransferAdded.invoke(rec("b"))
 		incoming.onIncomingTransferDeleted.invoke(rec("a"))
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["b"])
-	})
-
-	it("onDeleted ignores a foreign record that shares the nullifier", () => {
-		// A siloed nullifier is unique within ONE rollup tree, not across them, so
-		// the same value can legitimately exist under another profile or network.
-		// Matching on it alone would let that delete remove the row on screen.
-		const incoming = makeIncomingService()
-		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
-		incoming.onIncomingTransferAdded.invoke(rec("shared"))
-
-		incoming.onIncomingTransferDeleted.invoke(rec("shared", { networkId: "other-network" }))
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["shared"])
-
-		incoming.onIncomingTransferDeleted.invoke(rec("shared", { profileId: "other-profile" }))
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["shared"])
-
-		// Its own scope's delete still applies.
-		incoming.onIncomingTransferDeleted.invoke(rec("shared"))
-		expect(incomingTransfers.value).toEqual([])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b"])
 	})
 
 	it("config update for incomingTransfersVisible triggers a refresh", async () => {
@@ -148,7 +141,7 @@ describe("useIncomingTransfers", () => {
 		config.onUpdate.invoke({ key: "incomingTransfersVisible" } as unknown as ConfigProp)
 		await Promise.resolve()
 		expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["a"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a"])
 	})
 
 	it("config update for an unrelated key does NOT refresh", async () => {
@@ -181,7 +174,40 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value).toEqual([])
 	})
 
-	// ── Cross-account containment (the privacy fix) ──
+	it("re-fetches when the dust threshold config changes (D8)", async () => {
+		const incoming = makeIncomingService([rec("a")])
+		const config = makeConfigService()
+		setup({ incoming, config })
+		incoming.getIncomingTransfers.mockClear()
+		config.onUpdate.invoke({ key: "incomingDustUsdThreshold", value: 0.05 } as unknown as ConfigProp)
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+	})
+
+	it("re-fetches on onQuotesUpdated (a fresh quote can move a receipt across the threshold)", async () => {
+		const incoming = makeIncomingService([rec("a")])
+		const price = makePriceService()
+		setup({ incoming, config: makeConfigService(), price })
+		incoming.getIncomingTransfers.mockClear()
+		price.onQuotesUpdated.invoke({})
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).toHaveBeenCalledTimes(1)
+	})
+
+	it("dispose() removes the price + config subscriptions", async () => {
+		const incoming = makeIncomingService([rec("a")])
+		const config = makeConfigService()
+		const price = makePriceService()
+		const { dispose } = setup({ incoming, config, price })
+		dispose()
+		incoming.getIncomingTransfers.mockClear()
+		config.onUpdate.invoke({ key: "incomingDustUsdThreshold", value: 1 } as unknown as ConfigProp)
+		price.onQuotesUpdated.invoke({})
+		await Promise.resolve()
+		expect(incoming.getIncomingTransfers).not.toHaveBeenCalled()
+	})
+
+	// ── Cross-account containment (privacy fix — #314 + code-review, id-keyed) ──
 
 	it("onAdded DROPS a record for a non-active account (the leak the broadcast would otherwise cause)", () => {
 		const incoming = makeIncomingService()
@@ -203,8 +229,7 @@ describe("useIncomingTransfers", () => {
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
 		incoming.onIncomingTransferAdded.invoke(rec("mine"))
 		incoming.onIncomingTransferUpdated.invoke(rec("mine", { accountAddress: "OTHER_ACCOUNT", v: 9 }))
-		// The foreign update is dropped; the active record is untouched.
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["mine"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["mine"])
 	})
 
 	it("switching the active account SYNCHRONOUSLY clears the view then refetches for the new account", async () => {
@@ -212,47 +237,42 @@ describe("useIncomingTransfers", () => {
 		const incoming = makeIncomingService([rec("a1")])
 		const scope = () => ({ profileId: "p", networkId: "n", account: account.value })
 		const { incomingTransfers } = setup({ incoming, config: makeConfigService(), scope })
-		await (async () => {
-			incoming.onConnected.invoke()
-			await Promise.resolve()
-		})()
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["a1"])
+		incoming.onConnected.invoke()
+		await Promise.resolve()
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a1"])
 
-		// Switch to account "b": the sync watcher clears immediately…
 		incoming.getIncomingTransfers.mockResolvedValueOnce([rec("b1", { accountAddress: "b" })])
 		account.value = "b"
 		expect(incomingTransfers.value).toEqual([]) // cleared synchronously, no A rows linger
 		await Promise.resolve()
 		await Promise.resolve()
 		expect(incoming.getIncomingTransfers).toHaveBeenLastCalledWith("p", "n", "b")
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["b1"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["b1"])
 	})
 
 	it("a late fetch for a superseded scope (A→B→A) does not clobber the current view", async () => {
 		const account = ref("a")
 		const scope = () => ({ profileId: "p", networkId: "n", account: account.value })
-		// First fetch (for A) is deferred; we resolve it AFTER switching away and back.
 		let resolveA: (rows: IncomingTransferRecord[]) => void = () => {}
 		const aPending = new Promise<IncomingTransferRecord[]>((r) => {
 			resolveA = r
 		})
 		const incoming = makeIncomingService()
 		incoming.getIncomingTransfers
-			.mockReturnValueOnce(aPending) // A (stale, resolves last)
-			.mockResolvedValueOnce([rec("b1", { accountAddress: "b" })]) // B
-			.mockResolvedValueOnce([rec("a-fresh")]) // A again (fresh)
+			.mockReturnValueOnce(aPending)
+			.mockResolvedValueOnce([rec("b1", { accountAddress: "b" })])
+			.mockResolvedValueOnce([rec("a-fresh")])
 		const { incomingTransfers, refresh } = setup({ incoming, config: makeConfigService(), scope })
 
-		const aFetch = refresh() // starts A fetch (pending)
-		account.value = "b" // sync clear + refresh B
+		const aFetch = refresh()
+		account.value = "b"
 		await Promise.resolve()
-		account.value = "a" // sync clear + refresh A-fresh
+		account.value = "a"
 		await Promise.resolve()
 		await Promise.resolve()
-		// Now the ORIGINAL A fetch resolves — it must be dropped (superseded seq).
 		resolveA([rec("a-stale")])
 		await aFetch
 		await Promise.resolve()
-		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["a-fresh"])
+		expect(incomingTransfers.value.map((x) => x.id)).toEqual(["a-fresh"])
 	})
 })

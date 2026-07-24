@@ -25,6 +25,7 @@ import { TransferType } from "@/wallet/services/transaction/client"
 
 /** Utils */
 import { isValidHex } from "@/utils/string"
+import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
@@ -57,6 +58,15 @@ function leaveSend() {
 }
 
 const feeSettings = ref()
+/** Set by FeeSettingsCard when the selected fee-juice method has zero balance.
+ *  When true, the primary CTA becomes "Get fee juice" (C) and the fee card
+ *  shows the explainer banner (A). */
+const needsFeeJuice = ref(false)
+
+/** Open the fee-juice bridge in a new tab. */
+const openFeeJuiceBridge = () => {
+	window.open(FEE_JUICE_BRIDGE_URL, "_blank", "noopener,noreferrer")
+}
 
 const awaitingNewToken = ref(false)
 
@@ -559,12 +569,23 @@ onBeforeUnmount(() => {
 						:feeEstimate="feeEstimate"
 						:isEstimating="isEstimating"
 						v-model="feeSettings"
+						v-model:needsFeeJuice="needsFeeJuice"
 					/>
 				</div>
 			</Flex>
 
 			<Flex direction="column" :class="$style.bottom">
 				<Button
+					v-if="needsFeeJuice"
+					@click="openFeeJuiceBridge"
+					data-testid="send-get-fee-juice"
+					variant="cta"
+					wide
+				>
+					Get Fee Juice
+				</Button>
+				<Button
+					v-else
 					@click="handleSend"
 					data-testid="send-submit"
 					variant="cta"

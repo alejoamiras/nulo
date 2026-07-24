@@ -18,7 +18,8 @@ export interface RunVerifyLiveOpts {
 	sha: string
 	/** landing origin, e.g. "https://nulo.sh". */
 	landingUrl: string
-	/** faucet origin, e.g. "https://faucet.nulo.sh". */
+	/** tools/faucet origin — MUST be the OPEN host. A CF-Access-gated host returns the
+	 *  login page, not build.json, so verify-live would fail. e.g. "https://testnet.tools.nulo.sh". */
 	faucetUrl: string
 	fetchImpl?: typeof fetch
 	/** retries AFTER the first attempt (default 6). */
@@ -88,7 +89,7 @@ if (import.meta.main) {
 		version: process.env.VERSION ?? "",
 		sha: process.env.SHA ?? "",
 		landingUrl: process.env.LANDING_URL ?? "https://nulo.sh",
-		faucetUrl: process.env.FAUCET_URL ?? "https://faucet.nulo.sh",
+		faucetUrl: process.env.FAUCET_URL ?? "https://testnet.tools.nulo.sh",
 	})
 	if (result.ok) {
 		console.log("verify-live: OK — both surfaces serve this release")

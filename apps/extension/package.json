@@ -1,9 +1,9 @@
 {
 	"name": "@nulo/extension",
 	"private": true,
-	"displayName": "Nulo",
+	"displayName": "Nulo (V5)",
 	"description": "User-friendly self-custody wallet for Aztec network, preserving your privacy and revealing the power of account abstraction.",
-	"version": "0.25.0",
+	"version": "0.26.0",
 	"sentinel": "8",
 	"scripts": {
 		"check:rp-id": "bun run scripts/check-rp-id.ts",

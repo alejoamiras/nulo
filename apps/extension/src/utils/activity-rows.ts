@@ -94,7 +94,7 @@ export function buildActivityRows({
 		// by 1000 so the magnitude is comparable to the millisecond values
 		// used for tx / journal sortKeys.
 		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
+		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
 	}
 
 	return rows.sort((a, b) => b.sortKey - a.sortKey)

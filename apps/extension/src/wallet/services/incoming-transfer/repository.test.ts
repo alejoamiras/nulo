@@ -1,7 +1,8 @@
+import { describe, expect, test } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
-import { beforeEach, describe, expect, test } from "vitest"
-import { IncomingTransferRepository, recordKey, trustKey } from "./repository"
-import type { IncomingTransferRecord } from "./spec"
+import type { IncomingPublicEventRecord } from "./spec"
+import { publicRecordId } from "./spec"
+import { IncomingTransferRepository, trustKey } from "./repository"
 
 describe("IncomingTransferRepository — trustKey", () => {
 	test("composes profile|network|contract", () => {
@@ -18,89 +19,64 @@ describe("IncomingTransferRepository — trustKey", () => {
 	})
 })
 
-/**
- * A siloed nullifier is unique within ONE rollup tree, not across them, so the
- * nullifier alone cannot be the row key: the same value observed on two
- * networks would collide on a single row and one of them would disappear.
- */
-describe("IncomingTransferRepository — record identity", () => {
-	const NULLIFIER = "0xnull"
-	let repo: IncomingTransferRepository
+const RECORDS_ROOT = "nulo:core:incoming-transfers"
 
-	const record = (over: Partial<IncomingTransferRecord> = {}) =>
-		({
-			siloedNullifier: NULLIFIER,
-			profileId: "p1",
-			networkId: "n1",
-			accountAddress: "0xa",
-			owner: "0xa",
-			contract: "0xtoken",
-			tokenId: 1,
-			amountRaw: "1000",
-			noteHash: "0xnote",
-			txHash: "0xtx",
-			l2BlockNumber: 1,
-			txIndexInBlock: 0,
-			noteIndexInTx: 0,
-			discoveredAt: 0,
-			hidden: false,
-			...over,
-		}) as IncomingTransferRecord
+function pubRec(profileId: string, networkId: string, txHash: string): IncomingPublicEventRecord {
+	return {
+		kind: "public-event",
+		id: publicRecordId(profileId, networkId, txHash, 0),
+		profileId,
+		networkId,
+		accountAddress: "0xacct",
+		contract: "0xtok",
+		tokenId: 1,
+		from: "0xfrom",
+		amountRaw: "100",
+		txHash,
+		l2BlockNumber: 5,
+		blockHash: "0xbh",
+		txIndexInBlock: 0,
+		indexInTx: 0,
+		hidden: false,
+		discoveredAt: 0,
+	}
+}
 
-	beforeEach(() => {
+describe("IncomingTransferRepository — clearProfile / clearChain fan-out (code-review #4)", () => {
+	test("clearProfile deletes ONLY the target profile (p1 ≠ p11 prefix), incl. a codec-INVALID row", async () => {
 		const api = new FakeBrowserApi()
 		api.reset()
-		repo = new IncomingTransferRepository(api)
+		const repo = new IncomingTransferRepository(api)
+		await repo.upsertRecord(pubRec("p1", "n1", "0xa"))
+		await repo.upsertRecord(pubRec("p11", "n1", "0xb")) // different profile whose id shares the "p1" prefix
+		await repo.setTrust("p1", "n1", "0xtok", "trusted")
+		await repo.setTrust("p11", "n1", "0xtok", "trusted")
+		// A corrupt record row under p1 that FAILS codec validation — `get()` reads it as `undefined`,
+		// so a value-predicate sweep would silently skip it; the key-prefix delete must still remove it.
+		await api.storage.local.set({ [`${RECORDS_ROOT}@${publicRecordId("p1", "n1", "0xcorrupt", 0)}`]: "{}" })
+
+		await repo.clearProfile("p1")
+
+		const remaining = await repo.listRecords()
+		expect(remaining.map((r) => r.profileId)).toEqual(["p11"]) // p1's valid record gone; p11 untouched
+		expect((await repo.listTrust()).map((t) => t.profileId)).toEqual(["p11"])
+		// The corrupt row is gone from the underlying store (its key no longer present).
+		const rawKeys = Object.keys(await api.storage.local.get())
+		expect(rawKeys.some((k) => k.includes("0xcorrupt"))).toBe(false)
 	})
 
-	test("the same nullifier on two networks is two independent records", async () => {
-		const onN1 = record({ networkId: "n1", amountRaw: "1000" })
-		const onN2 = record({ networkId: "n2", amountRaw: "2000" })
+	test("clearChain deletes only (p1,n1), leaving (p1,n2) intact", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const repo = new IncomingTransferRepository(api)
+		await repo.upsertRecord(pubRec("p1", "n1", "0xa"))
+		await repo.upsertRecord(pubRec("p1", "n2", "0xb"))
+		await repo.setTrust("p1", "n1", "0xtok", "trusted")
+		await repo.setTrust("p1", "n2", "0xtok", "trusted")
 
-		await repo.upsertRecord(onN1)
-		await repo.upsertRecord(onN2)
+		await repo.clearChain("p1", "n1")
 
-		expect(await repo.listRecords()).toHaveLength(2)
-		expect((await repo.getRecord(onN1, NULLIFIER))?.amountRaw).toBe("1000")
-		expect((await repo.getRecord(onN2, NULLIFIER))?.amountRaw).toBe("2000")
-	})
-
-	test("the same nullifier under another account or profile stays distinct", async () => {
-		for (const row of [record(), record({ accountAddress: "0xb" }), record({ profileId: "p2" })]) {
-			await repo.upsertRecord(row)
-		}
-		expect(await repo.listRecords()).toHaveLength(3)
-	})
-
-	test("deleting one scope's record leaves the colliding one intact", async () => {
-		const onN1 = record({ networkId: "n1" })
-		const onN2 = record({ networkId: "n2" })
-		await repo.upsertRecord(onN1)
-		await repo.upsertRecord(onN2)
-
-		await repo.deleteRecord(onN1, NULLIFIER)
-
-		expect(await repo.getRecord(onN1, NULLIFIER)).toBeUndefined()
-		expect(await repo.getRecord(onN2, NULLIFIER)).toBeDefined()
-	})
-
-	test("re-upserting the same record replaces it rather than duplicating", async () => {
-		await repo.upsertRecord(record({ amountRaw: "1" }))
-		await repo.upsertRecord(record({ amountRaw: "2" }))
-
-		expect(await repo.listRecords()).toHaveLength(1)
-		expect((await repo.getRecord(record(), NULLIFIER))?.amountRaw).toBe("2")
-	})
-
-	test("a lookup from the wrong scope finds nothing", async () => {
-		await repo.upsertRecord(record({ networkId: "n1" }))
-
-		expect(await repo.getRecord(record({ networkId: "n2" }), NULLIFIER)).toBeUndefined()
-		expect(await repo.hasRecord(record({ profileId: "p2" }), NULLIFIER)).toBe(false)
-	})
-
-	test("a separator inside an identifier cannot forge another scope's key", () => {
-		const sneaky = recordKey({ profileId: 'p1","n1', networkId: "x", accountAddress: "0xa" }, NULLIFIER)
-		expect(sneaky).not.toBe(recordKey({ profileId: "p1", networkId: "n1", accountAddress: "0xa" }, NULLIFIER))
+		expect((await repo.listRecords()).map((r) => r.networkId)).toEqual(["n2"])
+		expect((await repo.listTrust()).map((t) => t.networkId)).toEqual(["n2"])
 	})
 })

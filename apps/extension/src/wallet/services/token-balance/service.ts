@@ -147,6 +147,35 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		this.queue.enqueue(balance)
 	}
 
+	/**
+	 * Causal-ack refresh request for the incoming-transfer balance outbox (D4). Enqueues a
+	 * re-projection for `(tokenId, accountAddress)` and returns a task id ONLY when it minted a
+	 * FRESH task — one created strictly after this call, so its projection is guaranteed to read
+	 * chain state including the just-discovered receipt. When a task is already pending/processing
+	 * (the queue COALESCES), the value still refreshes but this returns `{ busy: true }` WITHOUT a
+	 * task id — reusing the coalesced task's id would false-ack a receipt it may have preceded.
+	 * Returns `{ missing: true }` (NOT a throw) when no balance row exists for the pair, so the caller
+	 * can delete a positively-stale outbox row while KEEPING it on a transient storage throw.
+	 */
+	public async requestBalanceRefresh(
+		tokenId: number,
+		accountAddress: string,
+	): Promise<{ taskId: string } | { busy: true } | { missing: true }> {
+		// A genuinely-absent (token, account) balance pair is a POSITIVE result (`{missing:true}`), NOT a
+		// throw — so the caller (the incoming-transfer outbox drain) can safely delete a stale row on
+		// `missing` while KEEPING the row on a real throw (a transient `getAll()`/storage failure), which
+		// would otherwise be indistinguishable and discard the sole durable refresh marker (codex R1 High #4).
+		const balance = (await this.repo.getAll()).find((x) => x.token === tokenId && x.account === accountAddress)
+		if (!balance) {
+			return { missing: true }
+		}
+		const hadPending = this.queue.hasPendingTask(balance.id)
+		this.queue.enqueue(balance)
+		if (hadPending) return { busy: true }
+		const taskId = this.queue.getPendingTaskId(balance.id)
+		return taskId ? { taskId } : { busy: true }
+	}
+
 	public async refreshAccountBalances(account: string): Promise<void> {
 		for (const balance of (await this.repo.getAll()).filter((x) => x.account === account)) {
 			this.queue.enqueue(balance)

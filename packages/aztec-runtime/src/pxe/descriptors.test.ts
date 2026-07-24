@@ -5,12 +5,19 @@ import type { PxeServiceClientBase } from "./client"
 import { PXEProxy } from "./proxy"
 
 /** The deliberate `Methods` − `IPXE` delta: SW-side only, never per-network in-process. */
-const SW_ONLY = ["getNoteSchemas", "getBlockTimestamp", "clearChainState"] as const
+const SW_ONLY = [
+	"getNoteSchemas",
+	"getBlockTimestamp",
+	"clearChainState",
+	"getPublicTokenTransferEvents",
+	"getPublicScanTips",
+	"getPublicTokenClassStatus",
+] as const
 
 describe("PXE_METHOD_DESCRIPTORS", () => {
-	test("covers the full 22-method surface with every flag explicit", () => {
+	test("covers the full 25-method surface with every flag explicit", () => {
 		const names = Object.keys(PXE_METHOD_DESCRIPTORS)
-		expect(names).toHaveLength(22)
+		expect(names).toHaveLength(25)
 		for (const name of names) {
 			const d = PXE_METHOD_DESCRIPTORS[name as keyof typeof PXE_METHOD_DESCRIPTORS]
 			expect(typeof d.rpc).toBe("boolean")

@@ -232,7 +232,13 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// E2E_PROVERLESS injects the incoming-poll gate (same tree-shaken-in-prod
 		// pattern + negative-grep as the proof gate above). Default poll interval kept.
 		services.add(
-			new IncomingTransferService(logger, browserApi, undefined, E2E_PROVERLESS ? new ChromeStorageIncomingPollGate() : undefined),
+			new IncomingTransferService(
+				logger,
+				browserApi,
+				undefined, // pollIntervalMs (default)
+				undefined, // publicReader (production uses the built-in PXE reader)
+				E2E_PROVERLESS ? new ChromeStorageIncomingPollGate() : undefined,
+			),
 		)
 		services.add(new PasskeyService(logger, windowManager))
 		// Started LAST (declares dependencies on every service it purges) — finding D.

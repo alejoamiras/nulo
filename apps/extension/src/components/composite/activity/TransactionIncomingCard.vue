@@ -33,6 +33,9 @@ const props = defineProps({
 	amountFiat: { type: String, default: null },
 	/** Transaction hash that delivered the note (for hash-slice rendering). */
 	txHash: { type: String, default: null },
+	/** Receiver-honest kind label ("Received privately" / "Public → Public" /
+	 *  "Private → Public" / "Minted"), derived from the resolved type (D5-D). */
+	receivedLabel: { type: String, default: "Received" },
 })
 
 const formattedAmount = computed(() => {
@@ -62,7 +65,7 @@ const hashSlice = computed(() => {
 
 		<template #title-trailing>
 			<span :class="$style.title_sep">·</span>
-			<span :class="$style.chip">Received</span>
+			<span :class="$style.chip" data-testid="tx-incoming-kind-chip">{{ receivedLabel }}</span>
 		</template>
 
 		<template #secondary>

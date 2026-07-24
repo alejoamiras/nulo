@@ -99,7 +99,7 @@ watch(isOpen, async () => {
 			trap.value.deactivate()
 		}
 
-		removeOutside()
+		removeOutside?.()
 
 		if (Object.hasOwn(dropdownStyles.value, "top")) {
 			dropdownStyles.value.top = undefined
@@ -136,10 +136,30 @@ watch(isOpen, async () => {
 		}
 
 		nextTick(() => {
-			trap.value = focusTrap.createFocusTrap(dropdown.value.$el, {
-				initialFocus: false,
-			})
-			trap.value.activate()
+			let candidate
+			try {
+				candidate = focusTrap.createFocusTrap(dropdown.value.$el, {
+					initialFocus: false,
+					// Container is focusable (tabindex=-1) so focus-trap can hold focus even
+					// when every menu item is disabled (no tabbable node) — the case that
+					// otherwise makes activate() throw. The try/catch stays as a backstop.
+					fallbackFocus: () => dropdown.value?.$el,
+				})
+				candidate.activate()
+				trap.value = candidate
+			} catch {
+				// Backstop: fallbackFocus should prevent the no-tabbable throw, but if activate()
+				// still fails after partially installing listeners, deactivate the candidate so we
+				// don't leak focus isolation — then leave `trap` inert (its deactivate() no-ops).
+				// A menu that can't trap focus is far better than the y:0 undismissable lock-up
+				// this whole path exists to prevent.
+				try {
+					candidate?.deactivate?.()
+				} catch {
+					// deactivating a half-activated trap can itself throw; ignore.
+				}
+				trap.value = {}
+			}
 
 			/** Check if there is enough space to open (top/bottom) */
 			const dropdownRect = dropdown.value.$el.getBoundingClientRect()
@@ -235,6 +255,7 @@ const onKeydown = (event) => {
 				<Flex
 					v-if="isOpen"
 					ref="dropdown"
+					tabindex="-1"
 					@click="close"
 					:class="[
 						$style.dropdown,
