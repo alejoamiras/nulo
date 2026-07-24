@@ -1,7 +1,6 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { SetPublicAuthwitContractInteraction } from "@aztec/aztec.js/authorization"
 import { Contract, waitForProven } from "@aztec/aztec.js/contracts"
-import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxHash, TxStatus } from "@aztec/aztec.js/tx"
@@ -14,9 +13,8 @@ import { OutboxContract } from "@aztec/ethereum/contracts"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { decodeFunctionData } from "viem"
 import { sepolia } from "viem/chains"
-import { computed, ref, watch } from "vue"
+import { ref, watch } from "vue"
 import { BRIDGE, BRIDGE_PROXY, BRIDGE_TOKEN, L1_PORTAL } from "@/contracts/bridge-deployments"
-import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
 	addRecord,
 	connectJournalDeps,
@@ -41,6 +39,17 @@ const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.
 const PROVEN_TIMEOUT_SEC = 1800
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * The single source of the withdraw send options. Withdrawals NEVER carry an app-set fee — the
+ * connected wallet pays its own default (its fee-juice balance / per-network default). Deposits may
+ * sponsor; a withdrawal must not, and it must not on any network. Routing all three withdraw sends
+ * (public authwit, public exit, private exit) through one builder is what stops a fee being
+ * reintroduced on a single path. Do NOT add a `fee`/`paymentMethod` field here.
+ */
+export function buildWithdrawSendOpts(from: AztecAddress) {
+	return { from, wait: { waitForStatus: TxStatus.PROPOSED } }
+}
 
 let depsWired = false
 
@@ -218,9 +227,7 @@ export function useWithdrawFlow() {
 
 			const fromAddr = AztecAddress.fromStringUnsafe(from)
 			const nonce = Fr.random()
-			const fpc = await getSponsoredFpcInstance()
-			const fee = { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) }
-			const sendOpts = { from: fromAddr, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
+			const sendOpts = buildWithdrawSendOpts(fromAddr)
 			const token = await Contract.at(BRIDGE_TOKEN, TokenContractArtifact, aztec)
 			const bridge = await Contract.at(BRIDGE, tokenBridgeArtifact, aztec)
 
