@@ -1,6 +1,11 @@
 # Phase 3 — release-please Release PR #321 (0.26.0)
 
-**Status:** ▶ in progress — CHANGELOG verified; superseded-run artifact observed; waiting on the LIVE CI batch.
+**Status:** ✓ GREEN — merged.
+
+## Resolution
+- Live batch all green (Network e2e / Quality / Smoke e2e latest runs = success); aggregators superseded the stale cancelled ones → `mergeable=MERGEABLE state=CLEAN`, 0 fails.
+- Merged #321 via `gh pr merge 321 --merge`. Merge commit **`TAG_SHA=bffaad26e0601765119e34f72df2018644cc101d`**; 2-parent check = 3 → merge-commit. `origin/main` advanced.
+- `TAG_SHA` is what Phase 4 tag `v0.26.0` + the built artifacts + the faucet `buildId` must derive from (distinct from `RELEASE_SHA=4e5435b`).
 
 ## CHANGELOG review ✓
 - Version `0.26.0`, compares `v0.25.0...v0.26.0`, dated 2026-07-24. All 21 PRs correctly categorized (Features/Bug Fixes/Tests/Misc/Docs). Accurate. Version matches expectation.
