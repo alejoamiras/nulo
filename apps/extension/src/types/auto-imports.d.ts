@@ -145,8 +145,10 @@ declare global {
   const toValue: typeof import('vue').toValue
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
+  const txScope: typeof import('../stores/activity.store').txScope
   const unref: typeof import('vue').unref
   const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
+  const useActivityStore: typeof import('../stores/activity.store').useActivityStore
   const useAppStore: typeof import('../stores/app.store').useAppStore
   const useAttrs: typeof import('vue').useAttrs
   const useCacheStore: typeof import('../stores/cache.store').useCacheStore
@@ -242,6 +244,9 @@ declare global {
   // @ts-ignore
   export type { ProfileActivationSubject } from '../composables/waitForProfileActive'
   import('../composables/waitForProfileActive')
+  // @ts-ignore
+  export type { AwaitingTx, ActivitySlice } from '../stores/activity.store'
+  import('../stores/activity.store')
   // @ts-ignore
   export type { NotificationType, NotificationPayload, NotificationItem } from '../stores/notification.store'
   import('../stores/notification.store')
@@ -424,8 +429,10 @@ declare module 'vue' {
     readonly toValue: UnwrapRef<typeof import('vue')['toValue']>
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
+    readonly txScope: UnwrapRef<typeof import('../stores/activity.store')['txScope']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
     readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
+    readonly useActivityStore: UnwrapRef<typeof import('../stores/activity.store')['useActivityStore']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
     readonly useCacheStore: UnwrapRef<typeof import('../stores/cache.store')['useCacheStore']>

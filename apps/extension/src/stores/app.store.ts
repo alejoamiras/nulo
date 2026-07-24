@@ -12,16 +12,8 @@ import { getPrimaryCall } from "@/utils/tx-enrichment"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 import { useSyncedRef } from "@/composables/syncedRef.js"
-
-type AwaitingTx = {
-	/** Unique per submission so the rejection path removes exactly the placeholder
-	 *  it created — never a by-destination/contract search that could hit a
-	 *  same-recipient sibling or another account's row. */
-	id: string
-	account: string
-	contract: string
-	destination: string
-}
+import type { ActivityScope } from "@nulo/wallet-core/activity"
+import { type AwaitingTx, txScope, useActivityStore } from "@/stores/activity.store"
 
 export const useAppStore = defineStore("app", () => {
 	const _isHomeScreenOpened = ref(false)
@@ -130,110 +122,81 @@ export const useAppStore = defineStore("app", () => {
 		networks.value = networks.value.filter((n) => n.id !== target.id)
 	}
 
-	const awaitingTransactions = ref<AwaitingTx[]>([])
-	const transactions = ref<Tx[]>([])
+	const activity = useActivityStore()
 
-	// Account-switch isolation (Layer-A containment). A monotonic token bumped
-	// synchronously on every active-account change. Awaited feed fetches capture
-	// it and discard their result if it moved while in flight (A→B, A→B→A). See
-	// implementations-plan/account-switch-isolation.
-	const activityGeneration = ref(0)
+	/**
+	 * The scope the feed is showing. Requires all three parts: a half-resolved
+	 * scope during bootstrap would otherwise key a slice that no record can ever
+	 * match, so the view stays empty until the scope is whole.
+	 */
+	const activeScope = computed<ActivityScope | null>(() => {
+		const profileId = profile.value?.id
+		const networkId = network.value?.id
+		const chainId = network.value?.chainId
+		const accountAddress = account.value?.address
+		// Every part must be usable. A partially-resolved scope during bootstrap
+		// would key a slice no record can match, and an empty identifier is not a
+		// valid key at all.
+		if (!profileId || !networkId || !accountAddress) return null
+		if (typeof chainId !== "number" || !Number.isSafeInteger(chainId) || chainId < 0) return null
+		return { profileId, networkId, chainId, accountAddress }
+	})
 
-	// True only when the record's own scope (account + chain) equals the live
-	// active scope. Chain is tolerated when the live network is unknown — Phase 1
-	// filters on the fields it has and never falls back to "active-now".
-	const isActiveTxScope = (tx: Pick<Tx, "account" | "chainId">) => {
-		const activeAddress = account.value?.address
-		if (!activeAddress || tx.account !== activeAddress) return false
-		const activeChainId = network.value?.chainId
-		return activeChainId === undefined || tx.chainId === activeChainId
+	// `flush: 'sync'` so the swap happens in the same tick as the scope change —
+	// an async watcher leaves a frame in which the outgoing scope's rows are
+	// still on screen under the incoming one.
+	watch(activeScope, (scope) => activity.activateScope(scope), { flush: "sync", immediate: true })
+
+	const transactions = computed(() => activity.transactions)
+	const awaitingTransactions = computed(() => activity.awaitingTransactions)
+
+	const addAwaitingTransaction = (row: AwaitingTx) => {
+		if (activeScope.value) activity.addAwaiting(activeScope.value, row)
 	}
 
-	// Clears ONLY what the active feed renders for the outgoing account — never
-	// the durable tx store nor another account's in-flight work. `transactions`
-	// is refetched by `syncTransactions`; awaiting placeholders are kept only if
-	// they belong to the now-active account (drop-only containment — cross-account
-	// retention is Layer B / Phase 2).
-	const resetActiveFeedState = () => {
-		transactions.value = []
-		const activeAddress = account.value?.address
-		awaitingTransactions.value = activeAddress ? awaitingTransactions.value.filter((t) => t.account === activeAddress) : []
-	}
+	/** Removes exactly the placeholder with `id` (unique per submission), so the
+	 *  send-rejection path can never remove a same-recipient sibling or another
+	 *  account's placeholder. */
+	const removeAwaitingTransaction = (id: string) => activity.removeAwaiting(id)
 
-	// Single synchronous choke point for every switch path (AccountsPopup,
-	// visibility-driven reassignment, bootstrap, network switch → setupActiveAccount
-	// all funnel through `account.value`). `flush: 'sync'` closes the one-tick
-	// window the async app.vue watcher would leave, where B could paint A's rows.
-	// Keyed on address so a rename (same address) does not reset the feed.
-	watch(
-		() => account.value?.address,
-		() => {
-			activityGeneration.value++
-			resetActiveFeedState()
-		},
-		{ flush: "sync" },
-	)
-
-	// Removes exactly the placeholder with `id` (unique per submission), so the
-	// send-rejection path can never remove a same-recipient sibling or another
-	// account's placeholder.
-	const removeAwaitingTransaction = (id: string) => {
-		const idx = awaitingTransactions.value.findIndex((t) => t.id === id)
-		if (idx !== -1) awaitingTransactions.value.splice(idx, 1)
-	}
+	/** Wipe every cached scope — used by the local-reset flow. */
+	const clearActivity = () => activity.clearAll()
 
 	const onTxAdded = async (tx: Tx) => {
-		// Containment: only surface the tx in the active view when its scope
-		// matches the live scope. A tx settling for A while B is active must NOT
-		// enter B's feed.
-		if (isActiveTxScope(tx)) {
-			transactions.value.unshift(tx)
-		}
+		// Routed by the transaction's OWN scope: one settling for another account
+		// lands in that account's slice, never in whatever is on screen.
+		activity.ingestTransaction(tx, activeScope.value)
 
-		// Placeholder cleanup keys on the tx's OWN account plus the placeholder's
-		// captured scope (account + contract + destination) — never the live active
-		// account, so a tx settling for a non-active account still clears that
-		// account's placeholder. Use the shared primary-call picker so FEE_METHODS
-		// (sponsor_unconditionally etc.) are filtered out before destination
-		// resolution. Without this, a dApp + FPC tx whose calls[0] is the fee call
-		// would compare the FPC's address against the awaiting placeholder's
-		// intended destination — the awaiting card would never clear.
+		// Placeholder cleanup keys on the tx's own account plus the placeholder's
+		// captured scope (account + contract + destination). Use the shared
+		// primary-call picker so FEE_METHODS (sponsor_unconditionally etc.) are
+		// filtered out before destination resolution. Without this, a dApp + FPC tx
+		// whose calls[0] is the fee call would compare the FPC's address against the
+		// awaiting placeholder's intended destination — the card would never clear.
+		const scope = txScope(tx, activeScope.value)
+		if (!scope) return
 		const call = getPrimaryCall(tx.calls)
 		const destination = (call?.transfers?.length ? call?.transfers[0].to : (call?.args?.[1] as string | undefined)) ?? ""
-		const awaitingTxIdx = awaitingTransactions.value.findIndex(
-			(t) => t.account === tx.account && t.contract === call?.contract && t.destination === destination,
-		)
-		if (awaitingTxIdx > -1) {
-			awaitingTransactions.value.splice(awaitingTxIdx, 1)
-		}
+		activity.settleAwaiting(scope, (t) => t.account === tx.account && t.contract === call?.contract && t.destination === destination)
 	}
+
 	const onTxUpdated = (tx: Tx) => {
-		// Require account AND hash. A hash-only match could rewrite a different
-		// account's row; matching on account too means a foreign-scope event can
-		// never mutate the active view.
-		const ind = transactions.value.findIndex((x) => x.hash === tx.hash && x.account === tx.account)
-		if (ind !== -1) {
-			transactions.value.splice(ind, 1, tx)
-		}
+		activity.ingestTransaction(tx, activeScope.value)
 	}
+
 	const syncTransactions = async () => {
-		if (!account.value || !managers.transaction) return
+		if (!managers.transaction) return
+		// Capture the scope BEFORE the await: the result belongs to the scope it
+		// was fetched for, even if the user has switched away by the time it lands.
+		const captured = activeScope.value
+		if (!captured) return
 
-		// Capture scope + generation BEFORE the await (mirrors syncNetworkStatus'
-		// oldNetworkId guard): discard the result if a switch bumped the generation
-		// while the fetch was in flight (A→B, A→B→A), then filter rows to the
-		// captured account + chain as defense-in-depth.
-		const capturedGeneration = activityGeneration.value
-		const capturedAccount = account.value.address
-		const capturedChainId = network.value?.chainId
+		const rows = await managers.transaction.getTransactions(captured.accountAddress)
 
-		const rows = await managers.transaction.getTransactions(capturedAccount)
-
-		if (capturedGeneration !== activityGeneration.value) return
-
-		transactions.value = rows
-			.filter((tx) => tx.account === capturedAccount && (capturedChainId === undefined || tx.chainId === capturedChainId))
-			.sort((a, b) => b.updatedAt - a.updatedAt)
+		activity.setTransactions(
+			captured,
+			rows.filter((tx) => tx.account === captured.accountAddress && tx.chainId === captured.chainId),
+		)
 	}
 
 	const dappSessions = ref([])
@@ -269,9 +232,10 @@ export const useAppStore = defineStore("app", () => {
 		renameNetwork,
 		removeNetwork,
 		transactions,
-		activityGeneration,
-		resetActiveFeedState,
+		activeScope,
+		addAwaitingTransaction,
 		removeAwaitingTransaction,
+		clearActivity,
 		onTxAdded,
 		onTxUpdated,
 		syncTransactions,

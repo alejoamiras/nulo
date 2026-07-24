@@ -42,6 +42,9 @@ export interface BuildActivityRowsParams {
 	chainId?: number
 	/** Active network id — scopes incoming rows (record carries `networkId`). Applied only when set. */
 	networkId?: string
+	/** Active profile id — scopes rows that name a profile. Two profiles can derive
+	 *  the same address, so account + chain alone are not a unique scope. */
+	profileId?: string
 }
 
 export function buildActivityRows({
@@ -51,7 +54,13 @@ export function buildActivityRows({
 	accountAddress,
 	chainId,
 	networkId,
+	profileId,
 }: BuildActivityRowsParams): ActivityRow[] {
+	/** Two profiles can hold the same address, so a row that names a profile
+	 *  must match the one being viewed. Rows written before scope stamping name
+	 *  none and stay visible — they cannot be attributed either way. */
+	const wrongProfile = (rowProfileId: string | undefined) =>
+		profileId !== undefined && rowProfileId !== undefined && rowProfileId !== profileId
 	const rows: ActivityRow[] = []
 
 	for (const tx of transactions) {
@@ -59,6 +68,7 @@ export function buildActivityRows({
 		// out-of-scope tx from the store's flat list must not render under B).
 		if (accountAddress !== undefined && tx.account !== accountAddress) continue
 		if (chainId !== undefined && tx.chainId !== chainId) continue
+		if (wrongProfile(tx.profileId)) continue
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
 
@@ -66,6 +76,7 @@ export function buildActivityRows({
 		if (op.progress?.stage === "succeeded") continue
 		if (!ACTIVITY_FEED_KINDS.has(op.kind)) continue
 		if (op.accountAddress !== accountAddress) continue
+		if (wrongProfile(op.profileId)) continue
 		if (op.terminalAt === null) continue
 		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt, op })
 	}

@@ -103,6 +103,10 @@ const recentActivityRows = computed(() => {
 	const activeAccountAddress = appStore.account?.address
 	const activeChainId = appStore.network?.chainId
 	const activeNetworkId = appStore.network?.id
+	const activeProfileId = appStore.profile?.id
+	// Two profiles can derive the same address, so a row naming a profile must
+	// match the one being viewed; rows naming none stay visible.
+	const wrongProfile = (rowProfileId) => activeProfileId !== undefined && rowProfileId !== undefined && rowProfileId !== activeProfileId
 	const rows = []
 	for (const op of recentlyTerminalJournalOps.value) {
 		rows.push({ type: "journal", key: `journal:${op.id}`, sortKey: op.terminalAt ?? 0, op })
@@ -110,6 +114,7 @@ const recentActivityRows = computed(() => {
 	for (const tx of filteredRecentTransactions.value) {
 		if (activeAccountAddress !== undefined && tx.account !== activeAccountAddress) continue
 		if (activeChainId !== undefined && tx.chainId !== activeChainId) continue
+		if (wrongProfile(tx.profileId)) continue
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
 	for (const inc of incomingTransfers.value) {
@@ -118,6 +123,7 @@ const recentActivityRows = computed(() => {
 		if (props.token && inc.tokenId !== props.token.id) continue
 		if (activeAccountAddress !== undefined && inc.accountAddress !== activeAccountAddress) continue
 		if (activeNetworkId !== undefined && inc.networkId !== activeNetworkId) continue
+		if (wrongProfile(inc.profileId)) continue
 		// Path 2: prefer block timestamp (chain-derived, survives remove+re-add).
 		// Fall back to discoveredAt for legacy records or when PXE didn't
 		// resolve the block. *1000 to align magnitude with tx.updatedAt (ms).
@@ -271,6 +277,10 @@ const onCancelInFlight = buildCancelHandler(executionService, (jobId) => pending
  *  Same rules apply to in-flight and recently-terminal surfaces. */
 function journalRecordInScope(op) {
 	if (op.accountAddress !== appStore.account?.address) return false
+	// Profile scoping: two profiles can hold the SAME account address (the same
+	// mnemonic imported twice), so account + network alone would let one
+	// profile's operations render under the other.
+	if (op.profileId && appStore.profile?.id && op.profileId !== appStore.profile.id) return false
 	// Network scoping (codex audit gap on multi-network profiles): a tx
 	// fired on chain A shouldn't surface in the activity feed for chain B.
 	// Records before the journal carried `networkId` may have it
@@ -537,10 +547,10 @@ function clearAwaitingTransactionFallback(op) {
 	if (!recipient || op.tokenId === undefined) return
 	const tokenContract = tokenById(op.tokenId)?.contract
 	if (!tokenContract) return
-	const idx = appStore.awaitingTransactions.findIndex(
+	const placeholder = appStore.awaitingTransactions.find(
 		(t) => t.account === op.accountAddress && t.destination === recipient && t.contract === tokenContract,
 	)
-	if (idx !== -1) appStore.awaitingTransactions.splice(idx, 1)
+	if (placeholder) appStore.removeAwaitingTransaction(placeholder.id)
 }
 
 function onJournalAdded(op) {

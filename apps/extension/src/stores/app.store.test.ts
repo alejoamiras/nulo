@@ -15,7 +15,14 @@ import { useAppStore } from "./app.store"
 const getTransactionsMock = vi.fn()
 
 const asAccount = (address: string) => ({ address }) as unknown as Account
-const asNetwork = (chainId: number) => ({ chainId }) as unknown as Network
+const asNetwork = (chainId: number, id = `net-${chainId}`) => ({ id, chainId }) as unknown as Network
+
+/** Put the store on a complete scope; the feed stays empty until one exists. */
+const scopeTo = (store: ReturnType<typeof useAppStore>, address: string, chainId = 1) => {
+	store.profile = { id: "p1" } as never
+	store.network = asNetwork(chainId)
+	store.account = asAccount(address)
+}
 
 beforeEach(() => {
 	setActivePinia(createPinia())
@@ -47,9 +54,9 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 	// comes from the user's actual transfer call.
 	test("dApp + FPC tx with sponsor as calls[0] clears the awaiting placeholder", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xaccount")
+		scopeTo(store, "0xaccount")
 
-		store.awaitingTransactions.push({
+		store.addAwaitingTransaction({
 			id: "await-1",
 			account: "0xaccount",
 			contract: "0xtoken",
@@ -59,6 +66,7 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 		const tx = {
 			hash: "0xabc",
 			account: "0xaccount",
+			chainId: 1,
 			calls: [
 				{ contract: "0xfpc", method: "sponsor_unconditionally", args: [] },
 				{
@@ -78,9 +86,9 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 
 	test("transfer-only tx (no FPC) still clears the awaiting placeholder via call.transfers", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xaccount")
+		scopeTo(store, "0xaccount")
 
-		store.awaitingTransactions.push({
+		store.addAwaitingTransaction({
 			id: "await-1",
 			account: "0xaccount",
 			contract: "0xtoken",
@@ -90,6 +98,7 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 		const tx = {
 			hash: "0xdef",
 			account: "0xaccount",
+			chainId: 1,
 			calls: [
 				{
 					contract: "0xtoken",
@@ -107,9 +116,9 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 
 	test("tx whose destination doesn't match any awaiting placeholder leaves the list intact", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xaccount")
+		scopeTo(store, "0xaccount")
 
-		store.awaitingTransactions.push({
+		store.addAwaitingTransaction({
 			id: "await-1",
 			account: "0xaccount",
 			contract: "0xtoken",
@@ -119,6 +128,7 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 		const tx = {
 			hash: "0xdef",
 			account: "0xaccount",
+			chainId: 1,
 			calls: [
 				{
 					contract: "0xtoken",
@@ -137,9 +147,9 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 
 	test("uses args[1] as destination fallback when transfers is empty", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xaccount")
+		scopeTo(store, "0xaccount")
 
-		store.awaitingTransactions.push({
+		store.addAwaitingTransaction({
 			id: "await-1",
 			account: "0xaccount",
 			contract: "0xtoken",
@@ -149,6 +159,7 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 		const tx = {
 			hash: "0xfoo",
 			account: "0xaccount",
+			chainId: 1,
 			calls: [
 				{ contract: "0xfpc", method: "sponsor_unconditionally", args: [] },
 				{
@@ -166,34 +177,30 @@ describe("app.store.onTxAdded — destination resolution via getPrimaryCall", ()
 })
 
 describe("app.store — account-switch containment (Layer A)", () => {
-	test("switching accounts synchronously clears transactions and bumps the generation", () => {
+	test("switching accounts synchronously swaps the feed to the incoming scope", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
-		const genAfterA = store.activityGeneration
+		scopeTo(store, "0xA")
 
-		store.transactions = [{ hash: "0xA-tx", account: "0xA", chainId: 1 } as unknown as Tx]
-		store.awaitingTransactions = [{ id: "id-A", account: "0xA", contract: "0xt", destination: "0xr" }]
+		await store.onTxAdded({ hash: "0xA-tx", account: "0xA", chainId: 1, calls: [] } as unknown as Tx)
+		store.addAwaitingTransaction({ id: "id-A", account: "0xA", contract: "0xt", destination: "0xr" })
 
-		store.account = asAccount("0xB")
+		scopeTo(store, "0xB")
 
 		// Synchronous relative to the switch — no await, no nextTick.
 		expect(store.transactions).toEqual([])
 		// A's placeholder is foreign to B → dropped; B keeps its own (none here).
 		expect(store.awaitingTransactions).toEqual([])
-		expect(store.activityGeneration).toBe(genAfterA + 1)
 	})
 
-	test("a rename (same address) does NOT reset the feed or bump the generation", () => {
+	test("a rename (same address) does NOT reset the feed", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
-		const gen = store.activityGeneration
-		store.transactions = [{ hash: "0xA-tx", account: "0xA", chainId: 1 } as unknown as Tx]
+		scopeTo(store, "0xA")
+		await store.onTxAdded({ hash: "0xA-tx", account: "0xA", chainId: 1, calls: [] } as unknown as Tx)
 
 		// New object, SAME address (an account rename).
 		store.account = { address: "0xA", name: "Renamed" } as unknown as Account
 
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xA-tx"])
-		expect(store.activityGeneration).toBe(gen)
 	})
 
 	test("a late syncTransactions resolving after an A→B switch does NOT overwrite B's transactions (generation guard)", async () => {
@@ -205,28 +212,30 @@ describe("app.store — account-switch containment (Layer A)", () => {
 		})
 		getTransactionsMock.mockReturnValueOnce(aPending)
 
-		store.account = asAccount("0xA")
-		store.network = asNetwork(1)
+		scopeTo(store, "0xA")
 
-		// Fetch for A starts and captures A's generation, then awaits.
+		// Fetch for A starts, capturing A's scope, then awaits.
 		const syncA = store.syncTransactions()
 
-		// Switch to B before A's fetch resolves; B's own rows land.
-		store.account = asAccount("0xB")
-		const txB = { hash: "0xB-tx", account: "0xB", chainId: 1, updatedAt: 2 } as unknown as Tx
-		store.transactions = [txB]
+		// Switch to B before A's fetch resolves; B's own row lands.
+		scopeTo(store, "0xB")
+		await store.onTxAdded({ hash: "0xB-tx", account: "0xB", chainId: 1, updatedAt: 2, calls: [] } as unknown as Tx)
 
-		// A's late fetch resolves — the generation moved, so it must be discarded.
+		// A's late fetch resolves into A's slice, which is no longer on screen.
 		resolveA([{ hash: "0xA-tx", account: "0xA", chainId: 1, updatedAt: 1 } as unknown as Tx])
 		await syncA
 
-		expect(store.transactions).toEqual([txB])
+		expect(store.transactions.map((t) => t.hash)).toEqual(["0xB-tx"])
 		expect(store.transactions.find((t) => t.account === "0xA")).toBeUndefined()
+
+		// It is not lost either — it is waiting in A's own scope.
+		scopeTo(store, "0xA")
+		expect(store.transactions.map((t) => t.hash)).toEqual(["0xA-tx"])
 	})
 
 	test("syncTransactions filters returned rows to the captured account + chain", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
+		scopeTo(store, "0xA")
 		store.network = asNetwork(1)
 
 		getTransactionsMock.mockResolvedValueOnce([
@@ -242,7 +251,7 @@ describe("app.store — account-switch containment (Layer A)", () => {
 
 	test("onTxAdded for a foreign account is dropped from the active view (placeholder cleanup still runs)", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
+		scopeTo(store, "0xA")
 		store.network = asNetwork(1)
 
 		await store.onTxAdded({ hash: "0xforeign", account: "0xB", chainId: 1, calls: [] } as unknown as Tx)
@@ -255,7 +264,7 @@ describe("app.store — account-switch containment (Layer A)", () => {
 
 	test("onTxAdded drops a same-account tx on a foreign chain from the active view", async () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
+		scopeTo(store, "0xA")
 		store.network = asNetwork(1)
 
 		await store.onTxAdded({ hash: "0xotherchain", account: "0xA", chainId: 2, calls: [] } as unknown as Tx)
@@ -265,32 +274,30 @@ describe("app.store — account-switch containment (Layer A)", () => {
 
 	test("onTxUpdated with matching hash but different account does NOT touch the active row", () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
+		scopeTo(store, "0xA")
 
-		store.transactions = [{ hash: "0xh", account: "0xA", status: TxStatus.Pending, updatedAt: 1 } as unknown as Tx]
+		store.onTxUpdated({ hash: "0xh", account: "0xA", chainId: 1, status: TxStatus.Pending, updatedAt: 1 } as unknown as Tx)
 
 		// Foreign account, same hash — must NOT replace (Pinia wraps rows in a
 		// reactive proxy, so assert on fields rather than object identity).
-		store.onTxUpdated({ hash: "0xh", account: "0xB", status: TxStatus.Proven, updatedAt: 2 } as unknown as Tx)
+		store.onTxUpdated({ hash: "0xh", account: "0xB", chainId: 1, status: TxStatus.Proven, updatedAt: 2 } as unknown as Tx)
 		expect(store.transactions[0].status).toBe(TxStatus.Pending)
 		expect(store.transactions[0].updatedAt).toBe(1)
 
 		// Correct account + hash — replaces.
-		store.onTxUpdated({ hash: "0xh", account: "0xA", status: TxStatus.Proven, updatedAt: 3 } as unknown as Tx)
+		store.onTxUpdated({ hash: "0xh", account: "0xA", chainId: 1, status: TxStatus.Proven, updatedAt: 3 } as unknown as Tx)
 		expect(store.transactions[0].status).toBe(TxStatus.Proven)
 		expect(store.transactions[0].updatedAt).toBe(3)
 	})
 
 	test("removeAwaitingTransaction removes exactly the placeholder with that id (not by destination/contract)", () => {
 		const store = useAppStore()
-		store.account = asAccount("0xA")
+		scopeTo(store, "0xA")
 
 		// Two placeholders with the SAME destination + contract (two sends to the
 		// same recipient) — only the id disambiguates them.
-		store.awaitingTransactions = [
-			{ id: "id-1", account: "0xA", contract: "0xt", destination: "0xr" },
-			{ id: "id-2", account: "0xA", contract: "0xt", destination: "0xr" },
-		]
+		store.addAwaitingTransaction({ id: "id-1", account: "0xA", contract: "0xt", destination: "0xr" })
+		store.addAwaitingTransaction({ id: "id-2", account: "0xA", contract: "0xt", destination: "0xr" })
 
 		store.removeAwaitingTransaction("id-1")
 
@@ -301,8 +308,9 @@ describe("app.store — account-switch containment (Layer A)", () => {
 		const store = useAppStore()
 		// Active account is B; a tx settles for A. A's placeholder was created
 		// before the switch and (in this direct test) is still present.
-		store.account = asAccount("0xB")
-		store.awaitingTransactions = [{ id: "id-A", account: "0xA", contract: "0xtoken", destination: "0xrecipient" }]
+		scopeTo(store, "0xA")
+		store.addAwaitingTransaction({ id: "id-A", account: "0xA", contract: "0xtoken", destination: "0xrecipient" })
+		scopeTo(store, "0xB")
 
 		await store.onTxAdded({
 			hash: "0xA-tx",

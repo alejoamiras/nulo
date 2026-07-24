@@ -312,7 +312,7 @@ const handleSend = async () => {
 	// removes exactly THIS placeholder — not a by-destination/contract search that
 	// could remove a same-recipient sibling or another account's row after a switch.
 	const awaitingId = crypto.randomUUID()
-	appStore.awaitingTransactions.push({
+	appStore.addAwaitingTransaction({
 		id: awaitingId,
 		account: appStore.account.address,
 		destination,
