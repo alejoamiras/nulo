@@ -40,7 +40,7 @@
 | — code-review max --fix | ✓ | clean; define mechanism proven per-target (lessons/code-review.md) |
 | — codex post-impl audit | ✓ | round 4: 4 HIGH, 0 CRITICAL → HIGH-1/2/3 fixed `05d604a`, HIGH-4 fixed `290ff08` |
 | 6 testnet rehearsal + cutover | ⏸ OWNER | needs Sepolia key/funds + live node (DP7 token deploy + canaries) |
-| 7 deploy tooling | ◐ 7a ✓ | `290ff08` verify-l1 network+circle-proxy (dry-run proven both shapes); 7b remaining |
+| 7 deploy tooling | ◐ 7a+7b.1 ✓ | `290ff08` verify-l1 network+circle-proxy; **7b.1 (D21): forge mainnet L1 bundle — anvil MAINNET-FORK REHEARSAL PASSED** (real USDC/Permit2/live portal; stub proven inert; all readbacks); 7b.2 remaining (network-keyed deployer/signer, FPC descriptor, fee budget, conductor `--network`) |
 | 8 mainnet deploy | ⛔ GO REQUIRED | real funds — explicit owner go per tx |
 | 9 ship + harden | ⛔ GO REQUIRED | owner smoke; renounce + revoke LAST |
 
@@ -310,6 +310,7 @@ derivation-equality checks).
 | D18 | AZLO at cutover | RETIRE; best-effort "export before re-point" notice, NOT a drain-gate | Owner: testnet is play money — NEW-2's stranded-recovery risk isn't worth a hard gate |
 | D19 | Router owner | Renounce LAST — after the Phase-9 smoke — then verify `owner()==0` | `live-intent.ts:372` hard-fails post-renounce; a pre-smoke renounce strands a swapTarget fix (round-3 NEW-4) |
 | D20 | CI verify-deployments | Offline manifest-integrity only; on-chain readbacks stay at deploy-time | Owner-trim: hard-blocking CI on live RPC is non-hermetic + redundant with verify-l1 + runtime fail-closed; no mainnet fund-safety lost |
+| D21 | Mainnet L1 legs | Forge script (`DeployBridgeMainnet.s.sol`: InertSwapTarget + router) + anvil mainnet-fork rehearsal gate | Owner steer: simulate-before-broadcast, `--resume`, `--verify`, and a zero-cost rehearsal against REAL Circle USDC/Permit2/FeeJuicePortal — safer than viem sends for the real-money moment. TS conductor keeps the L2 half + manifest (cross-domain interleave) |
 
 *Resolved:* A3 (`lb.drpc.live`), A4 (retire), A6/A7 (manual + hostname layer, no service token). *No open asks.*
 

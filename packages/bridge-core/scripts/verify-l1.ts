@@ -171,9 +171,10 @@ if (fuel) {
 		routerArgs,
 		...common,
 	])
-	// UniswapFuelSwap is verified ONLY when the swap stack is present (testnet). A bridge-only mainnet
-	// deployment ships an INERT swapTarget stub (its bytecode/revert behaviour is verified in Phase 7/8),
-	// not UniswapFuelSwap — so verifying it here would be wrong.
+	// The swapTarget's SOURCE depends on the deployment shape: with a swap stack (testnet) it is
+	// UniswapFuelSwap; a bridge-only (mainnet) deployment ships the provably-reverting
+	// InertSwapTarget stub instead (DP2/DP8 — no constructor args), whose runtime revert behaviour
+	// is additionally probed at deploy (DeployBridgeMainnet.s.sol readbacks).
 	let okSwap = true
 	if (fuel.swap) {
 		const swap = fuel.swap
@@ -184,6 +185,13 @@ if (fuel) {
 			"src/UniswapFuelSwap.sol:UniswapFuelSwap",
 			"--constructor-args",
 			swapArgs,
+			...common,
+		])
+	} else {
+		okSwap = runForge(EVM_ROOT, `InertSwapTarget @ ${core.swapTarget}`, [
+			"verify-contract",
+			core.swapTarget,
+			"src/InertSwapTarget.sol:InertSwapTarget",
 			...common,
 		])
 	}
