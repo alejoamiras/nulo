@@ -83,9 +83,13 @@ prevent. Declared ✓-to-the-offline-boundary; the operator runbook below is the
 
 ## Phase 6/8 operator runbook (the owner-present sequence)
 **Phase 6 (Sepolia, fake money — owner env: PRIVATE_KEY + SEPOLIA_RPC_URL + ETHERSCAN_API_KEY):**
-1. DP7 token: add a `mint()`-able, NO-auto-Permit2 ERC20 (MintableERC20 minus the allowance
-   override) to `contracts/bridge/evm/src`, deploy, then `deploy-bridge-testnet.ts` with
-   `--reuse-token <it>` → fresh portal + L2 trio → candidate (now emits chain identity + source).
+1. DP7 token: **`TestUsdc.sol` (done, forge 4/4 — 7b.3)** — deploy it (constructor
+   `("Test USDC","USDC",6,1000)`), then `deploy-bridge-testnet.ts` with `--reuse-token <it>` → fresh
+   portal + L2 trio → candidate (now emits chain identity + source). Wire the conductor's L2 account
+   through `resolveDeployerKeys("testnet")` (BRIDGE_DEPLOYER_SECRET_TESTNET in env) replacing the
+   two `Fr.random()` at deploy-bridge-testnet.ts:240-242, and size funding via
+   `deploySequenceFeeBudget(perTxLimit)` — both landed in 7b.3, wiring is a 5-line change verified
+   by the run itself.
 2. Gates: `verify-deployments` (BRIDGE_MANIFEST=candidate), `verify-l1 --config candidate`,
    `smoke-swap-existing-testnet --config candidate` (exercises the NEW Permit2 approve fallback —
    the token no longer auto-grants), `fuel-testnet.ts` (public+private, FPC gate inline). Promote.
