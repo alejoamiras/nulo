@@ -168,6 +168,16 @@ function replayBuffered<T>(state: SourceState<T>): SourceState<T> {
  * A snapshot is authority AT its watermark and nothing beyond it: anything the
  * client already holds above the watermark came from an event the snapshot
  * could not have seen, so it survives untouched.
+ *
+ * KNOWN GAP — a COLD slice accepts whichever snapshot arrives first, and takes
+ * its incarnation as authoritative. A delayed snapshot from a retired
+ * incarnation therefore establishes that retired one and renders its rows until
+ * a newer snapshot supersedes it. Events are already buffered against this
+ * (`applyMutation`), but a snapshot cannot judge its own authority: that has to
+ * come from outside, as the coordinator's persisted current-incarnation read,
+ * subscribed before hydration. Buffering snapshots without that independent
+ * authority only postpones trusting an untrusted first one. Close this when the
+ * coordinator is wired into production — see the plan's §5.2.
  */
 export function applySnapshot<T>(state: SourceState<T>, snapshot: ActivitySnapshot<T>): { state: SourceState<T>; accepted: boolean } {
 	const current = state.incarnation

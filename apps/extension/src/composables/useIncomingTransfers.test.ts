@@ -122,6 +122,25 @@ describe("useIncomingTransfers", () => {
 		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["b"])
 	})
 
+	it("onDeleted ignores a foreign record that shares the nullifier", () => {
+		// A siloed nullifier is unique within ONE rollup tree, not across them, so
+		// the same value can legitimately exist under another profile or network.
+		// Matching on it alone would let that delete remove the row on screen.
+		const incoming = makeIncomingService()
+		const { incomingTransfers } = setup({ incoming, config: makeConfigService() })
+		incoming.onIncomingTransferAdded.invoke(rec("shared"))
+
+		incoming.onIncomingTransferDeleted.invoke(rec("shared", { networkId: "other-network" }))
+		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["shared"])
+
+		incoming.onIncomingTransferDeleted.invoke(rec("shared", { profileId: "other-profile" }))
+		expect(incomingTransfers.value.map((x) => x.siloedNullifier)).toEqual(["shared"])
+
+		// Its own scope's delete still applies.
+		incoming.onIncomingTransferDeleted.invoke(rec("shared"))
+		expect(incomingTransfers.value).toEqual([])
+	})
+
 	it("config update for incomingTransfersVisible triggers a refresh", async () => {
 		const incoming = makeIncomingService([rec("a")])
 		const config = makeConfigService()

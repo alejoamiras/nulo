@@ -323,8 +323,12 @@ newer event survives an older snapshot · **distinct-record lower event survives
 restart never reuses a revision · old incarnation cannot write after re-import · ABA `upsert→remove→newer-upsert`
 converges · same nullifier on two networks stays two records · drain-events + fresh-snapshot == reference model ·
 **(P3b)** a live pause-after-counter snapshot never drops the later row (committed-through watermark, ultra-B3) ·
-**(P11)** a cold slice buffers a delayed old-incarnation event/**snapshot** until the current incarnation is
-established, and a delayed OLD snapshot never re-establishes a lower monotonic lineage (rollback, ultra-S6) ·
+**(P11)** a cold slice buffers a delayed old-incarnation EVENT until the current incarnation is established.
+**NOT delivered for snapshots:** a cold slice still accepts whichever snapshot arrives first and adopts its
+incarnation, because a snapshot cannot judge its own authority — that requires the coordinator's persisted
+current-incarnation read, subscribed before hydration, which is only possible once the coordinator is wired into
+production. Buffering snapshots without that independent authority merely postpones trusting an untrusted first
+one. Recorded at `causal.ts` `applySnapshot` ·
 **(P12)** cross-source crash graduation: an incoming-note→outgoing-tx graduation whose SW dies before the
 incoming removal does NOT leave both visible — startup **exact-scope reconciliation** re-derives suppression
 (the live `onTxAdded` callback is unawaited and the existing-record scan returns before outgoing suppression,
