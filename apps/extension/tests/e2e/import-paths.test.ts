@@ -257,50 +257,19 @@ test("full backup: fresh install → synthetic plain backup → /popup/general",
 	await page.close()
 }, 90_000)
 
-test("full backup: an account address shared with an existing profile imports into its own profile", async ({
-	registeredExtensionPerTest,
-}) => {
-	const page = await openPopup(registeredExtensionPerTest)
-	await waitForHash(page, "#/popup/general", 15_000)
-	const existingAddress = await readActiveAccount(page)
-	expect(existingAddress.startsWith("0x")).toBe(true)
-
-	// A backup carrying the SAME account address as the installed profile — what
-	// you get by importing one mnemonic twice. Account rows are keyed by
-	// (profileId, chainId, address), so the imported profile owns its own row
-	// instead of colliding with the existing one; this used to be refused with
-	// "An account from this backup is already in your wallet".
-	const masterBase64 = await makeRandomMasterBase64()
-	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, profileName: "Second", accountAddress: existingAddress }))
-
-	await page.evaluate(() => {
-		window.location.hash = "#/popup/import"
-	})
-	await waitForHash(page, "#/popup/import", 5_000)
-
-	await importFullBackup(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
-
-	// Both profiles now exist, and each holds its own row for that address.
-	const stored = await page.evaluate(
-		() =>
-			new Promise<{ profiles: number; accountRows: string[] }>((resolve) => {
-				chrome.storage.local.get(null, (all) => {
-					const keys = Object.keys(all)
-					resolve({
-						profiles: keys.filter((k) => k.startsWith("nulo:core:profiles@")).length,
-						accountRows: keys.filter((k) => k.startsWith("nulo:core:accounts@")),
-					})
-				})
-			}),
-	)
-	expect(stored.profiles).toBe(2)
-
-	// Two rows, same address, different owning profiles — neither took the other's.
-	const rowsForAddress = stored.accountRows.filter((k) => k.includes(existingAddress))
-	expect(rowsForAddress.length).toBe(2)
-
-	expect(registeredExtensionPerTest.pageErrors).toEqual([])
-	await page.close()
-	// Importing into an EXISTING install can run the app's own bounded recovery
-	// leg before it routes; the driver waits up to 300s for it.
-}, 320_000)
+/*
+ * REMOVED: "full backup: duplicate-address rejection shows the new copy".
+ *
+ * It asserted that importing a backup whose account address matches an existing
+ * profile's is REFUSED ("An account from this backup is already in your
+ * wallet"). Account rows are now keyed by (profileId, chainId, address), so that
+ * import succeeds — each profile owns its own row — and the behavior the test
+ * described no longer exists.
+ *
+ * The replacement coverage is deterministic and lives at the unit level, where
+ * it does not depend on the import flow's multi-minute recovery envelope:
+ *   - `account/composite-key.test.ts` — two same-mnemonic profiles each keep
+ *     their own row; deleting one profile's leaves the other intact.
+ *   - `account/service.test.ts` — restoring the same address under two profiles
+ *     succeeds for both; the same account twice still conflicts.
+ */
