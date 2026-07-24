@@ -2,6 +2,8 @@
 
 Read-only terrain map for cutting stable **v0.26.0** (`dev → main`). Snapshot base: `origin/dev` HEAD `4e5435b` (#318), `origin/main` at `v0.25.0`. Captured against the live repo + GitHub API, not a blank slate.
 
+> **Live-settings caveat (codex audit).** Branch protection, ruleset merge-mode, and `AUTO_UNSTICK_ENABLED` are *live GitHub settings*, not repo-file facts — re-check them just-in-time at execution (Phase 1), don't trust this snapshot blindly.
+
 ## What exists (reuse-as-is — this is a runbook execution, not new code)
 
 | Piece | Where | Purpose | Reuse verdict |
@@ -21,7 +23,7 @@ Read-only terrain map for cutting stable **v0.26.0** (`dev → main`). Snapshot 
 
 ## Facts that shape the steps
 
-- dev is **23 commits ahead of main** (first-parent) since `v0.25.0`; contains `feat:` commits (#319, #316, #315, #309, #306, #302, #260, #305) → **minor bump → 0.26.0** (0.x caps any BREAKING to minor via `bump-minor-pre-major`).
+- dev is **ahead of main by 23 total commits / 21 first-parent** (`git rev-list --count [--first-parent] origin/main..origin/dev` = 23 / 21; the delta is the last `main→dev` sync merge + its bot commit) since `v0.25.0`; contains `feat:` commits (#319, #316, #315, #309, #306, #302, #260, #305) → **minor bump → 0.26.0** (0.x caps any BREAKING to minor via `bump-minor-pre-major`).
 - Version anchors all read `0.25.0`: root `package.json`, `apps/extension/package.json`, `.release-please-manifest.json`, `.release-please-prerelease-manifest.json`. Latest tag `v0.25.0`.
 - **Required checks on `main`** (live, app-id pinned): `quality-status`, `network-e2e-status`, `smoke-e2e-status`; `strict: true` (branch-up-to-date REQUIRED on main). All three run on a PR to main. `main` ruleset = **merge-commit only** (no squash).
 - dev HEAD `4e5435b` (#318) — feature PRs #315–#319 each squash-merged (green-gated). dev contains main's history via the last sync (#298 / `04e5728`), so a `dev → main` PR is up-to-date w.r.t. main.
