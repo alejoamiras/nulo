@@ -16,9 +16,9 @@ Cut stable **v0.26.0** by promoting the dev-only commits (**23 total / 21 first-
 - [✓] **Phase 1** — SHA frozen `RELEASE_SHA=4e5435b`; JIT pre-flight green.
 - [✓] **Phase 2** — promote PR #320 merged `e61849c` (merge-commit, 2 parents); network-e2e shard-3 flake re-run→passed; release-please opened #321.
 - [✓] **Phase 3** — Release PR #321 merged `bffaad2` (merge-commit, 2 parents) = `TAG_SHA`; CHANGELOG verified; first CI batch cancelled/superseded (not breakage), live batch green.
-- [▶] **Phase 4** — release.yml on push:main → auto-unstick tags v0.26.0 + build + publish + deploy.
-- [ ] **Phase 5** — sync-back PR (full CI).
-- [ ] **Phase 6** — verify live + wrap-up.
+- [✓] **Phase 4** — release.yml run 30062111294 success: auto-unstick tagged v0.26.0 (→TAG_SHA), 3 assets, isPrerelease=false, real body, landing+faucet deployed, verify-live green, stores skipped.
+- [▶] **Phase 5** — sync-back PR #322 `chore: sync main → dev` — awaiting its own full CI, then merge-commit.
+- [ ] **Phase 6** — verify live + wrap-up (verify-live already green).
 
 ## Why `light`
 
