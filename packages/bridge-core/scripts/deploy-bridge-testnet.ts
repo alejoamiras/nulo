@@ -98,6 +98,21 @@ async function nodeL1Addresses(): Promise<Record<string, `0x${string}`>> {
 	return Object.fromEntries(Object.entries(a).map(([k, v]) => [k, pick(v)]))
 }
 
+/**
+ * The chain identity the manifest must self-declare (the startup build-integrity assertion needs it,
+ * codex post-impl HIGH-3). Read from the node — NOT hardcoded — so a network reset can't ship a stale
+ * pin (the chain-constants incident). `walletChainId = (l1ChainId ^ rollupVersion) >>> 0`.
+ */
+async function nodeChainIdentity(): Promise<{ l1ChainId: number; walletChainId: number }> {
+	const res = await fetch(NODE_URL, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getNodeInfo", params: [] }),
+	})
+	const { l1ChainId, rollupVersion } = (await res.json()).result as { l1ChainId: number; rollupVersion: number }
+	return { l1ChainId, walletChainId: (l1ChainId ^ rollupVersion) >>> 0 }
+}
+
 async function nodeRegistry(): Promise<`0x${string}`> {
 	return (await nodeL1Addresses()).registryAddress
 }
@@ -449,8 +464,12 @@ async function main() {
 	}
 
 	// ─── Write the CANDIDATE (never the live file) ───────────────────
+	// Chain identity from the node (reset-safe) — the startup build-integrity assertion requires it.
+	const chainIdentity = await nodeChainIdentity()
 	const manifest: CandidateManifest = {
 		network: "testnet",
+		l1ChainId: chainIdentity.l1ChainId,
+		walletChainId: chainIdentity.walletChainId,
 		l1: {
 			usdc,
 			portal,
@@ -460,7 +479,7 @@ async function main() {
 			// the live manifest before promotion), so a stray preview/static deploy of new code against an
 			// OLD (bearer-bridge) manifest fails closed instead of stranding funds.
 			privateClaimMode: "salt-v2",
-			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
+			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000, source: "permissionless-mint" },
 			...(fuel ? { fuel } : {}),
 			feeJuice,
 		},

@@ -13,7 +13,7 @@ import {
 import { DRIPPER, NULO, OLUN, rebuildDripperInstance, rebuildNuloInstance, rebuildOlunInstance } from "@/contracts/deployments"
 import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
-import { buildBridgeManifest, buildCombinedManifest } from "@/lib/capabilities"
+import { buildCombinedManifest } from "@/lib/capabilities"
 import { IS_MAINNET } from "@/lib/network"
 import { createAztecWalletSession } from "./createAztecWalletSession"
 
@@ -21,24 +21,17 @@ const APP_ID = "nulo-faucet"
 
 async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
-	// Mainnet has no faucet — grant only the bridge capabilities (no Dripper/NULO/OLUN). Testnet grants
-	// the combined faucet+bridge manifest (both tabs share one origin/app, so one grant covers both).
-	if (IS_MAINNET) {
-		return buildBridgeManifest({
-			bridgeAddress: BRIDGE,
-			tokenAddress: BRIDGE_TOKEN,
-			proxyAddress: BRIDGE_PROXY,
-			sponsoredFpcAddress: sponsoredFpc.address,
-		})
-	}
+	// Mainnet omits the faucet tokens (no faucet tab) but KEEPS the bridge + PrivateFPC + FEE_JUICE +
+	// auth-registry grants, so private fuel and private-fuel-paid claims work (DP6). Testnet also
+	// supplies the faucet tokens (Dripper/NULO/OLUN). The FPC is registered on both networks, so both
+	// grants must include it — the earlier bridge-only manifest omitted it and would have broken the
+	// mainnet grant vs the unconditional FPC registration (codex post-impl HIGH-1).
 	return buildCombinedManifest({
-		dripperAddress: DRIPPER,
-		usdcAddress: NULO,
-		ethAddress: OLUN,
 		bridgeAddress: BRIDGE,
 		tokenAddress: BRIDGE_TOKEN,
 		proxyAddress: BRIDGE_PROXY,
 		sponsoredFpcAddress: sponsoredFpc.address,
+		...(IS_MAINNET ? {} : { dripperAddress: DRIPPER, usdcAddress: NULO, ethAddress: OLUN }),
 	})
 }
 

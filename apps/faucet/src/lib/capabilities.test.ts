@@ -148,18 +148,49 @@ describe("buildCombinedManifest", () => {
 		expect(cap).toEqual({ type: "accounts", canGet: true, canCreateAuthWit: true })
 	})
 
-	it("declares all seven contracts - faucet (dripper, usdc, eth) + bridge (bridge, token, proxy) + PrivateFPC", () => {
+	it("declares all seven contracts - bridge (bridge, token, proxy) + PrivateFPC + faucet (dripper, usdc, eth)", () => {
 		const cap = m.capabilities.find((c) => c.type === "contracts")
 		if (cap?.type !== "contracts") throw new Error("contracts cap missing")
 		expect(cap.contracts.map((a) => a.toString())).toEqual([
-			DRIPPER.toString(),
-			USDC.toString(),
-			ETH.toString(),
 			BRIDGE.toString(),
 			TOKEN.toString(),
 			PROXY.toString(),
 			PRIVATE_FPC_ADDRESS,
+			DRIPPER.toString(),
+			USDC.toString(),
+			ETH.toString(),
 		])
+	})
+
+	// The mainnet shape (HIGH-1 fix): omit the faucet tokens, but the bridge + PrivateFPC + private-fuel
+	// scopes MUST stay so private fuel (DP6) and private-fuel-paid claims work and the unconditional FPC
+	// registration doesn't hit a scope violation.
+	describe("mainnet shape (no faucet tokens)", () => {
+		const mm = buildCombinedManifest({
+			bridgeAddress: BRIDGE,
+			tokenAddress: TOKEN,
+			proxyAddress: PROXY,
+			sponsoredFpcAddress: SPONSORED_FPC,
+		})
+		it("grants bridge + token + proxy + PrivateFPC and NO faucet tokens", () => {
+			const cap = mm.capabilities.find((c) => c.type === "contracts")
+			if (cap?.type !== "contracts") throw new Error("contracts cap missing")
+			expect(cap.contracts.map((a) => a.toString())).toEqual([
+				BRIDGE.toString(),
+				TOKEN.toString(),
+				PROXY.toString(),
+				PRIVATE_FPC_ADDRESS,
+			])
+		})
+		it("keeps the private-fuel scopes (mint_and_pay_fee, pay_fee) and drops the faucet drips", () => {
+			const cap = mm.capabilities.find((c) => c.type === "transaction")
+			if (cap?.type !== "transaction") throw new Error("transaction cap missing")
+			const fns = cap.scope.map((s) => s.function)
+			expect(fns).toContain("mint_and_pay_fee")
+			expect(fns).toContain("pay_fee")
+			expect(fns).not.toContain("drip_to_public")
+			expect(fns).not.toContain("drip_to_private")
+		})
 	})
 
 	it("scopes both faucet drips and the bridge claim/exit/burn + sponsor", () => {

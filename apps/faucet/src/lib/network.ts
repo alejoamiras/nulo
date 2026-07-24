@@ -41,8 +41,11 @@ export const NETWORK: NetworkConfig = {
 	l1ChainId: target.l1ChainId,
 	walletChainId: target.walletChainId,
 	viemChain,
-	// VITE_AZTEC_NODE_URL still overrides for dev/e2e; otherwise the target's committed node URL.
-	nodeUrl: import.meta.env.VITE_AZTEC_NODE_URL ?? target.nodeUrl,
+	// The VITE_AZTEC_NODE_URL override is a dev/e2e affordance ONLY. A production build ignores it (like
+	// the ?chainId override) so a stale Cloudflare VITE_AZTEC_NODE_URL can't silently repoint a
+	// real-money build at the wrong Aztec node — the class of incident chain-constants exists to prevent
+	// (codex post-impl HIGH-2). Prod always uses the committed per-target node.
+	nodeUrl: import.meta.env.DEV ? (import.meta.env.VITE_AZTEC_NODE_URL ?? target.nodeUrl) : target.nodeUrl,
 	l1ExplorerBaseUrl: target.l1ExplorerBaseUrl,
 }
 
