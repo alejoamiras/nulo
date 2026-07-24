@@ -59,18 +59,18 @@ Pure durable causal protocol + property model · composite frontend activity sli
 snapshots + mutation envelopes · durable incarnations + per-source counters + snapshot watermarks + tombstones ·
 tx/incoming composite persistence keys · profile-aware rendering + residual filters · queued-journal derivation /
 claiming / delete-serialization (H1/H2/H3) · **the in-flight-send switch guard (§9)** — block a voluntary switch
-while a send is in flight, so active-scope can't drift · dedicated multi-profile/multi-account network e2e ·
-final `/harden security`.
+while a send is in flight, so active-scope can't drift · **the account composite re-key (§6.5)** — file account
+rows under `(profileId, chainId, address)` so two same-seed profiles stop overwriting each other · dedicated
+multi-profile/multi-account network e2e · final `/harden security`.
 
 ### Out of scope (state explicitly)
 - dApp task↔journal correlation + re-enabling dApp `ExecuteOperation` spinner cards (**Decision D2**).
 - Shipping a proverless path; any release/publish change.
-- Continuing an operation under the captured profile after drift — the op **aborts** (**Decision D1**).
+- Letting a voluntary switch happen mid-send at all — it is **blocked** (§9 guard, **Decision D1**).
 - Cryptographic ownership changes for incoming notes (keep `NoteDao.owner` as the trusted authority).
-- **Re-keying `AccountService` from global address keys to composite keys** — surfaced as an architectural
-  follow-up (§15 Ask A3). The execution + activity design must be *safe despite* the current global address key;
-  this PR must NOT silently absorb a full account-storage migration. The fence prevents cross-profile signing
-  regardless of the account-key shape.
+- Any change to the **account-ADDRESS freeze** (`packages/aztec-runtime/src/account/`): the vendored artifact,
+  derivation vectors, and regime record are untouched. The §6.5 re-key changes *how a row is filed*, never *what
+  address a seed derives* — fully independent surfaces (see §6.5).
 
 ## 3. Ground truth (verified this session — file:line)
 
@@ -88,7 +88,8 @@ final `/harden security`.
 - **Accounts are keyed globally by `account.address`** (`account/spec.ts:5-7`, `ACCOUNT_STORAGE_ROOT =
   "nulo:core:accounts"`, "Frozen"). The `Account` row carries `profileId`/`chainId`/`index` as *fields*, but the
   storage KEY is the address → **two same-mnemonic profiles derive colliding addresses that overwrite the same
-  row; they do not coexist as two persisted rows.** [VERIFIED — drives the e2e design, §11.]
+  row; they do not coexist as two persisted rows.** [VERIFIED — **§6.5/Phase 2a′ now re-keys this to a composite
+  `(profileId, chainId, address)`, which is why the §11 e2e no longer needs its recreate-on-switch workaround.**]
 - `Tx` has `chainId`+`account`, **no** `profileId`/`networkId` (`transaction/spec.ts:97`); stored under
   `nulo:core:txs` keyed by hash; `getTransactions(account)` filters address only; `purgeForAccounts(addresses)`
   cannot distinguish colliding addresses in different profiles.
@@ -340,6 +341,40 @@ incoming removal does NOT leave both visible — startup **exact-scope reconcili
   descriptors; retire every profile scope before tx/journal/incoming purges; **change tx profile-deletion from
   `purgeForAccounts(addresses)` to `purgeForProfile(profileId)`** (address-only is unsafe with collisions).
 
+### 6.5 Account composite re-key (pulled into scope — pre-production makes it free)
+**Today:** account rows are filed under **`account.address` alone** (`account/spec.ts:5-7`,
+`ACCOUNT_STORAGE_ROOT = "nulo:core:accounts"`, marked "Frozen"). The row *carries* `profileId`/`chainId`/`index`
+as fields, but the KEY is the bare address. So two profiles created from the **same seed** derive the same
+address → **the same storage key** → they overwrite each other's row (name / `visible` / `profileId`). They
+cannot coexist. That is one profile's data clobbering another's inside an arc whose whole point is siloing.
+
+**Change:** file the row under the composite `JSON.stringify(["account", profileId, chainId, address])`.
+- `AccountService` read/write/list/delete take `(profileId, chainId, address)` — most call sites already pass
+  exactly this triple, so the churn is mechanical.
+- `getAccounts(profileId, chainId)` becomes a true prefix/filter over composite keys rather than a
+  scan-and-filter on the row's `profileId` field.
+- Account deletion + profile deletion purge by composite prefix (aligns with the `purgeForProfile` change above).
+- **Index/derivation math is untouched** — `index` still feeds derivation exactly as today; only the filing
+  changes.
+
+**Why it is cheap RIGHT NOW and expensive later** (the reason for the reversal): the repo is **pre-production**
+(`CLAUDE.md` § migrations: "do NOT write migrations… there are no users; every fresh install stamps the current
+max schema version"). So: **no numbered storage migration, no backup migration.** Change the key derivation,
+re-pin the frozen-root provenance in the backup-migration registry, update the coverage test, reinstall the local
+extension. After launch this same change would require the full migration + backup-migration machinery the repo
+deliberately avoids — so deferring makes it permanently more expensive.
+
+**Explicitly NOT the address freeze.** `packages/aztec-runtime/src/account/` (vendored `SchnorrAccount.json`,
+`frozen-artifact.ts`, `instantiation-descriptor.ts`, `address-freeze.ts`) governs **what address a seed derives**
+— a versioned artifact of the extension major. This change governs **how the derived row is filed in storage**.
+Independent surfaces: the KAT (`derivation-vectors.test.ts`) and every freeze test must stay green with **zero**
+vector/pin edits. If a freeze test reds, the re-key was done wrong.
+
+**Blast radius (honest):** `AccountService` is load-bearing for every lookup, derivation entry point, and backup
+slice — bounded and mechanical, but it earns its own early phase (2a′) + its own tests, landing before anything
+keys off it. It also **simplifies the §11 e2e**: two colliding-address profiles just coexist as two rows, so the
+fixture drops its "recreate/ensure the active profile's rows after each switch" dance.
+
 ## 7. Frontend slice coordinator
 - **Activation:** a `flush:'sync'` watcher on `[profile?.id, network?.id, network?.chainId, account?.address]`
   derives a scope only via `assertCoherentScope` (else the immutable empty slice). On change: (1) swap
@@ -463,12 +498,13 @@ playground with a real account selector so `opts.from` can pick the 2nd granted 
 seam needed — the fence/scope gate is dropped with §9) parks a send at `proving` to hold it "in flight"
 deterministically.
 
-**Fixture topology** (respects the verified account-global-key + random-networkId facts): one browser; P1 from a
-deterministic mnemonic; **P2 imported from the SAME mnemonic** (→ different profileId, but `P1.A===P2.A` and
-`P1.B===P2.B`); both on Local Network / same chainId; assert profileIds differ and internal networkIds normally
-differ. **Because account storage is globally keyed by address, the fixture recreates/ensures the active
-profile's A/B rows after each switch and asserts the stored row's `profileId` — it does NOT assume both profiles'
-rows coexist.**
+**Fixture topology:** one browser; P1 from a deterministic mnemonic; **P2 imported from the SAME mnemonic** (→
+different profileId, but `P1.A===P2.A` and `P1.B===P2.B`); both on Local Network / same chainId; assert
+profileIds differ and internal networkIds normally differ (networkId is randomly allocated per profile). **With
+the §6.5 composite re-key, both profiles' A/B rows COEXIST** — so the fixture simply creates them once per
+profile and asserts each row's `profileId`; the old "recreate/ensure the active profile's rows after each switch"
+dance is gone (that workaround existed only because of the address-only key). Add an explicit assertion that
+after a P1→P2→P1 round trip, P1's account rows still carry P1's own name/`visible` (no clobber).
 
 **Case 1 — the render-isolation win (H0/H7):** a real incoming note lands on P1/A while P1 is active; assert it
 renders under P1 and, after switching to P2 (no send in flight), **zero** P1 cards appear under P2 (a
@@ -504,6 +540,20 @@ New `packages/wallet-core/src/activity/{scope,causal,model,index}.ts` + `causal.
 **Gate:** `bun run --cwd packages/wallet-core test src/activity` (≥1000 traces/property, seeds printed) · `bun run
 --cwd packages/wallet-core typecheck` · `bun run typecheck:all` · `bun run lint`. **No wiring lands before this
 is green.**
+
+### Phase 2a′ — Account composite re-key (§6.5) — lands FIRST of the storage work
+Re-key `nulo:core:accounts` to `JSON.stringify(["account", profileId, chainId, address])`; migrate
+`AccountService` read/write/list/delete + `getAccounts` prefix semantics + composite-prefix purge; re-pin the
+frozen-root provenance in the backup-migration registry + its coverage test. **No numbered migration** (pre-
+production). Lands before 2a so every downstream composite key sits on a settled account shape.
+Tests: two same-seed profiles hold **two coexisting rows**, each with its own name/`visible`/`profileId` ·
+`getAccounts(profileId, chainId)` returns only that profile's rows · account + profile deletion purge by prefix
+and leave the other profile's row intact · legacy address-keyed rows are absent-on-fresh-install (no dual-read
+needed pre-production; a dev with old-shaped data reinstalls).
+**Gate:** `bun run --cwd apps/extension test src/wallet/services/account src/wallet/services/backup
+src/wallet/services/storage-codecs.test.ts` · **`bun run --cwd packages/aztec-runtime test`** — the address KAT +
+every freeze test green with **zero** vector/pin edits (proves the re-key didn't touch derivation) · `bun run
+typecheck:all` · `bun run lint` · `bun run test`.
 
 ### Phase 2a — Durable protocol storage primitives (§5.4, §6 storage)
 > Split out of the old Phase 2 (audit codex-c2 / Opus-M1): storage primitives first, producer stamping (2b)
@@ -567,7 +617,9 @@ Remove the now-redundant Phase-1 clear/generation code **only after** slice test
 containment (keep the final present-and-equal filters). Run the shared-execution regressions in one invocation:
 `NULO_E2E_PROVERLESS=1 NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/{concurrent-sendtx,concurrent-sendtx-approve,
 concurrent-sendtx-confirm,cancel-mid-prove,transfers,multi-account-from,account-profile-siloing}.test.ts`.
-Then `bun run lint && bun run typecheck:all && bun run test && bun run test:e2e && bun run build:chrome`. Finally
+Then `bun run lint && bun run typecheck:all && bun run test && bun run test:e2e && bun run build:chrome`, plus
+**`bun run --cwd packages/aztec-runtime test`** (the address-freeze KAT + regime tests must be green with zero
+vector/pin edits — proves §6.5 never touched derivation). Finally
 `/harden security` over the diff; fix all blocking findings; rerun targeted suites + the full final gate. **Final
 product ask:** confirm once more the dApp `ExecuteOperation` spinner re-enable stays dropped (planned: hidden).
 
@@ -607,7 +659,8 @@ revisions under an explicit repair path (never silently reset counters + reuse a
 chain:** `fast-check` dev-only, 7-day min-age, `bun.lock` committed, frozen-lockfile CI; no crypto rolled.
 
 ## 15. Assumptions
-**Facts** — see §3 (all verified file:line this session): accounts keyed by address (colliding profiles overwrite)
+**Facts** — see §3 (all verified file:line this session): accounts keyed by address (colliding profiles overwrite
+— **this is what §6.5/Phase 2a′ now fixes**)
 · journal `profileId` required · the frozen prove→send pipeline with a pre-send `checkCancelled` · random
 networkId per profile · flat Phase-1 feed state + its sync watchers · tx has no profileId/networkId · incoming
 keyed by bare nullifier · setMeta/delete unlocked · silent-path pending fast-forward + queued-only cleanup ·
@@ -644,9 +697,9 @@ PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface a
   cache/request epochs that retains slices across the switch but not across a true wallet-lock. Recommend (i) for
   this PR (defer the switcher), but this is a genuine product call — not silently assumed. Confidentiality: any
   retained inactive-profile feed data lives in a trusted extension document; the store exposes only `activeSlice`.
-- (A3 — precondition) **AccountService composite re-key** stays a **follow-up** (§2) — the fence prevents
-  cross-profile *signing* regardless of the global address key; its current shape causes ownership churn (row
-  overwrite on switch) but not a signing leak.
+- (A3 — RESOLVED at the gate: **in scope**) **AccountService composite re-key** is now Phase 2a′ (§6.5). Deferral
+  was justified only by migration cost; pre-production zeroes it, and post-launch it becomes permanently
+  expensive. Confirmed by the user.
 - (A4) **Abort semantics** = the dispatcher-authorized `from` governs execution (popup-selected `appStore.account`
   is presentation state, not an SW authority) — binding.
 - (A5 — resolved by Option 1) No commit-to-submit CAS, no `submitting` marker, no lock-across-send. The §9 guard
@@ -698,7 +751,7 @@ PRECONDITIONS**, not deferrable asks; A4/A7 restate binding decisions. Surface a
 | D13 | Abort record | **keep the `failed` card (durable warning/audit); do NOT tombstone** | tombstone the drift record | **codex correction — supersedes the main draft's tombstoned-remove.** |
 | D14 | Pending ownership | **claim token distinguishes prepared vs claimed** | re-read stage in the cleanup block | codex — makes the queued/owned distinction explicit, not racy. |
 | D16 | Blast-radius framing | **discriminated `SendPrincipal` `{kind:"dapp",expectedProfileId}` vs `{kind:"wallet"}`; dApp-without-profile REJECTS; only drift-abort is inert for wallet; stamping applies to ALL** | Opus's `expectedProfileId===undefined` inert sentinel (fail-OPEN) | Opus framing, **hardened by codex-c3** — a sentinel lets a missed dApp call-site bypass the fence silently. |
-| D17 | AccountService re-key | **follow-up, out of scope** | absorb the full account-storage migration now | codex — fence prevents cross-profile signing regardless. |
+| D17 | AccountService re-key | **IN SCOPE — composite `(profileId, chainId, address)` key, Phase 2a′ (§6.5)** | ~~follow-up / out of scope~~ (reversed at the gate) | **User reversal**: the only reason to defer was migration cost, and **pre-production makes it zero** (no storage/backup migration). Now-or-pay-far-more-later; also completes the arc's siloing story at the storage layer and simplifies the e2e fixture. Address-freeze surface untouched. |
 | D18 | Delivery | **one PR, staged commits** | multiple PRs | **User binding**; mitigated by §17. |
 | D19 | Migration | **optional fields + dual-read** | numbered migration | all 3; pre-production, per-row tolerance. |
 
@@ -719,7 +772,9 @@ every queued claim is composite + serialized, and the guard provably blocks a sw
 ## 18. Critical files
 `packages/wallet-core/src/activity/{scope,causal,model}.ts` (new — pure protocol + property tests) ·
 `apps/extension/src/wallet/services/activity-protocol/*` (new — durable coordinator/repo) ·
-`apps/extension/src/stores/activity.store.ts` + `src/activity/source-bridge.ts` (new — slices + producer bridge) ·
+`apps/extension/src/wallet/services/account/{spec,service,repository}.ts` (§6.5 composite re-key — Phase 2a′,
+lands first) · `apps/extension/src/stores/activity.store.ts` + `src/activity/source-bridge.ts` (new — slices +
+producer bridge) ·
 the profile/account-**switch chokepoint** (`Header.vue` + the switch control) reading `hasInFlightSend` from the
 journal client (§9 guard) · `wallet-sdk/{queued-journal,background}.ts` + `packages/wallet-bridge/src/
 account-resolution.ts` (shared resolver, H1/H2) · `operation-journal/service.ts` (locked mutations, tombstones,
