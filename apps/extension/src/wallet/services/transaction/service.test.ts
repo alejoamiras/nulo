@@ -40,7 +40,16 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 				// The account exists ONLY for profile p1 (a purged/re-owned account
 				// resolves to undefined here).
 				getAccount: async (profileId: string, _chainId: number, address: string) =>
-					profileId === "p1" && address === ACCOUNT ? { profileId, address } : undefined,
+					(profileId === "p1" || profileId === "p2") && address === ACCOUNT ? { profileId, address } : undefined,
+				// Two profiles from one mnemonic own this address, so it has more than
+				// one owner and unscoped rows are ambiguous.
+				getAccountsByAddress: async (address: string) =>
+					address === ACCOUNT
+						? [
+								{ profileId: "p1", address },
+								{ profileId: "p2", address },
+							]
+						: [],
 			}),
 		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
@@ -68,6 +77,18 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 			fence,
 			networkId,
 		)
+
+	test("deleting one profile's transactions spares another profile sharing the address", async () => {
+		// Two profiles built from one mnemonic own the same address. An
+		// address-only purge would take both profiles' history.
+		await add("0xp1-tx", { profileId: "p1", epoch: deletionState.capture("p1") }, "net-1")
+		await add("0xp2-tx", { profileId: "p2", epoch: deletionState.capture("p2") }, "net-2")
+
+		await service.purgeForAccounts([ACCOUNT], "p1")
+
+		const remaining = (await service.getTransactions(ACCOUNT)).map((t) => t.hash)
+		expect(remaining).toEqual(["0xp2-tx"])
+	})
 
 	test("stamps the owning profile and network so history can be scoped", async () => {
 		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }

@@ -275,6 +275,18 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return poseidon2Hash([master, chainId, type, index])
 	}
 
+	/**
+	 * Every account row holding `address`, across all profiles.
+	 *
+	 * The address is no longer a unique row identity: two profiles built from one
+	 * mnemonic derive the same one. Callers that must decide whether an
+	 * address-keyed record is unambiguously a given profile's use this.
+	 */
+	public async getAccountsByAddress(address: string): Promise<Account[]> {
+		await this.ensureInitialized()
+		return (await this.storage.getValues()).filter((x) => x.address === address)
+	}
+
 	/** Lock-free, profileId-parameterized account read — for the deletion
 	 *  coordinator's snapshot (safe under the facade lock: no requireActiveProfile). */
 	public async getAccountsRaw(profileId: string): Promise<Account[]> {

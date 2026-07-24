@@ -15,6 +15,11 @@ import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 export function useInFlightSend() {
 	const appStore = useAppStore()
 	const ops = ref<OperationRecord[]>([])
+	// Until the first snapshot lands, an empty list is "we don't know yet", not
+	// "nothing is in flight". Reporting false there would let a click that lands
+	// before the journal answers switch during a send — the exact case the guard
+	// exists for, and the easiest one to hit.
+	const ready = ref(false)
 
 	const journal = new OperationJournalServiceClient()
 
@@ -35,9 +40,11 @@ export function useInFlightSend() {
 		const profileId = appStore.profile?.id
 		if (!profileId) {
 			ops.value = []
+			ready.value = true
 			return
 		}
 		ops.value = await journal.getOperations({ profileId })
+		ready.value = true
 	}
 
 	const connect = async () => {
@@ -55,14 +62,21 @@ export function useInFlightSend() {
 	onBeforeUnmount(dispose)
 
 	return {
-		/** True while the active profile has a send that has not finished. */
-		hasInFlightSend: computed(() =>
-			hasInFlightSend(ops.value, {
-				profileId: appStore.profile?.id,
-				accountAddress: appStore.account?.address,
-				networkId: appStore.network?.id,
-			}),
+		/**
+		 * True while the viewed account has a send that has not finished — and
+		 * also while the answer is still unknown, so callers fail closed.
+		 */
+		hasInFlightSend: computed(
+			() =>
+				!ready.value ||
+				hasInFlightSend(ops.value, {
+					profileId: appStore.profile?.id,
+					accountAddress: appStore.account?.address,
+					networkId: appStore.network?.id,
+				}),
 		),
+		/** False until the first journal snapshot has been read. */
+		ready,
 		connect,
 		refresh,
 		dispose,

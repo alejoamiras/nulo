@@ -109,7 +109,9 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 	 * re-run purge converges. Any throw propagates → the caller keeps the tombstone.
 	 */
 	private async purge(profileId: string, s: ProfileDeletionSnapshot): Promise<void> {
-		await this.txs.purgeForAccounts(s.addresses)
+		// Scoped to the profile being deleted: another profile can share these
+		// addresses, and its history must survive.
+		await this.txs.purgeForAccounts(s.addresses, profileId)
 		await this.auth.purgeForAccounts(s.addresses)
 		await this.balances.purgeForTokens(s.tokenIds)
 		await this.incoming.clearProfile(profileId)

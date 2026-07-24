@@ -48,6 +48,12 @@ const handleEditAccount = (target) => {
 
 const handleHideAccount = (acc) => {
 	if (accounts.value.length === 1) return
+	// Hiding ANY account reassigns the active one to the first visible account,
+	// so it changes the signing scope exactly like an explicit switch does.
+	if (inFlight.hasInFlightSend.value) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 
 	appStore.changeAccountVisibility(acc, false)
 	openToast({ label: "Account successfully hidden" })

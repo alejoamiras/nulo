@@ -192,19 +192,49 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {
-		await this.purgeForAccounts([account.address])
+		await this.purgeForAccounts([account.address], account.profileId)
+	}
+
+	/**
+	 * Whether `profileId` is the only profile holding any of `addresses`.
+	 *
+	 * Decides the fate of rows written before transactions carried a profile:
+	 * with a single owner they are unambiguously this profile's, so deletion is
+	 * safe; with more than one they could belong to either, and removing them
+	 * would destroy the surviving profile's history.
+	 */
+	private async isSoleOwner(addresses: readonly string[], profileId: string): Promise<boolean> {
+		const owners = new Set<string>()
+		for (const address of addresses) {
+			for (const account of await this.accountService.getAccountsByAddress(address)) {
+				owners.add(account.profileId)
+			}
+		}
+		owners.delete(profileId)
+		return owners.size === 0
 	}
 
 	/** Awaited tx purge for a SET of accounts — called by the deletion coordinator
 	 *  with the tombstone's authoritative address snapshot (finding D). Runs under
 	 *  the tx lock; idempotent. `onAccountDeleted` delegates here so the single-
 	 *  account (deleteNetwork chain-purge) path shares one implementation. */
-	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+	public async purgeForAccounts(addresses: readonly string[], profileId?: string): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
 		await this.lock.enter()
 		try {
-			const txs = (await this.txs.getValues()).filter((x) => set.has(x.account))
+			// Two profiles built from one mnemonic own the same address, so an
+			// address-only match deletes the OTHER profile's history too. When the
+			// caller knows whose rows these are, a scoped row must match that
+			// profile; a row that names no profile is only safe to remove when this
+			// is the address's sole owner, and is otherwise left alone.
+			const soleOwner = profileId !== undefined ? await this.isSoleOwner(addresses, profileId) : true
+			const txs = (await this.txs.getValues()).filter((x) => {
+				if (!set.has(x.account)) return false
+				if (profileId === undefined) return true
+				if (x.profileId !== undefined) return x.profileId === profileId
+				return soleOwner
+			})
 			await purgeRows(
 				txs,
 				(tx) => {

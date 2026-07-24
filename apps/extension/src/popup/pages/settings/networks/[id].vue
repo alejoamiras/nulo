@@ -13,6 +13,9 @@ import { managers } from "@/utils/core"
 /** Composables */
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
+import { useInFlightSend } from "@/composables/useInFlightSend"
+const inFlight = useInFlightSend()
+onBeforeMount(() => inFlight.connect())
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -47,6 +50,13 @@ const handleEditNetworkName = () => {
 const handleSetActive = async () => {
 	if (!network.value) return
 	if (isActive.value) return
+	// The network is part of the scope a send builds against, and switching it
+	// reloads accounts and reselects one — so it moves the signing scope just
+	// like an account switch. Same guard, same escape hatch.
+	if (inFlight.hasInFlightSend.value) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 	// Snapshot before the await: `network` is computed from `route.params.id`,
 	// and if the caller (or another reactive consumer) navigates while the
 	// RPC is in flight, `network.value` becomes `undefined` after the await.
