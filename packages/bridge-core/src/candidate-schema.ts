@@ -31,6 +31,11 @@ const l2RecordSchema = z
 export const candidateManifestSchema = z
 	.object({
 		network: z.string().min(1),
+		// The chain this manifest is FOR. The startup assertion checks these agree with BOTH the build
+		// target and the live node (fail-closed). Optional for back-compat; the runtime assertion treats
+		// their absence as a hard error.
+		l1ChainId: z.number().int().positive().optional(),
+		walletChainId: z.number().int().positive().optional(),
 		l1: z
 			.object({
 				usdc: evmAddress,
@@ -41,9 +46,19 @@ export const candidateManifestSchema = z
 						name: z.string().min(1),
 						symbol: z.string().min(1),
 						decimals: z.number().int().min(0).max(36),
-						maxWholePerTx: z.number().positive(),
+						// Token provenance discriminant. `permissionless-mint` = our own mintable test ERC20
+						// (has mint(), starts at ZERO Permit2 allowance so the approve path is exercised).
+						// `circle-proxy` = the official Circle USDC proxy (no mint, real allowance). Verification
+						// keys the contract-logic path off this — a mainnet manifest need not carry test fields.
+						source: z.enum(["permissionless-mint", "circle-proxy"]).optional(),
+						// Per-tx display cap — a test-token affordance. A `circle-proxy` (mainnet) token has no
+						// such cap and omits it; required for any other source (see refine).
+						maxWholePerTx: z.number().positive().optional(),
 					})
-					.strict(),
+					.strict()
+					.refine((t) => t.source === "circle-proxy" || t.maxWholePerTx !== undefined, {
+						message: "token.maxWholePerTx is required unless token.source is circle-proxy",
+					}),
 				// Split so a bridge-only (mainnet) deployment validates WITHOUT the swap stack. `core` (the
 				// router + its constructor deps — permit2, swapTarget, feeJuicePortal) is what `bridge()` and
 				// the Permit2 witness need, required whenever `fuel` is present. `swap` (the Uniswap→FeeJuice
@@ -81,6 +96,18 @@ export const candidateManifestSchema = z
 						// Optional: mainnet has no permissionless FeeAssetHandler (BYO-$AZTEC); testnet mints via one.
 						feeAssetHandler: evmAddress.optional(),
 						minFj: decimalString,
+					})
+					.strict()
+					.optional(),
+				// The pinned PrivateFPC identity for private fee-juice on this network. Its `address` MUST equal
+				// the deterministic artifact/salt derivation the extension + planPrivateFuelDeposit compute
+				// (verified at deploy — Phase 5/7); schema-valid alone is insufficient. Absent ⇒ private fuel
+				// resolves to the compiled-in PRIVATE_FPC_ADDRESS default.
+				privateFpc: z
+					.object({
+						address: aztecAddress,
+						version: z.string().min(1).optional(),
+						artifactDigest: z.string().min(1).optional(),
 					})
 					.strict()
 					.optional(),

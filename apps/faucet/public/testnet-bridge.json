@@ -1,5 +1,7 @@
 {
 	"network": "testnet",
+	"l1ChainId": 11155111,
+	"walletChainId": 1816023401,
 	"l1": {
 		"usdc": "0xb8ebd156dc94cde08ec9e7ef0501232b2dbedece",
 		"portal": "0x99b5dd6da65767b1eb074507272f7f7f50164567",
@@ -9,7 +11,8 @@
 			"name": "Aztec Nulo",
 			"symbol": "AZLO",
 			"decimals": 18,
-			"maxWholePerTx": 1000
+			"maxWholePerTx": 1000,
+			"source": "permissionless-mint"
 		},
 		"fuel": {
 			"core": {

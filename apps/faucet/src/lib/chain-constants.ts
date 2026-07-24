@@ -23,3 +23,15 @@ export const TESTNET_ROLLUP_VERSION = 1821665230
 
 /** The wallet matches a network by `(l1 ^ rollupVersion) >>> 0` → `1816023401`. */
 export const TESTNET_WALLET_CHAIN_ID = (TESTNET_L1_CHAIN_ID ^ TESTNET_ROLLUP_VERSION) >>> 0
+
+/** Ethereum mainnet — the L1 the Alpha/mainnet rollup settles to. */
+export const MAINNET_L1_CHAIN_ID = 1
+/**
+ * Alpha/mainnet rollup version. MUST be kept as fresh as its wallet-id pair — the Alpha 5.0.1
+ * upgrade shipped a stale MAINNET pin once, so a bump re-reads this from the node. Mirrors the
+ * extension's `MAINNET_ROLLUP_VERSION` (`apps/extension/src/utils/chain-ids.ts`).
+ */
+export const MAINNET_ROLLUP_VERSION = 4248422647
+
+/** The wallet matches a network by `(l1 ^ rollupVersion) >>> 0` → `4248422646` (== extension CHAIN_IDS.MAINNET). */
+export const MAINNET_WALLET_CHAIN_ID = (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0
