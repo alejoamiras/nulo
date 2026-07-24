@@ -11,6 +11,28 @@
 > build/prove/pre-send — §9). The corrected forms (coverage-watermark protocol; serialized pre-broadcast commit
 > point) are adopted. See §16 for full attribution.
 
+## 0a. Delivered state (implementation log)
+
+| Phase | What landed | Commit |
+|---|---|---|
+| 0 | Characterization pins for every behavior later phases flip | `b145fb8` |
+| 1 | Durable causal protocol as a pure, property-tested module (mutation-verified) | `0990e6b` |
+| 2a′ | Account rows re-keyed to `(profileId, chainId, address)`; freeze KAT untouched | `acf3fd6` |
+| 2a | Activity-protocol coordinator (allocate/settle/abandon, incarnations, tombstones); incoming re-keyed by scope | `f626369` |
+| 2b | Transactions stamp their owning profile + network | `a012a5b` |
+| 3 | Per-scope slices + instant switch; profile-aware display filters | `305dd05` |
+| 4 | In-flight-send switch guard; journal write serialization; shared account resolver | `5a4d32b` |
+| 5 | Network e2e for the guard | `363d614` |
+
+**Deliberate cuts, all recorded rather than silent:**
+- The slice store owns **transactions + awaiting placeholders** (what `app.store` owned). Journal and incoming
+  records keep their existing scope-filtered ingest, now also profile-aware. Their slice migration is not done;
+  the isolation guarantee for them rests on the filters the Phase-1 e2e already gates.
+- The guard covers the **account** switch; the lock-then-fast-unlock-into-another-profile race is a documented
+  residual (§9.6), not a closed hole.
+- No fence, session-generation, commit-to-submit CAS, orphan ledger or submission-recovery machinery was built,
+  per the arc's decision to prevent drift rather than detect it.
+
 ## 0. Primary invariant
 
 The immutable **composite scope** `S = (profileId, networkId, chainId, accountAddress)` governs every durable
