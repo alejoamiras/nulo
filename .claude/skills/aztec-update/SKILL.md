@@ -57,14 +57,39 @@ rm bun.lock && bun install
 - Recompile + commit the `target/*.json` (build input, not an on-chain act).
 - **The portal-fork pins** (`packages/bridge-core/scripts/portal-artifact.ts`): ANY byte change to `contracts/bridge/evm/upstream/NuloTokenPortal.sol` (even a comment) or a new l1-contracts toolchain shifts `FORKED_PORTAL_KECCAK` / `PORTAL_PIN`. Review the diff, update the source keccak, run `scripts/build-portal-artifact.ts`, fold the new bytecode hashes, commit the regenerated build.json.
 
+**The frozen account surface (never bumped with the line)**: the account artifact is VENDORED
+(`packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json`) and, with the instantiation
+descriptor + regime record (`frozen-artifact.ts`, `instantiation-descriptor.ts`,
+`address-freeze.ts`), fixes every derived account address. A bump must leave the KAT
+(`derivation-vectors.test.ts`) and all freeze tests green with ZERO vector regeneration and zero
+pin edits — if a bump reds any of them, upstream moved a protocol-level input; STOP, that is
+new-extension-major territory, not a re-pin (mirror the PrivateFPC conscious-re-pin spirit; see
+CLAUDE.md "Account-address freeze").
+
 **Drift detectors** (run all three; on a bump-only they must be GREEN, on a reset they CONFIRM the shift):
 1. `bun run --cwd apps/faucet verify:deployments` — re-derives the live dripper/tokens from pinned params.
 2. The PrivateFPC tripwire (`packages/bridge-core/src/private-fuel.test.ts`) — fires on artifact/bytecode drift. Re-pinning `PRIVATE_FPC_ADDRESS` is a CONSCIOUS act that owes a live re-canary; never silence the test.
 3. Re-derive the bridge/proxy instances from the manifest metas with the new artifacts (see the rc.2 lessons for the one-shot compare).
 
+**The frozen-account execution canary (MANDATORY, every `@aztec/*` bump PR)**: run
+`bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts` **prover-ON** before merge.
+LOCALLY, `e2e:agent` has NO accelerator enforcement — it silently falls back to in-browser WASM if
+no prover is up, which would pass the canary WITHOUT proving anything about native proving. To
+actually run it prover-ON locally: start `accelerator-server` on `127.0.0.1:59833` (the SHA-pinned
+binary from `_network-e2e.yml`), build the wallet with `VITE_NULO_ACCELERATOR_REQUIRED=1`, and
+confirm at least one `Received /prove request` in the accelerator log during the run. In CI this is
+automatic: the canary is a named file in the prover-ON `network-e2e-canary` job (`pr-network-e2e.yml`),
+so the required `network-e2e-status` check enforces it — that is the authoritative gate; the local
+run is a pre-flight. It proves the frozen 5.0.1 account bytecode still simulates, proves natively,
+and is accepted by the bumped node/toolchain across the full arc (frozen-ctor multicall deploy →
+init-nullifier flip → authwit consume → SW-restart re-derive + tx). The address KAT cannot see
+execution breakage — this canary is the only gate that does. **A red canary BLOCKS the bump**:
+default response is HOLD the `@aztec` line; shipping a new extension major (address-regime rotation)
+is the deliberate alternative — never a casual fix.
+
 ## Branch A — bump-only (no reset, detectors green)
 
-Normal delivery: `test:all` + `lint` + 5 builds → PR labeled **`e2e:network` + `e2e:smoke`** (forces both suites — the dep diff warrants it) → all three required checks green → merge. Done.
+Normal delivery: `test:all` + `lint` + 5 builds + **the prover-ON frozen-account canary (above)** → PR labeled **`e2e:network` + `e2e:smoke`** (forces both suites — the dep diff warrants it) → all three required checks green → merge. Done.
 
 ## Branch B — network reset (the coupled redeploy)
 

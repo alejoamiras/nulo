@@ -1,6 +1,6 @@
 /**
  * Regime-B reference vectors (plan D13): the signing-key-root chain computed EXCLUSIVELY from the
- * published 5.0.0 packages (pinned in package.json; digests in tarball-digests.json). These are the
+ * published 5.0.1 packages (pinned in package.json; digests in tarball-digests.json). These are the
  * known answers the repo's derivation helper must reproduce EXACTLY — no explanatory exception may
  * replace equality. Run from THIS directory: `bun install && bun derive-vectors.ts`.
  *
@@ -17,7 +17,7 @@ import { CompleteAddress, getContractInstanceFromInstantiationParams } from "@az
 import { deriveKeys } from "@aztec/stdlib/keys"
 
 // Regime-A values (from the rc.2-installed upstream deriveSigningKey — regime-a-vectors.json).
-// The construction is version-independent; 5.0.0 primitives MUST reproduce them.
+// The construction is version-independent; 5.0.1 primitives MUST reproduce them.
 const REGIME_A = [
 	{
 		seed: "0x0000000000000000000000000000000000000000000000000000000000000042",
@@ -36,7 +36,7 @@ for (const { seed: seedHex, signingKey: expectedSigningKey } of REGIME_A) {
 	const seed = Fr.fromHexString(seedHex)
 	const signingKey = sha512ToGrumpkinScalar([seed, DomainSeparator.IVSK_M])
 	if (signingKey.toString() !== expectedSigningKey) {
-		throw new Error(`5.0.0 signingKey construction diverged from the rc.2 reference for ${seedHex}`)
+		throw new Error(`5.0.1 signingKey construction diverged from the rc.2 reference for ${seedHex}`)
 	}
 
 	const secretKey = await deriveSecretKeyFromSigningKey(signingKey)

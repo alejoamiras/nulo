@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — wallet-ux-fixes</title>
+  <style>
+    :root { --ink:#1c1f27; --muted:#5b616e; --faint:#878d9c; --line:#e4e7ee; --bg:#fbfbfc;
+      --card:#ffffff; --accent:#4a5bd0; --accent-soft:#eaedfb; --ok:#1f8a5b; --warn:#b06a1a;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+    @media (prefers-color-scheme: dark) { :root { --ink:#e8eaf0; --muted:#9aa0b0; --faint:#6b7182;
+      --line:#262a35; --bg:#0e0f13; --card:#16181f; --accent:#8b98ff; --accent-soft:#1c2140; --ok:#4fd396; --warn:#e0a24a; } }
+    :root[data-theme="dark"] { --ink:#e8eaf0; --muted:#9aa0b0; --faint:#6b7182; --line:#262a35; --bg:#0e0f13;
+      --card:#16181f; --accent:#8b98ff; --accent-soft:#1c2140; --ok:#4fd396; --warn:#e0a24a; }
+    :root[data-theme="light"] { --ink:#1c1f27; --muted:#5b616e; --faint:#878d9c; --line:#e4e7ee; --bg:#fbfbfc;
+      --card:#ffffff; --accent:#4a5bd0; --accent-soft:#eaedfb; --ok:#1f8a5b; --warn:#b06a1a; }
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; max-width: 720px;
+      margin: 0 auto; padding: 2.5rem 1.15rem 5rem; color: var(--ink); line-height: 1.6; background: var(--bg); }
+    h1 { font-size: 1.75rem; margin: 0 0 0.4rem; letter-spacing: -0.02em; }
+    .sub { color: var(--muted); margin: 0 0 1.5rem; }
+    h2 { font-size: 1.2rem; margin-top: 2.5rem; letter-spacing: -0.01em; }
+    h3 { font-size: 1rem; margin: 1.4rem 0 0.3rem; }
+    code, pre { font-family: var(--mono); font-size: 0.85rem; }
+    pre { background: var(--card); border: 1px solid var(--line); padding: 0.9rem 1rem; border-radius: 8px;
+      overflow-x: auto; white-space: pre-wrap; line-height: 1.5; }
+    .tag { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--accent); }
+    .phase { margin: 1rem 0; padding: 1rem 1.15rem; border-left: 3px solid var(--line); background: var(--card);
+      border-radius: 0 8px 8px 0; }
+    .phase h3 { margin: 0 0 0.35rem; }
+    .proves { color: var(--muted); font-size: 0.88rem; margin: 0.4rem 0 0; }
+    .proves b { color: var(--ink); font-weight: 600; }
+    .approval { background: var(--accent-soft); padding: 1.1rem 1.25rem; border: 1px solid var(--accent);
+      border-radius: 10px; margin: 1.5rem 0; }
+    .approval h2 { margin-top: 0; }
+    .recommended { border-left-color: var(--accent); }
+    .warning { color: var(--warn); font-weight: 600; margin: 0.8rem 0; }
+    .muted { color: var(--faint); font-size: 0.88rem; }
+    a { color: var(--accent); }
+    ul { padding-left: 1.2rem; } li { margin: 0.3rem 0; }
+    .pill { display: inline-block; font-family: var(--mono); font-size: 0.68rem; padding: 0.1rem 0.45rem;
+      border-radius: 5px; background: var(--accent-soft); color: var(--accent); }
+  </style>
+</head>
+<body>
+  <p class="tag">Blueprint · mid · reject → re-drafted</p>
+  <h1>wallet-ux-fixes</h1>
+  <p class="sub">Four small wallet annoyances, fixed. Three are code; one is a design choice for you.</p>
+
+  <p>After your account-freeze work shipped, you flagged four rough edges. The plan went through a dual audit and
+  three fresh codex passes — which caught that one mechanism couldn't work, another would have broken CI, and
+  (repeatedly) that the account-switch bug is far bigger than it looks. The result: this PR ships the <b>two
+  genuinely clean fixes</b>, and the other two items split into their own PRs where they belong.</p>
+
+  <h2>Why this tier (mid)</h2>
+  <p>Scored 0 of 6 risk dimensions as HIGH → <span class="pill">mid</span>. But the review surfaced two items that
+  aren't "mid contained fixes" at all — the backup-format change and, especially, the account-switch bug (which
+  turned out to be a cross-account privacy leak spanning two pages, shared code, and a data-model gap). Both got
+  <b>split out</b>, keeping this PR low-risk and actually shippable.</p>
+
+  <h2>What ships in this PR (safest first — both codex-approved)</h2>
+
+  <div class="phase">
+    <h3>Phase 1 — Backup download stops closing the popup</h3>
+    <p>Right now, clicking "Download backup" asks the browser for download permission <i>after</i> making the
+    backup, which pops a prompt that closes the wallet and makes you start over. Fix: ask for that permission at
+    install time instead, so the download just happens — no prompt, no restart.</p>
+    <p class="proves">Proves itself by: <b>both browser builds pass with the permission baked in</b>, a unit test
+    (forcing the "not-granted" branch) confirms the download path never pops a prompt, lint + typecheck green.</p>
+  </div>
+
+  <div class="phase">
+    <h3>Phase 2 — Imported wallets land on the right default network</h3>
+    <p>Import a wallet and it defaults to <b>Testnet</b>, even though the extension's default is <b>Alpha V5</b> —
+    confusing. The old code hard-coded "Testnet" as the fallback; a recent change moved the real default to Alpha
+    but missed this spot. Fix: the fallback now asks the network service for <i>the actual default</i>, so imported
+    and fresh wallets always agree. (Remembering the <i>exact</i> network you were on across export/import is the
+    split-out PR-B.)</p>
+    <p class="proves">Proves itself by: <b>a test that the fallback returns the build's real primary network</b>
+    (Alpha normally, Testnet in the test environment — proving it reads one source, not a hard-coded name), plus an
+    import smoke test.</p>
+  </div>
+
+  <h2>Split out (not in this PR)</h2>
+  <ul>
+    <li><b>PR-D — the account-switch privacy fix (item 3).</b> This is the one that kept growing. Switching accounts
+    can show one account's transactions, incoming transfers, and pending actions under another — on both the home
+    feed AND the History page — because several data paths aren't scoped or guarded against a mid-switch race. Fixing
+    it right means one shared guard across both pages plus a real design decision (dApp actions don't currently
+    record which account they belong to). Too big and too sensitive to bundle — its own PR, likely its own plan.</li>
+    <li><b>PR-B — remember the exact active network across backup import.</b> My first mechanism was wrong (proven
+    unimplementable); the corrected approach is a small backup-format change, security-sensitive enough for its own
+    plan.</li>
+    <li><b>PR-C — the network-list redesign (item 4).</b> The design choice below.</li>
+  </ul>
+
+  <h2>Human context</h2>
+  <p>The extension recently switched its default network to Alpha V5 (mainnet). The test suite deliberately runs on
+  Testnet because CI can't reach the real Alpha network without stalling — which is exactly why the "just use Alpha"
+  shortcut would have broken the tests, and why the fix reads the default from one place that already knows about
+  that test setting.</p>
+
+  <h2>Open questions for you</h2>
+  <ul>
+    <li><b>[A1] The network-list redesign (item 4).</b> Four directions are in the
+    <a href="https://claude.ai/code/artifact/969681ff-fdb5-45f3-9481-883c50790edd">options artifact</a> (live
+    mockups). My pick is <b>B (active badge, no fake radio)</b> — smallest, safest, fixes the actual complaint. Pick
+    a letter and it ships as PR-C.</li>
+    <li><b>[A2] One PR or the split?</b> You originally asked for one PR. The audit + three codex passes converged on
+    a <b>four-way split</b>: <b>PR-A</b> (this — backup permission + import default, both codex-approved), <b>PR-B</b>
+    (backup-format), <b>PR-C</b> (network-list redesign), <b>PR-D</b> (the account-switch privacy fix). Bundling kept
+    the whole batch un-approvable — the account-switch fix alone was rejected four times as it revealed its true size.
+    <b>My recommendation: take the split; ship PR-A now.</b> If you insist on one PR, the account-switch item needs
+    its own blueprint first (it has a real design decision in it). Your call.</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Your approval decision</h2>
+    <ul>
+      <li>Confirm the scope: <b>PR-A = the two fixes above</b> (Phases 1–2); PR-B, PR-C, PR-D deferred.</li>
+      <li>Confirm tier <span class="pill">mid</span>.</li>
+      <li>Confirm the validation plan: component/unit + smoke e2e; both browser builds for the permission change.</li>
+      <li>Answer [A1] (network-UX letter — for PR-C) and [A2] (accept the split, or insist on one PR).</li>
+      <li><b>Approve</b>, <b>conditionally approve</b> (with conditions), or <b>reject</b> (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <h2>Implementation seeds <span class="muted">(draft — finalized after approval)</span></h2>
+  <p>One drives the autonomous session. <span class="warning">Use exactly ONE — they don't compose.</span></p>
+
+  <div class="phase recommended">
+    <h3>Recommended: <code>/goal</code> <span class="muted">(completion is observable in plan.md + gates)</span></h3>
+    <pre><code>/goal All FOUR phases marked ✓ in implementations-plan/wallet-ux-fixes/plan.md (the per-phase headers) — Phase 1 (downloads permission), Phase 2 (import network fallback), Phase 3 (preserve active network across backup — item 1b), Phase 4 (network-list active badge — item 4 option B) — each ✓ backed by its validation gate reported passing in the transcript; for each phase printed `LESSONS_FILE=implementations-plan/wallet-ux-fixes/lessons/phase-N.md`; both browser builds (`bun run --cwd apps/extension build:chrome` + `build:firefox`) exit 0 with `downloads` in required permissions; `/code-review max --fix` complete with findings applied + committed; codex post-impl audit complete with high/critical addressed; `bun run test:all`, `bun run lint`, and `bun run typecheck:all` all report exit 0 in the transcript. (Item 3 is a SEPARATE PR-D — OUT of scope.)</code></pre>
+  </div>
+
+  <h3>Alternative: <code>/loop 15m</code></h3>
+  <pre><code>/loop 15m Drive implementations-plan/wallet-ux-fixes (Phases 1-4: items 2, 1a, 1b, 4B — NOT item 3) forward. Never idle. Each firing: read plan.md + lessons/ (authoritative), `git status`, `git log --oneline -5`, and any open PR's `gh pr view --json statusCheckRollup`. Pick the next pending phase; after each edit run `bun run lint` + the touched package's tests; commit + push. Phase green = its plan.md validation gate passes verbatim — then mark ✓, file the lessons entry, print `LESSONS_FILE=...`, advance. Stuck or facing a decision? `/codex xhigh`, reach a defensible call, log it. Hard limits: never merge to dev/main, never publish, never expand scope beyond these four phases (item 3 is a separate PR-D). All phases ✓ → `/code-review max --fix` (commit separately) → codex post-impl audit → address high/critical → wrap-up report + stop.</code></pre>
+
+  <p class="muted" style="margin-top:2.5rem"><a href="plan.md">Full plan.md</a> ·
+    <a href="./lessons/">Lessons</a> ·
+    <a href="audit-codex.md">codex audit</a> ·
+    <a href="audit-fable.md">fable audit</a> ·
+    <a href="https://claude.ai/code/artifact/969681ff-fdb5-45f3-9481-883c50790edd">network-UX options</a></p>
+</body>
+</html>

@@ -1,7 +1,7 @@
 <script setup>
 /** Utils */
 import { ContactServiceClient } from "@/wallet/services/contact/client"
-import { isValidHex } from "@/utils/string"
+import { isValidHex, trimAddress } from "@/utils/string"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -50,11 +50,11 @@ const importContacts = ref([])
 const contactsByName = ref(null)
 const contactsByAddress = ref(null)
 
-/** True when at least one selected staged contact came in with
- *  `isSender: true`. Drives the active-network banner — we only
- *  surface it when the user's choice would actually trigger
- *  registerSender calls. */
-const hasIncomingSenders = computed(() => importContacts.value.some((c) => c?.isSender && c?.selected))
+/** Count of selected staged contacts that came in with `isSender: true`.
+ *  Drives the active-network banner — surfaced (with the explicit count)
+ *  only when the user's choice would actually trigger registerSender
+ *  calls, so sender additions are a stated, counted consequence. */
+const incomingSenderCount = computed(() => importContacts.value.filter((c) => c?.isSender && c?.selected).length)
 
 function handleSelectContact(contact) {
 	if (contact.isInvalidAddress) {
@@ -86,7 +86,7 @@ watch(
 			importContacts.value[cacheStore.importContact.idx] = {
 				...cacheStore.importContact,
 				duplicateName: !!contactsByName.value.get(cacheStore.importContact.name),
-				duplicateAddress: !!contactsByAddress.value.get(cacheStore.importContact.address),
+				duplicateAddress: !!contactsByAddress.value.get(cacheStore.importContact.address?.toLowerCase()),
 				isInvalidAddress: false,
 				selected: true,
 			}
@@ -103,15 +103,19 @@ watch(
 
 			importContacts.value = cacheStore.importContacts
 
+			// Address keys are lowercased: staged rows arrive canonicalized, but
+			// an existing contact saved before canonical-on-save may be mixed-
+			// case — it must still be detected as a duplicate (and auto-
+			// unselected), not presented as a fresh row.
 			for (const _c of contacts.value) {
 				contactsByName.value.set(_c.name, _c)
-				contactsByAddress.value.set(_c.address, _c)
+				contactsByAddress.value.set(_c.address.toLowerCase(), _c)
 			}
 
 			for (const idx in importContacts.value) {
 				const _c = importContacts.value[idx]
 				const _cbn = contactsByName.value.get(_c.name)
-				const _cba = contactsByAddress.value.get(_c.address)
+				const _cba = contactsByAddress.value.get(_c.address.toLowerCase())
 
 				importContacts.value[idx] = {
 					..._c,
@@ -163,9 +167,13 @@ watch(
 
 						<!-- Active-network banner. Only shown when at least one
 						     selected import will trigger registerSender on confirm. -->
-						<Text v-if="hasIncomingSenders" size="12" weight="600" color="secondary" align="center">
-							Senders will be registered on
-							<Text color="primary" weight="700">{{ appStore.network?.name ?? "no active network" }}</Text>.
+						<Text v-if="incomingSenderCount > 0 && appStore.network" size="12" weight="600" color="secondary" align="center">
+							<Text color="primary" weight="700">{{ incomingSenderCount }}</Text>
+							{{ incomingSenderCount === 1 ? "sender" : "senders" }} will be registered on
+							<Text color="primary" weight="700">{{ appStore.network.name }}</Text>.
+						</Text>
+						<Text v-else-if="incomingSenderCount > 0" size="12" weight="600" color="secondary" align="center">
+							No active network — sender registrations will be skipped.
 						</Text>
 					</Flex>
 

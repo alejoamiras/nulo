@@ -16,6 +16,7 @@ import { expect } from "vitest"
 import { test } from "./fixtures/extension"
 import {
 	buildSyntheticBackup,
+	deriveNuloAccountAddress,
 	gotoPopupImport,
 	importFullBackup,
 	makeRandomMasterBase64,
@@ -26,7 +27,9 @@ import {
 } from "./helpers/import-drivers"
 
 const HAS_FIXTURE = process.env.NULO_E2E_MIGRATION_FIXTURE === "1"
-const IS_RELEASE_ARTIFACT_RUN = !!process.env.EXTENSION_PATH
+// Explicit workflow-set artifact-mode flag (was bare EXTENSION_PATH — too broad: any custom
+// local build path would have satisfied the arming contract's artifact carve-out).
+const IS_RELEASE_ARTIFACT_RUN = process.env.NULO_E2E_ARTIFACT_RUN === "1"
 
 test("fixture-arming contract: unarmed runs are allowed ONLY against a release artifact", () => {
 	if (!HAS_FIXTURE) {
@@ -45,6 +48,9 @@ test.skipIf(!HAS_FIXTURE)(
 		const filePath = writeBackupToTemp(
 			buildSyntheticBackup({
 				masterBase64,
+				// Derivation-consistent with the master (chainId 31337 = the synthetic network) —
+				// the integrity coordinator blocks a mismatched import at finalize.
+				accountAddress: await deriveNuloAccountAddress(masterBase64, 31337),
 				extraData: {
 					// PRE-shape contact row: carries `legacyName`, no `name` — exactly
 					// what a v1 export would hold if v9001 had shipped as a real v2.

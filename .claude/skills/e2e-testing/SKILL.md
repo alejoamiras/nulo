@@ -47,9 +47,174 @@ This prevents guessing at selectors and ensures tests assert on real observable 
 - **Vitest orders files by mtime, not alphabetically** — don't rely on file execution order. Design tests to be order-independent via fixtures.
 - **`Button.vue` doesn't set HTML `disabled` attribute** — it uses CSS `pointer-events: none` instead. `btn.disabled` is always `false`. To check if a Button is enabled, use `getComputedStyle(btn).pointerEvents !== "none"`. If you skip this, click handlers like `handleMint` silently return early via their own `if (!isAllowed) return` guard.
 
+## CI-log + flake forensics (learned the hard way, THREE sessions running)
+
+- **`gh run view --log` interleaves the STEP'S SOURCE SCRIPT with runtime output.** Every line of the
+  workflow's `run:` block is echoed with near-identical timestamps before execution — grepping the log
+  for strings like `exit 86` or `retrying` will match the SOURCE and fake a runtime event. Two separate
+  sessions "confirmed" a boot-retry/port-collision story from source echoes. Discipline: match on
+  timestamps advancing, count actual invocation markers (`[e2e:agent] resolving ports...` appears once
+  per real attempt), and pull logs via `gh api .../jobs/<id>/logs` when the CLI view returns empty.
+- **`[aztec-node] Error: Address already in use` during sandbox boot is COSMETIC on aztec 5.0.1.** The
+  `aztec start --local-network` wrapper (`~/.aztec/versions/<v>/…/scripts/aztec.sh`) launches its OWN
+  `anvil --port "$ANVIL_PORT"` even though global-setup already started ours on that port; the inner
+  bind fails, the wrapper continues, the node boots fine (~30s). Do not diagnose port collisions from
+  this line alone — check whether the node reached ready + deployments after it.
+- **Full-backup import has a bounded two-stage clock**: restore (slow on hosted runners) THEN possibly
+  the app's own 30s recovery wait before it routes (`import.vue` completeImportWithRecovery). Any
+  navigation wait below restore+30s+margin fails STRUCTURALLY whenever the recovery leg runs — it looks
+  like flake because fast bootstraps skip the leg. Import-driver nav waits are sized 300s; affected
+  spec budgets 900s.
+- **The seeded-ACTIVE network is baked at build time and fresh-extension flows bootstrap on it** before
+  any fixture can switch. CI egress to the public Alpha mainnet RPC blackholes, and each blocked call
+  eats the node client's full 60s-abort × retry envelope — so e2e builds pin
+  `VITE_NULO_E2E_DEFAULT_NET=testnet` (smoke workflow + agent.sh; never ships, prod default unaffected).
+- **Never relaunch `e2e:agent` immediately after killing a run mid-flight.** Observed: a TaskStop'd
+  run's sandbox was still dying when the relaunch booted; the fresh suite then collapsed mid-run with
+  mass timeouts (28 passed, then 32 files of unrelated-looking failures). The `os error 48` boot line
+  is NOT the tell — it also appears on fully green runs (see the cosmetic-anvil bullet above). Before
+  relaunching after a kill, verify no aztec/anvil survivors hold the previous run's ports; when a run
+  collapses mid-suite like this, suspect the environment before the code.
+- **Vitest globalSetup contract (FIXED, was silent for the suite's whole life)**: with a `default`
+  export present, a named `teardown` export is IGNORED — the teardown must be the default's RETURN
+  value (vitest loader: `if (m.default) return { file, setup: m.default }`). Both `global-setup.ts`
+  and `global-setup-smoke.ts` had the dead-named-teardown bug; both now return the teardown, and a
+  setup that fails midway tears down what it already started before rethrowing.
+- **Do NOT add bash signal traps around foreground vitest** (tried, review-killed with empirical
+  proof): bash DEFERS INT/TERM traps until the foreground child exits, so a trap can never fire
+  during the build/suite windows it would protect — and a deferred trap that fires after the child
+  finishes CLOBBERS the real exit code (green run → 130; exit-86 → retry swallowed). Pre-vitest the
+  agent owns no processes; sandbox lifecycle belongs to the TS side: the wired global teardown
+  (ownership-gated, KILL-escalated), its signal hooks (fire-and-forget kills, lock left in place as
+  the reap record), and the next run's liveness-checked orphan reap via the progressively-written
+  `owned.json` (pids recorded per-spawn, not post-deploy).
+- **Lock-ownership rule**: only the run that WROTE `owned.json` may clear it; the reuse path updates
+  deployment fields in place without claiming ownership (overwriting with an empty pid map orphans
+  the prior run's live sandbox beyond reap).
+- **Release-gate tradeoff (deliberate, owner-visible)**: the encrypted backup-roundtrip SKIPS on
+  artifact smoke runs (`NULO_E2E_ARTIFACT_RUN=1`, the explicit flag set for BOTH artifact delivery
+  paths — never key on bare `EXTENSION_PATH`): prod-shaped builds seed Alpha-active and CI cannot
+  reach that RPC. Coverage lives on every PR via the pinned in-job build; the release gate keeps
+  every other smoke test. Revisit if an official CI-reachable mainnet RPC appears.
+- **A kill-recovery test must model ALL designed outcomes, not just the flattering one.** The
+  sw-restart-mid-restore test flaked for months (silent 240s park, ≥4 red CI runs) because a
+  PRE-finalize SW kill triggers the import composable's designed rollback (`deleteProfile` of the
+  orphan → wallet legitimately resets to register), while the test only accepted the recovery
+  outcome. Under CI proving load the restore stretches, the kill lands pre-finalize more often, and
+  the "flake" was the product doing exactly what it was coded to do. Map the implementation's
+  outcome space (read the error paths, not just the happy path) BEFORE writing the assertion.
+  Three hardening rules for the accepted alternate leg (each closed a codex-audit finding):
+  (1) *completion signal, not first-visible effect* — the profile row vanishes in `deleteProfile`'s
+  phase 1, but the deletion TOMBSTONE (`nulo:core:profile-tombstones@`) clears only after the
+  coordinator's full purge, so "row gone" alone accepts a half-done or wedged purge;
+  (2) *provenance-gate the alternate leg* — a clean register end-state is only PROVEN rollback if
+  the row demonstrably existed first (the mid-restore marker); without that it's equally consistent
+  with a restore that crashed before creating anything, which must FAIL;
+  (3) *converge the legs* — never `return` early around the test's load-bearing assertions; drive
+  the product's designed retry path so the on-chain checks execute on EVERY pass, or a required
+  gate can sit green for weeks while its raison-d'être assertions never run.
+- **One-shot route checks race vue-router settling — use settle loops.** `ensureUnlocked` samples the
+  hash ONCE and no-ops off-auth; a fresh popup transiently shows `/popup` (an index route that
+  immediately pushes general) before the guard settles on auth, so a one-shot sample in that window
+  means nobody ever types the password. Recovery waits should loop: general → done; auth → unlock →
+  re-check; terminal-reset route → verify completion via raw storage (row AND tombstone gone, see
+  above) before ending the wait. Always fall through to the loop's sleep after an unlock attempt
+  (oscillation must not hot-spin), and record the LAST unlock error into the timeout diagnostics —
+  a swallowed `.catch(() => {})` turns a selector regression into an opaque park.
+- **Instrument long navigation waits with a route-trajectory recorder** (poll `window.location.hash`
+  on an interval and push transitions into a `window.__nuloRouteTrace` array — vue-router's hash
+  history navigates via pushState, so `hashchange`/`popstate` listeners see NOTHING). On timeout,
+  dump trace + parked hash + storage key names into the thrown Error message (vitest prints it with
+  the failure; console.error can interleave away from the test's block in CI logs). A silent
+  multi-minute park is undiagnosable from CI logs after the fact.
+
 ## References
 
 - [Chrome Extension Testing with Puppeteer (official)](https://developer.chrome.com/docs/extensions/how-to/test/puppeteer)
 - [Puppeteer API](https://pptr.dev/api)
 - [Puppeteer Chrome Extensions guide](https://pptr.dev/guides/chrome-extensions)
 - [MetaMask e2e test setup](https://github.com/MetaMask/metamask-extension) — see `test/e2e/`
+
+- **tmpfs exhaustion after many network-e2e runs**: each run leaves a `/tmp/nulo-aztec-<pid>-<ts>`
+  sandbox data dir (~hundreds of MB); `/tmp` is RAM-backed tmpfs, so ~15 runs in a day ate 12 GB
+  of RAM and Chrome/extension pages started timing out at RANDOM early stages (popup boot, popup
+  windows) with healthy-looking load averages. If unrelated e2e stages start flaking rotationally
+  on a long-lived box, check `df -h /tmp` FIRST and `rm -rf /tmp/nulo-aztec-*` between sessions
+  (no run active). Diagnosed 2026-07-20 — a green suite at 20:00 degraded to rotating boot
+  timeouts by 22:00 with identical code (verified via a pre-change checkout that failed the same
+  way).
+
+## backup-restore-sw-restart: two DESIGNED outcomes, not one
+
+The mid-restore SW-kill scenario has two legitimate endings, decided by where the kill lands
+relative to `finalizeRestore` (the test asserts BOTH since #308 — do not "fix" a rollback ending
+back into a recovery expectation):
+
+- **RECOVERED** (kill post-finalize): reopen → auth → unlock → general, registrations survive.
+- **ROLLED BACK** (kill pre-finalize): the import page's catch deletes the orphan profile — the
+  reopened popup has zero profiles and legitimately routes to REGISTER. The test asserts the
+  rollback completed (row gone, tombstone cleared) and then re-imports cleanly.
+
+Two flake mechanisms this design killed (worth remembering as PATTERNS):
+
+1. **One-shot route sampling parks flows.** The fresh popup can transiently show `/popup` (an
+   index route that immediately pushes general) before the auth guard settles. A helper that
+   samples the hash ONCE (`ensureUnlocked`'s "not on auth → return") no-ops in that window —
+   nobody ever types the password and the downstream long wait parks silently. Use a settle LOOP
+   around unlock, never a single sample.
+2. **vue-router hash navigation fires NO `hashchange`** (it navigates via pushState). A
+   `hashchange`-listener route recorder logs nothing; record routes by POLLING (see the test's
+   `__nuloRouteTrace`).
+
+Related product gap (tracked separately): restore writes networks with Local LAST, and recovery
+seeds defaults only when ZERO network rows exist — a kill mid-network-writes leaves the profile
+without "Local" permanently.
+
+## PR-workflow silence — check mergeability first
+
+If a push to a PR branch triggers NO workflows at all (not even Quality; only Cloudflare checks
+appear), check `gh pr view <n> --json mergeStateStatus` — a `DIRTY` (conflicted) PR gets no
+`pull_request` merge-ref, so ALL pull_request-triggered workflows silently skip. Fix = merge the
+base branch in and push; the run fires immediately. Don't debug the workflows.
+
+## Local resource leaks: the sandbox datadir is on tmpfs (RAM)
+
+`global-setup.ts` puts `AZTEC_DATA_DIR` under `tmpdir()` — i.e. **tmpfs, which is RAM-backed**.
+Each run's aztec LMDB store can be multiple GB. The reaper (owned.json lock, liveness-checked
+orphan reap, kill-by-process-group) only runs at the START of the NEXT e2e run, so when you STOP
+running e2e the last run's orphans are never reaped. An orphaned aztec process holds its datadir
+open even after the dir is `rm`'d → the space stays pinned **in RAM as a deleted-but-open file** →
+swap fills → the box thrashes.
+
+### Symptom you'll hit first (it doesn't look like an e2e problem)
+
+Under this pressure your OWN tooling breaks before any test does:
+- The agent shell's stdout capture fails — commands that print output return "exit 1" with no
+  output, while no-output commands (`true`, `rm`) still succeed. (Redirect to a REAL-disk file and
+  `Read` it — `df -h /tmp; free -h > ~/x.txt` — to see through the broken capture.)
+- In-page e2e operations time out spuriously (e.g. `backup-roundtrip`'s 30s `DecompressionStream`
+  capture). A test that is GREEN on CI but RED locally with a timeout is very likely this, not code.
+
+### Diagnose
+
+`df -h /tmp` shows high "used" but `du -sh /tmp/*` sums to far less → the gap is deleted-open files
+held by LIVE processes. `ps -eo pid,rss,etimes,cmd | grep -E 'aztec|anvil'` finds the holders.
+
+### Recover (order matters)
+
+1. Kill the HOLDERS first — `rm` alone won't reclaim RAM while a process holds the fd open. Prefer
+   killing by process-group from the run's `owned.json` (kill `-pgid`). `pkill -f nulo-aztec` /
+   `pkill -f anvil` is the orphan-recovery LAST resort — it can hit ANOTHER agent's live run
+   (kill by owned pgid, not by name; see the run-isolation rule).
+2. Then `rm -rf /tmp/nulo-aztec-* /tmp/nulo-e2e-*` and `sync`.
+3. Confirm recovery: a plain `echo` through the shell works again.
+
+### Avoid
+
+- **Reap your own runs at session end**, not just implicitly at next-run-start. After a burst of
+  `e2e:agent` runs, kill the owned pgids + clear the datadirs before walking away.
+- Don't spin up e2e in a throwaway worktree (e.g. an A/B baseline) and then `git worktree remove`
+  it without reaping its sandbox first — that orphans its holders.
+- **Best fix (infra, separate PR): move `AZTEC_DATA_DIR` off tmpfs onto real disk** (`~/.cache/…`
+  or the gitignored `.e2e-state/…`). Then a leaked run wastes cheap disk you reap later instead of
+  RAM that breaks the machine.

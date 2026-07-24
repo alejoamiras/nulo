@@ -175,7 +175,10 @@ export async function mintPublicTokens(
 	}
 }
 
-/** Mint private tokens to an address.
+/** Mint private tokens to an address. Returns the mined L2 tx hash as a
+ *  `0x`-prefixed string — the SAME value the extension's note scanner reports
+ *  as `note.txHash` (both are `TxHash.toString()`), so callers can arm the
+ *  incoming-poll gate or correlate a discovered incoming record by hash.
  *
  *  `mint_to_private` is a private execution path, so the test wallet's
  *  PXE must know the token contract (instance + artifact) before it can
@@ -194,7 +197,7 @@ export async function mintPrivateTokens(
 	amount: bigint,
 	minterAddress: string,
 	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
-): Promise<void> {
+): Promise<string> {
 	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
 	const instance = await node.getContract(addr)
 	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
@@ -210,12 +213,128 @@ export async function mintPrivateTokens(
 	// immediately (mintPublicTokens hides this via a follow-up
 	// `balance_of_public.simulate` that implicitly forces a chain query —
 	// no such barrier for the private path). Worth fixing here rather than
-	// at the call site so future callers don't repeat the trap.
-	await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(toAddress), amount).send({
+	// at the call site so future callers don't repeat the trap. Waiting also
+	// gives us a mined `receipt.txHash` to return.
+	const sent = await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(toAddress), amount).send({
 		fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
 		from: AztecAddress.fromStringUnsafe(minterAddress),
 		wait: { timeout: 120 },
 	})
+	return sent.receipt.txHash.toString()
+}
+
+/** Private → private transfer between two addresses the test wallet can
+ *  act for (sender must hold private balance — see `mintPrivateTokens`).
+ *  Same registration + `wait` traps as the private mint above. Returns the
+ *  mined L2 tx hash (`0x`-prefixed `TxHash.toString()`) — the delivered note
+ *  the recipient discovers carries this exact `txHash`, so callers can arm the
+ *  incoming-poll gate or correlate the incoming record by hash. */
+export async function transferPrivateTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<string> {
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+
+	const token = await TokenContract.at(addr, wallet)
+	const sent = await token.methods
+		.transfer_private_to_private(AztecAddress.fromStringUnsafe(fromAddress), AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({
+			fee: { ...feeOptions, gasSettings: E2E_FEE_GAS },
+			from: AztecAddress.fromStringUnsafe(fromAddress),
+			wait: { timeout: 120 },
+		})
+	return sent.receipt.txHash.toString()
+}
+
+/** Public → public transfer (`transfer_public_to_public`) — the sender must hold a PUBLIC balance
+ *  (mint one first). Emits `Transfer{from: sender, to, amount}`: the recipient's PUBLIC arm sees a
+ *  "Public → Public" receipt. Public call, so no PXE registration needed (mirrors `mintPublicTokens`). */
+export async function transferPublicTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const from = AztecAddress.fromStringUnsafe(fromAddress)
+	const token = await TokenContract.at(AztecAddress.fromStringUnsafe(tokenAddress), wallet)
+	await token.methods
+		.transfer_public_to_public(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
+	const balance = await token.methods
+		.balance_of_public(AztecAddress.fromStringUnsafe(toAddress))
+		.simulate({ from, fee: { gasSettings: E2E_FEE_GAS } })
+	console.log(`[transferPublicTokens] recipient on-chain public balance: ${balance}`)
+}
+
+/** Private → public transfer (`transfer_private_to_public`) — the sender must hold a PRIVATE balance.
+ *  The public-credit leg emits `Transfer{from: PRIVATE_ADDRESS_MAGIC_VALUE, to, amount}`, so the
+ *  recipient's PUBLIC arm sees a "Private → Public" receipt (`from == MAGIC`). Needs PXE registration
+ *  (private execution) + `wait` (same traps as `transferPrivateTokens`). */
+export async function transferPrivateToPublicTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+	const from = AztecAddress.fromStringUnsafe(fromAddress)
+	const token = await TokenContract.at(addr, wallet)
+	await token.methods
+		.transfer_private_to_public(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
+}
+
+/** Public → private transfer (`transfer_public_to_private`) — the sender must hold a PUBLIC balance.
+ *  Delivers a private NOTE to the recipient (discovered by the NOTE arm as "Received privately") and
+ *  emits `Transfer{from: sender, to: PRIVATE_ADDRESS_MAGIC_VALUE}` on the debit leg (to == MAGIC, so
+ *  NOT a public receipt for the recipient — D7 dropped: pub→priv is not distinguished). Needs PXE
+ *  registration (note creation) + `wait`. */
+export async function transferPublicToPrivateTokens(
+	wallet: InstanceType<typeof EmbeddedWallet>,
+	node: ReturnType<typeof createAztecNodeClient>,
+	tokenAddress: string,
+	fromAddress: string,
+	toAddress: string,
+	amount: bigint,
+	feeOptions: { paymentMethod: SponsoredFeePaymentMethod },
+): Promise<void> {
+	const addr = AztecAddress.fromStringUnsafe(tokenAddress)
+	const instance = await node.getContract(addr)
+	if (!instance) throw new Error(`Token instance not found at node for ${tokenAddress}`)
+	try {
+		await wallet.registerContract(instance, TokenContract.artifact)
+	} catch {
+		// Already registered — ignore.
+	}
+	const from = AztecAddress.fromStringUnsafe(fromAddress)
+	const token = await TokenContract.at(addr, wallet)
+	await token.methods
+		.transfer_public_to_private(from, AztecAddress.fromStringUnsafe(toAddress), amount, 0)
+		.send({ fee: { ...feeOptions, gasSettings: E2E_FEE_GAS }, from, wait: { timeout: 120 } })
 }
 
 // ── Fee Juice L1→L2 Bridge ────────────────────────────────────────────
@@ -422,10 +541,10 @@ export async function setupPreFundedAccount(
 	logger.info(`Public FJ claimed: amount=${publicAmount}`)
 
 	// Step 5 — Private FJ via PrivateFPC.
-	// Top-level import of @alejoamiras/aztec-fee-payment fails on
+	// Top-level import of @alejoamiras/private-fee-juice fails on
 	// `Export named 'DEFAULT_TEARDOWN_DA_GAS_LIMIT'` (Aztec version drift between
 	// @wonderland's pinned deps and Nulo's). Sub-path imports work.
-	const { PrivateFPCContract } = await import("@alejoamiras/aztec-fee-payment/artifacts/private")
+	const { PrivateFPCContract } = await import("@alejoamiras/private-fee-juice/artifacts/private")
 	const { bridgeForMint } = await import("./aztec-private-fpc-bridge")
 
 	// PrivateFPC instance salt MUST match Nulo's auto-discovery (fpc/service.ts: the CANONICAL

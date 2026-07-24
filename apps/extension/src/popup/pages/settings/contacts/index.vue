@@ -19,7 +19,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 import { stringCompare } from "@/utils"
 
 /** Composables */
-import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useToast } from "@/composables/toast"
 import { useEntityCrud } from "@/composables/useEntityCrud"
 import { useContactImportExport } from "@/popup/components/modules/settings/contacts/useContactImportExport"
 
@@ -62,29 +62,46 @@ const sortedContacts = computed(() =>
  *  Network-scoped: switching networks reloads the set. */
 const senderAddresses = ref(new Set())
 function isContactSender(address) {
-	return senderAddresses.value.has(address)
+	// Canonical compare: PXE senders are lowercase hex; a stored contact
+	// address may predate canonical-on-save.
+	return senderAddresses.value.has(address.toLowerCase())
 }
+// Sequence guard: rapid network switches issue overlapping getSenders
+// calls with no ordering guarantee — only the LATEST request may write
+// the set, or a slow network-A response overwrites network-B's chips.
+let senderSyncSeq = 0
 async function syncSenders() {
+	const seq = ++senderSyncSeq
 	if (!appStore.network) {
 		senderAddresses.value = new Set()
 		return
 	}
 	try {
 		const list = await accountStateService.getSenders(appStore.network.id)
-		senderAddresses.value = new Set(list)
+		if (seq !== senderSyncSeq) return
+		senderAddresses.value = new Set(list.map((a) => a.toLowerCase()))
 	} catch (err) {
+		if (seq !== senderSyncSeq) return
 		console.warn("Failed to load senders for contacts list:", err)
 		senderAddresses.value = new Set()
 	}
 }
+// Events also INVALIDATE any in-flight syncSenders snapshot (seq bump):
+// without it, a snapshot taken before the event resolves later and
+// overwrites the event's write with stale data. Residual accepted: the
+// event carries no networkId, so a registration pinned to a previous
+// network (e.g. an import racing a network switch) briefly shows a chip
+// here until the next sync corrects it — cosmetic and self-healing.
 function onSenderAdded(address) {
+	senderSyncSeq++
 	const next = new Set(senderAddresses.value)
-	next.add(address)
+	next.add(address.toLowerCase())
 	senderAddresses.value = next
 }
 function onSenderDeleted(address) {
+	senderSyncSeq++
 	const next = new Set(senderAddresses.value)
-	next.delete(address)
+	next.delete(address.toLowerCase())
 	senderAddresses.value = next
 }
 accountStateService.onSenderAdded.add(onSenderAdded)
@@ -110,35 +127,13 @@ function handleEditContact(contact) {
 	popupStore.open("edit_contact")
 }
 function handleDeleteContact(contact) {
-	const isSender = isContactSender(contact.address)
-	const networkId = appStore.network?.id
-	const networkName = appStore.network?.name ?? "this network"
-
-	// Caller-owned ref, closure-captured by the callback. Survives
-	// ConfirmPopup's clear-on-close so we can read it after the await.
-	const unregisterSender = ref(true)
-
+	// Deleting a contact never touches sender registration — sender rows are
+	// independent PXE state, managed only in Settings → Advanced → Senders.
 	cacheStore.confirm.confirm_color = "red"
 	cacheStore.confirm.confirm_text = "Yes, delete contact"
 	cacheStore.confirm.description = `Delete contact "${contact.name}"?`
-	if (isSender && networkId) {
-		cacheStore.confirm.toggle = {
-			label: `Also unregister as sender on ${networkName}`,
-			description: "Stops your wallet from detecting incoming private transfers from this address.",
-			model: unregisterSender,
-		}
-	}
 	cacheStore.confirm.callback = async () => {
 		await contactService.deleteContact(contact.id)
-		if (isSender && networkId && unregisterSender.value) {
-			try {
-				await accountStateService.deleteSender(networkId, contact.address)
-			} catch (err) {
-				console.warn("Sender unregister failed:", err)
-				openToast({ label: `Contact deleted · sender unregister failed on ${networkName}`, icon: "warning" }, TOAST_DURATION.LONG)
-				return
-			}
-		}
 		openToast({ label: "Contact deleted" })
 	}
 	popupStore.open("confirm")

@@ -64,7 +64,9 @@ watch(
 		if (!props.toasts) return // List-only mount (the Fuel tab) — the Bridge mount owns the single toast.
 		if (!done) return
 		// The foreground stepper shows the receipt for this completion - a toast would double it.
-		if (journal.activeFlowId.value === done.id) return
+		// Keyed off the SYNCHRONOUS capture, not the live activeFlowId: the form's completion watcher
+		// releases the takeover before this one runs, so the live check would always pass here.
+		if (done.foreground) return
 		// A fee-juice (Fuel) completion is 18-dec Fee Juice, not the token bridge's asset - format + label it
 		// as such so a background Fuel completion isn't announced as the wrong amount of AZLO (codex MEDIUM).
 		const sym = assetSymbol(done.assetKind, done.isPrivate)

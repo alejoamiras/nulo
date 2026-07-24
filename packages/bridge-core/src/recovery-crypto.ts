@@ -95,11 +95,14 @@ export async function openRecordSecret(
 }
 
 /**
- * The v2 deposit envelope: the bearer secret AND its authoritative metadata, sealed together so
- * GCM's auth tag covers all of it — browser storage cannot redirect a claim by editing plaintext
- * fields. `sealerL1` lives inside because it gates trust revocation. This is the ONLY accepted
- * blob shape: a decrypt that doesn't parse as v2 is rejected outright (no legacy fallback — that
- * absence is what closes the downgrade attack).
+ * The v2 deposit envelope: the private claim credential AND its authoritative metadata, sealed
+ * together so GCM's auth tag covers all of it — browser storage cannot redirect a claim by editing
+ * plaintext fields. For a recipient-committed private TOKEN deposit `secret` is the `claim_salt`, a
+ * strand-prevention + linkage-privacy credential (NOT bearer): re-deriving the consumption secret
+ * requires the bound recipient, so a leaked salt claims only to that recipient. `sealerL1` lives
+ * inside because it gates trust revocation. This is the ONLY accepted blob shape: a decrypt that
+ * doesn't parse as v2 is rejected outright (no legacy fallback — that absence is what closes the
+ * downgrade attack).
  */
 export interface DepositEnvelopeV2 {
 	v: 2

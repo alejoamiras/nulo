@@ -3,7 +3,6 @@ import path from "node:path"
 import fs from "node:fs"
 import http from "node:http"
 import { execSync, spawn, type ChildProcess } from "node:child_process"
-import { tmpdir } from "node:os"
 import type { TestProject } from "vitest/node"
 import {
 	type AztecTestConfig,
@@ -14,7 +13,7 @@ import {
 	createSponsoredFeeOptions,
 	LOCAL_NODE_URL,
 } from "./fixtures/aztec"
-import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, readLock, writeLock } from "./lockfile"
+import { type OwnedState, clearLock, isPidAlive, killOrphanByPid, newAztecDataDir, readLock, writeLock } from "./lockfile"
 import { markBootReady, markBootStarted } from "./sentinel"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -54,12 +53,19 @@ const FAUCET_URL = FAUCET_PORT ? `http://localhost:${FAUCET_PORT}/` : undefined
 
 /** Per-run aztec data directory. Mandatory even for in-memory mode because
  *  some aztec subsystems still write to ~/.aztec/data by default — two
- *  agents writing there at the same time will corrupt LMDB. The path is
- *  recorded in the ownership lockfile so a future run can clean it up
- *  if this run is killed before teardown. */
-let AZTEC_DATA_DIR = path.join(tmpdir(), `nulo-aztec-${process.pid}-${Date.now()}`)
+ *  agents writing there at the same time will corrupt LMDB. On real disk (see
+ *  `newAztecDataDir`/`E2E_DATA_ROOT`), NOT tmpfs. The path is recorded in the
+ *  ownership lockfile so a future run — or `e2e:reap` — can clean it up if this
+ *  run is killed before teardown. */
+let AZTEC_DATA_DIR = newAztecDataDir()
 
 let anvilProcess: ChildProcess | null = null
+/** True only when THIS run wrote `.e2e-state/owned.json` (fresh sandbox or progressive partial
+ *  lock). Teardown must never clear a lock it does not own: on the REUSE path (and on failures
+ *  before any lock write) the file records a PRIOR run's still-live sandbox — deleting it would
+ *  orphan those processes beyond reap (codex Med). */
+let weOwnLock = false
+
 let weStartedAnvil = false
 let nodeProcess: ChildProcess | null = null
 let weStartedNode = false
@@ -153,7 +159,28 @@ function killOrphanChromes() {
 	} catch {}
 }
 
-export default async function setup(project: TestProject) {
+/** Vitest globalSetup contract: with a DEFAULT export present, the named `teardown` export is
+ *  IGNORED — the teardown must be the default's RETURN VALUE. The named export stayed dead for
+ *  the suite's whole life (cleanup ran only via the best-effort process-exit hook), which is how
+ *  half-booted sandboxes could outlive a failed run. The default now returns `teardown`, and a
+ *  setup that dies midway (e.g. the node fails after anvil started) tears down what it already
+ *  started before rethrowing — the exit-86 classifier reads boot MARKERS, not live processes, so
+ *  cleanup cannot mask the boot-failure classification. */
+export default async function setupWithTeardown(project: TestProject): Promise<() => Promise<void>> {
+	try {
+		await setup(project)
+	} catch (err) {
+		try {
+			await teardown()
+		} catch (cleanupErr) {
+			console.warn("[e2e-setup] teardown after failed setup also failed:", cleanupErr)
+		}
+		throw err
+	}
+	return teardown
+}
+
+export async function setup(project: TestProject) {
 	killOrphanChromes()
 
 	// Guard: ensure extension is built
@@ -240,6 +267,12 @@ export default async function setup(project: TestProject) {
 		clearLock()
 	}
 
+	// Provisional lock BEFORE the first spawn, updated after each spawn (recordSpawnedPid): the
+	// agent.sh signal trap and future-run orphan reap read pids from the lock, and the final
+	// post-deploy write used to land only after MINUTES of boot — a cancel in that window left
+	// untracked process groups behind (codex Med).
+	writeProvisionalLock()
+
 	// Sandbox bring-up begins here — this opens the boot-failure (exit 86)
 	// window. Manifest validation + orphan reap above are deliberately OUTSIDE
 	// it: a failure there is a build/env problem, not an infra-boot flake, so it
@@ -283,6 +316,7 @@ export default async function setup(project: TestProject) {
 			},
 		)
 		weStartedAnvil = true
+		recordSpawnedPid()
 
 		anvilProcess.stderr?.on("data", (data: Buffer) => {
 			const line = data.toString().trim()
@@ -376,6 +410,7 @@ export default async function setup(project: TestProject) {
 			},
 		)
 		weStartedNode = true
+		recordSpawnedPid()
 
 		nodeProcess.stdout?.on("data", (data: Buffer) => {
 			const line = data.toString().trim()
@@ -432,6 +467,7 @@ export default async function setup(project: TestProject) {
 				},
 			})
 			weStartedPlayground = true
+			recordSpawnedPid()
 
 			playgroundProcess.stdout?.on("data", (data: Buffer) => {
 				const line = data.toString().trim()
@@ -480,6 +516,7 @@ export default async function setup(project: TestProject) {
 					},
 				})
 				weStartedFaucet = true
+				recordSpawnedPid()
 
 				faucetProcess.stdout?.on("data", (data: Buffer) => {
 					const line = data.toString().trim()
@@ -583,7 +620,20 @@ async function deployContractsAndProvide(project: TestProject): Promise<void> {
 	// Always write the lock once children are alive, even if contract deploy
 	// failed — orphan cleanup on a future run is more valuable than the
 	// missing identity field.
-	const owned: OwnedState = {
+	if (weOwnLock) {
+		writeLock(buildOwnedState({ l1ContractAddresses, deployedConfig: config }))
+	} else {
+		// REUSE path (this run started nothing): the on-disk lock records the PRIOR run's live pids.
+		// Update ONLY the deployment fields in place - overwriting with our (empty) pid map and
+		// claiming ownership would let teardown clear a lock whose processes we cannot reap later
+		// (review CONFIRMED finding).
+		const prior = readLock()
+		if (prior) writeLock({ ...prior, l1ContractAddresses, deployedConfig: config })
+	}
+}
+
+function buildOwnedState(extra: Partial<OwnedState> = {}): OwnedState {
+	return {
 		startedAt: new Date().toISOString(),
 		bakedLocalRpcUrl: LOCAL_NODE_URL,
 		ports: {
@@ -594,17 +644,31 @@ async function deployContractsAndProvide(project: TestProject): Promise<void> {
 			playground: PLAYGROUND_PORT,
 			...(FAUCET_PORT ? { faucet: FAUCET_PORT } : {}),
 		},
-		pids: {
-			anvil: weStartedAnvil ? anvilProcess?.pid : undefined,
-			aztec: weStartedNode ? nodeProcess?.pid : undefined,
-			playground: weStartedPlayground ? playgroundProcess?.pid : undefined,
-			faucet: weStartedFaucet ? faucetProcess?.pid : undefined,
-		},
+		pids: currentPids(),
 		aztecDataDir: AZTEC_DATA_DIR,
-		l1ContractAddresses,
-		deployedConfig: config,
+		...extra,
 	}
-	writeLock(owned)
+}
+
+function writeProvisionalLock(): void {
+	writeLock(buildOwnedState())
+	weOwnLock = true
+}
+
+/** Update the owned lock's pid map right after a spawn — keeps the agent trap + orphan reap
+ *  current through the whole boot instead of only after deployment. */
+function recordSpawnedPid(): void {
+	if (!weOwnLock) return
+	writeLock(buildOwnedState())
+}
+
+function currentPids(): OwnedState["pids"] {
+	return {
+		anvil: weStartedAnvil ? anvilProcess?.pid : undefined,
+		aztec: weStartedNode ? nodeProcess?.pid : undefined,
+		playground: weStartedPlayground ? playgroundProcess?.pid : undefined,
+		faucet: weStartedFaucet ? faucetProcess?.pid : undefined,
+	}
 }
 
 function serializeL1ContractAddresses(addrs: unknown): Record<string, string> {
@@ -670,7 +734,7 @@ export async function teardown() {
 		}
 	}
 
-	clearLock()
+	if (weOwnLock) clearLock()
 	killOrphanChromes()
 }
 
@@ -726,10 +790,14 @@ function bestEffortKill(child: ChildProcess | null, weStarted: boolean): void {
 }
 
 const onExit = () => {
+	bestEffortKill(faucetProcess, weStartedFaucet)
 	bestEffortKill(playgroundProcess, weStartedPlayground)
 	bestEffortKill(nodeProcess, weStartedNode)
 	bestEffortKill(anvilProcess, weStartedAnvil)
-	clearLock()
+	// Deliberately NO clearLock here: these kills are fire-and-forget TERMs. If a TERM-resistant
+	// process survives, the lock is the ONLY record the next run's liveness-checked orphan reap
+	// can find it by - deleting it would orphan the survivor permanently (review CONFIRMED).
+	// The awaited teardown() (KILL escalation) remains the sole ownership-gated lock clearer.
 }
 process.on("SIGINT", onExit)
 process.on("SIGTERM", onExit)

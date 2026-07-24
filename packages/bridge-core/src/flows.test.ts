@@ -2,7 +2,8 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Fr } from "@aztec/aztec.js/fields"
 import { encodeAbiParameters, keccak256, numberToHex, toHex } from "viem"
 import { describe, expect, it, vi } from "vitest"
-import { type DepositFlowStage, depositPublic, runSwapBridge } from "./flows"
+import { tokenClaimSecretHash } from "./claim-secret"
+import { runSwapBridge } from "./flows"
 import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateFuelSecretHash } from "./private-fuel"
 import { SWAP_BRIDGE_ROUTER_ABI } from "./router-abi"
 
@@ -26,59 +27,6 @@ const depositLog = {
 	transactionIndex: 0,
 	removed: false,
 }
-
-describe("flows — depositPublic orchestration", () => {
-	const makeL1 = () => ({
-		pub: { waitForTransactionReceipt: vi.fn(async () => ({ logs: [depositLog] })) },
-		wallet: { writeContract: vi.fn(async () => "0xhash"), chain: { id: 31337 } },
-		account: { address: "0xacc" },
-	})
-
-	it("runs mint→approve→deposit→claim, reports stages, returns the receipt leaf index", async () => {
-		const stages: DepositFlowStage[] = []
-		const claimPublic = vi.fn(() => ({ send: vi.fn(async () => ({ receipt: {} })) }))
-		const bridge = { methods: { claim_public: claimPublic } }
-		const l1 = makeL1()
-
-		const leafIndex = await depositPublic(
-			l1 as never,
-			bridge as never,
-			{ usdc: "0x1", portal: "0x2", usdcAbi: [], portalAbi: [], recipient: RECIPIENT, amount: 100n },
-			{},
-			(s) => stages.push(s),
-		)
-
-		expect(leafIndex).toBe(42n) // from the Inbox MessageSent event, not a simulate
-		expect(stages).toEqual(["approving", "depositing", "syncing", "done"])
-		expect(l1.wallet.writeContract).toHaveBeenCalledTimes(3) // mint, approve, deposit
-		expect(claimPublic).toHaveBeenCalledOnce()
-	})
-
-	it("throws if the claim never succeeds (message not synced) — bounded retries", async () => {
-		const claimPublic = vi.fn(() => ({
-			send: vi.fn(async () => {
-				throw new Error("not synced")
-			}),
-		}))
-		const bridge = { methods: { claim_public: claimPublic } }
-		const l1 = makeL1()
-		// Stub the retry delay so the bounded loop resolves fast.
-		vi.spyOn(globalThis, "setTimeout").mockImplementation(((fn: () => void) => {
-			fn()
-			return 0 as unknown as ReturnType<typeof setTimeout>
-		}) as typeof setTimeout)
-
-		await expect(
-			depositPublic(
-				l1 as never,
-				bridge as never,
-				{ usdc: "0x1", portal: "0x2", usdcAbi: [], portalAbi: [], recipient: RECIPIENT, amount: 1n },
-				{},
-			),
-		).rejects.toThrow(/never succeeded/)
-		vi.restoreAllMocks()
-	})
-})
 
 const AZTEC_RECIPIENT = `0x${"a".padStart(64, "0")}` as const
 const ADDR = "0x1111111111111111111111111111111111111111" as const
@@ -134,6 +82,7 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		zeroForOnes: [],
 		isPrivate: true,
 		swapTarget: ADDR,
+		tokenClaimSalt: new Fr(0x7abcn),
 		nonce: 0n,
 		deadline: 9_999_999_999n,
 		chainId: 31337,
@@ -157,6 +106,67 @@ describe("flows — runSwapBridge injectable fuel secret (L3)", () => {
 		}
 		expect(writeArg.functionName).toBe("bridgeWithFuel")
 		expect(writeArg.args[0].fuelSecretHash).toBe((await privateFuelSecretHash(salt, claimer)).toString())
+		// F2: the private TOKEN leg binds the recipient-committed secret derived from tokenClaimSalt —
+		// the returned tokenSecretHex is the SALT (what claim_private takes), and the on-chain
+		// tokenSecretHash is computeSecretHash(deriveTokenClaimSecret(salt, recipient)).
+		expect(res.tokenSecretHex).toBe(new Fr(0x7abcn).toString())
+		const tokenArg = writeArg.args[0] as unknown as { tokenSecretHash: string }
+		expect(tokenArg.tokenSecretHash).toBe((await tokenClaimSecretHash(new Fr(0x7abcn), claimer)).toString())
+	})
+
+	// PRIVACY PIN (codex ultra Medium): the recipient is committed via tokenSecretHash and must NOT be
+	// published on-chain — the router ignores aztecRecipient on the private path but EMITS it as an
+	// indexed event, so a real value would let any observer read R off L1 (defeating the salt-entropy
+	// protection). A future refactor that re-passes the real recipient for private turns this red.
+	it("PRIVACY: a private deposit zeroes the on-chain aztecRecipient while still committing to R", async () => {
+		const l1 = makeL1()
+		const claimer = AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT)
+		const injected = deriveBridgeSecret(Fr.zero(), claimer)
+		await runSwapBridge(l1 as never, { ...baseParams, fuelSecret: injected } as never)
+
+		const ZERO32 = `0x${"0".repeat(64)}`
+		const writeArg = (l1.wallet.writeContract.mock.calls[0] as unknown[])[0] as {
+			args: [{ aztecRecipient: string; tokenSecretHash: string }]
+		}
+		// R is NOT on-chain (a real value leaks via the router's indexed BridgeWithFuel event)…
+		expect(writeArg.args[0].aztecRecipient).toBe(ZERO32)
+		expect(writeArg.args[0].aztecRecipient).not.toBe(AZTEC_RECIPIENT)
+		// …but the commitment STILL binds the real recipient, so claim_private re-derives + mints to R.
+		expect(writeArg.args[0].tokenSecretHash).toBe((await tokenClaimSecretHash(baseParams.tokenClaimSalt, claimer)).toString())
+		// The signed witness matches the calldata (else the Permit2 signature wouldn't verify).
+		const typed = (l1.wallet.signTypedData.mock.calls[0] as unknown[])[0] as { message: { witness: { aztecRecipient: string } } }
+		expect(typed.message.witness.aztecRecipient).toBe(ZERO32)
+	})
+
+	it("PUBLIC deposit still passes the real aztecRecipient on-chain (recipient bound in the content hash)", async () => {
+		const l1 = makeL1()
+		await runSwapBridge(l1 as never, { ...baseParams, isPrivate: false } as never)
+		const writeArg = (l1.wallet.writeContract.mock.calls[0] as unknown[])[0] as { args: [{ aztecRecipient: string }] }
+		expect(writeArg.args[0].aztecRecipient).toBe(AZTEC_RECIPIENT)
+	})
+
+	// codex ultra Low: a nonzero-but-invalid recipient strands the deposit (an undecryptable note the
+	// commitment makes unrecoverable). 0x..03 is canonical + nonzero but NOT a Grumpkin point.
+	it("rejects a nonzero-but-invalid recipient (not a Grumpkin point) BEFORE signing", async () => {
+		const l1 = makeL1()
+		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
+		// RECIPIENT (0x..03) is canonical + nonzero but NOT a Grumpkin point (isValid() === false).
+		await expect(
+			runSwapBridge(l1 as never, { ...baseParams, aztecRecipient: RECIPIENT, fuelSecret: injected } as never),
+		).rejects.toThrow(/not a valid Aztec address/)
+		expect(l1.wallet.signTypedData).not.toHaveBeenCalled()
+	})
+
+	it("F2: private token leg with no tokenClaimSalt is rejected BEFORE signing", async () => {
+		const l1 = makeL1()
+		const injected = deriveBridgeSecret(Fr.zero(), AztecAddress.fromStringUnsafe(AZTEC_RECIPIENT))
+		// fuelSecret present (passes the fuel guard) but tokenClaimSalt omitted → a random token secret
+		// would strand the deposit against the recipient-committed claim_private.
+		const { tokenClaimSalt: _drop, ...noSalt } = baseParams
+		await expect(runSwapBridge(l1 as never, { ...noSalt, fuelSecret: injected } as never)).rejects.toThrow(
+			/private token leg requires an injected tokenClaimSalt/,
+		)
+		expect(l1.wallet.signTypedData).not.toHaveBeenCalled()
 	})
 
 	it("falls back to a random secret when none is injected (PUBLIC path unchanged)", async () => {

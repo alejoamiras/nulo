@@ -31,12 +31,17 @@ export interface BuildActivityRowsParams {
 	 *  here on kind ∈ ACTIVITY_FEED_KINDS, `terminalAt !== null`,
 	 *  succeeded → not displayed (the matching chain tx covers it). */
 	terminalJournalOps: OperationRecord[]
-	/** Incoming-transfer records. Already filtered + sorted by the service
-	 *  layer; we just attach them as a row type. */
+	/** Incoming-transfer records. */
 	incomingTransfers: IncomingTransferRecord[]
-	/** Active account address used to scope journal rows. Incoming records
-	 *  are already account-scoped at the service layer. */
+	/** Active account address. When provided, ALL three row types are scoped to
+	 *  it — defense-in-depth after upstream ingest filtering (the incoming
+	 *  composable + the tx store already drop foreign-scope records, but a render
+	 *  filter here means a single missed guard can't leak another account's rows). */
 	accountAddress?: string
+	/** Active chain id — scopes tx rows (tx carries `chainId`). Applied only when set. */
+	chainId?: number
+	/** Active network id — scopes incoming rows (record carries `networkId`). Applied only when set. */
+	networkId?: string
 }
 
 export function buildActivityRows({
@@ -44,10 +49,16 @@ export function buildActivityRows({
 	terminalJournalOps,
 	incomingTransfers,
 	accountAddress,
+	chainId,
+	networkId,
 }: BuildActivityRowsParams): ActivityRow[] {
 	const rows: ActivityRow[] = []
 
 	for (const tx of transactions) {
+		// Scope tx to the active account+chain when a scope is supplied (a late/
+		// out-of-scope tx from the store's flat list must not render under B).
+		if (accountAddress !== undefined && tx.account !== accountAddress) continue
+		if (chainId !== undefined && tx.chainId !== chainId) continue
 		rows.push({ type: "tx", key: `tx:${tx.hash}`, sortKey: tx.updatedAt, tx })
 	}
 
@@ -60,6 +71,9 @@ export function buildActivityRows({
 	}
 
 	for (const inc of incomingTransfers) {
+		// Scope incoming to the active account+network when supplied.
+		if (accountAddress !== undefined && inc.accountAddress !== accountAddress) continue
+		if (networkId !== undefined && inc.networkId !== networkId) continue
 		// Path 2: prefer the chain-derived block timestamp (UTC seconds) over
 		// the wall-clock `discoveredAt`. Block timestamp survives token
 		// remove + re-add (records get re-indexed from PXE with identical
@@ -69,7 +83,7 @@ export function buildActivityRows({
 		// by 1000 so the magnitude is comparable to the millisecond values
 		// used for tx / journal sortKeys.
 		const sortKey = inc.blockTimestamp !== undefined ? inc.blockTimestamp * 1000 : inc.discoveredAt
-		rows.push({ type: "incoming", key: `incoming:${inc.siloedNullifier}`, sortKey, inc })
+		rows.push({ type: "incoming", key: `incoming:${inc.id}`, sortKey, inc })
 	}
 
 	return rows.sort((a, b) => b.sortKey - a.sortKey)

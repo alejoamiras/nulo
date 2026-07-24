@@ -18,6 +18,7 @@ import { OperationJournalServiceClient } from "@/wallet/services/operation-journ
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Utils */
 import { buildActivityRows } from "@/utils/activity-rows"
@@ -54,6 +55,7 @@ const tokensById = computed(() => {
 // toggle reload. Shared verbatim with the home Recent-Activity widget.
 const incomingTransferService = new IncomingTransferServiceClient()
 const configService = new ConfigServiceClient()
+const incomingPriceService = new PriceServiceClient()
 const {
 	incomingTransfers,
 	refresh: loadIncomingTransfers,
@@ -61,6 +63,7 @@ const {
 } = useIncomingTransfers({
 	incomingTransferService,
 	configService,
+	priceService: incomingPriceService,
 	scope: () =>
 		appStore.profile?.id && appStore.network?.id && appStore.account?.address
 			? { profileId: appStore.profile.id, networkId: appStore.network.id, account: appStore.account.address }
@@ -111,6 +114,8 @@ const activityRows = computed(() =>
 		terminalJournalOps: terminalJournalOps.value,
 		incomingTransfers: incomingTransfers.value,
 		accountAddress: appStore.account?.address,
+		chainId: appStore.network?.chainId,
+		networkId: appStore.network?.id,
 	}),
 )
 
@@ -160,13 +165,20 @@ onBeforeUnmount(() => {
 	journalService.disconnect()
 	incomingTransferService.disconnect()
 	configService.disconnect()
+	incomingPriceService.disconnect()
 	disposeIncomingTransfers()
 	heroObserver?.disconnect()
 })
 </script>
 
 <template>
-	<Flex v-if="appStore.isLogined" direction="column" :class="$style.wrapper">
+	<Flex
+		v-if="appStore.isLogined"
+		direction="column"
+		:class="$style.wrapper"
+		data-testid="activity-feed-root"
+		:data-active-account="appStore.account?.address"
+	>
 		<div :class="[$style.page_title_bar, !heroVisible && $style.page_title_bar_visible]">
 			<span :class="$style.page_title_label">HISTORY</span>
 		</div>

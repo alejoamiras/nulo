@@ -35,7 +35,7 @@ import { collectOffchainEffects } from "@aztec/stdlib/tx"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import { type JobError, type JobProgress, JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
-import { feeToUsd, formatFeeJuice } from "@/utils/fee-estimation"
+import { formatFeeJuice } from "@/utils/fee-estimation"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 import { primaryEndpointUrl } from "@/wallet/services/network/spec"
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
@@ -246,7 +246,6 @@ export class DappSendExecutor {
 		return {
 			maxFee: maxFeeRaw.toString(),
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
-			maxFeeUsd: feeToUsd(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
 		}
 	}
@@ -375,8 +374,10 @@ export class DappSendExecutor {
 				origin,
 				hooks,
 				getCalls: () => {
-					const primaryMethod =
-						(Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
+					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
+					// while proving, flipping to the real method once the settled record is built.
+					const primaryMethod = Array.isArray(op.exec?.calls) ? pickPrimaryMethod(op.exec.calls) : undefined
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},
@@ -498,8 +499,10 @@ export class DappSendExecutor {
 				origin,
 				hooks,
 				getCalls: () => {
-					const primaryMethod =
-						(Array.isArray(op.exec?.calls) ? op.exec.calls.find((c) => c?.name)?.name : undefined) ?? undefined
+					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
+					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
+					// while proving, flipping to the real method once the settled record is built.
+					const primaryMethod = Array.isArray(op.exec?.calls) ? pickPrimaryMethod(op.exec.calls) : undefined
 					return primaryMethod ? [{ method: primaryMethod }] : undefined
 				},
 			},

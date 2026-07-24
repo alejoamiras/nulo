@@ -12,13 +12,17 @@ import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 
 /** Utils */
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
-import { buildFeeMethods, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
+import { usePrices } from "@/composables/usePrices"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -45,6 +49,11 @@ const FEE_METHOD_LS_KEY = UI_STORAGE_KEYS.FEE_PAYMENT_METHODS
 
 const settings = defineModel()
 
+/** One-way child→parent flag: the selected fee-juice method has zero balance,
+ *  so the account must bridge before it can pay. Drives the Send page's
+ *  "get fee juice" CTA takeover. */
+const needsFeeJuiceOut = defineModel("needsFeeJuice", { type: Boolean, default: false })
+
 const methodId = getRandomHex(6)
 
 /**
@@ -63,7 +72,11 @@ const registeredFpcs = ref([])
  * completes, so the loading-state items don't briefly flash "no balance"
  * before the first fetch returns. This honors PR #66's stated intent.
  */
-const methods = computed(() => buildFeeMethods(registeredFpcs.value, isInitComplete.value ? gasBalances.value : undefined))
+const methods = computed(() =>
+	buildFeeMethods(registeredFpcs.value, isInitComplete.value ? gasBalances.value : undefined, {
+		allowSponsored: props.network?.chainId !== CHAIN_IDS.MAINNET,
+	}),
+)
 
 const isCustomMethod = computed(() => settings.value?.paymentMethod?.kind === "embedded")
 const useOwnMethod = ref(false)
@@ -88,9 +101,16 @@ const privateFeeJuiceFormatted = computed(() =>
 	gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
 )
 
+/** Fee USD is derived LIVE from the estimate's raw FJ amount × the current
+ *  usable AZTEC quote — an estimate-time snapshot would keep displaying a
+ *  stale figure after the 3-min refresh moved the rate (or after the quote
+ *  expired entirely, where the figure must disappear). */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
 const estimatedFeeDisplay = computed(() => {
 	if (!props.feeEstimate) return null
-	return { amount: props.feeEstimate.maxFeeFormatted, usd: props.feeEstimate.maxFeeUsd }
+	const usd = feeToUsd(BigInt(props.feeEstimate.maxFee), feeJuicePricingFromUsd(prices.feeJuiceQuote.value?.usd))
+	return { amount: props.feeEstimate.maxFeeFormatted, usd }
 })
 
 const showMethodSelector = computed(() => {
@@ -112,6 +132,29 @@ const derivedSettings = computed(() => {
 	if (!m) return undefined
 	return settingsForMethod(m, selectedPriority.value, gasBalances.value.publicFeeJuice, gasBalances.value.privateFeeJuice)
 })
+
+/** True when the selected fee-juice method (public or private) can't pay because
+ *  its balance is zero — the trigger for the get-fee-juice nudge (banner + CTA). */
+const feeJuiceMissing = computed(() => {
+	if (!isInitComplete.value || useEmbeddedFee.value) return false
+	const m = selectedMethod.value
+	if (!m) return false
+	if (m.type === "private_fpc") {
+		// Only a CONFIRMED zero triggers the bridge nudge. `null` means the PrivateFPC
+		// read failed or isn't registered — an unknown state, not a confirmed empty
+		// balance — so we don't tell a possibly-funded user to go bridge.
+		return gasBalances.value.privateFeeJuice === "0"
+	}
+	if (m.type === "fj") return gasBalances.value.publicFeeJuice === "0"
+	return false
+})
+watch(
+	feeJuiceMissing,
+	(v) => {
+		needsFeeJuiceOut.value = v
+	},
+	{ immediate: true },
+)
 
 // Sync the computed to v-model. No `immediate: true` — we don't want to
 // clobber the parent's initial value on mount; only push when derivation
@@ -211,6 +254,13 @@ const runInit = async () => {
 		// re-resolve.
 		isInitComplete.value = false
 
+		// Snapshot the identity this run targets (profile+network+account). A prop change
+		// during the awaits queues a coalesced re-run; we must NOT apply this run's stale
+		// balances/fpcs against the new identity.
+		const reqProfileId = props.profile?.id
+		const reqNetworkId = props.network.id
+		const reqAccount = props.account.address
+
 		// Pre-fill from local storage BEFORE the slow SW fetch so the
 		// dropdown trigger displays the user's last-used method while the
 		// fetch is in flight. The `isInitComplete` gate ensures this
@@ -231,6 +281,12 @@ const runInit = async () => {
 			executionService.getGasBalances(props.network.id, props.account.address),
 			fpcService.getFpcs(props.network.chainId),
 		])
+		// Discard if the profile/network/account switched mid-flight — the props watcher
+		// already queued a fresh init for the new identity. Everything past this guard is
+		// synchronous (no awaits), so the commit is atomic against the checked identity.
+		if (!isMounted || props.profile?.id !== reqProfileId || props.network?.id !== reqNetworkId || props.account?.address !== reqAccount)
+			return
+
 		gasBalances.value = gasResult
 		registeredFpcs.value = fpcs ?? []
 
@@ -245,13 +301,18 @@ const runInit = async () => {
 			if (resolved) {
 				selectedMethod.value = resolved
 			} else {
-				if (saved[props.account.address]) {
-					delete saved[props.account.address]
-					await storageLocalSet({ [FEE_METHOD_LS_KEY]: saved })
-				}
-				// Fall through to auto-select: prefer sponsored if registered.
-				const sponsoredMethod = methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
-				selectedMethod.value = sponsoredMethod ? { ...sponsoredMethod } : undefined
+				// A dangling saved selection (e.g. a deleted FPC) is simply ignored — it
+				// re-resolves to undefined every time and we fall through to the default. We
+				// deliberately do NOT prune it from storage here: a whole-map write would race
+				// persistSelection / another mounted FeeSettingsCard and could clobber a newer
+				// selection (last-write-wins on a stale snapshot).
+				// Fall through to the network's default method: Alpha (mainnet) → Private Fee
+				// Juice; every other network → Sponsored FPC (its historical default).
+				const preferred =
+					props.network?.chainId === CHAIN_IDS.MAINNET
+						? methods.value.find((m) => m.type === "private_fpc")
+						: methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
+				selectedMethod.value = preferred ? { ...preferred } : undefined
 			}
 		}
 
@@ -300,6 +361,8 @@ onBeforeUnmount(() => {
 	initRequested = false
 	fpcService.disconnect()
 	executionService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 	cacheStore.feePaymentMethods = cacheStore.feePaymentMethods.filter((m) => m.id !== methodId)
 })
 </script>
@@ -363,13 +426,29 @@ onBeforeUnmount(() => {
 				:privateFeeJuiceFormatted="privateFeeJuiceFormatted"
 			/>
 
+			<!-- Get-fee-juice nudge: the selected method has no fee juice to pay with. -->
+			<Flex v-if="feeJuiceMissing" align="center" gap="8" :class="$style.detail_row" data-testid="send-fee-nudge">
+				<Icon name="warning" size="14" color="secondary" />
+				<Flex direction="column" gap="2" :style="{ flex: 1, minWidth: 0 }">
+					<Text size="12" weight="600" color="primary">You have no fee juice yet</Text>
+					<Text size="11" weight="500" color="tertiary">Bridge some to cover the network fee.</Text>
+				</Flex>
+				<a
+					:href="FEE_JUICE_BRIDGE_URL"
+					target="_blank"
+					rel="noopener noreferrer"
+					:class="$style.get_fee_juice"
+					data-testid="send-fee-get-juice"
+				>Get fee juice</a>
+			</Flex>
+
 			<FeeCostReadout
-				v-if="selectedMethod"
+				v-if="selectedMethod && !feeJuiceMissing"
 				:estimate="estimatedFeeDisplay"
 				:isEstimating="isEstimating"
 			/>
 
-			<FeePriorityRow v-if="selectedMethod" v-model="selectedPriority" />
+			<FeePriorityRow v-if="selectedMethod && !feeJuiceMissing" v-model="selectedPriority" />
 		</template>
 	</Flex>
 </template>
@@ -412,6 +491,21 @@ onBeforeUnmount(() => {
 		& svg {
 			fill: var(--txt-primary);
 		}
+	}
+}
+
+.get_fee_juice {
+	font-family: var(--font-headline);
+	font-size: 10px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	color: var(--nulo-accent);
+	white-space: nowrap;
+	cursor: pointer;
+
+	&:hover {
+		text-decoration: underline;
 	}
 }
 

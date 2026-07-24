@@ -13,7 +13,7 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { L2AmountClaim } from "@aztec/aztec.js/ethereum"
 import { FeeJuicePaymentMethodWithClaim, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
-import { GasFees } from "@aztec/stdlib/gas"
+import { GasFees, ManaUsageEstimate } from "@aztec/stdlib/gas"
 import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 
 /** The canonical L2 Fee Juice contract address — a protocol constant (identical on every network). */
@@ -21,7 +21,7 @@ export const feeJuiceAddress: string = AztecAddress.fromNumberUnsafe(FEE_JUICE_A
 
 /** Minimal node shape for fee prediction (avoids a hard dep on the full node client type). */
 type MinFeeNode = {
-	getPredictedMinFees?: () => Promise<GasFees[]>
+	getPredictedMinFees?: (manaUsage?: ManaUsageEstimate) => Promise<GasFees[]>
 	getCurrentMinFees: () => Promise<GasFees>
 }
 
@@ -39,7 +39,9 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 	if (!node.getPredictedMinFees) return node.getCurrentMinFees()
 	let predicted: GasFees[]
 	try {
-		predicted = await node.getPredictedMinFees()
+		// Limit-congestion estimate (blocks at max capacity), matching BaseWallet's conservative default -
+		// an argless call defaults the node to Target, which under-prices the cap under rising congestion.
+		predicted = await node.getPredictedMinFees(ManaUsageEstimate.Limit)
 	} catch (e) {
 		// Only fall back for old nodes that don't implement the method — NOT for transient RPC errors,
 		// which must propagate (a silent fallback to current-min would under-price the inclusion-safe cap).

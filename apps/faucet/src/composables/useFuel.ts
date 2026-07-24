@@ -2,8 +2,10 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { DepositJournalRecord } from "@nulo/bridge-core"
 import {
+	type BridgeWitness,
+	SWAP_BRIDGE_ROUTER_ABI,
 	awaitL1Receipt,
-	FeeJuicePortalAbi,
+	bridgeWitnessPermitTypedData,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
 	isSealTrusted,
@@ -15,13 +17,15 @@ import {
 } from "@nulo/bridge-core"
 import { sepolia } from "viem/chains"
 import { ref } from "vue"
-import { FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
+import { BRIDGE_PERMIT2, BRIDGE_ROUTER, BRIDGE_SWAP_TARGET, FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
+import { ERC20_ABI } from "./useL1Usdc"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import {
 	addRecordVerified,
 	cacheSecret,
 	discard,
 	flagRecordError,
+	markApproveOutcome,
 	markSessionLive,
 	runDepositClaim,
 	runOnLane,
@@ -149,21 +153,91 @@ export function useFuelFlow() {
 				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
 			}
 
-			// Allowance-skip: approve the FeeJuicePortal only when its allowance is short.
-			setRecordStep(id, "approving", "checking the FeeJuicePortal allowance")
-			if ((await feeAsset.allowance()) < amount) {
-				setRecordStep(id, "approving", "confirm the allowance in your Ethereum wallet")
-				await feeAsset.approve(amount)
-				if (feeAsset.error.value) throw new Error(feeAsset.error.value)
+			// Fuel-only now goes through the router's Permit2 bridge() (tokenPortal = FeeJuicePortal). The
+			// canonical fee asset does NOT pre-approve Permit2 (unlike AZLO), so a ONE-TIME approve(Permit2,
+			// max) is needed; thereafter it's sign-only. assertUnderlying (feeAsset) stays the fail-closed
+			// portal/asset check. The router's isPrivate is ALWAYS false — the FJ portal has no private
+			// deposit; record privacy is a claim-side concern (private fuel lands at the FPC via plan.to).
+			if (!BRIDGE_ROUTER || !BRIDGE_PERMIT2 || !BRIDGE_SWAP_TARGET || !FUEL_ASSET || !FUEL_PORTAL) {
+				throw new Error("Fuel router/permit2 not configured for this deployment.")
 			}
+			// Capture into locals — TS re-widens imported (ESM live) bindings to `| undefined` across `await`.
+			const router = BRIDGE_ROUTER
+			const permit2 = BRIDGE_PERMIT2
+			const swapTarget = BRIDGE_SWAP_TARGET
+			const feeAssetAddr = FUEL_ASSET
+			const fuelPortalAddr = FUEL_PORTAL
+			const p2Allowance = (await l1.publicClient.readContract({
+				address: feeAssetAddr,
+				abi: ERC20_ABI,
+				functionName: "allowance",
+				args: [from, permit2],
+			})) as bigint
+			if (p2Allowance < amount) {
+				setRecordStep(id, "approving", "first time only: approve Permit2 in your Ethereum wallet")
+				const approveHash = await runOnLane("l1", () =>
+					wallet.writeContract({
+						address: feeAssetAddr,
+						abi: ERC20_ABI,
+						functionName: "approve",
+						args: [permit2, (1n << 256n) - 1n],
+						chain: sepolia,
+						account: from,
+					}),
+				)
+				// #292: resilient wait — checks reverted status + survives a post-mining RPC timeout, so a
+				// mined-but-slow approval doesn't strand the record without a depositTxHash / recovery path.
+				const apprId = id
+				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
+					onStillWaiting: (attempt) => setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
+				})
+				// Keeps the APPROVE step visible as done for the rest of the run — the rail renders it only
+				// when an approval was actually part of this run (a sufficient allowance shows no step at all).
+				markApproveOutcome(id, "done")
+			}
+
+			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")
+			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
+			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const fuelWitness: BridgeWitness = {
+				tokenPortal: fuelPortalAddr,
+				bridgeToken: feeAssetAddr,
+				totalAmount: amount,
+				fuelAmount: 0n,
+				aztecRecipient: plan.to as `0x${string}`,
+				fuelRecipient: `0x${"0".repeat(64)}`,
+				tokenSecretHash: plan.secretHash as `0x${string}`,
+				fuelSecretHash: `0x${"0".repeat(64)}`,
+				minFuelOutput: 0n,
+				routeHash: `0x${"0".repeat(64)}`,
+				isPrivate: false,
+				swapTarget: swapTarget,
+			}
+			const fuelTyped = bridgeWitnessPermitTypedData(
+				{ permitted: { token: feeAssetAddr, amount }, spender: router, nonce, deadline },
+				fuelWitness,
+				permit2,
+				sepolia.id,
+			)
+			const fuelSig = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...fuelTyped } as never))
 
 			setRecordStep(id, "depositing", "confirm the Fuel deposit in your Ethereum wallet")
 			const depositTxHash = await runOnLane("l1", () =>
 				wallet.writeContract({
-					address: FUEL_PORTAL,
-					abi: FeeJuicePortalAbi,
-					functionName: "depositToAztecPublic",
-					args: [plan.to, amount, plan.secretHash],
+					address: router,
+					abi: SWAP_BRIDGE_ROUTER_ABI,
+					functionName: "bridge",
+					args: [
+						{
+							tokenPortal: fuelPortalAddr,
+							bridgeToken: feeAssetAddr,
+							amount,
+							aztecRecipient: plan.to as `0x${string}`,
+							secretHash: plan.secretHash as `0x${string}`,
+							isPrivate: false,
+						},
+						{ nonce, deadline, signature: fuelSig },
+					],
 					chain: sepolia,
 					account: from,
 				} as never),

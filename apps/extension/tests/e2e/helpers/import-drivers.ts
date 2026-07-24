@@ -176,7 +176,10 @@ export async function importFullBackup(
 			expectedText,
 		)
 	} else {
-		await waitForHash(page, shell.successHash, 30_000)
+		// The import flow is restore + (possibly) the app's OWN bounded 30s recovery wait before it
+		// routes (import.vue completeImportWithRecovery) - a 30s clock expired structurally whenever
+		// the recovery leg ran. Sized to the recovery envelope + slow-runner restore + margin.
+		await waitForHash(page, shell.successHash, 300_000)
 	}
 }
 
@@ -188,11 +191,46 @@ export async function readActiveAccount(page: Page): Promise<string> {
 	})
 }
 
+/** Wait until the active-account pointer CONVERGES to `expected`. Post-import account setup runs
+ *  against the active network's RPC, so the pointer can transit intermediate states first — a
+ *  single-shot read races it (surfaced when the default network became Alpha mainnet, whose public
+ *  RPC throttles CI). The budget is sized to the node client's DOCUMENTED stall envelope
+ *  (aztec-runtime utils/fetch: 60s per-request abort × makeBackoff([1,2,3]) retries), so one
+ *  timed-out request + its successful retry fits — a smaller budget loses to a single throttled
+ *  request by design. Polls storage; throws on timeout. */
+export async function waitForActiveAccount(page: Page, expected: string, timeoutMs = 240_000): Promise<void> {
+	await page.waitForFunction(
+		async (want: string) => {
+			const r = await chrome.storage.local.get("nulo:ui:activeAccount")
+			return r["nulo:ui:activeAccount"] === want
+		},
+		{ timeout: timeoutMs, polling: 500 },
+		expected,
+	)
+}
+
 /** Generate an Fr-valid 32-byte master, base64-encoded (the form `importPlain`
  *  accepts). Lazy-imports `Fr` to avoid loading the heavy aztec wasm. */
 export async function makeRandomMasterBase64(): Promise<string> {
 	const { Fr } = await import("@aztec/aztec.js/fields")
 	return Buffer.from(Fr.random().toBuffer()).toString("base64")
+}
+
+/** Derive the REAL Nulo account address for (master, chainId, index) through the frozen
+ *  derivation path. Synthetic backups must carry derivation-consistent account rows: the
+ *  background integrity coordinator re-derives every account before activating an imported
+ *  profile and withholds the session on mismatch — a fabricated address IS a foreign backup. */
+export async function deriveNuloAccountAddress(masterBase64: string, chainId: number, index = 0): Promise<string> {
+	const { Fr } = await import("@aztec/aztec.js/fields")
+	const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
+	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
+	const { createLogger } = await import("@aztec/foundation/log")
+	const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
+	// Same formula as the wallet's account service: poseidon2Hash([master, chainId, type, index])
+	// with AccountType.Nulo_v1 = 0.
+	const seed = poseidon2Hash([master, new Fr(chainId), new Fr(0), new Fr(index)])
+	const account = await NuloAccount.new(seed, createLogger("import-drivers"))
+	return account.address.toString()
 }
 
 /** Encrypt a base64 master with the test password, returning the base64

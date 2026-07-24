@@ -29,8 +29,13 @@ import { TaskService } from "@/wallet/services/task/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { makeShallowPxeFake, type ShallowPxeFakeConfig } from "@/wallet/services/pxe/shallow-port.fake"
 import { svc } from "@/wallet/services/composition-harness"
+import { EventHandler } from "@nulo/wallet-core/utils"
+import { fakeBrowser } from "@webext-core/fake-browser"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import { TokenService } from "./service"
-import type { Token } from "./spec"
+import { PinMismatchError, TokenSeeder } from "./seeder"
+import { DEFAULT_TOKEN_SEEDS } from "./default-tokens"
+import type { Token, TokenInterface } from "./spec"
 
 const NETWORK = { id: "net1", chainId: 1, primaryEndpointId: "ep1", endpoints: [{ id: "ep1", rpcUrl: "http://fake" }] }
 const CONTRACT = AztecAddress.fromNumberUnsafe(0x1234).toString()
@@ -59,8 +64,20 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 	fakeTask.startSubtask.mockReturnValue(fakeTask)
 
 	const collection = new ServiceCollection()
-	collection.add(svc(ProfileService.name, { getActiveProfile: async () => ({ id: "p1" }), onProfileDeleted: { add: () => {} } }))
-	collection.add(svc(NetworkService.name, { getNetwork: async () => NETWORK, registerChainPurgeSubscriber: () => {} }))
+	collection.add(
+		svc(ProfileService.name, {
+			getActiveProfile: async () => ({ id: "p1" }),
+			onProfileDeleted: { add: () => {} },
+			onActiveProfileChanged: new EventHandler(),
+		}),
+	)
+	collection.add(
+		svc(NetworkService.name, {
+			getNetwork: async () => NETWORK,
+			registerChainPurgeSubscriber: () => {},
+			onActiveNetworkChanged: new EventHandler(),
+		}),
+	)
 	collection.add(svc(AccountService.name, {}))
 	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
 	collection.add(svc(OperationJournalService.name, {}))
@@ -127,5 +144,173 @@ describe("TokenService.restore — shared numeric cursor (nextNumericId + restor
 		expect(c.restoreError).toBeUndefined()
 		// `a` failed → its id was not consumed → `b`/`c` are consecutive from the cursor start.
 		expect(c.id).toBe(b.id + 1)
+	})
+})
+
+describe("TokenService seeding — composition (simulate-free slice)", () => {
+	// The deep half of the seed flow (previewTokenMetadata → simulate) is
+	// covered at the seeder-deps seam in seeder.test.ts — D2 keeps it out of
+	// composition. This slice drives the REAL graph for everything else:
+	// register-free pin reads, the seed-only persist path + journal labeling,
+	// tombstone-on-delete, and the unlock/network-change hook wiring.
+	const CUSD = DEFAULT_TOKEN_SEEDS[0].contract
+
+	async function seedHarness() {
+		const fake = makeShallowPxeFake({
+			instances: new Map([[AztecAddress.fromStringUnsafe(CONTRACT).toString(), fakeTokenInstance()]]),
+			artifacts: new Map([[CLASS_ID, TokenContractArtifact]]),
+			registered: [],
+		})
+		const api = new FakeBrowserApi()
+		api.reset()
+		const logger = new LoggerStore(new ConfigStore())
+		const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() }
+		fakeTask.startSubtask.mockReturnValue(fakeTask)
+
+		const onActiveProfileChanged = new EventHandler<{ id: string } | undefined>()
+		const onActiveNetworkChanged = new EventHandler<unknown>()
+		const journal = {
+			createOperation: vi.fn(async (input: Record<string, unknown>) => ({ id: "op1", ...input })),
+			transitionOperation: vi.fn(async () => {}),
+			setOperationMeta: vi.fn(async () => {}),
+			purgeForProfile: vi.fn(async () => {}),
+		}
+
+		const collection = new ServiceCollection()
+		collection.add(
+			svc(ProfileService.name, {
+				getActiveProfile: async () => ({ id: "p1" }),
+				onProfileDeleted: { add: () => {} },
+				onActiveProfileChanged,
+			}),
+		)
+		collection.add(
+			svc(NetworkService.name, {
+				getNetwork: async () => NETWORK,
+				getActiveNetwork: async () => NETWORK,
+				registerChainPurgeSubscriber: () => {},
+				onActiveNetworkChanged,
+			}),
+		)
+		collection.add(svc(AccountService.name, { getAccounts: async () => [{ address: "0xacc1" }] }))
+		collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
+		collection.add(svc(OperationJournalService.name, journal))
+		const tokenService = new TokenService(logger, api, () => fake.client)
+		collection.add(tokenService)
+		await collection.start()
+		return { tokenService, fake, api, journal, onActiveProfileChanged, onActiveNetworkChanged }
+	}
+
+	const seedIface = (chainId: number, contract: string) => ({ chainId, contract, isComplete: true }) as unknown as TokenInterface
+
+	test("pinned parse: matching class id registers once and returns the interface from THAT fetch", async () => {
+		const { tokenService, fake } = await seedHarness()
+		const ti = await tokenService.parseTokenInterface(NETWORK.id, CONTRACT, undefined, CLASS_ID)
+		expect(ti.contract).toBe(CONTRACT)
+		expect(fake.registerCalls).toHaveLength(1)
+	})
+
+	test("pinned parse: class-id mismatch throws PinMismatchError BEFORE any PXE registration", async () => {
+		const { tokenService, fake } = await seedHarness()
+		await expect(tokenService.parseTokenInterface(NETWORK.id, CONTRACT, undefined, "0xNOTTHECLASS")).rejects.toThrow(PinMismatchError)
+		expect(fake.registerCalls).toHaveLength(0)
+	})
+
+	test("addSeededToken persists the given snapshot with origin=seed journaling; idempotent", async () => {
+		const { tokenService, journal } = await seedHarness()
+		const input = {
+			profileId: "p1",
+			networkId: NETWORK.id,
+			accountAddress: "0xacc1",
+			tokenInterface: seedIface(NETWORK.chainId, CONTRACT),
+			name: "Compressed USD",
+			symbol: "cUSD",
+			decimals: 6,
+		}
+		const info = await tokenService.addSeededToken(input)
+		expect(info.symbol).toBe("cUSD")
+		expect(info.decimals).toBe(6)
+
+		expect(journal.createOperation).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: "token_import", origin: "seed", subtitle: "Default token", title: "cUSD" }),
+		)
+		expect(journal.transitionOperation).toHaveBeenLastCalledWith("op1", { stage: "succeeded" })
+
+		const rows = await tokenService.getTokensRaw("p1", NETWORK.chainId)
+		expect(rows).toHaveLength(1)
+		expect(rows[0].name).toBe("Compressed USD")
+
+		// Idempotency: a second call short-circuits before journaling.
+		await tokenService.addSeededToken(input)
+		expect(journal.createOperation).toHaveBeenCalledTimes(1)
+		expect(await tokenService.getTokensRaw("p1", NETWORK.chainId)).toHaveLength(1)
+	})
+
+	test("deleting a DEFAULT token writes the user tombstone marker", async () => {
+		const { tokenService } = await seedHarness()
+		const info = await tokenService.addSeededToken({
+			profileId: "p1",
+			networkId: NETWORK.id,
+			accountAddress: "0xacc1",
+			tokenInterface: seedIface(CHAIN_IDS.MAINNET, CUSD),
+			name: "Compressed USD",
+			symbol: "cUSD",
+			decimals: 6,
+		})
+		await tokenService.deleteToken(info.id)
+
+		const res = await fakeBrowser.storage.local.get("nulo:core:token-seeded@p1")
+		const marker = JSON.parse(res["nulo:core:token-seeded@p1"] as string)
+		expect(marker[`${CHAIN_IDS.MAINNET}:${CUSD.toLowerCase()}`].outcome).toBe("deleted")
+	})
+
+	test("deleting a NON-default token writes no marker", async () => {
+		const { tokenService } = await seedHarness()
+		const info = await tokenService.addSeededToken({
+			profileId: "p1",
+			networkId: NETWORK.id,
+			accountAddress: "0xacc1",
+			tokenInterface: seedIface(NETWORK.chainId, CONTRACT),
+			name: "Other",
+			symbol: "OTH",
+			decimals: 18,
+		})
+		await tokenService.deleteToken(info.id)
+		const res = await fakeBrowser.storage.local.get("nulo:core:token-seeded@p1")
+		expect(res["nulo:core:token-seeded@p1"]).toBeUndefined()
+	})
+
+	test("unlock + active-network-change both trigger a seed pass through the REAL init wiring", async () => {
+		const runSpy = vi.spyOn(TokenSeeder.prototype, "run").mockResolvedValue(undefined)
+		try {
+			const { onActiveProfileChanged, onActiveNetworkChanged } = await seedHarness()
+			onActiveProfileChanged.invoke({ id: "p1" })
+			expect(runSpy).toHaveBeenCalledTimes(1)
+			// Lock (undefined) must NOT trigger a pass.
+			onActiveProfileChanged.invoke(undefined)
+			expect(runSpy).toHaveBeenCalledTimes(1)
+			onActiveNetworkChanged.invoke(NETWORK)
+			expect(runSpy).toHaveBeenCalledTimes(2)
+		} finally {
+			runSpy.mockRestore()
+		}
+	})
+
+	test("purgeForProfile re-purges journals AFTER the seeder fence — a late seed's journal row cannot orphan", async () => {
+		const { tokenService, journal } = await seedHarness()
+		await tokenService.addSeededToken({
+			profileId: "p1",
+			networkId: NETWORK.id,
+			accountAddress: "0xacc1",
+			tokenInterface: seedIface(NETWORK.chainId, CONTRACT),
+			name: "Compressed USD",
+			symbol: "cUSD",
+			decimals: 6,
+		})
+		// The coordinator purges journals BEFORE TokenService.purgeForProfile
+		// runs; a seed committing in between creates a journal row nothing
+		// later sweeps — unless this purge re-runs the journal purge itself.
+		await tokenService.purgeForProfile("p1")
+		expect(journal.purgeForProfile).toHaveBeenCalledWith("p1")
 	})
 })

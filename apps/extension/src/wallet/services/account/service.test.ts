@@ -53,6 +53,27 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(Object.keys(raw).some((k) => k.includes("0xdef"))).toBe(false)
 	})
 
+	test("(P3/H) rejects an out-of-bound account index — negative / fractional / NaN / Infinity / >= 2^53", async () => {
+		const badIndices: Array<[string, unknown]> = [
+			["neg", -1],
+			["frac", 1.5],
+			["nan", Number.NaN],
+			["inf", Number.POSITIVE_INFINITY],
+			["unsafe", Number.MAX_SAFE_INTEGER],
+		]
+		for (const [label, index] of badIndices) {
+			const [res] = await accountService.restore([mkAccount(`0xidx-${label}`, { index })])
+			expect(res.restoreError, `index=${String(index)} must be rejected`).toBeDefined()
+		}
+		const raw = await api.storage.local.get(null)
+		expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:accounts@"))).toBe(false)
+	})
+
+	test("(P3) accepts the largest safe index (2^53 - 2) — the bound is < MAX_SAFE_INTEGER, not tighter", async () => {
+		const [res] = await accountService.restore([mkAccount("0xbig", { index: Number.MAX_SAFE_INTEGER - 1 })])
+		expect(res.restoreError).toBeUndefined()
+	})
+
 	test("a well-formed unique account restores cleanly", async () => {
 		const [res] = await accountService.restore([mkAccount("0x111")])
 		expect(res.restoreError).toBeUndefined()
@@ -87,5 +108,23 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		// …but no fire-and-forget onAccountDeleted (its async consumers would run
 		// after the coordinator releases the id and clobber a successor — audit H3).
 		expect(emit.mock.calls.filter(([e]) => e === "onAccountDeleted")).toHaveLength(0)
+	})
+
+	test("getAccounts returns index-sorted regardless of restore/insertion order (import default-account fix)", async () => {
+		// Restore in reverse-index order, exactly as a full-backup restore can insert rows: the resulting
+		// storage/insertion order is NOT index order. Without the sort, getAccounts[0] would be index 2 →
+		// the LAST account becomes the default active after import. It must return index 0 first.
+		await accountService.restore([mkAccount("0xc", { index: 2 }), mkAccount("0xa", { index: 0 }), mkAccount("0xb", { index: 1 })])
+		const accounts = await accountService.getAccounts("p1", 1, true)
+		expect(accounts.map((a) => a.index)).toEqual([0, 1, 2])
+		expect(accounts[0]!.address).toBe("0xa")
+	})
+
+	test("getAccounts is TOTALLY ordered — duplicate indices (hostile backup) break the tie by address, not insertion order", async () => {
+		// Legitimate per-type indices are unique; a crafted backup could carry two rows at the same index.
+		// The address tie-breaker keeps ordering deterministic instead of leaking insertion order.
+		await accountService.restore([mkAccount("0xbbb", { index: 0 }), mkAccount("0xaaa", { index: 0 })])
+		const accounts = await accountService.getAccounts("p1", 1, true)
+		expect(accounts.map((a) => a.address)).toEqual(["0xaaa", "0xbbb"])
 	})
 })

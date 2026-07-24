@@ -45,8 +45,6 @@ export type TransferFeeEstimate = {
 	readonly maxFee: string
 	/** Human-readable fee amount, e.g. "0.000123" */
 	readonly maxFeeFormatted: string
-	/** USD value, e.g. "$0.003" */
-	readonly maxFeeUsd: string
 	/** Gas breakdown */
 	readonly gasDetails: {
 		l2GasLimit: number

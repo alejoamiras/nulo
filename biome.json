@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.5.0/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
 	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true, "defaultBranch": "dev" },
 	"files": {
 		"ignoreUnknown": false,
@@ -11,7 +11,8 @@
 			"!**/target",
 			"!**/*.svg",
 			"!**/apps/extension/src/types",
-			"!**/apps/faucet/src/types"
+			"!**/apps/faucet/src/types",
+			"!**/packages/aztec-runtime/src/account/artifacts"
 		]
 	},
 	"formatter": {

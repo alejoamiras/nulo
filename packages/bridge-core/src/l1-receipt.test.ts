@@ -37,6 +37,36 @@ describe("awaitL1Receipt", () => {
 		expect(waits).toBe(1)
 	})
 
+	test("a REVERTED receipt throws immediately - a mined revert must never read as success", async () => {
+		// The fuel flow marks APPROVE done and deposit legs parse events off any returned receipt, so a
+		// reverted tx returning normally silently corrupts the run (codex fresh-eyes LOW).
+		await expect(
+			awaitL1Receipt(
+				{
+					waitForTransactionReceipt: async () => ({ status: "reverted" }),
+					getTransactionReceipt: async () => ({ status: "reverted" }),
+				},
+				HASH,
+				{ waitMs: noWait },
+			),
+		).rejects.toThrow(/reverted on-chain/)
+	})
+
+	test("a reverted receipt recovered via the direct read ALSO throws (not returned as mined)", async () => {
+		await expect(
+			awaitL1Receipt(
+				{
+					waitForTransactionReceipt: async () => {
+						throw new Error("Timed out while waiting for transaction")
+					},
+					getTransactionReceipt: async () => ({ status: "reverted" }),
+				},
+				HASH,
+				{ waitMs: noWait },
+			),
+		).rejects.toThrow(/reverted on-chain/)
+	})
+
 	test("keeps retrying while unmined, narrates each round, then returns once mined", async () => {
 		const seen: number[] = []
 		let round = 0

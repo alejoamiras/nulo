@@ -37,14 +37,14 @@ test.skipIf(!hasLocalNetwork)("switch to Local Network", async ({ registeredExte
 	expect(registeredExtension.pageErrors).toEqual([])
 })
 
-test.skipIf(!hasLocalNetwork)("networks page lists all 4 defaults", async ({ registeredExtension }) => {
+test.skipIf(!hasLocalNetwork)("networks page lists all 3 defaults", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 
 	await navigateToSettings(page, "networks")
 
 	// Network names are config-driven and stable across UI redesigns
-	for (const name of ["Alpha Mainnet", "Testnet", "Devnet", "Local Network"]) {
+	for (const name of ["Alpha V5", "Testnet", "Local Network"]) {
 		await page.waitForSelector(`text/${name}`, { visible: true, timeout: 5_000 })
 	}
 

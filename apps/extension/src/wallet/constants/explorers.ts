@@ -1,4 +1,4 @@
-import { CHAIN_IDS } from "@/components/ui/utils"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 
 /** Canonical list of explorer ids — single source for both the `BlockExplorerType`
  *  union and the config zod schema (`defaultExplorer`), so they can't drift. */
@@ -33,7 +33,6 @@ const EXPLORER_BASE_URLS: Record<BlockExplorerType, Record<number, string>> = {
 	aztecscan: {
 		[CHAIN_IDS.MAINNET]: "https://aztecscan.xyz",
 		[CHAIN_IDS.TESTNET]: "https://testnet.aztecscan.xyz",
-		[CHAIN_IDS.DEVNET]: "https://devnet.aztecscan.xyz",
 	},
 }
 

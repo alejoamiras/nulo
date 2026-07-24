@@ -1,0 +1,226 @@
+<title>Network list — selection UX options</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --ground: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f6; --line: #e2e5ec;
+    --ink: #1a1d26; --muted: #5c6270; --faint: #8a90a0;
+    --accent: #4a5bd0; --accent-soft: #e8ebfb;
+    --ok: #1f8a5b; --warn: #b06a1a; --risk: #c0442f;
+    --mock-bg: #111319; --mock-surface: #191c24; --mock-2: #20242e;
+    --mock-line: #2a2f3b; --mock-ink: #e8eaf0; --mock-muted: #868c9c;
+    --mock-accent: #7c8cff; --mock-accent-dim: #2c3352;
+    --radius: 12px; --radius-sm: 8px;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0d0e12; --surface: #15171e; --surface-2: #1b1e27; --line: #262a35;
+      --ink: #e8eaf0; --muted: #9aa0b0; --faint: #6b7182;
+      --accent: #8b98ff; --accent-soft: #1e2340;
+      --ok: #4fd396; --warn: #e0a24a; --risk: #f0765f;
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f6; --line: #e2e5ec;
+    --ink: #1a1d26; --muted: #5c6270; --faint: #8a90a0;
+    --accent: #4a5bd0; --accent-soft: #e8ebfb; --ok: #1f8a5b; --warn: #b06a1a; --risk: #c0442f;
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d0e12; --surface: #15171e; --surface-2: #1b1e27; --line: #262a35;
+    --ink: #e8eaf0; --muted: #9aa0b0; --faint: #6b7182;
+    --accent: #8b98ff; --accent-soft: #1e2340; --ok: #4fd396; --warn: #e0a24a; --risk: #f0765f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans);
+    line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  header { max-width: 640px; }
+  .eyebrow { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 0.75rem; }
+  h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); line-height: 1.15; margin: 0 0 0.9rem; text-wrap: balance; letter-spacing: -0.02em; }
+  .lede { color: var(--muted); font-size: 1.02rem; margin: 0 0 0.4rem; }
+  .problem { margin: 1.5rem 0 0; padding: 1rem 1.15rem; background: var(--surface-2);
+    border: 1px solid var(--line); border-radius: var(--radius-sm); font-size: 0.92rem; color: var(--muted); }
+  .problem b { color: var(--ink); font-weight: 600; }
+  h2.sec { font-size: 0.8rem; font-family: var(--mono); letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--faint); margin: 3rem 0 1.1rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.1rem; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 1.15rem 1.15rem 1.25rem; display: flex; flex-direction: column; gap: 0.9rem; position: relative; }
+  .card.rec { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card-head { display: flex; align-items: baseline; gap: 0.5rem; }
+  .opt-key { font-family: var(--mono); font-size: 0.78rem; font-weight: 600; color: var(--accent);
+    background: var(--accent-soft); border-radius: 5px; padding: 0.12rem 0.42rem; }
+  .card h3 { font-size: 1.02rem; margin: 0; letter-spacing: -0.01em; }
+  .rec-tag { margin-left: auto; font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 20px;
+    padding: 0.12rem 0.5rem; align-self: center; }
+  .how { font-size: 0.88rem; color: var(--muted); margin: 0; }
+  .how b { color: var(--ink); font-weight: 600; }
+
+  /* ── mock: a mini extension popup ── */
+  .mock { background: var(--mock-bg); border-radius: 10px; padding: 12px 12px 14px; color: var(--mock-ink);
+    font-size: 12px; border: 1px solid var(--mock-line); user-select: none; }
+  .mock-top { display: flex; align-items: center; gap: 8px; padding: 2px 2px 10px; }
+  .mock-back { color: var(--mock-muted); font-size: 15px; line-height: 1; }
+  .mock-title { font-weight: 600; font-size: 12.5px; letter-spacing: -0.01em; }
+  .mock-label { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--mock-muted); padding: 4px 2px 6px; }
+  .rows { display: flex; flex-direction: column; gap: 6px; }
+  .row { display: flex; align-items: center; gap: 9px; background: var(--mock-surface); border: 1px solid var(--mock-line);
+    border-radius: 9px; padding: 9px 10px; }
+  .row.active { border-color: var(--mock-accent-dim); }
+  .lead { width: 15px; height: 15px; flex: none; display: grid; place-items: center; }
+  .ring { width: 13px; height: 13px; border-radius: 50%; border: 1.6px solid var(--mock-muted); }
+  .ring.on { border-color: var(--mock-accent); background:
+    radial-gradient(circle at center, var(--mock-accent) 0 3.2px, transparent 3.6px); }
+  .radio { width: 14px; height: 14px; border-radius: 50%; border: 1.6px solid var(--mock-muted); position: relative; }
+  .radio.on { border-color: var(--mock-accent); }
+  .radio.on::after { content: ""; position: absolute; inset: 2.6px; border-radius: 50%; background: var(--mock-accent); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mock-accent); box-shadow: 0 0 0 3px var(--mock-accent-dim); }
+  .name { font-weight: 500; font-size: 12px; }
+  .sub { color: var(--mock-muted); font-size: 10px; }
+  .right { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+  .chev { color: var(--mock-muted); font-size: 14px; }
+  .pill { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--mock-accent); border: 1px solid var(--mock-accent-dim); border-radius: 20px; padding: 2px 7px; }
+  .gear { color: var(--mock-muted); font-size: 13px; }
+  .seg { display: flex; gap: 5px; padding: 4px; background: var(--mock-surface); border: 1px solid var(--mock-line);
+    border-radius: 9px; }
+  .seg > span { flex: 1; text-align: center; font-size: 10.5px; padding: 6px 4px; border-radius: 6px; color: var(--mock-muted); }
+  .seg > span.on { background: var(--mock-2); color: var(--mock-ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--mock-accent-dim); }
+  .manage-row { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; }
+  .manage-row .name { font-size: 11.5px; }
+  .tap-note { font-family: var(--mono); font-size: 8px; letter-spacing: 0.06em; color: var(--mock-muted);
+    text-align: center; padding-top: 8px; }
+
+  /* ── tradeoffs ── */
+  .trade { display: flex; flex-direction: column; gap: 0.3rem; margin-top: auto; }
+  .trade-row { display: grid; grid-template-columns: 4.6rem 1fr; gap: 0.5rem; font-size: 0.8rem; align-items: baseline; }
+  .trade-row .k { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  .trade-row .v { color: var(--muted); }
+  .lv { font-weight: 600; }
+  .lv.ok { color: var(--ok); } .lv.warn { color: var(--warn); } .lv.risk { color: var(--risk); }
+
+  .decide { margin-top: 3rem; padding: 1.4rem 1.5rem; background: var(--accent-soft);
+    border: 1px solid var(--accent); border-radius: var(--radius); }
+  .decide h2 { margin: 0 0 0.6rem; font-size: 1.05rem; }
+  .decide p { margin: 0 0 0.5rem; font-size: 0.92rem; color: var(--muted); }
+  .decide b { color: var(--ink); }
+  .foot { margin-top: 2.5rem; color: var(--faint); font-size: 0.82rem; }
+  .foot code { font-family: var(--mono); background: var(--surface-2); padding: 0.1rem 0.35rem; border-radius: 4px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Nulo · Settings › Networks</p>
+    <h1>Four ways to fix the network list</h1>
+    <p class="lede">The list looks selectable but isn't — pick the direction, and I'll build it.</p>
+    <div class="problem">
+      Today each row shows a left <b>circle / filled-circle</b> that reads like a radio button, but tapping a row
+      only <b>opens its detail page</b> — switching the active network happens one screen deeper. So people tap the
+      circle expecting a switch, nothing happens, and it feels broken. The four options below each resolve that
+      mismatch differently. Mockups are the real dark popup at ~1× scale.
+    </div>
+  </header>
+
+  <h2 class="sec">The options</h2>
+  <div class="grid">
+
+    <!-- A -->
+    <div class="card">
+      <div class="card-head"><span class="opt-key">A</span><h3>Inline radio, still drills in</h3></div>
+      <div class="mock">
+        <div class="mock-top"><span class="mock-back">‹</span><span class="mock-title">Manage Networks</span></div>
+        <div class="mock-label">Networks · 3</div>
+        <div class="rows">
+          <div class="row active"><span class="lead"><span class="radio on"></span></span><span class="name">Alpha V5</span><span class="right"><span class="chev">›</span></span></div>
+          <div class="row"><span class="lead"><span class="radio"></span></span><span class="name">Testnet</span><span class="right"><span class="chev">›</span></span></div>
+          <div class="row"><span class="lead"><span class="radio"></span></span><span class="name">Local Network</span><span class="right"><span class="chev">›</span></span></div>
+        </div>
+        <div class="tap-note">tap radio = switch · tap name/chevron = open</div>
+      </div>
+      <p class="how"><b>Make the left marker real.</b> The circle becomes an actual radio that switches the active network on tap; the rest of the row still opens detail. Restores exactly the affordance people expect.</p>
+      <div class="trade">
+        <div class="trade-row"><span class="k">Switch</span><span class="v"><span class="lv ok">1 tap</span>, from the list</span></div>
+        <div class="trade-row"><span class="k">A11y</span><span class="v"><span class="lv warn">two targets/row</span> — radio + drill-in need distinct focus stops + labels</span></div>
+        <div class="trade-row"><span class="k">Risk</span><span class="v"><span class="lv warn">medium</span> — split hit-areas, mis-taps on small rows</span></div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="card rec">
+      <div class="card-head"><span class="opt-key">B</span><h3>Active badge, no fake radio</h3><span class="rec-tag">Recommended</span></div>
+      <div class="mock">
+        <div class="mock-top"><span class="mock-back">‹</span><span class="mock-title">Manage Networks</span></div>
+        <div class="mock-label">Networks · 3</div>
+        <div class="rows">
+          <div class="row active"><span class="lead"><span class="dot"></span></span><span class="name">Alpha V5</span><span class="right"><span class="pill">Active</span><span class="chev">›</span></span></div>
+          <div class="row"><span class="lead" style="opacity:.0"></span><span class="name">Testnet</span><span class="right"><span class="chev">›</span></span></div>
+          <div class="row"><span class="lead" style="opacity:.0"></span><span class="name">Local Network</span><span class="right"><span class="chev">›</span></span></div>
+        </div>
+        <div class="tap-note">every row opens · active is labelled, not a control</div>
+      </div>
+      <p class="how"><b>Remove the misleading control.</b> Drop the per-row circle; the active row gets a small status <b>dot + "Active" label</b>. Every row is unambiguously a drill-in (chevron). Switching stays on the detail page where it already works.</p>
+      <div class="trade">
+        <div class="trade-row"><span class="k">Switch</span><span class="v"><span class="lv warn">2 taps</span> (open → set active) — unchanged from today</span></div>
+        <div class="trade-row"><span class="k">A11y</span><span class="v"><span class="lv ok">one target/row</span>, status conveyed by text not just color</span></div>
+        <div class="trade-row"><span class="k">Risk</span><span class="v"><span class="lv ok">low</span> — no interaction change, just honest affordance</span></div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="card">
+      <div class="card-head"><span class="opt-key">C</span><h3>Tap row = switch</h3></div>
+      <div class="mock">
+        <div class="mock-top"><span class="mock-back">‹</span><span class="mock-title">Select Network</span></div>
+        <div class="mock-label">Tap to switch · gear to manage</div>
+        <div class="rows">
+          <div class="row active"><span class="lead"><span class="ring on"></span></span><span class="name">Alpha V5</span><span class="right"><span class="gear">⚙</span></span></div>
+          <div class="row"><span class="lead"><span class="ring"></span></span><span class="name">Testnet</span><span class="right"><span class="gear">⚙</span></span></div>
+          <div class="row"><span class="lead"><span class="ring"></span></span><span class="name">Local Network</span><span class="right"><span class="gear">⚙</span></span></div>
+        </div>
+        <div class="tap-note">tap anywhere = switch · gear = open detail</div>
+      </div>
+      <p class="how"><b>Invert the model to match instinct.</b> The list becomes a true radio group — tapping a row switches immediately. Rename/endpoints/delete move behind a small <b>gear</b> per row. Fastest for "I just want to change network".</p>
+      <div class="trade">
+        <div class="trade-row"><span class="k">Switch</span><span class="v"><span class="lv ok">1 tap</span> — the primary action</span></div>
+        <div class="trade-row"><span class="k">A11y</span><span class="v"><span class="lv ok">roving radio group</span> (←/→), gear is the secondary stop</span></div>
+        <div class="trade-row"><span class="k">Risk</span><span class="v"><span class="lv risk">higher</span> — reworks the page's whole model + testids; detail now gear-gated</span></div>
+      </div>
+    </div>
+
+    <!-- D -->
+    <div class="card">
+      <div class="card-head"><span class="opt-key">D</span><h3>Split: switch on top, manage below</h3></div>
+      <div class="mock">
+        <div class="mock-top"><span class="mock-back">‹</span><span class="mock-title">Networks</span></div>
+        <div class="mock-label">Active network</div>
+        <div class="seg"><span class="on">Alpha V5</span><span>Testnet</span><span>Local</span></div>
+        <div class="mock-label" style="padding-top:10px">Manage</div>
+        <div class="rows">
+          <div class="manage-row" style="background:var(--mock-surface);border:1px solid var(--mock-line)"><span class="name">Alpha V5</span><span class="right"><span class="chev">›</span></span></div>
+          <div class="manage-row" style="background:var(--mock-surface);border:1px solid var(--mock-line)"><span class="name">Testnet</span><span class="right"><span class="chev">›</span></span></div>
+        </div>
+      </div>
+      <p class="how"><b>Separate the two jobs.</b> A segmented <b>active-network switcher</b> at the top (fast, obvious), and a plain <b>manage list</b> below (drill-in only, no radio look at all). Each control does one thing.</p>
+      <div class="trade">
+        <div class="trade-row"><span class="k">Switch</span><span class="v"><span class="lv ok">1 tap</span>, and visibly separated from manage</span></div>
+        <div class="trade-row"><span class="k">A11y</span><span class="v"><span class="lv ok">tablist on top</span>, clean list below — no dual-purpose rows</span></div>
+        <div class="trade-row"><span class="k">Risk</span><span class="v"><span class="lv warn">medium</span> — most layout change; segmented control crowds with 4+ networks</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="decide">
+    <h2>Which one?</h2>
+    <p><b>My pick: B (Active badge).</b> It's the smallest, safest change — it fixes the actual complaint (the fake-radio) by making the affordance honest, with no interaction rework and no new mis-tap surface. Both plan auditors independently favoured it for the same reason.</p>
+    <p>If your real goal is <b>faster switching</b> (not just "stop it looking broken"), <b>C</b> matches the instinct people already have, at the cost of a bigger rework. <b>D</b> is the most explicit but spends the most layout. <b>A</b> is the middle path but crowds two targets into one small row.</p>
+    <p style="margin-bottom:0">Tell me the letter — this ships as its own PR after the three code fixes.</p>
+  </div>
+
+  <p class="foot">Part of the <code>wallet-ux-fixes</code> blueprint · item 4 of 4. The other three fixes (backup permission, account-switch tx refresh, import default network) don't need your input — this one's a design call only you should make.</p>
+</div>

@@ -153,9 +153,10 @@ jobs:
       retry: "0"
       # Proverless shard pool (fast, accelerator OFF). Exclude, on top of the
       # fee-methods + concurrent-confirm heavy jobs (which run proverless too),
-      # the prover-ON canary files transfers + tx-sendTx-default — they run with
-      # REAL proving in network-e2e-canary. Keep this list in sync with those jobs.
-      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
+      # the prover-ON canary files transfers + tx-sendTx-default +
+      # frozen-account-canary — they run with REAL proving in
+      # network-e2e-canary. Keep this list in sync with those jobs.
+      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
       proverless: true
     secrets:
       SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
@@ -212,13 +213,18 @@ jobs:
     #   - tx-sendTx-default: dApp flow, waits through real prove → submit (the node
     #     validates a REAL proof at node.sendTx; playground hard-codes NO_WAIT so
     #     mine isn't awaited). Covers dapp-send-executor plumbing transfers doesn't.
+    #   - frozen-account-canary: the address-freeze execution gate (frozen-ctor
+    #     multicall deploy → init-nullifier flip → authwit consume → SW-restart
+    #     re-derive), which MUST see real proving — a fake proof would green a
+    #     frozen artifact the prover can no longer prove (CLAUDE.md
+    #     "Account-address freeze").
     # Dedicated runner with accelerator-server (proverless: false default).
     uses: ./.github/workflows/_network-e2e.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
       shard_label: "canary"
       retry: "0"
-      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts"
+      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
       # Real proving — accelerator ON unless the emergency kill switch is set.
       disable_accelerator: ${{ github.event.inputs.disable_accelerator == 'true' || vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
     secrets:

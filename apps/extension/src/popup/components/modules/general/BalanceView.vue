@@ -12,12 +12,15 @@ import { ContentKind } from "@/wallet/services/task/spec"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
+import { usePrices } from "@/composables/usePrices"
 import { useToast } from "@/composables/toast.js"
 const { openToast } = useToast()
 
@@ -77,6 +80,72 @@ const BalanceDisplayOptionsMap = {
 	total_private_balances: "Private Account Value",
 	total_public_balances: "Public Account Value",
 }
+
+/** Live prices (A1). Parent owns the client lifecycle; the composable owns
+ *  freshness. Every fiat element below renders ONLY with a usable quote —
+ *  no price means no dollar figure, never a fake $0.00. */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+
+/** Fiat kill-switch state — with it OFF the aggregate slot is HIDDEN entirely
+ *  (the space is reclaimed), not rendered as a dash. */
+const showFiatValues = ref(true)
+const configService = new ConfigServiceClient()
+configService.onUpdate.add(onConfigUpdate)
+function onConfigUpdate(prop) {
+	if (prop.key === "showFiatValues") showFiatValues.value = prop.value !== false
+}
+configService.getValue("showFiatValues").then((v) => {
+	showFiatValues.value = v !== false
+})
+
+const displayedRawTotal = computed(() => {
+	if (!tokenBalanceToDisplay.value) return 0n
+	return BigInt(tokenBalanceToDisplay.value?.publicBalance || 0) + BigInt(tokenBalanceToDisplay.value?.privateBalance || 0)
+})
+
+/** A1 secondary line for a selected token: `≈ $x.xx`, or undefined (hidden). */
+const displayedTokenFiat = computed(() => {
+	if (!tokenToDisplay.value) return undefined
+	return prices.tokenFiatLabel(tokenToDisplay.value, displayedRawTotal.value)
+})
+
+/** Which balance sides the active aggregate option sums. */
+const aggregateSides = computed(() => ({
+	private: appStore.displayOption !== "total_public_balances",
+	public: appStore.displayOption !== "total_private_balances",
+}))
+
+/** Real fiat aggregate over priced HOLDINGS: Σ balance × price (micro-USD).
+ *  A zero-balance row is worth exactly $0.00 whether priced or not, so it
+ *  counts as neither a holding nor a pricing gap — a registered-but-empty
+ *  token must not turn the aggregate into an em-dash. */
+const aggregate = computed(() => {
+	let micro = 0n
+	let priced = 0
+	let holdings = 0
+	for (const tb of tokenBalances.value) {
+		let raw = 0n
+		if (aggregateSides.value.private) raw += BigInt(tb.privateBalance || 0)
+		if (aggregateSides.value.public) raw += BigInt(tb.publicBalance || 0)
+		if (raw === 0n) continue
+		holdings += 1
+		const value = prices.tokenFiatMicro(tb.token, raw)
+		if (value === undefined) continue
+		micro += value
+		priced += 1
+	}
+	return { micro, priced, holdings }
+})
+
+/** Truthful matrix: no nonzero holdings is genuinely worth $0.00; holdings
+ *  that merely lack a price stay an honest em-dash. */
+const aggregateFiatDisplay = computed(() => {
+	if (aggregate.value.priced > 0) return prices.formatUsdMicro(aggregate.value.micro)
+	if (aggregate.value.holdings === 0) return "$0.00"
+	return "—"
+})
+const isAggregatePartial = computed(() => aggregate.value.priced > 0 && aggregate.value.priced < aggregate.value.holdings)
 
 const isCopied = ref(false)
 const handleCopy = (value, label) => {
@@ -254,6 +323,9 @@ onBeforeUnmount(() => {
 	taskService.disconnect()
 	tokenBalanceService.disconnect()
 	tokenService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
+	configService.disconnect()
 })
 </script>
 
@@ -262,6 +334,7 @@ onBeforeUnmount(() => {
 		<!-- Balance section -->
 		<section :class="$style.balance_section">
 			<div
+				v-if="tokenToDisplay || showFiatValues"
 				@click="handleTokenBalanceClick"
 				data-testid="balance-amount"
 				:class="[$style.balance_amount, isRefreshingBalance && $style.refreshing]"
@@ -270,7 +343,14 @@ onBeforeUnmount(() => {
 					{{ totalTokenBalance.value }}
 					<span :class="$style.balance_symbol">{{ tokenToDisplay?.symbol }}</span>
 				</template>
-				<template v-else>$0.00</template>
+				<template v-else>{{ aggregateFiatDisplay }}</template>
+			</div>
+
+			<div v-if="tokenToDisplay && displayedTokenFiat" data-testid="balance-fiat" :class="$style.fiat_line">
+				{{ displayedTokenFiat }}
+			</div>
+			<div v-if="!tokenToDisplay && isAggregatePartial" data-testid="balance-fiat-partial" :class="$style.fiat_partial">
+				priced assets only
 			</div>
 
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
@@ -336,6 +416,22 @@ onBeforeUnmount(() => {
 
 .refreshing {
 	animation: blink 2s linear infinite;
+}
+
+.fiat_line {
+	font-family: var(--font-mono);
+	font-size: 13px;
+	color: var(--nulo-secondary);
+	margin-top: 4px;
+}
+
+.fiat_partial {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--nulo-outline);
+	margin-top: 4px;
 }
 
 .breakdown {

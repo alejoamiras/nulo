@@ -44,6 +44,9 @@ const handleOpen = (target) => {
 					<Text @click="handleCopy(aztecVersion)" size="12" weight="500" color="support" class="copyable">
 						Aztec version - {{ aztecVersion }}
 					</Text>
+					<Text size="12" weight="500" color="support" data-testid="coingecko-attribution">
+						Token prices by CoinGecko
+					</Text>
 				</Flex>
 			</Flex>
 

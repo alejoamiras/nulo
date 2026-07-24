@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import type { IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
+import type { IncomingNoteRecord, IncomingTransferRecord } from "@/wallet/services/incoming-transfer/spec"
 import type { OperationRecord } from "@/wallet/services/operation-journal/spec"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import { buildActivityRows } from "./activity-rows"
@@ -26,9 +26,12 @@ function journal(overrides: Partial<OperationRecord>): OperationRecord {
 	} as OperationRecord
 }
 
-function incoming(overrides: Partial<IncomingTransferRecord>): IncomingTransferRecord {
+function incoming(overrides: Partial<IncomingNoteRecord>): IncomingTransferRecord {
+	const siloedNullifier = overrides.siloedNullifier ?? "0xn1"
 	return {
-		siloedNullifier: "0xn1",
+		kind: "note",
+		id: overrides.id ?? `note:p1|net-1|${siloedNullifier}`,
+		siloedNullifier,
 		profileId: "p1",
 		networkId: "net-1",
 		accountAddress: "0xa",
@@ -40,7 +43,7 @@ function incoming(overrides: Partial<IncomingTransferRecord>): IncomingTransferR
 		txHash: "0xtx",
 		l2BlockNumber: 1,
 		txIndexInBlock: 0,
-		noteIndexInTx: 0,
+		indexInTx: 0,
 		hidden: false,
 		discoveredAt: 1_000,
 		...overrides,
@@ -134,6 +137,59 @@ describe("buildActivityRows — three-source merge", () => {
 		expect(new Set(keys).size).toBe(keys.length)
 		expect(keys).toContain("tx:0xtx1")
 		expect(keys).toContain("journal:j1")
-		expect(keys).toContain("incoming:0xn1")
+		expect(keys).toContain("incoming:note:p1|net-1|0xn1")
+	})
+
+	// ── Cross-account render-scope filters (defense-in-depth) ──
+
+	test("tx scoping: drops other-account tx when accountAddress is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [{ ...tx(3_000, "0xmine"), account: "0xa" } as Tx, { ...tx(2_000, "0xtheirs"), account: "0xother" } as Tx],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			accountAddress: "0xa",
+		})
+		expect(rows.map((r) => (r.type === "tx" ? r.tx.hash : ""))).toEqual(["0xmine"])
+	})
+
+	test("tx scoping: drops wrong-chain tx when chainId is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [
+				{ ...tx(3_000, "0xright"), account: "0xa", chainId: 1 } as Tx,
+				{ ...tx(2_000, "0xwrong"), account: "0xa", chainId: 2 } as Tx,
+			],
+			terminalJournalOps: [],
+			incomingTransfers: [],
+			accountAddress: "0xa",
+			chainId: 1,
+		})
+		expect(rows.map((r) => (r.type === "tx" ? r.tx.hash : ""))).toEqual(["0xright"])
+	})
+
+	test("incoming scoping: drops other-account incoming when accountAddress is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [],
+			terminalJournalOps: [],
+			incomingTransfers: [
+				incoming({ siloedNullifier: "0xmine" }),
+				incoming({ siloedNullifier: "0xtheirs", accountAddress: "0xother" }),
+			],
+			accountAddress: "0xa",
+		})
+		expect(rows.map((r) => (r.type === "incoming" && r.inc.kind === "note" ? r.inc.siloedNullifier : ""))).toEqual(["0xmine"])
+	})
+
+	test("incoming scoping: drops wrong-network incoming when networkId is supplied", () => {
+		const rows = buildActivityRows({
+			transactions: [],
+			terminalJournalOps: [],
+			incomingTransfers: [
+				incoming({ siloedNullifier: "0xhere", networkId: "net-1" }),
+				incoming({ siloedNullifier: "0xelsewhere", networkId: "net-2" }),
+			],
+			accountAddress: "0xa",
+			networkId: "net-1",
+		})
+		expect(rows.map((r) => (r.type === "incoming" && r.inc.kind === "note" ? r.inc.siloedNullifier : ""))).toEqual(["0xhere"])
 	})
 })

@@ -68,6 +68,13 @@ vi.mock("@/contracts/sponsored-fpc", () => ({
 	getSponsoredFpcInstance: async () => ({ address: { toString: () => "0xfpc" } }),
 }))
 
+// Pre-baked like every other contract module here: the real getPrivateFpc dynamically imports the
+// PrivateFPC artifact + runs loadContractArtifact/derivation, which the gutted aztec.js mocks can't
+// support - unmocked, the connect-time registration rejects and status wedges at "setting-up".
+vi.mock("@/contracts/private-fpc", () => ({
+	getPrivateFpc: async () => ({ instance: { address: { toString: () => "0xprivfpc" } }, artifact: { name: "PrivateFPC" } }),
+}))
+
 vi.mock("@aztec/aztec.js/contracts", () => ({
 	Contract: {
 		at: vi.fn(async () => ({
@@ -124,10 +131,20 @@ function makePending(verificationHash = "deadbeef") {
 	}
 }
 
+async function connectThroughPicker(wrapper: VueWrapper) {
+	await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
+	await flushPromises()
+	const pickerRow = document.querySelector(`[data-testid="${TESTIDS.walletPickerConnect}"]`) as HTMLElement | null
+	expect(pickerRow).not.toBeNull()
+	pickerRow?.click()
+	await flushPromises()
+}
+
 describe("faucet smoke", () => {
 	let wrapper: VueWrapper | null = null
 
 	beforeEach(() => {
+		localStorage.clear()
 		__resetWalletConnectionForTests()
 		__resetFaucetDripForTests()
 		__resetToastsForTests()
@@ -167,8 +184,7 @@ describe("faucet smoke", () => {
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
 		wrapper = mount(App, { attachTo: document.body })
 
-		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
-		await flushPromises()
+		await connectThroughPicker(wrapper)
 
 		const modal = document.querySelector(`[data-testid="${TESTIDS.verificationModal}"]`)
 		expect(modal).not.toBeNull()
@@ -187,8 +203,7 @@ describe("faucet smoke", () => {
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
 		wrapper = mount(App, { attachTo: document.body })
 
-		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
-		await flushPromises()
+		await connectThroughPicker(wrapper)
 		const confirm = document.querySelector(`[data-testid="${TESTIDS.btnVerifyConfirm}"]`) as HTMLElement
 		confirm.click()
 		await flushPromises()
@@ -198,6 +213,21 @@ describe("faucet smoke", () => {
 		expect(cards).toHaveLength(2)
 		expect(cards[0].attributes("data-symbol")).toBe("NULO")
 		expect(cards[1].attributes("data-symbol")).toBe("OLUN")
+	})
+
+	it("2b. a remembered wallet skips the picker (auto-reconnect path)", async () => {
+		// The discovery stream yields the sole claimant and ends naturally, so
+		// the remembered path resolves immediately (no ambiguity-window wait).
+		localStorage.setItem("nulo-faucet:preferred-wallet", JSON.stringify({ id: "nulo", name: "Nulo" }))
+		const pending = makePending()
+		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
+		wrapper = mount(App, { attachTo: document.body })
+
+		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
+		await flushPromises()
+
+		expect(document.querySelector(`[data-testid="${TESTIDS.walletPicker}"]`)).toBeNull()
+		expect(document.querySelector(`[data-testid="${TESTIDS.verificationModal}"]`)).not.toBeNull()
 	})
 
 	it("3b. the Fuel tab has its OWN bridges list (so backgrounded Fuel bridges surface there)", async () => {
@@ -220,8 +250,7 @@ describe("faucet smoke", () => {
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
 		wrapper = mount(App, { attachTo: document.body })
 
-		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
-		await flushPromises()
+		await connectThroughPicker(wrapper)
 		const confirm = document.querySelector(`[data-testid="${TESTIDS.btnVerifyConfirm}"]`) as HTMLElement
 		confirm.click()
 		await flushPromises()
@@ -245,8 +274,7 @@ describe("faucet smoke", () => {
 		mockEstablishSecureChannel.mockResolvedValueOnce(pending)
 		wrapper = mount(App, { attachTo: document.body })
 
-		await wrapper.get(`[data-testid="${TESTIDS.btnConnect}"]`).trigger("click")
-		await flushPromises()
+		await connectThroughPicker(wrapper)
 		const confirm = document.querySelector(`[data-testid="${TESTIDS.btnVerifyConfirm}"]`) as HTMLElement
 		confirm.click()
 		await flushPromises()

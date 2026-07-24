@@ -28,6 +28,7 @@ import { DappSessionService } from "./services/dapp-session/service"
 import { ExecutionService } from "./services/execution/service"
 import { E2E_PROVERLESS } from "@/e2e/config"
 import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
+import { ChromeStorageIncomingPollGate } from "@/e2e/chrome-storage-incoming-poll-gate"
 import { FpcService } from "./services/fpc/service"
 import { LogViewerService } from "./services/log-viewer/service"
 import { LoggerService } from "./services/logger/service"
@@ -38,6 +39,8 @@ import { JournalGC } from "./services/operation-journal/gc"
 import { JournalReaper } from "./services/operation-journal/reaper"
 import { PasskeyService } from "./services/passkey/service"
 import { ProfileDeletionCoordinator } from "./services/profile-deletion/coordinator"
+import { AccountIntegrityCoordinator } from "./services/account-integrity/coordinator"
+import { PriceService } from "./services/price/service"
 import { ProfileService } from "./services/profile/service"
 import { registerPxeGenerationProvider, registerPxeStoreKeyProvider } from "./services/pxe/client"
 import { derivePxeStoreKey } from "@nulo/wallet-crypto"
@@ -188,6 +191,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new NetworkService(logger, browserApi))
 		services.add(new NoteService(logger))
 		services.add(new OperationJournalService(logger, browserApi))
+		services.add(new PriceService(logger, browserApi))
 		// Passing `browserApi` threads the storage port into ProfileService AND, because the port
 		// carries alarms, ACTIVATES SessionManager's proactive TTL auto-lock (dormant pre-arc when the
 		// composition root passed no port — see session-manager.ts "proactive TTL lights up once the
@@ -225,11 +229,24 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		services.add(new TokenService(logger, browserApi))
 		services.add(new TokenBalanceService(logger, browserApi))
 		services.add(new TransactionService(logger, browserApi))
-		services.add(new IncomingTransferService(logger, browserApi))
+		// E2E_PROVERLESS injects the incoming-poll gate (same tree-shaken-in-prod
+		// pattern + negative-grep as the proof gate above). Default poll interval kept.
+		services.add(
+			new IncomingTransferService(
+				logger,
+				browserApi,
+				undefined, // pollIntervalMs (default)
+				undefined, // publicReader (production uses the built-in PXE reader)
+				E2E_PROVERLESS ? new ChromeStorageIncomingPollGate() : undefined,
+			),
+		)
 		services.add(new PasskeyService(logger, windowManager))
 		// Started LAST (declares dependencies on every service it purges) — finding D.
 		const deletionCoordinator = new ProfileDeletionCoordinator(logger)
 		services.add(deletionCoordinator)
+		// Also last-phase: registers as ProfileService's pre-open address verifier + AccountService's
+		// operation-time mismatch sink (the address-freeze runtime guard).
+		services.add(new AccountIntegrityCoordinator(logger, browserApi))
 
 		await services.start()
 		logger.log("wallet", LogLevel.Info, "Services started")

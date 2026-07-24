@@ -23,7 +23,7 @@ The sink. The four browser contexts (service worker, popup, content script, offs
 
 | Path | Purpose |
 |---|---|
-| `src/wallet/` | Service-worker background services (account, profile, network, transaction, dapp-interaction, dapp-session, execution, fpc, passkey, token, token-balance, contact, …). Storage abstraction. Logger. Config. |
+| `src/wallet/` | Service-worker background services (account, profile, network, transaction, dapp-interaction, dapp-session, execution, fpc, passkey, token, token-balance, price, contact, …). Storage abstraction. Logger. Config. |
 | `src/popup/` | Vue 3 popup app: `pages/` (L6), `components/modules/` (L4), `components/popups/` + `windows/` (L5), `constants/`, `utils/`. |
 | `src/components/` | L1 `core/`, L2 `ui/`, L3 `composite/` primitives, plus flat service-bound visuals. |
 | `src/composables/` | C0 pure utilities + C1 service hooks. |

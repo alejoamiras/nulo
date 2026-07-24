@@ -44,3 +44,41 @@ smoke-testing the local rig (extension dist/chrome build + faucet preview of the
 Also: local smoke rig needed a secure origin — raw tailnet-IP HTTP is not a secure context
 (COOP ignored, `crypto.randomUUID` absent). Fixed via Tailscale Serve HTTPS in front of the vite
 preview (`__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` for the host allowlist; no repo config).
+
+## R EXECUTED — v0.25.0 shipped (2026-07-20)
+
+R ran on the SIMPLIFIED pipeline (the #287 folds were reverted in #295 first — see the
+over-engineering lesson). Sequence: promote dev→main (#296, merge-commit) → release-please
+Release PR (#297) → auto-unstick tagged v0.25.0 → publish chain → back-sync (#298, merge-commit).
+
+Two real snags, both recovered without weakening a gate:
+
+1. **network-e2e infra flake CANCELLED the first publish (push:main).** The `release.yml`
+   network-e2e agent ran ~30 min (tests passing — cancel-mid-prove ✓ at 15:22), then GitHub
+   cancelled it at the ~30-min mark (job timeout / an "infra boot exit 86" retry on a shard). The
+   cancel cascaded: attach-assets SKIPPED → the tag + GitHub release existed but with ZERO assets.
+   RECOVERY (documented): re-fire the publish against the existing tag via
+   `gh workflow run release.yml --ref main -f tag=v0.25.0 -f dry_run=false`. On workflow_dispatch,
+   network-e2e is OFF by default — and that's CORRECT here, not gate-dodging: this exact code
+   already passed network-e2e on the promote PR (#296) that put it on main, so re-rolling the flaky
+   30-45min gate on the republish only risks the same flake. The republish went fully green
+   (assets + deploys + verify-live). **FRAGILITY worth a targeted fix (see below).**
+
+2. **back-sync #298 blocked by commitlint.** The back-sync PR necessarily carries the
+   `release: promote dev → main` commit into dev, where commitlint is strict (PRs to main relax
+   it). `release` was NOT in `.commitlintrc.json`'s type-enum despite the runbook MANDATING that
+   subject → type-enum fail. FIX (root cause, no admin bypass): added `release` to the enum on the
+   sync branch itself, so #298's own commitlint re-ran green AND the fix landed on dev. Future
+   back-syncs won't hit this.
+
+Confirmations: the faucet redeploys fine via Cloudflare's dashboard Git-integration on push (the
+#287 hook preflight was unnecessary); verify-live (now advisory) confirmed the live sites serve
+0.25.0; my release commits were SSH-signed (no backfill needed).
+
+### FRAGILITY — network-e2e on the publish path can strand a release (open recommendation)
+The release publish chain re-runs the flaky 30-45min network-e2e on push:main, and its
+cancellation/timeout takes the WHOLE release down mid-attach (half-created release: tag + empty
+release, needing a manual republish). But that gate already passed on the promote PR that created
+the commit. A targeted fix (NOT speculative — it bit us this release): on the push:main publish
+path, either (a) drop the redundant network-e2e re-run, or (b) don't hard-gate attach-assets on it.
+Deferred to the user's decision — flagged, not implemented (respecting the ship-simple lesson).

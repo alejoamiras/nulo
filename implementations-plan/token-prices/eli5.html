@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — token-prices</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    .audit { background: #f2fbf4; padding: 1rem 1.25rem; border-left: 3px solid #2f7d4f; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>token-prices</h1>
+  <p>Today the wallet shows fake dollar signs: the home screen says "$0.00", the send screen says "~ $0.00 · no quotes available", and fee costs are computed from a made-up rate (0.02) hardcoded in the source. This plan makes all of those real. The wallet will ask CoinGecko (a free public price site) "what are USDC and AZTEC worth?" every few minutes while unlocked, remember the answer, and use it everywhere a dollar amount appears. Aztec-network tokens are too new to be listed anywhere, so we map them to their Ethereum twins: cUSD is priced as USDC, and Fee Juice (the gas token) is priced as AZTEC. Separately, the wallet will come with cUSD pre-added on Mainnet and Testnet, so a fresh install isn't an empty token list.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong><code>mid</code></strong>. Rubric: novelty LOW (the background-service pattern is well-established here), blast radius MODERATE (display across many screens; prices never move funds on their own), irreversibility LOW (no migrations), migration cost LOW, <strong>external coupling HIGH</strong> (third-party price API), security sensitivity MODERATE (the one risky spot — typing dollars in Send — got a dedicated safety policy). One HIGH → <code>mid</code>: plan + competing outline, dual audit, decision ledger, final fresh codex pass.</p>
+
+  <h2>Your design picks (from the options artifact)</h2>
+  <ul>
+    <li><strong>A1</strong> — home header keeps the token amount big; a small "≈ $1,249.38" appears under it. "Account Value" finally shows a real total (labeled when some tokens have no price).</li>
+    <li><strong>B1</strong> — each token row shows what your holding is worth. No price → nothing shown, never a fake zero.</li>
+    <li><strong>C3</strong> — the send screen gets a flip switch: type dollars, the wallet converts to tokens — with a shimmer while it recalculates, and hard safety rules (below).</li>
+    <li><strong>D2</strong> — fees use the real AZTEC price instead of the made-up rate; the gas card shows what your Fee Juice is worth.</li>
+  </ul>
+
+  <div class="audit">
+    <h2>What the audits changed</h2>
+    <p>Two independent reviewers (codex: <em>reject</em>; fable: <em>conditional approve</em>) attacked the draft. Their findings converged and were all adopted. The big ones, in plain language:</p>
+    <ul>
+      <li><strong>The draft had a stale Testnet id.</strong> The network hard-forked recently and the plan's Testnet identifier was the old one — tokens would silently never seed. Fixed and re-verified against the code; a live on-chain check of the cUSD address is now a blocking step before anything ships.</li>
+      <li><strong>Typing dollars needed stricter rules.</strong> Prices move; the amount you saw must be the amount that sends. Now: the quote is frozen while you type, the send button is disabled while converting, you always confirm token units, and if the price moved more than 1% you're asked to re-confirm. The line also says "via USDC" so the proxy is explicit.</li>
+      <li><strong>Pre-added tokens can't trust the network blindly.</strong> The wallet's RPC endpoint could lie about what a contract is. Seed entries now pin the expected contract fingerprint; mismatch → nothing is added.</li>
+      <li><strong>No always-on beacon.</strong> Price fetching only runs while the wallet is unlocked (it was going to be every 3 minutes forever). This is one of the questions below.</li>
+    </ul>
+    <p>A second fresh-eyes codex pass on the revised plan pushed further and won four more changes: the seeding check now validates and saves <em>the exact same data</em> in one pass (no window for a lying server to swap answers), fee screens never trigger a fetch at transaction time (that timing itself is a privacy leak — they use the cache or show nothing), a release build now <em>fails</em> if an API key is present (not just a scan), and two honest limitations were promoted to questions for you (#7 and #8 below).</p>
+    <p><strong>Final verdicts:</strong> fable — <em>conditional approve</em> (all conditions adopted). Codex — <em>conditional approve</em> on the amended plan (its last two conditions: validate before registering / roll back so a rejected seed can't poison local state — adopted; and a deleted default token now stays deleted even across network remove/re-add — adopted). The remaining codex conditions are exactly the eight questions below being answered before their phases.</p>
+  </div>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1: The price engine</h3>
+    <p>A background worker that asks CoinGecko for all mapped prices in one request (every 3 minutes, only while unlocked), checks the answers look sane, remembers them, and tells the UI. Includes a real settings toggle ("Show fiat values") that turns all of it off. AZTEC ($0.0147) and USDC ($0.9999) listings verified live during planning. No new browser permissions needed (verified: CoinGecko allows extension fetches).</p>
+    <p class="muted">Proves itself by: unit tests (fetch/cache/off-switch/staleness/backoff/sanity-bands) + one opt-in real-API test run locally + lint + typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2: Pre-added tokens</h3>
+    <p>A short built-in list (cUSD on Mainnet + Testnet). After unlock, the wallet quietly adds missing listed tokens through the same machinery as a manual add — with the contract-fingerprint check. Delete one and it stays deleted; failures retry a few times then give up quietly.</p>
+    <p class="muted">Proves itself by: unit tests (seed/skip/retry-cap/deletion/purge cases) + a BLOCKING live check that cUSD actually exists at that address on today's Testnet and Mainnet, logged in lessons.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3: Home screen dollars (A1 + B1)</h3>
+    <p>The header's fiat line, the real Account Value total, per-row values in the token list, and removal of every fake $0.00 (including two screens the draft missed — the balance-type popup and the Fee Juice card get theirs in phase 4).</p>
+    <p class="muted">Proves itself by: Vue component tests (priced / unpriced / stale / partial-total cases) + unit + lint + typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4: Real fee prices (D2)</h3>
+    <p>Fee estimates, transaction details, and the gas/Fee Juice cards switch from the made-up 0.02 rate to the live AZTEC price (~$0.015 today, so displayed fee dollars will visibly change). Done before the send-input phase on purpose — lower risk first.</p>
+    <p class="muted">Proves itself by: updated fee-estimation unit tests + component tests for both cards + lint + typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5: Type dollars in Send (C3)</h3>
+    <p>The flip switch, under the safety policy: frozen quote while typing, send disabled mid-conversion, token amount always confirmed, >1% price move forces re-confirmation, "via USDC" label, and math that never loses precision (rounds down, never invents dust).</p>
+    <p class="muted">Proves itself by: ≥10 new component tests on AmountCard (both directions, rounding at extremes, Max/Half, freeze + re-confirm rules, shimmer) + unit + lint + typecheck, all green.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 6: End-to-end + docs</h3>
+    <p>Browser tests confirm nothing fake shows when prices are unavailable; the full network suite confirms nothing broke; a release check guarantees no API key ever ships in a build; docs updated.</p>
+    <p class="muted">Proves itself by: full pre-PR gate (typecheck → tests → lint → build) + smoke e2e + network e2e, all green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>The old hardcoded fee rate carried a comment "hardcoded for privacy (no external API)" — a deliberate stance this plan consciously trades away, narrowly: the wallet always asks for the <em>same fixed list</em> of prices in one request (nobody can tell what you hold from the question), only while you're actually using it, and the settings toggle turns it off entirely. And prices are display-only by design everywhere except the dollar-input switch, which is why that one surface got the strict policy above.</p>
+
+  <h2>Open questions (the plan's Asks — answer with your verdict)</h2>
+  <ul>
+    <li><strong>1. Seeding isn't covered by the live-network browser suite</strong> (the local sandbox chain has no cUSD by design). It's covered by unit tests + the blocking live preflight instead. OK?</li>
+    <li><strong>2. USD only</strong> — no currency picker. OK?</li>
+    <li><strong>3. 1 Fee Juice = 1 AZTEC</strong> for pricing. OK?</li>
+    <li><strong>4. Refresh only while unlocked, on by default</strong> (no always-on fetching; note the first fetch happens right after unlock, before a new user sees the settings toggle). OK, or require opt-in consent first?</li>
+    <li><strong>5. Testnet shows real prices</strong> (test tokens valued at real-market USD; Aztec's docs are explicit that Testnet Fee Juice is NOT AZTEC — so this is a knowing dev-convenience fiction). OK, or hide fiat on testnet?</li>
+    <li><strong>6. Seed trust = pin-on-first-probe</strong>: the expected contract fingerprint is captured once from the canonical public RPCs and pinned in code. OK?</li>
+    <li><strong>7. Dollar-input uses a single price source.</strong> If CoinGecko's quote were persistently wrong (depeg, poisoning), the 1%-movement check can't catch it — your protection is that the token amount is always shown and confirmed before sending. Accept that, or restrict dollar-typing to nothing (display-only prices, dropping the C3 flip switch)?</li>
+    <li><strong>8. CoinGecko's free keyless tier is aimed at non-commercial use.</strong> The plan ships "Prices by CoinGecko" attribution + a docs note either way. Accept keyless-with-attribution now and revisit the plan tier at release time, or resolve licensing before implementation?</li>
+  </ul>
+
+  <div class="approval">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: price engine + seeding + surfaces A1/B1/C3/D2 (+ the two extra fake-$0.00 screens found in audit). Out of scope: currency picker, 24h-change, remote token lists, charts.</li>
+      <li>Confirm tier <code>mid</code>.</li>
+      <li>Confirm the validation plan: unit + component per phase; blocking live seed preflight in Phase 2; smoke + network e2e at Phase 6.</li>
+      <li>Answer the eight open questions (or accept the plan's defaults as written).</li>
+      <li>Post-implementation hardening: not scheduled for this plan; <code>/harden security</code> stays a pre-release repo-wide decision.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (CANONICAL — plan approved 2026-07-21 as written; all eight questions answered with the defaults)</h2>
+    <p>Two options for the autonomous implementation session. <code>/goal</code> survives <code>claude --resume</code> and is the official primitive for "work until the condition holds"; recurring <code>/loop</code> tasks fire on their interval until they expire after 7 days. Everything this plan requires is transcript-observable (gate commands + exit codes), so <code>/goal</code> is recommended.</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other. Run the session INSIDE the worktree (<code>agent-worktree resume token-prices</code>).</p>
+
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All six phases marked ✓ in implementations-plan/token-prices/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript — including Phase 2's live seed preflight logged in lessons/phase-2.md; for each phase the agent has printed LESSONS_FILE=implementations-plan/token-prices/lessons/phase-N.md in the transcript; /code-review max --fix complete with findings applied and committed separately; codex post-impl audit complete with high/critical findings addressed; bun run audit:vue and bun run test:e2e and bun run e2e:agent all report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/token-prices forward. Never idle waiting for my input. Each firing: (1) Reality check: read implementations-plan/token-prices/plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup. (2) Waiting on CI is fine — use the wait to review the diff or prep the next phase. (3) No task in hand? Pick the next pending step from plan.md and start it; after each meaningful edit run bun run lint + bun run test for touched packages; commit → push. (4) Stuck or facing a decision? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to dev/main, never publish, never expand scope beyond plan.md. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase green? Run the phase's full validation gate as written in plan.md (Phase 2 includes the live seed preflight), paste the result, mark ✓ in plan.md, print LESSONS_FILE=implementations-plan/token-prices/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review max --fix → commit fixes separately → codex post-impl audit (net diff + code-review commit summary + adversarial ask) → address high/critical findings → write the wrap-up report and stop.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="audit-codex.md">Codex audits</a> · <a href="audit-fable.md">Fable audit</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

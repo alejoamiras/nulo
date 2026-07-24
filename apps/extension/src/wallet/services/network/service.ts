@@ -16,6 +16,7 @@ import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
+import { CHAIN_IDS } from "@/utils/chain-ids"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -70,27 +71,28 @@ interface DefaultSeed {
  */
 export const LOCAL_NETWORK_RPC_URL: string = (import.meta.env.VITE_LOCAL_NETWORK_RPC_URL as string | undefined) ?? "http://localhost:8080"
 
+// E2E-ONLY default-active override: CI smoke has NO local chain and its runners cannot reliably
+// reach the public Alpha mainnet RPC (requests blackhole → every chain-adjacent flow eats the node
+// client's full 60s-abort×retry envelope, blowing any test budget). Smoke builds pin the seeded
+// ACTIVE network to Testnet (reachable from CI, the pre-Alpha test envelope); prod builds omit the
+// env, so real installs keep Alpha. Same never-ships pattern as the migration-fixture stamp
+// (_build-extension.yml greps release bundles).
+const E2E_DEFAULT_ACTIVE_TESTNET: boolean = (import.meta.env.VITE_NULO_E2E_DEFAULT_NET as string | undefined) === "testnet"
+
 const DEFAULT_SEEDS: DefaultSeed[] = [
 	{
-		name: "Alpha Mainnet",
-		rpcUrl: "https://aztec-mainnet.drpc.org",
-		chainId: 2934756904, // (1 ^ 2934756905) >>> 0
+		name: "Alpha V5",
+		rpcUrl: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
+		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		kind: "mainnet",
-		isPrimaryActive: false,
+		isPrimaryActive: !E2E_DEFAULT_ACTIVE_TESTNET,
 	},
 	{
 		name: "Testnet",
-		rpcUrl: "https://v5.testnet.rpc.aztec-labs.com",
-		chainId: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet rollup version
+		rpcUrl: "https://lb.drpc.live/aztec-testnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
+		chainId: CHAIN_IDS.TESTNET,
 		kind: "testnet",
-		isPrimaryActive: true,
-	},
-	{
-		name: "Devnet",
-		rpcUrl: "https://v4-devnet-3.aztec-labs.com/",
-		chainId: 896946031, // (11155111 ^ 903641544) >>> 0
-		kind: "devnet",
-		isPrimaryActive: false,
+		isPrimaryActive: E2E_DEFAULT_ACTIVE_TESTNET,
 	},
 	{
 		name: "Local Network",
@@ -100,6 +102,11 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		isPrimaryActive: false,
 	},
 ]
+
+/** The one seed marked `isPrimaryActive` (Alpha in prod, Testnet under the e2e flag). Single source
+ *  for the primary/default network — consumed by `getOrInitNetworks` (fresh seed) AND
+ *  `getPrimaryNetwork` (the import/bootstrap fallback), so the two can't disagree. */
+const PRIMARY_SEED = DEFAULT_SEEDS.find((s) => s.isPrimaryActive)
 
 /**
  * Strict RPC-URL equality that tolerates trailing-slash and casing differences
@@ -147,6 +154,8 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		"deleteNetwork",
 		"setActiveNetwork",
 		"getActiveNetwork",
+		"getPrimaryNetwork",
+		"setActiveForProfile",
 		"addEndpoint",
 		"updateEndpoint",
 		"deleteEndpoint",
@@ -263,6 +272,30 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		const network = await this.storage.get(id)
 		if (network?.profileId !== profile.id) return null
 		return network
+	}
+
+	public async getPrimaryNetwork(): Promise<Network | null> {
+		validateParams(NetworkMethodSchemas.getPrimaryNetwork.params, [], "getPrimaryNetwork")
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		if (!PRIMARY_SEED) return null
+		const rows = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
+		return rows.find((n) => n.chainId === PRIMARY_SEED.chainId) ?? null
+	}
+
+	public async setActiveForProfile(profileId: string, networkId: string): Promise<string> {
+		validateParams(NetworkMethodSchemas.setActiveForProfile.params, [profileId, networkId], "setActiveForProfile")
+		await this.ensureInitialized()
+		try {
+			await this.lock.enter()
+			// `requireOwnedRow` rejects a networkId that isn't a row of THIS profile — the id comes from
+			// an attacker-controlled backup, so it must resolve only within the profile's restored rows.
+			requireOwnedRow(await this.storage.get(networkId), profileId)
+			await this._writeActive(profileId, networkId)
+			return networkId
+		} finally {
+			this.lock.leave()
+		}
 	}
 
 	// ── Network mutations ────────────────────────────────────────────────

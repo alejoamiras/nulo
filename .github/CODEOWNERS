@@ -1,3 +1,8 @@
 # Default reviewer for everything.
 # Adjust scopes as the team grows.
 * @alejoamiras
+
+# Account-address freeze surface (vendored artifact, descriptor, regime record): intent marker —
+# on a solo-owner repo this adds no enforcement, but it flags that edits here rotate account
+# addresses and must follow the append-only regime policy (CLAUDE.md "Account-address freeze").
+/packages/aztec-runtime/src/account/ @alejoamiras

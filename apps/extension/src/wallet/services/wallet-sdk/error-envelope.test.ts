@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import {
+	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
 	JobCancelledError,
 	RpcDisconnectedError,
@@ -82,6 +83,15 @@ describe("toWalletResponseError", () => {
 			data: { walletErrorCode: "RPC_DISCONNECTED" },
 		})
 		expect(JSON.stringify(env)).not.toContain("simulateTx")
+	})
+
+	test("AccountAddressInconsistencyError → fully generic failure: no detail, no discriminator", () => {
+		const env = toWalletResponseError(new AccountAddressInconsistencyError(undefined, { profileId: "p1", chainId: 0 }))
+		expect(env).toEqual({ code: -32603, message: "The wallet could not process the request." })
+		const wire = JSON.stringify(env)
+		expect(wire).not.toContain("inconsistency")
+		expect(wire).not.toContain("ACCOUNT_ADDRESS")
+		expect(wire).not.toContain("p1")
 	})
 
 	test("plain Error → string fallback (preserves wire contract for unrecognised throws)", () => {

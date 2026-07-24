@@ -45,17 +45,27 @@ describe("BridgeStepper", () => {
 		runtime.value = { "0xd": { step: "sealing" } }
 		const w = mount(BridgeStepper, { props: { record: dep() } })
 		const phases = w.findAll(sel(TESTIDS.stepperPhase))
-		expect(phases.map((p) => p.attributes("data-phase"))).toEqual(["seal", "approve", "deposit", "sync", "claim", "confirm"])
+		expect(phases.map((p) => p.attributes("data-phase"))).toEqual(["seal", "sign", "deposit", "sync", "claim", "confirm"])
 		expect(phases[0].attributes("data-state")).toBe("active")
 		expect(phases[0].text()).toMatch(/encrypts this bridge's recovery secret/i)
 	})
 
-	it("skipped APPROVE renders the badge", () => {
-		runtime.value = { "0xd": { approveOutcome: "skipped" } }
-		const w = mount(BridgeStepper, { props: { record: dep({ depositTxHash: "0xt" }) } })
+	it("unneeded APPROVE is not rendered at all; it appears only while a real approval runs (fuel-only)", () => {
+		const fuelRec = dep({
+			assetKind: "fee-juice",
+			fuel: { amount: "1", secret: "0x1", secretHashHex: "0x2", minOutput: "0" },
+			isPrivate: false,
+			depositTxHash: "0xt",
+		})
+		// Sufficient allowance (no runtime signal) - the step a user doesn't need never shows.
+		runtime.value = { "0xd": {} }
+		let w = mount(BridgeStepper, { props: { record: fuelRec } })
+		expect(w.findAll(sel(TESTIDS.stepperPhase)).some((p) => p.attributes("data-phase") === "approve")).toBe(false)
+		// A real approval in flight - the step materializes as the active phase.
+		runtime.value = { "0xd": { step: "approving" } }
+		w = mount(BridgeStepper, { props: { record: dep({ ...fuelRec, depositTxHash: undefined }) } })
 		const approve = w.findAll(sel(TESTIDS.stepperPhase)).find((p) => p.attributes("data-phase") === "approve")
-		expect(approve?.attributes("data-state")).toBe("skipped")
-		expect(approve?.text()).toContain("SKIPPED")
+		expect(approve?.attributes("data-state")).toBe("active")
 	})
 
 	it("RETRY shows only for engine-drivable failed phases and routes to the engine action", async () => {

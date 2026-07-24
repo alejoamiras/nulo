@@ -17,6 +17,7 @@
  */
 
 import {
+	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
 	JobCancelledError,
 	RpcDisconnectedError,
@@ -68,6 +69,15 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			code: -32603,
 			message: "The wallet was disconnected while processing the request.",
 			data: { walletErrorCode: RpcDisconnectedError.CODE },
+		}
+	}
+	if (error instanceof AccountAddressInconsistencyError) {
+		// The integrity blocking state is a wallet-UI concern. A dApp gets a fully generic
+		// internal failure — no mismatch detail, no discriminator code — so the condition can't
+		// be probed or used to fingerprint a wallet install.
+		return {
+			code: -32603,
+			message: "The wallet could not process the request.",
 		}
 	}
 	if (error instanceof TooManyPendingError) {

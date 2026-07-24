@@ -22,7 +22,10 @@ import { DateTime } from "luxon"
 import TransactionCard from "./TransactionCard.vue"
 import TransactionTerminalCard from "@/components/composite/activity/TransactionTerminalCard.vue"
 import TransactionIncomingCard from "@/components/composite/activity/TransactionIncomingCard.vue"
+import { PriceServiceClient } from "@/wallet/services/price/client"
+import { usePrices } from "@/composables/usePrices"
 import { buildJournalTerminalCardProps } from "@/utils/journal-state"
+import { receivedLabel, resolveReceivedType } from "@/utils/received-display"
 
 const router = useRouter()
 
@@ -65,11 +68,18 @@ const handleSelectRow = (row) => {
 		router.push(`/popup/journal/${row.op.id}`)
 		return
 	}
-	if (row.type === "incoming" && row.inc.tokenId !== undefined) {
-		router.push(`/popup/tokens/${row.inc.tokenId}`)
+	if (row.type === "incoming") {
+		// Dedicated received-detail page (D5-A), replacing the old redirect to the token page.
+		router.push(`/popup/received/${row.inc.id}`)
 	}
 }
 
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+onBeforeUnmount(() => {
+	prices.dispose()
+	priceService.disconnect()
+})
 function incomingCardProps(inc) {
 	const token = props.tokensById[inc.tokenId]
 	return {
@@ -77,6 +87,8 @@ function incomingCardProps(inc) {
 		amountRaw: inc.amountRaw,
 		tokenDecimals: token?.decimals || 0,
 		txHash: inc.txHash,
+		amountFiat: token ? (prices.tokenFiatLabel(token, BigInt(inc.amountRaw || 0)) ?? null) : null,
+		receivedLabel: receivedLabel(resolveReceivedType(inc)),
 	}
 }
 

@@ -49,6 +49,8 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 /** Utils */
 import { ACTIVITY_FEED_KINDS, categoricalLabel, journalTerminalDisplay, sanitizeJournalSubtitle } from "@/utils/journal-state"
 import { humanizeMethodName, formatTransferType } from "@/utils/tx-enrichment"
+import { usePrices } from "@/composables/usePrices"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 import { balanceFormatted } from "@/utils/amount.js"
 
 /** Composables */
@@ -65,6 +67,8 @@ const router = useRouter()
 const journalService = new OperationJournalServiceClient()
 const configService = new ConfigServiceClient()
 const tokenService = new TokenServiceClient()
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
 
 const op = ref(null)
 const tokens = ref([])
@@ -96,6 +100,14 @@ const amountDisplay = computed(() => {
 const transferTypeLabel = computed(() => {
 	if (!isTransfer.value || op.value?.transferType === undefined) return null
 	return formatTransferType(op.value.transferType)
+})
+
+/** Hero fiat at today's rate. This page only renders failure-shaped records,
+ *  and the owner wants those priced too — the dollar context of what the
+ *  transfer WOULD have moved. */
+const transferFiat = computed(() => {
+	if (!isTransfer.value || !op.value?.amountRaw || !token.value) return null
+	return prices.tokenFiatLabel(token.value, BigInt(op.value.amountRaw)) ?? null
 })
 
 // Method label (when title is set; pre-broadcast records may not have one).
@@ -169,6 +181,22 @@ async function loadOp() {
 		notFound.value = true
 		return
 	}
+	// Cross-account isolation: a journal detail belongs to exactly one
+	// (profile, network, account). `getOperation` fetches by id alone, so if this
+	// record isn't the ACTIVE scope — e.g. the user switched accounts while on this
+	// page — refuse to render it (it would leak the other account's amount /
+	// recipient / dApp origin / error). The scope watcher below re-runs loadOp on
+	// any switch, flipping the page to not-found immediately.
+	if (
+		record.accountAddress !== appStore.account?.address ||
+		record.networkId !== appStore.network?.id ||
+		record.profileId !== appStore.profile?.id
+	) {
+		op.value = null
+		notFound.value = true
+		return
+	}
+	notFound.value = false
 	op.value = record
 }
 
@@ -180,6 +208,19 @@ function onOperationDeleted(deleted) {
 }
 
 journalService.onOperationDeleted.add(onOperationDeleted)
+
+// Re-validate the record's scope whenever the active profile/network/account
+// changes — a switch while viewing A's journal detail must not keep it on-screen.
+// `flush: 'sync'` + the synchronous `op` clear close the window where A's detail
+// would otherwise linger under B during the async `loadOp()` re-fetch.
+watch(
+	() => `${appStore.profile?.id}|${appStore.network?.id}|${appStore.account?.address}`,
+	() => {
+		op.value = null
+		loadOp()
+	},
+	{ flush: "sync" },
+)
 
 onMounted(async () => {
 	if (appStore.profile && appStore.network) {
@@ -196,6 +237,8 @@ onBeforeUnmount(() => {
 	journalService.disconnect()
 	configService.disconnect()
 	tokenService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 })
 </script>
 
@@ -218,7 +261,9 @@ onBeforeUnmount(() => {
 					{{ amountDisplay }}
 					<span v-if="token?.symbol" :class="$style.amount_symbol">{{ token.symbol }}</span>
 				</span>
-				<span v-if="transferTypeLabel" :class="$style.amount_caption">{{ transferTypeLabel }}</span>
+				<span v-if="transferFiat" data-testid="journal-detail-fiat" title="At today's price" :class="$style.amount_fiat">
+					{{ transferFiat }}
+				</span>
 			</Flex>
 
 			<!-- Transfer-type chip (transfer kind only) — mirrors tx/[id].vue. -->
@@ -332,14 +377,13 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.amount_caption {
-	font-family: var(--font-headline);
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 0.1em;
-	text-transform: uppercase;
+/* Mirrors tx/[id].vue's amount_fiat. */
+.amount_fiat {
+	font-family: var(--font-mono);
+	font-size: 11px;
 	color: var(--nulo-secondary);
 }
+
 
 /* Categorical chip — same pattern as tx/[id].vue's transfer_type_chip:
    inline pill, mono headline, uppercase, 1px border. */

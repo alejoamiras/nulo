@@ -80,6 +80,18 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		return validateResult(NetworkMethodSchemas.getActiveNetwork.result, result, "getActiveNetwork")
 	}
 
+	public async getPrimaryNetwork(): Promise<Network | null> {
+		validateParams(NetworkMethodSchemas.getPrimaryNetwork.params, [], "getPrimaryNetwork")
+		const result = await this.request("getPrimaryNetwork")
+		return validateResult(NetworkMethodSchemas.getPrimaryNetwork.result, result, "getPrimaryNetwork")
+	}
+
+	public async setActiveForProfile(profileId: string, networkId: string): Promise<string> {
+		validateParams(NetworkMethodSchemas.setActiveForProfile.params, [profileId, networkId], "setActiveForProfile")
+		const result = await this.request("setActiveForProfile", profileId, networkId)
+		return validateResult(NetworkMethodSchemas.setActiveForProfile.result, result, "setActiveForProfile")
+	}
+
 	public async addEndpoint(networkId: string, label: string | undefined, rpcUrl: string): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.addEndpoint.params, [networkId, label, rpcUrl], "addEndpoint")
 		const result = await this.request("addEndpoint", networkId, label, rpcUrl)

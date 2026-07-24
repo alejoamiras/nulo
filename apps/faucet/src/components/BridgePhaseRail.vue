@@ -42,7 +42,6 @@ const GLYPH: Record<BridgePhase["state"], string> = {
 	pending: "▢",
 	active: "●",
 	done: "✓",
-	skipped: "✓",
 	failed: "✕",
 }
 
@@ -95,8 +94,7 @@ function liveElapsed(startedAt?: number): string | null {
 		>
 			<span class="glyph" :class="{ pulse: phase.state === 'active' }">{{ GLYPH[phase.state] }}</span>
 			<span class="label">{{ phase.label }}</span>
-			<span v-if="phase.state === 'skipped'" class="badge">SKIPPED</span>
-			<span v-else-if="phase.state === 'done' && phase.elapsedMs !== undefined" class="took">{{ formatElapsed(phase.elapsedMs) }}</span>
+			<span v-if="phase.state === 'done' && phase.elapsedMs !== undefined" class="took">{{ formatElapsed(phase.elapsedMs) }}</span>
 			<span v-else-if="phase.state === 'active' && liveElapsed(phase.startedAt)" class="clock">
 				{{ liveElapsed(phase.startedAt) }}<template v-if="phase.eta"> · {{ phase.eta }}</template>
 			</span>
@@ -217,9 +215,8 @@ function liveElapsed(startedAt?: number): string | null {
 	color: var(--red);
 }
 
-/* The stamp moment: every ✓/⊘ snaps in once when the phase completes. */
-.phase.done .glyph,
-.phase.skipped .glyph {
+/* The stamp moment: every ✓ snaps in once when the phase completes. */
+.phase.done .glyph {
 	color: var(--mint);
 	animation: stamp 0.22s ease-out;
 }
@@ -228,14 +225,6 @@ function liveElapsed(startedAt?: number): string | null {
 	font: 600 12px/1 var(--font-mono);
 	color: var(--txt-primary);
 	letter-spacing: 0.06em;
-}
-
-.badge {
-	justify-self: start;
-	font: 600 10px/1 var(--font-mono);
-	color: var(--txt-secondary);
-	border: 1px solid var(--nulo-outline);
-	padding: 2px 5px;
 }
 
 .took {
@@ -304,8 +293,7 @@ function liveElapsed(startedAt?: number): string | null {
 	color: var(--red);
 }
 
-.cell.done,
-.cell.skipped {
+.cell.done {
 	color: var(--mint);
 	animation: stamp 0.22s ease-out;
 }

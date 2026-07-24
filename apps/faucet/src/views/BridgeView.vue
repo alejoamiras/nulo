@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, ref } from "vue"
 import { BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
 import BridgeAddToken from "@/components/BridgeAddToken.vue"
 import BridgeForm from "@/components/BridgeForm.vue"
@@ -7,6 +8,16 @@ import BridgeWalletPanel from "@/components/BridgeWalletPanel.vue"
 import L1WalletPanel from "@/components/L1WalletPanel.vue"
 import MintTestUsdc from "@/components/MintTestUsdc.vue"
 import { TESTIDS } from "@/lib/testids"
+
+const journalAnchor = ref<HTMLElement | null>(null)
+
+// When a bridge finishes, scroll "Your bridges" into view: the completed bridge lives there, and the
+// form otherwise leaves the user on the receipt without ever surfacing the list. nextTick so the list
+// has re-rendered the just-completed record before we scroll to it.
+async function onBridgeCompleted() {
+	await nextTick()
+	journalAnchor.value?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+}
 </script>
 
 <template>
@@ -24,8 +35,10 @@ import { TESTIDS } from "@/lib/testids"
 			<BridgeWalletPanel />
 		</section>
 
-		<BridgeForm />
-		<BridgeJournal kind="bridge-token" />
+		<BridgeForm @completed="onBridgeCompleted" />
+		<div ref="journalAnchor">
+			<BridgeJournal kind="bridge-token" />
+		</div>
 		<MintTestUsdc />
 		<BridgeAddToken />
 	</div>

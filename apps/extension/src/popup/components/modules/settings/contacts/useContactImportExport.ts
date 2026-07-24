@@ -1,8 +1,7 @@
 import type { Ref } from "vue"
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { downloadFile, pickFile, sanitizeString } from "@/utils"
-import { ensurePermissions } from "@/utils/general"
-import { parseContactsExport } from "@/utils/contacts-export-format"
+import { MAX_CONTACT_IMPORT_BYTES, parseContactsExport } from "@/utils/contacts-export-format"
 import type { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 import type { ContactServiceClient } from "@/wallet/services/contact/client"
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -23,10 +22,9 @@ export interface UseContactImportExportOptions {
 }
 
 /**
- * Encapsulates the contacts page import/export flows: downloads
- * permission preflight, sender-union resolution for export, file
- * pick + parse + per-row upsert + sender restoration for import,
- * and the aggregate user-facing toasts.
+ * Encapsulates the contacts page import/export flows: sender-union resolution
+ * for export, file pick + parse + per-row upsert + sender restoration for
+ * import, and the aggregate user-facing toasts.
  */
 export function useContactImportExport(opts: UseContactImportExportOptions) {
 	const { contacts, contactService, accountStateService } = opts
@@ -36,23 +34,15 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 	const popupStore = usePopupStore()
 
 	async function exportContacts() {
-		// Ask for the downloads permission FIRST while the user-gesture is
-		// still active. If we did the slow sender-union query first, Chrome
-		// silently denies the permission prompt (gesture window expires
-		// after async work).
-		const hasDownloadsPermission = await ensurePermissions({ permissions: ["downloads"] })
-		if (!hasDownloadsPermission) {
-			openToast({ label: "Permission for downloads not granted", icon: "warning" }, TOAST_DURATION.LONG)
-			return
-		}
-
+		// `downloads` is a required manifest permission (always granted), so no runtime prompt/gesture
+		// dance is needed — the download just happens.
 		// OR-across-networks sender membership: a contact is exported with
 		// `isSender: true` if registered on any active-status network in the
 		// active profile. Down networks are silently skipped.
 		let senderUnion = new Set<string>()
 		try {
 			const list = await accountStateService.getSendersAcrossActiveNetworks()
-			senderUnion = new Set(list)
+			senderUnion = new Set(list.map((a) => a.toLowerCase()))
 		} catch (err) {
 			console.warn("Failed to read sender union for export; isSender flags will all be false:", err)
 		}
@@ -62,7 +52,10 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			contacts: contacts.value.map((contact) => ({
 				name: contact.name,
 				address: contact.address,
-				isSender: senderUnion.has(contact.address),
+				// Canonical compare: PXE senders are lowercase; a stored contact
+				// may predate canonical-on-save — its registration must still
+				// export as isSender:true or a file round-trip drops the flag.
+				isSender: senderUnion.has(contact.address.toLowerCase()),
 			})),
 		}
 
@@ -94,16 +87,40 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			const file = await pickFile(".json", true)
 			if (!file) return
 
+			// Byte-level bound BEFORE reading — `raw.length` in the parser counts
+			// UTF-16 code units, so a heavily multi-byte file could otherwise
+			// exceed the advertised ceiling before the parser sees it.
+			if (file.size > MAX_CONTACT_IMPORT_BYTES) {
+				openToast({ label: "Contacts file is too large", icon: "warning" }, TOAST_DURATION.LONG)
+				return
+			}
+
 			const data = await file.text()
 			const { contacts: rawContacts } = parseContactsExport(data) as { contacts: Array<Record<string, unknown>> }
+			const seenAddresses = new Set<string>()
+			// Construct MINIMAL rows — never spread the hostile input object
+			// (arbitrary extra properties would ride along into staging and
+			// storage). Non-string name/address fields become "" (a single
+			// malformed row must not abort the whole import); whitespace-only
+			// names are dropped (sanitizeString keeps spaces). Addresses are
+			// lowercased: hex is case-insensitive and the wallet emits
+			// lowercase, so canonicalizing here keeps dedup and duplicate-
+			// contact matching sound against mixed-case files.
 			const importedContacts = rawContacts
 				.map((c) => ({
-					...c,
-					name: sanitizeString(c.name as string, 20),
-					address: sanitizeString(c.address as string, 66),
+					name: typeof c?.name === "string" ? sanitizeString(c.name, 20) : "",
+					address: typeof c?.address === "string" ? sanitizeString(c.address, 66).toLowerCase() : "",
 					isSender: c?.isSender === true,
 				}))
-				.filter((c) => !!c.name && !!c.address)
+				.filter((c) => !!c.name.trim() && !!c.address.trim())
+				// Per-address dedup (first row wins): duplicate addresses in a
+				// hostile file would multiply storage upserts and PXE sender
+				// registrations for the same target.
+				.filter((c) => {
+					if (seenAddresses.has(c.address)) return false
+					seenAddresses.add(c.address)
+					return true
+				})
 
 			if (!importedContacts?.length) {
 				openToast({ label: "No contacts found in file", icon: "info" })
@@ -130,10 +147,13 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 				return
 			}
 
+			// Address keys are lowercased to match the canonicalized import rows —
+			// an existing contact saved with mixed-case hex must merge, not
+			// duplicate. (Name keys stay case-sensitive: names are labels.)
 			const contactsByAddress = new Map<string, ContactRecord>()
 			const contactsByName = new Map<string, ContactRecord>()
 			for (const c of contacts.value) {
-				contactsByAddress.set(c.address, c)
+				contactsByAddress.set(c.address.toLowerCase(), c)
 				contactsByName.set(c.name, c)
 			}
 
@@ -142,67 +162,25 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 			// selected, isSender:true rows produce a per-row sender failure.
 			const activeNetworkId = appStore.network?.id ?? null
 
-			// Snapshot the active network's sender set ONCE before the loop.
-			// Used to detect merge-by-name flows where the existing contact's
-			// address was a registered sender — when the import replaces the
-			// address we need to unregister the old one to avoid orphaning.
-			let activeSenderSet = new Set<string>()
-			if (activeNetworkId) {
-				try {
-					const list = await accountStateService.getSenders(activeNetworkId)
-					activeSenderSet = new Set(list)
-				} catch (err) {
-					console.warn("Failed to read senders snapshot for import; merge-by-name will not migrate registrations:", err)
-				}
-			}
-
 			const errors: Array<{ name: string; address: string; operation: string; error: unknown }> = []
 			let senderTotal = 0
 			let senderOk = 0
+			let senderSkippedNoNetwork = 0
 
+			// Import is adds-only toward sender state: rows explicitly carrying
+			// `isSender: true` (from a previous deliberate export) get registered
+			// on the active network. It never deletes or migrates registrations —
+			// those live in Settings → Advanced → Senders.
 			for (const _c of res) {
-				const existingByAddress = contactsByAddress.get(_c.address)
+				const existingByAddress = contactsByAddress.get(_c.address.toLowerCase())
 				const existingByName = contactsByName.get(_c.name)
-				// Track the old address when merge-by-name swaps the address —
-				// we'll unregister its sender after applying the new one (add-
-				// then-delete order; matches EditContactPopup's applySenderDelta).
-				let oldSenderAddressToUnregister: string | null = null
 				try {
 					if (existingByAddress) {
 						await contactService.updateContact(existingByAddress.id, _c.name, _c.address)
 					} else if (existingByName) {
-						if (existingByName.address !== _c.address && activeSenderSet.has(existingByName.address)) {
-							oldSenderAddressToUnregister = existingByName.address
-						}
 						await contactService.updateContact(existingByName.id, _c.name, _c.address)
 					} else {
 						await contactService.addContact(_c.name, _c.address)
-					}
-
-					if (_c.isSender) {
-						senderTotal++
-						if (activeNetworkId) {
-							try {
-								await accountStateService.addSender(activeNetworkId, _c.address)
-								senderOk++
-							} catch (err) {
-								console.warn(`Failed to register sender ${_c.address}`, err)
-							}
-						} else {
-							console.warn(`Skipping sender registration for ${_c.address}: no active network`)
-						}
-					}
-
-					// Unregister the orphan old-address sender after the new
-					// address has been processed. Best-effort; a failure here
-					// leaves the old sender registered (privacy leak surface)
-					// but doesn't block the rest of the import.
-					if (oldSenderAddressToUnregister && activeNetworkId) {
-						try {
-							await accountStateService.deleteSender(activeNetworkId, oldSenderAddressToUnregister)
-						} catch (err) {
-							console.warn(`Failed to unregister old sender ${oldSenderAddressToUnregister}`, err)
-						}
 					}
 				} catch (err) {
 					errors.push({
@@ -212,6 +190,25 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 						error: err,
 					})
 				}
+
+				// Sender registration is INDEPENDENT of the contact upsert's
+				// outcome (decoupled state): an explicit isSender intent is
+				// attempted — and counted — even when the address-book row
+				// failed, so the toast accounting never silently drops it.
+				if (_c.isSender) {
+					senderTotal++
+					if (activeNetworkId) {
+						try {
+							await accountStateService.addSender(activeNetworkId, _c.address)
+							senderOk++
+						} catch (err) {
+							console.warn(`Failed to register sender ${_c.address}`, err)
+						}
+					} else {
+						senderSkippedNoNetwork++
+						console.warn(`Skipping sender registration for ${_c.address}: no active network`)
+					}
+				}
 			}
 
 			if (errors.length) {
@@ -220,12 +217,19 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 				}
 				openToast({ label: "Import ended with errors", icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (senderTotal > 0 && senderOk < senderTotal) {
-				const detail = senderOk === 0 ? "sender registration failed" : `${senderOk} of ${senderTotal} senders registered`
+				// "Skipped" ≠ "failed": the no-network case was announced as a
+				// skip by the import banner — the toast must say the same thing.
+				const allSkipped = senderSkippedNoNetwork === senderTotal - senderOk && senderOk === 0
+				const detail = allSkipped
+					? "sender registrations skipped (no active network)"
+					: senderOk === 0
+						? "sender registration failed"
+						: `${senderOk} of ${senderTotal} senders registered`
 				openToast({ label: `Contacts imported · ${detail}`, icon: "warning" }, TOAST_DURATION.LONG)
 			} else if (senderTotal > 0) {
-				openToast({ label: `Contacts imported · ${senderOk} senders registered`, icon: "info" })
+				openToast({ label: `Contacts imported · ${senderOk} ${senderOk === 1 ? "sender" : "senders"} registered`, icon: "info" })
 			} else {
-				openToast({ label: "Import competed successfully", icon: "info" })
+				openToast({ label: "Import completed successfully", icon: "info" })
 			}
 		} catch (err) {
 			console.error("Error occurred during import", (err as Error)?.message || (err as Error)?.stack || err)

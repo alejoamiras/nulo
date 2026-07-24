@@ -29,7 +29,8 @@ export interface GasBalances {
 }
 
 export function formatGasBalance(raw: string | null | undefined): string {
-	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS)
+	// Truncated to 4 decimals — full 18-decimal precision drowned the row.
+	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
 }
 
 export interface BuildSettingsInput {
@@ -142,8 +143,17 @@ export function resolveSavedSelection(
  * simulation would fail. `gasBalances` is optional so callers can keep
  * building the list before balances arrive (everything stays enabled
  * during load; balances flip the disabled state once fetched).
+ *
+ * `options.allowSponsored` (default true) gates whether Sponsored FPC
+ * rows are offered — set false on networks that have no funded sponsor
+ * (Alpha/mainnet), where offering it would be a trap that fails at send.
  */
-export function buildFeeMethods(registeredFpcs: RegisteredFpc[], gasBalances?: GasBalances): FeeMethodOption[] {
+export function buildFeeMethods(
+	registeredFpcs: RegisteredFpc[],
+	gasBalances?: GasBalances,
+	options?: { allowSponsored?: boolean },
+): FeeMethodOption[] {
+	const allowSponsored = options?.allowSponsored ?? true
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc)
 	const publicFeeJuiceZero = gasBalances?.publicFeeJuice === "0"
 	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
@@ -176,9 +186,18 @@ export function buildFeeMethods(registeredFpcs: RegisteredFpc[], gasBalances?: G
 			continue
 		}
 		if (fpc.type === FpcType.DefaultSponsoredFpc) {
+			// Hidden on networks with no funded sponsor (Alpha/mainnet) — see options.allowSponsored.
+			if (!allowSponsored) continue
 			base.push({ type: "fpc", title: fpc.name || "Sponsored FPC", subtitle: "sponsored", fpc })
 		}
 	}
 
 	return base
 }
+
+/**
+ * Destination of the "get fee juice" nudge — the tools site's fee-juice
+ * bridge (Fuel). A single destination for every network for now; override
+ * at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
+ */
+export const FEE_JUICE_BRIDGE_URL: string = (import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://tools.nulo.sh"

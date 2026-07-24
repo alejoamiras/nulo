@@ -11,6 +11,7 @@ import {
 	rebuildBridgeTokenInstance,
 } from "@/contracts/bridge-deployments"
 import { DRIPPER, NULO, OLUN, rebuildDripperInstance, rebuildNuloInstance, rebuildOlunInstance } from "@/contracts/deployments"
+import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { buildCombinedManifest } from "@/lib/capabilities"
 import { createAztecWalletSession } from "./createAztecWalletSession"
@@ -45,6 +46,11 @@ async function registerAllContracts(w: Wallet): Promise<void> {
 	await w.registerContract(proxyInst, bridgeProxyArtifact)
 	await w.registerContract(tokenInst, TokenContractArtifact)
 	await w.registerContract(bridgeInst, tokenBridgeArtifact)
+	// The PrivateFPC must be pre-registered so the no-fuel-claim gate's private Fee-Juice balance read
+	// works under 5.0.1 — the wallet only auto-registers it when a tx uses it as fee payer, which is too
+	// late for the pre-claim read. See @/contracts/private-fpc.
+	const { instance: privateFpcInst, artifact: privateFpcArtifact } = await getPrivateFpc()
+	await w.registerContract(privateFpcInst, privateFpcArtifact)
 }
 
 // Module-level singleton - ONE Aztec session shared by both the Faucet and Bridge tabs. The two tabs
@@ -64,4 +70,4 @@ export function useWalletConnection() {
 export const __resetWalletConnectionForTests = session.reset
 
 export { extractGrantedAccounts } from "./createAztecWalletSession"
-export type { ConnectStatus, GrantedAccount } from "./createAztecWalletSession"
+export type { ConnectStatus, DiscoveredWallet, GrantedAccount } from "./createAztecWalletSession"

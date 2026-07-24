@@ -8,11 +8,14 @@ export {}
 declare global {
   const ACTIVITY_FEED_KINDS: typeof import('../utils/journal-state').ACTIVITY_FEED_KINDS
   const AccessLevel: typeof import('../utils/confirmation-policies').AccessLevel
+  const CHAIN_IDS: typeof import('../utils/chain-ids').CHAIN_IDS
   const EffectScope: typeof import('vue').EffectScope
-  const FEE_JUICE_PRICING: typeof import('../utils/fee-estimation').FEE_JUICE_PRICING
-  const FEE_JUICE_USD_RATE: typeof import('../utils/fee-estimation').FEE_JUICE_USD_RATE
   const FEE_METHODS: typeof import('../utils/tx-enrichment').FEE_METHODS
   const IMPORT_ACTIVATION_TIMEOUT_MS: typeof import('../composables/completeImportWithRecovery').IMPORT_ACTIVATION_TIMEOUT_MS
+  const MAINNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').MAINNET_L1_CHAIN_ID
+  const MAINNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').MAINNET_ROLLUP_VERSION
+  const MAX_CONTACT_IMPORT_BYTES: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_BYTES
+  const MAX_CONTACT_IMPORT_ROWS: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_ROWS
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
@@ -41,7 +44,7 @@ declare global {
   const detectBackupType: typeof import('../utils/full-backup-helpers').detectBackupType
   const downloadFile: typeof import('../utils/files').downloadFile
   const effectScope: typeof import('vue').effectScope
-  const ensurePermissions: typeof import('../utils/general').ensurePermissions
+  const feeJuicePricingFromUsd: typeof import('../utils/fee-estimation').feeJuicePricingFromUsd
   const feeToUsd: typeof import('../utils/fee-estimation').feeToUsd
   const formatBaseUnits: typeof import('../utils/amount').formatBaseUnits
   const formatCallSummary: typeof import('../utils/tx-enrichment').formatCallSummary
@@ -76,6 +79,7 @@ declare global {
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
+  const isReceiptAboveDustThreshold: typeof import('../utils/incoming-dust').isReceiptAboveDustThreshold
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
   const isValidAmount: typeof import('../utils/amount').isValidAmount
@@ -108,12 +112,14 @@ declare global {
   const parseTransferIntent: typeof import('../utils/transfer-intent').parseTransferIntent
   const persistThemeHint: typeof import('../utils/general').persistThemeHint
   const pickFile: typeof import('../utils/files').pickFile
+  const pickPrimaryIndex: typeof import('../utils/primary-method').pickPrimaryIndex
   const pickPrimaryMethod: typeof import('../utils/tx-enrichment').pickPrimaryMethod
   const provide: typeof import('vue').provide
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
   const readonly: typeof import('vue').readonly
+  const receivedLabel: typeof import('../utils/received-display').receivedLabel
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
   const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
@@ -121,6 +127,9 @@ declare global {
   const requireNetwork: typeof import('../utils/core').requireNetwork
   const requireTransaction: typeof import('../utils/core').requireTransaction
   const resolveComponent: typeof import('vue').resolveComponent
+  const resolveFromDisplay: typeof import('../utils/received-display').resolveFromDisplay
+  const resolveReceivedType: typeof import('../utils/received-display').resolveReceivedType
+  const resolveRestoredActiveNetworkId: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkId
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
   const setLastActiveProfileId: typeof import('../utils/lastActiveProfile').setLastActiveProfileId
@@ -141,6 +150,7 @@ declare global {
   const triggerRef: typeof import('vue').triggerRef
   const trimAddress: typeof import('../utils/string').trimAddress
   const unref: typeof import('vue').unref
+  const usdThresholdToMicro: typeof import('../utils/incoming-dust').usdThresholdToMicro
   const useAcceleratorStatus: typeof import('../onboarding/composables/useAcceleratorStatus').useAcceleratorStatus
   const useAppStore: typeof import('../stores/app.store').useAppStore
   const useAttrs: typeof import('vue').useAttrs
@@ -166,6 +176,7 @@ declare global {
   const usePasskeyCeremony: typeof import('../composables/usePasskeyCeremony').usePasskeyCeremony
   const usePopupEntity: typeof import('../composables/usePopupEntity').usePopupEntity
   const usePopupStore: typeof import('../stores/popup.store').usePopupStore
+  const usePrices: typeof import('../composables/usePrices').usePrices
   const useProfileBootstrap: typeof import('../composables/useProfileBootstrap').useProfileBootstrap
   const useProfileCreateFlow: typeof import('../composables/useProfileCreateFlow').useProfileCreateFlow
   const useProfileImportFlow: typeof import('../composables/useProfileImportFlow').useProfileImportFlow
@@ -178,7 +189,9 @@ declare global {
   const useTemplateRef: typeof import('vue').useTemplateRef
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
+  const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
   const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
+  const walletChainId: typeof import('../utils/chain-ids').walletChainId
   const watch: typeof import('vue').watch
   const watchEffect: typeof import('vue').watchEffect
   const watchPostEffect: typeof import('vue').watchPostEffect
@@ -214,7 +227,7 @@ declare global {
   export type { RestoreStatus, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
   // @ts-ignore
-  export type { IncomingTransferServiceLike, ConfigServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
+  export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
   import('../composables/useIncomingTransfers')
   // @ts-ignore
   export type { UsePopupEntityHandlers } from '../composables/usePopupEntity'
@@ -265,6 +278,9 @@ declare global {
   export type { MethodCarrier } from '../utils/primary-method'
   import('../utils/primary-method')
   // @ts-ignore
+  export type { ReceivedType, FromDisplay } from '../utils/received-display'
+  import('../utils/received-display')
+  // @ts-ignore
   export type { TransferIntent } from '../utils/transfer-intent'
   import('../utils/transfer-intent')
   // @ts-ignore
@@ -279,11 +295,14 @@ declare module 'vue' {
   interface ComponentCustomProperties {
     readonly ACTIVITY_FEED_KINDS: UnwrapRef<typeof import('../utils/journal-state')['ACTIVITY_FEED_KINDS']>
     readonly AccessLevel: UnwrapRef<typeof import('../utils/confirmation-policies')['AccessLevel']>
+    readonly CHAIN_IDS: UnwrapRef<typeof import('../utils/chain-ids')['CHAIN_IDS']>
     readonly EffectScope: UnwrapRef<typeof import('vue')['EffectScope']>
-    readonly FEE_JUICE_PRICING: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_PRICING']>
-    readonly FEE_JUICE_USD_RATE: UnwrapRef<typeof import('../utils/fee-estimation')['FEE_JUICE_USD_RATE']>
     readonly FEE_METHODS: UnwrapRef<typeof import('../utils/tx-enrichment')['FEE_METHODS']>
     readonly IMPORT_ACTIVATION_TIMEOUT_MS: UnwrapRef<typeof import('../composables/completeImportWithRecovery')['IMPORT_ACTIVATION_TIMEOUT_MS']>
+    readonly MAINNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_L1_CHAIN_ID']>
+    readonly MAINNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_ROLLUP_VERSION']>
+    readonly MAX_CONTACT_IMPORT_BYTES: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_BYTES']>
+    readonly MAX_CONTACT_IMPORT_ROWS: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_ROWS']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
@@ -312,7 +331,7 @@ declare module 'vue' {
     readonly detectBackupType: UnwrapRef<typeof import('../utils/full-backup-helpers')['detectBackupType']>
     readonly downloadFile: UnwrapRef<typeof import('../utils/files')['downloadFile']>
     readonly effectScope: UnwrapRef<typeof import('vue')['effectScope']>
-    readonly ensurePermissions: UnwrapRef<typeof import('../utils/general')['ensurePermissions']>
+    readonly feeJuicePricingFromUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeJuicePricingFromUsd']>
     readonly feeToUsd: UnwrapRef<typeof import('../utils/fee-estimation')['feeToUsd']>
     readonly formatBaseUnits: UnwrapRef<typeof import('../utils/amount')['formatBaseUnits']>
     readonly formatCallSummary: UnwrapRef<typeof import('../utils/tx-enrichment')['formatCallSummary']>
@@ -347,6 +366,7 @@ declare module 'vue' {
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
     readonly isReadonly: UnwrapRef<typeof import('vue')['isReadonly']>
+    readonly isReceiptAboveDustThreshold: UnwrapRef<typeof import('../utils/incoming-dust')['isReceiptAboveDustThreshold']>
     readonly isRef: UnwrapRef<typeof import('vue')['isRef']>
     readonly isShallow: UnwrapRef<typeof import('vue')['isShallow']>
     readonly isValidAmount: UnwrapRef<typeof import('../utils/amount')['isValidAmount']>
@@ -379,12 +399,14 @@ declare module 'vue' {
     readonly parseTransferIntent: UnwrapRef<typeof import('../utils/transfer-intent')['parseTransferIntent']>
     readonly persistThemeHint: UnwrapRef<typeof import('../utils/general')['persistThemeHint']>
     readonly pickFile: UnwrapRef<typeof import('../utils/files')['pickFile']>
+    readonly pickPrimaryIndex: UnwrapRef<typeof import('../utils/primary-method')['pickPrimaryIndex']>
     readonly pickPrimaryMethod: UnwrapRef<typeof import('../utils/tx-enrichment')['pickPrimaryMethod']>
     readonly provide: UnwrapRef<typeof import('vue')['provide']>
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
+    readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
     readonly remapByMap: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapByMap']>
@@ -392,6 +414,9 @@ declare module 'vue' {
     readonly requireNetwork: UnwrapRef<typeof import('../utils/core')['requireNetwork']>
     readonly requireTransaction: UnwrapRef<typeof import('../utils/core')['requireTransaction']>
     readonly resolveComponent: UnwrapRef<typeof import('vue')['resolveComponent']>
+    readonly resolveFromDisplay: UnwrapRef<typeof import('../utils/received-display')['resolveFromDisplay']>
+    readonly resolveReceivedType: UnwrapRef<typeof import('../utils/received-display')['resolveReceivedType']>
+    readonly resolveRestoredActiveNetworkId: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkId']>
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
     readonly setLastActiveProfileId: UnwrapRef<typeof import('../utils/lastActiveProfile')['setLastActiveProfileId']>
@@ -412,6 +437,7 @@ declare module 'vue' {
     readonly triggerRef: UnwrapRef<typeof import('vue')['triggerRef']>
     readonly trimAddress: UnwrapRef<typeof import('../utils/string')['trimAddress']>
     readonly unref: UnwrapRef<typeof import('vue')['unref']>
+    readonly usdThresholdToMicro: UnwrapRef<typeof import('../utils/incoming-dust')['usdThresholdToMicro']>
     readonly useAcceleratorStatus: UnwrapRef<typeof import('../onboarding/composables/useAcceleratorStatus')['useAcceleratorStatus']>
     readonly useAppStore: UnwrapRef<typeof import('../stores/app.store')['useAppStore']>
     readonly useAttrs: UnwrapRef<typeof import('vue')['useAttrs']>
@@ -437,6 +463,7 @@ declare module 'vue' {
     readonly usePasskeyCeremony: UnwrapRef<typeof import('../composables/usePasskeyCeremony')['usePasskeyCeremony']>
     readonly usePopupEntity: UnwrapRef<typeof import('../composables/usePopupEntity')['usePopupEntity']>
     readonly usePopupStore: UnwrapRef<typeof import('../stores/popup.store')['usePopupStore']>
+    readonly usePrices: UnwrapRef<typeof import('../composables/usePrices')['usePrices']>
     readonly useProfileBootstrap: UnwrapRef<typeof import('../composables/useProfileBootstrap')['useProfileBootstrap']>
     readonly useProfileCreateFlow: UnwrapRef<typeof import('../composables/useProfileCreateFlow')['useProfileCreateFlow']>
     readonly useProfileImportFlow: UnwrapRef<typeof import('../composables/useProfileImportFlow')['useProfileImportFlow']>
@@ -449,7 +476,9 @@ declare module 'vue' {
     readonly useTemplateRef: UnwrapRef<typeof import('vue')['useTemplateRef']>
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
+    readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
     readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
+    readonly walletChainId: UnwrapRef<typeof import('../utils/chain-ids')['walletChainId']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
     readonly watchEffect: UnwrapRef<typeof import('vue')['watchEffect']>
     readonly watchPostEffect: UnwrapRef<typeof import('vue')['watchPostEffect']>

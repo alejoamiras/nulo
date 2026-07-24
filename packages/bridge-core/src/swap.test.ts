@@ -72,7 +72,9 @@ const params = (): SwapBridgeParams => ({
 	bridgeToken: "0x0000000000000000000000000000000000000005",
 	totalAmount: 100n,
 	fuelAmount: 10n,
-	aztecRecipient: `0x${"3".padStart(64, "0")}`,
+	// 0x..0a (value 10) is a valid Grumpkin point; 0x..03 is NOT — runSwapBridge now rejects invalid
+	// recipients before signing (an invalid recipient would strand the deposit in an undecryptable note).
+	aztecRecipient: `0x${"a".padStart(64, "0")}`,
 	fuelRecipient: `0x${"4".padStart(64, "0")}`,
 	minFuelOutput: 900n,
 	path: PATH,

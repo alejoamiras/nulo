@@ -21,7 +21,8 @@ import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import { AccountAddressInconsistencyError, InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import {
 	asBase64CredentialId,
 	asBase64MasterSecret,
@@ -1323,4 +1324,232 @@ describe("ProfileService — deletion coordinator integration (finding D)", () =
 		await boot2.deleteProfile(q.id)
 		expect(await boot2.getProfiles()).toHaveLength(0)
 	})
+})
+
+describe("account-integrity delegate — the session-open chokepoint", () => {
+	const throwingDelegate = () => {
+		const calls: Array<{ profileId: string }> = []
+		return {
+			calls,
+			delegate: {
+				verifyBeforeSessionOpen: async (profileId: string) => {
+					calls.push({ profileId })
+					throw new AccountAddressInconsistencyError()
+				},
+			},
+		}
+	}
+
+	test("unlock with a mismatching profile is WITHHELD: typed error, no session", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+
+		const { calls, delegate } = throwingDelegate()
+		service.setIntegrityDelegate(delegate)
+
+		await expect(service.unlockProfile(profile.id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(calls).toEqual([{ profileId: profile.id }])
+		expect(await service.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("STARTUP-WINDOW FAIL-CLOSED: unlock refuses on a durable block even with NO delegate injected yet", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+
+		// Simulate the coordinator having persisted a block on a prior boot, but not yet having
+		// injected its delegate this boot (the startup window). No `setIntegrityDelegate` call.
+		await new AccountIntegrityBlockedRepository(api.storage.local).set({
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		})
+
+		await expect(service.unlockProfile(profile.id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(await service.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("no delegate + NO block: unlock proceeds (the gate is targeted, not a blanket refusal)", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+		// No delegate, no block record.
+		const info = await service.unlockProfile(profile.id, "pass1234")
+		expect(info.id).toBe(profile.id)
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+	}, 30_000)
+
+	test("backup-import path: finalizeRestore runs the check AFTER restore, BEFORE the session opens", async () => {
+		const { service } = await makeService()
+		const events: unknown[] = []
+		service.onActiveProfileChanged.add((p) => events.push(p))
+
+		const out = await service.restore(
+			{ id: "ignored", name: "P", type: "password" },
+			{ type: "password", masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(32).fill(11)).toString("base64")) },
+			"pass1234",
+		)
+		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+
+		// Accounts are restored by the caller between restore() and finalizeRestore() — the
+		// delegate registered here stands in for the coordinator seeing a mismatched row.
+		const { calls, delegate } = throwingDelegate()
+		service.setIntegrityDelegate(delegate)
+
+		await expect(service.finalizeRestore(out.id, "pass1234")).rejects.toBeInstanceOf(AccountAddressInconsistencyError)
+		expect(calls).toEqual([{ profileId: out.id }])
+		// The mismatched import never activated: no session, no emit.
+		expect(await service.getActiveProfile()).toBeUndefined()
+		expect(events).toEqual([])
+	}, 30_000)
+
+	test("SW-restart persistence: a blocked profile's session is NOT silently rehydrated", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+
+		// The coordinator persisted a blocking record (simulated directly), then the SW died.
+		const repo = new AccountIntegrityBlockedRepository(api.storage.local)
+		await repo.set({
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		})
+
+		// Fresh service over the same persisted state = the SW restart.
+		const { service: rebooted } = await makeServiceFromExistingApi(api)
+		expect(await rebooted.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("SW-restart control: WITHOUT a blocking record the session rehydrates (gate is targeted)", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+
+		const { service: rebooted } = await makeServiceFromExistingApi(api)
+		expect((await rebooted.getActiveProfile())?.id).toBe(profile.id)
+	}, 30_000)
+
+	test("deleting a blocked profile clears its blocking record (no orphaned barrier)", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		const repo = new AccountIntegrityBlockedRepository(api.storage.local)
+		await repo.set({
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		})
+		expect(await repo.isBlocked(profile.id)).toBe(true)
+
+		await service.deleteProfile(profile.id)
+		expect(await repo.isBlocked(profile.id)).toBe(false)
+	}, 30_000)
+
+	test("persistIntegrityBlockIfLive: writes for a live profile, SKIPS a deleted one (no orphan)", async () => {
+		const { api, service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		const repo = new AccountIntegrityBlockedRepository(api.storage.local)
+		const record = {
+			profileId: profile.id,
+			chainId: 0,
+			accountIndex: 0,
+			storedAddress: "0xstored",
+			derivedAddress: "0xderived",
+			regimeId: "nulo-v5",
+			walletVersion: "0.0.0",
+			detectedAt: 1,
+		}
+		// Live profile → persisted.
+		await service.persistIntegrityBlockIfLive(record)
+		expect(await repo.isBlocked(profile.id)).toBe(true)
+		await repo.clear(profile.id)
+
+		// Delete it, then a late off-lock writer tries to persist for the gone profile → SKIPPED.
+		await service.deleteProfile(profile.id)
+		await service.persistIntegrityBlockIfLive(record)
+		expect(await repo.isBlocked(profile.id)).toBe(false)
+	}, 30_000)
+
+	test("EPOCH FENCE: a deletion that completes (reserve→release) DURING verify aborts the open", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "pass1234")
+		await service.lockActiveProfile()
+
+		// The delegate stands in for a slow verify; while it runs, a delete fully completes
+		// (reserve then release) — `isReserved` is false afterward, but the epoch advanced.
+		const state = service.getDeletionState()
+		service.setIntegrityDelegate({
+			verifyBeforeSessionOpen: async () => {
+				state.beginDeletion(profile.id)
+				state.release(profile.id)
+			},
+		})
+
+		await expect(service.unlockProfile(profile.id, "pass1234")).rejects.toThrow(/Invalid profile id/)
+		// A deleted profile must never be resurrected — no active session.
+		expect(await service.getActiveProfile()).toBeUndefined()
+	}, 30_000)
+
+	test("changePassword: a PRE-CHECK integrity block fails honestly — password unchanged + active session closed", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "oldpass12")
+		expect((await service.getActiveProfile())?.id).toBe(profile.id)
+
+		// Drift present BEFORE the change → the pre-persist verify throws.
+		service.setIntegrityDelegate({
+			verifyBeforeSessionOpen: async () => {
+				throw new AccountAddressInconsistencyError()
+			},
+		})
+
+		await expect(service.changeProfilePassword(profile.id, "oldpass12", "newpass12")).rejects.toBeInstanceOf(
+			AccountAddressInconsistencyError,
+		)
+		// The blocked profile's live session was closed (must not keep operating), and nothing was
+		// persisted — the OLD password still unlocks (with the delegate healed).
+		expect(await service.getActiveProfile()).toBeUndefined()
+		await service.setIntegrityDelegate({ verifyBeforeSessionOpen: async () => {} })
+		const reunlocked = await service.unlockProfile(profile.id, "oldpass12")
+		expect(reunlocked.id).toBe(profile.id)
+	}, 30_000)
+
+	test("changePassword: an integrity block on RE-OPEN commits the password but withholds the session", async () => {
+		const { service } = await makeService()
+		const profile = await service.createProfile("P", "oldpass12")
+
+		// Pass the PRE-check (before persist), throw on the RE-open (post-persist) — simulating a
+		// mismatched account restored between the two. The password change must still report success.
+		let call = 0
+		service.setIntegrityDelegate({
+			verifyBeforeSessionOpen: async () => {
+				call++
+				if (call >= 2) throw new AccountAddressInconsistencyError()
+			},
+		})
+
+		const info = await service.changeProfilePassword(profile.id, "oldpass12", "newpass12")
+		expect(info.id).toBe(profile.id)
+		expect(call).toBe(2)
+		// Session withheld (re-open threw + closed), but the NEW password is what's persisted.
+		expect(await service.getActiveProfile()).toBeUndefined()
+		await service.setIntegrityDelegate({ verifyBeforeSessionOpen: async () => {} })
+		const reunlocked = await service.unlockProfile(profile.id, "newpass12")
+		expect(reunlocked.id).toBe(profile.id)
+	}, 30_000)
 })

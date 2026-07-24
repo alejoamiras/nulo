@@ -2,6 +2,12 @@
 /** Vendor */
 import { DateTime } from "luxon"
 
+/** Services */
+import { PriceServiceClient } from "@/wallet/services/price/client"
+
+/** Composables */
+import { usePrices } from "@/composables/usePrices"
+
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
 
@@ -19,6 +25,12 @@ const props = defineProps({
 		type: Object,
 		required: false,
 	},
+	/** §3: this token's incoming public-transfer history is cold-start backfilling — drives the
+	 *  "Catching up…" affordance. Grafted by TokensView from IncomingTransferService's sync state. */
+	backfilling: {
+		type: Boolean,
+		default: false,
+	},
 })
 
 const token = computed(() => props.tokenBalance.token)
@@ -26,6 +38,17 @@ const decimals = computed(() => token.value?.decimals || 0)
 const publicRaw = computed(() => BigInt(props.tokenBalance?.publicBalance || 0))
 const privateRaw = computed(() => BigInt(props.tokenBalance?.privateBalance || 0))
 const totalBalance = computed(() => balanceFormatted(privateRaw.value + publicRaw.value, decimals.value, 10).value)
+
+/** B1: holding fiat value between amount and split — absent when unpriced.
+ *  The client lifecycle lives here (row-level) because TokenCard is mounted
+ *  per-row from the tokens list; the shared cache keeps this cheap. */
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const fiatLabel = computed(() => prices.tokenFiatLabel(token.value, privateRaw.value + publicRaw.value))
+onBeforeUnmount(() => {
+	prices.dispose()
+	priceService.disconnect()
+})
 const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6).value)
 const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6).value)
 const hasPrivate = computed(() => privateRaw.value !== 0n)
@@ -33,8 +56,13 @@ const hasPublic = computed(() => publicRaw.value !== 0n)
 // Treat updatedAt===0 as "balance has never synced" — the projector hasn't run yet
 // so the "0" placeholder in the row would be misleading. Render a spinner instead.
 const isInitialSync = computed(() => !!props.tokenBalance && props.tokenBalance.updatedAt === 0)
+// §3: the balance is known but incoming history is still hydrating → a subtle caption beside the balance.
+const catchingUp = computed(() => props.backfilling && !isInitialSync.value)
+// §3: balance ALSO unknown (fresh add) → escalate the loading block from a plain spinner to a shimmer.
+const catchingUpUnresolved = computed(() => props.backfilling && isInitialSync.value)
 const description = computed(() => {
 	if (props.tokenBalance?.isMinting) return "Minting more tokens..."
+	if (catchingUpUnresolved.value) return "Catching up…"
 	if (isInitialSync.value) return "Loading balance…"
 	if (props.tokenBalance?.isUpdating) return "Refreshing balance..."
 	if (props.newToken) return "Minting in progress..."
@@ -64,7 +92,12 @@ const handleRefreshBalance = async () => {
 			<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
 				{{ token.symbol }}
 			</span>
-			<span :class="$style.type_label">PRIVATE / PUBLIC</span>
+			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
+			<span v-else :class="$style.type_label">PRIVATE / PUBLIC</span>
+			<Flex v-if="catchingUp" align="center" gap="4" :class="$style.catching_up" data-testid="token-catching-up">
+				<span :class="$style.pulse_dot" />
+				<span :class="$style.catching_up_text">Catching up…</span>
+			</Flex>
 		</Flex>
 
 		<Flex
@@ -74,12 +107,16 @@ const handleRefreshBalance = async () => {
 			data-testid="token-balance-loading"
 			:class="$style.loading_block"
 		>
-			<Spinner size="12" color="--txt-tertiary" />
+			<span v-if="catchingUpUnresolved" :class="$style.balance_shimmer" data-testid="token-balance-shimmer" />
+			<Spinner v-else size="12" color="--txt-tertiary" />
 			<span :class="$style.loading_text">{{ description }}</span>
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
 			<span :class="$style.amount">{{ totalBalance || 0 }}</span>
-			<span :class="$style.detail">{{ privateFormatted }} / {{ publicFormatted }}</span>
+			<span :class="$style.detail">
+				<span :class="$style.split_dot" /> {{ privateFormatted }}&ensp;<span :class="[$style.split_dot, $style.split_dot_pub]" />
+				{{ publicFormatted }}
+			</span>
 		</Flex>
 	</RouterLink>
 
@@ -136,10 +173,32 @@ const handleRefreshBalance = async () => {
 	color: var(--txt-primary);
 }
 
+.fiat {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--nulo-secondary);
+}
+
 .detail {
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--nulo-outline);
+
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+}
+
+/* Same private/public dot vocabulary as BalanceView's header breakdown. */
+.split_dot {
+	display: inline-block;
+	width: 5px;
+	height: 5px;
+	background: var(--nulo-accent);
+}
+
+.split_dot_pub {
+	background: var(--nulo-outline);
 }
 
 .loading_block {
@@ -150,5 +209,69 @@ const handleRefreshBalance = async () => {
 	font-family: var(--font-mono);
 	font-size: 11px;
 	color: var(--nulo-outline);
+}
+
+/* §3 "Catching up…" — a status line under the symbol/fiat while incoming history hydrates. */
+.catching_up {
+	margin-top: 2px;
+}
+
+.pulse_dot {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--nulo-accent);
+
+	animation: token_pulse 2s linear infinite;
+}
+
+@keyframes token_pulse {
+	0% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.25;
+	}
+	100% {
+		opacity: 1;
+	}
+}
+
+.catching_up_text {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--nulo-secondary);
+}
+
+/* Escalated loading affordance (balance ALSO unresolved): a shimmer where the amount would be. */
+.balance_shimmer {
+	width: 72px;
+	height: 12px;
+
+	background: linear-gradient(
+		90deg,
+		var(--nulo-surface-low) 25%,
+		var(--nulo-surface-high) 50%,
+		var(--nulo-surface-low) 75%
+	);
+	background-size: 200% 100%;
+
+	animation: token_balance_shimmer 1.4s var(--bezier) infinite;
+}
+
+@keyframes token_balance_shimmer {
+	0% {
+		background-position: 200% 0;
+	}
+	100% {
+		background-position: -200% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.pulse_dot,
+	.balance_shimmer {
+		animation: none;
+	}
 }
 </style>

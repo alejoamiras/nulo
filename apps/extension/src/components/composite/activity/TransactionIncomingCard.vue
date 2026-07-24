@@ -29,8 +29,13 @@ const props = defineProps({
 	amountRaw: { type: String, required: true },
 	/** Token decimals — formats the displayed amount. */
 	tokenDecimals: { type: Number, default: 0 },
+	/** `≈ $x.xx` for the received amount — null when unpriced. */
+	amountFiat: { type: String, default: null },
 	/** Transaction hash that delivered the note (for hash-slice rendering). */
 	txHash: { type: String, default: null },
+	/** Receiver-honest kind label ("Received privately" / "Public → Public" /
+	 *  "Private → Public" / "Minted"), derived from the resolved type (D5-D). */
+	receivedLabel: { type: String, default: "Received" },
 })
 
 const formattedAmount = computed(() => {
@@ -51,6 +56,7 @@ const hashSlice = computed(() => {
 		:iconRotate="180"
 		:amount="formattedAmount ? `+${formattedAmount}` : null"
 		:amountSymbol="tokenSymbol"
+		:amountFiat="amountFiat"
 		testId="tx-incoming-card"
 	>
 		<template #badge>
@@ -59,7 +65,7 @@ const hashSlice = computed(() => {
 
 		<template #title-trailing>
 			<span :class="$style.title_sep">·</span>
-			<span :class="$style.chip">Received</span>
+			<span :class="$style.chip" data-testid="tx-incoming-kind-chip">{{ receivedLabel }}</span>
 		</template>
 
 		<template #secondary>

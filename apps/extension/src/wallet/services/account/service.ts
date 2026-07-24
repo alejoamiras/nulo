@@ -1,7 +1,7 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
-import type { ILogger } from "@/wallet/logger"
+import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
@@ -12,7 +12,9 @@ import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { NuloAccount, type IAccountContract } from "@nulo/aztec-runtime/account"
+import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
+import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
+import type { AccountIntegrityBlocked } from "../account-integrity/types"
 import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, AccountSchema, AccountType, type Account, type Events, type Methods } from "./spec"
 
 export * from "./spec"
@@ -70,7 +72,17 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	public async getAccounts(profileId: string, chainId: number, all?: boolean): Promise<Account[]> {
 		await this.ensureInitialized()
-		return (await this.storage.getValues()).filter((x) => x.profileId === profileId && x.chainId === chainId && (all || x.visible))
+		// Index-sorted, not storage order: `getValues()` returns rows in insertion order, which after a
+		// full-backup restore is NOT index order — so the default active account (accounts[0]) and the
+		// account list would otherwise be arbitrary. Every consumer only iterates/filters, so sorting here
+		// is the single source that keeps the first account deterministic across fresh and imported profiles.
+		return (
+			(await this.storage.getValues())
+				.filter((x) => x.profileId === profileId && x.chainId === chainId && (all || x.visible))
+				// Address is the tie-breaker so ordering is TOTAL even if a hostile backup restored duplicate
+				// indices (legitimate per-type indices are unique) — no reliance on insertion order anywhere.
+				.sort((a, b) => a.index - b.index || (a.address < b.address ? -1 : a.address > b.address ? 1 : 0))
+		)
 	}
 
 	public async getAccount(profileId: string, chainId: number, address: string): Promise<Account | undefined> {
@@ -197,9 +209,52 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const secret = await this.deriveAccountSecret(profileId, chainId, account.type, account.index)
 		const accountContract: IAccountContract = await NuloAccount.new(secret, this.logger)
 		if (accountContract.address.toString() !== address) {
-			throw new Error("account address inconsistency")
+			await this.raiseRuntimeMismatch(profileId, chainId, account.index, address, accountContract.address.toString())
 		}
 		return accountContract
+	}
+
+	/**
+	 * Mid-session escape hatch: an extension update can rehydrate a live session under new
+	 * derivation code without passing the pre-open verifier. Everything here is
+	 * DELEGATE-INDEPENDENT and fail-closed so a mismatch during the startup window (before the
+	 * coordinator starts) is still handled: `profileService` is a phase-0 dependency (always
+	 * present) and `integrityBlocked` is our own repo. Both the durable block (drives the barrier +
+	 * the next-boot gate) and the session close are AWAITED before the error propagates, so an MV3
+	 * termination right after the throw cannot lose either; a failure in one is logged but never
+	 * masks the typed error.
+	 */
+	private async raiseRuntimeMismatch(
+		profileId: string,
+		chainId: number,
+		accountIndex: number,
+		storedAddress: string,
+		derivedAddress: string,
+	): Promise<never> {
+		const record: AccountIntegrityBlocked = {
+			profileId,
+			chainId,
+			accountIndex,
+			storedAddress,
+			derivedAddress,
+			regimeId: V5_REGIME.id,
+			walletVersion: typeof __VERSION__ === "undefined" ? "unknown" : __VERSION__,
+			detectedAt: Date.now(),
+		}
+		// Persist through ProfileService's locked, still-exists-guarded writer: this runs OFF the
+		// facade lock (getAccountContract isn't inside a profile op), so a concurrent delete must not
+		// leave an orphan block for a just-deleted profile.
+		try {
+			await this.profileService.persistIntegrityBlockIfLive(record)
+		} catch (writeError) {
+			this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity block persist failed", String(writeError))
+		}
+		try {
+			await this.profileService.lockProfileIfActive(profileId)
+		} catch (closeError) {
+			this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "integrity session close failed", String(closeError))
+		}
+		throw new AccountAddressInconsistencyError(undefined, { profileId, chainId, accountIndex })
 	}
 
 	private async deriveAccountSecret(profileId: string, chainId: number, type: number, index: number): Promise<Fr> {

@@ -159,14 +159,14 @@ Anti-throttle Chrome flags live in `launchExtension` (`extension.ts`):
 
 ## Known failures + triage
 
-The full network suite is currently **46 / 66 passing**. The 18 remaining failures are tracked in `implementations-plan/network-test-triage/plan.md` and bucketed as: importToken cascade (14), contacts-sender (3), data-registerSender (1). None are infrastructure regressions from this work — they predate the parallel-isolation refactor.
+The full network suite is currently **46 / 66 passing**. The 18 remaining failures are tracked in `implementations-plan/network-test-triage/plan.md` and bucketed as: importToken cascade (14), contacts-sender (3 — that file has since been reworked into `senders-advanced.test.ts` by the contacts↔sender decoupling), data-registerSender (1). None are infrastructure regressions from this work — they predate the parallel-isolation refactor.
 
 ## What's owned per worktree (parallel-safety summary)
 
 | Resource | Per-worktree isolated? | How |
 |---|---|---|
 | Anvil PID | Yes | spawned by setup; tracked in lockfile |
-| Aztec sandbox PID | Yes | spawned by setup; tracked in lockfile; data dir `/tmp/nulo-aztec-<pid>-<ts>` |
+| Aztec sandbox PID | Yes | spawned by setup; tracked in lockfile; data dir `~/.cache/nulo-e2e/nulo-aztec-<pid>-<ts>` on real disk (NOT tmpfs — see `lockfile.ts` `E2E_DATA_ROOT`; override `NULO_E2E_DATA_ROOT`). Reap leftovers with `bun run e2e:reap`. |
 | Playground vite PID | Yes | spawned by setup; tracked in lockfile |
 | Ports | Yes | bind-and-release via `resolve-ports.ts`; spawn re-binds |
 | Wallet build artifact | Yes | `dist/chrome/` lives inside the worktree |

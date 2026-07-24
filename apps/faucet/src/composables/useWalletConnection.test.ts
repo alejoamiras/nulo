@@ -92,6 +92,12 @@ vi.mock("@/contracts/sponsored-fpc", () => ({
 		address: { toString: () => "0xfpc" },
 	}),
 }))
+vi.mock("@/contracts/private-fpc", () => ({
+	getPrivateFpc: async () => ({
+		instance: { address: { toString: () => "0xprivatefpc" } },
+		artifact: {},
+	}),
+}))
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
 
@@ -102,6 +108,16 @@ function makeWallet(grantedAccounts: Array<{ alias?: string; item?: string }> = 
 		})),
 		registerContract: vi.fn(async () => {}),
 	}
+}
+
+/** connect() → picker → pick the sole row. The always-show picker means every
+ *  legacy chain now passes through "choosing" + selectWallet. */
+async function connectAndPick(c: ReturnType<typeof useWalletConnection>) {
+	await c.connect()
+	expect(c.status.value).toBe("choosing")
+	c.selectWallet(c.discoveredWallets.value[0].key)
+	// selectWallet transitions synchronously, then establishes async.
+	for (let i = 0; i < 6; i++) await Promise.resolve()
 }
 
 function makePending(opts: { verificationHash?: string; confirmReturns?: unknown; confirmThrows?: Error } = {}) {
@@ -117,6 +133,7 @@ function makePending(opts: { verificationHash?: string; confirmReturns?: unknown
 
 describe("useWalletConnection", () => {
 	beforeEach(() => {
+		localStorage.clear()
 		__resetWalletConnectionForTests()
 		mockEstablishSecureChannel.mockReset()
 		mockDisconnectProvider.mockReset()
@@ -149,12 +166,16 @@ describe("useWalletConnection", () => {
 		expect(c.verificationEmojis.value).toBeNull()
 	})
 
-	it("connect() transitions idle → discovering → verifying with emoji grid populated", async () => {
+	it("connect() lands in 'choosing'; selecting the row reaches 'verifying' with the emoji grid", async () => {
 		const pending = makePending({ verificationHash: "abc123" })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
 		await c.connect()
+		expect(c.status.value).toBe("choosing")
+		expect(c.discoveredWallets.value).toHaveLength(1)
+		c.selectWallet(c.discoveredWallets.value[0].key)
 		expect(c.status.value).toBe("verifying")
+		for (let i = 0; i < 6; i++) await Promise.resolve()
 		expect(c.verificationEmojis.value).toBe("🟢🔵🟡🟣🔴⚪⚫🟠🟤")
 	})
 
@@ -163,13 +184,14 @@ describe("useWalletConnection", () => {
 		const pending = makePending({ confirmReturns: wallet })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
 		await c.confirmVerification()
 		expect(c.status.value).toBe("connected")
 		expect(c.selectedAccount.value).toBe("0xa1b2c3")
 		expect(c.accounts.value).toEqual([{ address: "0xa1b2c3", alias: "Main" }])
-		// 6 = the combined faucet + bridge set: dripper, usdc, eth, proxy, token, bridge.
-		expect(wallet.registerContract).toHaveBeenCalledTimes(6)
+		// 7 = the combined faucet + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
+		// (pre-registered so the no-fuel-claim private Fee-Juice balance read works under 5.0.1).
+		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
 	})
 
 	it("capability rejection lands in 'error' state with the capability-rejected category", async () => {
@@ -182,7 +204,7 @@ describe("useWalletConnection", () => {
 		const pending = makePending({ confirmReturns: wallet })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
 		await c.confirmVerification()
 		expect(c.status.value).toBe("error")
 		expect(c.error.value?.category).toBe("capability-rejected")
@@ -192,7 +214,7 @@ describe("useWalletConnection", () => {
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
 		await c.cancelVerification()
 		expect(pending.cancel).toHaveBeenCalled()
 		expect(c.status.value).toBe("idle")
@@ -229,7 +251,7 @@ describe("useWalletConnection", () => {
 		const pending = makePending({ confirmReturns: wallet })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
 		await c.confirmVerification()
 		expect(c.status.value).toBe("error")
 		await c.retryCapabilities()
@@ -241,7 +263,7 @@ describe("useWalletConnection", () => {
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
 		await c.confirmVerification()
 		await c.disconnect()
 		expect(mockDisconnectProvider).toHaveBeenCalled()
@@ -250,14 +272,14 @@ describe("useWalletConnection", () => {
 		expect(c.accounts.value).toEqual([])
 	})
 
-	it("multiple connect() calls in a row are no-ops while a flow is in progress", async () => {
-		mockEstablishSecureChannel.mockImplementation(
-			() => new Promise(() => {}), // never resolves
-		)
+	it("multiple connect() calls are no-ops while a flow is live (including while choosing)", async () => {
 		const c = useWalletConnection()
 		const a = c.connect()
-		const b = c.connect()
-		await Promise.race([Promise.all([a, b]), new Promise((r) => setTimeout(r, 50))])
+		const b = c.connect() // concurrent: second must not start a discovery
+		await Promise.all([a, b])
+		expect(mockGetAvailableWallets).toHaveBeenCalledTimes(1)
+		expect(c.status.value).toBe("choosing")
+		await c.connect() // while the picker is open: still a no-op
 		expect(mockGetAvailableWallets).toHaveBeenCalledTimes(1)
 	})
 
@@ -265,7 +287,8 @@ describe("useWalletConnection", () => {
 		const pending = makePending()
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
+		expect(mockOnDisconnect).not.toHaveBeenCalled() // subscribes only after confirm
 		await c.confirmVerification()
 		expect(c.status.value).toBe("connected")
 		expect(mockOnDisconnect).toHaveBeenCalledTimes(1)
@@ -281,7 +304,7 @@ describe("useWalletConnection", () => {
 		const pending = makePending({ confirmReturns: wallet })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
-		await c.connect()
+		await connectAndPick(c)
 		await c.confirmVerification()
 		expect(c.status.value).toBe("error")
 	})

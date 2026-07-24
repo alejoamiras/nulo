@@ -50,9 +50,19 @@ export default defineConfig({
 			// that defers V4/V10 in key-vectors.test.ts). It runs in aztec-runtime's OWN suite
 			// (node environment) via `test:all`.
 			"../../packages/aztec-runtime/src/account/derivation-vectors.test.ts",
+			// Same bb.js WASM limitation (poseidon2 in the class-id hash) plus node-only fs
+			// digest reads. Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/account/artifact-freeze.test.ts",
+			// Same bb.js WASM limitation (address derivation + init-hash poseidon2) + node crypto.
+			// Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/account/instantiation-descriptor.test.ts",
 			// Node-only (fs + import.meta.url file resolution — jsdom's URL isn't file-scheme).
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/pxe/opfs-store.test.ts",
+			// Live bb.js WASM poseidon2 (computeLogTag for the Transfer tag + the class-id hash in the
+			// D2 gate), which crashes under jsdom (`BBApiException: std::bad_cast` — same limitation as
+			// the account vectors above). Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/pxe/public-events.test.ts",
 		],
 		// Inline workspace @nulo/* packages so vite processes their TS
 		// source entry points instead of externalizing them (default

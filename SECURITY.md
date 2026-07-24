@@ -276,6 +276,30 @@ Expanding the encrypted boundary to cover profile-scoped metadata (contacts,
 dApp sessions, tx history) is tracked as M4.11 — large refactor, not a
 near-term patch.
 
+### External price feed (CoinGecko)
+
+While a profile session is unlocked (and `showFiatValues` is on — the default,
+toggleable in Settings → Appearance), the wallet fetches USD quotes from
+CoinGecko's keyless public API every ~3 minutes. Privacy posture:
+
+- The request is ONE batched query for a FIXED id set compiled into the build
+  (`price-map.ts`) — it never varies with the user's holdings, accounts, or
+  activity, so nothing user-specific is inferable from the query string.
+- No fetch is ever triggered by transaction activity (fee-USD reads are
+  cache-or-nothing), so request timing does not correlate with transactions.
+- What CoinGecko (and any on-path observer) does learn: an IP address running
+  Nulo is active while the wallet is unlocked. Turning `showFiatValues` off
+  stops all fetching and clears the cache.
+- Terms: keyless access is used under CoinGecko's public-API tier with in-app
+  attribution ("Token prices by CoinGecko", Settings → About). Revisit the
+  plan tier before a public marketplace release (release-checklist item; an
+  optional `VITE_COINGECKO_API_KEY` exists for CI/local rate-limit relief and
+  MUST NOT be set in release builds — enforced fail-fast in
+  `_build-extension.yml`).
+- Quotes are display-only except the send screen's fiat-input mode, which is
+  bounded by a frozen session quote, round-down bigint conversion, a >1%%
+  drift re-confirmation, and the always-visible derived token amount.
+
 ## Dependency policy
 
 **Supply-chain age gate.** `bunfig.toml` sets `minimumReleaseAge = 604800`
@@ -406,7 +430,7 @@ for them — see `renovate.json` `packageRules`.
 - `prConcurrentLimit: 3`, `prHourlyLimit: 2`, weekly Monday schedule
   (Buenos Aires TZ), no auto-merge anywhere.
 - `@aztec/*`, `@alejoamiras/aztec-accelerator`,
-  `@alejoamiras/aztec-standards`, `@alejoamiras/aztec-fee-payment` —
+  `@alejoamiras/aztec-standards`, `@alejoamiras/private-fee-juice` —
   all disabled (rule at the bottom of `packageRules`; later rules win
   per Renovate semantics).
 - `@types/node` capped via `allowedVersions: "<25"` — patch/minor on

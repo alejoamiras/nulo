@@ -11,6 +11,9 @@ import type { PartialGasSettingsRPC } from "./fee-options"
 
 export * from "./nulo-account"
 export * from "./fee-options"
+export * from "./address-freeze"
+export * from "./frozen-artifact"
+export * from "./instantiation-descriptor"
 
 export interface IAccountContract {
 	readonly address: AztecAddress

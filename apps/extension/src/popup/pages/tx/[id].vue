@@ -32,11 +32,13 @@ import {
 	humanizeMethodName,
 	FEE_METHODS,
 } from "@/utils/tx-enrichment"
-import { formatFeeJuice, feeToUsd } from "@/utils/fee-estimation"
+import { formatFeeJuice, feeToUsd, feeJuicePricingFromUsd } from "@/utils/fee-estimation"
+import { PriceServiceClient } from "@/wallet/services/price/client"
 import { getTransactionExplorerUrl, BLOCK_EXPLORERS } from "@/wallet/constants/explorers"
 import { buildGasBreakdown, computeFeeSavings, describeFeePaymentMethod } from "@/popup/components/modules/tx/tx-detail-helpers"
 
 /** Composables */
+import { usePrices } from "@/composables/usePrices"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
@@ -114,9 +116,23 @@ const handleCopy = (target) => {
 const feePaymentLabel = computed(() => describeFeePaymentMethod(tx.value))
 
 const formattedFee = computed(() => (tx.value?.fee ? formatFeeJuice(BigInt(tx.value.fee)) : null))
-const formattedFeeUsd = computed(() => (tx.value?.fee ? feeToUsd(BigInt(tx.value.fee)) : null))
+// Live pricing at TODAY'S AZTEC rate — historical fees are valued at the
+// current spot, not the price at execution time (TxFeeRow labels this).
+const priceService = new PriceServiceClient()
+const prices = usePrices(priceService)
+const feeJuicePricing = computed(() => feeJuicePricingFromUsd(prices.feeJuiceQuote.value?.usd))
+const formattedFeeUsd = computed(() => (tx.value?.fee ? feeToUsd(BigInt(tx.value.fee), feeJuicePricing.value) : null))
 const formattedEstFee = computed(() => (tx.value?.estimatedFee ? formatFeeJuice(BigInt(tx.value.estimatedFee)) : null))
-const formattedEstFeeUsd = computed(() => (tx.value?.estimatedFee ? feeToUsd(BigInt(tx.value.estimatedFee)) : null))
+const formattedEstFeeUsd = computed(() => (tx.value?.estimatedFee ? feeToUsd(BigInt(tx.value.estimatedFee), feeJuicePricing.value) : null))
+
+/** D2 hero line: fiat value of the transfer at TODAY'S rate, shown for
+ *  EVERY status (owner call: a failed transfer's dollar context is still
+ *  useful). `token` is the wallet's own record (has chainId+contract);
+ *  `transfer.token` doesn't. */
+const transferFiat = computed(() => {
+	if (!transfer.value || !token.value) return null
+	return prices.tokenFiatLabel(token.value, BigInt(transfer.value.amount || 0)) ?? null
+})
 
 const gasBreakdown = computed(() => buildGasBreakdown(tx.value?.gasDetails))
 const feeSavings = computed(() => computeFeeSavings(tx.value?.fee, tx.value?.estimatedFee))
@@ -127,10 +143,13 @@ const explorerUrl = computed(() => {
 })
 const explorerName = computed(() => BLOCK_EXPLORERS.find((e) => e.id === appStore.defaultExplorer)?.name ?? "explorer")
 
-/** User-facing calls list — excludes fee/entrypoint infrastructure. */
+/** User-facing calls list — excludes fee/entrypoint infrastructure. An ALL-infra tx (e.g. a
+ *  sponsored authorization: [sponsor_unconditionally, set_authorized]) falls back to the full list —
+ *  an empty details view would hide what the tx actually did. */
 const userCalls = computed(() => {
 	if (!tx.value?.calls) return []
-	return tx.value.calls.filter((c) => !FEE_METHODS.has(c.method))
+	const filtered = tx.value.calls.filter((c) => !FEE_METHODS.has(c.method))
+	return filtered.length ? filtered : tx.value.calls
 })
 
 onMounted(async () => {
@@ -144,6 +163,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
 	tokenService.disconnect()
 	configService.disconnect()
+	prices.dispose()
+	priceService.disconnect()
 })
 </script>
 
@@ -184,7 +205,9 @@ onBeforeUnmount(() => {
 					{{ transferAmount }}
 					<span :class="$style.amount_symbol">{{ transfer.token.symbol }}</span>
 				</span>
-				<span :class="$style.amount_caption">Transfer amount</span>
+				<span v-if="transferFiat" data-testid="tx-detail-fiat" title="At today's price" :class="$style.amount_fiat">
+					{{ transferFiat }}
+				</span>
 			</Flex>
 
 			<Flex v-else-if="mintAmount" align="center" direction="column" gap="6">
@@ -287,6 +310,7 @@ onBeforeUnmount(() => {
 						:feeUsd="formattedFeeUsd"
 						:gasBreakdown="gasBreakdown"
 						:estimatedFee="formattedEstFee"
+						:estimatedFeeUsd="formattedEstFeeUsd"
 						:feeSavings="feeSavings"
 					/>
 
@@ -358,6 +382,12 @@ onBeforeUnmount(() => {
 
 .content {
 	padding: 4px 20px var(--nav-clearance) 20px;
+}
+
+.amount_fiat {
+	font-family: var(--font-mono);
+	font-size: 11px;
+	color: var(--nulo-secondary);
 }
 
 .hero_meta {

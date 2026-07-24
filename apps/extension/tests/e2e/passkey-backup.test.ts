@@ -116,14 +116,19 @@ async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; c
 	})
 }
 
+/** The REAL account row captured at register time. The synthetic backup must carry it VERBATIM
+ *  (address AND chainId/index/type): the integrity coordinator re-derives every account from the
+ *  credential's master before activating the import, so a row whose chainId doesn't match the one
+ *  its address was derived under is withheld as a foreign backup. */
+type RegisteredAccountRow = { address: string; chainId: number; index: number; type: number }
+
 /** Build a passkey-typed synthetic backup payload that the import flow
  *  will accept. Mirrors `import-paths.test.ts:buildSyntheticBackup` but
  *  sets `profile.type = "passkey"` and uses the credentialId as the
- *  `master-key`. The address must match the active account at register
- *  time so the `Duplicate address` check doesn't fire post-reset (post-
- *  reset there's nothing to collide with anyway, but the imported
- *  account address still has to be a valid Aztec address). */
-function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: string): string {
+ *  `master-key`. The account row mirrors the register-time row exactly
+ *  (see `RegisteredAccountRow`); this also keeps the `Duplicate address`
+ *  check semantics of the pre-integrity version. */
+function buildSyntheticPasskeyBackup(credentialId: string, accountRow: RegisteredAccountRow): string {
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
@@ -138,7 +143,7 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: strin
 					profileId: "syn-profile-id",
 					name: "Local Network",
 					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
-					chainId: 31337,
+					chainId: accountRow.chainId,
 					kind: "local",
 					endpoints: [
 						{
@@ -151,12 +156,12 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountAddress: strin
 			],
 			account: [
 				{
-					address: accountAddress,
+					address: accountRow.address,
 					profileId: "syn-profile-id",
-					chainId: 31337,
+					chainId: accountRow.chainId,
 					name: "Account",
-					index: 0,
-					type: 0,
+					index: accountRow.index,
+					type: accountRow.type,
 					visible: true,
 				},
 			],
@@ -420,8 +425,21 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		const { credentialId } = await readRegisteredPasskeyProfile(page)
 		expect(credentialId.length).toBeGreaterThan(0)
 
+		// Capture the FULL account row (chainId/index/type, not just the address): the imported
+		// row must re-derive under the credential's master or the integrity coordinator
+		// withholds the session.
+		const accountRow = await page.evaluate(async (addr: string) => {
+			const all = await chrome.storage.local.get()
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:accounts@")) continue
+				const row = JSON.parse(v as string) as { address: string; chainId: number; index: number; type: number }
+				if (row.address === addr) return { address: row.address, chainId: row.chainId, index: row.index, type: row.type }
+			}
+			throw new Error(`no account row found for ${addr}`)
+		}, addressBefore)
+
 		// 2. Build the synthetic backup file with that exact credentialId.
-		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, addressBefore))
+		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, accountRow))
 
 		// 3. Reset the wallet via the in-app reset flow — the same pattern
 		//    `passkey-paths.test.ts:140-172` uses.

@@ -236,6 +236,11 @@ async function main() {
 		// so the FPC can reconstruct it inside mint_and_pay_fee. Public fuel lands at the user (random secret).
 		const bridgeSalt = fuelViaPrivateFpc ? Fr.random() : undefined
 		const fuelSecret = bridgeSalt ? deriveBridgeSecret(bridgeSalt, from) : undefined
+		// Recipient-committed private token leg: inject the per-deposit claim_salt. runSwapBridge derives
+		// the L1-committed secret from (salt, recipient) and echoes the SALT back as tokenSecretHex — which
+		// claim_private re-derives from below. Omitting it trips the F2 fail-closed guard (a random token
+		// secret would strand the deposit against the recipient-committed claim_private).
+		const tokenClaimSalt = isPrivate ? Fr.random() : undefined
 
 		const quote = await quoteFuelPath(pub as never, fuel.quoter, route, FUEL_SLICE)
 		const minOut = minOutputForSlippage(quote, fuel.slippageBps)
@@ -259,6 +264,7 @@ async function main() {
 				zeroForOnes: route.zeroForOnes,
 				isPrivate,
 				...(fuelSecret ? { fuelSecret } : {}),
+				...(tokenClaimSalt ? { tokenClaimSalt } : {}),
 				nonce,
 				deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
 				chainId: 11155111,

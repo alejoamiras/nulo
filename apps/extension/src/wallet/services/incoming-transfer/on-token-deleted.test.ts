@@ -22,13 +22,15 @@ describe("IncomingTransferService.onTokenDeleted — scopes to the deleted token
 		const listByContract = vi.fn(async () => [])
 		const getTrust = vi.fn(async () => undefined)
 		const getAccounts = vi.fn(async () => [])
+		const deleteCursor = vi.fn(async () => {})
+		const deleteOutbox = vi.fn(async () => {})
 
 		Object.assign(svc as unknown as Record<string, unknown>, {
 			// Active profile is P1 — the pre-fix code resolved via this and wiped P1.
 			profileService: { getActiveProfile: async () => ({ id: "P1" }) },
 			networkService: { getNetworksRaw },
 			accountService: { getAccounts },
-			repo: { listByContract, getTrust },
+			repo: { listByContract, getTrust, deleteCursor, deleteOutbox },
 		})
 
 		// Delete INACTIVE profile P2's token (P1 is active).

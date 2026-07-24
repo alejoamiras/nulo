@@ -18,6 +18,16 @@ export {
 } from "./artifact-class-id"
 export type { IPXE } from "./ipxe"
 export { PXE_SERVICE_NAME, type Methods, type NotesFilter } from "./spec"
+export {
+	PRIVATE_ADDRESS_MAGIC_VALUE,
+	PublicEventCursorSchema,
+	type PublicEventCursor,
+	type PublicScanTips,
+	type PublicTokenClassStatus,
+	type PublicTransferEvent,
+	type PublicTransferFetchArgs,
+	type PublicTransferPage,
+} from "./public-events"
 export { PxeService, type IProfileReader } from "./service"
 export { PxeServiceClientBase, type StoreKeyProvision } from "./client"
 export { PXEProxy } from "./proxy"
