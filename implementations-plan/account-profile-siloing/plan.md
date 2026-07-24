@@ -469,11 +469,18 @@ scope-changed error, no scope-aware abort warning, no submission bundle. (All of
 machinery is dropped.)
 
 ### 9.6 Residual + honest limits
-- A send in flight when the user hits **lock** is abandoned (reaper-failed at boot) — same as today; acceptable
-  and not a regression.
-- The guard is a **UX constraint** (you can't switch for the seconds a send proves+submits). This is standard
-  wallet behavior and far cheaper than the abort machinery. If a future in-session switcher makes this annoying,
-  revisit — but the guard is correct and leak-free as-is.
+- **The account switch is the guarded intent.** There is no in-session profile switcher today: reaching another
+  profile goes through lock → auth → unlock. Lock is never blocked (§9.3), so the guard attaches to the account
+  switch, which is the one scope change a user can make while a send is running.
+- **Residual: lock, then unlock a DIFFERENT profile, faster than the in-flight send notices.** Locking closes the
+  session, so the send fails at its next active-profile read — in practice well before a password can be typed,
+  since the executor touches the profile repeatedly while building. But it is a race, not an impossibility, and
+  it is the one drift window the guard does not close by construction. Closing it properly means either
+  cancelling in-flight sends AT lock (a behavior change to lock) or re-introducing a captured-scope check — the
+  machinery this arc deliberately dropped. Recorded, not hidden; revisit if an in-session profile switcher lands,
+  which would make it reachable without a lock.
+- The guard is a **UX constraint** (you can't switch accounts for the seconds a send proves+submits). This is
+  standard wallet behavior and far cheaper than the abort machinery. Cancel is always available as the escape.
 
 
 ## 10. Queued-journal + dispatcher consistency

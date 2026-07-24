@@ -25,6 +25,8 @@ import type { OperationJournalService } from "@/wallet/services/operation-journa
 import type { ProfileService } from "@/wallet/services/profile/service"
 import type { DappSessionService } from "@/wallet/services/dapp-session/service"
 import type { NetworkService } from "@/wallet/services/network/service"
+import type { AccountService } from "@/wallet/services/account/service"
+import { resolveAuthorizedSessionAccount } from "@nulo/wallet-bridge"
 import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
 import { pickPrimaryMethod } from "@/utils/primary-method"
@@ -57,7 +59,19 @@ export interface TryCreateQueuedJournalDeps {
 	profile: ProfileService
 	dappSession: DappSessionService
 	networkSvc: NetworkService
+	/** Supplies wallet-ordered accounts, so the record is filed under the same
+	 *  account the dispatcher will send from. */
+	account: AccountService
 	logger: ILogger
+}
+
+/** The sender a sendTx message names, if it names one. `NO_FROM` is the
+ *  sentinel for "let the wallet pick", i.e. the same as omitting it. */
+export function extractSendFrom(message: WalletMessage): string | undefined {
+	const opts = (message as { args?: unknown[] }).args?.[1] as Record<string, unknown> | undefined
+	const from = opts?.from
+	if (typeof from !== "string" || from === "NO_FROM") return undefined
+	return from
 }
 
 /**
@@ -83,7 +97,7 @@ export async function tryCreateQueuedJournal(
 	session: ActiveSession,
 	deps: TryCreateQueuedJournalDeps,
 ): Promise<string | undefined> {
-	const { journal, profile, dappSession, networkSvc, logger } = deps
+	const { journal, profile, dappSession, networkSvc, account: accountSvc, logger } = deps
 	try {
 		const activeProfile = await profile.getActiveProfile()
 		if (!activeProfile) return undefined
@@ -97,9 +111,23 @@ export async function tryCreateQueuedJournal(
 		const hasSendTxGrant = (dapp.capabilityGrants ?? []).some((g) => g.capability.type === "transaction")
 		if (!hasSendTxGrant) return undefined
 
-		// DappSession.accounts is string[] of CAIP. Parse to get the bare address.
-		const firstCaipAccount = dapp.accounts[0] as CaipAccount
-		const { address: accountAddress } = parseCaipAccount(firstCaipAccount)
+		// The record must name the account this send will actually go out as, so it
+		// resolves through the SAME rule the dispatcher uses — session-authorized
+		// explicit sender, else the first wallet-ordered session account. Taking
+		// `accounts[0]` instead would file a multi-account session's operation
+		// under whichever address the session happened to list first.
+		const sessionAddresses = new Set(dapp.accounts.map((caip: string) => parseCaipAccount(caip as CaipAccount).address))
+		const walletAccounts = await accountSvc.getAccounts(activeProfile.id, chainId, true)
+		const resolved = resolveAuthorizedSessionAccount({
+			walletAccounts,
+			sessionAddresses,
+			requestedFrom: extractSendFrom(message),
+		})
+		// An unauthorized or unresolvable sender is left un-journaled: the dispatch
+		// itself will refuse it, and a record naming the wrong account is worse
+		// than no record.
+		if (!resolved.ok) return undefined
+		const accountAddress = resolved.account.address
 
 		// `networkId` for activity-feed scoping must be the INTERNAL network row id
 		// (RecentActivityView.journalRecordInScope filters on `network.id`), NOT

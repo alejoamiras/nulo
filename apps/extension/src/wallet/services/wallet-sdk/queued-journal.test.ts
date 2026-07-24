@@ -63,12 +63,14 @@ function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
 	const profile = makeProfileStub()
 	const dappSession = makeDappSessionStub()
 	const networkSvc = makeNetworkStub()
+	const account = makeAccountStub()
 
 	const deps: TryCreateQueuedJournalDeps = {
 		journal,
 		profile: profile as never,
 		dappSession: dappSession as never,
 		networkSvc: networkSvc as never,
+		account: account as never,
 		logger,
 		...overrides,
 	}
@@ -95,6 +97,14 @@ function makeDappSessionStub(opts: { name?: string | null } = { name: "Example D
 			capabilityGrants: [{ capability: { type: "transaction" } }, { capability: { type: "accounts" } }],
 			dappMetadata: metadata,
 		})),
+	}
+}
+
+/** Wallet order is index-sorted, exactly as `AccountService.getAccounts` returns. */
+function makeAccountStub(addresses: string[] = ["0xabc"]) {
+	return {
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		getAccounts: vi.fn<() => Promise<any[]>>(async () => addresses.map((address, index) => ({ address, index }))),
 	}
 }
 
@@ -286,24 +296,19 @@ describe("tryCreateQueuedJournal", () => {
 })
 
 /**
- * Characterization of the account this record is filed under.
+ * Which account the record is filed under.
  *
- * The record is stamped with `dapp.accounts[0]` — the first address in the
- * SESSION array — while the dispatcher independently resolves the account it
- * will really send from (an explicit `from`, else the first WALLET-ordered
- * session account; pinned in wallet-bridge's `account-order.characterization`).
- * Those two rules are unrelated, so a multi-account session files the operation
- * under an account that is not the sender.
- *
- * Both tests below assert the WRONG account on purpose: they are the "before"
- * half of deriving the record's account from the send itself. Flip them when
- * the shared resolver lands; do not relax them.
+ * The record must name the account the send will actually go out as, so it
+ * resolves through the same rule the dispatcher uses: a session-authorized
+ * explicit sender, else the first WALLET-ordered session account. It used to
+ * take `session.accounts[0]`, which is an unrelated ordering, so a
+ * multi-account session filed the operation under the wrong account.
  */
-describe("tryCreateQueuedJournal — record account characterization", () => {
+describe("tryCreateQueuedJournal — record account", () => {
 	const ADDR_A = "0xaaa"
 	const ADDR_B = "0xbbb"
 
-	/** Session lists B first, so `accounts[0]` and "the sender" can disagree. */
+	/** Session lists B first while wallet order is [A, B], so the two rules disagree. */
 	function depsWithSessionOrder() {
 		return makeDeps({
 			dappSession: {
@@ -313,6 +318,7 @@ describe("tryCreateQueuedJournal — record account characterization", () => {
 					dappMetadata: { name: "Example Dapp" },
 				})),
 			} as never,
+			account: makeAccountStub([ADDR_A, ADDR_B]) as never,
 		})
 	}
 
@@ -324,20 +330,29 @@ describe("tryCreateQueuedJournal — record account characterization", () => {
 		} as unknown as WalletMessage
 	}
 
-	test("(BUG PIN) an explicit `from` is ignored — the record is filed under session accounts[0]", async () => {
+	test("an explicit `from` is honored", async () => {
 		const { deps, journal } = depsWithSessionOrder()
 
 		const id = await tryCreateQueuedJournal(sendTxFrom(ADDR_A), makeSession(), deps)
 
-		// The send names A; the record says B purely because B is listed first.
-		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_B)
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_A)
 	})
 
-	test("(BUG PIN) a NO_FROM send is filed under session accounts[0], not the wallet-ordered default", async () => {
+	test("NO_FROM files under the first WALLET-ordered session account, not the first listed", async () => {
 		const { deps, journal } = depsWithSessionOrder()
 
 		const id = await tryCreateQueuedJournal(sendTxFrom("NO_FROM"), makeSession(), deps)
 
-		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_B)
+		// The session lists B first; wallet order is [A, B], so A wins.
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_A)
+	})
+
+	test("a sender outside the session is left un-journaled rather than filed under someone else", async () => {
+		const { deps, journal } = depsWithSessionOrder()
+
+		const id = await tryCreateQueuedJournal(sendTxFrom("0xstranger"), makeSession(), deps)
+
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
 	})
 })

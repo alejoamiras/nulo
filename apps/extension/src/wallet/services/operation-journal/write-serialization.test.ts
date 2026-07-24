@@ -1,14 +1,15 @@
 /**
- * Characterization pins for the journal's UNLOCKED write paths.
+ * Serialization of the journal's read-then-write paths.
  *
- * `transitionOperation` serializes on `transitionLock`; `deleteOperation` and
- * `setOperationMeta` do not — even though both are load-then-write on the same
- * row, which the `transitionLock` doc explicitly says MUST take the lock.
+ * `transitionOperation`, `setOperationMeta` and `deleteOperation` all load a row
+ * and then write it, so they share one lock. Without it the interleavings below
+ * lose data: a delete landing mid-transition is undone when the transition's
+ * write lands on the deleted row, and a metadata update writes a snapshot that
+ * predates a transition, discarding its stage change.
  *
- * These two tests pin the resulting races as they behave TODAY (both are
- * bugs). They are the "before" half of the fix: when the delete/meta paths are
- * serialized, both expectations below invert, and that inversion is the proof
- * the fix landed. Do not "fix" these tests by loosening them — flip them.
+ * These tests were written against the unserialized behavior and inverted when
+ * the lock was added; each drives a competing write into the other's load→write
+ * gap and asserts the result is now the serialized one.
  */
 
 import type { JobProgress } from "@nulo/wallet-core/jobs"
@@ -22,8 +23,8 @@ import type { NewOperationInput } from "./spec"
 
 /**
  * A dApp-arrival record: `initialStage: "queued"` is reserved for the wallet-sdk
- * surface (`dapp_execute` + `dapp` + sessionId), which is exactly where the
- * unserialized delete/claim races below actually occur.
+ * surface (`dapp_execute` + `dapp` + sessionId), which is exactly where these
+ * races actually occur.
  */
 const INPUT: NewOperationInput = {
 	kind: "dapp_execute",
@@ -46,8 +47,7 @@ async function started(): Promise<{ api: FakeBrowserApi; service: OperationJourn
 
 /**
  * Hold the NEXT `storage.set` until the returned `release` is called, so a
- * competing write can be driven to completion inside the gap between a
- * caller's load and its write.
+ * competing write can be driven at the other's load→write gap.
  */
 function gateNextWrite(api: FakeBrowserApi): { release: () => void; gated: () => boolean } {
 	let release!: () => void
@@ -68,7 +68,7 @@ function gateNextWrite(api: FakeBrowserApi): { release: () => void; gated: () =>
 	return { release, gated: () => reached }
 }
 
-describe("OperationJournal — unlocked-write characterization", () => {
+describe("OperationJournal — read-then-write serialization", () => {
 	let api: FakeBrowserApi
 	let service: OperationJournalService
 
@@ -76,43 +76,42 @@ describe("OperationJournal — unlocked-write characterization", () => {
 		;({ api, service } = await started())
 	})
 
-	test("(BUG PIN) a delete that lands mid-transition is undone — the record is resurrected", async () => {
+	test("a delete issued mid-transition takes effect — the record is not resurrected", async () => {
 		const rec = await service.createOperation(INPUT)
 		const { release, gated } = gateNextWrite(api)
 
-		// Transition loads the row, then blocks on its write.
+		// Transition loads the row and blocks on its write, holding the lock.
 		const transition = service.transitionOperation(rec.id, PENDING)
 		await vi.waitFor(() => expect(gated()).toBe(true))
 
-		// Delete runs to completion in that gap — unserialized, so nothing stops it.
-		await service.deleteOperation(rec.id)
-		expect(await service.getOperation(rec.id)).toBeUndefined()
+		// The delete now queues behind it instead of slipping into the gap.
+		const deletion = service.deleteOperation(rec.id)
 
-		// The transition's write now lands on a deleted row and revives it.
 		release()
 		await transition
+		await deletion
 
-		expect(await service.getOperation(rec.id)).toBeDefined()
+		expect(await service.getOperation(rec.id)).toBeUndefined()
 	})
 
-	test("(BUG PIN) setOperationMeta writes a stale snapshot, discarding a concurrent transition", async () => {
+	test("a metadata update and a transition both survive — neither overwrites the other", async () => {
 		const rec = await service.createOperation(INPUT)
-
-		// Meta loads the row (stage `queued`), then blocks on its write.
 		const { release, gated } = gateNextWrite(api)
+
+		// Meta loads the row (stage `queued`) and blocks on its write.
 		const meta = service.setOperationMeta(rec.id, { title: "renamed" })
 		await vi.waitFor(() => expect(gated()).toBe(true))
 
-		// A full transition completes inside the gap.
-		await service.transitionOperation(rec.id, PENDING)
-		expect((await service.getOperation(rec.id))?.progress.stage).toBe("pending")
+		// The transition waits for the lock rather than being clobbered by meta's
+		// now-stale snapshot.
+		const transition = service.transitionOperation(rec.id, PENDING)
 
-		// Meta's stale snapshot overwrites it — the stage change is lost.
 		release()
 		await meta
+		await transition
 
 		const after = await service.getOperation(rec.id)
 		expect(after?.title).toBe("renamed")
-		expect(after?.progress.stage).toBe("queued")
+		expect(after?.progress.stage).toBe("pending")
 	})
 })
