@@ -1,15 +1,15 @@
 {
-	"promotedAt": "2026-07-27T14:58:19.213Z",
+	"promotedAt": "2026-07-27T16:01:43.259Z",
 	"intent": "implementations-plan/tools-two-network/lessons/intent.json",
-	"commitAtPromotion": "e8cd4ecaa8929ee06014f1c19b4eb3ebf04d7fb6",
+	"commitAtPromotion": "39f4c86324175ab2ffb004648522a8da238ff558",
 	"mode": "bridge-only",
 	"bridge": {
-		"candidateSha256": "d0cc10000fe3c9aba2828c765da0de249f7141368eefcda45c0e6b7a151907ae",
+		"candidateSha256": "7c530636845b2d26e30325ca3b08658c45a2257c7d4145b365384d11e98ecee4",
 		"live": "apps/faucet/public/testnet-bridge.json"
 	},
 	"faucet": {
 		"unchangedSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
 		"live": "apps/faucet/src/contracts/deployments.json"
 	},
-	"zeroSeed": "l1.fuel.core byte-carried; swap RETIRED (--drop-swap, token cutover); no fuel/router deploys this arc"
+	"zeroSeed": "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
 }
