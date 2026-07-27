@@ -112,11 +112,19 @@ async function main() {
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
 	const from = (await manager.getAccount()).getAddress()
-	for (let i = 0; i < 100 && !(await node.getContract(from)); i++) {
-		if (i === 0) console.log("waiting out the deployer instance proving lag…")
-		await new Promise((r) => setTimeout(r, 12_000))
+	// Account instances are NOT served by node.getContract (observed live: the FPC deployed AFTER
+	// the account became visible while the account never did) — the serveable existence proof is the
+	// PUBLIC fee-juice balance (public state reads at checkpoint level; a positive balance proves the
+	// account-deploy tx landed, since the claim and the deploy were one tx).
+	{
+		const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+		const { feeJuiceAddress } = await import("../src/fee-juice")
+		const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact as never, ewallet as never)
+		const r = (await fj.methods.balance_of_public(from).simulate({ from })) as { result?: bigint } | bigint
+		const bal = typeof r === "bigint" ? r : (r.result ?? 0n)
+		if (bal <= 0n) throw new Error(`L2 deployer ${from} has no public FJ — run the conductor's L2 group first; STOP`)
+		console.log(`L2 deployer landed (public FJ ${bal})`)
 	}
-	if (!(await node.getContract(from))) throw new Error(`L2 deployer ${from} never became visible; STOP`)
 	console.log("L2 smoke account (the funded deployer)", from.toString())
 	const fee = { paymentMethod: preexistingFeeJuicePayment(from) }
 	const sendOpts = { from, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
