@@ -1,5 +1,5 @@
 {
-	"builtAt": "2026-07-27T14:58:05.492Z",
+	"builtAt": "2026-07-27T15:53:26.681Z",
 	"primaryRpc": "https://v5.testnet.rpc.aztec-labs.com",
 	"identity": {
 		"nodeVersion": "5.0.0",
@@ -41,7 +41,7 @@
 		}
 	},
 	"source": {
-		"commit": "2826202315010856de715bb65d75c7ecbc8a2a20",
+		"commit": "c1a92f558727a9e815bbf61bf8e5ffa8c955cadc",
 		"treeClean": true,
 		"operationalAllowlist": [
 			"apps/faucet/public/testnet-bridge.candidate.json",
@@ -54,6 +54,5 @@
 			"implementations-plan/tools-two-network/lessons/",
 			"apps/faucet/public/testnet-bridge.journal.jsonl"
 		]
-	},
-	"candidateSha256": "d0cc10000fe3c9aba2828c765da0de249f7141368eefcda45c0e6b7a151907ae"
+	}
 }
