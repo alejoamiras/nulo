@@ -135,6 +135,8 @@ const OPERATIONAL_ALLOWLIST = [
 	"packages/bridge-core/deploy-journal.jsonl",
 	"implementations-plan/aztec-5.0.0-stable/lessons/",
 	"implementations-plan/aztec-5.0.1-line/lessons/",
+	"implementations-plan/tools-two-network/lessons/",
+	"apps/faucet/public/testnet-bridge.journal.jsonl",
 ]
 
 async function build(intentPath: string): Promise<void> {
