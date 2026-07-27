@@ -9,6 +9,7 @@
  * Idempotent — exits early if the pinned instance already exists.
  */
 
+import { Contract } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
@@ -37,19 +38,21 @@ async function main() {
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
 	const from = (await manager.getAccount()).getAddress()
-	// node.getContract serves instances at a LATER finalization stage than the CHECKPOINTED wait the
-	// conductor used — a freshly-deployed account operates (it proved the whole trio) minutes before
-	// it is visible here. Bounded wait for the proving lag; a never-visible account is a real error.
-	let visible = false
-	for (let i = 0; i < 100 && !visible; i++) {
-		visible = (await node.getContract(from)) !== undefined && (await node.getContract(from)) !== null
-		if (!visible) {
-			if (i === 0) console.log(`L2 deployer ${from} not yet visible via getContract — waiting out the proving lag…`)
-			await new Promise((r) => setTimeout(r, 12_000))
-		}
+	// node.getContract serves instances only once their epoch PROVES — a freshly-deployed account
+	// operates (it proved the whole trio) tens of minutes before it is visible there. The serveable
+	// existence proof is the PUBLIC fee-juice balance: public state reads at checkpoint level, and a
+	// positive balance proves the account-deploy tx landed (the claim and the deploy were ONE tx).
+	if (await node.getContract(from)) {
+		console.log(`L2 deployer ${from.toString()} visible (proven) — pays via fee juice`)
+	} else {
+		const { FeeJuiceContractArtifact } = await import("@aztec/noir-contracts.js/FeeJuice")
+		const { feeJuiceAddress } = await import("../src/fee-juice")
+		const fj = await Contract.at(AztecAddress.fromStringUnsafe(feeJuiceAddress), FeeJuiceContractArtifact as never, ewallet as never)
+		const r = (await fj.methods.balance_of_public(from).simulate({ from })) as { result?: bigint } | bigint
+		const bal = typeof r === "bigint" ? r : (r.result ?? 0n)
+		if (bal <= 0n) throw new Error(`L2 deployer ${from} has no public FJ and is not visible — run the conductor's L2 group first; STOP`)
+		console.log(`L2 deployer ${from.toString()} landed (public FJ ${bal}) — instance not yet proven-visible, proceeding`)
 	}
-	if (!visible) throw new Error(`L2 deployer ${from} never became visible — run the conductor's L2 group first; STOP`)
-	console.log(`L2 deployer ${from.toString()} pays via fee juice`)
 
 	console.log(`deploying PrivateFPC (canonical salt, deployer ZERO)… (${mins()})`)
 	const result = await PrivateFPCContract.deploy(ewallet as never, {
