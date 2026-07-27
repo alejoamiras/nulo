@@ -2,9 +2,31 @@ import { z } from "zod"
 
 export const ACCOUNT_SERVICE_NAME = "account"
 
-/** EntityStorage root for account rows (keyed by `account.address`). Frozen:
+/** EntityStorage root for account rows. Frozen:
  *  renaming detaches every existing row; the backup-migration registry pins it. */
 export const ACCOUNT_STORAGE_ROOT = "nulo:core:accounts"
+
+/**
+ * Storage id for an account row: `(profileId, chainId, address)`, not the bare
+ * address.
+ *
+ * The address derives from `poseidon2Hash([profileSecret, chainId, type, index])`,
+ * so two profiles restored from the same mnemonic derive the SAME address — under
+ * an address-only key they collide on one row and the later write takes ownership
+ * of the earlier profile's account. Including the profile in the id lets both
+ * coexist.
+ *
+ * JSON-encoded rather than delimiter-joined: a separator could also occur inside
+ * a profile id, which would make two different tuples encode identically.
+ */
+export function accountRowId(profileId: string, chainId: number, address: string): string {
+	return JSON.stringify(["account", profileId, chainId, address])
+}
+
+/** `accountRowId` for a row that already carries its own scope fields. */
+export function accountRowIdOf(account: Pick<Account, "profileId" | "chainId" | "address">): string {
+	return accountRowId(account.profileId, account.chainId, account.address)
+}
 
 export enum AccountType {
 	// SECURITY: Numeric value is used in poseidon2Hash for key derivation. NEVER change it.

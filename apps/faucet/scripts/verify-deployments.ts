@@ -66,7 +66,7 @@ function findToken(data: DeploymentsJson, symbol: "NULO" | "OLUN"): TokenDeploym
  */
 async function verifyBridgeManifest(path: string): Promise<boolean> {
 	const m = JSON.parse(readFileSync(path, "utf8")) as {
-		l1: { fuel?: { router?: string; permit2?: string; swapTarget?: string }; privateClaimMode?: string; portal: string }
+		l1: { fuel?: { core?: { router?: string; permit2?: string; swapTarget?: string } }; privateClaimMode?: string; portal: string }
 		l2: {
 			proxy: { address: string; salt: string; constructorArtifact: string }
 			token: { address: string; salt: string; constructorArtifact: string; constructorArgs: [string, string, number] }
@@ -105,8 +105,8 @@ async function verifyBridgeManifest(path: string): Promise<boolean> {
 	pin("token", token.address.toString(), m.l2.token.address)
 	pin("bridge", bridge.address.toString(), m.l2.bridge.address)
 
-	if (!m.l1.fuel?.router || !m.l1.fuel?.permit2 || !m.l1.fuel?.swapTarget) {
-		console.error("[FAIL] bridge manifest missing required router/permit2/swapTarget (C7)")
+	if (!m.l1.fuel?.core?.router || !m.l1.fuel?.core?.permit2 || !m.l1.fuel?.core?.swapTarget) {
+		console.error("[FAIL] bridge manifest missing required core router/permit2/swapTarget (C7)")
 		ok = false
 	}
 	if (m.l1.privateClaimMode !== "salt-v2") {

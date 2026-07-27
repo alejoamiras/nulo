@@ -1,5 +1,5 @@
 import { type Address, createPublicClient, createWalletClient, custom, type EIP1193Provider, type WalletClient } from "viem"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { computed, ref, shallowRef } from "vue"
 
 /**
@@ -27,7 +27,7 @@ function getProvider(): EIP1193Provider | undefined {
  * is present whenever a read actually runs.
  */
 const publicClient = createPublicClient({
-	chain: sepolia,
+	chain: NETWORK.viemChain,
 	transport: custom({
 		async request(args: { method: string; params?: unknown }) {
 			const provider = getProvider()
@@ -44,14 +44,16 @@ const error = ref<string | null>(null)
 const walletClient = shallowRef<WalletClient | null>(null)
 
 const isConnected = computed(() => address.value !== null)
-const wrongChain = computed(() => isConnected.value && chainId.value !== sepolia.id)
+const wrongChain = computed(() => isConnected.value && chainId.value !== NETWORK.l1ChainId)
 
 function onAccountsChanged(accounts: readonly string[]) {
 	address.value = (accounts[0] as Address | undefined) ?? null
 	const provider = getProvider()
 	// Rebuild the walletClient on account change - otherwise it keeps signing as the old account.
 	walletClient.value =
-		address.value && provider ? createWalletClient({ account: address.value, chain: sepolia, transport: custom(provider) }) : null
+		address.value && provider
+			? createWalletClient({ account: address.value, chain: NETWORK.viemChain, transport: custom(provider) })
+			: null
 }
 function onChainChanged(hexChainId: string) {
 	chainId.value = Number.parseInt(hexChainId, 16)
@@ -70,7 +72,7 @@ async function connect() {
 		address.value = (accounts[0] as Address | undefined) ?? null
 		chainId.value = Number.parseInt((await provider.request({ method: "eth_chainId" })) as string, 16)
 		if (address.value) {
-			walletClient.value = createWalletClient({ account: address.value, chain: sepolia, transport: custom(provider) })
+			walletClient.value = createWalletClient({ account: address.value, chain: NETWORK.viemChain, transport: custom(provider) })
 		}
 		provider.on("accountsChanged", onAccountsChanged)
 		provider.on("chainChanged", onChainChanged)
@@ -94,7 +96,7 @@ async function switchToSepolia() {
 	const provider = getProvider()
 	if (!provider) return
 	try {
-		await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: `0x${sepolia.id.toString(16)}` }] })
+		await provider.request({ method: "wallet_switchEthereumChain", params: [{ chainId: `0x${NETWORK.l1ChainId.toString(16)}` }] })
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : "Failed to switch network"
 	}
@@ -107,7 +109,7 @@ function ensureWalletClient(): WalletClient | null {
 	if (walletClient.value) return walletClient.value
 	const provider = getProvider()
 	if (address.value && provider) {
-		walletClient.value = createWalletClient({ account: address.value, chain: sepolia, transport: custom(provider) })
+		walletClient.value = createWalletClient({ account: address.value, chain: NETWORK.viemChain, transport: custom(provider) })
 	}
 	return walletClient.value
 }

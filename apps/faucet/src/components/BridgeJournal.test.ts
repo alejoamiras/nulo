@@ -27,7 +27,7 @@ vi.mock("@/composables/useToast", () => ({
 	useToast: () => ({ push }),
 }))
 
-const restoreFile = vi.fn(async (_raw: string) => ({ id: "0xrestored", direction: "deposit" as const, amount: "5000000000000000000" }))
+const restoreFile = vi.fn(async (_raw: string) => ({ id: "0xrestored", direction: "deposit" as const, amount: (5n * UNIT).toString() }))
 vi.mock("@/composables/useBridgeBackup", () => ({
 	useBridgeBackup: () => ({ restoreFile, exportBridge: vi.fn() }),
 }))
@@ -35,11 +35,15 @@ vi.mock("@/composables/useBridgeBackup", () => ({
 import { TESTIDS } from "@/lib/testids"
 import BridgeJournal from "./BridgeJournal.vue"
 import BridgeJournalCard from "./BridgeJournalCard.vue"
+// Amounts + symbol derive from the LIVE manifest (the token cutover changes both — a hardcoded
+// 18-dec "AZLO" fixture breaks on a 6-dec USDC manifest).
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
 const GOOD_HASH = `0x${"ab".repeat(32)}`
 const recOf = (over: Partial<BridgeJournalRecord>): BridgeJournalRecord =>
-	({ id: "0x", direction: "deposit", isPrivate: false, amount: "1000000000000000000", createdAt: 1, ...over }) as BridgeJournalRecord
+	({ id: "0x", direction: "deposit", isPrivate: false, amount: (1n * UNIT).toString(), createdAt: 1, ...over }) as BridgeJournalRecord
 
 describe("BridgeJournal", () => {
 	beforeEach(() => {
@@ -58,7 +62,9 @@ describe("BridgeJournal", () => {
 		await input.trigger("change")
 		await vi.waitFor(() => expect(restoreFile).toHaveBeenCalled())
 		await nextTick()
-		expect(push).toHaveBeenCalledWith(expect.objectContaining({ kind: "ok", text: expect.stringContaining("Restored: 5.00 AZLO") }))
+		expect(push).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: "ok", text: expect.stringContaining(`Restored: 5.00 ${BRIDGE_TOKEN_SYMBOL}`) }),
+		)
 
 		push.mockClear()
 		restoreFile.mockRejectedValueOnce(new Error("This bridge is already tracked here - nothing to restore."))
@@ -76,7 +82,7 @@ describe("BridgeJournal", () => {
 		lastCompleted.value = {
 			id: "0xfg",
 			direction: "deposit",
-			amount: "100000000000000000000",
+			amount: (100n * UNIT).toString(),
 			isPrivate: false,
 			txHash: GOOD_HASH,
 			foreground: true,
@@ -92,12 +98,12 @@ describe("BridgeJournal", () => {
 
 	it("a completion pushes the toast with the explorer link (pin for the lastCompleted watcher)", async () => {
 		const w = mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = { id: "0xa", direction: "deposit", amount: "100000000000000000000", isPrivate: false, txHash: GOOD_HASH }
+		lastCompleted.value = { id: "0xa", direction: "deposit", amount: (100n * UNIT).toString(), isPrivate: false, txHash: GOOD_HASH }
 		await nextTick()
 		expect(push).toHaveBeenCalledWith(
 			expect.objectContaining({
 				kind: "ok",
-				text: expect.stringContaining("Bridged 100.00 AZLO to Aztec"),
+				text: expect.stringContaining(`Bridged 100.00 ${BRIDGE_TOKEN_SYMBOL} to Aztec`),
 				link: expect.objectContaining({ href: expect.stringContaining(GOOD_HASH) }),
 			}),
 		)
@@ -106,11 +112,11 @@ describe("BridgeJournal", () => {
 
 	it("withdraw completions toast the Ethereum wording with the etherscan link", async () => {
 		mount(BridgeJournal, { global: { stubs: { BridgeJournalCard: true } } })
-		lastCompleted.value = { id: "0xb", direction: "withdraw", amount: "40000000000000000000", isPrivate: true, txHash: GOOD_HASH }
+		lastCompleted.value = { id: "0xb", direction: "withdraw", amount: (40n * UNIT).toString(), isPrivate: true, txHash: GOOD_HASH }
 		await nextTick()
 		expect(push).toHaveBeenCalledWith(
 			expect.objectContaining({
-				text: expect.stringContaining("Released 40.00 AZLO to Ethereum"),
+				text: expect.stringContaining(`Released 40.00 ${BRIDGE_TOKEN_SYMBOL} to Ethereum`),
 				link: expect.objectContaining({ href: `https://sepolia.etherscan.io/tx/${GOOD_HASH}` }),
 			}),
 		)
@@ -129,7 +135,7 @@ describe("BridgeJournal", () => {
 		lastCompleted.value = {
 			id: "0xc",
 			direction: "deposit",
-			amount: "15000000000000000000",
+			amount: (15n * 10n ** 18n).toString(), // Fee Juice — ALWAYS 18-dec, independent of the bridged token
 			isPrivate: false,
 			assetKind: "fee-juice",
 			txHash: GOOD_HASH,
@@ -143,7 +149,7 @@ describe("BridgeJournal", () => {
 		lastCompleted.value = {
 			id: "0xfj",
 			direction: "deposit",
-			amount: "15000000000000000000",
+			amount: (15n * 10n ** 18n).toString(), // Fee Juice — ALWAYS 18-dec, independent of the bridged token
 			isPrivate: true,
 			assetKind: "fee-juice",
 			txHash: GOOD_HASH,

@@ -1,8 +1,10 @@
 /**
  * Fail-closed PrivateFPC gate: reconcile the live network, the installed fee-payment artifact, and
- * the canonical descriptor (`src/private-fpc-canonical.json`) before ANY fund-moving private-fuel
- * step. The FPC address is bytecode + @aztec-version + salt specific — depositing real Fee Juice to
- * an address derived from the wrong artifact is an UNRECOVERABLE loss.
+ * the per-network canonical descriptor (`src/private-fpc-canonical.json` for testnet,
+ * `src/private-fpc-canonical-mainnet.json` for Alpha/mainnet — selected by the LIVE node's identity,
+ * never a flag) before ANY fund-moving private-fuel step. The FPC address is bytecode +
+ * @aztec-version + salt specific — depositing real Fee Juice to an address derived from the wrong
+ * artifact is an UNRECOVERABLE loss.
  *
  *   AZTEC_NODE_URL=https://v5.testnet.rpc.aztec-labs.com \
  *     bun packages/bridge-core/scripts/check-fpc-version.ts --mode predeploy|require-deployed
@@ -114,20 +116,35 @@ const fail = (msg: string): never => {
  * closing the "operator forgot the separate --mode require-deployed command" gap
  * (codex ultra-audit HIGH). The CLI at the bottom wraps it.
  */
+interface FpcDescriptor {
+	aztecVersion: string
+	salt: string
+	expectedAddress: string
+	artifactSha256: string
+	network: { l1ChainId: number; rollupVersion: number }
+	compatibleNodeVersions: Record<string, string[] | string>
+}
+
 export async function runFpcGate(mode: GateMode): Promise<void> {
 	const here = fileURLToPath(new URL(".", import.meta.url))
-	const descriptor = JSON.parse(readFileSync(join(here, "..", "src", "private-fpc-canonical.json"), "utf8")) as {
-		aztecVersion: string
-		salt: string
-		expectedAddress: string
-		artifactSha256: string
-		network: { l1ChainId: number; rollupVersion: number }
-		compatibleNodeVersions: Record<string, string[] | string>
-	}
 	const pkg = JSON.parse(readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "package.json"), "utf8"))
 	const artifactBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))
 
 	const info = await rpc<{ nodeVersion: string; l1ChainId: number; rollupVersion: number }>("node_getNodeInfo", [])
+
+	// Select the descriptor whose network pins match the LIVE node (testnet vs mainnet) — never a
+	// flag, so an operator pointing at the wrong node can't pick the wrong pins. No match = STOP.
+	const descriptors = ["private-fpc-canonical.json", "private-fpc-canonical-mainnet.json"].map(
+		(f) => JSON.parse(readFileSync(join(here, "..", "src", f), "utf8")) as FpcDescriptor,
+	)
+	const descriptor = descriptors.find((d) => d.network.l1ChainId === info.l1ChainId && d.network.rollupVersion === info.rollupVersion)
+	if (!descriptor) {
+		fail(
+			`no FPC descriptor pins the live network (l1ChainId=${info.l1ChainId}, rollupVersion=${info.rollupVersion}) — ` +
+				"wrong node URL, a network reset, or a network this repo has not curated. STOP.",
+		)
+		return
+	}
 
 	console.log("gate mode          :", mode)
 	console.log("node URL           :", NODE_URL)

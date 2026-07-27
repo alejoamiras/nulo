@@ -21,7 +21,7 @@
 import type { StorageRef } from "@nulo/wallet-core/migration"
 import { SCHEMA_RESERVED_PREFIX } from "@nulo/wallet-core/migration"
 import type { Account } from "@/wallet/services/account/spec"
-import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT } from "@/wallet/services/account/spec"
+import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, accountRowId } from "@/wallet/services/account/spec"
 import { ACCOUNT_STATE_SERVICE_NAME } from "@/wallet/services/account-state/spec"
 import type { Authwit } from "@/wallet/services/auth-registry/spec"
 import {
@@ -112,7 +112,7 @@ export type SliceDescriptor =
  *  slice type — renaming the field in a spec fails HERE, not silently at
  *  import time. */
 type AssertAnchor<T, K extends keyof T> = K
-type _AccountAnchor = AssertAnchor<Account, "address">
+type _AccountAnchor = AssertAnchor<Account, "profileId" | "chainId" | "address">
 type _NetworkAnchor = AssertAnchor<Network, "id">
 type _TokenAnchor = AssertAnchor<Token, "id">
 type _TokenBalanceAnchor = AssertAnchor<TokenBalanceRaw, "id">
@@ -127,6 +127,22 @@ const stringAnchor =
 		const v = row[field]
 		return typeof v === "string" && v.length > 0 ? v : undefined
 	}
+
+/**
+ * Account rows are keyed by `(profileId, chainId, address)` — the address alone
+ * is not unique, since two profiles restored from the same mnemonic derive the
+ * same address. All three fields must be present and well-typed, or the row has
+ * no reconstructable identity and is rejected rather than guessed at.
+ */
+const accountAnchor: SliceRowIdOf = (row) => {
+	const profileId = row.profileId
+	const chainId = row.chainId
+	const address = row.address
+	if (typeof profileId !== "string" || profileId.length === 0) return undefined
+	if (typeof chainId !== "number" || !Number.isFinite(chainId)) return undefined
+	if (typeof address !== "string" || address.length === 0) return undefined
+	return accountRowId(profileId, chainId, address)
+}
 
 /** Numeric ids are stored under their decimal string (`storage.set(`${id}`)`). */
 const numberAnchor =
@@ -173,7 +189,7 @@ function configStoredToSlice(stored: unknown): { ok: true; slice: unknown[] } | 
  *  slice — they normalize as an empty root, never a reject. */
 export const BACKUP_SLICE_REGISTRY: Readonly<Record<string, SliceDescriptor>> = {
 	[PROFILE_SERVICE_NAME]: { kind: "block-listed", root: PROFILE_STORAGE_ROOT },
-	[ACCOUNT_SERVICE_NAME]: { kind: "root", root: ACCOUNT_STORAGE_ROOT, idOf: stringAnchor("address") },
+	[ACCOUNT_SERVICE_NAME]: { kind: "root", root: ACCOUNT_STORAGE_ROOT, idOf: accountAnchor },
 	[NETWORK_SERVICE_NAME]: { kind: "root", root: NETWORK_STORAGE_ROOT, idOf: stringAnchor("id") },
 	[TOKEN_SERVICE_NAME]: { kind: "root", root: TOKEN_STORAGE_ROOT, idOf: numberAnchor("id") },
 	[TOKEN_BALANCE_SERVICE_NAME]: { kind: "root", root: TOKEN_BALANCE_STORAGE_ROOT, idOf: numberAnchor("id") },

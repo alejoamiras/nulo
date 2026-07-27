@@ -257,42 +257,19 @@ test("full backup: fresh install → synthetic plain backup → /popup/general",
 	await page.close()
 }, 90_000)
 
-test("full backup: duplicate-address rejection shows the new copy, stays on /popup/import", async ({ registeredExtensionPerTest }) => {
-	const page = await openPopup(registeredExtensionPerTest)
-	await waitForHash(page, "#/popup/general", 15_000)
-	const existingAddress = await readActiveAccount(page)
-	expect(existingAddress.startsWith("0x")).toBe(true)
-
-	// Build a backup colliding on this exact address — accountService.restore
-	// throws "Duplicate address", the catch rolls back via deleteProfile and
-	// surfaces the inline banner.
-	const masterBase64 = await makeRandomMasterBase64()
-	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, profileName: "Conflict", accountAddress: existingAddress }))
-
-	await page.evaluate(() => {
-		window.location.hash = "#/popup/import"
-	})
-	await waitForHash(page, "#/popup/import", 5_000)
-
-	await importFullBackup(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL, { expectError: true })
-
-	const banner = await page.evaluate(() => document.body.textContent ?? "")
-	expect(banner).toContain("Can't import")
-	expect(banner).toContain("An account from this backup is already in your wallet")
-
-	expect(page.url()).toContain("#/popup/import")
-
-	// Rollback ran: only the original registered profile remains.
-	const profileCount = await page.evaluate(
-		() =>
-			new Promise<number>((resolve) => {
-				chrome.storage.local.get(null, (all) => {
-					const keys = Object.keys(all).filter((k) => k.startsWith("nulo:core:profiles@"))
-					resolve(keys.length)
-				})
-			}),
-	)
-	expect(profileCount).toBe(1)
-
-	await page.close()
-}, 90_000)
+/*
+ * REMOVED: "full backup: duplicate-address rejection shows the new copy".
+ *
+ * It asserted that importing a backup whose account address matches an existing
+ * profile's is REFUSED ("An account from this backup is already in your
+ * wallet"). Account rows are now keyed by (profileId, chainId, address), so that
+ * import succeeds — each profile owns its own row — and the behavior the test
+ * described no longer exists.
+ *
+ * The replacement coverage is deterministic and lives at the unit level, where
+ * it does not depend on the import flow's multi-minute recovery envelope:
+ *   - `account/composite-key.test.ts` — two same-mnemonic profiles each keep
+ *     their own row; deleting one profile's leaves the other intact.
+ *   - `account/service.test.ts` — restoring the same address under two profiles
+ *     succeeds for both; the same account twice still conflicts.
+ */

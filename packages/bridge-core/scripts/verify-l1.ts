@@ -1,9 +1,11 @@
 /**
- * Verifies the bridge's L1 sources on Sepolia Etherscan.
+ * Verifies the bridge's L1 sources on Etherscan — the chain comes from the manifest's `l1ChainId`
+ * (Sepolia for testnet, Ethereum for mainnet; legacy manifests fall back to Sepolia).
  *
  * Two contracts, two compile roots:
  * - MintableERC20 - our own foundry project (contracts/bridge/evm); forge reconstructs the
- *   standard-json from the same foundry.toml that produced the deployed bytecode.
+ *   standard-json from the same foundry.toml that produced the deployed bytecode. A `circle-proxy`
+ *   token (reused official USDC) is NOT source-verified here — its identity is pinned at deploy.
  * - the portal - compiled from source in the l1-contracts root (the npm package ships the full
  *   foundry project EXCEPT the target source). A `l1.portalSource: "forked-v1"` config verifies the
  *   F-001 fork NuloTokenPortal, staged + self-pinned by source keccak (see portal-artifact.ts);
@@ -34,7 +36,6 @@ const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
 const L1_ARTIFACTS_ROOT = join(dirname(createRequire(import.meta.url).resolve("@aztec/l1-artifacts/package.json")), "l1-contracts")
 const PORTAL_SOURCE_REL = join("test", "portals", "TokenPortal.sol")
 const VENDORED_PORTAL = join(EVM_ROOT, "upstream", "TokenPortal.sol")
-const CHAIN_ID = "11155111"
 
 const dryRun = process.argv.includes("--dry-run")
 const apiKey = process.env.ETHERSCAN_API_KEY
@@ -98,15 +99,28 @@ function runForge(root: string, label: string, args: string[]): boolean {
 const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
 const token = config.l1.token
 if (!token) {
-	console.error("testnet-bridge.json has no l1.token constructor record - redeploy or backfill it.")
+	console.error("bridge manifest has no l1.token constructor record - redeploy or backfill it.")
 	process.exit(1)
 }
-const tokenArgs = encodeAbiParameters(parseAbiParameters("string, string, uint8, uint256"), [
-	token.name,
-	token.symbol,
-	token.decimals,
-	BigInt(token.maxWholePerTx),
-])
+
+// The chain comes from the manifest (self-declared identity), not a hardcoded Sepolia — a mainnet
+// manifest verifies on Ethereum. Legacy manifests without l1ChainId fall back to Sepolia.
+const CHAIN_ID = String(config.l1ChainId ?? 11155111)
+const EXPLORER_BASE = CHAIN_ID === "1" ? "https://etherscan.io" : "https://sepolia.etherscan.io"
+
+// A `circle-proxy` token is NOT our contract: no maxWholePerTx, no MintableERC20 source to verify
+// (Circle's proxy is already Etherscan-verified). Its IDENTITY (address == the canonical Circle USDC
+// + code readback) is pinned in the deploy/reuse path, not here. Only OUR permissionless-mint token
+// gets source-verified.
+const ownToken = token.source !== "circle-proxy"
+const tokenArgs = ownToken
+	? encodeAbiParameters(parseAbiParameters("string, string, uint8, uint256"), [
+			token.name,
+			token.symbol,
+			token.decimals,
+			BigInt(token.maxWholePerTx),
+		])
+	: null
 
 // `forked-v1` (the F-001 security fork) verifies NuloTokenPortal from the l1-root with a self-pinned
 // source hash; a legacy/absent marker verifies the canonical TokenPortal against the artifact metadata.
@@ -118,14 +132,23 @@ const common = dryRun
 	? ["--chain-id", CHAIN_ID, "--show-standard-json-input"]
 	: ["--chain-id", CHAIN_ID, "--etherscan-api-key", apiKey as string, "--watch"]
 
-const okToken = runForge(EVM_ROOT, `MintableERC20 @ ${config.l1.usdc}`, [
-	"verify-contract",
-	config.l1.usdc,
-	"src/MintableERC20.sol:MintableERC20",
-	"--constructor-args",
-	tokenArgs,
-	...common,
-])
+let okToken = true
+if (ownToken && tokenArgs) {
+	// Which of OUR mintable contracts this deployment used: the legacy auto-Permit2 MintableERC20
+	// (default) or the DP7 TestUsdc (no auto-allowance — the post-cutover testnet token). Both share
+	// the same constructor shape, so tokenArgs applies to either.
+	const tokenContract = (token.sourceContract as string | undefined) ?? "MintableERC20"
+	okToken = runForge(EVM_ROOT, `${tokenContract} @ ${config.l1.usdc}`, [
+		"verify-contract",
+		config.l1.usdc,
+		`src/${tokenContract}.sol:${tokenContract}`,
+		"--constructor-args",
+		tokenArgs,
+		...common,
+	])
+} else {
+	console.log(`— token @ ${config.l1.usdc} is circle-proxy (reused official USDC): source-verify skipped; identity pinned at deploy`)
+}
 const portalTarget = forkedPortal ? "test/portals/NuloTokenPortal.sol:NuloTokenPortal" : "test/portals/TokenPortal.sol:TokenPortal"
 const okPortal = runForge(L1_ARTIFACTS_ROOT, `${forkedPortal ? "NuloTokenPortal" : "TokenPortal"} @ ${config.l1.portal}`, [
 	"verify-contract",
@@ -138,37 +161,59 @@ const okPortal = runForge(L1_ARTIFACTS_ROOT, `${forkedPortal ? "NuloTokenPortal"
 const fuel = config.l1.fuel
 let okFuel = true
 if (fuel) {
-	const swapArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [fuel.poolManager, fuel.feeJuice, fuel.weth])
+	const core = fuel.core
 	const routerArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [
-		fuel.permit2,
-		fuel.feeJuicePortal,
-		fuel.swapTarget,
+		core.permit2,
+		core.feeJuicePortal,
+		core.swapTarget,
 	])
-	const okSwap = runForge(EVM_ROOT, `UniswapFuelSwap @ ${fuel.swapTarget}`, [
+	const okRouter = runForge(EVM_ROOT, `SwapBridgeRouter @ ${core.router}`, [
 		"verify-contract",
-		fuel.swapTarget,
-		"src/UniswapFuelSwap.sol:UniswapFuelSwap",
-		"--constructor-args",
-		swapArgs,
-		...common,
-	])
-	const okRouter = runForge(EVM_ROOT, `SwapBridgeRouter @ ${fuel.router}`, [
-		"verify-contract",
-		fuel.router,
+		core.router,
 		"src/SwapBridgeRouter.sol:SwapBridgeRouter",
 		"--constructor-args",
 		routerArgs,
 		...common,
 	])
-	okFuel = okSwap && okRouter
+	// The swapTarget's SOURCE comes from the RECORDED core.swapTargetContract — swap-absence does NOT
+	// imply the inert stub (a token cutover carries the AZLO-era UniswapFuelSwap, whose constructor
+	// args live in the DROPPED swap block and cannot be reconstructed here). Recorded InertSwapTarget
+	// verifies (no args); a legacy/carried target is an EXPLICIT skip — its source was verified in its
+	// original arc, and live-intent's swapTarget-equality readback still binds the address.
+	let okSwap = true
+	if (fuel.swap) {
+		const swap = fuel.swap
+		const swapArgs = encodeAbiParameters(parseAbiParameters("address, address, address"), [swap.poolManager, swap.feeJuice, swap.weth])
+		okSwap = runForge(EVM_ROOT, `UniswapFuelSwap @ ${core.swapTarget}`, [
+			"verify-contract",
+			core.swapTarget,
+			"src/UniswapFuelSwap.sol:UniswapFuelSwap",
+			"--constructor-args",
+			swapArgs,
+			...common,
+		])
+	} else if (core.swapTargetContract === "InertSwapTarget") {
+		okSwap = runForge(EVM_ROOT, `InertSwapTarget @ ${core.swapTarget}`, [
+			"verify-contract",
+			core.swapTarget,
+			"src/InertSwapTarget.sol:InertSwapTarget",
+			...common,
+		])
+	} else {
+		console.log(
+			`— swapTarget @ ${core.swapTarget} is ${core.swapTargetContract ?? "a legacy carried target"}: source-verify skipped ` +
+				"(constructor args live in the dropped swap block; verified in its original arc; equality readback still binds it)",
+		)
+	}
+	okFuel = okRouter && okSwap
 }
 
 if (!dryRun && okToken && okPortal && okFuel) {
-	console.log(`\nhttps://sepolia.etherscan.io/address/${config.l1.usdc}#code`)
-	console.log(`https://sepolia.etherscan.io/address/${config.l1.portal}#code`)
+	console.log(`\n${EXPLORER_BASE}/address/${config.l1.usdc}#code`)
+	console.log(`${EXPLORER_BASE}/address/${config.l1.portal}#code`)
 	if (fuel) {
-		console.log(`https://sepolia.etherscan.io/address/${fuel.swapTarget}#code`)
-		console.log(`https://sepolia.etherscan.io/address/${fuel.router}#code`)
+		console.log(`${EXPLORER_BASE}/address/${fuel.core.swapTarget}#code`)
+		console.log(`${EXPLORER_BASE}/address/${fuel.core.router}#code`)
 	}
 }
 process.exit(okToken && okPortal && okFuel ? 0 : 1)

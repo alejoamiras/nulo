@@ -19,7 +19,6 @@ import { fileURLToPath } from "node:url"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
@@ -27,14 +26,15 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
-import { TokenPortalAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import { deriveTokenClaimSecret } from "../src/claim-secret"
+import { runRouterDeposit } from "../src/flows"
+import { ensurePermit2Allowance } from "../src/l1"
+import { SWAP_BRIDGE_ROUTER_ABI } from "../src/router-abi"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -82,7 +82,14 @@ async function main() {
 
 	const usdc = CONFIG.l1.usdc as `0x${string}`
 	const portal = CONFIG.l1.portal as `0x${string}`
-	const usdcAbi = evmArtifact("MintableERC20").abi
+	const usdcAbi = evmArtifact((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20").abi
+	// The app's ONLY deposit path is the router's witness-bound Permit2 bridge() — the smoke must
+	// prove THAT path (approve fallback included), not the portal-direct legacy (codex bug-bash r1).
+	const core = CONFIG.l1.fuel?.core as { router?: `0x${string}`; permit2?: `0x${string}`; swapTarget?: `0x${string}` } | undefined
+	if (!core?.router || !core?.permit2 || !core?.swapTarget) {
+		throw new Error("candidate manifest has no l1.fuel.core router/permit2/swapTarget — the app deposit path needs them (C7)")
+	}
+	const routerCore = core as { router: `0x${string}`; permit2: `0x${string}`; swapTarget: `0x${string}` }
 	const decimals = CONFIG.l1.token.decimals as number
 	console.log(`candidate: portal ${portal} (${CONFIG.l1.portalSource ?? "legacy"}), usdc ${usdc}`)
 
@@ -172,13 +179,76 @@ async function main() {
 	const amount = 100n * 10n ** BigInt(decimals)
 	const l2recipient = from
 
+	const retryOnRevert = async <T>(fn: () => Promise<T>, tries = 3): Promise<T> => {
+		for (let i = 1; ; i++) {
+			try {
+				return await fn()
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e)
+				if (i >= tries || !/REVERTED/.test(msg)) throw e
+				console.log(`bridge() reverted (attempt ${i}/${tries}) — waiting one Aztec slot and retrying: ${msg.slice(0, 120)}`)
+				await new Promise((r) => setTimeout(r, 45_000))
+			}
+		}
+	}
+
+	// One deposit path for the whole smoke — the app's exact router flow: one-time Permit2 approve
+	// when the token needs it (TestUsdc/real USDC start at zero; MintableERC20 short-circuits), then
+	// the witness-bound bridge(). Returns the claim value (PRIVATE: the salt in = the value out;
+	// PUBLIC: the flow's own random secret) + leaf index for the L2 claim.
+	const depositViaRouter = async (depAmount: bigint, priv: boolean, claimSalt?: Fr): Promise<{ claimValue: Fr; leafIndex: bigint }> => {
+		await ensurePermit2Allowance({
+			allowance: async () =>
+				(await pub.readContract({
+					address: usdc,
+					abi: usdcAbi as never,
+					functionName: "allowance",
+					args: [account.address, routerCore.permit2],
+				})) as bigint,
+			approveMax: async () =>
+				await wallet.writeContract({
+					address: usdc,
+					abi: usdcAbi as never,
+					functionName: "approve",
+					args: [routerCore.permit2, (1n << 256n) - 1n] as never,
+				}),
+			waitReceipt: async (hash) => await pub.waitForTransactionReceipt({ hash }),
+			needed: depAmount,
+			onStatus: (st, tx) => console.log(`permit2 approval: ${st}${tx ? ` (${tx})` : ""} (${mins()})`),
+		})
+		// A bridge() can transiently REVERT when the Inbox's per-L2-slot message subtree fills (seen
+		// live: back-to-back deposits ~20s apart in one ~36s slot; the identical calldata succeeded on
+		// replay next block). Retry across slots; a persistent revert still fails the smoke.
+		const r = await retryOnRevert(() =>
+			runRouterDeposit(
+				{ pub, wallet, account } as never,
+				{
+					router: routerCore.router,
+					routerAbi: SWAP_BRIDGE_ROUTER_ABI as never,
+					permit2: routerCore.permit2,
+					tokenPortal: portal,
+					bridgeToken: usdc,
+					amount: depAmount,
+					aztecRecipient: l2recipient.toString() as `0x${string}`,
+					isPrivate: priv,
+					swapTarget: routerCore.swapTarget,
+					claimSalt,
+					nonce: BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`),
+					deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
+					chainId: 11155111,
+				},
+				(st) => console.log(`l1: ${st} (${mins()})`),
+			),
+		)
+		return { claimValue: Fr.fromHexString(r.claimValueHex), leafIndex: r.leafIndex }
+	}
+
 	if (redirectProof) {
 		// Prove the CIRCUIT binding LIVE: deposit A + a sync SENTINEL B (both to R). Once B claims, the
 		// network has synced past both, so a wrong-recipient claim on the earlier A reverts for the BINDING
 		// reason, not because A isn't synced yet. The authoritative gate is that the CORRECT claim of A still
 		// succeeds afterwards — if the wrong claim had redirected/consumed A, that correct claim would fail.
 		const depositPrivate = async (salt: Fr): Promise<bigint> => {
-			const sh = await computeSecretHash(deriveTokenClaimSecret(salt, l2recipient))
 			await pub.waitForTransactionReceipt({
 				hash: await wallet.writeContract({
 					address: usdc,
@@ -187,31 +257,7 @@ async function main() {
 					args: [account.address, amount] as never,
 				}),
 			})
-			await pub.waitForTransactionReceipt({
-				hash: await wallet.writeContract({
-					address: usdc,
-					abi: usdcAbi as never,
-					functionName: "approve",
-					args: [portal, amount] as never,
-				}),
-			})
-			const s = await pub.simulateContract({
-				address: portal,
-				abi: TokenPortalAbi as never,
-				functionName: "depositToAztecPrivate" as never,
-				args: [amount, sh.toString()] as never,
-				account,
-			})
-			const leaf = BigInt((s.result as [string, bigint])[1])
-			await pub.waitForTransactionReceipt({
-				hash: await wallet.writeContract({
-					address: portal,
-					abi: TokenPortalAbi as never,
-					functionName: "depositToAztecPrivate" as never,
-					args: [amount, sh.toString()] as never,
-				}),
-			})
-			return leaf
+			return (await depositViaRouter(amount, true, salt)).leafIndex
 		}
 		const claimPrivate = async (recipient: AztecAddress, salt: Fr, leaf: bigint): Promise<boolean> => {
 			for (let i = 0; i < 300; i++) {
@@ -260,13 +306,9 @@ async function main() {
 		)
 		return
 	}
-	// PRIVATE: the stored/claimed value is the claim_salt; the L1-committed secretHash is over the
-	// DERIVED secret deriveTokenClaimSecret(salt, recipient), so claim_private re-derives it in-circuit.
-	// PUBLIC: claimValue is the raw secret (claim_public binds the recipient in its content hash).
-	const claimValue = Fr.random()
-	const committedSecret = isPrivate ? deriveTokenClaimSecret(claimValue, l2recipient) : claimValue
-	const secretHash = await computeSecretHash(committedSecret)
-
+	// PRIVATE: the claimed value is the claim_salt (claim_private re-derives the secret in-circuit).
+	// PUBLIC: runRouterDeposit generates + returns the raw secret. Both ride the app's router path.
+	const claimSalt = isPrivate ? Fr.random() : undefined
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
 			address: usdc,
@@ -275,35 +317,10 @@ async function main() {
 			args: [account.address, amount] as never,
 		}),
 	})
-	await pub.waitForTransactionReceipt({
-		hash: await wallet.writeContract({
-			address: usdc,
-			abi: usdcAbi as never,
-			functionName: "approve",
-			args: [portal, amount] as never,
-		}),
-	})
-	// PRIVATE deposit omits the recipient (mint_to_private content hash = amount only); the recipient
-	// is bound solely via the secretHash. PUBLIC deposit carries the recipient in its content hash.
-	const depositFn = isPrivate ? "depositToAztecPrivate" : "depositToAztecPublic"
-	const depositArgs = isPrivate ? [amount, secretHash.toString()] : [l2recipient.toString(), amount, secretHash.toString()]
-	const sim = await pub.simulateContract({
-		address: portal,
-		abi: TokenPortalAbi as never,
-		functionName: depositFn as never,
-		args: depositArgs as never,
-		account,
-	})
-	const leafIndex = BigInt((sim.result as [string, bigint])[1])
-	await pub.waitForTransactionReceipt({
-		hash: await wallet.writeContract({
-			address: portal,
-			abi: TokenPortalAbi as never,
-			functionName: depositFn as never,
-			args: depositArgs as never,
-		}),
-	})
-	console.log(`deposited ${amount} → L2 (${isPrivate ? "private" : "public"}), leafIndex ${leafIndex} (${mins()})`)
+	const dep = await depositViaRouter(amount, isPrivate, claimSalt)
+	const claimValue = dep.claimValue
+	const leafIndex = dep.leafIndex
+	console.log(`deposited ${amount} → L2 via router (${isPrivate ? "private" : "public"}), leafIndex ${leafIndex} (${mins()})`)
 
 	let claimed = false
 	for (let i = 0; i < 300 && !claimed; i++) {

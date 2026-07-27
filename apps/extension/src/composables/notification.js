@@ -34,8 +34,7 @@ export const getTemplate = (name, params) => {
 						appStore.network = null
 						appStore.accounts = []
 						appStore.account = null
-						appStore.transactions = []
-						appStore.awaitingTransactions = []
+						appStore.clearActivity()
 						storageLocalRemove("nulo:ui:feePaymentMethods")
 
 						appStore.isLogined = false

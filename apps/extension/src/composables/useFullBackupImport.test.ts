@@ -120,7 +120,11 @@ vi.mock("@/wallet/services/config/client", () => ({
 // Service-name modules pull in side-effecting validators when imported
 // from the real client modules, so re-export the bare name constants (plus
 // the storage-root constants the backup-migration registry imports).
-vi.mock("@/wallet/services/account/spec", () => ({ ACCOUNT_SERVICE_NAME: "account", ACCOUNT_STORAGE_ROOT: "nulo:core:accounts" }))
+vi.mock("@/wallet/services/account/spec", () => ({
+	ACCOUNT_SERVICE_NAME: "account",
+	ACCOUNT_STORAGE_ROOT: "nulo:core:accounts",
+	accountRowId: (profileId: string, chainId: number, address: string) => JSON.stringify(["account", profileId, chainId, address]),
+}))
 vi.mock("@/wallet/services/account-state/spec", () => ({ ACCOUNT_STATE_SERVICE_NAME: "account-state" }))
 vi.mock("@/wallet/services/auth-registry/spec", () => ({
 	AUTH_REGISTRY_SERVICE_NAME: "auth-registry",
@@ -498,7 +502,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				account: [{ address: "0xMINE" }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xMINE" }],
 				transaction: [
 					{ hash: "h1", account: "0xMINE", chainId: 1 },
 					{ hash: "h2", account: "0xFOREIGN", chainId: 1 },
@@ -531,7 +535,10 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				account: [{ address: "0xA" }, { address: "0xB" }],
+				account: [
+					{ profileId: "src-profile-id", chainId: 1, address: "0xA" },
+					{ profileId: "src-profile-id", chainId: 1, address: "0xB" },
+				],
 				transaction: [
 					{ hash: "h1", account: "0xA", chainId: 1 },
 					{ hash: "h2", account: "0xB", chainId: 1 },
@@ -561,7 +568,10 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				account: [{ address: "0xOK" }, { address: "0xBAD" }],
+				account: [
+					{ profileId: "src-profile-id", chainId: 1, address: "0xOK" },
+					{ profileId: "src-profile-id", chainId: 1, address: "0xBAD" },
+				],
 				transaction: [{ hash: "h1", account: "0xBAD", chainId: 1 }],
 			},
 		})
@@ -589,7 +599,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				account: [{ address: "0xMINE", chainId: 1 }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xMINE" }],
 				"auth-registry": [
 					{ id: 1, account: "0xMINE", hash: "0xh1" },
 					{ id: 2, account: "0xVICTIM", hash: "0xh2" },
@@ -615,7 +625,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				account: [{ address: "0xMINE", chainId: 1 }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xMINE" }],
 				token: [{ id: 1, chainId: 1, contract: "0xT" }],
 				"token-balance": [
 					{ id: 10, token: 1, account: "0xMINE" },
@@ -641,7 +651,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup({
 			data: {
-				account: [{ address: "0xMINE", chainId: 1 }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xMINE" }],
 				transaction: [
 					{ hash: "h1", account: "0xMINE", chainId: 1 },
 					{ hash: "h2", account: "0xMINE", chainId: 2 },
@@ -1043,7 +1053,7 @@ describe("useFullBackupImport — failure branches", () => {
 		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 	})
 
-	it("duplicate address: matches on err.message, rolls back, surfaces new copy", async () => {
+	it("duplicate account: matches on err.message, rolls back, surfaces new copy", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
 		const backup = await buildBackup()
@@ -1051,10 +1061,10 @@ describe("useFullBackupImport — failure branches", () => {
 
 		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
 		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
-		// Pre-A11: composable did `if (err === "Duplicate address")`. RPC layer
+		// Pre-A11: composable did `if (err === "Duplicate account")`. RPC layer
 		// reconstructs server throws as Error instances, so that check was DEAD.
 		// Post-fix: composable matches on err.message.
-		accountClient.restore.mockRejectedValue(new Error("Duplicate address"))
+		accountClient.restore.mockRejectedValue(new Error("Duplicate account"))
 
 		await c.restoreBackup()
 
@@ -1142,7 +1152,7 @@ describe("useFullBackupImport — passkey backup", () => {
 			data: {
 				profile: { id: "src-profile-id", name: "PK", type: "passkey" },
 				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
-				account: [{ address: "0xaaaa" }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 				token: [],
 			},
 		})
@@ -1227,7 +1237,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 			data: {
 				profile: { id: "src-profile-id", name: "Vault A", type: "password" },
 				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
-				account: [{ address: "0xaaaa" }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 				token: [],
 			},
 		})
@@ -1250,7 +1260,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 			data: {
 				profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
 				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
-				account: [{ address: "0xaaaa" }],
+				account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 				token: [],
 			},
 		})
@@ -1274,7 +1284,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 				data: {
 					profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
 					network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
-					account: [{ address: "0xaaaa" }],
+					account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 					token: [],
 				},
 			})
@@ -1302,7 +1312,7 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 				data: {
 					profile: { id: "src-profile-id", name: "FromBackup", type: "password" },
 					network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
-					account: [{ address: "0xaaaa" }],
+					account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa" }],
 					token: [],
 				},
 			})

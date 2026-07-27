@@ -30,6 +30,10 @@ export interface L2Record {
 /** Shape consumed by the faucet reader (bridge-deployments.ts) - keep every field it reads. */
 export interface CandidateManifest {
 	network: string
+	/** Chain identity — the startup build-integrity assertion requires these, so a promoted candidate
+	 *  MUST carry them or the deployed app rejects the manifest at boot (codex post-impl HIGH-3). */
+	l1ChainId?: number
+	walletChainId?: number
 	l1: {
 		usdc: string
 		portal: string
@@ -37,11 +41,18 @@ export interface CandidateManifest {
 		/** L9 runtime interlock — "salt-v2" marks a recipient-committed deployment; the deposit code
 		 *  refuses private deposits without it. Written only into candidate/promoted manifests. */
 		privateClaimMode?: "salt-v2"
-		token: { name: string; symbol: string; decimals: number; maxWholePerTx: number }
+		token: {
+			name: string
+			symbol: string
+			decimals: number
+			maxWholePerTx?: number
+			source?: "permissionless-mint" | "circle-proxy"
+			sourceContract?: "MintableERC20" | "TestUsdc"
+		}
 		fuel?: Record<string, unknown>
 		/** Direct Fee-Juice bridge config — the faucet's Fuel tab reads exactly these keys
 		 *  (bridge-deployments.ts). Omitting it from a promotion silently disables direct Fuel. */
-		feeJuice?: { portal: string; asset: string; feeAssetHandler: string; minFj: string }
+		feeJuice?: { portal: string; asset: string; feeAssetHandler?: string; minFj: string }
 	}
 	l2: { proxy: L2Record; token: L2Record; bridge: L2Record }
 }

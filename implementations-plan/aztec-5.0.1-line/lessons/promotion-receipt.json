@@ -1,14 +1,15 @@
 {
-	"promotedAt": "2026-07-18T22:10:13.979Z",
-	"intent": "implementations-plan/aztec-5.0.1-line/lessons/intent.json",
-	"commitAtPromotion": "3783f89c7b9ecdffff144567584dad69f69e3319",
+	"promotedAt": "2026-07-27T16:01:43.259Z",
+	"intent": "implementations-plan/tools-two-network/lessons/intent.json",
+	"commitAtPromotion": "39f4c86324175ab2ffb004648522a8da238ff558",
+	"mode": "bridge-only",
 	"bridge": {
-		"candidateSha256": "910421983e65a316009982b0f9fd9781a1d3ed5ff37a3e7d40ae0c24d67a9649",
+		"candidateSha256": "7c530636845b2d26e30325ca3b08658c45a2257c7d4145b365384d11e98ecee4",
 		"live": "apps/faucet/public/testnet-bridge.json"
 	},
 	"faucet": {
-		"candidateSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
+		"unchangedSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
 		"live": "apps/faucet/src/contracts/deployments.json"
 	},
-	"zeroSeed": "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc"
+	"zeroSeed": "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
 }

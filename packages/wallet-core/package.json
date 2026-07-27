@@ -12,7 +12,8 @@
 		"./migration": "./src/migration/index.ts",
 		"./base": "./src/base/index.ts",
 		"./logger": "./src/logger/interfaces.ts",
-		"./jobs": "./src/jobs/index.ts"
+		"./jobs": "./src/jobs/index.ts",
+		"./activity": "./src/activity/index.ts"
 	},
 	"scripts": {
 		"test": "vitest run",
@@ -21,8 +22,9 @@
 	"devDependencies": {
 		"@types/node": "^24.13.2",
 		"@webext-core/fake-browser": "^1.5.2",
-		"vitest": "^4.1.9",
+		"fast-check": "^4.9.0",
 		"jsdom": "^29.1.1",
-		"typescript": "^6.0.3"
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.9"
 	}
 }

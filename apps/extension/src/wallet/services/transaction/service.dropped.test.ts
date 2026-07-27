@@ -31,6 +31,7 @@ import {
 	TransactionService,
 	TxExecutionResult,
 	TxStatus,
+	isDroppedFinal,
 	type Tx,
 } from "./service"
 
@@ -62,7 +63,18 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		services.add(
 			svc(PROFILE_SERVICE_NAME, { getActiveProfile: async () => ({ id: "p1" }), getDeletionState: () => new ProfileDeletionState() }),
 		)
-		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler(), getAccount: async () => undefined }))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, {
+				onAccountDeleted: new EventHandler(),
+				getAccount: async () => undefined,
+				// Two profiles share ACCOUNT (same-seed derivation) so a scoped purge
+				// takes the not-sole-owner ambiguous-marking path.
+				getAccountsByAddress: async () => [
+					{ profileId: "p1", address: ACCOUNT },
+					{ profileId: "p2", address: ACCOUNT },
+				],
+			}),
+		)
 		services.add(
 			svc(NETWORK_SERVICE_NAME, {
 				getNodeForUrl: async () => ({ getTxReceipt }),
@@ -158,10 +170,61 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		await tick(DROPPED_RESURRECTION_WINDOW_MS + 5_000)
 		const callsAfterExpiry = getTxReceipt.mock.calls.length
 
+		// Expiry re-emits the row unchanged as the "Dropped is now FINAL" signal
+		// destructive consumers (authwit reconcile-removal) gate on.
+		expect(updates).toHaveLength(2)
+		expect(updates[1].status).toBe(TxStatus.Dropped)
+		expect(isDroppedFinal(updates[1])).toBe(true)
+
 		defaultReceipt = mined
 		await tick(60_000)
 		expect(getTxReceipt.mock.calls.length).toBe(callsAfterExpiry)
 		expect((await service.getTransaction(HASH)).status).toBe(TxStatus.Dropped)
+	})
+
+	test("a watched tx whose receipt reads PENDING re-arms into the fast poller", async () => {
+		await add()
+		await tick(DROPPED_GRACE_MS + 2_000)
+		expect((await service.getTransaction(HASH)).status).toBe(TxStatus.Dropped)
+
+		// The pool sees it again: the next recheck flips the row back to Pending
+		// AND resumes every-tick polling — it must not strand in neither map.
+		defaultReceipt = stillPending
+		await tick(DROPPED_RECHECK_INTERVAL_MS + 1_000)
+		expect((await service.getTransaction(HASH)).status).toBe(TxStatus.Pending)
+		expect(service.getPendingForAccount(ACCOUNT)).toHaveLength(1)
+
+		defaultReceipt = mined
+		await tick(2_000)
+		expect((await service.getTransaction(HASH)).status).toBe(TxStatus.Proposed)
+	})
+
+	test("an in-flight receipt resolving after purge cannot resurrect the row", async () => {
+		await add()
+		let release = () => {}
+		const gate = new Promise<void>((r) => {
+			release = r
+		})
+		getTxReceipt.mockImplementationOnce(async () => {
+			await gate
+			return mined()
+		})
+		// The poll starts and parks on the gate mid-tick.
+		await tick(1_000)
+		await service.purgeForAccounts([ACCOUNT])
+		expect(await service.getTransactions(ACCOUNT)).toHaveLength(0)
+
+		release()
+		await tick(0)
+		expect(await service.getTransactions(ACCOUNT)).toHaveLength(0)
+		expect(updates).toHaveLength(0)
+	})
+
+	test("isDroppedFinal: only an aged Dropped row is final", () => {
+		const young = { status: TxStatus.Dropped, updatedAt: Date.now() }
+		expect(isDroppedFinal(young)).toBe(false)
+		expect(isDroppedFinal({ ...young, updatedAt: Date.now() - DROPPED_RESURRECTION_WINDOW_MS - 1_000 })).toBe(true)
+		expect(isDroppedFinal({ status: TxStatus.Pending, updatedAt: 0 })).toBe(false)
 	})
 
 	test("non-dropped transitions are untouched by the debounce", async () => {
@@ -188,6 +251,26 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		await tick(DROPPED_RECHECK_INTERVAL_MS * 2)
 		expect(getTxReceipt.mock.calls.length).toBe(callsAfterPurge)
 		expect(await service.getTransactions(ACCOUNT)).toHaveLength(0)
+	})
+
+	test("ambiguous-marking evicts a dropped tx from the watch — no poll, no un-marking", async () => {
+		await add()
+		await tick(DROPPED_GRACE_MS + 2_000)
+		expect((await service.getTransaction(HASH)).status).toBe(TxStatus.Dropped)
+
+		// Deleting profile p1 while p2 shares the address: the unscoped row is
+		// marked ambiguous instead of deleted. It must leave the watch — a late
+		// mine may NOT resurrect it (the write would erase the ambiguous flag).
+		await service.purgeForAccounts([ACCOUNT], "p1")
+		expect((await service.getTransaction(HASH)).ambiguous).toBe(true)
+
+		const callsAfterMark = getTxReceipt.mock.calls.length
+		defaultReceipt = mined
+		await tick(DROPPED_RECHECK_INTERVAL_MS * 2)
+		expect(getTxReceipt.mock.calls.length).toBe(callsAfterMark)
+		const after = await service.getTransaction(HASH)
+		expect(after.status).toBe(TxStatus.Dropped)
+		expect(after.ambiguous).toBe(true)
 	})
 
 	test("Dropped rows are NOT re-armed from storage on restart (D16 parity)", async () => {

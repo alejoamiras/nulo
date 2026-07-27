@@ -194,9 +194,13 @@ export function buildBridgeManifest(input: BridgeManifestInput): AppManifest {
 }
 
 export interface CombinedManifestInput {
-	readonly dripperAddress: AztecAddress
-	readonly usdcAddress: AztecAddress
-	readonly ethAddress: AztecAddress
+	/** The faucet tokens (Dripper/NULO/OLUN) — testnet-only. Omit ALL three on mainnet: the grant then
+	 *  covers the Bridge + fuel (public + private) but NOT the faucet, matching the mainnet UI (no
+	 *  faucet tab). The bridge + PrivateFPC + FEE_JUICE + auth-registry grants are always present, so
+	 *  private-fuel-paid bridge claims work on both networks (DP6). */
+	readonly dripperAddress?: AztecAddress
+	readonly usdcAddress?: AztecAddress
+	readonly ethAddress?: AztecAddress
 	readonly bridgeAddress: AztecAddress
 	readonly tokenAddress: AztecAddress
 	readonly proxyAddress: AztecAddress
@@ -205,28 +209,37 @@ export interface CombinedManifestInput {
 }
 
 /**
- * Build ONE manifest covering both the Faucet and the Bridge. The two tabs are the same origin =
- * the same app to the wallet, which keys the capability grant per-app - so two separate manifests
- * collide (the second connect's grant shadows the first, and registerContract for the missing
- * contracts hits a scope violation). One complete manifest, requested once, fixes that: connect on
- * either tab and both work, with no second wallet prompt. `canCreateAuthWit: true` because the
- * bridge's `exit_to_l1` needs a public burn auth-wit (the faucet simply never creates one).
+ * Build ONE manifest covering the Bridge + fuel, and — when the faucet tokens are supplied (testnet)
+ * — the Faucet too. The tabs are the same origin = the same app to the wallet, which keys the grant
+ * per-app, so two separate manifests collide (the second connect's grant shadows the first, and
+ * registerContract for the missing contracts hits a scope violation). One complete manifest, requested
+ * once, fixes that. On mainnet the faucet tokens are omitted (no faucet), but the PrivateFPC +
+ * FEE_JUICE + auth-registry grants stay so private fuel + private-fuel-paid claims work (DP6).
+ * `canCreateAuthWit: true` because the bridge's `exit_to_l1` needs a public burn auth-wit.
  */
 export function buildCombinedManifest(input: CombinedManifestInput): AppManifest {
 	const { dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, sponsoredFpcAddress } = input
+	// All three faucet tokens present ⇒ include the faucet grants; none ⇒ bridge+fuel only (mainnet).
+	const faucet = dripperAddress && usdcAddress && ethAddress ? { dripper: dripperAddress, usdc: usdcAddress, eth: ethAddress } : null
 	return {
 		version: "1.0",
 		metadata: {
 			name: "nulo-faucet",
 			version: "0.1.0",
-			description: "Faucet + Bridge on Aztec alpha-testnet - Nulo",
+			description: faucet ? "Faucet + Bridge on Aztec - Nulo" : "Bridge on Aztec - Nulo",
 			url: input.appUrl ?? defaultUrl(),
 		},
 		capabilities: [
 			{ type: "accounts", canGet: true, canCreateAuthWit: true },
 			{
 				type: "contracts",
-				contracts: [dripperAddress, usdcAddress, ethAddress, bridgeAddress, tokenAddress, proxyAddress, PRIVATE_FPC_L2],
+				contracts: [
+					bridgeAddress,
+					tokenAddress,
+					proxyAddress,
+					PRIVATE_FPC_L2,
+					...(faucet ? [faucet.dripper, faucet.usdc, faucet.eth] : []),
+				],
 				canRegister: true,
 				canGetMetadata: true,
 			},
@@ -234,8 +247,12 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 				type: "simulation",
 				utilities: {
 					scope: [
-						{ contract: usdcAddress, function: "balance_of_private" },
-						{ contract: ethAddress, function: "balance_of_private" },
+						...(faucet
+							? [
+									{ contract: faucet.usdc, function: "balance_of_private" },
+									{ contract: faucet.eth, function: "balance_of_private" },
+								]
+							: []),
 						{ contract: tokenAddress, function: "balance_of_private" },
 						// No-fuel claim fee source: read the user's PRIVATE Fee Juice held at the PrivateFPC
 						// (abi_utility) to decide whether a no-fuel claim can self-pay from it.
@@ -249,8 +266,12 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 				// the actual send is still gated by the (separate) transaction scope.
 				transactions: {
 					scope: [
-						{ contract: usdcAddress, function: "balance_of_public" },
-						{ contract: ethAddress, function: "balance_of_public" },
+						...(faucet
+							? [
+									{ contract: faucet.usdc, function: "balance_of_public" },
+									{ contract: faucet.eth, function: "balance_of_public" },
+								]
+							: []),
 						{ contract: tokenAddress, function: "balance_of_public" },
 						{ contract: bridgeAddress, function: "claim_public" },
 						{ contract: bridgeAddress, function: "claim_private" },
@@ -278,8 +299,12 @@ export function buildCombinedManifest(input: CombinedManifestInput): AppManifest
 			{
 				type: "transaction",
 				scope: [
-					{ contract: dripperAddress, function: "drip_to_public" },
-					{ contract: dripperAddress, function: "drip_to_private" },
+					...(faucet
+						? [
+								{ contract: faucet.dripper, function: "drip_to_public" },
+								{ contract: faucet.dripper, function: "drip_to_private" },
+							]
+						: []),
 					{ contract: FEE_JUICE_L2, function: "claim_and_end_setup" },
 					// Private fuel: FeeJuice.claim + PrivateFPC.mint_and_pay_fee (the public path uses
 					// claim_and_end_setup above; the private path claims then ends setup via the FPC).

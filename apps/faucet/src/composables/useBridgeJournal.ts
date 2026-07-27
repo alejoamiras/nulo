@@ -19,7 +19,7 @@ import {
 	revokeSealTrust,
 	upsertRecord,
 } from "@nulo/bridge-core"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { computed, ref } from "vue"
 import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
@@ -299,7 +299,7 @@ export const clearDone = discard
 
 /** Deployment binding: a record from another deployment never resumes (stale-deployment). */
 export function deploymentMatches(rec: BridgeJournalRecord): boolean {
-	if (rec.chainId !== sepolia.id) return false
+	if (rec.chainId !== NETWORK.l1ChainId) return false
 	// Fee-juice (Fuel) records bind to the canonical FeeJuicePortal + the L2 Fee Juice address — NOT the
 	// token bridge. Same chain, different deployment edge: without this branch a Fuel record would be
 	// wrongly quarantined as stale-deployment (plan §5 DQ2).

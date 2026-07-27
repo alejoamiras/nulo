@@ -65,14 +65,29 @@ const isAvailableToCreateNetwork = computed(() => {
 const isCreating = ref(false)
 const handleCreateNetwork = async () => {
 	if (!isAvailableToCreateNetwork.value) return
+	// Creating a network ACTIVATES it, so it moves the scope a send is building
+	// against. Checked up front to avoid creating one we then refuse to switch
+	// to, and again at the switch itself — a send can start during the create.
+	if (appStore.hasInFlightSend) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 
 	try {
 		isCreating.value = true
 		const network = await managers.network.addNetwork(nameTerm.value, urlTerm.value)
 		isCreating.value = false
 
-		appStore.network = network
 		await managers.network.setActiveNetwork(network.id)
+		const activated = await appStore.commitScopeChange(() => {
+			appStore.network = network
+		})
+		if (!activated) {
+			openToast({ label: "Network added. Finish or cancel your pending transaction to switch to it", icon: "info" }, 4_000)
+			appStore.networks = await managers.network.getNetworks()
+			emit("onClose")
+			return
+		}
 		appStore.networks = await managers.network.getNetworks()
 
 		emit("onClose")

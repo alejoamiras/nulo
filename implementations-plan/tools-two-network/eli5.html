@@ -1,0 +1,200 @@
+<title>Two-network tools — plan in plain terms</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --surface: #ffffff; --ink: #1a1f2b; --ink-soft: #55607a;
+    --line: #e4e8f0; --accent: #0f766e; --accent-soft: #e6f2f0;
+    --warn: #b45309; --warn-soft: #fef3e2; --danger: #b91c1c; --danger-soft: #fdeaea;
+    --ok: #15803d; --ok-soft: #e7f4ec; --mono: 'SFMono-Regular', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1117; --surface: #161b26; --ink: #e8ecf4; --ink-soft: #9aa6bd;
+      --line: #262d3d; --accent: #2dd4bf; --accent-soft: #10312e;
+      --warn: #f0b866; --warn-soft: #2e2413; --danger: #f18a86; --danger-soft: #2e1616;
+      --ok: #6ee7a0; --ok-soft: #12271a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1117; --surface: #161b26; --ink: #e8ecf4; --ink-soft: #9aa6bd;
+    --line: #262d3d; --accent: #2dd4bf; --accent-soft: #10312e;
+    --warn: #f0b866; --warn-soft: #2e2413; --danger: #f18a86; --danger-soft: #2e1616;
+    --ok: #6ee7a0; --ok-soft: #12271a;
+  }
+  :root[data-theme="light"] {
+    --bg: #f7f8fa; --surface: #ffffff; --ink: #1a1f2b; --ink-soft: #55607a;
+    --line: #e4e8f0; --accent: #0f766e; --accent-soft: #e6f2f0;
+    --warn: #b45309; --warn-soft: #fef3e2; --danger: #b91c1c; --danger-soft: #fdeaea;
+    --ok: #15803d; --ok-soft: #e7f4ec;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6; font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 5rem; }
+  header.hero { border-bottom: 2px solid var(--ink); padding-bottom: 1.5rem; margin-bottom: 2.5rem; }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin: 0 0 .6rem; }
+  h1 { font-size: 2rem; line-height: 1.15; margin: 0 0 .5rem; text-wrap: balance; letter-spacing: -.02em; }
+  .sub { color: var(--ink-soft); font-size: 1.05rem; margin: 0; }
+  h2 { font-size: 1.3rem; margin: 2.75rem 0 .75rem; letter-spacing: -.01em; padding-top: .5rem; }
+  h3 { font-size: 1rem; margin: 1.5rem 0 .4rem; }
+  p { margin: .6rem 0; }
+  strong { color: var(--ink); }
+  code { font-family: var(--mono); font-size: .88em; background: var(--accent-soft); color: var(--accent); padding: .1em .35em; border-radius: 4px; }
+  a { color: var(--accent); }
+  .lede { font-size: 1.1rem; color: var(--ink); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.3rem; margin: 1rem 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 34rem) { .two { grid-template-columns: 1fr; } }
+  .net-head { font-family: var(--mono); font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 .5rem; }
+  .net-host { font-family: var(--mono); font-size: .95rem; color: var(--accent); word-break: break-all; }
+  .net-row { display: flex; justify-content: space-between; gap: .5rem; font-size: .9rem; padding: .3rem 0; border-top: 1px dashed var(--line); }
+  .net-row span:first-child { color: var(--ink-soft); }
+  .callout { border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; padding: .85rem 1.1rem; margin: 1.25rem 0; }
+  .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .callout.danger { border-color: var(--danger); background: var(--danger-soft); }
+  .callout p { margin: .3rem 0; }
+  .callout .tag { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+  .callout.danger .tag { color: var(--danger); }
+  .callout.warn .tag { color: var(--warn); }
+  ol.phases { list-style: none; counter-reset: p; padding: 0; margin: 1rem 0; }
+  ol.phases > li { counter-increment: p; position: relative; padding: .75rem 0 .75rem 3rem; border-top: 1px solid var(--line); }
+  ol.phases > li::before { content: counter(p); position: absolute; left: 0; top: .8rem; width: 1.9rem; height: 1.9rem; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-weight: 700; font-size: .9rem; display: grid; place-items: center; }
+  ol.phases > li.money::before { background: var(--danger-soft); color: var(--danger); }
+  ol.phases .pt { font-weight: 600; }
+  ol.phases .pd { color: var(--ink-soft); font-size: .92rem; }
+  .pill { display: inline-block; font-family: var(--mono); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; padding: .12em .5em; border-radius: 999px; vertical-align: middle; margin-left: .4rem; }
+  .pill.safe { background: var(--ok-soft); color: var(--ok); }
+  .pill.money { background: var(--danger-soft); color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .92rem; }
+  th, td { text-align: left; padding: .55rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .75rem; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-soft); }
+  td.k { font-family: var(--mono); color: var(--accent); white-space: nowrap; }
+  .ask { display: flex; gap: .6rem; padding: .6rem 0; border-bottom: 1px solid var(--line); }
+  .ask .n { font-family: var(--mono); color: var(--warn); font-weight: 700; flex-shrink: 0; }
+  pre { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1rem; overflow-x: auto; font-family: var(--mono); font-size: .82rem; line-height: 1.5; color: var(--ink); }
+  .seed-label { font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); margin: 1.5rem 0 .3rem; }
+  footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: .85rem; }
+  .journey { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+  .journey .step { flex: 1; min-width: 8rem; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .8rem; font-size: .85rem; }
+  .journey .step b { display: block; font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .06em; }
+  .v-rej { color: var(--danger); } .v-cond { color: var(--warn); } .v-ok { color: var(--ok); }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <p class="eyebrow">Blueprint · tier mid · plan v3</p>
+    <h1>Two versions of the tools site — one for real money, one for testnet</h1>
+    <p class="sub">The plain-English companion to <a href="plan.md">plan.md</a>. This is the decision layer — no code jargon. Read it, then approve or push back at the gate.</p>
+  </header>
+
+  <p class="lede">Today <code>tools.nulo.sh</code> is one site pointed at Aztec testnet. We want it to be <strong>two sites built from the same code</strong>: one for the real Alpha/mainnet network (bridging real Ethereum USDC + real fee juice), and one that stays on testnet for safe play. Which one a build becomes is decided by <strong>one committed config file</strong> — not a dashboard toggle that can silently drift.</p>
+
+  <h2>Why now</h2>
+  <p>The extension release just shipped and it defaults Alpha's fees to <strong>Private Fee Juice</strong>. For the team to actually use Alpha, they need a real place to <strong>get fee juice</strong> — that's this tool. So this isn't a nice-to-have; the extension's "Get Fee Juice" nudge points here.</p>
+
+  <div class="two">
+    <div class="card">
+      <p class="net-head">Testnet build</p>
+      <p class="net-host">testnet.tools.nulo.sh</p>
+      <div class="net-row"><span>Network</span><span>Aztec testnet (Sepolia)</span></div>
+      <div class="net-row"><span>Token bridge</span><span>self-deployed 6-dec test USDC</span></div>
+      <div class="net-row"><span>Fee juice</span><span>public + private</span></div>
+      <div class="net-row"><span>Access</span><span>open</span></div>
+    </div>
+    <div class="card">
+      <p class="net-head">Mainnet / Alpha build</p>
+      <p class="net-host">tools.nulo.sh</p>
+      <div class="net-row"><span>Network</span><span>Aztec mainnet (Ethereum)</span></div>
+      <div class="net-row"><span>Token bridge</span><span>official Circle USDC (6-dec)</span></div>
+      <div class="net-row"><span>Fee juice</span><span>public + private</span></div>
+      <div class="net-row"><span>Access</span><span>Cloudflare Access (team)</span></div>
+    </div>
+  </div>
+
+  <h2>The money reality — read this twice</h2>
+  <div class="callout danger">
+    <p class="tag">Real funds</p>
+    <p>The mainnet build moves <strong>real Ethereum USDC</strong> and real fee juice. The <strong>~$5-per-user limit is something we tell people</strong>, not a rule the contract enforces — the guardrails are Cloudflare Access, a trusted team, and keeping wallet balances low.</p>
+    <p><strong>Deploying the contracts will cost more than $5 in gas — that's expected and accepted.</strong> Only the last two phases spend real money, and each on-chain step needs your explicit go every time.</p>
+  </div>
+
+  <h2>How a wrong build is stopped</h2>
+  <p>The nightmare is a build that <em>looks</em> like mainnet but talks to the wrong chain, wrong token, or wrong decimals — that silently burns real money. Five independent checks make that fail loudly instead:</p>
+  <div class="card">
+    <p>① The <strong>config file</strong> that picks the network is committed to git, never a dashboard setting.<br>
+    ② The <strong>manifest states its own chain</strong>, and the app refuses to load unless the build target, the manifest, and the live node <em>all three agree</em>.<br>
+    ③ The old <code>?chainId=</code> URL trick that could repoint the app is <strong>switched off outside tests</strong>.<br>
+    ④ CI checks — offline, no network — that a build <strong>bundles the manifest it claims to</strong> (its addresses match what the build says). The <em>live</em> on-chain checks run at <strong>deploy time</strong> instead, where the real money actually moves.<br>
+    ⑤ Each build knows <strong>which hostname it belongs at</strong> and refuses to run elsewhere — so a testnet build can't quietly sit at the mainnet address (this one was found in the final audit pass).</p>
+  </div>
+
+  <h2>The two decisions you already made</h2>
+  <div class="card">
+    <p><strong>1 · Private fee juice works on mainnet.</strong> Because the extension defaults Alpha to Private Fee Juice, we deploy/pin a real mainnet <em>PrivateFPC</em> so a private deposit can't strand. (An audit caught that leaving this out would trap funds.)</p>
+    <p><strong>2 · Ship both networks now</strong> — token bridge + public &amp; private fee juice on each — at production rigor on the money paths, sized to the <$5 exposure.</p>
+  </div>
+
+  <h2>Nine steps, safest first</h2>
+  <p>Everything real-money is pushed to the very end. Steps 1–7 are refactors and testnet/fake-money work you can drive autonomously.</p>
+  <ol class="phases">
+    <li><span class="pt">Withdrawals stop setting a fee</span> <span class="pill safe">safe</span><div class="pd">The wallet pays its own way on withdraw — never the app. Isolated fix.</div></li>
+    <li><span class="pt">One source of truth for "which network"</span> <span class="pill safe">safe</span><div class="pd">Collapse ~9 scattered hard-coded Sepolia references into one file; ban the footgun import.</div></li>
+    <li><span class="pt">Manifest + build integrity</span> <span class="pill safe">safe</span><div class="pd">Teach the config file to name its chain and carry the fee-juice contracts; migrate everything at once so nothing half-breaks.</div></li>
+    <li><span class="pt">Build &amp; deploy twice</span> <span class="pill safe">safe</span><div class="pd">Two build configs, two Cloudflare projects, CI verifies each. Rename faucet → tools finished.</div></li>
+    <li><span class="pt">App: real-USDC + private fuel + per-network UI</span> <span class="pill safe">safe</span><div class="pd">Add the Permit2 approve step real USDC needs; hide testnet-only buttons on mainnet; wire private fuel to the pinned mainnet FPC.</div></li>
+    <li><span class="pt">Testnet rehearsal + real cutover</span> <span class="pill safe">safe</span><div class="pd">Deploy a mint-able test USDC on Sepolia, move testnet onto it, and rehearse the exact mainnet path with fake money.</div></li>
+    <li><span class="pt">Deploy tooling for mainnet</span> <span class="pill safe">safe</span><div class="pd">Make the deploy script network-aware, use a stable recoverable deployer, budget the whole gas sequence, pin the real USDC identity.</div></li>
+    <li class="money"><span class="pt">Deploy on mainnet</span> <span class="pill money">real money</span><div class="pd">Fund a fresh key, deploy the portal + token trio + router + PrivateFPC against real USDC, then renounce the router owner key.</div></li>
+    <li class="money"><span class="pt">Ship &amp; harden</span> <span class="pill money">real money</span><div class="pd">Point the live site at it, you smoke-test a real <$5 bridge + both fee-juice paths on Alpha, then revoke the Permit2 approval.</div></li>
+  </ol>
+
+  <h2>Decisions locked in</h2>
+  <table>
+    <thead><tr><th>Decision</th><th>Chosen</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Bridge shape</td><td>Keep Permit2 + the router everywhere (your standing preference); no exact-approve.</td></tr>
+      <tr><td class="k">Swap-fuel</td><td>Off on mainnet — router deployed for bridging only, with a deliberately dead swap target.</td></tr>
+      <tr><td class="k">Withdraw fee</td><td>App never sets it, on either network.</td></tr>
+      <tr><td class="k">$5 cap</td><td>Communicated to users, not enforced on-chain. Deploy gas is separate + accepted.</td></tr>
+      <tr><td class="k">Private fuel</td><td>Supported on mainnet via a pinned PrivateFPC.</td></tr>
+      <tr><td class="k">Real USDC</td><td>Pin Circle's canonical address + verify its code on-chain, not just its name.</td></tr>
+      <tr><td class="k">Hardening</td><td>Dead swap target, renounce the router owner key, revoke Permit2 after the smoke, low balances. No heavyweight anti-theft — it's a $5 tool.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Open questions — all resolved</h2>
+  <p>Nothing left to decide before starting.</p>
+  <div class="ask"><span class="n">A3</span><span>Mainnet RPC host → the dRPC Alpha host already in the extension (<code>lb.drpc.live</code>). Sets the site's allowed-connections list.</span></div>
+  <div class="ask"><span class="n">A4</span><span><strong>Retire AZLO</strong> — testnet is play money, so we don't guard its old-token recovery; just a "export before the switch" heads-up, no hard gate.</span></div>
+  <div class="ask"><span class="n">A6/A7</span><span>No Cloudflare service token — manual smoke + the hostname check ⑤ is enough. The heavy live-network CI gate was trimmed as non-hermetic and redundant with the deploy-time checks.</span></div>
+
+  <h2>How the plan got here</h2>
+  <p>This survived two full audit rounds (Codex + an independent Claude reviewer). The disagreements were the point — each round caught real money-loss paths before any code was written.</p>
+  <div class="journey">
+    <div class="step"><b>v1</b> <span class="v-rej">both reject</span><br>fee juice wasn't really decoupled; mainnet couldn't validate.</div>
+    <div class="step"><b>v2</b> <span class="v-cond">split verdict</span><br>reviewer conditionally OK; Codex found 2 more criticals (private fuel would strand; cutover never happened).</div>
+    <div class="step"><b>v3</b> <span class="v-ok">both conditional-approve</span><br>final Codex pass confirmed both criticals closed; found 5 fixable items (missed migration files, the AZLO recovery risk, +3) — all folded in.</div>
+  </div>
+
+  <h2>The autopilot seeds (draft)</h2>
+  <p>These drive the build once you approve. Finalized after the gate.</p>
+  <p class="seed-label">/goal</p>
+  <pre>All phases ✓ in plan.md, each backed by its validation gate passing;
+/code-review max --fix applied; codex post-impl audit high/critical addressed;
+test:faucet + lint green. Phases 8–9 spend REAL mainnet funds — never
+deploy/fund/send a mainnet tx without my explicit go each time.</pre>
+  <p class="seed-label">/loop 15m</p>
+  <pre>Drive plan.md; never idle. Each firing: read plan + lessons + git status.
+Phases 1–7 (refactor/testnet/fake-money): proceed autonomously, lint +
+test:faucet after each edit, commit + push. Phases 8–9 (REAL money): STOP,
+get explicit go before any deploy/fund/mainnet tx. Stuck? /codex xhigh, log
+it. 5× fail on a step → stop + reassess. All safe phases ✓ → /code-review
+max --fix → codex audit → stop for the mainnet go.</pre>
+
+  <footer>
+    Blueprint <code>mid</code> · worktree <code>tools-two-network</code> · full detail in <a href="plan.md">plan.md</a>, audits in <a href="audit-codex.md">audit-codex.md</a> + <a href="audit-fable.md">audit-fable.md</a>.
+  </footer>
+</div>

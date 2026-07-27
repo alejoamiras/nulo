@@ -8,6 +8,7 @@
  * that live there.
  */
 
+export * from "./account-resolution"
 export * from "./action"
 export * from "./authwit-content"
 export * from "./caip"

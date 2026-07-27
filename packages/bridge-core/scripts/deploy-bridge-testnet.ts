@@ -43,14 +43,23 @@ import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifac
 import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
+import { resolveDeployerKeys } from "./deployer-keys"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
-const TOKEN_NAME = "Aztec Nulo"
-const TOKEN_SYMBOL = "AZLO"
-const TOKEN_DECIMALS = 18
+// Token identity — env-overridable so a token cutover (e.g. the DP7 TestUsdc) configures the
+// SAME conductor instead of forking it. Defaults = the legacy AZLO identity.
+const TOKEN_NAME = process.env.TOKEN_NAME ?? "Aztec Nulo"
+const TOKEN_SYMBOL = process.env.TOKEN_SYMBOL ?? "AZLO"
+const TOKEN_DECIMALS = Number(process.env.TOKEN_DECIMALS ?? 18)
+// Which of OUR mintable contracts backs the token: drives the deploy artifact, the metadata
+// reads, and the manifest's token.sourceContract (verify-l1 verifies against it).
+const TOKEN_CONTRACT = (process.env.TOKEN_CONTRACT ?? "MintableERC20") as "MintableERC20" | "TestUsdc"
+if (TOKEN_CONTRACT !== "MintableERC20" && TOKEN_CONTRACT !== "TestUsdc") {
+	throw new Error(`TOKEN_CONTRACT must be MintableERC20 | TestUsdc, got ${TOKEN_CONTRACT}`)
+}
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -59,6 +68,10 @@ const MNEMONIC = process.env.MNEMONIC
 if (!PRIVATE_KEY && !MNEMONIC) throw new Error("PRIVATE_KEY or MNEMONIC required (packages/bridge-core/.env)")
 
 const fromJournalMode = process.argv.includes("--from-journal")
+// EXPLICIT token-cutover intent: reusing a token that differs from the live manifest's l1.usdc is
+// normally a hard-stop (identity fork protection). This flag acknowledges the fork ON PURPOSE
+// (a planned cutover to a new token, e.g. AZLO -> TestUsdc) — the metadata assert still runs.
+const allowTokenCutover = process.argv.includes("--allow-token-cutover")
 // `--reuse-token <address>`: keep the EXISTING AZLO L1 ERC20 (readback-verified below)
 // and deploy only a NEW portal + L2 set against it. Malformed input hard-stops.
 const reuseTokenAddress = parseReuseTokenArg(process.argv)
@@ -96,6 +109,21 @@ async function nodeL1Addresses(): Promise<Record<string, `0x${string}`>> {
 	const a = (await res.json()).result.l1ContractAddresses as Record<string, unknown>
 	const pick = (v: unknown) => (typeof v === "object" && v ? (v as { value: string }).value : (v as string)) as `0x${string}`
 	return Object.fromEntries(Object.entries(a).map(([k, v]) => [k, pick(v)]))
+}
+
+/**
+ * The chain identity the manifest must self-declare (the startup build-integrity assertion needs it,
+ * codex post-impl HIGH-3). Read from the node — NOT hardcoded — so a network reset can't ship a stale
+ * pin (the chain-constants incident). `walletChainId = (l1ChainId ^ rollupVersion) >>> 0`.
+ */
+async function nodeChainIdentity(): Promise<{ l1ChainId: number; walletChainId: number }> {
+	const res = await fetch(NODE_URL, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "node_getNodeInfo", params: [] }),
+	})
+	const { l1ChainId, rollupVersion } = (await res.json()).result as { l1ChainId: number; rollupVersion: number }
+	return { l1ChainId, walletChainId: (l1ChainId ^ rollupVersion) >>> 0 }
 }
 
 async function nodeRegistry(): Promise<`0x${string}`> {
@@ -178,7 +206,7 @@ async function main() {
 
 	if (!recorded) appendJournal(JOURNAL_PATH, { phase: "generation", salts })
 
-	const usdcArt = evmArtifact("MintableERC20")
+	const usdcArt = evmArtifact(TOKEN_CONTRACT)
 	let usdc: `0x${string}`
 	if (reuseTokenAddress) {
 		// --from-journal resume: the flag must agree with the journal's recorded usdc —
@@ -203,7 +231,14 @@ async function main() {
 			manifestUsdc = undefined
 		}
 		if (manifestUsdc === undefined) console.log("no live manifest l1.usdc — metadata-only reuse verification")
-		assertReuseMatchesManifest(reuseTokenAddress, manifestUsdc)
+		if (allowTokenCutover) {
+			console.log(
+				`⚠ INTENTIONAL TOKEN CUTOVER: reusing ${reuseTokenAddress} (live l1.usdc is ${manifestUsdc ?? "<none>"}) — ` +
+					"the bridge identity FORKS to a fresh portal + L2 trio; prior journals/backups for the old token stop resolving.",
+			)
+		} else {
+			assertReuseMatchesManifest(reuseTokenAddress, manifestUsdc)
+		}
 		const tokenR = getContract({ address: reuseTokenAddress, abi: usdcArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const tr = tokenR.read as any
@@ -215,16 +250,18 @@ async function main() {
 		appendJournal(JOURNAL_PATH, { phase: "confirmed", step: "usdc", address: usdc })
 		console.log(`reusing L1 token ${usdc} (readback-verified ${TOKEN_SYMBOL}/${TOKEN_DECIMALS})`)
 	} else {
-		usdc = await deployEvm("usdc", "MintableERC20", usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
+		usdc = await deployEvm("usdc", TOKEN_CONTRACT, usdcArt.abi, usdcArt.bytecode, [TOKEN_NAME, TOKEN_SYMBOL, TOKEN_DECIMALS, 1000n])
 	}
 	const portal = await deployEvm("portal", "NuloTokenPortal", portalArt.abi, portalArt.bytecode, [])
 
 	// ─── L2 (testnet aztec.js - REAL proofs) ─────────────────────────
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
-	const secret = Fr.random()
+	// STABLE deployer (never Fr.random()): derived from BRIDGE_DEPLOYER_SECRET_TESTNET so a crash
+	// mid-generation keeps control of the account (and any funds) — re-run with the same env resumes.
+	const { secret, salt } = resolveDeployerKeys("testnet")
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
-	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
+	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
 	const deployer = await manager.getAccount()
 	const from = deployer.getAddress()
 	console.log("L2 deployer", from.toString())
@@ -391,16 +428,33 @@ async function main() {
 	// deploys fresh fuel (DeployFuelLive) and passes FUEL_ROUTER + FUEL_SWAP; the pool config (pools,
 	// quoter, slippage, …) carries forward from the live manifest. Pre-B2 fuel is a hard abort.
 	const prior = existsSync(LIVE_PATH) ? JSON.parse(readFileSync(LIVE_PATH, "utf8")) : null
-	const priorFuel = prior?.l1?.fuel as Record<string, unknown> | undefined
+	const priorFuel = prior?.l1?.fuel as { core?: Record<string, unknown>; swap?: Record<string, unknown> } | undefined
 	const l1a = await nodeL1Addresses()
+	// The router + its constructor deps (permit2/swapTarget/feeJuicePortal) live under `core`; the
+	// swap-quoting stack carries forward untouched under `swap`. The rollup-coupled + env overrides
+	// land INSIDE `core` (they used to be flat).
+	// A token cutover DROPS the swap stack: the Uniswap pools are keyed by the token address, so the
+	// prior token's pools cannot serve the new token — carrying them would emit a manifest whose
+	// quoting path points at nonexistent liquidity (codex bug-bash r2 HIGH). The cutover shape is
+	// bridge-only + direct fuel: core carried (refreshed), swap gone — exactly the mainnet shape.
+	if (allowTokenCutover && priorFuel?.swap) {
+		console.log("⚠ token cutover: DROPPING the prior swap stack (pools are token-keyed) — promote with --drop-swap")
+	}
 	const fuel = priorFuel
 		? {
-				...priorFuel,
-				// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
-				// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
-				feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),
-				...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
-				...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
+				...(allowTokenCutover ? { core: priorFuel.core } : priorFuel),
+				core: {
+					...priorFuel.core,
+					// Record WHICH contract the (carried) swapTarget is — verification must never infer it
+					// from swap-absence. The carried testnet target is the AZLO-era UniswapFuelSwap unless
+					// the operator deployed a replacement and says so via SWAP_TARGET_CONTRACT.
+					...(allowTokenCutover ? { swapTargetContract: process.env.SWAP_TARGET_CONTRACT ?? "UniswapFuelSwap" } : {}),
+					// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
+					// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
+					feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),
+					...(process.env.FUEL_ROUTER ? { router: process.env.FUEL_ROUTER.toLowerCase() } : {}),
+					...(process.env.FUEL_SWAP ? { swapTarget: process.env.FUEL_SWAP.toLowerCase() } : {}),
+				},
 			}
 		: undefined
 
@@ -415,9 +469,9 @@ async function main() {
 		feeAssetHandler: l1a.feeAssetHandlerAddress.toLowerCase(),
 		minFj: String(process.env.FUEL_MIN_FJ ?? priorFeeJuice?.minFj ?? "16000000000000000000"),
 	}
-	if (fuel?.router && fuel?.swapTarget) {
+	if (fuel?.core?.router && fuel?.core?.swapTarget) {
 		const router = getContract({
-			address: fuel.router as `0x${string}`,
+			address: fuel.core.router as `0x${string}`,
 			abi: [
 				{ type: "function", name: "swapTarget", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
 				{
@@ -432,7 +486,7 @@ async function main() {
 		})
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const rr = router.read as any
-		assertSame(await rr.swapTarget(), fuel.swapTarget, "router.swapTarget")
+		assertSame(await rr.swapTarget(), fuel.core.swapTarget, "router.swapTarget")
 		const witnessType = (await rr.BRIDGE_WITNESS_TYPE_STRING()) as string
 		if (!witnessType.includes("swapTarget")) {
 			throw new Error(
@@ -443,8 +497,12 @@ async function main() {
 	}
 
 	// ─── Write the CANDIDATE (never the live file) ───────────────────
+	// Chain identity from the node (reset-safe) — the startup build-integrity assertion requires it.
+	const chainIdentity = await nodeChainIdentity()
 	const manifest: CandidateManifest = {
 		network: "testnet",
+		l1ChainId: chainIdentity.l1ChainId,
+		walletChainId: chainIdentity.walletChainId,
 		l1: {
 			usdc,
 			portal,
@@ -454,7 +512,14 @@ async function main() {
 			// the live manifest before promotion), so a stray preview/static deploy of new code against an
 			// OLD (bearer-bridge) manifest fails closed instead of stranding funds.
 			privateClaimMode: "salt-v2",
-			token: { name: TOKEN_NAME, symbol: TOKEN_SYMBOL, decimals: TOKEN_DECIMALS, maxWholePerTx: 1000 },
+			token: {
+				name: TOKEN_NAME,
+				symbol: TOKEN_SYMBOL,
+				decimals: TOKEN_DECIMALS,
+				maxWholePerTx: 1000,
+				source: "permissionless-mint",
+				sourceContract: TOKEN_CONTRACT,
+			},
 			...(fuel ? { fuel } : {}),
 			feeJuice,
 		},

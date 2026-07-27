@@ -116,6 +116,7 @@ const activityRows = computed(() =>
 		accountAddress: appStore.account?.address,
 		chainId: appStore.network?.chainId,
 		networkId: appStore.network?.id,
+		profileId: appStore.profile?.id,
 	}),
 )
 

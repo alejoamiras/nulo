@@ -2,6 +2,10 @@ import { mount } from "@vue/test-utils"
 import { describe, expect, it } from "vitest"
 import { TESTIDS } from "@/lib/testids"
 import BridgeReceipt from "./BridgeReceipt.vue"
+// Token amounts + symbol derive from the LIVE manifest (the cutover changes both); Fee-Juice rows
+// stay 18-dec (FJ is chain-fixed, not token-driven).
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
 const L1 = `0x${"ab".repeat(32)}`
@@ -13,7 +17,7 @@ describe("BridgeReceipt", () => {
 			props: {
 				snapshot: {
 					direction: "deposit" as const,
-					amount: "100000000000000000000",
+					amount: (100n * UNIT).toString(),
 					isPrivate: true,
 					l1TxHash: L1,
 					l2TxHash: L2,
@@ -31,7 +35,7 @@ describe("BridgeReceipt", () => {
 		expect(done.attributes("role")).toBe("img")
 		expect(w.text()).toContain("Ethereum → Aztec")
 		expect(w.text()).toContain("Bridged")
-		expect(w.text()).toContain("100.00 AZLO")
+		expect(w.text()).toContain(`100.00 ${BRIDGE_TOKEN_SYMBOL}`)
 		expect(w.text()).toContain("private")
 		expect(w.text()).toContain("3m 42s")
 		const links = w.findAll(sel(TESTIDS.receiptLink))
@@ -47,7 +51,7 @@ describe("BridgeReceipt", () => {
 			props: {
 				snapshot: {
 					direction: "withdraw" as const,
-					amount: "40000000000000000000",
+					amount: (40n * UNIT).toString(),
 					isPrivate: false,
 					l1TxHash: "junk",
 					l2TxHash: L2,
@@ -56,7 +60,7 @@ describe("BridgeReceipt", () => {
 		})
 		expect(w.text()).toContain("Aztec → Ethereum")
 		expect(w.text()).toContain("Released")
-		expect(w.text()).toContain("40.00 AZLO")
+		expect(w.text()).toContain(`40.00 ${BRIDGE_TOKEN_SYMBOL}`)
 		// A withdraw never carries gas back to Ethereum — no FJ anywhere.
 		expect(w.text()).not.toContain("FJ")
 		expect(w.findAll(sel(TESTIDS.receiptLink))).toHaveLength(1)
@@ -109,9 +113,9 @@ describe("BridgeReceipt", () => {
 
 	it("no-fuel deposit: no gas rows", () => {
 		const w = mount(BridgeReceipt, {
-			props: { snapshot: { direction: "deposit" as const, amount: "100000000000000000000", isPrivate: true } },
+			props: { snapshot: { direction: "deposit" as const, amount: (100n * UNIT).toString(), isPrivate: true } },
 		})
-		expect(w.text()).toContain("100.00 AZLO")
+		expect(w.text()).toContain(`100.00 ${BRIDGE_TOKEN_SYMBOL}`)
 		expect(w.text()).not.toContain("Gas ready")
 		expect(w.text()).not.toContain("Gas used")
 	})
@@ -139,7 +143,7 @@ describe("BridgeReceipt", () => {
 				snapshot: {
 					direction: "deposit" as const,
 					assetKind: "fee-juice" as const,
-					amount: "20000000000000000000",
+					amount: (20n * 10n ** 18n).toString(), // Fee Juice — ALWAYS 18-dec
 					isPrivate: true,
 					l1TxHash: L1,
 					l2TxHash: L2,

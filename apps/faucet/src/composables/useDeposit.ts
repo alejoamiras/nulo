@@ -14,6 +14,7 @@ import {
 	awaitL1Receipt,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
+	ensurePermit2Allowance,
 	buildFuelRoute,
 	deriveBridgeSecret,
 	deriveTokenClaimSecret,
@@ -34,7 +35,7 @@ import {
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import {
 	BRIDGE,
@@ -62,6 +63,7 @@ import {
 	connectJournalDeps,
 	discard,
 	flagRecordError,
+	markApproveOutcome,
 	markSessionLive,
 	isMsgConsumed,
 	resumeSessionWork,
@@ -81,7 +83,7 @@ import { readBalance } from "./useTokenBalance"
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
+const NODE_URL = NETWORK.nodeUrl
 
 /**
 
@@ -688,7 +690,7 @@ export function useDepositFlow() {
 					token: L1_USDC,
 					weth: BRIDGE_FUEL.weth,
 					feeJuice: BRIDGE_FUEL.feeJuice,
-					tokenWeth: BRIDGE_FUEL.pools.azloWeth,
+					tokenWeth: BRIDGE_FUEL.pools.tokenWeth,
 					ethFj: BRIDGE_FUEL.pools.ethFj,
 				})
 				const quote = await quoteFuelPath(l1.publicClient as never, BRIDGE_FUEL.quoter, route, fuelSlice)
@@ -746,7 +748,7 @@ export function useDepositFlow() {
 				amount: tokenAmount.toString(),
 				createdAt: now,
 				updatedAt: now,
-				chainId: sepolia.id,
+				chainId: NETWORK.l1ChainId,
 				portal: L1_PORTAL,
 				bridge: BRIDGE.toString(),
 				recipient,
@@ -780,7 +782,7 @@ export function useDepositFlow() {
 
 			if (isPrivate) {
 				const provider = providerFingerprint()
-				const trusted = isSealTrusted(localStorage, sepolia.id, from, provider)
+				const trusted = isSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				log(trusted ? "seal: trusted wallet - one signature" : "seal: first private bridge for this wallet - two signatures")
 				setRecordStep(
 					id,
@@ -794,11 +796,11 @@ export function useDepositFlow() {
 				const envelope = { secret: secret.toString(), recipient, amount: tokenAmount.toString(), sealerL1: from }
 				const { blob, key } = await sealDepositRecord({
 					sign,
-					binding: { chainId: sepolia.id, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex: id },
+					binding: { chainId: NETWORK.l1ChainId, portal: L1_PORTAL, bridge: BRIDGE.toString(), secretHashHex: id },
 					envelope,
 					trusted,
 				})
-				if (!trusted) markSealTrusted(localStorage, sepolia.id, from, provider)
+				if (!trusted) markSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				sealKeys.set(id, key)
 				cacheSecret(id, secret.toString(), { v: 2, ...envelope })
 				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
@@ -810,19 +812,53 @@ export function useDepositFlow() {
 				}
 			}
 
+			// Real USDC (and the DP7 permissionless-mint test token) start at ZERO Permit2 allowance, so a
+			// deposit must do a one-time approve(Permit2, max) before the witness transfer. The testnet
+			// MintableERC20 auto-grants Permit2 → this short-circuits (no tx) for it; the DP7 token + real
+			// USDC are what exercise the approve (codex F2/F4). Mirrors useFuel's approve leg.
+			const ensurePermit2Approval = async (permit2: `0x${string}`, needed: bigint, recordId: string): Promise<void> => {
+				// The shared approval state machine (bridge-core) — the same sequencing the candidate
+				// smokes rehearse. The approval hash is JOURNALED the moment it exists, so a rejection
+				// after the approval mines still shows the standing max allowance instead of
+				// "nothing was sent".
+				await ensurePermit2Allowance({
+					allowance: async () =>
+						(await l1.publicClient.readContract({
+							address: L1_USDC,
+							abi: ERC20_ABI,
+							functionName: "allowance",
+							args: [from, permit2],
+						})) as bigint,
+					approveMax: async () =>
+						(await runOnLane("l1", () =>
+							wallet.writeContract({
+								address: L1_USDC,
+								abi: ERC20_ABI,
+								functionName: "approve",
+								args: [permit2, (1n << 256n) - 1n],
+								chain: NETWORK.viemChain,
+								account: from,
+							}),
+						)) as `0x${string}`,
+					waitReceipt: async (hash) =>
+						await awaitL1Receipt(l1.publicClient, hash, {
+							onStillWaiting: (attempt) =>
+								setRecordStep(recordId, "approving", `still waiting for the approval (round ${attempt})`),
+						}),
+					needed,
+					onStatus: (status, txHash) => {
+						if (status === "approving")
+							setRecordStep(recordId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
+						if (status === "waiting" && txHash) updateRecord(recordId, { approveTxHash: txHash })
+						if (status === "approved") markApproveOutcome(recordId, "done")
+					},
+				})
+			}
+
 			if (fuelPre && fuelSlice && BRIDGE_FUEL) {
 				const fuelCfg = BRIDGE_FUEL
-				// Fueled leg: ONE Permit2 witness signature + ONE router tx. No approve - the live
-				// token pre-approves Permit2 for every holder (asserted, fail-closed).
-				const permit2Allowance = (await l1.publicClient.readContract({
-					address: L1_USDC,
-					abi: ERC20_ABI,
-					functionName: "allowance",
-					args: [from, fuelCfg.permit2],
-				})) as bigint
-				if (permit2Allowance < amount) {
-					throw new Error("This token does not pre-approve Permit2 - fueled bridging is unavailable for it.")
-				}
+				// Fueled leg: one-time Permit2 approve (if needed) → ONE Permit2 witness signature + ONE router tx.
+				await ensurePermit2Approval(fuelCfg.permit2, amount, id)
 
 				setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
 				const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
@@ -850,7 +886,7 @@ export function useDepositFlow() {
 					{ permitted: { token: L1_USDC, amount }, spender: fuelCfg.router, nonce, deadline },
 					witness,
 					fuelCfg.permit2,
-					sepolia.id,
+					NETWORK.l1ChainId,
 				)
 				const signature = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...typed } as never))
 
@@ -878,7 +914,7 @@ export function useDepositFlow() {
 							},
 							{ nonce, deadline, signature },
 						],
-						chain: sepolia,
+						chain: NETWORK.viemChain,
 						account: from,
 					} as never),
 				)
@@ -952,20 +988,12 @@ export function useDepositFlow() {
 			}
 
 			// Single deposit path: bridge-only through the router's Permit2 `bridge()` (fuel fields zeroed).
-			// No approve tx — the live token pre-approves canonical Permit2 (asserted, fail-closed). The
-			// witness pins tokenPortal/token/amount/recipient/secretHash/isPrivate + the router's swapTarget.
+			// A one-time Permit2 approve (if needed) precedes it; the witness pins tokenPortal/token/amount/
+			// recipient/secretHash/isPrivate + the router's swapTarget.
 			if (!BRIDGE_ROUTER || !BRIDGE_PERMIT2 || !BRIDGE_SWAP_TARGET) {
 				throw new Error("Bridge router/permit2 not configured (required for the deposit path).")
 			}
-			const permit2Allowance = (await l1.publicClient.readContract({
-				address: L1_USDC,
-				abi: ERC20_ABI,
-				functionName: "allowance",
-				args: [from, BRIDGE_PERMIT2],
-			})) as bigint
-			if (permit2Allowance < tokenAmount) {
-				throw new Error("This token does not pre-approve Permit2 - bridging is unavailable for it.")
-			}
+			await ensurePermit2Approval(BRIDGE_PERMIT2, tokenAmount, id)
 
 			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
@@ -990,7 +1018,7 @@ export function useDepositFlow() {
 				{ permitted: { token: L1_USDC, amount: tokenAmount }, spender: BRIDGE_ROUTER, nonce, deadline },
 				bridgeWitness,
 				BRIDGE_PERMIT2,
-				sepolia.id,
+				NETWORK.l1ChainId,
 			)
 			const bridgeSig = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...bridgeTyped } as never))
 
@@ -1012,7 +1040,7 @@ export function useDepositFlow() {
 						},
 						{ nonce, deadline, signature: bridgeSig },
 					],
-					chain: sepolia,
+					chain: NETWORK.viemChain,
 					account: from,
 				} as never),
 			)
@@ -1068,8 +1096,13 @@ export function useDepositFlow() {
 			if (id) {
 				const rec = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 				if (rec && !rec.depositTxHash && isUserRejection(e)) {
+					// A rejection AFTER the one-time Permit2 approval mined must not read as a no-op — the max
+					// allowance stands (harmless: only YOUR signature can spend it; revocable anytime).
+					const approvedFirst = !!rec.approveTxHash
 					discard(id)
-					error.value = "Rejected in your wallet - nothing was sent."
+					error.value = approvedFirst
+						? "Rejected in your wallet - nothing was bridged. The one-time Permit2 approval from this attempt remains active (only your signature can use it; revocable anytime)."
+						: "Rejected in your wallet - nothing was sent."
 				} else if (rec) {
 					flagRecordError(id, `${msg}. Your funds are not lost - this bridge stays in Pending.`)
 				}

@@ -47,6 +47,13 @@ const handleEditNetworkName = () => {
 const handleSetActive = async () => {
 	if (!network.value) return
 	if (isActive.value) return
+	// The network is part of the scope a send builds against, and switching it
+	// reloads accounts and reselects one — so it moves the signing scope just
+	// like an account switch. Same guard, same escape hatch.
+	if (appStore.hasInFlightSend) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 	// Snapshot before the await: `network` is computed from `route.params.id`,
 	// and if the caller (or another reactive consumer) navigates while the
 	// RPC is in flight, `network.value` becomes `undefined` after the await.
@@ -55,8 +62,18 @@ const handleSetActive = async () => {
 	// reactive trigger. See implementations-plan/e2e-full-network-recovery/findings.md.
 	const target = network.value
 	try {
+		// Re-checked after the RPC: a send can start while it is in flight, and
+		// activating the network would move the scope out from under it.
+		// Persist first, then commit the in-memory scope with no await in between:
+		// an await there would let a send start after the check and still switch.
 		await managers.network.setActiveNetwork(target.id)
-		appStore.network = target
+		const activated = await appStore.commitScopeChange(() => {
+			appStore.network = target
+		})
+		if (!activated) {
+			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			return
+		}
 		openToast({ label: "Active network updated", icon: "check-circle" })
 	} catch {
 		openToast({ label: "Failed to switch network", icon: "warning", color: "red" }, TOAST_DURATION.LONG)

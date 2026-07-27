@@ -6,6 +6,7 @@ import {
 	SWAP_BRIDGE_ROUTER_ABI,
 	awaitL1Receipt,
 	bridgeWitnessPermitTypedData,
+	ensurePermit2Allowance,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
 	isSealTrusted,
@@ -15,7 +16,7 @@ import {
 	planPublicFuelDeposit,
 	sealDepositRecord,
 } from "@nulo/bridge-core"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { ref } from "vue"
 import { BRIDGE_PERMIT2, BRIDGE_ROUTER, BRIDGE_SWAP_TARGET, FUEL_ASSET, FUEL_PORTAL } from "@/contracts/bridge-deployments"
 import { ERC20_ABI } from "./useL1Usdc"
@@ -40,7 +41,7 @@ import { useL1Wallet } from "./useL1Wallet"
 
 const log = (...args: unknown[]) => console.log("[bridge:fuel]", ...args)
 
-const NODE_URL = import.meta.env.VITE_AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
+const NODE_URL = NETWORK.nodeUrl
 
 /**
  * The Fuel flow: deposit the L1 fee asset straight into the canonical FeeJuicePortal and claim it as
@@ -104,7 +105,7 @@ export function useFuelFlow() {
 				amount: amount.toString(),
 				createdAt: now,
 				updatedAt: now,
-				chainId: sepolia.id,
+				chainId: NETWORK.l1ChainId,
 				portal: FUEL_PORTAL,
 				bridge: feeJuiceAddress,
 				recipient,
@@ -127,7 +128,7 @@ export function useFuelFlow() {
 			// one signature steady-state, two on a wallet's first private bridge (the determinism self-test).
 			if (isPrivate && plan.salt) {
 				const provider = providerFingerprint()
-				const trusted = isSealTrusted(localStorage, sepolia.id, from, provider)
+				const trusted = isSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				setRecordStep(
 					id,
 					"sealing",
@@ -144,11 +145,11 @@ export function useFuelFlow() {
 				}
 				const { blob } = await sealDepositRecord({
 					sign,
-					binding: { chainId: sepolia.id, portal: FUEL_PORTAL, bridge: feeJuiceAddress, secretHashHex: id },
+					binding: { chainId: NETWORK.l1ChainId, portal: FUEL_PORTAL, bridge: feeJuiceAddress, secretHashHex: id },
 					envelope,
 					trusted,
 				})
-				if (!trusted) markSealTrusted(localStorage, sepolia.id, from, provider)
+				if (!trusted) markSealTrusted(localStorage, NETWORK.l1ChainId, from, provider)
 				cacheSecret(id, plan.secret.toString(), { v: 2, ...envelope })
 				updateRecord(id, { sealedEnvelope: blob, sealerL1: from })
 			}
@@ -167,34 +168,43 @@ export function useFuelFlow() {
 			const swapTarget = BRIDGE_SWAP_TARGET
 			const feeAssetAddr = FUEL_ASSET
 			const fuelPortalAddr = FUEL_PORTAL
-			const p2Allowance = (await l1.publicClient.readContract({
-				address: feeAssetAddr,
-				abi: ERC20_ABI,
-				functionName: "allowance",
-				args: [from, permit2],
-			})) as bigint
-			if (p2Allowance < amount) {
-				setRecordStep(id, "approving", "first time only: approve Permit2 in your Ethereum wallet")
-				const approveHash = await runOnLane("l1", () =>
-					wallet.writeContract({
+			// The shared approval state machine (bridge-core) — same sequencing as the deposit leg and
+			// the candidate smokes. The approval hash is journaled the moment it exists (#292 resilient
+			// wait preserved via awaitL1Receipt); the APPROVE rail step renders only when an approval was
+			// actually part of this run.
+			const apprId = id
+			await ensurePermit2Allowance({
+				allowance: async () =>
+					(await l1.publicClient.readContract({
 						address: feeAssetAddr,
 						abi: ERC20_ABI,
-						functionName: "approve",
-						args: [permit2, (1n << 256n) - 1n],
-						chain: sepolia,
-						account: from,
+						functionName: "allowance",
+						args: [from, permit2],
+					})) as bigint,
+				approveMax: async () =>
+					(await runOnLane("l1", () =>
+						wallet.writeContract({
+							address: feeAssetAddr,
+							abi: ERC20_ABI,
+							functionName: "approve",
+							args: [permit2, (1n << 256n) - 1n],
+							chain: NETWORK.viemChain,
+							account: from,
+						}),
+					)) as `0x${string}`,
+				waitReceipt: async (hash) =>
+					await awaitL1Receipt(l1.publicClient, hash, {
+						onStillWaiting: (attempt) =>
+							setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
 					}),
-				)
-				// #292: resilient wait — checks reverted status + survives a post-mining RPC timeout, so a
-				// mined-but-slow approval doesn't strand the record without a depositTxHash / recovery path.
-				const apprId = id
-				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
-					onStillWaiting: (attempt) => setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
-				})
-				// Keeps the APPROVE step visible as done for the rest of the run — the rail renders it only
-				// when an approval was actually part of this run (a sufficient allowance shows no step at all).
-				markApproveOutcome(id, "done")
-			}
+				needed: amount,
+				onStatus: (status, txHash) => {
+					if (status === "approving")
+						setRecordStep(apprId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
+					if (status === "waiting" && txHash) updateRecord(apprId, { approveTxHash: txHash })
+					if (status === "approved") markApproveOutcome(apprId, "done")
+				},
+			})
 
 			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
@@ -217,7 +227,7 @@ export function useFuelFlow() {
 				{ permitted: { token: feeAssetAddr, amount }, spender: router, nonce, deadline },
 				fuelWitness,
 				permit2,
-				sepolia.id,
+				NETWORK.l1ChainId,
 			)
 			const fuelSig = await runOnLane("l1", () => wallet.signTypedData({ account: from, ...fuelTyped } as never))
 
@@ -238,7 +248,7 @@ export function useFuelFlow() {
 						},
 						{ nonce, deadline, signature: fuelSig },
 					],
-					chain: sepolia,
+					chain: NETWORK.viemChain,
 					account: from,
 				} as never),
 			)
@@ -280,8 +290,13 @@ export function useFuelFlow() {
 			if (id) {
 				const rec = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 				if (rec && !rec.depositTxHash && isUserRejection(e)) {
+					// A rejection AFTER the one-time Permit2 approval mined must not read as a no-op — the max
+					// allowance stands (harmless: only YOUR signature can spend it; revocable anytime).
+					const approvedFirst = !!rec.approveTxHash
 					discard(id)
-					error.value = "Rejected in your wallet - nothing was sent."
+					error.value = approvedFirst
+						? "Rejected in your wallet - nothing was bridged. The one-time Permit2 approval from this attempt remains active (only your signature can use it; revocable anytime)."
+						: "Rejected in your wallet - nothing was sent."
 				} else if (rec) {
 					flagRecordError(id, `${msg}. Your funds are not lost - this bridge stays in Pending.`)
 				}

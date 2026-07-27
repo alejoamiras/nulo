@@ -22,6 +22,10 @@ vi.mock("@/composables/useDeposit", () => ({
 
 import { TESTIDS } from "@/lib/testids"
 import BridgeJournalCard from "./BridgeJournalCard.vue"
+// Amounts + symbol derive from the LIVE manifest (the token cutover changes both — a hardcoded
+// 18-dec "AZLO" fixture breaks on a 6-dec USDC manifest).
+import { BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL } from "@/contracts/bridge-deployments"
+const UNIT = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 
 const sel = (t: string) => `[data-testid="${t}"]`
 const DEPLOY = { chainId: 11155111, portal: "0xportal", bridge: "0xbridge" }
@@ -32,7 +36,7 @@ function deposit(over: Partial<DepositJournalRecord> = {}): DepositJournalRecord
 		id: "0xdep",
 		direction: "deposit",
 		isPrivate: false,
-		amount: "100000000000000000000",
+		amount: (100n * UNIT).toString(),
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
 		recipient: "0xaztec",
@@ -48,7 +52,7 @@ function withdraw(over: Partial<WithdrawJournalRecord> = {}): WithdrawJournalRec
 		id: "0xwd",
 		direction: "withdraw",
 		isPrivate: false,
-		amount: "40000000000000000000",
+		amount: (40n * UNIT).toString(),
 		createdAt: Date.now(),
 		updatedAt: Date.now(),
 		recipientL1: "0xeth",
@@ -91,7 +95,7 @@ describe("BridgeJournalCard", () => {
 		expect(card.attributes("data-stage")).toBe("claimable")
 		expect(card.attributes("data-privacy")).toBe("private")
 		expect(w.text()).toContain("ETHEREUM → AZTEC")
-		expect(w.text()).toContain("100.00 AZLO")
+		expect(w.text()).toContain(`100.00 ${BRIDGE_TOKEN_SYMBOL}`)
 		expect(w.text()).toContain("PRIVATE")
 	})
 

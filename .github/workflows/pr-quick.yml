@@ -249,12 +249,17 @@ jobs:
       upload_artifacts: true
 
   build-faucet:
-    name: Build Faucet
+    name: Build Faucet (${{ matrix.target }})
     needs: changes
     if: needs.changes.outputs.needs-faucet-build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [testnet, mainnet]
     uses: ./.github/workflows/_build-faucet.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      target: ${{ matrix.target }}
       upload_artifacts: true
 
   # Smoke e2e moved to its own pr-smoke-e2e.yml workflow:

@@ -10,6 +10,8 @@
  * return "" only for an empty hash/address, so callers can still suppress a missing link.
  */
 
+import { NETWORK } from "./network"
+
 function base(): string {
 	const url = import.meta.env.VITE_EXPLORER_BASE_URL ?? "https://testnet.aztecscan.xyz"
 	return url.endsWith("/") ? url.slice(0, -1) : url
@@ -24,10 +26,10 @@ export function explorerTxUrl(hash: string): string {
 	return `${b}/tx-effects/${hash}`
 }
 
-/** Sepolia etherscan link for the bridge's L1 legs (deposit + consume txs). */
+/** L1 etherscan link for the bridge's L1 legs (deposit + consume txs). Base is per-network. */
 export function etherscanTxUrl(hash: string): string {
 	if (!TX_HASH_SHAPE.test(hash)) return ""
-	return `https://sepolia.etherscan.io/tx/${hash}`
+	return `${NETWORK.l1ExplorerBaseUrl}/tx/${hash}`
 }
 
 export function explorerAddressUrl(addr: string): string {
@@ -36,7 +38,7 @@ export function explorerAddressUrl(addr: string): string {
 	return `${b}/contracts/instances/${addr}`
 }
 
-/** Sepolia etherscan address page (no validation needed - addresses are public routing data). */
+/** L1 etherscan address page (no validation needed - addresses are public routing data). */
 export function etherscanAddressUrl(addr: string): string {
-	return addr ? `https://sepolia.etherscan.io/address/${addr}` : ""
+	return addr ? `${NETWORK.l1ExplorerBaseUrl}/address/${addr}` : ""
 }

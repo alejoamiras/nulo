@@ -81,10 +81,10 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(Object.keys(raw).some((k) => k.includes("0x111"))).toBe(true)
 	})
 
-	test("(H4) two concurrent restores of the SAME address — the lock lets exactly ONE win", async () => {
+	test("(H4) two concurrent restores of the SAME account — the lock lets exactly ONE win", async () => {
 		// Without the restore lock both would pass the (empty-store) intersection
-		// check and both write the global address-keyed row (ownership flip). The
-		// lock serialises them → the 2nd sees the 1st's write → throws Duplicate.
+		// check and both write the same row (ownership flip). The lock serialises
+		// them → the 2nd sees the 1st's write → throws Duplicate.
 		const results = await Promise.allSettled([
 			accountService.restore([mkAccount("0xrace")]),
 			accountService.restore([mkAccount("0xrace")]),
@@ -93,7 +93,19 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		const rejected = results.filter((r) => r.status === "rejected")
 		expect(fulfilled).toHaveLength(1)
 		expect(rejected).toHaveLength(1)
-		expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ message: expect.stringContaining("Duplicate address") })
+		expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ message: expect.stringContaining("Duplicate account") })
+	})
+
+	test("the same address in two different profiles restores into two independent rows", async () => {
+		// Same mnemonic imported twice derives one address per profile; each profile
+		// owns its own row, so neither restore can take the other's account away.
+		const [first] = await accountService.restore([mkAccount("0xshared", { profileId: "p1", name: "P1" })])
+		const [second] = await accountService.restore([mkAccount("0xshared", { profileId: "p2", name: "P2" })])
+
+		expect(first?.restoreError).toBeUndefined()
+		expect(second?.restoreError).toBeUndefined()
+		expect(await accountService.getAccount("p1", 1, "0xshared")).toMatchObject({ profileId: "p1", name: "P1" })
+		expect(await accountService.getAccount("p2", 1, "0xshared")).toMatchObject({ profileId: "p2", name: "P2" })
 	})
 
 	test("(H3) purgeForProfile removes rows but emits NO onAccountDeleted (coordinator awaits dependents directly)", async () => {

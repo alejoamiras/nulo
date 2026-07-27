@@ -135,6 +135,10 @@ const onActiveProfileChanged = async (profile) => {
 	} else {
 		popupStore.closeAll()
 		appStore.isLogined = false
+		// Every cached scope goes with the lock, so no profile's activity outlives
+		// it in memory. Switching profiles runs through lock/unlock, which means a
+		// switch deliberately starts cold rather than repainting from cache.
+		appStore.clearActivity()
 		appStore.profiles = await managers.profile.getProfiles()
 		router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
 	}
