@@ -65,8 +65,11 @@ const sepolia = defineChain({
 
 const evmAbi = (name: string): Abi => JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8")).abi as Abi
 
-const TOTAL = 10n * 10n ** 18n
-const FUEL_SLICE = 25n * 10n ** 16n // 0.25 AZLO -> ~Fee Juice for the self-paying claim
+// Amounts are DECIMALS-DRIVEN from the manifest token (an 18-dec assumption against a 6-dec token
+// would request 10^19 base units into a 10^9 mint cap — instant revert; codex bug-bash r2).
+const TOKEN_DECIMALS = BigInt(CONFIG.l1.token?.decimals ?? 18)
+const TOTAL = 10n * 10n ** TOKEN_DECIMALS
+const FUEL_SLICE = 25n * 10n ** (TOKEN_DECIMALS - 2n) // 0.25 tokens -> ~Fee Juice for the self-paying claim
 
 async function main() {
 	const t0 = Date.now()

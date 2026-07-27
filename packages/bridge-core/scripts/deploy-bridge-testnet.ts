@@ -433,9 +433,16 @@ async function main() {
 	// The router + its constructor deps (permit2/swapTarget/feeJuicePortal) live under `core`; the
 	// swap-quoting stack carries forward untouched under `swap`. The rollup-coupled + env overrides
 	// land INSIDE `core` (they used to be flat).
+	// A token cutover DROPS the swap stack: the Uniswap pools are keyed by the token address, so the
+	// prior token's pools cannot serve the new token — carrying them would emit a manifest whose
+	// quoting path points at nonexistent liquidity (codex bug-bash r2 HIGH). The cutover shape is
+	// bridge-only + direct fuel: core carried (refreshed), swap gone — exactly the mainnet shape.
+	if (allowTokenCutover && priorFuel?.swap) {
+		console.log("⚠ token cutover: DROPPING the prior swap stack (pools are token-keyed) — promote with --drop-swap")
+	}
 	const fuel = priorFuel
 		? {
-				...priorFuel,
+				...(allowTokenCutover ? { core: priorFuel.core } : priorFuel),
 				core: {
 					...priorFuel.core,
 					// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel

@@ -144,7 +144,14 @@ export const candidateManifestSchema = z
 		// The L1 token identity and the L2 token's constructor identity must agree — a drift mints an
 		// L2 asset with the wrong name/symbol/decimals (decimals mis-scales every bridged amount).
 		const args = m.l2.token.constructorArgs
-		if (args.length >= 3 && (args[0] !== m.l1.token.name || args[1] !== m.l1.token.symbol || args[2] !== m.l1.token.decimals)) {
+		if (args.length < 3) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["l2", "token", "constructorArgs"],
+				message:
+					"L2 token constructorArgs must carry [name, symbol, decimals, ...] — an empty/short list bypasses the identity invariant",
+			})
+		} else if (args[0] !== m.l1.token.name || args[1] !== m.l1.token.symbol || args[2] !== m.l1.token.decimals) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				path: ["l2", "token", "constructorArgs"],

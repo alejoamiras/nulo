@@ -74,6 +74,12 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		expect(() => parseCandidateManifest(m)).toThrow(/sourceContract/)
 	})
 
+	it("rejects EMPTY/short L2 constructorArgs (the identity-invariant bypass)", () => {
+		const m = liveManifest()
+		m.l2.token.constructorArgs = []
+		expect(() => parseCandidateManifest(m)).toThrow(/empty\/short list/)
+	})
+
 	it("rejects an L1 token identity that drifts from the L2 constructor identity", () => {
 		const m = liveManifest()
 		m.l1.token.decimals = 6 // L2 constructorArgs still say 18 — a mis-scale of every bridged amount

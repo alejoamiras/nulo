@@ -1096,8 +1096,13 @@ export function useDepositFlow() {
 			if (id) {
 				const rec = journal.records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 				if (rec && !rec.depositTxHash && isUserRejection(e)) {
+					// A rejection AFTER the one-time Permit2 approval mined must not read as a no-op — the max
+					// allowance stands (harmless: only YOUR signature can spend it; revocable anytime).
+					const approvedFirst = !!rec.approveTxHash
 					discard(id)
-					error.value = "Rejected in your wallet - nothing was sent."
+					error.value = approvedFirst
+						? "Rejected in your wallet - nothing was bridged. The one-time Permit2 approval from this attempt remains active (only your signature can use it; revocable anytime)."
+						: "Rejected in your wallet - nothing was sent."
 				} else if (rec) {
 					flagRecordError(id, `${msg}. Your funds are not lost - this bridge stays in Pending.`)
 				}

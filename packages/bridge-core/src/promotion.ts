@@ -33,10 +33,20 @@ export function assertFaucetCandidateShape(candidate: FaucetCandidateShape): voi
  *  byte-carried from the live manifest (or absent in both) — any new or changed fuel
  *  infrastructure means a fuel/router deploy or WETH seed happened, which this arc
  *  forbids. Deep-equality via canonical JSON of the two sections. */
-export function assertZeroSeed(candidateFuel: unknown, liveFuel: unknown): void {
-	if (JSON.stringify(candidateFuel ?? null) !== JSON.stringify(liveFuel ?? null)) {
-		throw new Error(
-			"zero-seed violated: the candidate's l1.fuel differs from the live manifest — no fuel/router deploys this arc; STOP",
-		)
+export function assertZeroSeed(candidateFuel: unknown, liveFuel: unknown, opts: { allowSwapDrop?: boolean } = {}): void {
+	if (JSON.stringify(candidateFuel ?? null) === JSON.stringify(liveFuel ?? null)) return
+	// EXPLICIT swap retirement (a token cutover): the Uniswap pools are keyed by the token address,
+	// so a new token cannot carry the old swap config — the candidate keeps `core` BYTE-EQUAL and
+	// DROPS `swap` entirely. Allowed only under the operator's --drop-swap flag; core may never
+	// change and swap may never be silently ALTERED (only dropped whole).
+	if (opts.allowSwapDrop) {
+		const cand = candidateFuel as { core?: unknown; swap?: unknown } | null | undefined
+		const live = liveFuel as { core?: unknown; swap?: unknown } | null | undefined
+		const coreEqual = JSON.stringify(cand?.core ?? null) === JSON.stringify(live?.core ?? null)
+		if (coreEqual && cand?.swap === undefined && live?.swap !== undefined) return
 	}
+	throw new Error(
+		"zero-seed violated: the candidate's l1.fuel differs from the live manifest — no fuel/router deploys this arc " +
+			"(a token cutover retiring the swap stack must pass --drop-swap with core byte-carried); STOP",
+	)
 }

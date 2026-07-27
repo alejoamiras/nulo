@@ -450,7 +450,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
  * manifest — new or changed fuel infrastructure hard-fails the promotion.
  */
-async function promote(intentPath: string, opts: { bridgeOnly?: boolean } = {}): Promise<void> {
+async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwap?: boolean } = {}): Promise<void> {
 	// --bridge-only: a bridge cutover that touches NO faucet deployment (codex r1 HIGH-4). The faucet
 	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the
 	// promotion provably leaves it byte-identical.
@@ -460,17 +460,17 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean } = {}):
 	const faucetCandidatePath = join(repoRoot, "apps/faucet/src/contracts/deployments.candidate.json")
 	const faucetLivePath = join(repoRoot, "apps/faucet/src/contracts/deployments.json")
 
-	// 0. The full gate, candidate-pinned, immediately before anything is written.
-	await verify(intentPath, bridgeCandidatePath)
-
-	// 0b. The recorded candidate digest is REQUIRED at promote time: without it, promote
-	// would be the first-ever verify (digest recorded mid-promote — the one-time recording
-	// regime never happened; review finding #5), and the re-read below could not be bound
-	// to the bytes verify actually checked.
+	// 0. The recorded candidate digest is REQUIRED BEFORE promote's own verify runs — verify
+	// RECORDS a missing digest, so checking after it would always pass (the one-time recording
+	// regime would never have happened; codex bug-bash r2 HIGH). Read + require FIRST.
 	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
 	if (!intent.candidateSha256) {
 		throw new Error("intent has no recorded candidateSha256 — run verify --candidate (and commit the intent) BEFORE promote — STOP")
 	}
+
+	// 0b. The full gate, candidate-pinned, immediately before anything is written (re-pins the
+	// candidate bytes against the digest required above).
+	await verify(intentPath, bridgeCandidatePath)
 
 	// 0c. The FPC require-deployed gate as CODE, not operator discipline (review finding #6):
 	// promotion enables the faucet's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
@@ -529,7 +529,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean } = {}):
 	} catch {
 		liveFuel = undefined
 	}
-	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel)
+	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel, { allowSwapDrop: opts.dropSwap === true })
 
 	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
 	const writes: Array<[string, Buffer, string]> =
@@ -602,13 +602,14 @@ if (isMain) {
 	const candidateFlag = rest.indexOf("--candidate")
 	const candidatePath = candidateFlag !== -1 ? rest[candidateFlag + 1] : undefined
 	const bridgeOnly = rest.includes("--bridge-only")
+	const dropSwap = rest.includes("--drop-swap")
 	const run =
 		cmd === "build"
 			? build(intentPath)
 			: cmd === "verify"
 				? verify(intentPath, candidatePath)
 				: cmd === "promote"
-					? promote(intentPath, { bridgeOnly })
+					? promote(intentPath, { bridgeOnly, dropSwap })
 					: Promise.reject(new Error(`unknown command ${cmd}`))
 	run.catch((err) => {
 		console.error(`✗ ${err instanceof Error ? err.message : err}`)
