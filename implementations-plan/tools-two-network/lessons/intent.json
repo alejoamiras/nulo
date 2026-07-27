@@ -54,5 +54,6 @@
 			"implementations-plan/tools-two-network/lessons/",
 			"apps/faucet/public/testnet-bridge.journal.jsonl"
 		]
-	}
+	},
+	"candidateSha256": "7c530636845b2d26e30325ca3b08658c45a2257c7d4145b365384d11e98ecee4"
 }
