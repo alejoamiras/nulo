@@ -232,3 +232,33 @@ verified against the code and folded into v3-final below.
 Permit2 approve fallback (token/spender/amount/ordering, both legs); vite target/manifest defines
 agree with the Node-side target; placeholder mainnet build fails closed; CI two-target matrix +
 digest + mainnet dRPC CSP coherent.
+
+---
+
+# Codex bug-bash — pre-cutover iteration loop (owner-directed, xhigh)
+
+## Round 1 — session `019fa3c8-9d66-72c3-800b-e73f008c0232`
+> `iterate (9 findings, 0 CRITICAL)` — and the decisive call: **"testnet cutover not deployable as
+> written; findings 1–4 block the exact proposed sequence."** The bug bash paid for itself before a
+> single Sepolia tx.
+
+**All 9 fixed in `4772408` + `1bb255a`** (verify → fix → separate commit):
+H1 `--allow-token-cutover` + env-driven token identity + emitted `sourceContract`;
+H2 stable deployer actually WIRED into the conductor (`resolveDeployerKeys`, fail-closed env);
+H3 one shared `ensurePermit2Allowance` state machine (app legs + BOTH smokes) and the plain smoke
+rewired onto `runRouterDeposit` (the app's router witness path — portal-direct deleted);
+H4 `promote --bridge-only` with a before/after digest PIN on the live faucet manifest;
+H5 forge `EXPECTED_DEPLOYER` pin (fork-rehearsed negative + positive);
+M6 live-node identity check wired post-mount (PROD kills, dev warns);
+M7 `approveTxHash` journaled at approve time;
+M8 schema `superRefine` (mint⇒sourceContract, L1↔L2 token identity, slippage<10000) + live manifest
+backfill + the mainnet placeholder's L2 trio recomputed to a coherent USDC-identity derivation
+(chain mismatch deliberately kept → still fails closed at boot);
+M9 previews per codex's design: EXACT `CF_PAGES_URL` host baked (testnet + non-`dev` branch only,
+never a wildcard, never mainnet), recorded in build.json, 3 unit pins + 3-shape build proof.
+
+**Architecture recs adopted:** #2 superRefine (done), #3 one approval state machine (done),
+#4 bridge-only promotion (done); #1 (single network-aware conductor) partially — cutover-critical
+parts landed, full unification deferred; #5/#6 (virtual target module; verify consolidation) → later.
+
+## Round 2 — fresh session, verifying the fixes + hunting new bugs (in flight)
