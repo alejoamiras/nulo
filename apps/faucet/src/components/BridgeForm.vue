@@ -113,7 +113,7 @@ const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (fromBalance.value !== null && amountUnits.value > fromBalance.value) {
 		return fromChain.value === "ethereum"
-			? `Amount exceeds your Sepolia ${BRIDGE_TOKEN_SYMBOL} balance.`
+			? `Amount exceeds your ${NETWORK.viemChain.name} ${BRIDGE_TOKEN_SYMBOL} balance.`
 			: `Amount exceeds your Aztec ${isPrivate.value ? "private" : "public"} balance.`
 	}
 	return null

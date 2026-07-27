@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { AddressDisplay, Button } from "@nulo/design"
 import { useL1Wallet } from "@/composables/useL1Wallet"
+import { NETWORK } from "@/lib/network"
 import { TESTIDS } from "@/lib/testids"
 
-const { address, isConnected, wrongChain, isConnecting, connect, disconnect, switchToSepolia } = useL1Wallet()
+const { address, isConnected, wrongChain, isConnecting, connect, disconnect, switchL1Network } = useL1Wallet()
 </script>
 
 <template>
@@ -11,8 +12,8 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 		<div v-if="isConnected && address" class="chip">
 			<span class="label">Ethereum</span>
 			<AddressDisplay :address="address ?? ''" :data-testid="TESTIDS.l1Account" />
-			<button v-if="wrongChain" class="wrong-chain" type="button" :data-testid="TESTIDS.l1SwitchChain" @click="switchToSepolia">
-				Switch to Sepolia
+			<button v-if="wrongChain" class="wrong-chain" type="button" :data-testid="TESTIDS.l1SwitchChain" @click="switchL1Network">
+				Switch to {{ NETWORK.viemChain.name }}
 			</button>
 			<button class="disconnect" type="button" aria-label="Disconnect" :data-testid="TESTIDS.l1Disconnect" @click="disconnect">
 				✕

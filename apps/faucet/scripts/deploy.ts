@@ -32,6 +32,7 @@ import {
 	type InteractionFeeOptions,
 } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
+import { preexistingFeeJuicePayment } from "@nulo/bridge-core"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { type AztecNode, createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -68,7 +69,7 @@ function parseArgs(argv: string[]): CLIOptions {
 		return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined
 	}
 	const networkArg = flag("--network") ?? "testnet"
-	if (networkArg !== "testnet" && networkArg !== "local-network") {
+	if (networkArg !== "testnet" && networkArg !== "mainnet" && networkArg !== "local-network") {
 		throw new Error(`unknown --network: ${networkArg}`)
 	}
 	// Candidate-first (P5): a live deploy writes the CANDIDATE; only the receipted
@@ -323,7 +324,13 @@ async function run(): Promise<void> {
 		const accountInstance = await accountManager.getAccount()
 		logger.info(`Deployer account: ${accountInstance.getAddress().toString()}`)
 
-		const fee = await buildSponsoredFeeOptions(wallet)
+		// MAINNET has no SponsoredFPC — the (already-deployed, fee-juiced) deployer pays from its own
+		// public Fee Juice balance via the zero-call payload the account entrypoint routes as
+		// PREEXISTING_FEE_JUICE. Testnet/local keep the sponsored path.
+		const fee =
+			config.network.name === "mainnet"
+				? { paymentMethod: preexistingFeeJuicePayment(accountInstance.getAddress()) }
+				: await buildSponsoredFeeOptions(wallet)
 		await ensureAccountDeployed(accountManager, node, fee)
 
 		const deployOptions: DeployOptions = { from: accountInstance.getAddress(), fee }

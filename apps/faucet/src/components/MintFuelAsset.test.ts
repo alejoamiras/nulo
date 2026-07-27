@@ -5,13 +5,13 @@ import { ref } from "vue"
 const isConnected = ref(false)
 const wrongChain = ref(false)
 const connect = vi.fn()
-const switchToSepolia = vi.fn()
+const switchL1Network = vi.fn()
 const minting = ref(false)
 const mintError = ref<string | null>(null)
 const mint = vi.fn()
 
 vi.mock("@/composables/useL1Wallet", () => ({
-	useL1Wallet: () => ({ isConnected, wrongChain, connect, switchToSepolia }),
+	useL1Wallet: () => ({ isConnected, wrongChain, connect, switchL1Network }),
 }))
 vi.mock("@/composables/useL1FeeAsset", () => ({
 	useL1FeeAsset: () => ({ minting, mintError, mint }),
@@ -30,7 +30,7 @@ describe("MintFuelAsset", () => {
 		minting.value = false
 		mintError.value = null
 		connect.mockClear()
-		switchToSepolia.mockClear()
+		switchL1Network.mockClear()
 		mint.mockClear()
 	})
 
@@ -54,7 +54,7 @@ describe("MintFuelAsset", () => {
 		const w = mount(MintFuelAsset)
 		expect(btn(w).text()).toMatch(/switch to sepolia/i)
 		await btn(w).trigger("click")
-		expect(switchToSepolia).toHaveBeenCalledTimes(1)
+		expect(switchL1Network).toHaveBeenCalledTimes(1)
 		expect(mint).not.toHaveBeenCalled()
 	})
 
