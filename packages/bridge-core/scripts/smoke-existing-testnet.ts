@@ -179,6 +179,19 @@ async function main() {
 	const amount = 100n * 10n ** BigInt(decimals)
 	const l2recipient = from
 
+	const retryOnRevert = async <T>(fn: () => Promise<T>, tries = 3): Promise<T> => {
+		for (let i = 1; ; i++) {
+			try {
+				return await fn()
+			} catch (e) {
+				const msg = e instanceof Error ? e.message : String(e)
+				if (i >= tries || !/REVERTED/.test(msg)) throw e
+				console.log(`bridge() reverted (attempt ${i}/${tries}) — waiting one Aztec slot and retrying: ${msg.slice(0, 120)}`)
+				await new Promise((r) => setTimeout(r, 45_000))
+			}
+		}
+	}
+
 	// One deposit path for the whole smoke — the app's exact router flow: one-time Permit2 approve
 	// when the token needs it (TestUsdc/real USDC start at zero; MintableERC20 short-circuits), then
 	// the witness-bound bridge(). Returns the claim value (PRIVATE: the salt in = the value out;
@@ -203,24 +216,29 @@ async function main() {
 			needed: depAmount,
 			onStatus: (st, tx) => console.log(`permit2 approval: ${st}${tx ? ` (${tx})` : ""} (${mins()})`),
 		})
-		const r = await runRouterDeposit(
-			{ pub, wallet, account } as never,
-			{
-				router: routerCore.router,
-				routerAbi: SWAP_BRIDGE_ROUTER_ABI as never,
-				permit2: routerCore.permit2,
-				tokenPortal: portal,
-				bridgeToken: usdc,
-				amount: depAmount,
-				aztecRecipient: l2recipient.toString() as `0x${string}`,
-				isPrivate: priv,
-				swapTarget: routerCore.swapTarget,
-				claimSalt,
-				nonce: BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`),
-				deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
-				chainId: 11155111,
-			},
-			(st) => console.log(`l1: ${st} (${mins()})`),
+		// A bridge() can transiently REVERT when the Inbox's per-L2-slot message subtree fills (seen
+		// live: back-to-back deposits ~20s apart in one ~36s slot; the identical calldata succeeded on
+		// replay next block). Retry across slots; a persistent revert still fails the smoke.
+		const r = await retryOnRevert(() =>
+			runRouterDeposit(
+				{ pub, wallet, account } as never,
+				{
+					router: routerCore.router,
+					routerAbi: SWAP_BRIDGE_ROUTER_ABI as never,
+					permit2: routerCore.permit2,
+					tokenPortal: portal,
+					bridgeToken: usdc,
+					amount: depAmount,
+					aztecRecipient: l2recipient.toString() as `0x${string}`,
+					isPrivate: priv,
+					swapTarget: routerCore.swapTarget,
+					claimSalt,
+					nonce: BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`),
+					deadline: BigInt(Math.floor(Date.now() / 1000) + 1800),
+					chainId: 11155111,
+				},
+				(st) => console.log(`l1: ${st} (${mins()})`),
+			),
 		)
 		return { claimValue: Fr.fromHexString(r.claimValueHex), leafIndex: r.leafIndex }
 	}
