@@ -95,12 +95,14 @@ export interface DappSendExecutorLane {
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
 		reuseController?: AbortController,
+		fence?: ExecutionFence,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }>
 	beginJournal(
 		networkId: string,
 		accountAddress: string,
 		origin: LocalTxOrigin,
 		calls?: { method?: string }[],
+		fence?: ExecutionFence,
 	): Promise<string | undefined>
 	markJournal(journalId: string | undefined, progress: JobProgress, error?: JobError | null): Promise<void>
 }
@@ -154,6 +156,12 @@ export class DappSendExecutor {
 			accountAddress: string
 			origin: LocalTxOrigin
 			hooks: ExecutionHooks | undefined
+			// The AUTHORIZATION-time fence. The journal create must carry THIS
+			// epoch, not one recaptured after the FIFO wait: a profile deleted
+			// and reimported under the same id while the operation queued would
+			// otherwise mint a fresh epoch and file the stale operation into the
+			// successor incarnation.
+			fence: ExecutionFence | undefined
 			// A THUNK, not a value: the primary-method extraction reads the
 			// (potentially large / adversarial) `op.exec.calls`, and must run
 			// AFTER `acquireSlot` — computing it earlier would delay our FIFO
@@ -183,6 +191,7 @@ export class DappSendExecutor {
 				params.getCalls(),
 				params.hooks,
 				preController,
+				params.fence,
 			)
 			journalId = claimed.journalId
 			const controller = claimed.controller
@@ -279,6 +288,7 @@ export class DappSendExecutor {
 			op.accountAddress,
 			origin,
 			primaryMethod ? [{ method: primaryMethod }] : undefined,
+			fence,
 		)
 
 		const controller = journalId ? new AbortController() : undefined
@@ -374,6 +384,7 @@ export class DappSendExecutor {
 				accountAddress: op.accountAddress,
 				origin,
 				hooks,
+				fence,
 				getCalls: () => {
 					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
 					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
@@ -500,6 +511,7 @@ export class DappSendExecutor {
 				accountAddress: op.accountAddress,
 				origin,
 				hooks,
+				fence,
 				getCalls: () => {
 					// The shared picker, NOT the raw first call: a self-pay claim's fee payload leads the list
 					// (e.g. [claim_and_end_setup, claim_public]) and the raw pick titles it "Claim Fee Juice"
