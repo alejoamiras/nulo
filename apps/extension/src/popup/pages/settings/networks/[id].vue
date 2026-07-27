@@ -65,13 +65,21 @@ const handleSetActive = async () => {
 	// Guard first, persist second: the guard admits (and moves the in-memory
 	// scope) before the service write, so a refusal leaves nothing moved — the
 	// reverse order let the durable pointer escape a refused switch.
-	const result = await activateNetworkGuarded(appStore, (id) => managers.network.setActiveNetwork(id), target)
+	const result = await activateNetworkGuarded(
+		appStore,
+		(id) => managers.network.setActiveNetwork(id),
+		() => managers.network.getActiveNetwork(),
+		target,
+	)
 	if (result === "blocked") {
 		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
 		return
 	}
-	if (result === "failed") {
-		openToast({ label: "Failed to switch network", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+	if (result === "unconfirmed") {
+		openToast(
+			{ label: "Couldn't confirm the network switch — reopen the popup to verify", icon: "warning", color: "red" },
+			TOAST_DURATION.LONG,
+		)
 		return
 	}
 	openToast({ label: "Active network updated", icon: "check-circle" })
