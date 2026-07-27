@@ -14,10 +14,13 @@
  *     defaults at salt 1337 AND with our retired USDC/ETH drips (4242/4243).
  */
 
-export type Network = "testnet" | "local-network"
+export type Network = "testnet" | "mainnet" | "local-network"
 
 export const NETWORK_URLS: Record<Network, string> = {
 	testnet: "https://v5.testnet.rpc.aztec-labs.com",
+	// The Alpha node — same dRPC host the tools app + extension pin. Universal deploys (deployer
+	// ZERO, fixed salts) land the SAME addresses as testnet, so deployments.json serves both.
+	mainnet: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 	"local-network": "http://localhost:8080",
 }
 

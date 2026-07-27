@@ -6,6 +6,7 @@ import { DripperContractArtifact } from "@aztec-foundation/aztec-standards/artif
 import { reactive, ref } from "vue"
 import { DRIPPER } from "@/contracts/deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
+import { IS_MAINNET } from "@/lib/network"
 import type { FaucetToken, TokenSymbol } from "@/constants/tokens"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
@@ -59,16 +60,17 @@ async function drip(
 		if (typeof method !== "function") {
 			throw new Error(`Dripper missing method ${fnName}`)
 		}
-		const fpc = await getSponsoredFpcInstance()
-		// Pass the fee through `.request({ fee })` so aztec.js merges the
-		// SponsoredFPC's `sponsor_unconditionally()` call into exec.calls
-		// AND sets exec.feePayer. Tagging feePayer manually leaves the
-		// public setup phase with no sponsor call, which the sequencer
-		// rejects as "Setup function not on allow list".
+		// TESTNET: pass the fee through `.request({ fee })` so aztec.js merges the SponsoredFPC's
+		// `sponsor_unconditionally()` call into exec.calls AND sets exec.feePayer (tagging feePayer
+		// manually leaves the public setup phase with no sponsor call — "Setup function not on allow
+		// list"). MAINNET has no sponsor: pass NO fee override so the connected wallet applies the
+		// user's own fee method (the extension defaults Alpha to Private Fee Juice).
 		const interaction = method(tokenAddress, token.onchainAmount)
-		const exec = await interaction.request({
-			fee: { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) },
-		})
+		const exec = IS_MAINNET
+			? await interaction.request({})
+			: await interaction.request({
+					fee: { paymentMethod: new SponsoredFeePaymentMethod((await getSponsoredFpcInstance()).address) },
+				})
 
 		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast for SDK signature variance across versions
 		const tx = await (wallet as any).sendTx(exec, { from: account } as any)

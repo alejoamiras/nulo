@@ -92,7 +92,7 @@ function disconnect() {
 	walletClient.value = null
 }
 
-async function switchToSepolia() {
+async function switchL1Network() {
 	const provider = getProvider()
 	if (!provider) return
 	try {
@@ -127,6 +127,6 @@ export function useL1Wallet() {
 		publicClient,
 		connect,
 		disconnect,
-		switchToSepolia,
+		switchL1Network,
 	}
 }
