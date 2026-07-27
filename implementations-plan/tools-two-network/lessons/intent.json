@@ -1,5 +1,5 @@
 {
-	"builtAt": "2026-07-27T15:57:51.431Z",
+	"builtAt": "2026-07-27T16:47:25.754Z",
 	"primaryRpc": "https://v5.testnet.rpc.aztec-labs.com",
 	"identity": {
 		"nodeVersion": "5.0.0",
@@ -24,10 +24,10 @@
 	},
 	"signer": "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5",
 	"caps": {
-		"maxTotalEthSpend": "0.5",
-		"maxWethSeed": "0.25"
+		"maxTotalEthSpend": "2.0",
+		"maxWethSeed": "1.5"
 	},
-	"startingBalanceEth": 8.257404082126204,
+	"startingBalanceEth": 8.256759306019777,
 	"artifacts": {
 		"privateFpc": {
 			"address": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0",
@@ -41,7 +41,7 @@
 		}
 	},
 	"source": {
-		"commit": "f3e03d0df39ad5582899f8314ba2d03997976050",
+		"commit": "d2a693800fd2b84c867f42fec16db912579d1be8",
 		"treeClean": true,
 		"operationalAllowlist": [
 			"apps/faucet/public/testnet-bridge.candidate.json",
@@ -54,6 +54,5 @@
 			"implementations-plan/tools-two-network/lessons/",
 			"apps/faucet/public/testnet-bridge.journal.jsonl"
 		]
-	},
-	"candidateSha256": "7c530636845b2d26e30325ca3b08658c45a2257c7d4145b365384d11e98ecee4"
+	}
 }
