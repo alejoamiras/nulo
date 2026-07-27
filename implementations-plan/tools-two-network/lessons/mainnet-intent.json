@@ -74,6 +74,23 @@
       "bridge": "0x25a4113e69c60c4ef3fd62c195436d34fa100e96934b53951bdf6f5cb8198807 (== group-2 portal-bound address)",
       "portalEtherscan": "verified",
       "lesson": "node.getContract serves instances at a later finalization stage than CHECKPOINTED \u2014 fresh processes must wait out the proving lag before seeing a just-deployed account"
+    },
+    "4a-fpc-canary": {
+      "date": "2026-07-27",
+      "status": "PASSED (3.1m)",
+      "privateFpc": "0x1a6d21ce5fd80137df0e99632a4ca17e58a42dc8f6c08191a96ca8ae907a1bc0 (pinned derivation matched)",
+      "gateRequireDeployed": "green \u2014 live class == pinned artifact class",
+      "dust": {
+        "deposited": "15715250332080000000",
+        "leaf": 14801920,
+        "privateGained": "6286100132832000000",
+        "fee": "9429150199248000000"
+      },
+      "calibratedMinFuelFj": "15715250332080000000",
+      "lessons": [
+        "alpha lb fronts a MIXED 5.0.1/5.1.0 fleet \u2014 compat curation must cover both",
+        "account instances are never node.getContract-served (the later-deployed FPC became visible; the account never did) \u2014 existence guards must use the public FJ balance"
+      ]
     }
   }
 }
