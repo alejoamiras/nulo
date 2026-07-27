@@ -64,6 +64,16 @@
         "leafIndex": 14766080
       },
       "note": "one resume: viem getContract .read multi-arg calls need ARRAY args; crashed pre-spend on a read-only check, journal resumed cleanly"
+    },
+    "3-l2-trio": {
+      "date": "2026-07-27",
+      "status": "LIVE \u2014 all 9 read-backs green, candidate written (9.7m)",
+      "l2Account": "0x19ae6b7ccd52c19da48f537b7b189b7bf407db4fcfa1ae7c28d137104a6ad077 (claim-in-tx bootstrap, 300 FJ claimed)",
+      "proxy": "0x0681a3267a507b4f0edcd1186de3c052becc4ac581e6aa6d17c819c7a7b88784",
+      "token": "0x03bd1289e403c74cc919b2ead9f39e38e5f9ae044e56348bfc218c0a160232b4",
+      "bridge": "0x25a4113e69c60c4ef3fd62c195436d34fa100e96934b53951bdf6f5cb8198807 (== group-2 portal-bound address)",
+      "portalEtherscan": "verified",
+      "lesson": "node.getContract serves instances at a later finalization stage than CHECKPOINTED \u2014 fresh processes must wait out the proving lag before seeing a just-deployed account"
     }
   }
 }

@@ -1,0 +1,78 @@
+{
+	"network": "mainnet",
+	"l1ChainId": 1,
+	"walletChainId": 4248422646,
+	"l1": {
+		"usdc": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+		"portal": "0x3c32f16f5893c9699b4131a235604d8f5c6dfab6",
+		"portalSource": "forked-v1",
+		"privateClaimMode": "salt-v2",
+		"token": {
+			"name": "USD Coin",
+			"symbol": "USDC",
+			"decimals": 6,
+			"source": "circle-proxy"
+		},
+		"fuel": {
+			"core": {
+				"router": "0x2eb3435f5f47414fd10655d43199ecdcb0707559",
+				"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
+				"swapTarget": "0xfe001417c1060c908d157baecda0b6a076e87d8c",
+				"swapTargetContract": "UniswapFuelSwap",
+				"feeJuicePortal": "0xaf73dd51d1eb8a079bb097f39c832cdd00ac691c"
+			},
+			"swap": {
+				"poolManager": "0x000000000004444c5dc75cb358380d2e3de08a90",
+				"quoter": "0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203",
+				"weth": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+				"feeJuice": "0xa27ec0006e59f245217ff08cd52a7e8b169e62d2",
+				"pools": {
+					"tokenWeth": {
+						"fee": 500,
+						"tickSpacing": 10
+					},
+					"ethFj": {
+						"fee": 10000,
+						"tickSpacing": 200
+					}
+				},
+				"slippageBps": 300,
+				"minFuelFj": "30000000000000000000"
+			}
+		},
+		"feeJuice": {
+			"portal": "0xaf73dd51d1eb8a079bb097f39c832cdd00ac691c",
+			"asset": "0xa27ec0006e59f245217ff08cd52a7e8b169e62d2",
+			"minFj": "16000000000000000000"
+		}
+	},
+	"l2": {
+		"proxy": {
+			"address": "0x0681a3267a507b4f0edcd1186de3c052becc4ac581e6aa6d17c819c7a7b88784",
+			"salt": 942680973923,
+			"constructorArtifact": "constructor",
+			"constructorArgs": []
+		},
+		"token": {
+			"address": "0x03bd1289e403c74cc919b2ead9f39e38e5f9ae044e56348bfc218c0a160232b4",
+			"salt": 1018005023549,
+			"constructorArtifact": "constructor_with_minter",
+			"constructorArgs": [
+				"USD Coin",
+				"USDC",
+				6,
+				"0x0681a3267a507b4f0edcd1186de3c052becc4ac581e6aa6d17c819c7a7b88784",
+				"0x0000000000000000000000000000000000000000000000000000000000000000"
+			]
+		},
+		"bridge": {
+			"address": "0x25a4113e69c60c4ef3fd62c195436d34fa100e96934b53951bdf6f5cb8198807",
+			"salt": 1080623453876,
+			"constructorArtifact": "constructor",
+			"constructorArgs": [
+				"0x0681a3267a507b4f0edcd1186de3c052becc4ac581e6aa6d17c819c7a7b88784",
+				"0x3c32f16f5893c9699b4131a235604d8f5c6dfab6"
+			]
+		}
+	}
+}
