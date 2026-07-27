@@ -36,7 +36,8 @@ import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
  */
 export const PLAN_PINNED_L1_SIGNERS: Record<"testnet" | "mainnet", string | null> = {
 	testnet: "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5",
-	mainnet: null,
+	// Fresh network-keyed mainnet EOA (DP4), generated 2026-07-27; key held owner-side only.
+	mainnet: "0xE75e277a6800a37429dac55FcD2f3540E371059c",
 }
 
 /** Fail-closed signer lookup — throws while a network's signer is unpinned. */
