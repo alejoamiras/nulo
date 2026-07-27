@@ -26,8 +26,8 @@ interface IFeeJuicePortalView {
  *
  * REHEARSAL (no funds): run against a mainnet fork first —
  *   anvil --fork-url $ETH_RPC_URL &
- *   forge script script/DeployBridgeMainnet.s.sol --rpc-url http://localhost:8545 --broadcast \
- *     --private-key <anvil-funded-key>
+ *   PRIVATE_KEY=<anvil-funded-key> EXPECTED_DEPLOYER=<its address> \
+ *     forge script script/DeployBridgeMainnet.s.sol --rpc-url http://localhost:8545 --broadcast
  * The same in-script assertions (chain id, Circle USDC identity, portal binding, stub
  * inertness, router readbacks) run in rehearsal and in the real deploy.
  *
@@ -54,6 +54,11 @@ contract DeployBridgeMainnet is Script {
         address feeJuiceAsset = vm.envOr("FEE_JUICE_ASSET", DEFAULT_FEE_JUICE_ASSET);
 
         // ── Pre-flight (fails the SIMULATION, before any broadcast) ──────────
+        // The broadcaster MUST be the plan-pinned mainnet signer (PLAN_PINNED_L1_SIGNERS.mainnet,
+        // live-intent.ts) — passed as EXPECTED_DEPLOYER by the conductor/operator. envAddress has no
+        // default, so an unset pin fails closed: no arbitrary PRIVATE_KEY can deploy + own the router.
+        address expectedDeployer = vm.envAddress("EXPECTED_DEPLOYER");
+        require(vm.addr(pk) == expectedDeployer, "broadcaster != EXPECTED_DEPLOYER (plan-pinned signer) - STOP");
         require(block.chainid == 1, "mainnet (or a mainnet fork) only");
         require(PERMIT2.code.length > 0, "Permit2 has no code - wrong chain?");
         require(CIRCLE_USDC.code.length > 0, "Circle USDC has no code - wrong chain?");

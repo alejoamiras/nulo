@@ -20,9 +20,12 @@ export interface ManifestChainIdentity {
 export function checkBuildIntegrity(
 	target: Pick<FaucetTarget, "key" | "l1ChainId" | "walletChainId" | "host">,
 	manifest: ManifestChainIdentity,
-	opts: { hostname: string; isProd: boolean },
+	opts: { hostname: string; isProd: boolean; allowedPreviewHost?: string },
 ): string | null {
-	if (opts.isProd && opts.hostname !== target.host) {
+	// A Cloudflare PR preview is a PROD build at its EXACT baked preview hostname (CF_PAGES_URL at
+	// build time — never a wildcard, and never baked into mainnet builds; see makeFaucetConfig).
+	const hostOk = opts.hostname === target.host || (!!opts.allowedPreviewHost && opts.hostname === opts.allowedPreviewHost)
+	if (opts.isProd && !hostOk) {
 		return `hostname ${opts.hostname} != ${target.key} target host ${target.host} (mis-hosted build)`
 	}
 	if (manifest.l1ChainId === undefined || manifest.walletChainId === undefined) {
@@ -39,7 +42,11 @@ export function checkBuildIntegrity(
 
 /** Fail-closed gate called before mount — throws (app refuses to render) on any mismatch. */
 export function assertBuildIntegrity(hostname: string = typeof window !== "undefined" ? window.location.hostname : ""): void {
-	const err = checkBuildIntegrity(resolveFaucetTarget(), MANIFEST_CHAIN, { hostname, isProd: import.meta.env.PROD })
+	const err = checkBuildIntegrity(resolveFaucetTarget(), MANIFEST_CHAIN, {
+		hostname,
+		isProd: import.meta.env.PROD,
+		allowedPreviewHost: import.meta.env.VITE_ALLOWED_PREVIEW_HOST || undefined,
+	})
 	if (err) throw new Error(`build integrity check failed — refusing to load: ${err}`)
 }
 

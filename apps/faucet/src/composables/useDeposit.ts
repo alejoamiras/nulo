@@ -14,6 +14,7 @@ import {
 	awaitL1Receipt,
 	SWAP_BRIDGE_ROUTER_ABI,
 	bridgeWitnessPermitTypedData,
+	ensurePermit2Allowance,
 	buildFuelRoute,
 	deriveBridgeSecret,
 	deriveTokenClaimSecret,
@@ -816,28 +817,42 @@ export function useDepositFlow() {
 			// MintableERC20 auto-grants Permit2 → this short-circuits (no tx) for it; the DP7 token + real
 			// USDC are what exercise the approve (codex F2/F4). Mirrors useFuel's approve leg.
 			const ensurePermit2Approval = async (permit2: `0x${string}`, needed: bigint, recordId: string): Promise<void> => {
-				const allowance = (await l1.publicClient.readContract({
-					address: L1_USDC,
-					abi: ERC20_ABI,
-					functionName: "allowance",
-					args: [from, permit2],
-				})) as bigint
-				if (allowance >= needed) return
-				setRecordStep(recordId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
-				const approveHash = await runOnLane("l1", () =>
-					wallet.writeContract({
-						address: L1_USDC,
-						abi: ERC20_ABI,
-						functionName: "approve",
-						args: [permit2, (1n << 256n) - 1n],
-						chain: NETWORK.viemChain,
-						account: from,
-					}),
-				)
-				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
-					onStillWaiting: (attempt) => setRecordStep(recordId, "approving", `still waiting for the approval (round ${attempt})`),
+				// The shared approval state machine (bridge-core) — the same sequencing the candidate
+				// smokes rehearse. The approval hash is JOURNALED the moment it exists, so a rejection
+				// after the approval mines still shows the standing max allowance instead of
+				// "nothing was sent".
+				await ensurePermit2Allowance({
+					allowance: async () =>
+						(await l1.publicClient.readContract({
+							address: L1_USDC,
+							abi: ERC20_ABI,
+							functionName: "allowance",
+							args: [from, permit2],
+						})) as bigint,
+					approveMax: async () =>
+						(await runOnLane("l1", () =>
+							wallet.writeContract({
+								address: L1_USDC,
+								abi: ERC20_ABI,
+								functionName: "approve",
+								args: [permit2, (1n << 256n) - 1n],
+								chain: NETWORK.viemChain,
+								account: from,
+							}),
+						)) as `0x${string}`,
+					waitReceipt: async (hash) =>
+						await awaitL1Receipt(l1.publicClient, hash, {
+							onStillWaiting: (attempt) =>
+								setRecordStep(recordId, "approving", `still waiting for the approval (round ${attempt})`),
+						}),
+					needed,
+					onStatus: (status, txHash) => {
+						if (status === "approving")
+							setRecordStep(recordId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
+						if (status === "waiting" && txHash) updateRecord(recordId, { approveTxHash: txHash })
+						if (status === "approved") markApproveOutcome(recordId, "done")
+					},
 				})
-				markApproveOutcome(recordId, "done")
 			}
 
 			if (fuelPre && fuelSlice && BRIDGE_FUEL) {

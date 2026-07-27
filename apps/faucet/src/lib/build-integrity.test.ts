@@ -39,6 +39,34 @@ describe("checkBuildIntegrity — fail-closed target/manifest/hostname", () => {
 		expect(err).toMatch(/mis-hosted build/)
 	})
 
+	// CF Pages PR previews: the EXACT baked preview host is accepted; anything else still fails.
+	it("accepts the EXACT baked preview host (a CF Pages preview build)", () => {
+		const err = checkBuildIntegrity(
+			TESTNET,
+			{ l1ChainId: 11155111, walletChainId: 1816023401 },
+			{ hostname: "abc123.nulo-tools.pages.dev", isProd: true, allowedPreviewHost: "abc123.nulo-tools.pages.dev" },
+		)
+		expect(err).toBeNull()
+	})
+
+	it("REJECTS a different pages.dev host even when a preview host is baked (no wildcard)", () => {
+		const err = checkBuildIntegrity(
+			TESTNET,
+			{ l1ChainId: 11155111, walletChainId: 1816023401 },
+			{ hostname: "evil.nulo-tools.pages.dev", isProd: true, allowedPreviewHost: "abc123.nulo-tools.pages.dev" },
+		)
+		expect(err).toMatch(/mis-hosted build/)
+	})
+
+	it("REJECTS a preview host when none was baked (the mainnet artifact)", () => {
+		const err = checkBuildIntegrity(
+			MAINNET,
+			{ l1ChainId: 1, walletChainId: 4248422646 },
+			{ hostname: "abc123.nulo-tools.pages.dev", isProd: true },
+		)
+		expect(err).toMatch(/mis-hosted build/)
+	})
+
 	it("SKIPS the hostname check outside prod (localhost dev / e2e)", () => {
 		const err = checkBuildIntegrity(
 			TESTNET,

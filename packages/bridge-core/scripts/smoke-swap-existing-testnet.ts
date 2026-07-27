@@ -35,6 +35,7 @@ import { privateKeyToAccount } from "viem/accounts"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { feeJuiceAddress, publicFeeJuicePayment } from "../src/fee-juice"
 import { runSwapBridge } from "../src/flows"
+import { ensurePermit2Allowance } from "../src/l1"
 import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
 import { buildFuelRoute } from "../src/route"
 
@@ -80,7 +81,7 @@ async function main() {
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
 			address: azlo,
-			abi: evmAbi("MintableERC20") as never,
+			abi: evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20") as never,
 			functionName: "mint",
 			args: [account.address, TOTAL] as never,
 		}),
@@ -183,6 +184,27 @@ async function main() {
 	const quote = await quoteFuelPath(pub as never, swap.quoter, route, FUEL_SLICE)
 	const minOut = minOutputForSlippage(quote, swap.slippageBps)
 	console.log(`quote: ${FUEL_SLICE} AZLO-wei → ${quote} FJ-wei (floor ${minOut}) (${mins()})`)
+
+	const tokenAbi = evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20")
+	await ensurePermit2Allowance({
+		allowance: async () =>
+			(await pub.readContract({
+				address: azlo,
+				abi: tokenAbi as never,
+				functionName: "allowance",
+				args: [account.address, core.permit2],
+			})) as bigint,
+		approveMax: async () =>
+			await wallet.writeContract({
+				address: azlo,
+				abi: tokenAbi as never,
+				functionName: "approve",
+				args: [core.permit2, (1n << 256n) - 1n] as never,
+			}),
+		waitReceipt: async (hash) => await pub.waitForTransactionReceipt({ hash }),
+		needed: TOTAL,
+		onStatus: (st, tx) => console.log(`permit2 approval: ${st}${tx ? ` (${tx})` : ""} (${mins()})`),
+	})
 
 	const result = await runSwapBridge(
 		{ pub, wallet, account } as never,

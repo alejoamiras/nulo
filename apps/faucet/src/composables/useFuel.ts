@@ -6,6 +6,7 @@ import {
 	SWAP_BRIDGE_ROUTER_ABI,
 	awaitL1Receipt,
 	bridgeWitnessPermitTypedData,
+	ensurePermit2Allowance,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
 	isSealTrusted,
@@ -167,34 +168,43 @@ export function useFuelFlow() {
 			const swapTarget = BRIDGE_SWAP_TARGET
 			const feeAssetAddr = FUEL_ASSET
 			const fuelPortalAddr = FUEL_PORTAL
-			const p2Allowance = (await l1.publicClient.readContract({
-				address: feeAssetAddr,
-				abi: ERC20_ABI,
-				functionName: "allowance",
-				args: [from, permit2],
-			})) as bigint
-			if (p2Allowance < amount) {
-				setRecordStep(id, "approving", "first time only: approve Permit2 in your Ethereum wallet")
-				const approveHash = await runOnLane("l1", () =>
-					wallet.writeContract({
+			// The shared approval state machine (bridge-core) — same sequencing as the deposit leg and
+			// the candidate smokes. The approval hash is journaled the moment it exists (#292 resilient
+			// wait preserved via awaitL1Receipt); the APPROVE rail step renders only when an approval was
+			// actually part of this run.
+			const apprId = id
+			await ensurePermit2Allowance({
+				allowance: async () =>
+					(await l1.publicClient.readContract({
 						address: feeAssetAddr,
 						abi: ERC20_ABI,
-						functionName: "approve",
-						args: [permit2, (1n << 256n) - 1n],
-						chain: NETWORK.viemChain,
-						account: from,
+						functionName: "allowance",
+						args: [from, permit2],
+					})) as bigint,
+				approveMax: async () =>
+					(await runOnLane("l1", () =>
+						wallet.writeContract({
+							address: feeAssetAddr,
+							abi: ERC20_ABI,
+							functionName: "approve",
+							args: [permit2, (1n << 256n) - 1n],
+							chain: NETWORK.viemChain,
+							account: from,
+						}),
+					)) as `0x${string}`,
+				waitReceipt: async (hash) =>
+					await awaitL1Receipt(l1.publicClient, hash, {
+						onStillWaiting: (attempt) =>
+							setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
 					}),
-				)
-				// #292: resilient wait — checks reverted status + survives a post-mining RPC timeout, so a
-				// mined-but-slow approval doesn't strand the record without a depositTxHash / recovery path.
-				const apprId = id
-				await awaitL1Receipt(l1.publicClient, approveHash as `0x${string}`, {
-					onStillWaiting: (attempt) => setRecordStep(apprId, "approving", `still waiting for the approval (round ${attempt})`),
-				})
-				// Keeps the APPROVE step visible as done for the rest of the run — the rail renders it only
-				// when an approval was actually part of this run (a sufficient allowance shows no step at all).
-				markApproveOutcome(id, "done")
-			}
+				needed: amount,
+				onStatus: (status, txHash) => {
+					if (status === "approving")
+						setRecordStep(apprId, "approving", "first time only: approve Permit2 in your Ethereum wallet")
+					if (status === "waiting" && txHash) updateRecord(apprId, { approveTxHash: txHash })
+					if (status === "approved") markApproveOutcome(apprId, "done")
+				},
+			})
 
 			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)

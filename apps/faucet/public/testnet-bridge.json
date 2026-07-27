@@ -12,7 +12,8 @@
 			"symbol": "AZLO",
 			"decimals": 18,
 			"maxWholePerTx": 1000,
-			"source": "permissionless-mint"
+			"source": "permissionless-mint",
+			"sourceContract": "MintableERC20"
 		},
 		"fuel": {
 			"core": {

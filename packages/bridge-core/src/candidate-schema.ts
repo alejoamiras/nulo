@@ -129,6 +129,37 @@ export const candidateManifestSchema = z
 			.strict(),
 	})
 	.strict()
+	// Cross-field SEMANTIC invariants (codex bug-bash r1): syntactic strictness alone still admits a
+	// coherent-looking but unusable manifest. Each failure names its path.
+	.superRefine((m, ctx) => {
+		// A permissionless-mint token must name WHICH of our contracts it is — verify-l1 source-verifies
+		// against it, and the smokes select the mint ABI by it.
+		if (m.l1.token.source === "permissionless-mint" && !m.l1.token.sourceContract) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["l1", "token", "sourceContract"],
+				message: "required when token.source is permissionless-mint (verify-l1 needs the contract name)",
+			})
+		}
+		// The L1 token identity and the L2 token's constructor identity must agree — a drift mints an
+		// L2 asset with the wrong name/symbol/decimals (decimals mis-scales every bridged amount).
+		const args = m.l2.token.constructorArgs
+		if (args.length >= 3 && (args[0] !== m.l1.token.name || args[1] !== m.l1.token.symbol || args[2] !== m.l1.token.decimals)) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["l2", "token", "constructorArgs"],
+				message: `L2 token constructor identity [${String(args[0])}, ${String(args[1])}, ${String(args[2])}] != l1.token [${m.l1.token.name}, ${m.l1.token.symbol}, ${m.l1.token.decimals}]`,
+			})
+		}
+		// 10_000 bps would be a ZERO min-output floor — the swap could be sandwiched to dust.
+		if (m.l1.fuel?.swap && m.l1.fuel.swap.slippageBps >= 10_000) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["l1", "fuel", "swap", "slippageBps"],
+				message: "slippageBps must be < 10000 (10000 = a zero min-output floor)",
+			})
+		}
+	})
 
 export type ValidatedCandidateManifest = z.infer<typeof candidateManifestSchema>
 

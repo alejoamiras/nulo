@@ -117,6 +117,10 @@ export interface DepositJournalRecord extends JournalBase {
 	secretHashHex: string
 	/** Display copy of the sealing L1 account (authoritative copy lives inside the envelope). */
 	sealerL1?: string
+	/** The one-time Permit2 approval's tx hash, when THIS deposit performed it — persisted so a
+	 *  post-approval rejection/timeout still shows the mined approval (a standing max allowance)
+	 *  instead of "nothing was sent" (codex bug-bash r1). */
+	approveTxHash?: string
 	/** Persisted the moment writeContract returns - leafIndex stays chain-recoverable. */
 	depositTxHash?: string
 	leafIndex?: string

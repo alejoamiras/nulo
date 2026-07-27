@@ -450,7 +450,11 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
  * manifest — new or changed fuel infrastructure hard-fails the promotion.
  */
-async function promote(intentPath: string): Promise<void> {
+async function promote(intentPath: string, opts: { bridgeOnly?: boolean } = {}): Promise<void> {
+	// --bridge-only: a bridge cutover that touches NO faucet deployment (codex r1 HIGH-4). The faucet
+	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the
+	// promotion provably leaves it byte-identical.
+	const bridgeOnly = opts.bridgeOnly === true
 	const bridgeCandidatePath = join(repoRoot, "apps/faucet/public/testnet-bridge.candidate.json")
 	const bridgeLivePath = join(repoRoot, "apps/faucet/public/testnet-bridge.json")
 	const faucetCandidatePath = join(repoRoot, "apps/faucet/src/contracts/deployments.candidate.json")
@@ -475,12 +479,18 @@ async function promote(intentPath: string): Promise<void> {
 
 	// 1. Symlink rejection on every involved path (a symlinked live target would
 	// redirect the rename; a symlinked candidate breaks the read-once contract).
-	for (const p of [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]) {
+	const involvedPaths = bridgeOnly
+		? [bridgeCandidatePath, bridgeLivePath, faucetLivePath]
+		: [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]
+	for (const p of involvedPaths) {
 		let st: ReturnType<typeof lstatSync> | undefined
 		try {
 			st = lstatSync(p)
 		} catch {
-			if (p === bridgeCandidatePath || p === faucetCandidatePath) throw new Error(`candidate missing: ${p} — nothing to promote`)
+			if (p === bridgeCandidatePath || (!bridgeOnly && p === faucetCandidatePath))
+				throw new Error(`candidate missing: ${p} — nothing to promote`)
+			if (bridgeOnly && p === faucetLivePath)
+				throw new Error(`--bridge-only requires an existing live faucet manifest to pin: ${p} — STOP`)
 			continue // a live target may not exist yet — rename will create it
 		}
 		if (st.isSymbolicLink()) throw new Error(`refusing to promote through a symlink: ${p}`)
@@ -491,22 +501,26 @@ async function promote(intentPath: string): Promise<void> {
 	// separately, and an edit between the two reads would otherwise ship bytes that
 	// skipped the digest pin + privileged readbacks (review finding #4).
 	const bridgeBytes = readFileSync(bridgeCandidatePath)
-	const faucetBytes = readFileSync(faucetCandidatePath)
+	const faucetBytes = bridgeOnly ? null : readFileSync(faucetCandidatePath)
 	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")
-	const faucetSha = createHash("sha256").update(faucetBytes).digest("hex")
+	const faucetSha = faucetBytes ? createHash("sha256").update(faucetBytes).digest("hex") : null
+	// The bridge-only pin: the live faucet manifest's digest BEFORE any write; re-asserted after.
+	const faucetLivePin = bridgeOnly ? createHash("sha256").update(readFileSync(faucetLivePath)).digest("hex") : null
 	if (bridgeSha !== intent.candidateSha256) {
 		throw new Error(
 			`bridge candidate bytes changed between verify and promote: ${bridgeSha} != recorded ${intent.candidateSha256} — STOP`,
 		)
 	}
 	const bridgeCandidate = parseCandidateManifest(JSON.parse(bridgeBytes.toString("utf8")))
-	assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
+	if (faucetBytes) {
+		assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
 
-	// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
-	// previously a junk candidate failed only AFTER the live file was overwritten.
-	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
-		stdio: "inherit",
-	})
+		// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
+		// previously a junk candidate failed only AFTER the live file was overwritten.
+		execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
+			stdio: "inherit",
+		})
+	}
 
 	// 3. Zero-seed assertion: fuel section byte-carried from live (or absent in both).
 	let liveFuel: unknown
@@ -518,10 +532,13 @@ async function promote(intentPath: string): Promise<void> {
 	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel)
 
 	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
-	const writes: Array<[string, Buffer, string]> = [
-		[bridgeLivePath, bridgeBytes, bridgeSha],
-		[faucetLivePath, faucetBytes, faucetSha],
-	]
+	const writes: Array<[string, Buffer, string]> =
+		faucetBytes && faucetSha
+			? [
+					[bridgeLivePath, bridgeBytes, bridgeSha],
+					[faucetLivePath, faucetBytes, faucetSha],
+				]
+			: [[bridgeLivePath, bridgeBytes, bridgeSha]]
 	for (const [target, bytes, sha] of writes) {
 		mkdirSync(dirname(target), { recursive: true })
 		const tmp = `${target}.promote-tmp`
@@ -537,7 +554,16 @@ async function promote(intentPath: string): Promise<void> {
 	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
 	// re-prove the faucet derivation through the real gate.
 	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
-	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], { stdio: "inherit" })
+	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], {
+		stdio: "inherit",
+		env: { ...process.env, BRIDGE_MANIFEST: bridgeLivePath },
+	})
+	if (faucetLivePin) {
+		const after = createHash("sha256").update(readFileSync(faucetLivePath)).digest("hex")
+		if (after !== faucetLivePin) {
+			throw new Error(`--bridge-only violated: live faucet manifest changed (${after} != pinned ${faucetLivePin}) — investigate NOW`)
+		}
+	}
 
 	// 6. Promotion receipt — committed by the operator alongside the promoted files.
 	const receiptPath = join(repoRoot, "implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json")
@@ -550,8 +576,11 @@ async function promote(intentPath: string): Promise<void> {
 				promotedAt: new Date().toISOString(),
 				intent: intentPath,
 				commitAtPromotion: commit,
+				mode: bridgeOnly ? "bridge-only" : "bridge+faucet",
 				bridge: { candidateSha256: bridgeSha, live: "apps/faucet/public/testnet-bridge.json" },
-				faucet: { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" },
+				faucet: faucetSha
+					? { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" }
+					: { unchangedSha256: faucetLivePin, live: "apps/faucet/src/contracts/deployments.json" },
 				zeroSeed: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
 			},
 			null,
@@ -572,13 +601,14 @@ if (isMain) {
 	}
 	const candidateFlag = rest.indexOf("--candidate")
 	const candidatePath = candidateFlag !== -1 ? rest[candidateFlag + 1] : undefined
+	const bridgeOnly = rest.includes("--bridge-only")
 	const run =
 		cmd === "build"
 			? build(intentPath)
 			: cmd === "verify"
 				? verify(intentPath, candidatePath)
 				: cmd === "promote"
-					? promote(intentPath)
+					? promote(intentPath, { bridgeOnly })
 					: Promise.reject(new Error(`unknown command ${cmd}`))
 	run.catch((err) => {
 		console.error(`✗ ${err instanceof Error ? err.message : err}`)

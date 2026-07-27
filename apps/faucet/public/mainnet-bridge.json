@@ -35,13 +35,13 @@
 			"constructorArgs": []
 		},
 		"token": {
-			"address": "0x24efd640bf86acce447d67ab91094dd52d41b49fa71204cf085d252e58d01443",
+			"address": "0x0e536ab48b8db181c5c555af13ac65d3006e07aaaddac961f3d29736a9a71ca3",
 			"salt": 365987950302,
 			"constructorArtifact": "constructor_with_minter",
 			"constructorArgs": [
-				"Aztec Nulo",
-				"AZLO",
-				18,
+				"USD Coin",
+				"USDC",
+				6,
 				"0x142110cbe687fb7a20bebede97c72140954259946846189e16a3140bbbf1eeb6",
 				"0x0000000000000000000000000000000000000000000000000000000000000000"
 			]

@@ -67,6 +67,25 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		expect(() => parseCandidateManifest(m)).toThrow(/core/)
 	})
 
+	// Semantic invariants (superRefine): coherent-looking but unusable manifests must reject.
+	it("rejects a permissionless-mint token WITHOUT sourceContract (verify-l1 needs the name)", () => {
+		const m = liveManifest()
+		delete m.l1.token.sourceContract
+		expect(() => parseCandidateManifest(m)).toThrow(/sourceContract/)
+	})
+
+	it("rejects an L1 token identity that drifts from the L2 constructor identity", () => {
+		const m = liveManifest()
+		m.l1.token.decimals = 6 // L2 constructorArgs still say 18 — a mis-scale of every bridged amount
+		expect(() => parseCandidateManifest(m)).toThrow(/constructor identity/)
+	})
+
+	it("rejects slippageBps 10000 (a zero min-output floor)", () => {
+		const m = liveManifest()
+		m.l1.fuel.swap.slippageBps = 10_000
+		expect(() => parseCandidateManifest(m)).toThrow(/slippageBps/)
+	})
+
 	// verify-l1 source-verifies a permissionless-mint token against token.sourceContract — the DP7
 	// cutover candidate declares TestUsdc; absent defaults to the legacy MintableERC20; junk rejects.
 	it("accepts token.sourceContract TestUsdc (the DP7 cutover shape) and rejects unknown contracts", () => {
