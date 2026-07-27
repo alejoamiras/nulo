@@ -12,7 +12,7 @@
 		"rollupVersion": 4248422647
 	},
 	"compatibleNodeVersions": {
-		"$comment": "HUMAN-CURATED, digest-keyed — DELIBERATELY EMPTY: the live Alpha node reports 5.1.0 while our pinned line is 5.0.1, and no owner ruling exists yet on 5.0.1-artifact-vs-5.1.0-node compatibility. An empty list makes the FPC gate FAIL CLOSED on mainnet (a wrong ruling here opens the unrecoverable-deposit window). Before the Phase-8 mainnet PrivateFPC deploy the owner must rule and add e.g. [\"5.1.0\"] — mirroring the 5.0.0 testnet ruling's process.",
-		"d5a2453cda5cc05026cbda68a57afc5951f73fb08649f66cea8c412be6c54acc": []
+		"$comment": "HUMAN-CURATED, digest-keyed. OWNER RULING 2026-07-27: the 5.0.1 artifact is compatible with the live 5.1.0 Alpha node (mirrors the testnet 5.0.0/5.0.1 ruling; the post-deploy dust canary remains the authoritative on-net proof before any real funding/promotion). A new artifact digest requires fresh curation, never inherited compat.",
+		"d5a2453cda5cc05026cbda68a57afc5951f73fb08649f66cea8c412be6c54acc": ["5.1.0"]
 	}
 }
