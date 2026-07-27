@@ -35,9 +35,11 @@ export interface FuelDepositPlan {
 	salt?: Fr
 }
 
-/** Plan a PUBLIC fee-juice deposit: lands recipient-bound, claimed to the public Fee-Juice balance. */
-export async function planPublicFuelDeposit(recipient: AztecAddress, amount: bigint): Promise<FuelDepositPlan> {
-	const secret = Fr.random()
+/** Plan a PUBLIC fee-juice deposit: lands recipient-bound, claimed to the public Fee-Juice balance.
+ *  `secret` may be supplied for a DETERMINISTIC plan (e.g. derived from a deployer secret) so a
+ *  crash between the L1 deposit and the L2 claim is resumable with no secret persisted anywhere;
+ *  a leaked public-deposit secret is grief-free regardless (the claim is recipient-bound). */
+export async function planPublicFuelDeposit(recipient: AztecAddress, amount: bigint, secret: Fr = Fr.random()): Promise<FuelDepositPlan> {
 	const secretHash = await computeSecretHash(secret)
 	return { to: recipient.toString() as Hex, amount, secretHash: secretHash.toString() as Hex, secret, isPrivate: false }
 }
