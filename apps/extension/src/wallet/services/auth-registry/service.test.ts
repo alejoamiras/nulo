@@ -21,7 +21,6 @@ import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
 import { TRANSACTION_SERVICE_NAME, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
-import { DROPPED_RESURRECTION_WINDOW_MS } from "@/wallet/services/transaction/service"
 import { svc } from "../composition-harness"
 import { AuthRegistryService, MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "./service"
 import type { Authwit } from "./spec"
@@ -91,7 +90,7 @@ describe("AuthRegistryService — pending/reconcile/cap (Phase 5)", () => {
 	})
 })
 
-describe("AuthRegistryService.reconcileFromTx — dropped-finality gating", () => {
+describe("AuthRegistryService.reconcileFromTx — dropped is non-destructive", () => {
 	let service: AuthRegistryService
 	let txUpdated: EventHandler<unknown>
 
@@ -118,13 +117,13 @@ describe("AuthRegistryService.reconcileFromTx — dropped-finality gating", () =
 		await new Promise((r) => setTimeout(r, 10))
 	}
 
-	test("a FIRST Dropped observation does NOT remove pending rows (resurrection still possible)", async () => {
+	test("a Dropped tx does NOT remove pending rows — dropped is reversible (resurrection); sync reconciles", async () => {
 		await emitTx({ hash: "0xtx1", status: TxStatus.Dropped, updatedAt: Date.now() })
 		expect(await service.getAuthwits(A)).toHaveLength(1)
 	})
 
-	test("a FINAL Dropped (past the resurrection window) removes the pending row", async () => {
-		await emitTx({ hash: "0xtx1", status: TxStatus.Dropped, updatedAt: Date.now() - DROPPED_RESURRECTION_WINDOW_MS - 1_000 })
+	test("a settled reverted tx removes the pending row (genuinely terminal)", async () => {
+		await emitTx({ hash: "0xtx1", status: TxStatus.Proven, executionResult: TxExecutionResult.AppLogicReverted, updatedAt: Date.now() })
 		expect(await service.getAuthwits(A)).toHaveLength(0)
 	})
 

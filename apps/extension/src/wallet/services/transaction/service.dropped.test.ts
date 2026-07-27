@@ -31,7 +31,6 @@ import {
 	TransactionService,
 	TxExecutionResult,
 	TxStatus,
-	isDroppedFinal,
 	type Tx,
 } from "./service"
 
@@ -170,12 +169,6 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		await tick(DROPPED_RESURRECTION_WINDOW_MS + 5_000)
 		const callsAfterExpiry = getTxReceipt.mock.calls.length
 
-		// Expiry re-emits the row unchanged as the "Dropped is now FINAL" signal
-		// destructive consumers (authwit reconcile-removal) gate on.
-		expect(updates).toHaveLength(2)
-		expect(updates[1].status).toBe(TxStatus.Dropped)
-		expect(isDroppedFinal(updates[1])).toBe(true)
-
 		defaultReceipt = mined
 		await tick(60_000)
 		expect(getTxReceipt.mock.calls.length).toBe(callsAfterExpiry)
@@ -211,6 +204,7 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		})
 		// The poll starts and parks on the gate mid-tick.
 		await tick(1_000)
+		expect(getTxReceipt).toHaveBeenCalledTimes(1)
 		await service.purgeForAccounts([ACCOUNT])
 		expect(await service.getTransactions(ACCOUNT)).toHaveLength(0)
 
@@ -218,13 +212,6 @@ describe("TransactionService — DROPPED debounce + resurrection", () => {
 		await tick(0)
 		expect(await service.getTransactions(ACCOUNT)).toHaveLength(0)
 		expect(updates).toHaveLength(0)
-	})
-
-	test("isDroppedFinal: only an aged Dropped row is final", () => {
-		const young = { status: TxStatus.Dropped, updatedAt: Date.now() }
-		expect(isDroppedFinal(young)).toBe(false)
-		expect(isDroppedFinal({ ...young, updatedAt: Date.now() - DROPPED_RESURRECTION_WINDOW_MS - 1_000 })).toBe(true)
-		expect(isDroppedFinal({ status: TxStatus.Pending, updatedAt: 0 })).toBe(false)
 	})
 
 	test("non-dropped transitions are untouched by the debounce", async () => {

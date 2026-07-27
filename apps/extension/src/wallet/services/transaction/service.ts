@@ -53,15 +53,6 @@ export const DROPPED_CONFIRMATIONS = 3
 export const DROPPED_RESURRECTION_WINDOW_MS = 30 * 60_000
 export const DROPPED_RECHECK_INTERVAL_MS = 15_000
 
-/** Whether a Dropped row is past the resurrection window — the wallet will no
- *  longer flip it back on a late mine. Consumers that act DESTRUCTIVELY on a
- *  drop (e.g. the authwit reconcile-removal) must gate on this instead of the
- *  first Dropped observation, which is still reversible. The watch-expiry
- *  re-emit of `onTransactionUpdated` is the event that turns this true. */
-export function isDroppedFinal(tx: Pick<Tx, "status" | "updatedAt">, now = Date.now()): boolean {
-	return tx.status === TxStatus.Dropped && now - tx.updatedAt > DROPPED_RESURRECTION_WINDOW_MS
-}
-
 export class TransactionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTransactions", "getTransaction")
 	public static name = TRANSACTION_SERVICE_NAME
@@ -347,12 +338,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			if (now - tx.updatedAt > DROPPED_RESURRECTION_WINDOW_MS) {
 				this.droppedWatch.delete(hash)
 				this.droppedNextCheckAt.delete(hash)
-				// Row state is unchanged; the re-emit is the "Dropped is now FINAL —
-				// no resurrection can follow" signal. Consumers that act
-				// destructively on a drop (authwit reconcile-removal) gate on
-				// `isDroppedFinal` and therefore act on THIS event, not on the
-				// initial (still-reversible) Dropped transition.
-				this.emit("onTransactionUpdated", tx)
 				continue
 			}
 			if ((this.droppedNextCheckAt.get(hash) ?? 0) <= now) {

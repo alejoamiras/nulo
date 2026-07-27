@@ -11,7 +11,7 @@ import { AccountService } from "@/wallet/services/account/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
-import { TransactionService, OriginType, isDroppedFinal } from "@/wallet/services/transaction/service"
+import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
 import { type Tx, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, Lock, sleep } from "@/wallet/utils"
@@ -96,13 +96,13 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	}
 
 	/** Map a tx's settled on-chain outcome to a pending-authwit reconcile. Proven/Finalized
-	 *  + Success ⇒ confirm; FINAL Dropped or any settled non-success (reverted) ⇒ remove.
-	 *  Other (non-terminal) statuses are ignored — `set_authorized` only takes effect once
-	 *  mined. A FIRST Dropped observation is NOT final: the transaction service may still
-	 *  resurrect the tx on a late mine (transient DROPPED answers happen behind
-	 *  load-balanced RPCs), and a row removed here cannot be reconfirmed later — authwit
-	 *  hashes aren't enumerable from chain. `isDroppedFinal` turns true on the watch-expiry
-	 *  re-emit of `onTransactionUpdated`, which is when the removal actually runs. */
+	 *  + Success ⇒ confirm; settled non-success (reverted) ⇒ remove. A Dropped status
+	 *  deliberately does NOTHING: the transaction service may still resurrect a dropped tx
+	 *  on a late mine (transient DROPPED answers happen behind load-balanced RPCs), and a
+	 *  row removed here can never be reconfirmed — authwit hashes aren't enumerable from
+	 *  chain. A stale pending row for a genuinely dropped tx is the SAFE direction
+	 *  (over-claiming; revoking a never-landed grant is a no-op) and registry sync
+	 *  reconciles it eventually. */
 	private async reconcileFromTx(tx: Tx): Promise<void> {
 		const settled = tx.status === TxStatus.Proven || tx.status === TxStatus.Finalized
 		if (settled && tx.executionResult === TxExecutionResult.Success) {
@@ -110,7 +110,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			return
 		}
 		const reverted = settled && tx.executionResult !== undefined && tx.executionResult !== TxExecutionResult.Success
-		if (isDroppedFinal(tx) || reverted) {
+		if (reverted) {
 			await this.reconcileAuthwits(tx.hash, "dropped")
 		}
 	}
