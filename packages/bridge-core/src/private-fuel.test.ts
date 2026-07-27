@@ -149,6 +149,29 @@ describe("private-fuel keystone", () => {
 		expect(descriptor.network.l1ChainId).toBe(11155111)
 		expect(descriptor.network.rollupVersion).toBe(1821665230)
 	})
+
+	it("MAINNET DESCRIPTOR — same identity as testnet (derivation is network-independent), mainnet pins, FAIL-CLOSED compat", () => {
+		// check-fpc-version selects the descriptor whose network pins match the live node. The FPC
+		// address derives from bytecode + canonical salt + ZERO deployer — network-independent — so
+		// the two descriptors MUST agree on identity and differ ONLY in network pins + compat curation.
+		const dir = fileURLToPath(new URL(".", import.meta.url))
+		const testnet = JSON.parse(readFileSync(join(dir, "private-fpc-canonical.json"), "utf8"))
+		const mainnet = JSON.parse(readFileSync(join(dir, "private-fpc-canonical-mainnet.json"), "utf8"))
+		expect(mainnet.expectedAddress).toBe(testnet.expectedAddress)
+		expect(mainnet.salt).toBe(testnet.salt)
+		expect(mainnet.deployer).toBe(testnet.deployer)
+		expect(mainnet.artifactSha256).toBe(testnet.artifactSha256)
+		expect(mainnet.aztecVersion).toBe(testnet.aztecVersion)
+		// Alpha/mainnet identity (verified live 2026-07-24): (1 ^ 4248422647) >>> 0 = 4248422646.
+		expect(mainnet.network.l1ChainId).toBe(1)
+		expect(mainnet.network.rollupVersion).toBe(4248422647)
+		// FAIL-CLOSED pin: the compat list is deliberately EMPTY until the owner rules on
+		// 5.0.1-artifact-vs-5.1.0-node compatibility — the mainnet FPC gate must RED until then.
+		// (When the ruling lands, this assertion flips to expect the curated version list.)
+		const compat = mainnet.compatibleNodeVersions[mainnet.artifactSha256]
+		expect(Array.isArray(compat)).toBe(true)
+		expect(compat).toHaveLength(0)
+	})
 })
 
 // Canonical FeeJuice lives at protocol address 3.

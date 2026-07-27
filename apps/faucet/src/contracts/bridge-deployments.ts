@@ -6,7 +6,7 @@ import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { parseCandidateManifest } from "@nulo/bridge-core"
-import rawConfig from "../../public/testnet-bridge.json"
+import rawTestnetConfig from "../../public/testnet-bridge.json"
 
 /*
  * testnet-bridge.json is DEPLOY METADATA, not registerable instances. We rebuild each L2
@@ -18,21 +18,29 @@ import rawConfig from "../../public/testnet-bridge.json"
  * the faucet loudly at boot instead of shipping a broken lane (the rc.2 arc shipped a stale
  * carried feeJuicePortal precisely because this file used to cast an untyped `fuel` block).
  */
-const config = parseCandidateManifest(rawConfig)
+// The bridge manifest is injected per build target via vite `define` (import.meta.env). Falls back to
+// the static testnet import under vitest (no define) and the default `vite build` — so tests + the
+// legacy testnet build are unchanged. The mainnet build injects public/mainnet-bridge.json.
+const injectedManifest = import.meta.env.VITE_BRIDGE_MANIFEST_JSON
+const config = parseCandidateManifest(injectedManifest ? JSON.parse(injectedManifest) : rawTestnetConfig)
 
 export const L1_USDC = config.l1.usdc as `0x${string}`
 export const L1_PORTAL = config.l1.portal as `0x${string}`
 
+/** The chain identity this manifest declares — consumed by the build-integrity assertion (fail-closed
+ *  target↔manifest↔node check). `undefined` on a legacy manifest without the fields ⇒ a hard error there. */
+export const MANIFEST_CHAIN = { l1ChainId: config.l1ChainId, walletChainId: config.walletChainId }
+
 /**
- * Router + Permit2 are REQUIRED bridge config now (bridge-only + fuel-only both go through the
- * router's `bridge()` — C7). They currently live under `l1.fuel`; read them from there but treat
- * them as bridge-level requirements. `undefined` here means the (post-cutover) single-path deposit
+ * Router + Permit2 are REQUIRED bridge config (bridge-only + fuel-only both go through the router's
+ * `bridge()` — C7). They live under `l1.fuel.core` (the router + its constructor deps), present on
+ * BOTH the testnet and the bridge-only mainnet shape. `undefined` here means the single-path deposit
  * cannot run — the deposit code asserts their presence fail-closed.
  */
-export const BRIDGE_ROUTER = (config.l1 as { fuel?: { router?: string } }).fuel?.router as `0x${string}` | undefined
-export const BRIDGE_PERMIT2 = (config.l1 as { fuel?: { permit2?: string } }).fuel?.permit2 as `0x${string}` | undefined
+export const BRIDGE_ROUTER = config.l1.fuel?.core.router as `0x${string}` | undefined
+export const BRIDGE_PERMIT2 = config.l1.fuel?.core.permit2 as `0x${string}` | undefined
 /** The router's current swap target — witness-bound even for a bridge-only deposit (F-004). */
-export const BRIDGE_SWAP_TARGET = (config.l1 as { fuel?: { swapTarget?: string } }).fuel?.swapTarget as `0x${string}` | undefined
+export const BRIDGE_SWAP_TARGET = config.l1.fuel?.core.swapTarget as `0x${string}` | undefined
 
 /**
  * L9 runtime interlock (codex cond. 2): the deposit code REFUSES to build a private deposit unless
@@ -54,7 +62,7 @@ export interface FuelDeployment {
 	weth: `0x${string}`
 	feeJuice: `0x${string}`
 	pools: {
-		azloWeth: { fee: number; tickSpacing: number }
+		tokenWeth: { fee: number; tickSpacing: number }
 		ethFj: { fee: number; tickSpacing: number }
 	}
 	slippageBps: number
@@ -63,24 +71,29 @@ export interface FuelDeployment {
 
 // Fully typed via the strict schema — the pool keys the swap UI needs are asserted here (the
 // schema keeps `pools` an open record; the faucet's swap lane requires these two specifically).
+// The swap-fuel stack. Present ONLY when `l1.fuel.swap` exists (testnet) — a bridge-only mainnet
+// manifest omits `swap`, so BRIDGE_FUEL is undefined and the swap-fuel UI never renders (DP2). The
+// flat shape is preserved (core + swap merged) so every downstream consumer is unchanged.
 const fuelCfg = config.l1.fuel
 const requiredPools = (pools: Record<string, { fee: number; tickSpacing: number }>): FuelDeployment["pools"] => {
-	const { azloWeth, ethFj } = pools
-	if (!azloWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.pools must include azloWeth and ethFj")
-	return { azloWeth, ethFj }
+	// `tokenWeth` is the generic key (any bridged token); `azloWeth` is the AZLO-era legacy spelling.
+	const tokenWeth = pools.tokenWeth ?? pools.azloWeth
+	const { ethFj } = pools
+	if (!tokenWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.swap.pools must include tokenWeth (or legacy azloWeth) and ethFj")
+	return { tokenWeth, ethFj }
 }
-export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg
+export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg?.swap
 	? {
-			router: fuelCfg.router as `0x${string}`,
-			swapTarget: fuelCfg.swapTarget as `0x${string}`,
-			permit2: fuelCfg.permit2 as `0x${string}`,
-			poolManager: fuelCfg.poolManager as `0x${string}`,
-			quoter: fuelCfg.quoter as `0x${string}`,
-			weth: fuelCfg.weth as `0x${string}`,
-			feeJuice: fuelCfg.feeJuice as `0x${string}`,
-			pools: requiredPools(fuelCfg.pools),
-			slippageBps: fuelCfg.slippageBps,
-			minFuelFj: BigInt(fuelCfg.minFuelFj),
+			router: fuelCfg.core.router as `0x${string}`,
+			swapTarget: fuelCfg.core.swapTarget as `0x${string}`,
+			permit2: fuelCfg.core.permit2 as `0x${string}`,
+			poolManager: fuelCfg.swap.poolManager as `0x${string}`,
+			quoter: fuelCfg.swap.quoter as `0x${string}`,
+			weth: fuelCfg.swap.weth as `0x${string}`,
+			feeJuice: fuelCfg.swap.feeJuice as `0x${string}`,
+			pools: requiredPools(fuelCfg.swap.pools),
+			slippageBps: fuelCfg.swap.slippageBps,
+			minFuelFj: BigInt(fuelCfg.swap.minFuelFj),
 		}
 	: undefined
 
@@ -99,10 +112,14 @@ export const FUEL_MIN_FJ = feeJuiceCfg?.minFj ? BigInt(feeJuiceCfg.minFj) : unde
 export const BRIDGE_PROXY = AztecAddress.fromStringUnsafe(config.l2.proxy.address)
 export const BRIDGE_TOKEN = AztecAddress.fromStringUnsafe(config.l2.token.address)
 
-/** The bridged pair's display identity - ONE source for every surface. The token-identity flip
- *  (AZLO/18) changes these two lines + the deployment config; nothing else. */
-export const BRIDGE_TOKEN_SYMBOL = "AZLO"
-export const BRIDGE_TOKEN_DECIMALS = 18
+/** The bridged pair's display identity — derived from the manifest so each network gets its own
+ *  (testnet AZLO/18, mainnet USDC/6). A wrong decimals here mis-scales every amount, so it is NOT
+ *  hardcoded. */
+export const BRIDGE_TOKEN_SYMBOL = config.l1.token.symbol
+export const BRIDGE_TOKEN_DECIMALS = config.l1.token.decimals
+/** Whether the bridged token is our permissionless-mint test token (has mint()) vs a real
+ *  `circle-proxy` token — gates the MintTestUsdc affordance off on mainnet. */
+export const BRIDGE_TOKEN_MINTABLE = config.l1.token.source !== "circle-proxy"
 export const BRIDGE = AztecAddress.fromStringUnsafe(config.l2.bridge.address)
 
 const common = { publicKeys: PublicKeys.default(), deployer: AztecAddress.ZERO } as const

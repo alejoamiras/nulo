@@ -10,7 +10,7 @@ import {
 	recoveryKeyMessage,
 	sealBridgeBackup,
 } from "@nulo/bridge-core"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { addRecordVerified, runOnLane, useBridgeJournal } from "./useBridgeJournal"
 import { getRetainedSealKey, providerFingerprint } from "./useDeposit"
@@ -117,7 +117,7 @@ export function useBridgeBackup() {
 		const matchesToken = portal === L1_PORTAL.toLowerCase() && bridge === BRIDGE.toString().toLowerCase()
 		// A Fuel recovery file binds to the canonical FeeJuicePortal + the L2 Fee Juice address (plan §5 DQ2).
 		const matchesFuel = !!FUEL_PORTAL && portal === FUEL_PORTAL.toLowerCase() && bridge === feeJuiceAddress.toLowerCase()
-		if (file.chainId !== sepolia.id || (!matchesToken && !matchesFuel)) {
+		if (file.chainId !== NETWORK.l1ChainId || (!matchesToken && !matchesFuel)) {
 			throw new Error("This file belongs to a different bridge deployment - it cannot be restored here.")
 		}
 		if (journal.records.value.some((r) => r.id === file.id)) {

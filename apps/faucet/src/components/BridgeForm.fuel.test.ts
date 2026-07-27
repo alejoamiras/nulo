@@ -21,7 +21,7 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 		quoter: "0xquoter",
 		weth: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
 		feeJuice: "0x762C132040fdA6183066Fa3B14d985ee55aA3C18",
-		pools: { azloWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
+		pools: { tokenWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
 		slippageBps: 300,
 		minFuelFj: 11n * 10n ** 18n,
 	},
@@ -103,7 +103,7 @@ describe("BridgeForm fuel surface", () => {
 		await settleQuote()
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
 		expect(depositFn).toHaveBeenCalledTimes(1)
-		expect(depositFn.mock.calls[0][2]).toMatchObject({ fuelSlice: 25n * 10n ** 16n })
+		expect(depositFn.mock.calls[0][2]).toMatchObject({ fuelSlice: 10n ** 18n })
 
 		depositFn.mockClear()
 		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click") // off
@@ -134,12 +134,12 @@ describe("BridgeForm fuel surface", () => {
 		expect(depositFn).not.toHaveBeenCalled()
 	})
 
-	it("an oversize slice (> 1 AZLO) blocks with the pool-impact warning", async () => {
+	it("an oversize slice (> 25 AZLO) blocks with the pool-impact warning", async () => {
 		const w = mount(BridgeForm)
 		await w.find(sel(TESTIDS.bridgeFuelToggle)).trigger("click")
-		await w.find(sel(TESTIDS.bridgeFuelSlice)).setValue("2")
+		await w.find(sel(TESTIDS.bridgeFuelSlice)).setValue("30")
 		await settleQuote()
-		expect(w.text()).toMatch(/Max fuel is 1 AZLO/)
+		expect(w.text()).toMatch(/Max fuel is 25 AZLO/)
 		await w.find(sel(TESTIDS.bridgeSubmit)).trigger("click")
 		expect(depositFn).not.toHaveBeenCalled()
 	})
@@ -169,6 +169,6 @@ describe("BridgeForm fuel surface", () => {
 		expect(depositFn).toHaveBeenCalledTimes(1)
 		// private (default) + fuel: the slice IS passed (gas-follows-token).
 		expect(depositFn.mock.calls[0][1]).toBe(true)
-		expect((depositFn.mock.calls[0][2] as { fuelSlice?: bigint })?.fuelSlice).toBe(25n * 10n ** 16n)
+		expect((depositFn.mock.calls[0][2] as { fuelSlice?: bigint })?.fuelSlice).toBe(10n ** 18n)
 	})
 })

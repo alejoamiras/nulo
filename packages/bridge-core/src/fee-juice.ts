@@ -63,6 +63,21 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 	return new GasFees(worstDa, worstL2)
 }
 
+/**
+ * The mainnet deploy sequence's worst-case L2 tx count: the deployer account deploy + the three
+ * contract deploys (proxy, token, bridge) + two wiring txs + the PrivateFPC deploy. The bridged
+ * fee-juice budget MUST cover the WHOLE sequence, not one claim — under-sizing stalls a live-money
+ * deploy mid-sequence (recoverable via the stable deployer, but a stall nonetheless).
+ */
+export const DEPLOY_SEQUENCE_TX_COUNT = 7
+
+/** The full-sequence fee-juice budget: per-tx worst-case fee limit × the whole sequence. */
+export function deploySequenceFeeBudget(perTxFeeLimit: bigint, txCount: number = DEPLOY_SEQUENCE_TX_COUNT): bigint {
+	if (perTxFeeLimit <= 0n) throw new Error("deploySequenceFeeBudget: perTxFeeLimit must be positive")
+	if (!Number.isInteger(txCount) || txCount < 1) throw new Error("deploySequenceFeeBudget: txCount must be a positive integer")
+	return perTxFeeLimit * BigInt(txCount)
+}
+
 /** The L1→L2 claim a Fee-Juice bridge deposit produced; the preimage the L2 claim consumes. */
 export type FeeJuiceClaim = Pick<L2AmountClaim, "claimAmount" | "claimSecret" | "messageLeafIndex">
 
