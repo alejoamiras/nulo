@@ -66,6 +66,14 @@ Build + deploy `apps/faucet` twice from one codebase:
   max-approve to the canonical singleton is the intended pattern. Deploy `SwapBridgeRouter` on
   mainnet. (Rejected: direct-portal/exact-approve.)
 - **DP2 — Swap-fuel disabled on mainnet.** Router deployed for `bridge()` + Permit2 only; no pools.
+  **REVERSED by D23 (owner override, 2026-07-25): swap-fuel ships EVERYWHERE.** Mainnet rides the
+  existing canonical Uniswap V4 liquidity (USDC → WETH 500-tier → native-ETH/AZTEC 10000-tier —
+  proven live by `discover-mainnet-fuel.ts` + executed on a mainnet fork by `MainnetFuel.fork.t.sol`,
+  public + private, through the REAL FeeJuicePortal/Inbox); testnet self-seeds per token generation
+  (`SeedTokenPool.s.sol` + `restore-swap.ts`). `DeployBridgeMainnet.s.sol` now deploys
+  `UniswapFuelSwap` as the swapTarget with a pre-flight quoter dust-probe of the exact route
+  (fail-closed, simulation-time). DP8's inert-stub leg is superseded; its OTHER controls (renounce
+  after smoke, revoke approvals, low balances) stand unchanged.
 - **DP3 — Withdrawals set no fee** (both networks) — the wallet pays its own default.
 - **DP4 — Fresh, network-keyed mainnet L1 signer.**
 - **DP5 — No on-chain cap.** <$5 is communicated to users; the control is CF-Access + trust + low
