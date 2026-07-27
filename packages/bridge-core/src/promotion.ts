@@ -33,8 +33,26 @@ export function assertFaucetCandidateShape(candidate: FaucetCandidateShape): voi
  *  byte-carried from the live manifest (or absent in both) — any new or changed fuel
  *  infrastructure means a fuel/router deploy or WETH seed happened, which this arc
  *  forbids. Deep-equality via canonical JSON of the two sections. */
+/** Deep key-sorted stringify: the candidate arrives ZOD-PARSED (schema key order) while the live
+ *  manifest is raw JSON (file key order) — the zero-seed invariant is semantic equality of keys +
+ *  values, not serialization order (hit live at the first --drop-swap promote). */
+function canonical(value: unknown): string {
+	const sort = (v: unknown): unknown => {
+		if (Array.isArray(v)) return v.map(sort)
+		if (v && typeof v === "object") {
+			return Object.fromEntries(
+				Object.keys(v as Record<string, unknown>)
+					.sort()
+					.map((k) => [k, sort((v as Record<string, unknown>)[k])]),
+			)
+		}
+		return v
+	}
+	return JSON.stringify(sort(value ?? null))
+}
+
 export function assertZeroSeed(candidateFuel: unknown, liveFuel: unknown, opts: { allowSwapDrop?: boolean } = {}): void {
-	if (JSON.stringify(candidateFuel ?? null) === JSON.stringify(liveFuel ?? null)) return
+	if (canonical(candidateFuel) === canonical(liveFuel)) return
 	// EXPLICIT swap retirement (a token cutover): the Uniswap pools are keyed by the token address,
 	// so a new token cannot carry the old swap config — the candidate keeps `core` BYTE-EQUAL and
 	// DROPS `swap` entirely. Allowed only under the operator's --drop-swap flag; core may never
@@ -42,7 +60,7 @@ export function assertZeroSeed(candidateFuel: unknown, liveFuel: unknown, opts: 
 	if (opts.allowSwapDrop) {
 		const cand = candidateFuel as { core?: unknown; swap?: unknown } | null | undefined
 		const live = liveFuel as { core?: unknown; swap?: unknown } | null | undefined
-		const coreEqual = JSON.stringify(cand?.core ?? null) === JSON.stringify(live?.core ?? null)
+		const coreEqual = canonical(cand?.core) === canonical(live?.core)
 		if (coreEqual && cand?.swap === undefined && live?.swap !== undefined) return
 	}
 	throw new Error(

@@ -61,6 +61,15 @@ describe("assertZeroSeed", () => {
 			const c = { ...core, swapTargetContract: "UniswapFuelSwap" }
 			expect(() => assertZeroSeed({ core: structuredClone(c) }, { core: c, swap: live.swap }, { allowSwapDrop: true })).not.toThrow()
 		})
+		it("compares CANONICALLY — key order differences (zod vs raw JSON) do not reject", () => {
+			const reordered = {
+				feeJuicePortal: core.feeJuicePortal,
+				swapTarget: core.swapTarget,
+				permit2: core.permit2,
+				router: core.router,
+			}
+			expect(() => assertZeroSeed({ core: reordered }, live, { allowSwapDrop: true })).not.toThrow()
+		})
 		it("rejects an ALTERED (not dropped) swap even under the flag", () => {
 			expect(() =>
 				assertZeroSeed({ core: structuredClone(core), swap: { quoter: "0xother" } }, live, { allowSwapDrop: true }),
