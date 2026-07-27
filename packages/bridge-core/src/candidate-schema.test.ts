@@ -16,6 +16,22 @@ const liveManifestPath = join(
 )
 const liveManifest = () => JSON.parse(readFileSync(liveManifestPath, "utf8"))
 
+// The live manifest's swap block comes and goes with token cutovers (core-only after a cutover,
+// restored once pools are seeded) — swap-shape tests INJECT a synthetic block so they never depend
+// on the live file's current phase.
+const withSwap = (m: ReturnType<typeof liveManifest>) => {
+	m.l1.fuel.swap ??= {
+		poolManager: "0x0000000000000000000000000000000000000005",
+		quoter: "0x0000000000000000000000000000000000000006",
+		weth: "0x0000000000000000000000000000000000000008",
+		feeJuice: "0x0000000000000000000000000000000000000009",
+		pools: { tokenWeth: { fee: 3000, tickSpacing: 60 }, ethFj: { fee: 987, tickSpacing: 10 } },
+		slippageBps: 300,
+		minFuelFj: "29580299742031535464",
+	}
+	return m
+}
+
 describe("candidate-schema (strict bridge-manifest gate)", () => {
 	it("accepts the committed live manifest", () => {
 		expect(() => parseCandidateManifest(liveManifest())).not.toThrow()
@@ -34,7 +50,7 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 	})
 
 	it("rejects a non-integer minFuelFj (base-unit amounts travel as decimal strings)", () => {
-		const m = liveManifest()
+		const m = withSwap(liveManifest())
 		m.l1.fuel.swap.minFuelFj = "1.5e18"
 		expect(() => parseCandidateManifest(m)).toThrow(/minFuelFj/)
 	})
@@ -46,7 +62,7 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 	})
 
 	it("rejects an out-of-range slippage", () => {
-		const m = liveManifest()
+		const m = withSwap(liveManifest())
 		m.l1.fuel.swap.slippageBps = 10_001
 		expect(() => parseCandidateManifest(m)).toThrow(/slippageBps/)
 	})
@@ -90,12 +106,12 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 
 	it("rejects an L1 token identity that drifts from the L2 constructor identity", () => {
 		const m = liveManifest()
-		m.l1.token.decimals = 6 // L2 constructorArgs still say 18 — a mis-scale of every bridged amount
+		m.l1.token.decimals = m.l1.token.decimals === 9 ? 12 : 9 // guaranteed ≠ the L2 constructor identity
 		expect(() => parseCandidateManifest(m)).toThrow(/constructor identity/)
 	})
 
 	it("rejects slippageBps 10000 (a zero min-output floor)", () => {
-		const m = liveManifest()
+		const m = withSwap(liveManifest())
 		m.l1.fuel.swap.slippageBps = 10_000
 		expect(() => parseCandidateManifest(m)).toThrow(/slippageBps/)
 	})
