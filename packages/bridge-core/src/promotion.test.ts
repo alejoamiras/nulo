@@ -49,6 +49,18 @@ describe("assertZeroSeed", () => {
 				/zero-seed violated/,
 			)
 		})
+		// The core compare is STRICT byte-equality — even a metadata-only enrichment (the conductor
+		// adding swapTargetContract) rejects, which is why the LIVE manifest carries the field
+		// (backfilled) BEFORE a cutover. Codex r4 reproduced the failure; this pins the strictness.
+		it("rejects a candidate core that ADDS a field the live core lacks (metadata enrichment)", () => {
+			expect(() =>
+				assertZeroSeed({ core: { ...core, swapTargetContract: "UniswapFuelSwap" } }, live, { allowSwapDrop: true }),
+			).toThrow(/zero-seed violated/)
+		})
+		it("accepts identical cores that BOTH carry swapTargetContract (the backfilled live shape)", () => {
+			const c = { ...core, swapTargetContract: "UniswapFuelSwap" }
+			expect(() => assertZeroSeed({ core: structuredClone(c) }, { core: c, swap: live.swap }, { allowSwapDrop: true })).not.toThrow()
+		})
 		it("rejects an ALTERED (not dropped) swap even under the flag", () => {
 			expect(() =>
 				assertZeroSeed({ core: structuredClone(core), swap: { quoter: "0xother" } }, live, { allowSwapDrop: true }),
