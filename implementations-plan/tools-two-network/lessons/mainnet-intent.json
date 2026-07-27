@@ -91,6 +91,18 @@
         "alpha lb fronts a MIXED 5.0.1/5.1.0 fleet \u2014 compat curation must cover both",
         "account instances are never node.getContract-served (the later-deployed FPC became visible; the account never did) \u2014 existence guards must use the public FJ balance"
       ]
+    },
+    "4b-smokes-promote": {
+      "date": "2026-07-27",
+      "status": "PROMOTED",
+      "publicSmoke": "PASSED 2.2m \u2014 3 USDC router deposit leaf 14804992 + claim_public",
+      "privateSmoke": "PASSED 3.5m \u2014 3 USDC router deposit leaf 14807040 + claim_private (recipient-committed)",
+      "promote": "candidate -> mainnet-bridge.json; build:mainnet + verify:build-target mainnet green (chainId 4248422646, digest match); 523/523 tests",
+      "remaining_phase9_owner": [
+        "CF Pages mainnet project (build:mainnet) + tools.nulo.sh domain",
+        "owner UI smoke under CF Access",
+        "DP8 cleanup AFTER owner smoke: renounce router owner + revoke USDC/AZTEC Permit2 approvals + revoke FJ portal allowances"
+      ]
     }
   }
 }

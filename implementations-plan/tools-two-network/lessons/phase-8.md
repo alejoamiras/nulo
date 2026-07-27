@@ -36,3 +36,27 @@ balance DELTAS from setUp, never absolutes.
 Pin fresh mainnet EOA (PLAN_PINNED_L1_SIGNERS.mainnet) + fund; FPC compat ruling (DP6); the actual
 `DeployBridgeMainnet` broadcast; manifest swap block written from deployed addresses + calibrated
 slippageBps/minFuelFj.
+
+## Phase-8 EXECUTION record (2026-07-27, owner-authorized through group 4)
+
+Full arc landed in one evening — every broadcast intent-first, journal-first, receipts in
+`mainnet-intent.json`. L1: UniswapFuelSwap `0xFe00…7d8c` + SwapBridgeRouter `0x2EB3…7559` +
+NuloTokenPortal `0x3c32…fab6` (all Etherscan-verified, portal one-shot-initialized against the
+PRECOMPUTED bridge address). L2: deployer `0x19ae…d077` bootstrapped CLAIM-IN-TX from 300 bridged
+$AZTEC, trio (proxy `0x0681…8784` / token `0x03bd…32b4` / bridge `0x25a4…8807` == the portal-bound
+precompute), PrivateFPC at the pinned `0x1a6d…1bc0`. Gates: require-deployed green; dust canary
+PASSED (+6.29 FJ private, fee 9.43); public smoke 2.2m; private smoke 3.5m; promote + build-target
+verify green. minFuelFj calibrated live: 15.72 FJ (≈0.28 USDC min slice).
+
+Live lessons (all encoded into the scripts/config, not just prose):
+- **The Alpha LB fronts a MIXED 5.0.1/5.1.0 fleet** — any single nodeVersion read is one backend's
+  answer; compat curation must cover the fleet, and identity pins (chainId/rollupVersion) are the
+  stable check, not nodeVersion.
+- **Account instances are never served by `node.getContract`** (the later-deployed FPC became
+  visible; the account never did). Existence guards for accounts must use serveable state — the
+  public fee-juice balance (positive ⇒ the claim-in-tx deploy landed).
+- **bridge-core's tsconfig covers only src/** — scripts were never typechecked; two latent crashes
+  (removed import, unexported symbol) shipped and surfaced at runtime. Added per-script bundle
+  resolution checks during the arc; a scripts-inclusive typecheck lane is follow-up work.
+- viem `getContract(...).read.fn` takes args as an ARRAY; bare multi-arg calls crash at runtime
+  (caught pre-spend by the journal-first ordering).
