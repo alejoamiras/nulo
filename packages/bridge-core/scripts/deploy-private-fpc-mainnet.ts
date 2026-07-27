@@ -37,9 +37,18 @@ async function main() {
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
 	const from = (await manager.getAccount()).getAddress()
-	if (!(await node.getContract(from))) {
-		throw new Error(`L2 deployer ${from} not deployed — run the conductor's L2 group (deploy-bridge-mainnet.ts) first; STOP`)
+	// node.getContract serves instances at a LATER finalization stage than the CHECKPOINTED wait the
+	// conductor used — a freshly-deployed account operates (it proved the whole trio) minutes before
+	// it is visible here. Bounded wait for the proving lag; a never-visible account is a real error.
+	let visible = false
+	for (let i = 0; i < 100 && !visible; i++) {
+		visible = (await node.getContract(from)) !== undefined && (await node.getContract(from)) !== null
+		if (!visible) {
+			if (i === 0) console.log(`L2 deployer ${from} not yet visible via getContract — waiting out the proving lag…`)
+			await new Promise((r) => setTimeout(r, 12_000))
+		}
 	}
+	if (!visible) throw new Error(`L2 deployer ${from} never became visible — run the conductor's L2 group first; STOP`)
 	console.log(`L2 deployer ${from.toString()} pays via fee juice`)
 
 	console.log(`deploying PrivateFPC (canonical salt, deployer ZERO)… (${mins()})`)

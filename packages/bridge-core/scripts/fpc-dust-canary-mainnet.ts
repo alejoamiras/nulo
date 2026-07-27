@@ -101,7 +101,11 @@ async function main() {
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
 	const from = (await manager.getAccount()).getAddress()
-	if (!(await node.getContract(from))) throw new Error("L2 deployer not deployed; STOP")
+	for (let i = 0; i < 100 && !(await node.getContract(from)); i++) {
+		if (i === 0) console.log("waiting out the deployer instance proving lag…")
+		await new Promise((r) => setTimeout(r, 12_000))
+	}
+	if (!(await node.getContract(from))) throw new Error("L2 deployer never became visible; STOP")
 
 	const bridgeSalt = Fr.random()
 	const plan = await planPrivateFuelDeposit(from, dust, bridgeSalt)

@@ -111,7 +111,11 @@ async function main() {
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)
 	const from = (await manager.getAccount()).getAddress()
-	if (!(await node.getContract(from))) throw new Error(`L2 deployer ${from} not deployed — run the conductor's L2 group first; STOP`)
+	for (let i = 0; i < 100 && !(await node.getContract(from)); i++) {
+		if (i === 0) console.log("waiting out the deployer instance proving lag…")
+		await new Promise((r) => setTimeout(r, 12_000))
+	}
+	if (!(await node.getContract(from))) throw new Error(`L2 deployer ${from} never became visible; STOP`)
 	console.log("L2 smoke account (the funded deployer)", from.toString())
 	const fee = { paymentMethod: preexistingFeeJuicePayment(from) }
 	const sendOpts = { from, fee, wait: { waitForStatus: TxStatus.PROPOSED } }
