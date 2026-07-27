@@ -823,3 +823,28 @@ account-resolution.ts` (shared resolver, H1/H2) · `operation-journal/service.ts
 `hasInFlightSend` selector) · `incoming-transfer/{repository,service}.ts` + `transaction/{spec,service}.ts`
 (composite keys, scope fields) · `RecentActivityView.vue`/`activity.vue`/`activity-rows.ts` (profile-aware render) ·
 `tests/e2e/network/account-profile-siloing.test.ts` (render-isolation + in-flight-guard e2e).
+
+## 19. Post-merge hardening (branch `fix/siloing-hardening`, codex rounds 1–4)
+
+After the arc squashed into dev (#325), an iterative adversarial loop (codex `gpt-5.6-sol` xhigh, 3 code
+rounds + 1 design round) ran against the merged result. Every finding was source-verified before acceptance;
+verdicts and fixes live in the branch's commit messages. Fixed here: cancel identity across BOTH re-file lock
+orders (in-place `refileOperationScope`, replacing delete+recreate); guarded, serialized network activation
+with indeterminate-failure reconcile; cross-silo outgoing-tx dedupe scoping; journal creation fences (profile
+existence + D13 deletion epoch + network liveness, with the authorization-time `ExecutionFence` threaded
+through the FIFO wait instead of recaptured after it); purge snapshots moved under the transition lock.
+
+### Deferred residuals — recorded, deliberately NOT built
+
+Stopping rule applied (owner decision, 2026-07-27): a finding is recorded instead of fixed when it needs
+multiple independent coincidences AND its worst outcome is an invisible/stale row rather than a wrong
+signature, a cross-profile render, or fund loss. Same treatment as §9.6.
+
+| Residual | Why deferred |
+|---|---|
+| Token-import fencing (codex R3 finding 3 / R4 Design B) | Needs a profile deletion completed inside a ~2–5 s metadata-fetch window from the same popup; worst case is a dead row no profileId-scoped read ever renders. Codex's remedy restructures the token service's entry points + event payloads — cost out of proportion. |
+| `TokenAdded` scoped payload (profileId/networkId on the event) | Real but PRE-EXISTING dev behavior (event consumers infer active scope after an await); belongs to a dev-side follow-up, not this branch. |
+| Network deletion epochs (delete → restore same network id) | Triple coincidence; `isNetworkLive` already covers the purge window. |
+| Cross-window activation convergence (`onActiveNetworkChanged` → store) | Pre-existing gap; each realm converges on reopen. Invariant I4 narrowed accordingly. |
+| Account preference-write serialization (`selectAccount`'s discarded promise) | Pre-existing, ms-scale reorder of a preference write; self-corrects on next read. |
+| `addTransaction` input object · required `ProfileFenceReader` · deferred/gate race harness · `isActivatingNetwork` UI state | Codex QoL list — valid, none load-bearing; batch into a quality pass. |
