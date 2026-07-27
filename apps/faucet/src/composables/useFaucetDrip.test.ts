@@ -154,6 +154,18 @@ describe("useFaucetDrip", () => {
 		expect(opts.fee?.gasSettings?.maxFeesPerGas).toEqual({ _paddedBy: 1.5 })
 	})
 
+	it("fee-padding failure degrades to wallet defaults — the drip still sends", async () => {
+		const { predictedWorstMinFees } = await import("@nulo/bridge-core")
+		vi.mocked(predictedWorstMinFees).mockRejectedValueOnce(new Error("node unreachable"))
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const res = await drip.drip(NULO, NULO_ADDR, "public")
+		expect(res.kind).toBe("txHash")
+		const opts = w._calls[0]?.opts as { from?: unknown; fee?: unknown }
+		expect(opts.fee).toBeUndefined()
+	})
+
 	it("sendTx receives the merged exec (sponsor call + feePayer) and the selected account", async () => {
 		const w = makeWallet()
 		// biome-ignore lint/suspicious/noExplicitAny: test stub

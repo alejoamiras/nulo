@@ -83,16 +83,18 @@ async function drip(
 		// and the pool silently drops it ("Tx dropped by P2P node"). `sponsor_unconditionally()`
 		// asserts no budget and the sponsor pays ACTUAL gas, not the max — headroom here is free.
 		// predicted-worst covers congestion drift; ×1.5 covers the prove window on top.
-		const sendOpts = IS_MAINNET
-			? { from: account }
-			: {
-					from: account,
-					fee: {
-						gasSettings: {
-							maxFeesPerGas: (await predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))).mul(1.5),
-						},
-					},
-				}
+		//
+		// Best-effort: a predict/node hiccup degrades to the wallet's zero-headroom default (the
+		// pre-padding behavior, fine while fees are flat) instead of failing the drip outright.
+		let paddedMaxFees: unknown
+		if (!IS_MAINNET) {
+			try {
+				paddedMaxFees = (await predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))).mul(1.5)
+			} catch (feeErr) {
+				console.warn("[drip] fee padding unavailable, sending with wallet defaults:", feeErr)
+			}
+		}
+		const sendOpts = paddedMaxFees ? { from: account, fee: { gasSettings: { maxFeesPerGas: paddedMaxFees } } } : { from: account }
 		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast for SDK signature variance across versions
 		const tx = await (wallet as any).sendTx(exec, sendOpts as any)
 		const txHash = extractTxHash(tx)
