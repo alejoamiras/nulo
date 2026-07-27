@@ -126,3 +126,28 @@ swap retirement (D22), recorded swapTarget contract. The exact sequence:**
    `verify-l1` (mainnet chain — verifies InertSwapTarget), `verify:build-target mainnet`, ship.
 5. Phase 9: owner smoke under Access → renounce router owner (verify owner()==0) → revoke BOTH
    Permit2 approvals. Only then public.
+
+## Pool deepening (owner-directed UX fix, 2026-07-27)
+
+Owner: default 0.25 too small, UI cap 1 token too tight — viable fuel window was [0.75, 1] USDC.
+
+**Probe-first sizing** (`quoteFuelPath` at 1/2/5/10/25 USDC vs a dust quote):
+- Before: 0.38%/USDC ≈ linear; 10 USDC = 3.74% (already over the 3% slippage guard), 25 USDC = 8.85%.
+- After deepening ONLY token/WETH 6×: 25 USDC still 3.56% → decomposition showed ~2.5% residual lives in
+  the ETH/FJ leg. **Lesson: the fuel path has TWO legs; deepening one just moves the bottleneck.**
+- After deepening both: 1 USDC 0.09% · 10 USDC 0.86% · 25 USDC 2.12% (live == fork rehearsal, digit-for-digit).
+
+**ETH/FJ drift**: `DeployFuelLive`'s ±10%-sqrt price guard correctly ABORTED the re-seed — live fills had
+pushed the pool from the 200K FJ/ETH init target to ~87K. Fix: pass the exact current on-chain sqrtPrice as
+`FJ_POOL_SQRT_PRICE` (guard passes trivially) and compute liquidity for the ETH budget at THAT price:
+`L = eth / (1/sqrtPc − 1/sqrtPu)` → L=224e18 for 0.6 ETH, ~34.5K FJ (40 free handler mints). Re-seeding at
+a stale target price is exactly what the guard exists to prevent — never override it, recompute.
+
+**Broadcasts** (intent d2a6938→18b93dc, caps raised 0.5→2.0 / 0.25→1.5 for this):
+1. `SeedTokenPool` WETH_SEED=1.25e18, POOL_LIQUIDITY=3.75e13 — 17/17 txs 0x1 (blocks 11362894–11362911).
+2. `DeployFuelLive` seed-only (reused swapTarget+router, SEED_AZLO_WETH=false) — 4/4 txs 0x1.
+
+Spend: 1.8546/2.0 ETH (verify green; balance 8.2568 → 6.4021). No manifest change — fee/tickSpacing
+unchanged, liquidity is not manifest state — so NO promote; the live app benefits immediately.
+
+**UI**: MAX_FUEL_SLICE 1 → 25 whole tokens (2.12% at cap < 3% guard), default slice 0.25 → 1 token.
