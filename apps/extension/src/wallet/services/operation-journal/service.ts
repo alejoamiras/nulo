@@ -490,23 +490,40 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	}
 
 	/**
-	 * Delete only if the row's CURRENT stage (re-read under the transition lock)
-	 * is one of `allowedStages`. A concurrent cancel serialized ahead of us moves
-	 * the row to a terminal stage, and an unconditional delete would erase that
-	 * decision — the caller must observe `false` and honor the cancel instead.
-	 * A missing row returns `true`: it is already gone, so the caller's
-	 * delete-then-replace can proceed exactly as after a successful delete.
+	 * Move a row to a new scope IN PLACE — same journal id — provided its
+	 * CURRENT stage (re-read under the transition lock) is one of
+	 * `allowedStages`. Cancellation identity is the point: `cancelJob`
+	 * addresses the row by id, so a delete+recreate re-file freed the id and a
+	 * cancel that had suspended before its transition resumed onto a missing
+	 * row and silently no-oped while execution continued under the
+	 * replacement. Keeping the id makes both lock orders safe: if the cancel
+	 * serialized first the stage left the allowed set and this refuses; if the
+	 * re-file serialized first the cancel still finds the same row (and the
+	 * same registered controller) under the new scope.
 	 */
-	public async deleteOperationIfStage(id: string, allowedStages: readonly JobProgress["stage"][]): Promise<boolean> {
+	public async refileOperationScope(
+		id: string,
+		scope: { profileId?: string; networkId: string; accountAddress: string },
+		allowedStages: readonly JobProgress["stage"][],
+	): Promise<
+		{ outcome: "refiled"; record: OperationRecord } | { outcome: "missing" } | { outcome: "stage"; stage: JobProgress["stage"] }
+	> {
 		await this.ensureInitialized()
 		await this.transitionLock.enter()
 		try {
 			const existing = await this._loadValidated(id)
-			if (!existing) return true
-			if (!allowedStages.includes(existing.progress.stage)) return false
-			await this.storage.delete(id)
-			this.emit("onOperationDeleted", existing)
-			return true
+			if (!existing) return { outcome: "missing" }
+			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
+			const updated: OperationRecord = {
+				...existing,
+				profileId: scope.profileId ?? existing.profileId,
+				networkId: scope.networkId,
+				accountAddress: scope.accountAddress,
+				updatedAt: Date.now(),
+			}
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return { outcome: "refiled", record: updated }
 		} finally {
 			this.transitionLock.leave()
 		}

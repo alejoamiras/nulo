@@ -89,7 +89,7 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		return { journalId: id, controller }
 	}
 
-	const record = await operationJournal.getOperation(queuedJournalId).catch(() => null)
+	let record = await operationJournal.getOperation(queuedJournalId).catch(() => null)
 	if (!record) {
 		// Record was reaped (boot sweep or staleness GC). Best-effort
 		// fallback — create new in-flight record so execution proceeds.
@@ -134,28 +134,39 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 			`Queued record ${queuedJournalId} was filed under ${record.accountAddress}/${record.networkId} but execution resolved ` +
 				`${accountAddress}/${networkId}; re-filing under the executing scope`,
 		)
-		// Delete rather than fail it: this operation never ran under the old scope,
-		// so a failed card there would be activity that did not happen. The delete
-		// must SUCCEED before a replacement exists, or both rows would be live at
-		// once — one of them cancellable and neither matching what runs.
-		//
-		// CONDITIONAL on the stage still being pre-claim, re-read under the journal
-		// lock: the stage/abort checks above ran on a snapshot, and a cancel that
-		// wins the lock between them and this delete moves the row terminal +
-		// aborts the old controller. An unconditional delete would erase that
-		// cancel and the fresh controller below would run it anyway. `false` here
-		// means exactly "cancel won" — honor it. (cancelJob transitions BEFORE it
-		// aborts, so an abort with the row still queued/pending cannot exist.)
-		const deleted = await operationJournal.deleteOperationIfStage(queuedJournalId, ["queued", "pending"])
-		if (!deleted) {
+		// Re-file IN PLACE — same journal id — never delete+recreate. The id is
+		// the cancellation identity: `cancelJob` addresses the row (and the
+		// registered controller) by id, so freeing it let a cancel that had
+		// suspended before its transition resume onto a missing row and silently
+		// no-op while execution continued under the replacement. The refile is
+		// conditional on the stage still being pre-claim, re-read under the
+		// journal lock: the stage/abort checks above ran on a snapshot, and a
+		// cancel that wins the lock in between moves the row terminal — "stage"
+		// here means exactly "cancel won", honor it. (cancelJob transitions
+		// BEFORE it aborts, so an abort with the row still pre-claim cannot
+		// exist.) In-place also keeps the old scope clean: the row MOVES, so no
+		// failed card is left behind as activity that never happened.
+		const refile = await operationJournal.refileOperationScope(
+			queuedJournalId,
+			{ profileId: input.profileId, networkId, accountAddress },
+			["queued", "pending"],
+		)
+		if (refile.outcome === "stage") {
 			logger?.info(`Queued record ${queuedJournalId} left the pre-claim stage during re-file; honoring the cancel`)
 			throw new JobCancelledSentinel(queuedJournalId)
 		}
-		if (reuseController) activeControllers.delete(queuedJournalId)
-		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
-		const controller = id ? new AbortController() : undefined
-		if (id && controller) activeControllers.set(id, controller)
-		return { journalId: id, controller }
+		if (refile.outcome === "missing") {
+			// Reaped mid-flight — same fallback as the record-not-found branch.
+			if (reuseController) activeControllers.delete(queuedJournalId)
+			const id = await createFreshRecord(networkId, accountAddress, origin, calls)
+			const controller = id ? new AbortController() : undefined
+			if (id && controller) activeControllers.set(id, controller)
+			return { journalId: id, controller }
+		}
+		// Fall through to the normal claim: the row (same id, new scope) is still
+		// queued/pending, the pre-acquire controller is still registered under it,
+		// and the claim transition below keeps arbitrating against cancel.
+		record = refile.record
 	}
 
 	// Accept queued OR pending. Queued is the normal claim path; pending

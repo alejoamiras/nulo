@@ -434,7 +434,7 @@ describe("OperationJournalService", () => {
 		expect(seen).toHaveBeenCalledTimes(1)
 	})
 
-	test("deleteOperationIfStage: refuses when the row left the allowed stages (cancel-vs-re-file arbitration)", async () => {
+	test("refileOperationScope: refuses when the row left the allowed stages (cancel-vs-re-file arbitration)", async () => {
 		const rec = await service.createOperation({
 			...VALID_INPUT,
 			kind: "dapp_execute",
@@ -444,30 +444,46 @@ describe("OperationJournalService", () => {
 		})
 		await service.transitionOperation(rec.id, { stage: "cancelled" })
 
-		const deleted = await service.deleteOperationIfStage(rec.id, ["queued", "pending"])
+		const res = await service.refileOperationScope(rec.id, { networkId: "net2", accountAddress: "0xnew" }, ["queued", "pending"])
 
-		expect(deleted).toBe(false)
-		// The cancelled row survives — the cancel decision is preserved.
-		expect((await service.getOperation(rec.id))?.progress.stage).toBe("cancelled")
+		expect(res.outcome).toBe("stage")
+		// The cancelled row survives untouched — the cancel decision is preserved.
+		const after = await service.getOperation(rec.id)
+		expect(after?.progress.stage).toBe("cancelled")
+		expect(after?.accountAddress).toBeUndefined()
 	})
 
-	test("deleteOperationIfStage: deletes a row still in an allowed stage; missing row counts as deleted", async () => {
-		const seen = vi.fn()
-		service.onOperationDeleted.add(seen)
+	test("refileOperationScope: moves a pre-claim row's scope IN PLACE — same id, updated fields, Updated emit", async () => {
+		const updated = vi.fn()
+		const deleted = vi.fn()
+		service.onOperationUpdated.add(updated)
+		service.onOperationDeleted.add(deleted)
 		const rec = await service.createOperation({
 			...VALID_INPUT,
 			kind: "dapp_execute",
 			origin: "dapp",
 			sessionId: "session-X",
+			accountAddress: "0xold",
+			networkId: "net1",
 			initialStage: { stage: "queued" },
 		})
 
-		expect(await service.deleteOperationIfStage(rec.id, ["queued", "pending"])).toBe(true)
-		expect(await service.getOperation(rec.id)).toBeFalsy()
-		expect(seen).toHaveBeenCalledTimes(1)
-		// Already gone → true (caller may proceed to re-file, same as post-delete).
-		expect(await service.deleteOperationIfStage(rec.id, ["queued", "pending"])).toBe(true)
-		expect(seen).toHaveBeenCalledTimes(1)
+		const res = await service.refileOperationScope(rec.id, { networkId: "net2", accountAddress: "0xnew" }, ["queued", "pending"])
+
+		expect(res.outcome).toBe("refiled")
+		const after = await service.getOperation(rec.id)
+		expect(after?.id).toBe(rec.id)
+		expect(after?.networkId).toBe("net2")
+		expect(after?.accountAddress).toBe("0xnew")
+		expect(after?.progress.stage).toBe("queued")
+		// A move, not a delete+create: cancellation identity survives.
+		expect(updated).toHaveBeenCalledTimes(1)
+		expect(deleted).not.toHaveBeenCalled()
+
+		// Missing row → "missing" (caller falls back to create-fresh).
+		expect((await service.refileOperationScope("no-such-id", { networkId: "n", accountAddress: "a" }, ["queued"])).outcome).toBe(
+			"missing",
+		)
 	})
 
 	test("transitionOperation: queued → cancelled is legal (user-cancel-while-queued)", async () => {
