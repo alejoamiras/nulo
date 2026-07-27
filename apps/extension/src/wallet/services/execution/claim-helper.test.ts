@@ -42,7 +42,8 @@ function makeJournal() {
 	const getOperation = vi.fn(async (_id: string) => null as unknown)
 	const transitionOperation = vi.fn(async (_id: string, _progress: unknown, _error?: unknown) => undefined as unknown)
 	const deleteOperation = vi.fn(async (_id: string) => undefined as unknown)
-	return { getOperation, transitionOperation, deleteOperation }
+	const deleteOperationIfStage = vi.fn(async (_id: string, _allowed: readonly string[]) => true)
+	return { getOperation, transitionOperation, deleteOperation, deleteOperationIfStage }
 }
 
 const INPUT_NO_QUEUED = {
@@ -80,7 +81,8 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		expect(res.journalId).toBe("refiled-id")
 		// The stale row is removed rather than failed: this operation never ran
 		// under that account, so a failed card there would be false activity.
-		expect(journal.deleteOperation).toHaveBeenCalledWith("queued-id")
+		// The delete is CONDITIONAL on the stage still being pre-claim.
+		expect(journal.deleteOperationIfStage).toHaveBeenCalledWith("queued-id", ["queued", "pending"])
 		expect(journal.transitionOperation).not.toHaveBeenCalled()
 		expect(activeControllers.has("queued-id")).toBe(false)
 		expect(activeControllers.has("refiled-id")).toBe(true)
@@ -98,7 +100,33 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		const res = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" })
 
 		expect(res.journalId).toBe("refiled-id")
-		expect(journal.deleteOperation).toHaveBeenCalledWith("queued-id")
+		expect(journal.deleteOperationIfStage).toHaveBeenCalledWith("queued-id", ["queued", "pending"])
+	})
+
+	test("a cancel that wins the journal lock during re-file is honored, not erased", async () => {
+		// The mismatch branch's stage/abort checks run on a snapshot. cancelJob can
+		// win the journal lock between them and the delete: the row goes terminal
+		// and the old controller aborts. The conditional delete then observes the
+		// moved stage (returns false) — the helper MUST surface the cancel instead
+		// of creating a fresh, un-aborted controller that would run the operation
+		// the user just stopped.
+		const { deps, journal, createFreshRecord, activeControllers } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({
+			networkId: "net1",
+			accountAddress: "0xSOMEONE-ELSE",
+			progress: { stage: "queued" },
+		})
+		journal.deleteOperationIfStage.mockResolvedValueOnce(false) // cancel won
+		const controller = new AbortController()
+		activeControllers.set("queued-id", controller)
+
+		await expect(
+			claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id", reuseController: controller }),
+		).rejects.toBeInstanceOf(JobCancelledSentinel)
+
+		// No replacement row, no fresh controller — the cancel stands.
+		expect(createFreshRecord).not.toHaveBeenCalled()
+		expect(activeControllers.has("refiled-id")).toBe(false)
 	})
 
 	test("no queuedJournalId → calls createFreshRecord, registers controller, returns the new id", async () => {

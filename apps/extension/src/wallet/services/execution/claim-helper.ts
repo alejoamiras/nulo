@@ -138,7 +138,19 @@ export async function claimOrCreateDappExecuteJournal(deps: ClaimHelperDeps, inp
 		// so a failed card there would be activity that did not happen. The delete
 		// must SUCCEED before a replacement exists, or both rows would be live at
 		// once — one of them cancellable and neither matching what runs.
-		await operationJournal.deleteOperation(queuedJournalId)
+		//
+		// CONDITIONAL on the stage still being pre-claim, re-read under the journal
+		// lock: the stage/abort checks above ran on a snapshot, and a cancel that
+		// wins the lock between them and this delete moves the row terminal +
+		// aborts the old controller. An unconditional delete would erase that
+		// cancel and the fresh controller below would run it anyway. `false` here
+		// means exactly "cancel won" — honor it. (cancelJob transitions BEFORE it
+		// aborts, so an abort with the row still queued/pending cannot exist.)
+		const deleted = await operationJournal.deleteOperationIfStage(queuedJournalId, ["queued", "pending"])
+		if (!deleted) {
+			logger?.info(`Queued record ${queuedJournalId} left the pre-claim stage during re-file; honoring the cancel`)
+			throw new JobCancelledSentinel(queuedJournalId)
+		}
 		if (reuseController) activeControllers.delete(queuedJournalId)
 		const id = await createFreshRecord(networkId, accountAddress, origin, calls)
 		const controller = id ? new AbortController() : undefined

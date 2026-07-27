@@ -393,6 +393,42 @@ describe("OperationJournalService", () => {
 		await expect(service.transitionOperation(rec.id, { stage: "simulating" })).rejects.toBeInstanceOf(IllegalTransitionError)
 	})
 
+	test("deleteOperationIfStage: refuses when the row left the allowed stages (cancel-vs-re-file arbitration)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		await service.transitionOperation(rec.id, { stage: "cancelled" })
+
+		const deleted = await service.deleteOperationIfStage(rec.id, ["queued", "pending"])
+
+		expect(deleted).toBe(false)
+		// The cancelled row survives — the cancel decision is preserved.
+		expect((await service.getOperation(rec.id))?.progress.stage).toBe("cancelled")
+	})
+
+	test("deleteOperationIfStage: deletes a row still in an allowed stage; missing row counts as deleted", async () => {
+		const seen = vi.fn()
+		service.onOperationDeleted.add(seen)
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+
+		expect(await service.deleteOperationIfStage(rec.id, ["queued", "pending"])).toBe(true)
+		expect(await service.getOperation(rec.id)).toBeFalsy()
+		expect(seen).toHaveBeenCalledTimes(1)
+		// Already gone → true (caller may proceed to re-file, same as post-delete).
+		expect(await service.deleteOperationIfStage(rec.id, ["queued", "pending"])).toBe(true)
+		expect(seen).toHaveBeenCalledTimes(1)
+	})
+
 	test("transitionOperation: queued → cancelled is legal (user-cancel-while-queued)", async () => {
 		const rec = await service.createOperation({
 			...VALID_INPUT,

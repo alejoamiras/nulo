@@ -449,4 +449,27 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			this.transitionLock.leave()
 		}
 	}
+
+	/**
+	 * Delete only if the row's CURRENT stage (re-read under the transition lock)
+	 * is one of `allowedStages`. A concurrent cancel serialized ahead of us moves
+	 * the row to a terminal stage, and an unconditional delete would erase that
+	 * decision — the caller must observe `false` and honor the cancel instead.
+	 * A missing row returns `true`: it is already gone, so the caller's
+	 * delete-then-replace can proceed exactly as after a successful delete.
+	 */
+	public async deleteOperationIfStage(id: string, allowedStages: readonly JobProgress["stage"][]): Promise<boolean> {
+		await this.ensureInitialized()
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return true
+			if (!allowedStages.includes(existing.progress.stage)) return false
+			await this.storage.delete(id)
+			this.emit("onOperationDeleted", existing)
+			return true
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
 }
