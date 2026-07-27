@@ -32,6 +32,24 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 
 export * from "./spec"
 
+/**
+ * DROPPED-receipt debounce. The node answers DROPPED for any tx hash it does
+ * not know — including a just-submitted tx that hasn't reached the queried
+ * replica yet, so behind a load-balanced RPC the submitting `sendTx` and the
+ * receipt poll can hit different nodes and a healthy tx transiently reads as
+ * dropped (aztec.js guards its own `waitForTx` against exactly this via
+ * `ignoreDroppedReceiptsFor`). A DROPPED answer is therefore only accepted as
+ * terminal once the tx is older than the grace window AND was seen dropped on
+ * enough consecutive polls.
+ */
+export const DROPPED_GRACE_MS = 60_000
+export const DROPPED_CONFIRMATIONS = 3
+/** After a tx IS marked Dropped, keep re-checking it at a slow cadence for this
+ *  long — a late mine (the receipt turning up mined after all) resurrects the
+ *  row instead of leaving a confirmed tx labeled failed forever. */
+export const DROPPED_RESURRECTION_WINDOW_MS = 30 * 60_000
+export const DROPPED_RECHECK_INTERVAL_MS = 15_000
+
 export class TransactionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTransactions", "getTransaction")
 	public static name = TRANSACTION_SERVICE_NAME
@@ -42,6 +60,15 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private readonly txs: EntityStorage<Tx>
 	private readonly pending = new Map<string, Tx>()
+	// Consecutive-DROPPED counter per pending hash. In-memory on purpose: a SW
+	// restart resets the streak, which only makes the debounce MORE conservative.
+	private readonly droppedStreaks = new Map<string, number>()
+	// Resurrection watch: txs marked Dropped THIS session, re-checked at a slow
+	// cadence until the window expires. Deliberately never re-armed from storage
+	// on init — same reasoning as D16 in `restore`: a restored/aged row's
+	// `submittedEndpointUrl` must not get the sync worker dialing it again.
+	private readonly droppedWatch = new Map<string, Tx>()
+	private readonly droppedNextCheckAt = new Map<string, number>()
 	// Serializes restore's read-modify-write (contains → set) so two concurrent
 	// imports can't both pass the create-only check for the same hash.
 	private readonly lock = new Lock()
@@ -80,6 +107,11 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// fenced (see `updateTx`) so a mid-poll tx can't resurrect (finding D).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
+		// Only Pending rows are re-armed. Dropped rows are NOT added to the
+		// resurrection watch across restarts: rows can enter storage via backup
+		// restore, and their `submittedEndpointUrl` is backup-controlled — the
+		// worker must never dial it for a row this session didn't transition
+		// itself (D16 parity; see `restore`).
 		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
 			this.pending.set(tx.hash, tx)
 		}
@@ -203,6 +235,9 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 				txs,
 				(tx) => {
 					this.pending.delete(tx.hash)
+					this.droppedStreaks.delete(tx.hash)
+					this.droppedWatch.delete(tx.hash)
+					this.droppedNextCheckAt.delete(tx.hash)
 					return this.txs.delete(tx.hash)
 				},
 				(tx) => this.emit("onTransactionDeleted", tx),
@@ -214,13 +249,14 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private async runWorker() {
 		while (true) {
-			if (this.pending.size) {
+			const due = [...this.pending.values(), ...this.collectDroppedDue()]
+			if (due.length) {
 				const activeProfile = await this.profileService.getActiveProfile()
 				if (activeProfile) {
 					try {
-						this.logDebug(`Sync ${this.pending.size} transactions...`)
+						this.logDebug(`Sync ${due.length} transactions...`)
 						const start = Date.now()
-						await Promise.allSettled([...this.pending.values()].map((x) => this.updateTx(x)))
+						await Promise.allSettled(due.map((x) => this.updateTx(x)))
 						const end = Date.now()
 						this.logDebug(`Transactions synced in ${end - start}ms`)
 					} catch (error) {
@@ -230,6 +266,25 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			}
 			await sleep(1000)
 		}
+	}
+
+	/** Dropped txs due for a resurrection re-check this tick; watch entries past
+	 *  the window are evicted (the row simply stays Dropped). */
+	private collectDroppedDue(): Tx[] {
+		const now = Date.now()
+		const due: Tx[] = []
+		for (const [hash, tx] of this.droppedWatch) {
+			if (now - tx.updatedAt > DROPPED_RESURRECTION_WINDOW_MS) {
+				this.droppedWatch.delete(hash)
+				this.droppedNextCheckAt.delete(hash)
+				continue
+			}
+			if ((this.droppedNextCheckAt.get(hash) ?? 0) <= now) {
+				this.droppedNextCheckAt.set(hash, now + DROPPED_RECHECK_INTERVAL_MS)
+				due.push(tx)
+			}
+		}
+		return due
 	}
 
 	private async updateTx(tx: Tx) {
@@ -261,6 +316,25 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		}
 		const status = this.getTxStatus(receipt.status)
 		const executionResult = this.getTxExecutionResult(receipt.executionResult)
+
+		// Debounce DROPPED for a still-pending tx: within the submission grace
+		// window, or below the consecutive-observation threshold, keep the row
+		// Pending and let the next tick re-check (see the constants' doc block —
+		// DROPPED also means "this replica has never seen the hash").
+		if (status === TxStatus.Dropped && tx.status === TxStatus.Pending) {
+			const streak = (this.droppedStreaks.get(tx.hash) ?? 0) + 1
+			this.droppedStreaks.set(tx.hash, streak)
+			const ageMs = Date.now() - tx.createdAt
+			if (ageMs < DROPPED_GRACE_MS || streak < DROPPED_CONFIRMATIONS) {
+				this.logDebug(
+					`Tx ${tx.hash.slice(0, 8)} reported dropped (streak ${streak}, age ${Math.round(ageMs / 1000)}s) — keeping pending`,
+				)
+				return
+			}
+		} else {
+			this.droppedStreaks.delete(tx.hash)
+		}
+
 		if (status === tx.status && executionResult === tx.executionResult) {
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} still ${receipt.status}`)
 			return
@@ -270,11 +344,12 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// the tx lock: a concurrent profile-delete purge (`purgeForAccounts`, same
 		// lock) removes this tx from `this.pending` + storage. Without the guarded
 		// re-check, the worker's stale write would RESURRECT a deleted profile's tx
-		// (finding D — in-flight-write fencing). `pending.has` is the fence: the
-		// purge deletes the entry, so a purged tx is skipped here.
+		// (finding D — in-flight-write fencing). Membership in `pending` OR
+		// `droppedWatch` is the fence: the purge deletes both entries, so a purged
+		// tx is skipped here.
 		await this.lock.enter()
 		try {
-			if (!this.pending.has(tx.hash)) return
+			if (!this.pending.has(tx.hash) && !this.droppedWatch.has(tx.hash)) return
 			tx.updatedAt = Date.now()
 			tx.status = status
 			tx.executionResult = executionResult
@@ -287,6 +362,13 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			this.emit("onTransactionUpdated", tx)
 			if (tx.status !== TxStatus.Pending) {
 				this.pending.delete(tx.hash)
+			}
+			if (tx.status === TxStatus.Dropped) {
+				this.droppedWatch.set(tx.hash, tx)
+				this.droppedNextCheckAt.set(tx.hash, Date.now() + DROPPED_RECHECK_INTERVAL_MS)
+			} else {
+				this.droppedWatch.delete(tx.hash)
+				this.droppedNextCheckAt.delete(tx.hash)
 			}
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
 		} finally {
