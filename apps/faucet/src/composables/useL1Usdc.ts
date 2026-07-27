@@ -72,6 +72,15 @@ export function useL1Usdc() {
 			balance.value = null
 			return
 		}
+		// The read client delegates to the wallet's provider, which executes eth_call on whatever
+		// chain the wallet is CURRENTLY on. Connect does not auto-switch (L1WalletPanel offers it),
+		// so a first-open read on the wrong chain hits an address with no code there and viem
+		// throws its raw `returned no data ("0x")` dump. Hold the read until the switch lands —
+		// the chainId watch below re-runs it immediately when it does.
+		if (l1.wrongChain.value) {
+			balance.value = null
+			return
+		}
 		try {
 			balance.value = (await l1.publicClient.readContract({
 				address: L1_USDC,
@@ -79,9 +88,10 @@ export function useL1Usdc() {
 				functionName: "balanceOf",
 				args: [owner],
 			})) as bigint
-		} catch (err) {
-			// Set-only: a background poll succeeding must not clear an error a user ACTION just surfaced.
-			error.value = errorMessage(err, "Failed to read the Sepolia USDC balance")
+		} catch {
+			// Set-only: a background poll succeeding must not clear an error a user ACTION just
+			// surfaced. Fixed copy — the raw viem message is a wall of text in the mint card.
+			error.value = "Failed to read the L1 token balance - retrying in the background."
 		}
 	}
 
@@ -129,9 +139,11 @@ export function useL1Usdc() {
 		timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
 	}
 
+	// chainId is a dependency so the balance appears the moment a wrong-chain wallet switches to
+	// the target network, rather than waiting out the poll interval.
 	watch(
-		() => l1.address.value,
-		(addr) => {
+		() => [l1.address.value, l1.chainId.value] as const,
+		([addr]) => {
 			void refresh()
 			if (addr) ensurePolling()
 		},
