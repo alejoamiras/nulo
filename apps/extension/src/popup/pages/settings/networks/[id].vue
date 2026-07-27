@@ -82,6 +82,9 @@ const handleSetActive = async () => {
 		)
 		return
 	}
+	// "stale" — the profile changed while this activation waited; the view that
+	// asked for it is gone, so there is nobody to toast at.
+	if (result === "stale") return
 	openToast({ label: "Active network updated", icon: "check-circle" })
 }
 

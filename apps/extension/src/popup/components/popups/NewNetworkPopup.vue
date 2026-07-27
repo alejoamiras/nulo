@@ -89,11 +89,13 @@ const handleCreateNetwork = async () => {
 			network,
 		)
 		if (result !== "activated") {
-			const label =
-				result === "blocked"
-					? "Network added. Finish or cancel your pending transaction to switch to it"
-					: "Network added, but the switch didn't confirm — reopen the popup to verify"
-			openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
+			if (result !== "stale") {
+				const label =
+					result === "blocked"
+						? "Network added. Finish or cancel your pending transaction to switch to it"
+						: "Network added, but the switch didn't confirm — reopen the popup to verify"
+				openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
+			}
 			appStore.networks = await managers.network.getNetworks()
 			emit("onClose")
 			return

@@ -3,11 +3,13 @@ import { activateNetworkGuarded } from "./guarded-network-activation"
 
 type Net = { id: string }
 
-function makeStore(current: Net | undefined, admit: boolean) {
+function makeStore(current: Net | undefined, admit: boolean | (() => boolean), profileId = "p1") {
 	const store = {
 		network: current,
+		profile: { id: profileId },
 		commitScopeChange: vi.fn(async (commit: () => void) => {
-			if (!admit) return false
+			const ok = typeof admit === "function" ? admit() : admit
+			if (!ok) return false
 			commit()
 			return true
 		}),
@@ -43,8 +45,6 @@ describe("activateNetworkGuarded", () => {
 	})
 
 	test("persist error but the write actually LANDED → reconcile keeps the target (no split-brain revert)", async () => {
-		// Transport failure after the durable write: the pointer is on n2. A
-		// blind revert to n1 would recreate the durable/UI split-brain.
 		const store = makeStore({ id: "n1" }, true)
 		const persist = vi.fn(async () => {
 			throw new Error("port closed before response")
@@ -57,7 +57,7 @@ describe("activateNetworkGuarded", () => {
 		expect(store.network?.id).toBe("n2")
 	})
 
-	test("persist error and the write did NOT land → reconcile returns to the durable network", async () => {
+	test("persist error, write did NOT land → guarded reconcile returns to the durable network", async () => {
 		const store = makeStore({ id: "n1" }, true)
 		const persist = vi.fn(async () => {
 			throw new Error("boom before write")
@@ -68,6 +68,29 @@ describe("activateNetworkGuarded", () => {
 
 		expect(result).toBe("unconfirmed")
 		expect(store.network?.id).toBe("n1")
+		// The reconcile itself went THROUGH the guard (two commits total).
+		expect(store.commitScopeChange).toHaveBeenCalledTimes(2)
+	})
+
+	test("reconcile is REFUSED (send started in the admitted scope) → view stays put, still unconfirmed", async () => {
+		// Admission passes; a send then starts in the newly viewed scope; the
+		// persist fails. Reconciling back would hide the send's activity — the
+		// guard refuses and the view deliberately stays diverged until the send
+		// settles or the popup reopens.
+		let calls = 0
+		const store = makeStore({ id: "n1" }, () => {
+			calls += 1
+			return calls === 1 // admit the activation, refuse the reconcile
+		})
+		const persist = vi.fn(async () => {
+			throw new Error("boom")
+		})
+		const read = vi.fn(async () => ({ id: "n1" }))
+
+		const result = await activateNetworkGuarded(store, persist, read, { id: "n2" })
+
+		expect(result).toBe("unconfirmed")
+		expect(store.network?.id).toBe("n2")
 	})
 
 	test("reconcile read fails → in-memory stays on the target (indeterminate, converges on next bootstrap)", async () => {
@@ -85,34 +108,73 @@ describe("activateNetworkGuarded", () => {
 		expect(store.network?.id).toBe("n2")
 	})
 
-	test("a stale activation's failure handling never clobbers a newer activation", async () => {
+	test("activations are strictly serialized — an older activation cannot overtake a newer one", async () => {
+		// A stalls inside its persist; B is requested next. B must WAIT for A to
+		// fully finish (serialization), so the final state is the LAST requested
+		// target — never the older one resuming over the newer.
 		const store = makeStore({ id: "n1" }, true)
-		// First activation: persist hangs until released, then fails.
-		let releaseFirst: () => void = () => undefined
-		const firstBlocked = new Promise<void>((r) => {
-			releaseFirst = r
+		const order: string[] = []
+		let releaseA: () => void = () => undefined
+		const aBlocked = new Promise<void>((r) => {
+			releaseA = r
 		})
-		const persistFirst = vi.fn(async () => {
-			await firstBlocked
-			throw new Error("slow failure")
+		const persistA = vi.fn(async () => {
+			order.push("a-start")
+			await aBlocked
+			order.push("a-done")
 		})
-		const readFirst = vi.fn(async () => ({ id: "n1" }))
-		const first = activateNetworkGuarded(store, persistFirst, readFirst, { id: "n2" })
+		const persistB = vi.fn(async () => {
+			order.push("b")
+		})
+		const read = vi.fn(async () => ({ id: "nX" }))
 
-		// Second activation supersedes and succeeds.
-		const second = await activateNetworkGuarded(
-			store,
-			async () => undefined,
-			async () => ({ id: "n3" }),
-			{ id: "n3" },
-		)
-		expect(second).toBe("activated")
-		expect(store.network?.id).toBe("n3")
+		const a = activateNetworkGuarded(store, persistA, read, { id: "n2" })
+		const b = activateNetworkGuarded(store, persistB, read, { id: "n3" })
+		await new Promise((r) => setTimeout(r, 10))
+		expect(order).toEqual(["a-start"]) // B has not begun
+		releaseA()
 
-		// The stale failure resolves — it must NOT reconcile over n3.
-		releaseFirst()
-		expect(await first).toBe("unconfirmed")
+		expect(await a).toBe("activated")
+		expect(await b).toBe("activated")
+		expect(order).toEqual(["a-start", "a-done", "b"])
 		expect(store.network?.id).toBe("n3")
-		expect(readFirst).not.toHaveBeenCalled()
+	})
+
+	test("a throwing activation does not wedge the queue (rejection-proof tail)", async () => {
+		const store = makeStore({ id: "n1" }, true)
+		const boom = vi.fn(async () => {
+			throw new Error("persist failed")
+		})
+		const readBoom = vi.fn(async () => {
+			throw new Error("read failed")
+		})
+
+		expect(await activateNetworkGuarded(store, boom, readBoom, { id: "n2" })).toBe("unconfirmed")
+		// The next activation still runs normally.
+		expect(
+			await activateNetworkGuarded(
+				store,
+				async () => undefined,
+				async () => ({ id: "n3" }),
+				{ id: "n3" },
+			),
+		).toBe("activated")
+		expect(store.network?.id).toBe("n3")
+	})
+
+	test("a queued activation whose profile changed while waiting is dropped as stale", async () => {
+		// Captured at enqueue under p1; by the time it runs the wallet re-scoped
+		// to p2 (lock → unlock another profile). The target belongs to a foreign
+		// profile — nothing may move.
+		const store = makeStore({ id: "n1" }, true, "p1")
+		const persist = vi.fn(async () => undefined)
+		const read = vi.fn(async () => ({ id: "n1" }))
+
+		const p = activateNetworkGuarded(store, persist, read, { id: "n2" })
+		store.profile = { id: "p2" }
+
+		expect(await p).toBe("stale")
+		expect(persist).not.toHaveBeenCalled()
+		expect(store.network?.id).toBe("n1")
 	})
 })
