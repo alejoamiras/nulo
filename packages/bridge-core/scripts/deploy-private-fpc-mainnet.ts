@@ -11,6 +11,7 @@
 
 import { Contract } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
+import { preexistingFeeJuicePayment } from "../src/fee-juice"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
