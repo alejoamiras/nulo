@@ -17,6 +17,7 @@ import { useBridgeJournal } from "@/composables/useBridgeJournal"
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { useNow } from "@/lib/clock"
+import { IS_MAINNET } from "@/lib/network"
 import { formatBigInt } from "@/lib/format"
 import { etherscanTxUrl, explorerTxUrl } from "@/lib/explorer"
 import { TESTIDS } from "@/lib/testids"
@@ -352,7 +353,7 @@ function onDiscard() {
 
 		<p v-if="discardArmed && stage !== 'done' && record.isPrivate && record.direction === 'deposit'" class="discard-warning">
 			Discarding destroys the only copy of this claim's sealed recovery secret - the deposited funds become
-			unclaimable. Testnet only.
+			unclaimable{{ IS_MAINNET ? " - these are REAL funds" : "" }}.
 		</p>
 	</article>
 </template>

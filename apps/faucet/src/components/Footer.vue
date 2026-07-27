@@ -2,6 +2,11 @@
 import { computed } from "vue"
 import { DRIPPER, NULO, OLUN } from "@/contracts/deployments"
 import { explorerAddressUrl } from "@/lib/explorer"
+import { IS_MAINNET } from "@/lib/network"
+
+const tagline = IS_MAINNET
+	? "Play tokens on Aztec mainnet · Permissionless dripper · Fixed amounts · No real value"
+	: "Alpha-testnet only · Permissionless dripper · Fixed amounts · No rate limit"
 
 const links = computed(() => ({
 	nulo: explorerAddressUrl(NULO.toString()),
@@ -23,9 +28,7 @@ const links = computed(() => ({
 			<a v-if="links.dripper" :href="links.dripper" target="_blank" rel="noopener noreferrer">Dripper</a>
 			<span v-else>Dripper</span>
 		</p>
-		<p class="tagline">
-			Alpha-testnet only · Permissionless dripper · Fixed amounts · No rate limit
-		</p>
+		<p class="tagline">{{ tagline }}</p>
 		<p class="external">
 			<a href="https://github.com/defi-wonderland/aztec-standards" target="_blank" rel="noopener noreferrer">
 				Wonderland aztec-standards
