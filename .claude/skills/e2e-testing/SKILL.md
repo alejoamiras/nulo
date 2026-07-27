@@ -46,6 +46,10 @@ This prevents guessing at selectors and ensures tests assert on real observable 
 - **Never use `chrome.runtime.reload()` for state reset** — it kills the extension and all its page contexts, crashing the browser connection. Use browser-per-file isolation instead.
 - **Vitest orders files by mtime, not alphabetically** — don't rely on file execution order. Design tests to be order-independent via fixtures.
 - **`Button.vue` doesn't set HTML `disabled` attribute** — it uses CSS `pointer-events: none` instead. `btn.disabled` is always `false`. To check if a Button is enabled, use `getComputedStyle(btn).pointerEvents !== "none"`. If you skip this, click handlers like `handleMint` silently return early via their own `if (!isAllowed) return` guard.
+- **An instant `page.$$` count can read 0 on a stably-populated feed.** Vue lists that refresh by ARRAY REPLACEMENT swap their children inside a sub-frame window; a count read landing in it sees 0 while 250ms samples on either side show every card. POSITIVE count assertions must poll (`waitForFunction(count >= N)`); ZERO assertions may stay instant (a dip can't false-fail a zero — pair them with a MutationObserver for flash detection). A `waitForSelector` resolving does NOT make the very next `$$` safe.
+- **Vitest swallows console output for PASSING tests** — instrumentation that `console.log`s yields data only on failure. Write debug samples to a file (`appendFileSync` to a tmp path) so passing runs produce evidence too.
+- **Inline sampling loops HEAL the race they're hunting.** A sampler inserted between the wait and the assertion delays the assertion past the dip → the flake "disappears" under instrumentation. Run the sampler in a detached promise at the ORIGINAL assertion timing and await it after the assertions.
+- **Verify what a run actually executed before reasoning from it.** Editing/reverting a test file while an `e2e:agent` sandbox is still building means vitest reads the file as of test-phase start, not launch — a "pass with instrumentation" may have run without it.
 
 ## CI-log + flake forensics (learned the hard way, THREE sessions running)
 
