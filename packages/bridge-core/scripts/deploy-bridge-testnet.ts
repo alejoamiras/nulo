@@ -445,6 +445,10 @@ async function main() {
 				...(allowTokenCutover ? { core: priorFuel.core } : priorFuel),
 				core: {
 					...priorFuel.core,
+					// Record WHICH contract the (carried) swapTarget is — verification must never infer it
+					// from swap-absence. The carried testnet target is the AZLO-era UniswapFuelSwap unless
+					// the operator deployed a replacement and says so via SWAP_TARGET_CONTRACT.
+					...(allowTokenCutover ? { swapTargetContract: process.env.SWAP_TARGET_CONTRACT ?? "UniswapFuelSwap" } : {}),
 					// The FeeJuicePortal is ROLLUP-COUPLED — refresh it from the node so a carried fuel
 					// block never re-promotes the previous rollup's (dead) portal (codex post-impl MED).
 					feeJuicePortal: l1a.feeJuicePortalAddress.toLowerCase(),

@@ -67,6 +67,14 @@ describe("candidate-schema (strict bridge-manifest gate)", () => {
 		expect(() => parseCandidateManifest(m)).toThrow(/core/)
 	})
 
+	it("accepts core.swapTargetContract (InertSwapTarget|UniswapFuelSwap) and rejects junk", () => {
+		const m = liveManifest()
+		m.l1.fuel.core.swapTargetContract = "InertSwapTarget"
+		expect(() => parseCandidateManifest(m)).not.toThrow()
+		m.l1.fuel.core.swapTargetContract = "EvilSwap"
+		expect(() => parseCandidateManifest(m)).toThrow(/swapTargetContract/)
+	})
+
 	// Semantic invariants (superRefine): coherent-looking but unusable manifests must reject.
 	it("rejects a permissionless-mint token WITHOUT sourceContract (verify-l1 needs the name)", () => {
 		const m = liveManifest()

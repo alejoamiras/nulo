@@ -82,7 +82,27 @@ run any gate here would be plausible-but-unverified code, the exact class this p
 prevent. Declared ✓-to-the-offline-boundary; the operator runbook below is the hand-off.
 
 ## Phase 6/8 operator runbook (the owner-present sequence)
-**Phase 6 (Sepolia, fake money — owner env: PRIVATE_KEY + SEPOLIA_RPC_URL + ETHERSCAN_API_KEY):**
+**Phase 6 (Sepolia, fake money) — REVISED per the bug-bash loop (r2/r3): intent-FIRST ordering,
+swap retirement (D22), recorded swapTarget contract. The exact sequence:**
+0. `live-intent.ts build <intent>` **BEFORE any broadcast** (captures the pre-spend balance baseline
+   + source/artifact pins — building it later excludes earlier spend from the caps; codex r3 HIGH),
+   commit the intent. `verify <intent>` before EACH broadcast group.
+1. Deploy TestUsdc (forge create, constructor ("Test USDC","USDC",6,1000)).
+2. `TOKEN_CONTRACT=TestUsdc TOKEN_NAME="Test USDC" TOKEN_SYMBOL=USDC TOKEN_DECIMALS=6` +
+   `BRIDGE_DEPLOYER_SECRET_TESTNET` set → `deploy-bridge-testnet.ts --reuse-token <addr>
+   --allow-token-cutover` → fresh portal + L2 trio; candidate = core-only fuel (swap DROPPED — the
+   pools are token-keyed, D22) + chain identity + sourceContract=TestUsdc +
+   core.swapTargetContract=UniswapFuelSwap (the carried target, recorded so verify-l1 never guesses).
+3. Smokes (all via the app's router path + approve fallback): `smoke-existing-testnet --config
+   <candidate>` public, `--private`, `--redirect-proof`. (smoke-swap is N/A — no swap stack.)
+4. `verify-l1 --config <candidate>` (TestUsdc source + portal + router; carried swapTarget =
+   explicit skip note).
+5. `live-intent.ts verify <intent> --candidate <candidate>` (records the digest) → **COMMIT the
+   digest-bearing intent** (promote requires the digest pre-recorded + tree-clean; codex r3 MED) →
+   `live-intent.ts promote <intent> --bridge-only --drop-swap`.
+6. Commit + push the promoted manifest; the app rebuild + CF preview pick it up.
+
+**Original env note:**
 1. DP7 token: **`TestUsdc.sol` (done, forge 4/4 — 7b.3)** — deploy it (constructor
    `("Test USDC","USDC",6,1000)`), then `deploy-bridge-testnet.ts` with `--reuse-token <it>` → fresh
    portal + L2 trio → candidate (now emits chain identity + source). Wire the conductor's L2 account

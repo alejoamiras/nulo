@@ -175,10 +175,11 @@ if (fuel) {
 		routerArgs,
 		...common,
 	])
-	// The swapTarget's SOURCE depends on the deployment shape: with a swap stack (testnet) it is
-	// UniswapFuelSwap; a bridge-only (mainnet) deployment ships the provably-reverting
-	// InertSwapTarget stub instead (DP2/DP8 — no constructor args), whose runtime revert behaviour
-	// is additionally probed at deploy (DeployBridgeMainnet.s.sol readbacks).
+	// The swapTarget's SOURCE comes from the RECORDED core.swapTargetContract — swap-absence does NOT
+	// imply the inert stub (a token cutover carries the AZLO-era UniswapFuelSwap, whose constructor
+	// args live in the DROPPED swap block and cannot be reconstructed here). Recorded InertSwapTarget
+	// verifies (no args); a legacy/carried target is an EXPLICIT skip — its source was verified in its
+	// original arc, and live-intent's swapTarget-equality readback still binds the address.
 	let okSwap = true
 	if (fuel.swap) {
 		const swap = fuel.swap
@@ -191,13 +192,18 @@ if (fuel) {
 			swapArgs,
 			...common,
 		])
-	} else {
+	} else if (core.swapTargetContract === "InertSwapTarget") {
 		okSwap = runForge(EVM_ROOT, `InertSwapTarget @ ${core.swapTarget}`, [
 			"verify-contract",
 			core.swapTarget,
 			"src/InertSwapTarget.sol:InertSwapTarget",
 			...common,
 		])
+	} else {
+		console.log(
+			`— swapTarget @ ${core.swapTarget} is ${core.swapTargetContract ?? "a legacy carried target"}: source-verify skipped ` +
+				"(constructor args live in the dropped swap block; verified in its original arc; equality readback still binds it)",
+		)
 	}
 	okFuel = okRouter && okSwap
 }

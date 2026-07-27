@@ -75,6 +75,11 @@ export const candidateManifestSchema = z
 								router: evmAddress,
 								permit2: evmAddress,
 								swapTarget: evmAddress,
+								// WHICH contract sits at swapTarget — swap-absence does NOT imply the inert stub (a
+								// token cutover carries the old UniswapFuelSwap). verify-l1 verifies the RECORDED
+								// contract; absent = legacy (source-verified in its original arc; equality readbacks
+								// still bind it).
+								swapTargetContract: z.enum(["UniswapFuelSwap", "InertSwapTarget"]).optional(),
 								feeJuicePortal: evmAddress,
 							})
 							.strict(),

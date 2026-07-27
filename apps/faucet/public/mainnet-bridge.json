@@ -17,6 +17,7 @@
 				"router": "0x78365a471dfce304f25d0382cdbd65b2b7935820",
 				"permit2": "0x000000000022d473030f116ddee9f6b43ac78ba3",
 				"swapTarget": "0x9c3cf20639a1a1f3fec1db8e6fa3199910db6dba",
+				"swapTargetContract": "InertSwapTarget",
 				"feeJuicePortal": "0xb4a9f8eadc8ca944729d61e59a9f491faff237a3"
 			}
 		},

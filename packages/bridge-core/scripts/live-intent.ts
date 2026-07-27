@@ -581,7 +581,9 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 				faucet: faucetSha
 					? { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" }
 					: { unchangedSha256: faucetLivePin, live: "apps/faucet/src/contracts/deployments.json" },
-				zeroSeed: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
+				zeroSeed: opts.dropSwap
+					? "l1.fuel.core byte-carried; swap RETIRED (--drop-swap, token cutover); no fuel/router deploys this arc"
+					: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
 			},
 			null,
 			"\t",
