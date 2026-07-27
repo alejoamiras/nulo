@@ -103,6 +103,26 @@
         "owner UI smoke under CF Access",
         "DP8 cleanup AFTER owner smoke: renounce router owner + revoke USDC/AZTEC Permit2 approvals + revoke FJ portal allowances"
       ]
+    },
+    "5-dp8-cleanup": {
+      "date": "2026-07-27",
+      "status": "DONE \u2014 arc closed",
+      "renounceOwnership": {
+        "tx": "0x93cb61bf508266f6",
+        "block": 25627050,
+        "verified": "router.owner == 0x0 (setSwapTarget permanently dead)"
+      },
+      "revokeUsdcPermit2": {
+        "tx": "0xf7ca1a62747c8258",
+        "block": 25627051,
+        "verified": "allowance == 0"
+      },
+      "aztecAllowances": "already 0 (exact approvals, fully consumed)",
+      "swapTargetOwner": "KEPT (sweep-only power \u2014 dust rescue; no protocol reach; plan named only the router)",
+      "finalBalances": {
+        "eoaEth": "0.00835",
+        "l2FeeJuicePublic": "~272 FJ (working capital)"
+      }
     }
   }
 }

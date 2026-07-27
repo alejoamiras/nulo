@@ -60,3 +60,17 @@ Live lessons (all encoded into the scripts/config, not just prose):
   resolution checks during the arc; a scripts-inclusive typecheck lane is follow-up work.
 - viem `getContract(...).read.fn` takes args as an ARRAY; bare multi-arg calls crash at runtime
   (caught pre-spend by the journal-first ordering).
+
+## Phase 9 close-out (2026-07-27) — DP8 executed
+
+Owner smoked the live tools.nulo.sh (CF Access on), then gave the DP8 go:
+- `router.renounceOwnership()` — tx 0x93cb61bf508266f6, block 25627050; verified owner()==0x0.
+  `setSwapTarget` (and the router's sweep) are permanently dead.
+- `USDC.approve(Permit2, 0)` — tx 0xf7ca1a62747c8258, block 25627051; verified allowance 0.
+- $AZTEC allowances (FJ portal + Permit2) were already 0 — exact approvals, fully consumed.
+- **Deliberate scope call:** the UniswapFuelSwap's owner was KEPT — its only power is `sweep`
+  (dust rescue on a contract that nets to zero every fill; no protocol reach). The plan's DP8
+  named the router only; killing sweep would only forfeit rescuing users' stray transfers.
+
+The tools-two-network arc is CLOSED. Residual working capital: ~0.0084 ETH on the L1 burner,
+~272 FJ public on the L2 deployer (pays future faucet-token maintenance).
