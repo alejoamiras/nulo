@@ -452,7 +452,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
  * manifest — new or changed fuel infrastructure hard-fails the promotion.
  */
-async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwap?: boolean } = {}): Promise<void> {
+async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwap?: boolean; restoreSwap?: boolean } = {}): Promise<void> {
 	// --bridge-only: a bridge cutover that touches NO faucet deployment (codex r1 HIGH-4). The faucet
 	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the
 	// promotion provably leaves it byte-identical.
@@ -531,7 +531,10 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	} catch {
 		liveFuel = undefined
 	}
-	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel, { allowSwapDrop: opts.dropSwap === true })
+	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel, {
+		allowSwapDrop: opts.dropSwap === true,
+		allowSwapAdd: opts.restoreSwap === true,
+	})
 
 	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
 	const writes: Array<[string, Buffer, string]> =
@@ -583,9 +586,11 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 				faucet: faucetSha
 					? { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" }
 					: { unchangedSha256: faucetLivePin, live: "apps/faucet/src/contracts/deployments.json" },
-				zeroSeed: opts.dropSwap
-					? "l1.fuel.core byte-carried; swap RETIRED (--drop-swap, token cutover); no fuel/router deploys this arc"
-					: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
+				zeroSeed: opts.restoreSwap
+					? "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
+					: opts.dropSwap
+						? "l1.fuel.core byte-carried; swap RETIRED (--drop-swap, token cutover); no fuel/router deploys this arc"
+						: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
 			},
 			null,
 			"\t",
@@ -607,13 +612,14 @@ if (isMain) {
 	const candidatePath = candidateFlag !== -1 ? rest[candidateFlag + 1] : undefined
 	const bridgeOnly = rest.includes("--bridge-only")
 	const dropSwap = rest.includes("--drop-swap")
+	const restoreSwap = rest.includes("--restore-swap")
 	const run =
 		cmd === "build"
 			? build(intentPath)
 			: cmd === "verify"
 				? verify(intentPath, candidatePath)
 				: cmd === "promote"
-					? promote(intentPath, { bridgeOnly, dropSwap })
+					? promote(intentPath, { bridgeOnly, dropSwap, restoreSwap })
 					: Promise.reject(new Error(`unknown command ${cmd}`))
 	run.catch((err) => {
 		console.error(`✗ ${err instanceof Error ? err.message : err}`)

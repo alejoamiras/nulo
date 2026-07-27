@@ -36,7 +36,7 @@ const manifest: CandidateManifest = {
 				quoter: "0x0000000000000000000000000000000000000006",
 				weth: "0x0000000000000000000000000000000000000008",
 				feeJuice: "0x0000000000000000000000000000000000000009",
-				pools: { azloWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
+				pools: { tokenWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
 				slippageBps: 100,
 				minFuelFj: "10000000000000000000",
 			},

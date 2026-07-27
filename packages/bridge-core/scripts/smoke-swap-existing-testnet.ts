@@ -93,7 +93,7 @@ async function main() {
 		token: azlo,
 		weth: swap.weth,
 		feeJuice: swap.feeJuice,
-		tokenWeth: swap.pools.azloWeth,
+		tokenWeth: swap.pools.tokenWeth ?? swap.pools.azloWeth,
 		ethFj: swap.pools.ethFj,
 	})
 

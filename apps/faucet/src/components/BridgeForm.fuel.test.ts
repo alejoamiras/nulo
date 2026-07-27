@@ -21,7 +21,7 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 		quoter: "0xquoter",
 		weth: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
 		feeJuice: "0x762C132040fdA6183066Fa3B14d985ee55aA3C18",
-		pools: { azloWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
+		pools: { tokenWeth: { fee: 500, tickSpacing: 10 }, ethFj: { fee: 987, tickSpacing: 10 } },
 		slippageBps: 300,
 		minFuelFj: 11n * 10n ** 18n,
 	},

@@ -61,6 +61,15 @@ describe("assertZeroSeed", () => {
 			const c = { ...core, swapTargetContract: "UniswapFuelSwap" }
 			expect(() => assertZeroSeed({ core: structuredClone(c) }, { core: c, swap: live.swap }, { allowSwapDrop: true })).not.toThrow()
 		})
+		it("allowSwapAdd: accepts core-carried + a whole NEW swap under --restore-swap only", () => {
+			const newSwap = { quoter: "0xq2", pools: { tokenWeth: { fee: 3000, tickSpacing: 60 } } }
+			expect(() => assertZeroSeed({ core: structuredClone(core), swap: newSwap }, { core }, { allowSwapAdd: true })).not.toThrow()
+			expect(() => assertZeroSeed({ core: structuredClone(core), swap: newSwap }, { core })).toThrow(/zero-seed violated/)
+			// never a silent REPLACE of an existing swap through this door
+			expect(() => assertZeroSeed({ core: structuredClone(core), swap: newSwap }, live, { allowSwapAdd: true })).toThrow(
+				/zero-seed violated/,
+			)
+		})
 		it("compares CANONICALLY — key order differences (zod vs raw JSON) do not reject", () => {
 			const reordered = {
 				feeJuicePortal: core.feeJuicePortal,

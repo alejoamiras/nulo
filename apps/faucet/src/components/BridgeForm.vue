@@ -147,7 +147,7 @@ async function refreshFuelQuote() {
 			token: L1_USDC,
 			weth: BRIDGE_FUEL.weth,
 			feeJuice: BRIDGE_FUEL.feeJuice,
-			tokenWeth: BRIDGE_FUEL.pools.azloWeth,
+			tokenWeth: BRIDGE_FUEL.pools.tokenWeth,
 			ethFj: BRIDGE_FUEL.pools.ethFj,
 		})
 		const fj = await quoteFuelPath(l1.publicClient as never, BRIDGE_FUEL.quoter, route, fuelSliceUnits.value)

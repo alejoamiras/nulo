@@ -62,7 +62,7 @@ export interface FuelDeployment {
 	weth: `0x${string}`
 	feeJuice: `0x${string}`
 	pools: {
-		azloWeth: { fee: number; tickSpacing: number }
+		tokenWeth: { fee: number; tickSpacing: number }
 		ethFj: { fee: number; tickSpacing: number }
 	}
 	slippageBps: number
@@ -76,9 +76,11 @@ export interface FuelDeployment {
 // flat shape is preserved (core + swap merged) so every downstream consumer is unchanged.
 const fuelCfg = config.l1.fuel
 const requiredPools = (pools: Record<string, { fee: number; tickSpacing: number }>): FuelDeployment["pools"] => {
-	const { azloWeth, ethFj } = pools
-	if (!azloWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.swap.pools must include azloWeth and ethFj")
-	return { azloWeth, ethFj }
+	// `tokenWeth` is the generic key (any bridged token); `azloWeth` is the AZLO-era legacy spelling.
+	const tokenWeth = pools.tokenWeth ?? pools.azloWeth
+	const { ethFj } = pools
+	if (!tokenWeth || !ethFj) throw new Error("bridge manifest: l1.fuel.swap.pools must include tokenWeth (or legacy azloWeth) and ethFj")
+	return { tokenWeth, ethFj }
 }
 export const BRIDGE_FUEL: FuelDeployment | undefined = fuelCfg?.swap
 	? {

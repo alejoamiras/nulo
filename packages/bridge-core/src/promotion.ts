@@ -51,8 +51,22 @@ function canonical(value: unknown): string {
 	return JSON.stringify(sort(value ?? null))
 }
 
-export function assertZeroSeed(candidateFuel: unknown, liveFuel: unknown, opts: { allowSwapDrop?: boolean } = {}): void {
+export function assertZeroSeed(
+	candidateFuel: unknown,
+	liveFuel: unknown,
+	opts: { allowSwapDrop?: boolean; allowSwapAdd?: boolean } = {},
+): void {
 	if (canonical(candidateFuel) === canonical(liveFuel)) return
+	// EXPLICIT swap restoration (pools seeded THIS arc for the current token): the candidate keeps
+	// `core` byte-equal and ADDS a whole `swap` block the live manifest lacks. Allowed only under the
+	// operator's --restore-swap flag — core may never change, and an existing swap may never be
+	// silently replaced through this door.
+	if (opts.allowSwapAdd) {
+		const cand = candidateFuel as { core?: unknown; swap?: unknown } | null | undefined
+		const live = liveFuel as { core?: unknown; swap?: unknown } | null | undefined
+		const coreEqual = canonical(cand?.core) === canonical(live?.core)
+		if (coreEqual && cand?.swap !== undefined && live?.swap === undefined) return
+	}
 	// EXPLICIT swap retirement (a token cutover): the Uniswap pools are keyed by the token address,
 	// so a new token cannot carry the old swap config — the candidate keeps `core` BYTE-EQUAL and
 	// DROPS `swap` entirely. Allowed only under the operator's --drop-swap flag; core may never
