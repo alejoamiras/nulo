@@ -37,7 +37,7 @@ interface IMintable {
  *   POOL_SQRT_PRICE_X96  target sqrtPriceX96 for token/WETH (currency0=token). Default = the
  *                        DeployBridge fork-fixture's ~2,100 6-dec-USDC-per-WETH shape.
  *   TICK_LOWER/TICK_UPPER liquidity band (defaults match the fixture shape)
- *   WETH_SEED            WETH side of the liquidity (default 0.25 ether — the intent cap)
+ *   WETH_SEED            WETH side of the liquidity (default 0.25 ether; must be ≤ the intent cap)
  *   POOL_LIQUIDITY       liquidityDelta (default 7.5e12 — the fixture's 6e13 scaled to 0.25 WETH)
  *   TOKEN_MINT_CALLS     how many maxMintPerTx mints to fund the helper (default 10)
  *

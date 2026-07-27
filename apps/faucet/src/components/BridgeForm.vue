@@ -46,7 +46,7 @@ const direction = ref<"l1-to-l2" | "l2-to-l1">("l1-to-l2")
 /** Fuel (arrive-with-gas): exact-input AZLO slice, quoted to FJ live. Renders only when the
  *  deployment configures fuel and the direction is L1→L2. */
 const fuelOn = ref(false)
-const fuelSlice = ref("0.25")
+const fuelSlice = ref("1")
 const fuelQuote = ref<{ state: "idle" | "loading" | "ok" | "error"; fj?: bigint; min?: bigint; message?: string }>({
 	state: "idle",
 })
@@ -123,16 +123,17 @@ const amountError = settledAmount.shown
 
 const fuelAvailable = computed(() => BRIDGE_FUEL !== undefined && direction.value === "l1-to-l2")
 const fuelSliceUnits = computed(() => parseAmount(fuelSlice.value || "0", BRIDGE_TOKEN_DECIMALS))
-/** Oversize fuel slices crater the (deliberately small) pools - the fork rehearsal measured a
- *  2-token fill moving prices ~25%. Cap at 1 WHOLE token — decimals-derived, never a hardcoded
- *  10^18 (a 6-dec token would otherwise allow 10^12 whole tokens). */
-const MAX_FUEL_SLICE = 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
+/** Oversize fuel slices move the pool price against the user. At the deepened testnet seeding a
+ *  25-token fill measures ~1.5% impact — comfortably inside the 3% slippage guard; bigger fills
+ *  approach the guard and start reverting on minOut. Decimals-derived, never a hardcoded 10^18
+ *  (a 6-dec token would otherwise allow 10^12 whole tokens). */
+const MAX_FUEL_SLICE = 25n * 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 const fuelError = computed(() => {
 	if (!fuelOn.value || !fuelAvailable.value) return null
 	if (fuelSliceUnits.value === 0n) return "Enter a fuel slice."
 	if (fuelSliceUnits.value >= amountUnits.value) return "The fuel slice must be smaller than the amount."
 	if (fuelSliceUnits.value > MAX_FUEL_SLICE)
-		return `Max fuel is 1 ${BRIDGE_TOKEN_SYMBOL} - bigger slices just move the pool price against you.`
+		return `Max fuel is 25 ${BRIDGE_TOKEN_SYMBOL} - bigger slices just move the pool price against you.`
 	if (fuelQuote.value.state === "error") return fuelQuote.value.message ?? "No fuel route available right now."
 	return null
 })

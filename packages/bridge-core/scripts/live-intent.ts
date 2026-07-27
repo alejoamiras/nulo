@@ -54,10 +54,12 @@ export function requirePinnedSigner(network: "testnet" | "mainnet"): string {
 /** The testnet pin — the historical single-network export every testnet script asserts against. */
 export const PLAN_PINNED_L1_SIGNER = requirePinnedSigner("testnet")
 
-/** Hard per-arc exposure ceilings (reviewed at the plan gate; rc.2 precedent ~0.09 ETH + seed). */
+/** Hard per-arc exposure ceilings (reviewed at the plan gate; raised from 0.5/0.25 for the
+ *  owner-directed pool deepening — a ~1.25 WETH seed to cut swap price impact to ~1.5% at a
+ *  25-token fill). Testnet ETH only; the mainnet arc re-reviews these from scratch. */
 export const CAPS = {
-	maxTotalEthSpend: "0.5", // ether — L1 gas + WETH_SEED + pool seeding, everything
-	maxWethSeed: "0.25", // ether — DeployFuelLive's WETH_SEED must be explicit and ≤ this
+	maxTotalEthSpend: "2.0", // ether — L1 gas + WETH_SEED + pool seeding, everything
+	maxWethSeed: "1.5", // ether — SeedTokenPool/DeployFuelLive's WETH_SEED must be explicit and ≤ this
 }
 
 const here = dirname(fileURLToPath(import.meta.url))

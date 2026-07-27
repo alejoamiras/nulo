@@ -71,7 +71,7 @@ const TOKEN_DECIMALS = BigInt(CONFIG.l1.token?.decimals ?? 18)
 const TOTAL = 10n * 10n ** TOKEN_DECIMALS
 // Env-tunable: the slice must buy ENOUGH FJ for the self-paying claim at the CURRENT pool rate
 // (quote >= minFuelFj) — a fresh pool's pricing can put the old default under the floor.
-const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (25n * 10n ** (TOKEN_DECIMALS - 2n)).toString())
+const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (10n ** TOKEN_DECIMALS).toString())
 
 async function main() {
 	const t0 = Date.now()
