@@ -12,8 +12,9 @@
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { L2AmountClaim } from "@aztec/aztec.js/ethereum"
-import { FeeJuicePaymentMethodWithClaim, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
+import { type FeePaymentMethod, FeeJuicePaymentMethodWithClaim, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { GasFees, ManaUsageEstimate } from "@aztec/stdlib/gas"
+import { ExecutionPayload } from "@aztec/stdlib/tx"
 import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 
 /** The canonical L2 Fee Juice contract address — a protocol constant (identical on every network). */
@@ -93,6 +94,20 @@ export const publicFeeJuicePayment = (sender: AztecAddress, claim: FeeJuiceClaim
  * bridge's L2 txs before the user holds any Fee Juice of their own.
  */
 export const sponsoredFeePayment = (fpc: AztecAddress): SponsoredFeePaymentMethod => new SponsoredFeePaymentMethod(fpc)
+
+/**
+ * Pay L2 gas from the sender's ALREADY-CLAIMED public Fee-Juice balance. aztec.js 5.x ships no
+ * class for this because the protocol needs no calls at all — the account entrypoint detects a
+ * zero-call fee payload and routes it as PREEXISTING_FEE_JUICE (see aztec.js
+ * account_entrypoint_meta_payment_method), with the sender as fee payer. This is the mainnet
+ * deploy sequence's steady-state method after the claim-in-tx bootstrap.
+ */
+export const preexistingFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
+	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),
+	getExecutionPayload: () => Promise.resolve(ExecutionPayload.empty()),
+	getFeePayer: () => Promise.resolve(sender),
+	getGasSettings: () => undefined,
+})
 
 /**
  * The FeeJuice claim call args for claiming bridged Fee Juice as a standalone payload

@@ -8,7 +8,7 @@
  * Run:                      bun scripts/deploy-private-fpc-mainnet.ts
  * Idempotent — exits early if the pinned instance already exists.
  */
-import { FeeJuicePaymentMethod } from "@aztec/aztec.js/fee"
+
 import { Fr } from "@aztec/aztec.js/fields"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
@@ -47,7 +47,7 @@ async function main() {
 		salt: Fr.fromHexString(PRIVATE_FPC_SALT),
 		universalDeploy: true,
 	}).send({
-		fee: { paymentMethod: new FeeJuicePaymentMethod(from) },
+		fee: { paymentMethod: preexistingFeeJuicePayment(from) },
 		from,
 	} as never)
 	const got = result.instance.address.toString()

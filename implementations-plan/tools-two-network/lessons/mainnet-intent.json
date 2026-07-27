@@ -51,6 +51,19 @@
       "etherscanVerified": "2/2",
       "readbacks": "swapTarget wired, owner == pinned EOA",
       "ethAfter": "0.008585727007477808"
+    },
+    "2-portal-fj": {
+      "date": "2026-07-27",
+      "status": "LIVE",
+      "nuloTokenPortal": "0x3c32f16f5893c9699b4131a235604d8f5c6dfab6",
+      "portalInitTx": "0xd789ed4628fe335a6e3014e89abbf649acf184c72d7b58c8894bf75b34948148",
+      "boundL2Bridge": "0x25a4113e69c60c4ef3fd62c195436d34fa100e96934b53951bdf6f5cb8198807",
+      "l2Deployer": "0x19ae6b7ccd52c19da48f537b7b189b7bf407db4fcfa1ae7c28d137104a6ad077",
+      "fjDeposit": {
+        "amount": "300e18",
+        "leafIndex": 14766080
+      },
+      "note": "one resume: viem getContract .read multi-arg calls need ARRAY args; crashed pre-spend on a read-only check, journal resumed cleanly"
     }
   }
 }

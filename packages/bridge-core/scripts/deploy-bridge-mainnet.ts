@@ -35,7 +35,7 @@ import { fileURLToPath } from "node:url"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
-import { FeeJuicePaymentMethod } from "@aztec/aztec.js/fee"
+
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -47,7 +47,7 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
-import { publicFeeJuicePayment } from "../src/fee-juice"
+import { preexistingFeeJuicePayment, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
@@ -287,15 +287,13 @@ async function main() {
 		const fjPortalR = getContract({ address: feeJuicePortal, abi: FeeJuicePortalAbi as unknown as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		assertSame(await (fjPortalR.read as any).UNDERLYING(), feeJuiceAsset, "FeeJuicePortal.UNDERLYING == node fee asset")
-		const bal = (await ur.balanceOf(account.address)) as bigint
-		void bal
 		const assetR = getContract({ address: feeJuiceAsset, abi: ERC20_META as unknown as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const ar = assetR.read as any
-		const aztecBal = (await ar.balanceOf(account.address)) as bigint
+		const aztecBal = (await ar.balanceOf([account.address])) as bigint
 		if (aztecBal < FJ_BRIDGE_AMOUNT) throw new Error(`$AZTEC balance ${aztecBal} < FJ_BRIDGE_AMOUNT ${FJ_BRIDGE_AMOUNT}; STOP`)
 		const plan = await planPublicFuelDeposit(from, FJ_BRIDGE_AMOUNT, claimSecret)
-		const allowance = (await ar.allowance(account.address, feeJuicePortal)) as bigint
+		const allowance = (await ar.allowance([account.address, feeJuicePortal])) as bigint
 		if (allowance < FJ_BRIDGE_AMOUNT) {
 			const approveHash = await wallet.writeContract({
 				address: feeJuiceAsset,
@@ -359,7 +357,7 @@ async function main() {
 		console.log(`L2 account deployed + FJ claimed (${mins()})`)
 	}
 
-	const fee = { paymentMethod: new FeeJuicePaymentMethod(from) }
+	const fee = { paymentMethod: preexistingFeeJuicePayment(from) }
 	const opts = { from, fee }
 	const sendOpts = { ...opts, wait: { waitForStatus: TxStatus.CHECKPOINTED } }
 
