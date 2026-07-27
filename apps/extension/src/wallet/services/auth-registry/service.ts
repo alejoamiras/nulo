@@ -100,9 +100,10 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  deliberately does NOTHING: the transaction service may still resurrect a dropped tx
 	 *  on a late mine (transient DROPPED answers happen behind load-balanced RPCs), and a
 	 *  row removed here can never be reconfirmed — authwit hashes aren't enumerable from
-	 *  chain. A stale pending row for a genuinely dropped tx is the SAFE direction
-	 *  (over-claiming; revoking a never-landed grant is a no-op) and registry sync
-	 *  reconciles it eventually. */
+	 *  chain. ACCEPTED RESIDUAL: a genuinely dropped tx's row then lingers as pending —
+	 *  `syncAuthwit` skips pending rows on purpose, so nothing prunes it. That is the safe
+	 *  direction (over-claiming; revoking a never-landed grant is a no-op); it stays
+	 *  user-visible/revocable and only costs headroom against the tracked-authwit cap. */
 	private async reconcileFromTx(tx: Tx): Promise<void> {
 		const settled = tx.status === TxStatus.Proven || tx.status === TxStatus.Finalized
 		if (settled && tx.executionResult === TxExecutionResult.Success) {
