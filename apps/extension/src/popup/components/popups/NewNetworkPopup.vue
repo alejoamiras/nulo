@@ -1,6 +1,7 @@
 <script setup>
 /** Utils */
 import { managers } from "@/utils/core"
+import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -78,12 +79,16 @@ const handleCreateNetwork = async () => {
 		const network = await managers.network.addNetwork(nameTerm.value, urlTerm.value)
 		isCreating.value = false
 
-		await managers.network.setActiveNetwork(network.id)
-		const activated = await appStore.commitScopeChange(() => {
-			appStore.network = network
-		})
-		if (!activated) {
-			openToast({ label: "Network added. Finish or cancel your pending transaction to switch to it", icon: "info" }, 4_000)
+		// Guard first, persist second: the guard admits (and moves the in-memory
+		// scope) before the service write, so a refusal leaves the durable active
+		// network untouched — the network is created but NOT activated.
+		const result = await activateNetworkGuarded(appStore, (id) => managers.network.setActiveNetwork(id), network)
+		if (result !== "activated") {
+			const label =
+				result === "blocked"
+					? "Network added. Finish or cancel your pending transaction to switch to it"
+					: "Network added, but switching to it failed"
+			openToast({ label, icon: "info" }, 4_000)
 			appStore.networks = await managers.network.getNetworks()
 			emit("onClose")
 			return
