@@ -115,6 +115,9 @@ async function makeHarness() {
 	collection.add(
 		svc(ProfileService.name, {
 			getActiveProfile: async () => ({ id: "p1" }),
+			// The journal's create fence checks membership here — the fake must
+			// list the profile the flow files under or every create is refused.
+			getProfiles: async () => [{ id: "p1" }],
 			getDeletionState: () => deletionState,
 			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
 		}),

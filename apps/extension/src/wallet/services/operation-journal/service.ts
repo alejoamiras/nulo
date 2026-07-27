@@ -7,6 +7,7 @@ import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex } from "@/wallet/utils"
@@ -82,6 +83,9 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 */
 	private readonly transitionLock: Lock
 
+	/** Optional profile-existence fence for `createOperation` — see `init`. */
+	private profileService: ProfileService | null = null
+
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(OPERATION_JOURNAL_SERVICE_NAME, logger)
 		// Local storage: records survive SW restart AND full browser exit.
@@ -112,6 +116,14 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			networkService.registerChainPurgeSubscriber(async (_profileId, _chainId, networkId) => this.clearChainState(networkId))
 		} catch {
 			// NetworkService not registered in this collection — skip cascade wiring.
+		}
+		// Same optionality for the profile-existence fence in `createOperation`:
+		// absent ProfileService (minimal fixtures) means no fence, matching the
+		// pre-fence behavior those fixtures pin.
+		try {
+			this.profileService = services.get(ProfileService.name) as ProfileService
+		} catch {
+			this.profileService = null
 		}
 	}
 
@@ -147,22 +159,18 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 */
 	public async clearChainState(networkId: string): Promise<void> {
 		await this.ensureInitialized()
-		const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
-		await purgeRows(
-			records,
-			// Serialized like every other delete: an unserialized purge lets a
-			// transition that has already read a row write it back afterwards,
-			// leaving an orphan the reaper can only fail, never remove.
-			(record) => this.deleteRowLocked(record.id),
-			(record) => this.emit("onOperationDeleted", record),
-		)
-	}
-
-	/** Delete a row under the transition lock, without emitting. */
-	private async deleteRowLocked(id: string): Promise<void> {
+		// One lock hold for snapshot + sweep, same as `purgeForProfile`: an
+		// unserialized purge lets a transition that has already read a row write
+		// it back afterwards, and a snapshot outside the hold misses a row a
+		// concurrent `createOperation` (same lock) is about to land.
 		await this.transitionLock.enter()
 		try {
-			await this.storage.delete(id)
+			const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
+			await purgeRows(
+				records,
+				(record) => this.storage.delete(record.id),
+				(record) => this.emit("onOperationDeleted", record),
+			)
 		} finally {
 			this.transitionLock.leave()
 		}
@@ -173,17 +181,48 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 *  `clearChainState` (chain-purge cascade) misses (finding D). */
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
-		await purgeRows(
-			records,
-			(record) => this.deleteRowLocked(record.id),
-			(record) => this.emit("onOperationDeleted", record),
-		)
+		// Snapshot AND delete under one transition-lock hold: `createOperation`
+		// writes under the same lock, so a row can never land between the
+		// snapshot and the sweep. A snapshot taken outside missed exactly that
+		// row, leaving a record for the deleted profile behind.
+		await this.transitionLock.enter()
+		try {
+			const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
+			await purgeRows(
+				records,
+				(record) => this.storage.delete(record.id),
+				(record) => this.emit("onOperationDeleted", record),
+			)
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 
 	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {
 		validateParams(OperationJournalMethodSchemas.createOperation.params, [input], "createOperation")
 		await this.ensureInitialized()
+		// The whole create runs under the transition lock so it serializes
+		// against `purgeForProfile`: the row either lands before the purge's
+		// snapshot (and is swept) or the fence below sees the profile already
+		// absent — tombstoned profiles are absent from every read — and refuses.
+		// Without this, a creator that captured its profile before a deletion
+		// began could persist durable dApp metadata for an erased profile after
+		// its purge ran, and nothing would ever sweep it.
+		await this.transitionLock.enter()
+		try {
+			return await this._createOperationLocked(input)
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
+
+	private async _createOperationLocked(input: NewOperationInput): Promise<OperationRecord> {
+		if (this.profileService) {
+			const known = await this.profileService.getProfiles()
+			if (!known.some((p) => p.id === input.profileId)) {
+				throw new Error(`profile ${input.profileId} does not exist — operation not created`)
+			}
+		}
 
 		let id: string
 		do {

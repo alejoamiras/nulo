@@ -393,6 +393,47 @@ describe("OperationJournalService", () => {
 		await expect(service.transitionOperation(rec.id, { stage: "simulating" })).rejects.toBeInstanceOf(IllegalTransitionError)
 	})
 
+	test("createOperation: refuses when the profile is absent (deleted or tombstoned) — profile-deletion fence", async () => {
+		// A creator that captured its profile BEFORE a deletion began must not
+		// persist durable dApp metadata for the erased profile afterward.
+		// `getProfiles` treats tombstoned profiles as absent, so one membership
+		// check covers deletion-in-progress and fully-deleted alike.
+		const profiles = [{ id: "profile-a" }]
+		const profileStub = {
+			name: "profile",
+			dependencies: [],
+			getProfiles: async () => profiles,
+			async start() {},
+		}
+		const collection = new ServiceCollection()
+		const svc = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		collection.add(svc)
+		collection.add(profileStub as never)
+		await collection.start()
+
+		// Live profile → create succeeds.
+		const rec = await svc.createOperation(VALID_INPUT)
+		expect(rec.profileId).toBe("profile-a")
+
+		// Profile erased → create refused, nothing persisted.
+		profiles.length = 0
+		await expect(svc.createOperation(VALID_INPUT)).rejects.toThrow(/does not exist/)
+		expect((await svc.getOperations({ profileId: "profile-a" })).length).toBe(1)
+	})
+
+	test("purgeForProfile: sweeps rows and leaves other profiles untouched", async () => {
+		const mine = await service.createOperation(VALID_INPUT)
+		const theirs = await service.createOperation({ ...VALID_INPUT, profileId: "profile-b" })
+		const seen = vi.fn()
+		service.onOperationDeleted.add(seen)
+
+		await service.purgeForProfile("profile-a")
+
+		expect(await service.getOperation(mine.id)).toBeFalsy()
+		expect((await service.getOperation(theirs.id))?.id).toBe(theirs.id)
+		expect(seen).toHaveBeenCalledTimes(1)
+	})
+
 	test("deleteOperationIfStage: refuses when the row left the allowed stages (cancel-vs-re-file arbitration)", async () => {
 		const rec = await service.createOperation({
 			...VALID_INPUT,
