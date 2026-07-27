@@ -169,7 +169,7 @@ describe("private-fuel keystone", () => {
 		// node — and ONLY that. Any other node version (or a new artifact digest) must re-red the
 		// gate until freshly curated.
 		const compat = mainnet.compatibleNodeVersions[mainnet.artifactSha256]
-		expect(compat).toEqual(["5.1.0"])
+		expect(compat).toEqual(["5.0.1", "5.1.0"])
 	})
 })
 
