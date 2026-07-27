@@ -421,6 +421,51 @@ describe("OperationJournalService", () => {
 		expect((await svc.getOperations({ profileId: "profile-a" })).length).toBe(1)
 	})
 
+	test("createOperation: refuses a stale profile epoch (deleted-and-reimported incarnation)", async () => {
+		// Same id, new incarnation: membership passes but the epoch advanced —
+		// the stale creator's write must be refused.
+		let epoch = 0
+		const profileStub = {
+			name: "profile",
+			dependencies: [],
+			getProfiles: async () => [{ id: "profile-a" }],
+			getDeletionState: () => ({ isCurrent: (_id: string, captured: number) => captured === epoch }),
+			async start() {},
+		}
+		const collection = new ServiceCollection()
+		const svc = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		collection.add(svc)
+		collection.add(profileStub as never)
+		await collection.start()
+
+		// Current epoch → allowed.
+		await svc.createOperation({ ...VALID_INPUT, profileEpoch: 0 })
+		// Deletion (and re-import) happened since capture → refused.
+		epoch = 1
+		await expect(svc.createOperation({ ...VALID_INPUT, profileEpoch: 0 })).rejects.toThrow(/deleted since/)
+		// A fresh capture against the new incarnation is fine.
+		await svc.createOperation({ ...VALID_INPUT, profileEpoch: 1 })
+	})
+
+	test("createOperation: refuses when the target network is deleted or mid-deletion", async () => {
+		const live = new Set(["net-live"])
+		const networkStub = {
+			name: "network",
+			dependencies: [],
+			registerChainPurgeSubscriber: () => undefined,
+			isNetworkLive: async (id: string) => live.has(id),
+			async start() {},
+		}
+		const collection = new ServiceCollection()
+		const svc = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		collection.add(svc)
+		collection.add(networkStub as never)
+		await collection.start()
+
+		await svc.createOperation({ ...VALID_INPUT, networkId: "net-live" })
+		await expect(svc.createOperation({ ...VALID_INPUT, networkId: "net-gone" })).rejects.toThrow(/deleted/)
+	})
+
 	test("purgeForProfile: sweeps rows and leaves other profiles untouched", async () => {
 		const mine = await service.createOperation(VALID_INPUT)
 		const theirs = await service.createOperation({ ...VALID_INPUT, profileId: "profile-b" })

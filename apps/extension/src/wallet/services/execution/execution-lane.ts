@@ -46,6 +46,10 @@ import {
 export interface ExecutionLaneDeps {
 	operationJournal: OperationJournalService
 	getActiveProfile(): Promise<ProfileInfo | undefined>
+	/** Deletion epoch for a profile at capture time — threaded into the journal
+	 *  create fence so a profile deleted (or deleted-and-reimported) between
+	 *  capture and persist refuses the row. Optional: absent means unfenced. */
+	captureProfileEpoch?(profileId: string): number
 	getNetwork(networkId: string): Promise<Network>
 	logDebug(msg: string, ...rest: unknown[]): void
 	logInfo(msg: string, ...rest: unknown[]): void
@@ -110,6 +114,7 @@ export class ExecutionLane {
 				kind: "dapp_execute",
 				origin: "dapp",
 				profileId: profile.id,
+				profileEpoch: this.deps.captureProfileEpoch?.(profile.id),
 				accountAddress,
 				networkId,
 				title: primaryMethod ?? "Transaction",

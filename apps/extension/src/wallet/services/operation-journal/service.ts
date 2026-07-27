@@ -28,10 +28,12 @@ export * from "./spec"
 /**
  * Durable operation journal (Phase 2).
  *
- * Storage-only service — no orchestration, no business logic, no calls out
- * to other services. Consumers (ExecutionService, dApp interaction flows)
- * drive transitions; this service persists them, validates FSM legality
- * via `@nulo/wallet-core/jobs`, and fans out events.
+ * Storage-first service — no orchestration or business logic. Consumers
+ * (ExecutionService, dApp interaction flows) drive transitions; this service
+ * persists them, validates FSM legality via `@nulo/wallet-core/jobs`, and
+ * fans out events. Its ONLY calls out are the creation fences: profile
+ * existence + deletion epoch (ProfileService) and network liveness
+ * (NetworkService), both optional so minimal fixtures run unfenced.
  *
  * Phase 2 carries owned here:
  *   #1  origin + profileId required at create-time (NewOperationInput schema)
@@ -76,15 +78,21 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 *   - transition volume is low (a handful per tx lifecycle)
 	 *
 	 * Every path that reads a row and then writes (or deletes) it takes this
-	 * lock: `transitionOperation`, `touchOperation`, `setOperationMeta` and
-	 * `deleteOperation`. `createOperation` and `getOperation` don't, since
-	 * neither is a load-then-write on an existing row. A new load+merge+write
+	 * lock: `transitionOperation`, `touchOperation`, `setOperationMeta`,
+	 * `deleteOperation`, `refileOperationScope`, and the bulk purges
+	 * (`purgeForProfile`, `clearChainState` — snapshot AND sweep in one hold).
+	 * `createOperation` ALSO takes it — not as a load-then-write, but so
+	 * creation serializes against the purges' snapshots and the fences can't
+	 * be outrun. `getOperation` alone stays lock-free. A new load+merge+write
 	 * path MUST acquire it too.
 	 */
 	private readonly transitionLock: Lock
 
 	/** Optional profile-existence fence for `createOperation` — see `init`. */
 	private profileService: ProfileService | null = null
+
+	/** Optional network-liveness fence for `createOperation` — see `init`. */
+	private networkService: NetworkService | null = null
 
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(OPERATION_JOURNAL_SERVICE_NAME, logger)
@@ -112,10 +120,11 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// register NetworkService, and the journal still works as a standalone
 		// storage primitive in those contexts.
 		try {
-			const networkService = services.get(NetworkService.name) as NetworkService
-			networkService.registerChainPurgeSubscriber(async (_profileId, _chainId, networkId) => this.clearChainState(networkId))
+			this.networkService = services.get(NetworkService.name) as NetworkService
+			this.networkService.registerChainPurgeSubscriber(async (_profileId, _chainId, networkId) => this.clearChainState(networkId))
 		} catch {
 			// NetworkService not registered in this collection — skip cascade wiring.
+			this.networkService = null
 		}
 		// Same optionality for the profile-existence fence in `createOperation`:
 		// absent ProfileService (minimal fixtures) means no fence, matching the
@@ -221,6 +230,27 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			const known = await this.profileService.getProfiles()
 			if (!known.some((p) => p.id === input.profileId)) {
 				throw new Error(`profile ${input.profileId} does not exist — operation not created`)
+			}
+			// Membership is not an incarnation check: backup re-import deliberately
+			// reuses a freed profile id, so a creator that captured the OLD
+			// incarnation would pass the check above and write stale dApp metadata
+			// into the successor. The deletion epoch (bumped by every deletion of
+			// that id, surviving release) distinguishes incarnations same-worker; a
+			// SW restart kills the stale closure, so cross-restart is moot.
+			if (input.profileEpoch !== undefined && typeof this.profileService.getDeletionState === "function") {
+				const deletion = this.profileService.getDeletionState()
+				if (!deletion.isCurrent(input.profileId, input.profileEpoch)) {
+					throw new Error(`profile ${input.profileId} was deleted since this operation was prepared — not created`)
+				}
+			}
+		}
+		// The network row deliberately outlives its purge cascade, so the
+		// liveness check (row exists AND no delete in progress) is what keeps a
+		// creator that resolved the network pre-deletion from landing a row
+		// between the cascade's journal sweep and the row delete.
+		if (this.networkService && input.networkId !== undefined && typeof this.networkService.isNetworkLive === "function") {
+			if (!(await this.networkService.isNetworkLive(input.networkId))) {
+				throw new Error(`network ${input.networkId} is deleted or being deleted — operation not created`)
 			}
 		}
 

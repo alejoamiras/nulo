@@ -196,6 +196,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.lane = new ExecutionLane({
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
+			captureProfileEpoch: (profileId) => this.profileService.getDeletionState().capture(profileId),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logInfo: (msg, ...rest) => this.logInfo(msg, ...rest),

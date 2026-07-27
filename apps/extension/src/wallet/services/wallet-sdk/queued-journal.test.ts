@@ -81,6 +81,9 @@ function makeProfileStub() {
 	return {
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		getActiveProfile: vi.fn<() => Promise<any>>(async () => ({ id: "profile-1" })),
+		// The creator captures the deletion epoch alongside the profile and
+		// threads it into the journal's create fence.
+		getDeletionState: vi.fn(() => ({ capture: (_id: string) => 0 })),
 	}
 }
 
