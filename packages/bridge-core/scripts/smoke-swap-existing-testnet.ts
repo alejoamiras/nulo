@@ -69,7 +69,9 @@ const evmAbi = (name: string): Abi => JSON.parse(readFileSync(join(OUT, `${name}
 // would request 10^19 base units into a 10^9 mint cap — instant revert; codex bug-bash r2).
 const TOKEN_DECIMALS = BigInt(CONFIG.l1.token?.decimals ?? 18)
 const TOTAL = 10n * 10n ** TOKEN_DECIMALS
-const FUEL_SLICE = 25n * 10n ** (TOKEN_DECIMALS - 2n) // 0.25 tokens -> ~Fee Juice for the self-paying claim
+// Env-tunable: the slice must buy ENOUGH FJ for the self-paying claim at the CURRENT pool rate
+// (quote >= minFuelFj) — a fresh pool's pricing can put the old default under the floor.
+const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (25n * 10n ** (TOKEN_DECIMALS - 2n)).toString())
 
 async function main() {
 	const t0 = Date.now()
