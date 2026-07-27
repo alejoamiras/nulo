@@ -39,7 +39,7 @@
 | 5 app real-USDC + gating | ✓ | `923edb8`+`6a7b985` — approve fallback both legs; per-network grant/tab/mint; 517 |
 | — code-review max --fix | ✓ | clean; define mechanism proven per-target (lessons/code-review.md) |
 | — codex post-impl audit | ✓ | round 4: 4 HIGH, 0 CRITICAL → HIGH-1/2/3 fixed `05d604a`, HIGH-4 fixed `290ff08` |
-| 6 testnet rehearsal + cutover | ⏸ OWNER | needs Sepolia key/funds + live node (DP7 token deploy + canaries) |
+| 6 testnet rehearsal + cutover | ✓ | `8cbee2d` — TestUsdc `0x032E…2448` + fresh portal `0xe0fd…d21f` + L2 trio LIVE; 3/3 router-path smokes (public 3.0m / private 3.7m / redirect 3.1m); Etherscan-verified; intent-first + digest-pinned `promote --bridge-only --drop-swap`; swap retired (D22) — testnet now runs the exact mainnet shape |
 | 7 deploy tooling | ✓ (to the offline boundary) | `290ff08` verify-l1 network+circle-proxy; **7b.1 (D21): forge mainnet L1 bundle — anvil MAINNET-FORK REHEARSAL PASSED** (real USDC/Permit2/live portal; stub proven inert; all readbacks); **7b.2: per-network FPC descriptor (mainnet FAILS CLOSED pending the owner's 5.1.0 compat ruling) + fail-closed mainnet signer pin** (`f5c9bc6`); **7b.3: TestUsdc (DP7 token, forge 4/4 — zero Permit2 allowance vs the legacy auto-grant) + stable network-keyed `resolveDeployerKeys` (F6/A11, 4 pins) + `deploySequenceFeeBudget` (fable NEW-2)** (`4dbca2b`). The conductor's LIVE execution (wiring these into the owner-present Phase 6/8 runs) — runbook in lessons/phase-7.md |
 | 8 mainnet deploy | ⛔ GO REQUIRED | real funds — explicit owner go per tx |
 | 9 ship + harden | ⛔ GO REQUIRED | owner smoke; renounce + revoke LAST |
