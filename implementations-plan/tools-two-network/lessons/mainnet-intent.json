@@ -1,19 +1,56 @@
 {
-  "$comment": "Phase-8 MAINNET pre-spend baseline (minimal intent — live-intent.ts is testnet-hardwired; the burner's whole balance IS the cap per DP5). Recorded 2026-07-27 BEFORE any mainnet broadcast; verify balances vs caps before EACH broadcast group.",
+  "$comment": "Phase-8 MAINNET pre-spend baseline (minimal intent \u2014 live-intent.ts is testnet-hardwired; the burner's whole balance IS the cap per DP5). Recorded 2026-07-27 BEFORE any mainnet broadcast; verify balances vs caps before EACH broadcast group.",
   "sourceCommit": "31df17e24f80ec6cb8ff836923816691ca994817",
   "signer": "0xE75e277a6800a37429dac55FcD2f3540E371059c",
   "signerNonceAtBaseline": 0,
-  "network": { "l1ChainId": 1, "rollupVersion": 4248422647, "nodeVersion": "5.1.0" },
-  "baseline": { "eth": "0.01", "aztec": "1500", "usdc": "14.703001" },
-  "caps": { "maxTotalEthSpend": "0.01", "note": "burner holds ONLY the arc's funds; no other wallet ever signs" },
-  "fpcRuling": { "artifact": "5.0.1", "node": "5.1.0", "ruledBy": "owner", "date": "2026-07-27", "canaryStillRequired": true },
+  "network": {
+    "l1ChainId": 1,
+    "rollupVersion": 4248422647,
+    "nodeVersion": "5.1.0"
+  },
+  "baseline": {
+    "eth": "0.01",
+    "aztec": "1500",
+    "usdc": "14.703001"
+  },
+  "caps": {
+    "maxTotalEthSpend": "0.01",
+    "note": "burner holds ONLY the arc's funds; no other wallet ever signs"
+  },
+  "fpcRuling": {
+    "artifact": "5.0.1",
+    "node": "5.1.0",
+    "ruledBy": "owner",
+    "date": "2026-07-27",
+    "canaryStillRequired": true
+  },
   "dressRehearsal": {
     "forkBlock": 25626095,
     "predictedAddresses": {
-      "$comment": "CREATE addresses from (EOA, nonce 0/1) — live MUST match or STOP.",
+      "$comment": "CREATE addresses from (EOA, nonce 0/1) \u2014 live MUST match or STOP.",
       "uniswapFuelSwap": "0xFe001417C1060c908D157baECdA0B6a076e87d8c",
       "swapBridgeRouter": "0x2EB3435f5F47414fd10655d43199EcdCB0707559"
     },
     "routeProbe": "0.01 USDC -> 0.579299621782343481 AZTEC"
+  },
+  "broadcastGroups": {
+    "1-l1-bundle": {
+      "date": "2026-07-27",
+      "status": "LIVE + VERIFIED",
+      "uniswapFuelSwap": {
+        "address": "0xFe001417C1060c908D157baECdA0B6a076e87d8c",
+        "block": 25626113,
+        "gas": 3126581
+      },
+      "swapBridgeRouter": {
+        "address": "0x2EB3435f5F47414fd10655d43199EcdCB0707559",
+        "block": 25626114,
+        "gas": 3196903
+      },
+      "addressesMatchPrediction": true,
+      "etherscanVerified": "2/2",
+      "readbacks": "swapTarget wired, owner == pinned EOA",
+      "ethAfter": "0.008585727007477808"
+    }
   }
 }
