@@ -66,13 +66,17 @@ const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3"
 
 const ETH_RPC = process.env.ETH_RPC_URL ?? "https://ethereum-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k"
-const PRIVATE_KEY = process.env.MAINNET_PRIVATE_KEY as `0x${string}` | undefined
-if (!PRIVATE_KEY) throw new Error("MAINNET_PRIVATE_KEY required (packages/bridge-core/.env)")
 
-// Group-1 addresses (DeployBridgeMainnet.s.sol broadcast) — REQUIRED, readback-verified below.
-const FUEL_ROUTER = process.env.FUEL_ROUTER as `0x${string}` | undefined
-const FUEL_SWAP = process.env.FUEL_SWAP as `0x${string}` | undefined
-if (!FUEL_ROUTER || !FUEL_SWAP) throw new Error("FUEL_ROUTER + FUEL_SWAP required (the group-1 deployed addresses)")
+// Required env, asserted once at module init — the helper keeps the narrowed hex type inside main().
+function requiredHex(name: string, hint: string): `0x${string}` {
+	const v = process.env[name]
+	if (!v) throw new Error(`${name} required (${hint})`)
+	return v as `0x${string}`
+}
+const PRIVATE_KEY = requiredHex("MAINNET_PRIVATE_KEY", "packages/bridge-core/.env")
+// Group-1 addresses (DeployBridgeMainnet.s.sol broadcast) — readback-verified below.
+const FUEL_ROUTER = requiredHex("FUEL_ROUTER", "the group-1 deployed router")
+const FUEL_SWAP = requiredHex("FUEL_SWAP", "the group-1 deployed swap target")
 
 // Fee-juice bridge size: the FULL deploy sequence + FPC deploy + canaries run from this. 300 AZTEC
 // is generous headroom at observed Alpha fees; the surplus stays claimable by the L2 deployer.
