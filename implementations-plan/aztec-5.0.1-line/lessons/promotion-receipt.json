@@ -1,14 +1,15 @@
 {
-	"promotedAt": "2026-07-18T22:10:13.979Z",
-	"intent": "implementations-plan/aztec-5.0.1-line/lessons/intent.json",
-	"commitAtPromotion": "3783f89c7b9ecdffff144567584dad69f69e3319",
+	"promotedAt": "2026-07-27T14:58:19.213Z",
+	"intent": "implementations-plan/tools-two-network/lessons/intent.json",
+	"commitAtPromotion": "e8cd4ecaa8929ee06014f1c19b4eb3ebf04d7fb6",
+	"mode": "bridge-only",
 	"bridge": {
-		"candidateSha256": "910421983e65a316009982b0f9fd9781a1d3ed5ff37a3e7d40ae0c24d67a9649",
+		"candidateSha256": "d0cc10000fe3c9aba2828c765da0de249f7141368eefcda45c0e6b7a151907ae",
 		"live": "apps/faucet/public/testnet-bridge.json"
 	},
 	"faucet": {
-		"candidateSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
+		"unchangedSha256": "52a2c87084dfb0abff3c466afa4ee416052385547f6a98996dc1d2ffd1838f94",
 		"live": "apps/faucet/src/contracts/deployments.json"
 	},
-	"zeroSeed": "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc"
+	"zeroSeed": "l1.fuel.core byte-carried; swap RETIRED (--drop-swap, token cutover); no fuel/router deploys this arc"
 }
