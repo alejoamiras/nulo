@@ -51,7 +51,7 @@ export function useL1FeeAsset() {
 			})) as bigint
 		} catch (err) {
 			// Set-only: a background poll succeeding must not clear an error a user ACTION just surfaced.
-			error.value = errorMessage(err, "Failed to read the Sepolia fee-asset balance")
+			error.value = errorMessage(err, "Failed to read the L1 fee-asset balance")
 		}
 	}
 

@@ -37,7 +37,6 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 		<div class="topbar">
 		<nav class="tabs" :data-testid="TESTIDS.tabs">
 			<button
-				v-if="!isMainnet"
 				type="button"
 				class="tab"
 				:class="{ active: tab === 'faucet' }"
@@ -78,7 +77,7 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 
 		<!-- v-show (not v-if): keep both views mounted so each tab owns an independent,
 		     persistent wallet session (codex: two sessions, not one shared connection). -->
-		<FaucetView v-if="!isMainnet" v-show="tab === 'faucet'" />
+		<FaucetView v-show="tab === 'faucet'" />
 		<BridgeView v-show="tab === 'bridge'" />
 		<FuelView v-show="tab === 'fuel'" />
 

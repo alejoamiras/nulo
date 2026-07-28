@@ -3,7 +3,7 @@ import { LogLevel } from "../logger/interfaces"
 import type { ILogger } from "../logger/interfaces"
 import { Lock } from "./lock"
 
-function deferred<T = void>() {
+function _deferred<T = void>() {
 	let resolve!: (value: T) => void
 	let reject!: (reason?: unknown) => void
 	const promise = new Promise<T>((res, rej) => {
@@ -70,7 +70,7 @@ describe("Lock", () => {
 		vi.advanceTimersByTime(5 * 60_000 + 1)
 		// The force-release synchronously calls leave(); next caller can enter.
 		let secondAcquired = false
-		const second = (async () => {
+		const _second = (async () => {
 			await lock.enter()
 			secondAcquired = true
 			lock.leave()

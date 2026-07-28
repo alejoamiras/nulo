@@ -32,7 +32,7 @@ let payloadMock: Ref<unknown> = ref(null)
 let isCancelledMock = ref(false)
 let payloadToLoad: unknown = null
 let loadPromiseResolve: (() => void) | undefined
-let loadPromiseReject: ((err: Error) => void) | undefined
+let _loadPromiseReject: ((err: Error) => void) | undefined
 let getActiveProfilePromiseResolve: ((p: unknown) => void) | undefined
 let getActiveProfilePromiseReject: ((err: Error) => void) | undefined
 
@@ -48,7 +48,7 @@ const loadInteractionPayloadMock = vi.fn(() => {
 			payloadMock.value = payloadToLoad
 			resolve()
 		}
-		loadPromiseReject = reject
+		_loadPromiseReject = reject
 	})
 })
 
@@ -254,7 +254,7 @@ afterEach(() => {
 	isCancelledMock = ref(false)
 	appStoreMock = appStoreDefaults()
 	loadPromiseResolve = undefined
-	loadPromiseReject = undefined
+	_loadPromiseReject = undefined
 	getActiveProfilePromiseResolve = undefined
 	getActiveProfilePromiseReject = undefined
 	vi.clearAllMocks()

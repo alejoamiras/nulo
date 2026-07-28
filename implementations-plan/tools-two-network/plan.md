@@ -41,8 +41,8 @@
 | — codex post-impl audit | ✓ | round 4: 4 HIGH, 0 CRITICAL → HIGH-1/2/3 fixed `05d604a`, HIGH-4 fixed `290ff08` |
 | 6 testnet rehearsal + cutover | ✓ | `8cbee2d` — TestUsdc `0x032E…2448` + fresh portal `0xe0fd…d21f` + L2 trio LIVE; 3/3 router-path smokes (public 3.0m / private 3.7m / redirect 3.1m); Etherscan-verified; intent-first + digest-pinned `promote --bridge-only --drop-swap`; swap retired (D22) — testnet now runs the exact mainnet shape |
 | 7 deploy tooling | ✓ (to the offline boundary) | `290ff08` verify-l1 network+circle-proxy; **7b.1 (D21): forge mainnet L1 bundle — anvil MAINNET-FORK REHEARSAL PASSED** (real USDC/Permit2/live portal; stub proven inert; all readbacks); **7b.2: per-network FPC descriptor (mainnet FAILS CLOSED pending the owner's 5.1.0 compat ruling) + fail-closed mainnet signer pin** (`f5c9bc6`); **7b.3: TestUsdc (DP7 token, forge 4/4 — zero Permit2 allowance vs the legacy auto-grant) + stable network-keyed `resolveDeployerKeys` (F6/A11, 4 pins) + `deploySequenceFeeBudget` (fable NEW-2)** (`4dbca2b`). The conductor's LIVE execution (wiring these into the owner-present Phase 6/8 runs) — runbook in lessons/phase-7.md |
-| 8 mainnet deploy | ⛔ GO REQUIRED | real funds — explicit owner go per tx |
-| 9 ship + harden | ⛔ GO REQUIRED | owner smoke; renounce + revoke LAST |
+| 8 mainnet deploy | ✓ | executed 2026-07-27 under owner go: L1 bundle + portal + FJ bridge + L2 trio (claim-in-tx bootstrap) + PrivateFPC + dust canary + public/private smokes + promote — receipts in lessons/mainnet-intent.json |
+| 9 ship + harden | ✓ | tools.nulo.sh live under CF Access; owner UI smoke passed; DP8 done — router owner renounced (`0x93cb61bf…`, owner()==0), USDC→Permit2 revoked, AZTEC allowances already consumed; swapTarget owner kept (sweep-only) |
 
 ---
 
@@ -66,6 +66,14 @@ Build + deploy `apps/faucet` twice from one codebase:
   max-approve to the canonical singleton is the intended pattern. Deploy `SwapBridgeRouter` on
   mainnet. (Rejected: direct-portal/exact-approve.)
 - **DP2 — Swap-fuel disabled on mainnet.** Router deployed for `bridge()` + Permit2 only; no pools.
+  **REVERSED by D23 (owner override, 2026-07-25): swap-fuel ships EVERYWHERE.** Mainnet rides the
+  existing canonical Uniswap V4 liquidity (USDC → WETH 500-tier → native-ETH/AZTEC 10000-tier —
+  proven live by `discover-mainnet-fuel.ts` + executed on a mainnet fork by `MainnetFuel.fork.t.sol`,
+  public + private, through the REAL FeeJuicePortal/Inbox); testnet self-seeds per token generation
+  (`SeedTokenPool.s.sol` + `restore-swap.ts`). `DeployBridgeMainnet.s.sol` now deploys
+  `UniswapFuelSwap` as the swapTarget with a pre-flight quoter dust-probe of the exact route
+  (fail-closed, simulation-time). DP8's inert-stub leg is superseded; its OTHER controls (renounce
+  after smoke, revoke approvals, low balances) stand unchanged.
 - **DP3 — Withdrawals set no fee** (both networks) — the wallet pays its own default.
 - **DP4 — Fresh, network-keyed mainnet L1 signer.**
 - **DP5 — No on-chain cap.** <$5 is communicated to users; the control is CF-Access + trust + low

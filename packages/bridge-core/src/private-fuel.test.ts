@@ -165,12 +165,11 @@ describe("private-fuel keystone", () => {
 		// Alpha/mainnet identity (verified live 2026-07-24): (1 ^ 4248422647) >>> 0 = 4248422646.
 		expect(mainnet.network.l1ChainId).toBe(1)
 		expect(mainnet.network.rollupVersion).toBe(4248422647)
-		// FAIL-CLOSED pin: the compat list is deliberately EMPTY until the owner rules on
-		// 5.0.1-artifact-vs-5.1.0-node compatibility — the mainnet FPC gate must RED until then.
-		// (When the ruling lands, this assertion flips to expect the curated version list.)
+		// Owner ruling 2026-07-27: the 5.0.1 artifact is curated compatible with the 5.1.0 Alpha
+		// node — and ONLY that. Any other node version (or a new artifact digest) must re-red the
+		// gate until freshly curated.
 		const compat = mainnet.compatibleNodeVersions[mainnet.artifactSha256]
-		expect(Array.isArray(compat)).toBe(true)
-		expect(compat).toHaveLength(0)
+		expect(compat).toEqual(["5.0.1", "5.1.0"])
 	})
 })
 

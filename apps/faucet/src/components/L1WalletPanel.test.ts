@@ -8,10 +8,10 @@ const wrongChain = ref(false)
 const isConnecting = ref(false)
 const connect = vi.fn()
 const disconnect = vi.fn()
-const switchToSepolia = vi.fn()
+const switchL1Network = vi.fn()
 
 vi.mock("@/composables/useL1Wallet", () => ({
-	useL1Wallet: () => ({ address, isConnected, wrongChain, isConnecting, connect, disconnect, switchToSepolia }),
+	useL1Wallet: () => ({ address, isConnected, wrongChain, isConnecting, connect, disconnect, switchL1Network }),
 }))
 
 import { TESTIDS } from "@/lib/testids"
@@ -27,7 +27,7 @@ describe("L1WalletPanel", () => {
 		isConnecting.value = false
 		connect.mockClear()
 		disconnect.mockClear()
-		switchToSepolia.mockClear()
+		switchL1Network.mockClear()
 	})
 
 	it("disconnected: shows the connect button, no account chip", () => {
@@ -43,7 +43,7 @@ describe("L1WalletPanel", () => {
 		const w = mount(L1WalletPanel)
 		expect(w.find(sel(TESTIDS.l1Account)).exists()).toBe(true)
 		await w.find(sel(TESTIDS.l1SwitchChain)).trigger("click")
-		expect(switchToSepolia).toHaveBeenCalled()
+		expect(switchL1Network).toHaveBeenCalled()
 		await w.find(sel(TESTIDS.l1Disconnect)).trigger("click")
 		expect(disconnect).toHaveBeenCalled()
 	})

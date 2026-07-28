@@ -96,8 +96,14 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	}
 
 	/** Map a tx's settled on-chain outcome to a pending-authwit reconcile. Proven/Finalized
-	 *  + Success ⇒ confirm; Dropped or any settled non-success (reverted) ⇒ remove. Other
-	 *  (non-terminal) statuses are ignored — `set_authorized` only takes effect once mined. */
+	 *  + Success ⇒ confirm; settled non-success (reverted) ⇒ remove. A Dropped status
+	 *  deliberately does NOTHING: the transaction service may still resurrect a dropped tx
+	 *  on a late mine (transient DROPPED answers happen behind load-balanced RPCs), and a
+	 *  row removed here can never be reconfirmed — authwit hashes aren't enumerable from
+	 *  chain. ACCEPTED RESIDUAL: a genuinely dropped tx's row then lingers as pending —
+	 *  `syncAuthwit` skips pending rows on purpose, so nothing prunes it. That is the safe
+	 *  direction (over-claiming; revoking a never-landed grant is a no-op); it stays
+	 *  user-visible/revocable and only costs headroom against the tracked-authwit cap. */
 	private async reconcileFromTx(tx: Tx): Promise<void> {
 		const settled = tx.status === TxStatus.Proven || tx.status === TxStatus.Finalized
 		if (settled && tx.executionResult === TxExecutionResult.Success) {
@@ -105,7 +111,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			return
 		}
 		const reverted = settled && tx.executionResult !== undefined && tx.executionResult !== TxExecutionResult.Success
-		if (tx.status === TxStatus.Dropped || reverted) {
+		if (reverted) {
 			await this.reconcileAuthwits(tx.hash, "dropped")
 		}
 	}
