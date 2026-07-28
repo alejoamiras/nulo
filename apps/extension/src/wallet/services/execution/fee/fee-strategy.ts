@@ -40,6 +40,7 @@
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import { predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import type { TxExecutionRequest, TxSimulationResult } from "@aztec/stdlib/tx"
 import type { ILogger } from "@/wallet/logger"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
@@ -167,7 +168,12 @@ export async function finalizeGasLimits(
 			// Reuse the already-committed cap verbatim. Non-embedded paths keep the refetch + general default.
 			maxFeesPerGas = txRequest.txContext.gasSettings.maxFeesPerGas
 		} else {
-			maxFeesPerGas = await node.getCurrentMinFees()
+			// Inclusion-safe basis: the worst predicted min fee across upcoming slots, not the
+			// current block's — a tx is proven seconds-to-minutes after estimation, and a cap
+			// priced off a momentarily low current-min gets the tx dropped when the base fee
+			// ticks up in that window. `maxFeesPerGas` is a cap, so the padding costs nothing
+			// unless the base fee actually rises.
+			maxFeesPerGas = await predictedWorstMinFees(node)
 			maxFeesPerGas = maxFeesPerGas.mul(multiplier)
 		}
 	}

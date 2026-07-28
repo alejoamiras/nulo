@@ -5,6 +5,7 @@
  * moved here with the subsystem; the behavior contract is identical.
  */
 
+import { GasFees } from "@aztec/stdlib/gas"
 import { describe, expect, test } from "vitest"
 import { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
@@ -32,7 +33,7 @@ const INPUTS = {
 
 // Node reports min fees of 50/100; default multiplier 2 → a fresh build
 // would finalize 100:200, so a matching entry stores that fingerprint.
-const CURRENT_MIN = { feePerDaGas: 50n, feePerL2Gas: 100n }
+const CURRENT_MIN = new GasFees(50n, 100n)
 const MATCHING_BASE_FEE_FINGERPRINT = "100:200"
 
 const PRIMARY_ENDPOINT = { id: "ep-1", rpcUrl: "http://localhost:8080" }
@@ -67,7 +68,8 @@ function makeReuse(
 		entry?: Partial<TransferEstimateReuseEntry>
 		profile?: { id: string } | undefined
 		network?: Partial<Network>
-		getCurrentMinFees?: () => Promise<{ feePerDaGas: bigint; feePerL2Gas: bigint }>
+		getCurrentMinFees?: () => Promise<GasFees>
+		getPredictedMinFees?: () => Promise<GasFees[]>
 		pending?: Array<{ hash: string }>
 	} = {},
 ) {
@@ -82,6 +84,7 @@ function makeReuse(
 			}) as Network,
 		getNode: async () => ({
 			getCurrentMinFees: overrides.getCurrentMinFees ?? (async () => CURRENT_MIN),
+			getPredictedMinFees: overrides.getPredictedMinFees,
 		}),
 		getPendingForAccount: () => overrides.pending ?? [],
 		logDebug: () => {},
@@ -174,9 +177,27 @@ describe("tryConsume: every observable exit", () => {
 
 	test("base fee drift → undefined", async () => {
 		const { reuse } = makeReuse({
-			getCurrentMinFees: async () => ({ feePerDaGas: 51n, feePerL2Gas: 100n }),
+			getCurrentMinFees: async () => new GasFees(51n, 100n),
 		})
 		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+	})
+
+	test("predicted-worst (not current-min) is the consume-time basis", async () => {
+		// Current-min alone would finalize 100:200 and match the entry, but a
+		// fresh build prices off the worst predicted slot (60/120 → 120:240),
+		// so the 100:200 entry must reject.
+		const { reuse } = makeReuse({
+			getPredictedMinFees: async () => [new GasFees(55n, 110n), new GasFees(60n, 120n)],
+		})
+		expect(await reuse.tryConsume("est-1", INPUTS)).toBeUndefined()
+	})
+
+	test("predicted-worst entry matches when the prediction is stable", async () => {
+		const { reuse, entry } = makeReuse({
+			entry: { baseFeeFingerprint: "120:240" },
+			getPredictedMinFees: async () => [new GasFees(55n, 110n), new GasFees(60n, 120n)],
+		})
+		expect(await reuse.tryConsume("est-1", INPUTS)).toBe(entry)
 	})
 
 	test("base fee fetch failure → undefined (conservative)", async () => {

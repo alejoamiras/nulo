@@ -21,7 +21,7 @@ import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 export const feeJuiceAddress: string = AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS).toString()
 
 /** Minimal node shape for fee prediction (avoids a hard dep on the full node client type). */
-type MinFeeNode = {
+export type MinFeeNode = {
 	getPredictedMinFees?: (manaUsage?: ManaUsageEstimate) => Promise<GasFees[]>
 	getCurrentMinFees: () => Promise<GasFees>
 }
