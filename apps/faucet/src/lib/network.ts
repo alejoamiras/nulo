@@ -56,3 +56,7 @@ export const NETWORK_KEY = target.key
  *  capabilities, and the testnet-only mint affordances (mainnet bridges real USDC — there is no
  *  faucet and no permissionless mint). */
 export const IS_MAINNET = target.key === "mainnet"
+
+/** Uppercase L1 chip for the bridge/fuel FROM/TO panels: plain "ETHEREUM" on mainnet, the
+ *  network-qualified "ETHEREUM · SEPOLIA" form on test targets. */
+export const L1_CHAIN_LABEL = IS_MAINNET ? "ETHEREUM" : `ETHEREUM · ${viemChain.name.toUpperCase()}`

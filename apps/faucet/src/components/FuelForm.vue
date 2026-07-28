@@ -4,7 +4,7 @@ import { assetKindOf, type DepositJournalRecord } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
 import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { FUEL_MIN_FJ } from "@/contracts/bridge-deployments"
-import { NETWORK } from "@/lib/network"
+import { L1_CHAIN_LABEL, NETWORK } from "@/lib/network"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
@@ -167,7 +167,7 @@ function fmt(b: bigint | null): string {
 		<template v-else>
 			<div class="panel">
 				<span class="role">FROM</span>
-				<span class="chip">ETHEREUM · SEPOLIA</span>
+				<span class="chip">{{ L1_CHAIN_LABEL }}</span>
 				<span class="balance" :data-testid="TESTIDS.fuelBalanceL1">Balance: {{ fmt(feeAsset.balance.value) }} $AZTEC</span>
 			</div>
 

@@ -1,5 +1,5 @@
 import { bridgeWitnessPermitTypedData } from "@nulo/bridge-core"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { TESTNET_L1_CHAIN_ID, TESTNET_WALLET_CHAIN_ID } from "./chain-constants"
 import { NETWORK } from "./network"
 
@@ -13,6 +13,25 @@ describe("NETWORK — single-source chain identity", () => {
 
 	it("carries the wallet (Aztec) chain id from chain-constants", () => {
 		expect(NETWORK.walletChainId).toBe(TESTNET_WALLET_CHAIN_ID)
+	})
+})
+
+describe("L1_CHAIN_LABEL — the FROM/TO panel chip", () => {
+	it("testnet (default target) → network-qualified", async () => {
+		const { L1_CHAIN_LABEL } = await import("./network")
+		expect(L1_CHAIN_LABEL).toBe("ETHEREUM · SEPOLIA")
+	})
+
+	it("mainnet target → plain ETHEREUM", async () => {
+		vi.stubEnv("VITE_FAUCET_TARGET", "mainnet")
+		vi.resetModules()
+		try {
+			const { L1_CHAIN_LABEL } = await import("./network")
+			expect(L1_CHAIN_LABEL).toBe("ETHEREUM")
+		} finally {
+			vi.unstubAllEnvs()
+			vi.resetModules()
+		}
 	})
 })
 
