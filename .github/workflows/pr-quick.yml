@@ -69,10 +69,12 @@ jobs:
               - 'packages/wallet-bridge/src/**'
               - 'packages/wallet-bridge/package.json'
             extension:
-              # Built target — whole package; design dep lib — src + manifest.
+              # Built target — whole package; design + bridge-core dep libs — src + manifest.
               - 'apps/extension/**'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
             playground:
               - 'apps/playground/**'
             landing:
