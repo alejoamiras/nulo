@@ -31,6 +31,7 @@ vi.mock("@/contracts/bridge-deployments", () => ({
 	BRIDGE: { toString: () => "0xbridge" },
 	BRIDGE_TOKEN_SYMBOL: "AZLO",
 	BRIDGE_TOKEN_DECIMALS: 18,
+	BRIDGE_TOKEN_MINTABLE: true,
 }))
 vi.mock("@/composables/useL1Wallet", () => ({
 	useL1Wallet: () => ({ isConnected: ref(true), address: ref("0xl1addr"), publicClient: {} }),
