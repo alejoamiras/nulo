@@ -12,7 +12,7 @@
     },
     "apps/extension": {
       "name": "@nulo/extension",
-      "version": "0.25.0",
+      "version": "0.26.0",
       "dependencies": {
         "@alejoamiras/aztec-accelerator": "5.0.1",
         "@alejoamiras/private-fee-juice": "5.0.1",
@@ -41,6 +41,7 @@
         "@codemirror/view": "^6.43.1",
         "@lezer/highlight": "^1.2.3",
         "@nulo/aztec-runtime": "workspace:*",
+        "@nulo/bridge-core": "workspace:*",
         "@nulo/design": "workspace:*",
         "@nulo/extension-messaging": "workspace:*",
         "@nulo/wallet-bridge": "workspace:*",

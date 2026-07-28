@@ -55,6 +55,7 @@
 		"@aztec-foundation/aztec-standards": "5.0.1",
 		"@lezer/highlight": "^1.2.3",
 		"@nulo/aztec-runtime": "workspace:*",
+		"@nulo/bridge-core": "workspace:*",
 		"@nulo/design": "workspace:*",
 		"@nulo/extension-messaging": "workspace:*",
 		"@nulo/wallet-bridge": "workspace:*",

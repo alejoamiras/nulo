@@ -6,6 +6,7 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./artifacts": "./src/artifacts.ts",
+		"./fee-juice": "./src/fee-juice.ts",
 		"./private-fpc-artifact": "./src/private-fpc-artifact.ts"
 	},
 	"scripts": {

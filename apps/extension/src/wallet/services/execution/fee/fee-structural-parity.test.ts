@@ -124,6 +124,19 @@ describe("finalizeGasLimits: exact slot projection", () => {
 		})
 	})
 
+	test("computed path prices off the COMPONENT-WISE WORST predicted slot, × multiplier", async () => {
+		// DA peaks in slot 1 (600), L2 peaks in slot 2 (900) — the basis takes
+		// each axis's max independently, then applies the multiplier.
+		const predictedNode = {
+			getCurrentMinFees: async () => new GasFees(555n, 666n),
+			getPredictedMinFees: async () => [new GasFees(600n, 700n), new GasFees(560n, 900n)],
+		} as unknown as AztecNode
+		const tx = makeTxRequest()
+		await finalizeGasLimits(predictedNode, tx, makeSimulated(31_000, 32_000, 3_500, 3_600), 1, undefined, undefined, 2)
+		const s = shape(tx)
+		expect([s.feeDa, s.feeL2]).toEqual([1_200n, 1_800n])
+	})
+
 	test("explicit maxFeesPerGas wins over node min fees", async () => {
 		const tx = makeTxRequest()
 		await finalizeGasLimits(NODE, tx, makeSimulated(31_000, 32_000, 3_500, 3_600), 1, new GasFees(777n, 888n))

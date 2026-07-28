@@ -16,8 +16,10 @@
  * node lookup only after endpoint checks pass, etc.).
  */
 
+import { GasFees } from "@aztec/stdlib/gas"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { type MinFeeNode, predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import { PRIORITY_MULTIPLIERS } from "@nulo/wallet-bridge"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { TransferType } from "@/wallet/services/transaction/spec"
@@ -28,8 +30,8 @@ import type { FeeSettings } from "./spec"
 
 export const ESTIMATE_REUSE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
-/** Stable fingerprint for `node.getCurrentMinFees()` so we can compare
- *  the snapshot taken at estimate time against the value at confirm.
+/** Stable fingerprint for a fee basis so we can compare the snapshot
+ *  taken at estimate time against the value at confirm.
  *  FORMAT IS BYTE-STABLE — cached entries depend on it. */
 export function fingerprintBaseFee(min: { feePerDaGas: bigint; feePerL2Gas: bigint }): string {
 	return `${min.feePerDaGas.toString()}:${min.feePerL2Gas.toString()}`
@@ -109,7 +111,7 @@ export type TransferEstimateReuseEntry = {
 export interface TransferEstimateReuseDeps {
 	getActiveProfile(): Promise<{ id: string } | undefined>
 	getNetwork(networkId: string): Promise<Network>
-	getNode(chainId: number): Promise<{ getCurrentMinFees(): Promise<{ feePerDaGas: bigint; feePerL2Gas: bigint }> }>
+	getNode(chainId: number): Promise<MinFeeNode>
 	getPendingForAccount(account: string): { hash: string }[]
 	logDebug(msg: string): void
 }
@@ -181,19 +183,20 @@ export class TransferEstimateReuse {
 
 		// Base fee snapshot. Compare the cached entry's fingerprint
 		// (derived from the txRequest's actual `maxFeesPerGas`) against
-		// `liveMin * multiplier` — that's what a fresh build would have
-		// finalized. If the chain min hasn't drifted, they match.
+		// `predictedWorstMinFees * multiplier` — that's what a fresh build
+		// would have finalized (same basis + same GasFees.mul as
+		// `finalizeGasLimits`). If the basis hasn't drifted, they match.
 		// (codex audit SHOULD-FIX #3)
 		const node = await this.deps.getNode(network.chainId)
 		try {
-			const currentMin = await node.getCurrentMinFees()
+			const basis = await predictedWorstMinFees(node)
 			const multiplier = inputs.feeSettings.priorityLevel
 				? PRIORITY_MULTIPLIERS[inputs.feeSettings.priorityLevel]
 				: DEFAULT_FEE_MULTIPLIER
-			const expectedFingerprint = fingerprintBaseFee({
-				feePerDaGas: currentMin.feePerDaGas * BigInt(multiplier),
-				feePerL2Gas: currentMin.feePerL2Gas * BigInt(multiplier),
-			})
+			// Re-wrap before multiplying: the basis components may arrive as a bare
+			// `{feePerDaGas, feePerL2Gas}` from a minimal node, and the fingerprint
+			// must reproduce the exact `GasFees.mul` product the build finalized.
+			const expectedFingerprint = fingerprintBaseFee(new GasFees(basis.feePerDaGas, basis.feePerL2Gas).mul(multiplier))
 			if (expectedFingerprint !== entry.baseFeeFingerprint) {
 				this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: base fee changed`)
 				return undefined

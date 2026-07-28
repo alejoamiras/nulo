@@ -24,6 +24,7 @@
 
 import { GasSettings } from "@aztec/stdlib/gas"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { DEFAULT_FEE_MULTIPLIER, finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
 
@@ -52,8 +53,9 @@ export class FpcStrategy implements FeeStrategy {
 				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
 				task,
 			)
-			// Fetch actual fees for FPC fee payload (with priority multiplier)
-			const baseFees = (await built.node.getCurrentMinFees()).mul(multiplier)
+			// Fetch actual fees for FPC fee payload (with priority multiplier). Same
+			// inclusion-safe predicted-worst basis as `finalizeGasLimits`.
+			const baseFees = (await predictedWorstMinFees(built.node)).mul(multiplier)
 			let maxFee = simulatedTx.gasUsed.totalGas.add(fpc.getTotalGas()).computeFee(baseFees)
 			ctx.op.actions.unshift(...fpc.getFeePayload(ctx.op.accountAddress, maxFee))
 			// precise estimation (rebuild — the rebinding of `built` is the

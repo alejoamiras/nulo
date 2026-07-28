@@ -119,7 +119,7 @@ const aggregateSides = computed(() => ({
 /** Real fiat aggregate over priced HOLDINGS: Σ balance × price (micro-USD).
  *  A zero-balance row is worth exactly $0.00 whether priced or not, so it
  *  counts as neither a holding nor a pricing gap — a registered-but-empty
- *  token must not turn the aggregate into an em-dash. */
+ *  token must not flag the aggregate as partial. */
 const aggregate = computed(() => {
 	let micro = 0n
 	let priced = 0
@@ -138,14 +138,10 @@ const aggregate = computed(() => {
 	return { micro, priced, holdings }
 })
 
-/** Truthful matrix: no nonzero holdings is genuinely worth $0.00; holdings
- *  that merely lack a price stay an honest em-dash. */
-const aggregateFiatDisplay = computed(() => {
-	if (aggregate.value.priced > 0) return prices.formatUsdMicro(aggregate.value.micro)
-	if (aggregate.value.holdings === 0) return "$0.00"
-	return "—"
-})
-const isAggregatePartial = computed(() => aggregate.value.priced > 0 && aggregate.value.priced < aggregate.value.holdings)
+/** Always a dollar figure — holdings that lack a price count as $0.00 and
+ *  the "priced assets only" caption owns the honesty, never an em-dash. */
+const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
+const isAggregatePartial = computed(() => aggregate.value.priced < aggregate.value.holdings)
 
 const isCopied = ref(false)
 const handleCopy = (value, label) => {

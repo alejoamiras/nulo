@@ -247,16 +247,16 @@ describe("BalanceView fiat (A1)", () => {
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$999.86") // 1,000 cUSD private
 	})
 
-	test("no priced tokens → em-dash, never a fake $0.00", async () => {
+	test("no priced tokens → $0.00 with the 'priced assets only' caption, never an em-dash", async () => {
 		mockQuotes = {}
 		const { wrapper, appStore } = await mountView()
 		appStore.displayOption = "total_account_value"
 		await flushPromises()
 
 		const amount = wrapper.find('[data-testid="balance-amount"]').text()
-		expect(amount).toContain("—")
-		expect(amount).not.toContain("$0.00")
-		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(false)
+		expect(amount).toContain("$0.00")
+		expect(amount).not.toContain("—")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
 	})
 })
 
@@ -272,15 +272,16 @@ describe("BalanceView state matrix (S-A)", () => {
 		expect(wrapper.find('[data-testid="balance-amount"]').text()).toContain("$0.00")
 	})
 
-	test("tokens held but none priced → plain em-dash (no fake $0.00)", async () => {
+	test("tokens held but none priced → $0.00 flagged partial (no em-dash)", async () => {
 		mockQuotes = {}
 		const { wrapper, appStore } = await mountView()
 		appStore.displayOption = "total_account_value"
 		await flushPromises()
 
 		const text = wrapper.find('[data-testid="balance-amount"]').text()
-		expect(text).toContain("—")
-		expect(text).not.toContain("$0.00")
+		expect(text).toContain("$0.00")
+		expect(text).not.toContain("—")
+		expect(wrapper.find('[data-testid="balance-fiat-partial"]').exists()).toBe(true)
 	})
 
 	test("registered-but-EMPTY unpriced rows are $0.00 holdings, not a pricing gap (no em-dash)", async () => {

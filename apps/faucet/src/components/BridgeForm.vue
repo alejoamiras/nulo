@@ -3,9 +3,16 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { assetKindOf, buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
-import { NETWORK } from "@/lib/network"
+import { L1_CHAIN_LABEL, NETWORK } from "@/lib/network"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
-import { BRIDGE_FUEL, BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, L1_USDC } from "@/contracts/bridge-deployments"
+import {
+	BRIDGE_FUEL,
+	BRIDGE_TOKEN,
+	BRIDGE_TOKEN_DECIMALS,
+	BRIDGE_TOKEN_MINTABLE,
+	BRIDGE_TOKEN_SYMBOL,
+	L1_USDC,
+} from "@/contracts/bridge-deployments"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
@@ -177,7 +184,8 @@ watch([fuelOn, fuelSlice, direction], () => {
 })
 const flowError = computed(() => depositFlow.error.value ?? withdrawFlow.error.value)
 
-const showMintHint = computed(() => fromChain.value === "ethereum" && usdc.balance.value === 0n)
+// Gated on mintability: the mainnet token is real bridged USDC with no mint affordance below.
+const showMintHint = computed(() => BRIDGE_TOKEN_MINTABLE && fromChain.value === "ethereum" && usdc.balance.value === 0n)
 
 const isFirstSeal = computed(() => {
 	const addr = l1.address.value
@@ -359,7 +367,7 @@ function fmt(b: bigint | null): string {
 		<div class="panels">
 			<div class="panel" :data-testid="TESTIDS.bridgeFrom" :data-chain="fromChain">
 				<span class="role">FROM</span>
-				<span class="chip">{{ fromChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
+				<span class="chip">{{ fromChain === "ethereum" ? L1_CHAIN_LABEL : "AZTEC" }}</span>
 				<template v-if="fromChain === 'ethereum'">
 					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
@@ -386,7 +394,7 @@ function fmt(b: bigint | null): string {
 
 			<div class="panel" :data-testid="TESTIDS.bridgeTo" :data-chain="toChain">
 				<span class="role">TO</span>
-				<span class="chip">{{ toChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
+				<span class="chip">{{ toChain === "ethereum" ? L1_CHAIN_LABEL : "AZTEC" }}</span>
 				<template v-if="toChain === 'ethereum'">
 					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
@@ -423,7 +431,7 @@ function fmt(b: bigint | null): string {
 			<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
 		</Flex>
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
-		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
+		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on {{ NETWORK.viemChain.name }} yet - mint some below.</p>
 
 		<!-- HOW it arrives: privacy presets (gas-follows-token); PRIVATE is the default. -->
 			<div class="flabel">How it arrives</div>

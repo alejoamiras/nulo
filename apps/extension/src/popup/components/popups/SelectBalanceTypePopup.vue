@@ -75,8 +75,8 @@ const handleSelectOption = (option) => {
 	emit("onClose")
 }
 
-/** Real fiat aggregates for the three summary options — `—` when nothing is
- *  priced (never a fake $0.00). Mirrors BalanceView's aggregate math. */
+/** Real fiat aggregates for the three summary options — always a dollar
+ *  figure; unpriced rows count as $0.00. Mirrors BalanceView's aggregate. */
 const priceService = new PriceServiceClient()
 const prices = usePrices(priceService)
 
@@ -90,23 +90,14 @@ configService.getValue("showFiatValues").then((v) => {
 
 const aggregateFiat = (sides) => {
 	let micro = 0n
-	let priced = 0
-	let holdings = 0
 	for (const tb of tokenBalances.value) {
 		let raw = 0n
 		if (sides.private) raw += BigInt(tb.privateBalance || 0)
 		if (sides.public) raw += BigInt(tb.publicBalance || 0)
-		// Zero-balance rows are worth $0.00 whether priced or not (mirrors
-		// BalanceView's aggregate matrix).
-		if (raw === 0n) continue
-		holdings += 1
-		const value = prices.tokenFiatMicro(tb.token, raw)
-		if (value === undefined) continue
-		micro += value
-		priced += 1
+		// Unpriced rows count as $0.00 (mirrors BalanceView's aggregate).
+		micro += prices.tokenFiatMicro(tb.token, raw) ?? 0n
 	}
-	if (priced > 0) return prices.formatUsdMicro(micro)
-	return holdings === 0 ? prices.formatUsdMicro(0n) : "—"
+	return prices.formatUsdMicro(micro)
 }
 
 const aggregatePreview = (optionRef) => {
@@ -115,7 +106,9 @@ const aggregatePreview = (optionRef) => {
 	return aggregateFiat({ private: true, public: true })
 }
 
-const amountToPreview = ref("—")
+const previewFor = (option) => (option.token ? `${comma(option.token.balance)} ${option.token.symbol}` : aggregatePreview(option.ref))
+
+const amountToPreview = ref(prices.formatUsdMicro(0n))
 const onHover = (str) => {
 	amountToPreview.value = str
 }
@@ -148,9 +141,10 @@ watch(
 				})
 			}
 
-			if (!displayOptions.value.map((opt) => opt.ref).includes(appStore.displayOption?.ref)) {
-				amountToPreview.value = aggregatePreview("total_account_value")
-			}
+			// Seed the preview with the CURRENT selection so the card never
+			// opens on a placeholder while quotes resolve.
+			const current = displayOptions.value.find((opt) => opt.ref === appStore.displayOption)
+			amountToPreview.value = current ? previewFor(current) : aggregatePreview("total_account_value")
 		} else {
 			tokenBalanceService.disconnect()
 		}
@@ -181,9 +175,7 @@ watch(
 					<Flex
 						v-for="option in displayOptions"
 						@click="handleSelectOption(option)"
-						@pointerenter="
-							onHover(option.token ? `${comma(option.token?.balance)} ${option.token.symbol}` : aggregatePreview(option.ref))
-						"
+						@pointerenter="onHover(previewFor(option))"
 						align="center"
 						justify="between"
 						gap="16"
