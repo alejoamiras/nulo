@@ -42,7 +42,13 @@ function makeJournal() {
 	const getOperation = vi.fn(async (_id: string) => null as unknown)
 	const transitionOperation = vi.fn(async (_id: string, _progress: unknown, _error?: unknown) => undefined as unknown)
 	const deleteOperation = vi.fn(async (_id: string) => undefined as unknown)
-	return { getOperation, transitionOperation, deleteOperation }
+	const refileOperationScope = vi.fn(
+		async (_id: string, scope: { profileId?: string; networkId: string; accountAddress: string }, _allowed: readonly string[]) => ({
+			outcome: "refiled" as const,
+			record: { networkId: scope.networkId, accountAddress: scope.accountAddress, progress: { stage: "queued" } },
+		}),
+	)
+	return { getOperation, transitionOperation, deleteOperation, refileOperationScope }
 }
 
 const INPUT_NO_QUEUED = {
@@ -57,17 +63,17 @@ describe("claimOrCreateDappExecuteJournal", () => {
 		vi.clearAllMocks()
 	})
 
-	test("a queued record filed under another account is re-filed, not reused", async () => {
+	test("a queued record filed under another account is re-filed IN PLACE — same id, same controller", async () => {
 		// The row was written when the message arrived; execution then resolved a
-		// different account. Reusing it would file the operation under one account
-		// while sending from another, and leave its cancel card out of sight.
+		// different account. The scope moves but the journal id must NOT: the id
+		// is the cancellation identity, and a delete+recreate freed it so a
+		// suspended cancel resumed onto a missing row and silently no-oped.
 		const { deps, journal, createFreshRecord, activeControllers } = makeDeps()
 		journal.getOperation.mockResolvedValueOnce({
 			networkId: "net1",
 			accountAddress: "0xSOMEONE-ELSE",
 			progress: { stage: "queued" },
 		})
-		createFreshRecord.mockResolvedValueOnce("refiled-id")
 		const controller = new AbortController()
 		activeControllers.set("queued-id", controller)
 
@@ -77,28 +83,85 @@ describe("claimOrCreateDappExecuteJournal", () => {
 			reuseController: controller,
 		})
 
-		expect(res.journalId).toBe("refiled-id")
-		// The stale row is removed rather than failed: this operation never ran
-		// under that account, so a failed card there would be false activity.
-		expect(journal.deleteOperation).toHaveBeenCalledWith("queued-id")
-		expect(journal.transitionOperation).not.toHaveBeenCalled()
-		expect(activeControllers.has("queued-id")).toBe(false)
-		expect(activeControllers.has("refiled-id")).toBe(true)
+		expect(journal.refileOperationScope).toHaveBeenCalledWith(
+			"queued-id",
+			{ profileId: undefined, networkId: "net1", accountAddress: "0xabc" },
+			["queued", "pending"],
+		)
+		// Same id survives; the refiled row is then claimed normally.
+		expect(res.journalId).toBe("queued-id")
+		expect(journal.transitionOperation).toHaveBeenCalledWith("queued-id", { stage: "pending" })
+		expect(createFreshRecord).not.toHaveBeenCalled()
+		// The pre-acquire controller stays registered under the SAME id — a
+		// cancel arriving at any point still finds it.
+		expect(res.controller).toBe(controller)
+		expect(activeControllers.get("queued-id")).toBe(controller)
 	})
 
-	test("a queued record filed under another network is re-filed too", async () => {
-		const { deps, journal, createFreshRecord } = makeDeps()
+	test("a queued record filed under another network is re-filed in place too", async () => {
+		const { deps, journal } = makeDeps()
 		journal.getOperation.mockResolvedValueOnce({
 			networkId: "net-OTHER",
 			accountAddress: "0xabc",
 			progress: { stage: "queued" },
 		})
-		createFreshRecord.mockResolvedValueOnce("refiled-id")
 
 		const res = await claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id" })
 
-		expect(res.journalId).toBe("refiled-id")
-		expect(journal.deleteOperation).toHaveBeenCalledWith("queued-id")
+		expect(res.journalId).toBe("queued-id")
+		expect(journal.refileOperationScope).toHaveBeenCalledWith(
+			"queued-id",
+			{ profileId: undefined, networkId: "net1", accountAddress: "0xabc" },
+			["queued", "pending"],
+		)
+	})
+
+	test("a cancel that wins the journal lock during re-file is honored, not erased", async () => {
+		// The mismatch branch's stage/abort checks run on a snapshot. cancelJob can
+		// win the journal lock between them and the refile: the row goes terminal
+		// and the controller aborts. The refile then observes the moved stage —
+		// the helper MUST surface the cancel instead of proceeding.
+		const { deps, journal, createFreshRecord, activeControllers } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({
+			networkId: "net1",
+			accountAddress: "0xSOMEONE-ELSE",
+			progress: { stage: "queued" },
+		})
+		journal.refileOperationScope.mockResolvedValueOnce({ outcome: "stage", stage: "cancelled" } as never)
+		const controller = new AbortController()
+		activeControllers.set("queued-id", controller)
+
+		await expect(
+			claimOrCreateDappExecuteJournal(deps, { ...INPUT_NO_QUEUED, queuedJournalId: "queued-id", reuseController: controller }),
+		).rejects.toBeInstanceOf(JobCancelledSentinel)
+
+		// No replacement row, no fresh controller — the cancel stands.
+		expect(createFreshRecord).not.toHaveBeenCalled()
+		expect(journal.transitionOperation).not.toHaveBeenCalled()
+	})
+
+	test("a record reaped during the re-file window falls back to create-fresh", async () => {
+		const { deps, journal, createFreshRecord, activeControllers } = makeDeps()
+		journal.getOperation.mockResolvedValueOnce({
+			networkId: "net1",
+			accountAddress: "0xSOMEONE-ELSE",
+			progress: { stage: "queued" },
+		})
+		journal.refileOperationScope.mockResolvedValueOnce({ outcome: "missing" } as never)
+		createFreshRecord.mockResolvedValueOnce("fresh-id")
+		const controller = new AbortController()
+		activeControllers.set("queued-id", controller)
+
+		const res = await claimOrCreateDappExecuteJournal(deps, {
+			...INPUT_NO_QUEUED,
+			queuedJournalId: "queued-id",
+			reuseController: controller,
+		})
+
+		expect(res.journalId).toBe("fresh-id")
+		// The orphaned pre-acquire entry is dropped, same as the reaped branch.
+		expect(activeControllers.has("queued-id")).toBe(false)
+		expect(activeControllers.has("fresh-id")).toBe(true)
 	})
 
 	test("no queuedJournalId → calls createFreshRecord, registers controller, returns the new id", async () => {

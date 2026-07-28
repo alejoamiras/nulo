@@ -7,6 +7,7 @@ import { Lock, EventHandler } from "@nulo/wallet-core/utils"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex } from "@/wallet/utils"
@@ -27,10 +28,12 @@ export * from "./spec"
 /**
  * Durable operation journal (Phase 2).
  *
- * Storage-only service — no orchestration, no business logic, no calls out
- * to other services. Consumers (ExecutionService, dApp interaction flows)
- * drive transitions; this service persists them, validates FSM legality
- * via `@nulo/wallet-core/jobs`, and fans out events.
+ * Storage-first service — no orchestration or business logic. Consumers
+ * (ExecutionService, dApp interaction flows) drive transitions; this service
+ * persists them, validates FSM legality via `@nulo/wallet-core/jobs`, and
+ * fans out events. Its ONLY calls out are the creation fences: profile
+ * existence + deletion epoch (ProfileService) and network liveness
+ * (NetworkService), both optional so minimal fixtures run unfenced.
  *
  * Phase 2 carries owned here:
  *   #1  origin + profileId required at create-time (NewOperationInput schema)
@@ -75,12 +78,21 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 *   - transition volume is low (a handful per tx lifecycle)
 	 *
 	 * Every path that reads a row and then writes (or deletes) it takes this
-	 * lock: `transitionOperation`, `touchOperation`, `setOperationMeta` and
-	 * `deleteOperation`. `createOperation` and `getOperation` don't, since
-	 * neither is a load-then-write on an existing row. A new load+merge+write
+	 * lock: `transitionOperation`, `touchOperation`, `setOperationMeta`,
+	 * `deleteOperation`, `refileOperationScope`, and the bulk purges
+	 * (`purgeForProfile`, `clearChainState` — snapshot AND sweep in one hold).
+	 * `createOperation` ALSO takes it — not as a load-then-write, but so
+	 * creation serializes against the purges' snapshots and the fences can't
+	 * be outrun. `getOperation` alone stays lock-free. A new load+merge+write
 	 * path MUST acquire it too.
 	 */
 	private readonly transitionLock: Lock
+
+	/** Optional profile-existence fence for `createOperation` — see `init`. */
+	private profileService: ProfileService | null = null
+
+	/** Optional network-liveness fence for `createOperation` — see `init`. */
+	private networkService: NetworkService | null = null
 
 	public constructor(logger: ILogger, browserApi?: BrowserApi) {
 		super(OPERATION_JOURNAL_SERVICE_NAME, logger)
@@ -108,10 +120,19 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// register NetworkService, and the journal still works as a standalone
 		// storage primitive in those contexts.
 		try {
-			const networkService = services.get(NetworkService.name) as NetworkService
-			networkService.registerChainPurgeSubscriber(async (_profileId, _chainId, networkId) => this.clearChainState(networkId))
+			this.networkService = services.get(NetworkService.name) as NetworkService
+			this.networkService.registerChainPurgeSubscriber(async (_profileId, _chainId, networkId) => this.clearChainState(networkId))
 		} catch {
 			// NetworkService not registered in this collection — skip cascade wiring.
+			this.networkService = null
+		}
+		// Same optionality for the profile-existence fence in `createOperation`:
+		// absent ProfileService (minimal fixtures) means no fence, matching the
+		// pre-fence behavior those fixtures pin.
+		try {
+			this.profileService = services.get(ProfileService.name) as ProfileService
+		} catch {
+			this.profileService = null
 		}
 	}
 
@@ -147,22 +168,18 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 */
 	public async clearChainState(networkId: string): Promise<void> {
 		await this.ensureInitialized()
-		const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
-		await purgeRows(
-			records,
-			// Serialized like every other delete: an unserialized purge lets a
-			// transition that has already read a row write it back afterwards,
-			// leaving an orphan the reaper can only fail, never remove.
-			(record) => this.deleteRowLocked(record.id),
-			(record) => this.emit("onOperationDeleted", record),
-		)
-	}
-
-	/** Delete a row under the transition lock, without emitting. */
-	private async deleteRowLocked(id: string): Promise<void> {
+		// One lock hold for snapshot + sweep, same as `purgeForProfile`: an
+		// unserialized purge lets a transition that has already read a row write
+		// it back afterwards, and a snapshot outside the hold misses a row a
+		// concurrent `createOperation` (same lock) is about to land.
 		await this.transitionLock.enter()
 		try {
-			await this.storage.delete(id)
+			const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
+			await purgeRows(
+				records,
+				(record) => this.storage.delete(record.id),
+				(record) => this.emit("onOperationDeleted", record),
+			)
 		} finally {
 			this.transitionLock.leave()
 		}
@@ -173,17 +190,69 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 *  `clearChainState` (chain-purge cascade) misses (finding D). */
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
-		const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
-		await purgeRows(
-			records,
-			(record) => this.deleteRowLocked(record.id),
-			(record) => this.emit("onOperationDeleted", record),
-		)
+		// Snapshot AND delete under one transition-lock hold: `createOperation`
+		// writes under the same lock, so a row can never land between the
+		// snapshot and the sweep. A snapshot taken outside missed exactly that
+		// row, leaving a record for the deleted profile behind.
+		await this.transitionLock.enter()
+		try {
+			const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
+			await purgeRows(
+				records,
+				(record) => this.storage.delete(record.id),
+				(record) => this.emit("onOperationDeleted", record),
+			)
+		} finally {
+			this.transitionLock.leave()
+		}
 	}
 
 	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {
 		validateParams(OperationJournalMethodSchemas.createOperation.params, [input], "createOperation")
 		await this.ensureInitialized()
+		// The whole create runs under the transition lock so it serializes
+		// against `purgeForProfile`: the row either lands before the purge's
+		// snapshot (and is swept) or the fence below sees the profile already
+		// absent — tombstoned profiles are absent from every read — and refuses.
+		// Without this, a creator that captured its profile before a deletion
+		// began could persist durable dApp metadata for an erased profile after
+		// its purge ran, and nothing would ever sweep it.
+		await this.transitionLock.enter()
+		try {
+			return await this._createOperationLocked(input)
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
+
+	private async _createOperationLocked(input: NewOperationInput): Promise<OperationRecord> {
+		if (this.profileService) {
+			const known = await this.profileService.getProfiles()
+			if (!known.some((p) => p.id === input.profileId)) {
+				throw new Error(`profile ${input.profileId} does not exist — operation not created`)
+			}
+			// Membership is not an incarnation check: backup re-import deliberately
+			// reuses a freed profile id, so a creator that captured the OLD
+			// incarnation would pass the check above and write stale dApp metadata
+			// into the successor. The deletion epoch (bumped by every deletion of
+			// that id, surviving release) distinguishes incarnations same-worker; a
+			// SW restart kills the stale closure, so cross-restart is moot.
+			if (input.profileEpoch !== undefined && typeof this.profileService.getDeletionState === "function") {
+				const deletion = this.profileService.getDeletionState()
+				if (!deletion.isCurrent(input.profileId, input.profileEpoch)) {
+					throw new Error(`profile ${input.profileId} was deleted since this operation was prepared — not created`)
+				}
+			}
+		}
+		// The network row deliberately outlives its purge cascade, so the
+		// liveness check (row exists AND no delete in progress) is what keeps a
+		// creator that resolved the network pre-deletion from landing a row
+		// between the cascade's journal sweep and the row delete.
+		if (this.networkService && input.networkId !== undefined && typeof this.networkService.isNetworkLive === "function") {
+			if (!(await this.networkService.isNetworkLive(input.networkId))) {
+				throw new Error(`network ${input.networkId} is deleted or being deleted — operation not created`)
+			}
+		}
 
 		let id: string
 		do {
@@ -445,6 +514,46 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			if (!existing) return
 			await this.storage.delete(id)
 			this.emit("onOperationDeleted", existing)
+		} finally {
+			this.transitionLock.leave()
+		}
+	}
+
+	/**
+	 * Move a row to a new scope IN PLACE — same journal id — provided its
+	 * CURRENT stage (re-read under the transition lock) is one of
+	 * `allowedStages`. Cancellation identity is the point: `cancelJob`
+	 * addresses the row by id, so a delete+recreate re-file freed the id and a
+	 * cancel that had suspended before its transition resumed onto a missing
+	 * row and silently no-oped while execution continued under the
+	 * replacement. Keeping the id makes both lock orders safe: if the cancel
+	 * serialized first the stage left the allowed set and this refuses; if the
+	 * re-file serialized first the cancel still finds the same row (and the
+	 * same registered controller) under the new scope.
+	 */
+	public async refileOperationScope(
+		id: string,
+		scope: { profileId?: string; networkId: string; accountAddress: string },
+		allowedStages: readonly JobProgress["stage"][],
+	): Promise<
+		{ outcome: "refiled"; record: OperationRecord } | { outcome: "missing" } | { outcome: "stage"; stage: JobProgress["stage"] }
+	> {
+		await this.ensureInitialized()
+		await this.transitionLock.enter()
+		try {
+			const existing = await this._loadValidated(id)
+			if (!existing) return { outcome: "missing" }
+			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
+			const updated: OperationRecord = {
+				...existing,
+				profileId: scope.profileId ?? existing.profileId,
+				networkId: scope.networkId,
+				accountAddress: scope.accountAddress,
+				updatedAt: Date.now(),
+			}
+			await this.storage.set(id, updated)
+			this.emit("onOperationUpdated", updated)
+			return { outcome: "refiled", record: updated }
 		} finally {
 			this.transitionLock.leave()
 		}

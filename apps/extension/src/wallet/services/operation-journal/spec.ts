@@ -143,6 +143,15 @@ export type NewOperationInput = {
 	 * (transfers, token imports).
 	 */
 	sessionId?: string
+	/**
+	 * The profile deletion epoch the creator captured WHEN it captured
+	 * `profileId` (via `ProfileDeletionState.capture`). The journal refuses
+	 * creation if the epoch has advanced since — a deletion began or completed
+	 * in between. Membership alone cannot catch this: backup re-import
+	 * deliberately reuses a freed profile id, so a stale creator would pass a
+	 * bare existence check and write into the successor incarnation.
+	 */
+	profileEpoch?: number
 	accountAddress?: string
 	networkId?: string
 	tokenId?: number
@@ -237,6 +246,7 @@ export const NewOperationInputSchema: z.ZodType<NewOperationInput> = z
 		origin: OperationOriginSchema,
 		profileId: z.string().min(1),
 		sessionId: z.string().optional(),
+		profileEpoch: z.number().int().nonnegative().optional(),
 		accountAddress: z.string().optional(),
 		networkId: z.string().optional(),
 		tokenId: z.number().optional(),

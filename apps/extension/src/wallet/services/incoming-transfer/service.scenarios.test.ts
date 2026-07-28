@@ -214,14 +214,15 @@ function makeTokenStub(tokens: { id: number; chainId: number; contract: string; 
 	}
 }
 
-function makeTransactionStub(txs: { hash: string; account: string; chainId: number }[] = []) {
+function makeTransactionStub(txs: { hash: string; account: string; chainId: number; profileId?: string; networkId?: string }[] = []) {
 	return {
 		name: "transaction",
 		dependencies: [],
 		onTransactionAdded: eh<{ hash: string; account: string; chainId: number; calls: unknown[] }>(),
 		// Real surface: `getTransactions(accountAddress)` returns all txs for
-		// the address; the service filters by chainId locally. Pinning the
-		// argspec here keeps the test honest with what scanContract calls.
+		// the address ACROSS profiles and networks; the service must filter to
+		// the scanned scope locally. Pinning the argspec here keeps the test
+		// honest with what scanContract calls.
 		getTransactions: vi.fn().mockImplementation(async (account: string) => {
 			return txs.filter((t) => t.account === account)
 		}),
@@ -957,7 +958,7 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 	test("dedupe source 2 (outgoing tx hash): note with matching outgoing hash → skip", async () => {
 		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
 		const token = makeTokenStub([tokenA])
-		const transaction = makeTransactionStub([{ hash: "0xtx1", account: "0xa", chainId: 1 }])
+		const transaction = makeTransactionStub([{ hash: "0xtx1", account: "0xa", chainId: 1, profileId: "p1", networkId: "n1" }])
 		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ txHash: "0xtx1" })] })
 		const { service } = await bootService({ network, token, transaction, note: noteSvc })
 
@@ -969,6 +970,24 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 		// Skipped → no trust transition either; nothing to prompt about.
 		expect(pending).not.toHaveBeenCalled()
 		expect(trust.size).toBe(0)
+	})
+
+	test("a FOREIGN profile's outgoing tx does not suppress this scope's note", async () => {
+		// p2 shares address 0xa (same seed) and sent 0xtx1 on the same chain.
+		// From p1's silo that send is someone else's activity — the note must
+		// surface as incoming, exactly like another device's outgoing does.
+		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+		const token = makeTokenStub([tokenA])
+		const transaction = makeTransactionStub([{ hash: "0xtx1", account: "0xa", chainId: 1, profileId: "p2", networkId: "n9" }])
+		const noteSvc = makeNoteStub({ [tokenA.contract]: [note({ txHash: "0xtx1" })] })
+		const { service } = await bootService({ network, token, transaction, note: noteSvc })
+
+		const pending = vi.fn()
+		service.onIncomingTransferPending.add(pending)
+
+		await scan(service)
+
+		expect(pending).toHaveBeenCalledTimes(1)
 	})
 
 	test("dedupe source 3 (in-flight journal txHash): note with matching journal txHash → skip", async () => {
@@ -2407,7 +2426,7 @@ describe("IncomingTransferService — public-event scan arm (D3)", () => {
 
 	test("dedupe vs own outgoing public tx: matching txHash → no record, no outbox", async () => {
 		const { reader, state } = makePublicReader()
-		const txStub = makeTransactionStub([{ hash: "0xmine", account: "0xa", chainId: 1 }])
+		const txStub = makeTransactionStub([{ hash: "0xmine", account: "0xa", chainId: 1, profileId: "p1", networkId: "n1" }])
 		const { service } = await bootPublic(reader, state, { transaction: txStub })
 		state.responses.push(pubPage([pubEvent({ txHash: "0xmine" })]))
 
@@ -2415,6 +2434,20 @@ describe("IncomingTransferService — public-event scan arm (D3)", () => {
 
 		expect(records.get("pub:p1|n1|0xmine|0")).toBeUndefined()
 		expect(outboxFor()).toBeUndefined()
+	})
+
+	test("a FOREIGN profile's outgoing tx does not suppress this scope's public event", async () => {
+		// p2 shares address 0xa (same seed) and sent 0xtheirs on the same chain.
+		// From p1's silo that send is someone else's activity — the event must
+		// surface as incoming, exactly like another device's outgoing does.
+		const { reader, state } = makePublicReader()
+		const txStub = makeTransactionStub([{ hash: "0xtheirs", account: "0xa", chainId: 1, profileId: "p2", networkId: "n9" }])
+		const { service } = await bootPublic(reader, state, { transaction: txStub })
+		state.responses.push(pubPage([pubEvent({ txHash: "0xtheirs" })]))
+
+		await scanPublic(service)
+
+		expect(records.get("pub:p1|n1|0xtheirs|0")).toBeDefined()
 	})
 
 	test("MAGIC (from-private) and zero (mint) senders stored raw; both create records", async () => {

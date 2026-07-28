@@ -108,6 +108,11 @@ export async function tryCreateQueuedJournal(
 	try {
 		const activeProfile = await profile.getActiveProfile()
 		if (!activeProfile) return undefined
+		// Captured WITH the profile, asserted by the journal at persist time: if
+		// this profile is deleted (even deleted-and-reimported under the same id)
+		// while we resolve session/account/network below, the create is refused
+		// instead of writing stale dApp metadata into the successor incarnation.
+		const profileEpoch = profile.getDeletionState().capture(activeProfile.id)
 
 		const chainId = chainInfoToChainId(session)
 		const dapp = await dappSession.tryGetDappSessionByOriginAndChain(session.origin, String(chainId))
@@ -186,6 +191,7 @@ export async function tryCreateQueuedJournal(
 				kind: "dapp_execute",
 				origin: "dapp",
 				profileId: activeProfile.id,
+				profileEpoch,
 				sessionId: session.sessionId,
 				accountAddress,
 				networkId: network.id,

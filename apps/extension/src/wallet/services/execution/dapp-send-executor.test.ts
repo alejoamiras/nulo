@@ -148,7 +148,8 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		const result = await executor.executeSendTransaction(op, ORIGIN)
 
 		expect(result).toBe("0xhash")
-		expect(deps.lane.beginJournal).toHaveBeenCalledWith("net-1", "0xacct", ORIGIN, [{ method: "dapp_method" }])
+		// Fifth arg: the authorization-time fence (none captured in this harness).
+		expect(deps.lane.beginJournal).toHaveBeenCalledWith("net-1", "0xacct", ORIGIN, [{ method: "dapp_method" }], undefined)
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "simulating" })
 		const ctx = (proveAndSend.mock.calls[0] as unknown[])[0] as { scopes: unknown[] }
 		expect(ctx.scopes).toEqual([built.account.address])

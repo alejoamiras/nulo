@@ -9,6 +9,7 @@
 <script setup>
 /** Utils */
 import { managers } from "@/utils/core"
+import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -61,23 +62,30 @@ const handleSetActive = async () => {
 	// `undefined`, leaving the popup with no active network until the next
 	// reactive trigger. See implementations-plan/e2e-full-network-recovery/findings.md.
 	const target = network.value
-	try {
-		// Re-checked after the RPC: a send can start while it is in flight, and
-		// activating the network would move the scope out from under it.
-		// Persist first, then commit the in-memory scope with no await in between:
-		// an await there would let a send start after the check and still switch.
-		await managers.network.setActiveNetwork(target.id)
-		const activated = await appStore.commitScopeChange(() => {
-			appStore.network = target
-		})
-		if (!activated) {
-			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
-			return
-		}
-		openToast({ label: "Active network updated", icon: "check-circle" })
-	} catch {
-		openToast({ label: "Failed to switch network", icon: "warning", color: "red" }, TOAST_DURATION.LONG)
+	// Guard first, persist second: the guard admits (and moves the in-memory
+	// scope) before the service write, so a refusal leaves nothing moved — the
+	// reverse order let the durable pointer escape a refused switch.
+	const result = await activateNetworkGuarded(
+		appStore,
+		(id) => managers.network.setActiveNetwork(id),
+		() => managers.network.getActiveNetwork(),
+		target,
+	)
+	if (result === "blocked") {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
 	}
+	if (result === "unconfirmed") {
+		openToast(
+			{ label: "Couldn't confirm the network switch — reopen the popup to verify", icon: "warning", color: "red" },
+			TOAST_DURATION.LONG,
+		)
+		return
+	}
+	// "stale" — the profile changed while this activation waited; the view that
+	// asked for it is gone, so there is nobody to toast at.
+	if (result === "stale") return
+	openToast({ label: "Active network updated", icon: "check-circle" })
 }
 
 const handleAddEndpoint = () => {

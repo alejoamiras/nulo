@@ -993,7 +993,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				// Re-read tx-suppression sets live. The outer-scan-loop
 				// approach would stale these between notes if onTransactionAdded
 				// fires mid-scan (codex R1 M1 / R2 confirmation).
-				const outgoingTxHashes = await this.collectOutgoingTxHashes(network.chainId, accountAddress)
+				const outgoingTxHashes = await this.collectOutgoingTxHashes(profileId, networkId, network.chainId, accountAddress)
 				const inflightTxHashes = await this.collectInflightTxHashes(profileId, networkId, accountAddress)
 
 				// Existing-record branch: backfill blockTimestamp if missing.
@@ -1680,7 +1680,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 
 			// 3-source dedupe: own outgoing tx hashes, in-flight journal txHash (existing record was
 			// checked above).
-			const outgoing = await this.collectOutgoingTxHashes(chainId, account)
+			const outgoing = await this.collectOutgoingTxHashes(profileId, networkId, chainId, account)
 			if (outgoing.has(ev.txHash)) return
 			const inflight = await this.collectInflightTxHashes(profileId, networkId, account)
 			if (inflight.has(ev.txHash)) return
@@ -1875,10 +1875,23 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		}
 	}
 
-	private async collectOutgoingTxHashes(chainId: number, accountAddress: string): Promise<Set<string>> {
+	private async collectOutgoingTxHashes(
+		profileId: string,
+		networkId: string,
+		chainId: number,
+		accountAddress: string,
+	): Promise<Set<string>> {
 		try {
+			// Positive scope match only: `getTransactions` is address-wide, and two
+			// same-seed profiles (or two networks on one chainId) share addresses.
+			// A foreign profile's outgoing must NOT suppress this scope's incoming —
+			// same-seed activity from another silo deliberately surfaces as incoming
+			// (see the visibility escape hatch in `getIncomingTransfers`), exactly
+			// like another device's outgoing does.
 			const txs = await this.transactionService.getTransactions(accountAddress)
-			return new Set(txs.filter((t) => t.chainId === chainId).map((t) => t.hash))
+			return new Set(
+				txs.filter((t) => t.profileId === profileId && t.networkId === networkId && t.chainId === chainId).map((t) => t.hash),
+			)
 		} catch (error) {
 			this.logWarn(`getTransactions failed: ${getErrorMessage(error)}`)
 			return new Set()
