@@ -19,19 +19,25 @@ const open = computed(() => status.value === "choosing-account")
 
 const picked = ref<string | null>(null)
 // Pre-select the first granted account on open; clear on close so a later
-// session never inherits a stale pick.
-watch(open, async (isOpen) => {
-	if (isOpen) {
-		picked.value = accounts.value[0]?.address ?? null
-		previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-		await nextTick()
-		dialogEl.value?.focus()
-	} else {
-		picked.value = null
-		previouslyFocused?.focus()
-		previouslyFocused = null
-	}
-})
+// session never inherits a stale pick. `immediate` covers mounting while the
+// session is ALREADY paused in choosing-account (remount/HMR) — without it the
+// dialog would open with nothing selected and a dead Continue button.
+watch(
+	open,
+	async (isOpen) => {
+		if (isOpen) {
+			picked.value = accounts.value[0]?.address ?? null
+			previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+			await nextTick()
+			dialogEl.value?.focus()
+		} else {
+			picked.value = null
+			previouslyFocused?.focus()
+			previouslyFocused = null
+		}
+	},
+	{ immediate: true },
+)
 
 function shortAddress(address: string): string {
 	return `${address.slice(0, 6)}…${address.slice(-4)}`
