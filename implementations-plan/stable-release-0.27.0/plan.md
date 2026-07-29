@@ -166,6 +166,10 @@ Declined for this cut (Phase 0). Standing follow-ups: recon.md list + the § Sec
 - **Round 1 verdict (draft): `reject`** — six findings, ALL adopted (annotated-tag peeling + body/draft/hash gate; state-based recovery table + dispatch⇒manual-sync rule; per-host freshness with owner-verified mainnet host; executable batch-discipline gate; full-OID head pins; dev freeze; accepted-risk Asks surfaced). Adopted/rejected log in `audit-codex.md`.
 - **Round 2 verdict (revised plan, resumed session): `conditional approve (with conditions: add fail-closed JIT rules/check assertions and explicitly resolve owner Asks 1–2 before execution)`** — both conditions folded: Phases 1/3/4 gates are now fail-closed `test`/`jq -e` assertions (incl. branch-protection strict/signatures/context+app_id verification and the #337 rollup assertion), and the two Asks are resolved AT the approval gate before Phase 2 can start.
 
-## Seeds
+## Approval
 
-Finalized post-approval; drafts in the ELI5. ELI5 Artifact: https://claude.ai/code/artifact/af831909-632a-4b67-82c8-151190a9f4db (source: `eli5.html` in this dir — republish the same path to update the same URL).
+**APPROVED** by the owner at the gate (2026-07-29), verdict `approve`, with both Asks explicitly confirmed: (1) owner performs the authenticated mainnet-tools spot-check in Phase 6; (2) the recorded supply-chain residuals are accepted for this cut. Scope unchanged from the audited revision — draft seeds promoted to final verbatim.
+
+## Seeds (FINAL — post-approval)
+
+ELI5 Artifact: https://claude.ai/code/artifact/af831909-632a-4b67-82c8-151190a9f4db (source: `eli5.html` in this dir — republish the same path to update the same URL). Recommended seed: `/goal` (completion fully transcript-observable); `/loop 15m` alternative embedded alongside it in the ELI5. Both must run inside this worktree (`agent-worktree resume stable-release-0.27.0`).
