@@ -17,7 +17,7 @@ Ship the next stable: promote `dev` (head `c00598aee7a69a4e75382a9c83a9d4cb6188f
 
 ## Phases
 
-### Phase 1 — JIT pre-flight (state verification only)
+### Phase 1 ✓ — JIT pre-flight (state verification only)
 
 Re-verify live state immediately before acting (never trust prior snapshots):
 
@@ -43,7 +43,7 @@ test "$(gh pr list --base main --state open --json number -q 'length')" = "1"
 
 **Validation gate** — the assertion block exits 0 end to end. Layers: none (state checks). Any non-zero → stop, diagnose, do not proceed. (Codex condition: `CLEAN` alone can't detect weakened live protection — hence the explicit strict/signatures/context+app_id assertions.) **Phase 2 may not start until the approval gate's two owner Asks are explicitly resolved.**
 
-### Phase 2 — Merge promote PR #337 (dev → main)
+### Phase 2 ✓ — Merge promote PR #337 (dev → main)
 
 Server-side head pin is the real guard (closes the TOCTOU window; the fetch is advisory):
 
@@ -53,7 +53,7 @@ gh pr merge 337 --merge --match-head-commit c00598aee7a69a4e75382a9c83a9d4cb6188
 
 **Validation gate** — `git fetch origin && git log origin/main -1 --format='%H %p %s'`: pass = a TRUE 2-parent merge commit whose second parent is `c00598ae…`; #337 state MERGED. Layers: none new (the PR's three required gates are already green and are the content gate).
 
-### Phase 3 — Merge the release-please Release PR
+### Phase 3 ✓ — Merge the release-please Release PR
 
 release-please opens `chore(main): release 0.27.0` within ~1 min of the push to main. Review the `CHANGELOG.md` diff + version. **The authorized release is 0.27.0 — if release-please computes ANY other number, STOP and diagnose (manifest drift, ancestry break); do not ship an unapproved version.** Wait for full required CI (~30–45 min). **Batch discipline is the gate, not "3 non-pending"** (0.26.0 lesson: a superseded CI batch on the same head reports FAILURE after cancellation):
 
@@ -70,7 +70,7 @@ TAG_SHA=$(gh pr view $RPR --json mergeCommit -q .mergeCommit.oid)   # record in 
 
 Flake → re-run that check; cancellation artifacts (superseded batch) are not failures. **Validation gate** — the three per-SHA latest-completed runs each `success`, `mergeStateStatus=CLEAN`, merged as a 2-parent merge commit, `TAG_SHA` recorded. Layers: full CI on the release content (server-side).
 
-### Phase 4 — Auto-unstick + publish chain (hands-off, watched)
+### Phase 4 ✓ — Auto-unstick + publish chain (hands-off, watched)
 
 The post-merge `push:main` run: release-please aborts (v4 bug — expected), `auto-unstick` tags `v0.27.0` @ `TAG_SHA`, creates the Release, relabels; the SAME run continues: gates → build chrome+firefox → smoke-against-artifact → attach-assets → refresh-landing + deploy-faucet → verify-live (advisory). Watch; intervene only per the recovery table.
 
@@ -100,7 +100,7 @@ Layers: smoke e2e against the real built artifact (in-chain) + local hash verifi
 
 **Any dispatch-path recovery means `sync-main-to-dev` will NOT fire (push-only job)** — Phase 5 then uses the runbook's manual two-step (merge main→dev, then the prerelease-manifest re-baseline PR).
 
-### Phase 5 — Merge the sync-back PR (main → dev, MERGE COMMIT)
+### Phase 5 ✓ — Merge the sync-back PR (main → dev, MERGE COMMIT)
 
 Happy path: `sync-main-to-dev` opens `chore: sync main → dev`. **`dev` stays frozen (no pushes, no docs PR) until this merges** — loose protection on dev means base movement doesn't force re-runs, so movement here is silent risk. Wait for dev's required gates (~30–45 min), then:
 
