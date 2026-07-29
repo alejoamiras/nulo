@@ -111,7 +111,7 @@ gh pr merge $SPR --merge --match-head-commit "$SHEAD"     # NEVER squash — anc
 
 If labeled `needs-manual-resolution`: resolve on the sync branch, then merge-commit. If Phase 4 took a dispatch recovery: manual sync per runbook § "After a stable cut" (order matters: merge main→dev first, then re-baseline the prerelease manifest). **Validation gate** — true 2-parent merge on dev; `dev:package.json` version == 0.27.0; `.release-please-prerelease-manifest.json` == `{".": "0.27.0"}`; and after `git fetch origin dev --tags` + re-confirming `git rev-list -n1 v0.27.0 == $TAG_SHA`: `git merge-base --is-ancestor v0.27.0 origin/dev` exits 0. Layers: full CI on dev.
 
-### Phase 6 — Live verification + wrap-up
+### Phase 6 ✓ — Live verification + wrap-up
 
 - **Tools testnet host** (automated, unauthenticated): `verify-live` covers `testnet.tools.nulo.sh`; independently re-check `/build.json` buildId SHA-suffix == first 8 of `TAG_SHA` AND `index.html` `nulo-build` meta == buildId.
 - **Tools mainnet host** (`tools.nulo.sh` is Access-gated — NOT reachable by automation): **owner-verified** in the browser — same buildId/meta check + the FROM chip reads "ETHEREUM". This is an explicit Ask resolved at approval (owner does the authenticated check).

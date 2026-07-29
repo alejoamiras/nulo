@@ -21,3 +21,12 @@ Addendum (automated mainnet evidence + a finding):
   suffix" expectation is unsatisfiable while production tracks dev (this run: content verified
   identical instead — the gate's intent, not its letter).
 - Still owner-only: the Access-domain routing check + the visual ETHEREUM-chip confirmation.
+
+Close-out:
+- OWNER CONFIRMED in-session: the mainnet tools site (through Access) renders the FROM chip as
+  plain "ETHEREUM" — a string that exists only in the v0.27.0 build, so this is direct freshness
+  proof for the released code on the custom domain (on top of the pages.dev buildId + the
+  tree-identity check).
+- CF production-branch finding: owner says tracking `dev` was DELIBERATE (two-network rollout) and
+  is flipping the mainnet project's production branch to `main` now. Recorded; no issue filed.
+- Phase 6 gate ✓ — all six phases green.
