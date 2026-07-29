@@ -33,7 +33,10 @@ watch(
 			picked.value = accounts.value[0]?.address ?? null
 			previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
 			await nextTick()
-			dialogEl.value?.focus()
+			// Initial focus lands on the SELECTED radio (the roving-tabindex entry point);
+			// the dialog container is the fallback for the empty edge.
+			const selectedRow = dialogEl.value?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
+			;(selectedRow ?? dialogEl.value)?.focus()
 		} else {
 			picked.value = null
 			previouslyFocused?.focus()
@@ -86,8 +89,10 @@ function onKey(evt: KeyboardEvent) {
 	}
 	// Minimal focus trap, same as WalletPickerModal: Tab cycles within the dialog.
 	if (evt.key === "Tab" && dialogEl.value) {
+		// button:not([tabindex='-1']) — the non-selected radios carry tabindex="-1" (roving
+		// pattern) and must not count as Tab boundaries (post-impl audit MED).
 		const focusables = [
-			...dialogEl.value.querySelectorAll<HTMLElement>("button, [href], input, [tabindex]:not([tabindex='-1'])"),
+			...dialogEl.value.querySelectorAll<HTMLElement>("button:not([tabindex='-1']), [href], input, [tabindex]:not([tabindex='-1'])"),
 		].filter((el) => !el.hasAttribute("disabled"))
 		if (focusables.length === 0) return
 		const first = focusables[0]

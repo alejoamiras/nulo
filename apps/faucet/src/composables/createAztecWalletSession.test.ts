@@ -822,6 +822,15 @@ describe("multi-account: choose-on-connect", () => {
 		])
 	})
 
+	it("oversized wallet ids are refused on WRITE — no quota churn from hostile provider ids (D-23)", async () => {
+		const hugeId = "w".repeat(300)
+		const { provider } = makeMultiProvider({ id: hugeId, accounts: [{ alias: "Only", item: MA_A }] })
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("connected") // selection still applies in-session
+		expect(localStorage.getItem(SELECTED_KEY)).toBeNull() // but nothing was persisted
+	})
+
 	it("the memory is bounded: writing a 9th wallet evicts the oldest entry", async () => {
 		const seeded: Array<[string, string]> = Array.from({ length: 8 }, (_, i) => [`w${i + 1}`, MA_A])
 		localStorage.setItem(SELECTED_KEY, JSON.stringify(seeded))
@@ -1035,14 +1044,18 @@ describe("parseGrantedAccounts hardening", () => {
 		expect(accounts[2].alias).toBe("")
 	})
 
-	it("accepts a syntactically valid address WITHOUT proving curve validity (documented boundary, D-30)", () => {
-		// 0x...02 round-trips fromStringUnsafe; whether it is a real curve point is NOT checked
-		// here — authorization is enforced wallet-side per RPC. This test pins the boundary.
-		const syntacticOnly = addr("2")
+	it("accepts a PROVABLY curve-invalid (but syntactic) address — the documented boundary (D-30)", () => {
+		// 0x…03 is NOT a valid Grumpkin x-coordinate: `AztecAddress.fromStringUnsafe(addr("3")).isValid()`
+		// returns false (verified out-of-band with bun — isValid needs the Barretenberg WASM,
+		// which this jsdom suite deliberately does not boot; 0x…02 and 0x…05 ARE valid, so the
+		// fixture choice matters). It still round-trips fromStringUnsafe: the parser performs
+		// syntactic validation ONLY. Authorization is enforced wallet-side per RPC; a send
+		// involving such an address surfaces through the normal error path.
+		const curveInvalid = addr("3")
 		const { accounts } = parseGrantedAccounts({
-			granted: [{ type: "accounts", accounts: [{ alias: "edge", item: syntacticOnly }] }],
+			granted: [{ type: "accounts", accounts: [{ alias: "edge", item: curveInvalid }] }],
 		})
-		expect(accounts).toEqual([{ address: syntacticOnly, alias: "edge" }])
+		expect(accounts).toEqual([{ address: curveInvalid, alias: "edge" }])
 	})
 
 	it("caps the list at 16 and reports the hidden remainder", () => {

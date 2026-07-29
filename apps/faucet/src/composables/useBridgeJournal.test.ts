@@ -543,6 +543,17 @@ describe("useBridgeJournal engine", () => {
 		expect(isSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")).toBe(true)
 	})
 
+	it("⑧c wrong connected AZTEC account blocks PUBLIC claims too (post-impl HIGH-1)", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim, connectedAztec: () => "0xanotheraccount" })
+		addRecord(mkDeposit("0xpublicmismatch", { isPrivate: false }))
+		await runDepositClaim("0xpublicmismatch")
+		const { runtime } = useBridgeJournal()
+		expect(runtime.value["0xpublicmismatch"]?.attention).toBe("mismatch")
+		expect(claim).not.toHaveBeenCalled()
+	})
+
 	it("⑧b wrong connected AZTEC account ⇒ mismatch before anything runs", async () => {
 		const deps = baseDeps(kv)
 		const claim = smartClaimFake()

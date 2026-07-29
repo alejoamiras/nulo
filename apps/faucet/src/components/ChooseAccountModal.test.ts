@@ -177,6 +177,19 @@ describe("ChooseAccountModal", () => {
 		expect(c.status.value).toBe("idle")
 	})
 
+	it("mounting WHILE already in choosing-account still pre-selects the first account (immediate watcher)", async () => {
+		const c = await driveTo([
+			{ alias: "Main", item: ADDR_A },
+			{ alias: "Savings", item: ADDR_B },
+		])
+		expect(c.status.value).toBe("choosing-account")
+		const w = mountModal() // mounted AFTER the pause began — remount/HMR path
+		await w.vm.$nextTick()
+		const rows = w.findAll(`[data-testid="${TESTIDS.accountChoiceRow}"]`)
+		expect(rows[0].attributes("aria-checked")).toBe("true")
+		expect(w.find(`[data-testid="${TESTIDS.accountChoiceContinue}"]`).attributes("disabled")).toBeUndefined()
+	})
+
 	it("discloses grant truncation ('Showing 16 of 17')", async () => {
 		const w = mountModal()
 		const seventeen = Array.from({ length: 17 }, (_, i) => ({

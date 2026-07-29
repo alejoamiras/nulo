@@ -263,6 +263,9 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		return readRememberedMap().find(([id]) => id === walletId)?.[1] ?? null
 	}
 	function writeRememberedAccount(walletId: string, address: string): void {
+		// Bound on WRITE as well as read (plan D-23): a hostile provider id must not produce
+		// oversized writes / quota churn.
+		if (walletId.length === 0 || walletId.length > STORED_STRING_MAX || address.length > STORED_STRING_MAX) return
 		// Atomic rebuild: filter-out + unshift + cap, then ONE setItem (plan D-23).
 		const head: [string, string] = [walletId, address]
 		const next = [head, ...readRememberedMap().filter(([id]) => id !== walletId)].slice(0, MAX_REMEMBERED_WALLETS)

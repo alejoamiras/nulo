@@ -222,8 +222,17 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	const aztec = bridgeWallet.wallet.value
 	if (!aztec) throw new Error("Connect your Aztec wallet first.")
 	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
-	if (!rec?.fuel?.received || !rec.fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
-	await sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), rec.fuel, id)
+	const fuel = rec?.fuel
+	if (!fuel?.received || !fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
+	// Post-impl audit HIGH-1/HIGH-2: the claim acts for rec.recipient — refuse under a different
+	// active account, and run the wallet send inside a tracked operation span.
+	const active = bridgeWallet.selectedAccount.value
+	if (active && rec?.recipient && active.toLowerCase() !== rec.recipient.toLowerCase()) {
+		throw new Error(
+			`This gas claim belongs to ${rec.recipient.slice(0, 6)}…${rec.recipient.slice(-4)}. Switch to that account to claim.`,
+		)
+	}
+	await withOperation(() => sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec?.recipient ?? ""), fuel, id))
 }
 
 /** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the
@@ -575,7 +584,7 @@ export function ensureDepositJournalDeps(): void {
 					if (standaloneFj && fuel) {
 						// Best-effort inline standalone claim; a FAILURE leaves standaloneClaimed unset, so
 						// the card surfaces "CLAIM YOUR GAS" once the record completes (no silent strand).
-						void sendStandaloneFjClaim(aztec, recipientAddr, fuel, rec.id).catch((e) =>
+						void withOperation(() => sendStandaloneFjClaim(aztec, recipientAddr, fuel, rec.id)).catch((e) =>
 							log("standalone FJ claim failed (recoverable via CLAIM YOUR GAS):", e instanceof Error ? e.message : String(e)),
 						)
 					}

@@ -100,7 +100,7 @@ function onMenuKey(evt: KeyboardEvent) {
 	}
 	if (evt.key === "ArrowDown" || evt.key === "ArrowUp") {
 		evt.preventDefault()
-		const rows = [...(menuEl.value?.querySelectorAll<HTMLElement>('[role="menuitemradio"]') ?? [])]
+		const rows = [...(menuEl.value?.querySelectorAll<HTMLElement>('[role="menuitemradio"]:not([disabled])') ?? [])]
 		if (rows.length === 0) return
 		const idx = rows.indexOf(document.activeElement as HTMLElement)
 		const next = evt.key === "ArrowDown" ? (idx + 1) % rows.length : (idx - 1 + rows.length) % rows.length

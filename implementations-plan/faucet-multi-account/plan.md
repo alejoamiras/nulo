@@ -144,6 +144,17 @@ See Decision ledger.
 | D-30 | Address validation is syntactic-only — correct the security wording + test curve-invalid behavior (MED) | **Adopted**: wording corrected (authorization ≠ note-receivability); curve-invalid granted address unit-tested through the normal RPC error path. |
 | D-31 | Menu `<li>` `role="none"` + keyboard treatment for sibling copy control (LOW) | **Adopted**. |
 
+### Post-implementation audit round (verdict: reject → fixes applied)
+
+| # | Finding (severity) | Disposition |
+|---|---|---|
+| D-32 | Journal actions can act for a non-active account — only private claims were guarded (HIGH) | **Adopted**: the pre-click recipient guard now covers ALL deposit claims (public + private + auto-resume) — mismatch card instead of running; `claimFuelStandalone` gets the same guard (throws with switch-to instructions). Divergence from v4's "re-scope visibleRecords" is now EXPLICIT: records stay visible across switches (no vanishing in-flight cards) but can only be ACTED on under their account — uniform enforcement chosen over view-scoping. Test ⑧c pins the public path. |
+| D-33 | `claimFuelStandalone` + detached inline `sendStandaloneFjClaim` outside operation spans (HIGH) | **Adopted**: both wrapped in `withOperation` (the detached promise independently — it outlives its parent span). |
+| D-34 | Write path missed the string bound (MED) | **Adopted**: `writeRememberedAccount` refuses oversized ids/addresses; test pins no-persist for a 300-char provider id. |
+| D-35 | D-30 test fixture (0x…02) is actually curve-VALID — evidence didn't prove the claim (MED) | **Adopted**: fixture replaced with 0x…03, verified curve-INVALID via out-of-band `isValid()` probe (WASM-dependent, so pinned in a comment rather than asserted in the jsdom suite). |
+| D-36 | Modal trap counted `tabindex="-1"` radios as Tab boundaries; initial focus on container (MED) | **Adopted**: selector excludes them; initial focus lands on the selected radio; mount-while-open regression test added. |
+| D-37 | Switcher arrow traversal included disabled rows (LOW) | **Adopted**: `:not([disabled])`. |
+
 ## Security & Adversarial Considerations
 
 - **Threat model**: malicious/compromised wallet extension feeding hostile grant payloads (addresses, aliases, list size); same-origin storage tampering; user confusion about which account funds land in. Surface: grant parsing, localStorage, the two new UI surfaces.

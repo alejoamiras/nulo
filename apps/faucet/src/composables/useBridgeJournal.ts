@@ -544,11 +544,17 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		if (!guardDeployment(rec)) return
 		if (!deps.claim || !deps.claimReceiptStatus) throw new Error("Journal deps not connected")
 
-		// Pre-click recipient guard (private): the claim mints a NOTE to rec.recipient - never claim
-		// when a different Aztec account is connected.
+		// Pre-click recipient guard (ALL deposit claims — post-impl audit HIGH-1): the claim acts
+		// for rec.recipient; it must never run while a DIFFERENT Aztec account is active, or the
+		// chip shows B while an action executes for A. Private claims additionally mint a NOTE to
+		// the recipient. Auto-resume respects the same rule: a mismatched record waits with a
+		// mismatch card until its account is active again.
 		const aztec = deps.connectedAztec?.() ?? null
-		if (rec.isPrivate && aztec && rec.recipient && aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
-			setRuntime(id, { attention: "mismatch", note: `This private deposit claims to ${rec.recipient}. Connect that Aztec account.` })
+		if (aztec && rec.recipient && aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
+			setRuntime(id, {
+				attention: "mismatch",
+				note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
+			})
 			return
 		}
 

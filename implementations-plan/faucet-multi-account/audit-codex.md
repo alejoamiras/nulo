@@ -102,3 +102,22 @@ No remaining CRITICAL/HIGH findings. V3 resolves the state-machine, mutation-bou
 The five phases remain right-sized. These items fit naturally within Phases 1–4 and their existing typecheck/lint/unit gates; they do not require another architecture round.
 
 VERDICT: conditional approve (conditions: wrap spawned journal continuations rather than the void dispatcher, define explicit one-shot toast metadata, and accurately document/test syntactic-only address validation)
+## Post-impl round 1 (resumed session, xhigh) — VERDICT: reject
+
+No CRITICAL findings. Two HIGH blockers remain despite the green suite.
+
+- **HIGH — Journal actions can target the wrong displayed account.** `visibleRecords` is not scoped by `selectedAccount`; only private claims enforce an account mismatch. Public deposit claims and standalone Fuel Juice claims use the record’s recipient directly. With A and B both granted, the chip can show B while an action successfully sends from A. This violates “selection drives all tabs” and diverges from v4’s live journal re-scoping without a ledger entry. See [useBridgeJournal.ts](/home/homelab/Projects/nulo/.claude/worktrees/faucet-multi-account/apps/faucet/src/composables/useBridgeJournal.ts:923).
+
+- **HIGH — Operation-span coverage is incomplete.** `claimFuelStandalone()` is entirely outside `withOperation`, and the detached `void sendStandaloneFjClaim(...)` launched during a deposit claim is not independently wrapped. The enclosing operation is not guaranteed to remain active through that detached wallet prompt/send, permitting a mid-operation account switch. See [useDeposit.ts](/home/homelab/Projects/nulo/.claude/worktrees/faucet-multi-account/apps/faucet/src/composables/useDeposit.ts:220) and [useDeposit.ts](/home/homelab/Projects/nulo/.claude/worktrees/faucet-multi-account/apps/faucet/src/composables/useDeposit.ts:578).
+
+- **MED — Storage hardening diverges from D-23.** Reads bound wallet IDs, but `writeRememberedAccount()` inserts the current provider ID without the 256-character bound before serialization. A hostile provider can repeatedly trigger oversized writes/quota failures.
+
+- **MED — D-30’s test does not prove its claim.** The “syntactically valid without proving curve validity” fixture uses address `0x…02`, which `isValid()` reports as valid. It also lacks the promised normal RPC-failure-path assertion. The implementation documentation is correct; the test evidence is not.
+
+- **MED — Modal focus behavior remains imperfect.** The trap’s selector includes buttons with `tabindex="-1"`, undermining roving-tabindex boundary detection; initial focus lands on the dialog rather than the selected/first radio. The immediate-watcher TDZ fix itself is correct, but this mount-while-open path lacks a focused regression test.
+
+- **LOW — AccountSwitcher avoids nested interactive elements and handles Escape/outside close correctly, but disabled rows remain in Arrow-key traversal.**
+
+R3 condition 2 landed fully. Condition 1 landed for the named journal continuations but not the complete invariant. Condition 3 landed in documentation, but its test is invalid. The pause-token/`finishSetup` state machine otherwise withstands disconnect, retry, stale completion, and double-entry attacks.
+
+VERDICT: reject (blocking: wrong-account journal actions and unguarded standalone Fuel Juice wallet-operation spans)
