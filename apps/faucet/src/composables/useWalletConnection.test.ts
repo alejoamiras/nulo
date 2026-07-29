@@ -100,6 +100,7 @@ vi.mock("@/contracts/private-fpc", () => ({
 }))
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
+import { __resetOpsInFlightForTests, withOperation } from "./useOpsInFlight"
 
 // Full-length canonical addresses: the hardened parser round-trips AztecAddress.fromStringUnsafe,
 // which requires 32-byte hex (short fakes are rejected as malformed grant entries).
@@ -344,5 +345,37 @@ describe("extractGrantedAccounts", () => {
 			{ address: ADDR_A, alias: "Main" },
 			{ address: ADDR_B, alias: "Saver" },
 		])
+	})
+})
+
+describe("switch gating during operations (D-18 wiring: session gate reads useOpsInFlight)", () => {
+	beforeEach(() => {
+		localStorage.clear()
+		__resetWalletConnectionForTests()
+		__resetOpsInFlightForTests()
+	})
+
+	it("selectAccount rejects while a tracked operation span is open, succeeds after it closes", async () => {
+		const wallet = makeWallet([
+			{ alias: "Main", item: ADDR_MAIN },
+			{ alias: "Saver", item: ADDR_B },
+		])
+		const pending = makePending({ confirmReturns: wallet })
+		mockEstablishSecureChannel.mockResolvedValue(pending)
+		const c = useWalletConnection()
+		await connectAndPick(c)
+		await c.confirmVerification()
+		expect(c.status.value).toBe("choosing-account")
+		await c.confirmAccountChoice(ADDR_MAIN)
+		expect(c.status.value).toBe("connected")
+
+		let release: () => void = () => {}
+		const span = withOperation(() => new Promise<void>((res) => (release = res)))
+		expect(c.selectAccount(ADDR_B)).toBe(false) // blocked mid-operation, at the session boundary
+		expect(c.selectedAccount.value).toBe(ADDR_MAIN)
+		release()
+		await span
+		expect(c.selectAccount(ADDR_B)).toBe(true)
+		expect(c.selectedAccount.value).toBe(ADDR_B)
 	})
 })

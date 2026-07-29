@@ -25,6 +25,7 @@ import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
 import { dropPhaseClock } from "@/lib/phase-clock"
+import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 // Secrets, envelopes, signatures, and keys must never reach this log.
@@ -514,7 +515,10 @@ function completeWithdraw(rec: WithdrawJournalRecord | undefined, consumeTxHash?
  */
 export async function runDepositClaim(id: string, opts: { interactive?: boolean } = {}): Promise<void> {
 	try {
-		await runDepositClaimInner(id, opts)
+		// withOperation wraps EACH spawned continuation (this is the single entry point for card
+		// retries, resumeSessionWork, and the fuel claim leg) — never the void dispatcher, which
+		// would release the switch gate immediately (plan D-28).
+		await withOperation(() => runDepositClaimInner(id, opts))
 	} catch (e) {
 		surfaceRunFailure(id, e)
 	}
@@ -831,7 +835,7 @@ async function recordMessageConsumed(rec: DepositJournalRecord): Promise<boolean
  *  re-prompting; otherwise the proven-wait → witness → ONE L1 consume runs on the L1 lane. */
 export async function runWithdrawConsume(id: string): Promise<void> {
 	try {
-		await runWithdrawConsumeInner(id)
+		await withOperation(() => runWithdrawConsumeInner(id))
 	} catch (e) {
 		surfaceRunFailure(id, e)
 	}

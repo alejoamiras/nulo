@@ -59,7 +59,8 @@ const fuelQuote = ref<{ state: "idle" | "loading" | "ok" | "error"; fj?: bigint;
 })
 let quoteTimer: ReturnType<typeof setTimeout> | null = null
 const isPrivate = ref(true)
-const amount = ref("100")
+const AMOUNT_DEFAULT = "100"
+const amount = ref(AMOUNT_DEFAULT)
 
 const bothConnected = computed(() => l1.isConnected.value && bridge.status.value === "connected")
 
@@ -88,7 +89,17 @@ const ownedRecord = computed(() => (ownedId.value ? journal.records.value.find((
 const l2Handle = shallowRef<UseTokenBalanceHandle | null>(null)
 watch(
 	() => [bridge.status.value, bridge.selectedAccount.value] as const,
-	([status, account]) => {
+	([status, account], prev) => {
+		// Active-ACCOUNT switch (connected → connected, different address): stand the form down
+		// through the same release path as the Background button — foreground ownership, stage,
+		// flow errors — and clear transient inputs. A form half-built for account A must not
+		// carry its amount/receipt into account B.
+		const prevAccount = prev?.[1] ?? null
+		if (prevAccount && account && prevAccount !== account) {
+			onBackground()
+			receiptSnapshot.value = null
+			amount.value = AMOUNT_DEFAULT
+		}
 		l2Handle.value?.dispose()
 		l2Handle.value =
 			status === "connected" && account && bridge.wallet.value

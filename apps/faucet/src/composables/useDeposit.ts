@@ -79,6 +79,7 @@ import { useBridgeWallet } from "./useBridgeWallet"
 import { ERC20_ABI } from "./useL1Usdc"
 import { useL1Wallet } from "./useL1Wallet"
 import { readBalance } from "./useTokenBalance"
+import { withOperation } from "./useOpsInFlight"
 
 // Verbose tracing while the bridge flows are being hardened - ids, stages, tx hashes ONLY.
 const log = (...args: unknown[]) => console.log("[bridge:deposit]", ...args)
@@ -1122,5 +1123,7 @@ export function useDepositFlow() {
 		{ immediate: true },
 	)
 
-	return { busy, error, deposit, journal }
+	// withOperation: a deposit is an account-sensitive prompt/send span — while it runs, account
+	// switching is blocked (useOpsInFlight, plan D-8/D-19).
+	return { busy, error, deposit: (...args: Parameters<typeof deposit>) => withOperation(() => deposit(...args)), journal }
 }

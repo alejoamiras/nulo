@@ -15,6 +15,7 @@ import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import { buildCombinedManifest } from "@/lib/capabilities"
 import { createAztecWalletSession } from "./createAztecWalletSession"
+import { opsInFlight } from "./useOpsInFlight"
 
 const APP_ID = "nulo-faucet"
 
@@ -66,6 +67,10 @@ const session = createAztecWalletSession({
 	appId: APP_ID,
 	buildManifest: buildCapabilityManifest,
 	registerContracts: registerAllContracts,
+	// The mutation-boundary switch gate: selectAccount() rejects while any account-sensitive
+	// operation (drip / deposit / withdraw / fuel / add-token / journal continuation) is in
+	// flight — the UI's disabled rows are UX on top, not the enforcement (plan D-18).
+	isSwitchBlocked: opsInFlight,
 })
 
 export function useWalletConnection() {
