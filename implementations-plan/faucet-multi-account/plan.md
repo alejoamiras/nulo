@@ -191,7 +191,7 @@ FaucetView account-keyed cards; BridgeForm account-change reset via `releaseFore
 `AccountSwitcher.vue` (plain-text trigger, local dropdown recipe, always-rendered menu, busy-disabled rows, Disconnect footer) into both panels; toast on switch + on remembered auto-select. Tests: open/close/Esc/outside; switch → selectAccount+toast; busy → rows disabled; single-account menu shows Disconnect; keyboard nav (incl. copy-control reachability, D-31); auto-selection/truncation toasts fire exactly once via `selectionNotice` (D-29).
 **Gate**: same commands · exit 0, all faucet tests green · typecheck+lint+unit.
 
-### Phase 5 — Polish, docs, aggregate
+### Phase 5 — Polish, docs, aggregate ✓ (gate green 2026-07-29: `bun run audit:faucet` exit 0 end-to-end)
 Copy pass; stale-comment sweep (D-17); `implementations-plan/index.md` status; docs touch-ups.
 **Gate**: `bun run audit:faucet` (typecheck:all + test:faucet + lint + verify:deployments + build:faucet) · exit 0 end-to-end · aggregate.
 

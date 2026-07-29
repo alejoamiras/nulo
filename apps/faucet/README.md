@@ -29,6 +29,13 @@ it. Collision detection is best-effort: if multiple wallets claim the
 remembered identity during the scan window, auto-reconnect turns itself
 off and the picker shows all claimants.
 
+**Multiple accounts**: if your wallet shares more than one account, the
+faucet asks which one to use ("Choose main account") and remembers the
+answer per wallet. The connected chip shows the active account and opens
+a menu to switch anytime — switching drives all tabs (Faucet, Bridge,
+Fuel) and is blocked while an operation is running, so nothing ever
+executes under an account other than the one it started with.
+
 ## Deploy the contracts (one-time)
 
 The first run requires the maintainer to deploy the `Dripper` + USDC +

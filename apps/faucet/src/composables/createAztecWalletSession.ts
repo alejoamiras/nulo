@@ -91,9 +91,13 @@ export function truncateName(name: string, max: number): string {
 }
 
 /**
- * Per-feature config for an Aztec wallet session. The faucet and the bridge each create ONE
- * session (a module-level singleton) with their own appId, capability manifest, and contract
- * registration - the codex finding: two independent sessions, not one shared connection.
+ * Per-feature config for an Aztec wallet session. The faucet app creates ONE session (a
+ * module-level singleton in useWalletConnection; useBridgeWallet re-exports it) with a combined
+ * capability manifest covering every tab — one connection, one grant, one active account.
+ *
+ * Account-selection contract for consumers: read `selectedAccount` AT ACTION TIME and capture it
+ * for the operation's lifetime; wrap every account-sensitive prompt/send span in
+ * `useOpsInFlight.withOperation` so switching is blocked while the operation runs.
  */
 export interface AztecWalletSessionConfig {
 	readonly appId: string
