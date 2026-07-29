@@ -1,0 +1,106 @@
+<title>Release 0.27.0 — plan</title>
+<style>
+  :root {
+    --bg: #faf9f7; --ink: #1f2328; --muted: #5c6470; --accent: #0f6b62;
+    --accent-soft: #e8f2ef; --gate: #9a6b1f; --gate-soft: #faf3e3;
+    --rail: #d8d5cf; --card: #ffffff; --mono-bg: #f1efeb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #15181b; --ink: #e6e4df; --muted: #9aa1a9; --accent: #4fb3a5;
+      --accent-soft: #1c2a27; --gate: #d8a94e; --gate-soft: #2a2416;
+      --rail: #33383d; --card: #1b1f23; --mono-bg: #22262b; }
+  }
+  :root[data-theme="dark"] { --bg: #15181b; --ink: #e6e4df; --muted: #9aa1a9; --accent: #4fb3a5;
+    --accent-soft: #1c2a27; --gate: #d8a94e; --gate-soft: #2a2416;
+    --rail: #33383d; --card: #1b1f23; --mono-bg: #22262b; }
+  :root[data-theme="light"] { --bg: #faf9f7; --ink: #1f2328; --muted: #5c6470; --accent: #0f6b62;
+    --accent-soft: #e8f2ef; --gate: #9a6b1f; --gate-soft: #faf3e3;
+    --rail: #d8d5cf; --card: #ffffff; --mono-bg: #f1efeb; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 680px; margin: 0 auto; padding: 3rem 1.25rem 4rem; }
+  h1 { font-size: 1.7rem; font-weight: 650; line-height: 1.25; text-wrap: balance; margin: 0 0 .4rem; }
+  h2 { font-size: 1.15rem; font-weight: 650; margin: 2.6rem 0 .8rem; }
+  p { margin: .6rem 0; }
+  .eyebrow { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); font-weight: 650; }
+  .lede { color: var(--muted); }
+  .phases { list-style: none; margin: 1rem 0; padding: 0; display: flex; flex-direction: column; gap: .9rem; }
+  .phase { border-left: 3px solid var(--rail); padding: .65rem 1rem; background: var(--card); }
+  .phase b { display: block; margin-bottom: .15rem; }
+  .phase .num { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .45rem; font-weight: 650; }
+  .gate { display: block; margin-top: .35rem; font-size: .86rem; color: var(--muted); }
+  .gate::before { content: "proves itself by — "; color: var(--accent); font-weight: 600; }
+  .approval { background: var(--gate-soft); border-left: 3px solid var(--gate); padding: 1rem 1.25rem; margin: 1.6rem 0; }
+  .approval h2 { margin-top: 0; color: var(--gate); }
+  .approval li { margin: .45rem 0; }
+  .note { background: var(--accent-soft); border-left: 3px solid var(--accent); padding: .8rem 1rem; margin: 1.2rem 0; font-size: .95rem; }
+  pre { background: var(--mono-bg); padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap;
+    font: .84rem/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .recommended { border-left: 3px solid var(--accent); padding-left: 1rem; }
+  .recommended .eyebrow { color: var(--accent); }
+  .warn { color: var(--gate); font-weight: 650; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  ul { padding-left: 1.2rem; } li { margin: .35rem 0; }
+  a { color: var(--accent); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<p class="eyebrow">Blueprint · light · approval requested</p>
+<h1>Ship Nulo v0.27.0 — the stable release, end to end</h1>
+<p class="lede">Everything queued on the integration branch — the two-network tools, activity siloing, the fee-cap hardening, and this week's five-bug sweep — gets promoted to the stable branch, tagged v0.27.0, published as downloadable extension zips, and the landing + tools websites get refreshed. Frontend only: no smart contracts are redeployed. Most of the machinery is automation that has already shipped two releases cleanly; this plan is the checklist of guarded moments between the automated stretches.</p>
+
+<h2>Why the "light" tier</h2>
+<p>By the strict rubric this could be "mid" (a release is public and hard to un-ring), but the pipeline has shipped 0.24.0 and 0.26.0 with a written playbook, this plan reuses the proven 0.26.0 blueprint, and every change riding the release was already reviewed and gated on its own PR — including a dedicated adversarial audit of the fee change. One independent auditor (Codex) still reviewed this plan hard: it rejected the first draft over six real gaps (details in the plan file), and every one was fixed and re-verified before this page was shown to you.</p>
+
+<h2>The six phases</h2>
+<ol class="phases">
+  <li class="phase"><b><span class="num">1</span>Last-second state check</b>
+    Before touching anything, re-verify the world is as expected: the auto-release switch is on, the stable branch matches the last release, no v0.27.0 tag already exists, and the promotion PR is still green and unmoved.
+    <span class="gate">every check printing exactly the expected value; any surprise stops the release.</span></li>
+  <li class="phase"><b><span class="num">2</span>Merge the promotion (#337)</b>
+    The already-green PR moves the release content to the stable branch. The merge is pinned to the exact reviewed commit — if anything moved underneath, the server refuses.
+    <span class="gate">a true merge commit lands on the stable branch with the pinned commit as its parent.</span></li>
+  <li class="phase"><b><span class="num">3</span>Merge the version PR</b>
+    A bot opens "release 0.27.0" with the changelog. We confirm the number is exactly 0.27.0 (any other number stops the release), wait for the full test suite, and merge — checking the <em>latest completed</em> test batch, so a superseded, cancelled batch can't masquerade as a failure.
+    <span class="gate">all three required test suites green on the exact commit, then a pinned merge.</span></li>
+  <li class="phase"><b><span class="num">4</span>Tag + publish (automated, watched)</b>
+    Automation tags v0.27.0, creates the release, builds the Chrome + Firefox zips, smoke-tests the actual built zip, attaches everything, and pokes the website deploys. We watch and only step in per a written recovery table (each stuck state has one prescribed action; a wrong-looking tag is a hard stop).
+    <span class="gate">tag points at the right commit, release lists exactly the three files, and the checksums verify after downloading them.</span></li>
+  <li class="phase"><b><span class="num">5</span>Close the loop back to dev</b>
+    The bot's "sync main → dev" PR gets merged as a true merge (never squashed — the next release's version math depends on the ancestry). Dev stays frozen until this lands.
+    <span class="gate">dev shows version 0.27.0, the prerelease counter is re-baselined, and the release commit is provably in dev's history.</span></li>
+  <li class="phase"><b><span class="num">6</span>Prove the live sites + wrap up</b>
+    The testnet tools site is verified automatically by build fingerprint; the mainnet tools site sits behind a login wall, so <b>you</b> spot-check it (and the "ETHEREUM" chip fix while you're there); the landing page must offer the 0.27.0 downloads. Then the plan + lessons land in the repo as a small docs PR.
+    <span class="gate">build fingerprints match the released commit; you confirm the mainnet site; docs PR green.</span></li>
+</ol>
+
+<h2>Human context</h2>
+<p>Two commits matter: the <b>reviewed content commit</b> (what you approved on the promotion PR) and the <b>tagged release commit</b> (created when the version PR merges). Every integrity check compares against the right one of these two — that distinction, plus "never squash the sync-back", is most of what past releases taught us. The publishing automation is real but has known sharp edges (a years-old bug in the release bot means it "sticks" once per release; our auto-unsticker handles it, and the recovery table covers the cases where it half-finishes).</p>
+
+<div class="note">Time expectation: roughly 1.5–2.5 hours, almost all of it waiting on two full test-suite cycles. The merges themselves are minutes.</div>
+
+<h2>Open questions (the two things only you can give)</h2>
+<ul>
+  <li><b>Mainnet tools check</b> — the mainnet tools site is behind Cloudflare Access, so automation can't see it. The plan assigns you a one-minute logged-in spot-check at the end.</li>
+  <li><b>Accepted-for-now security residuals</b> — three known, pre-existing gaps stay open this cut: build actions pinned by version tag (not hash), no rule preventing a future tag/asset overwrite, and the release bot's token being broader than strictly needed. Fixing them is real follow-up work; the audit asked that you accept them explicitly rather than silently.</li>
+</ul>
+
+<div class="approval">
+  <h2>Your approval decision</h2>
+  <ul>
+    <li>Confirm scope: v0.27.0, frontend release only, marketplaces off, no extra test cycle on the tag build (the same code already passed it on the promotion PR).</li>
+    <li>Confirm the two open questions above: you take the mainnet spot-check, and you accept the three security residuals for this cut.</li>
+    <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+  </ul>
+</div>
+
+<h2>Implementation seeds <span class="muted">(draft — finalized after approval)</span></h2>
+<p class="muted">These drive the autonomous session that executes the release. Full technical plan: <code>implementations-plan/stable-release-0.27.0/plan.md</code> in the worktree.</p>
+<p class="warn">Use exactly ONE per session — they don't compose.</p>
+
+<div class="recommended">
+  <p class="eyebrow">Recommended: /goal (completion is fully transcript-observable)</p>
+  <pre>/goal All 6 phases marked ✓ in implementations-plan/stable-release-0.27.0/plan.md, each ✓ backed by its phase's validation gate (as written in plan.md) reported passing in the transcript — including Phase 4's peeled-tag == TAG_SHA check, the exact 3-asset list, and a passing `sha256sum -c SHASUMS256.txt`, and Phase 5's true merge commit + prerelease manifest re-baselined to 0.27.0 + `git merge-base --is-ancestor` exit 0; a lessons file printed per phase (`LESSONS_FILE=implementations-plan/stable-release-0.27.0/lessons/phase-N.md`); the wrap-up docs PR to dev open with quality-status green; and the transcript shows NO use of --admin, no gate weakened, no dev pushes before the sync PR merged, and any recovery-table STOP state surfaced to the owner instead of being worked around.</pre>
+</div>
+
+<p class="eyebrow">Alternative: /loop 15m</p>
+<pre>/loop 15m Drive implementations-plan/stable-release-0.27.0 forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), `git status`, and the live release state (`gh pr view` / `gh run list` for the current phase's PR or run — no --watch). (2) Waiting on a required CI cycle is fine — verify it's progressing, use the wait to prep the next phase's gate commands; never start work that pushes to dev before the sync PR merges. (3) Phase gate green (the EXACT commands in plan.md, incl. peeled-tag and sha256 checks)? Mark ✓, file lessons/phase-N.md, print LESSONS_FILE=..., advance. (4) A recovery-table state? Take ONLY the prescribed action; a STOP state (wrong-SHA tag, unexpected version) = surface to the owner and hold. (5) Red required check? Re-run the flake or fix breakage — NEVER neutralize a gate, never --admin. (6) All 6 phases ✓? Write the wrap-up (shipped tag, merge SHAs, gotchas), open the docs PR, update index.md, surface, and stop the loop.</pre>
