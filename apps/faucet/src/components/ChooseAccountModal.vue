@@ -18,6 +18,10 @@ const { status, accounts, hiddenAccountsCount, confirmAccountChoice, cancelAccou
 const open = computed(() => status.value === "choosing-account")
 
 const picked = ref<string | null>(null)
+// Declared BEFORE the immediate watcher below: `immediate: true` runs the callback
+// synchronously during setup, so bottom-of-script declarations would still be in TDZ.
+const dialogEl = ref<HTMLElement | null>(null)
+let previouslyFocused: HTMLElement | null = null
 // Pre-select the first granted account on open; clear on close so a later
 // session never inherits a stale pick. `immediate` covers mounting while the
 // session is ALREADY paused in choosing-account (remount/HMR) — without it the
@@ -98,9 +102,6 @@ function onKey(evt: KeyboardEvent) {
 		}
 	}
 }
-
-const dialogEl = ref<HTMLElement | null>(null)
-let previouslyFocused: HTMLElement | null = null
 </script>
 
 <template>
