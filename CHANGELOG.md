@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.27.0](https://github.com/alejoamiras/nulo/compare/v0.26.0...v0.27.0) (2026-07-29)
+
+
+### Features
+
+* **activity:** silo wallet activity by profile, network, chain and account ([#325](https://github.com/alejoamiras/nulo/issues/325)) ([12bc0fb](https://github.com/alejoamiras/nulo/commit/12bc0fbe1a1e13d80974c16e01a8902818387926))
+* **bridge:** mainnet swap-fuel — canonical-pool discovery + UniswapFuelSwap swapTarget ([#326](https://github.com/alejoamiras/nulo/issues/326)) ([a444e36](https://github.com/alejoamiras/nulo/commit/a444e3618d5d34a78f7187899225955f2ef08dec))
+* **prices:** price + seed nulo's bridged usdc on alpha ([#330](https://github.com/alejoamiras/nulo/issues/330)) ([b7b7ebc](https://github.com/alejoamiras/nulo/commit/b7b7ebc0b999bd53cbe6291f8bc37e47686d8285))
+* **tools:** network-aware l1 copy + token faucet live on alpha mainnet ([#329](https://github.com/alejoamiras/nulo/issues/329)) ([9335547](https://github.com/alejoamiras/nulo/commit/9335547cd42bbb238afb97cfb44b0afdf5c46a9d))
+* **tools:** two-network foundations — dual build, schema split, mainnet deploy tooling ([#324](https://github.com/alejoamiras/nulo/issues/324)) ([5552392](https://github.com/alejoamiras/nulo/commit/55523924fc30199875323fc60bf1415c620fca44))
+
+
+### Bug Fixes
+
+* **activity:** post-merge hardening of the siloing arc (codex rounds 1-4) ([#328](https://github.com/alejoamiras/nulo/issues/328)) ([42a640a](https://github.com/alejoamiras/nulo/commit/42a640a64cae3471b7ff12dc90daa2544a2a72db))
+* **faucet:** pad sponsored-drip maxFeesPerGas so pool fee ticks can't drop it ([#332](https://github.com/alejoamiras/nulo/issues/332)) ([7063bfe](https://github.com/alejoamiras/nulo/commit/7063bfec1030367b8b86c54f56d1061ccd414c80))
+* pre-release bug sweep (fiat $0, testnet usdc, aztecscan links, fee caps, l1 chip) ([#335](https://github.com/alejoamiras/nulo/issues/335)) ([c00598a](https://github.com/alejoamiras/nulo/commit/c00598aee7a69a4e75382a9c83a9d4cb6188f0ed))
+* **tools:** network-aware faucet footer + discard warning on alpha ([#331](https://github.com/alejoamiras/nulo/issues/331)) ([f0eedcf](https://github.com/alejoamiras/nulo/commit/f0eedcffd17724e54ef3f5af7404fb324d85518e))
+* **transactions:** debounce transient DROPPED receipts + resurrect late-mined txs ([#327](https://github.com/alejoamiras/nulo/issues/327)) ([5c92048](https://github.com/alejoamiras/nulo/commit/5c92048ad17c342628c81c9715b9d97ffa4f22ab))
+
+
+### Misc
+
+* re-baseline prerelease manifest to 0.26.0 ([361589d](https://github.com/alejoamiras/nulo/commit/361589d54a807dafa798514efbf5092c13d33d35))
+* sync main → dev ([#322](https://github.com/alejoamiras/nulo/issues/322)) ([1da3377](https://github.com/alejoamiras/nulo/commit/1da3377d45705b8e6f792e5a6a4be66ff26071e8))
+
+
+### Docs
+
+* **plan:** dp8 receipts — tools-two-network arc closed ([#333](https://github.com/alejoamiras/nulo/issues/333)) ([03e069a](https://github.com/alejoamiras/nulo/commit/03e069a7dd2405e02d18a8c028bfda570616ddfe))
+* **plan:** stable-release-0.26.0 blueprint + execution record ([#323](https://github.com/alejoamiras/nulo/issues/323)) ([60e74b5](https://github.com/alejoamiras/nulo/commit/60e74b52705eb3fe7f360d1acf65f5d80732fe4f))
+
 ## [0.26.0](https://github.com/alejoamiras/nulo/compare/v0.25.0...v0.26.0) (2026-07-24)
 
 
