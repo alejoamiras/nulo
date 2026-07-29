@@ -183,7 +183,7 @@ Pause token + `"choosing-account"` + `finishSetup` tail + hardened `extractGrant
 FaucetView account-keyed cards; BridgeForm account-change reset via `releaseForeground` (D-22); `useOpsInFlight` + `withOperation` across ALL 8 wrap sites + coverage grep sweep (D-19); `isSwitchBlocked` wiring (D-18); journal re-scope characterization test. Integration tests: post-switch drip uses the NEW account (D-1 proof); switch attempt mid-operation rejected at the session boundary.
 **Gate**: same commands · all exit 0, D-1 integration test green · typecheck+lint+unit.
 
-### Phase 3 — Choose-on-connect modal
+### Phase 3 — Choose-on-connect modal ✓ (gate green 2026-07-29: typecheck ✓ · lint exit 0 · test:faucet 563/563)
 `ChooseAccountModal.vue` (radiogroup a11y, focus handling) + App.vue mount + status sweep. Tests: N rows + alias fallback; select+Continue → confirmAccountChoice; Esc/backdrop → cancel; not rendered for 1-account; focus restore.
 **Gate**: same commands · exit 0 · typecheck+lint+unit.
 

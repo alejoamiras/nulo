@@ -35,6 +35,8 @@ const connectLabel = computed(() => {
 			return "Verify in wallet"
 		case "capability-approval":
 			return "Approve permissions in wallet"
+		case "choosing-account":
+			return "Choose your account"
 		case "error":
 			return "Retry connection"
 		default:
@@ -134,7 +136,7 @@ function openInstall() {
 				v-else-if="showConnectButton"
 				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
-				:disabled="status === 'discovering' || status === 'choosing'"
+				:disabled="status === 'discovering' || status === 'choosing' || status === 'choosing-account'"
 				:data-testid="TESTIDS.btnConnect"
 				@click="onClick"
 			>

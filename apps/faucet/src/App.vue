@@ -3,6 +3,7 @@ import { computed, ref } from "vue"
 import { IS_MAINNET } from "@/lib/network"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
+import ChooseAccountModal from "./components/ChooseAccountModal.vue"
 import WalletPickerModal from "./components/WalletPickerModal.vue"
 import BridgeFooter from "./components/BridgeFooter.vue"
 import ThemeToggle from "./components/ThemeToggle.vue"
@@ -86,6 +87,7 @@ const stripExclude = computed(() => (tab.value === "faucet" ? ["no-wallet", "cap
 		<AppToastRegion />
 		<!-- ONE picker for the shared session — the panels only trigger connect(). -->
 		<WalletPickerModal />
+		<ChooseAccountModal />
 	</main>
 </template>
 

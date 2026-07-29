@@ -31,6 +31,8 @@ const connectLabel = computed(() => {
 			return "Verify in wallet"
 		case "capability-approval":
 			return "Approve permissions"
+		case "choosing-account":
+			return "Choose your account"
 		case "error":
 			return "Retry connection"
 		default:
@@ -104,7 +106,7 @@ async function onClick() {
 				v-else
 				:class="{ denied: status === 'error' }"
 				:loading="status === 'discovering'"
-				:disabled="status === 'discovering' || status === 'choosing'"
+				:disabled="status === 'discovering' || status === 'choosing' || status === 'choosing-account'"
 				:data-testid="TESTIDS.bridgeL2Connect"
 				@click="onClick"
 			>

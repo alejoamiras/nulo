@@ -133,6 +133,9 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	const verificationEmojis = ref<string | null>(null)
 	const accounts = ref<GrantedAccount[]>([])
 	const selectedAccount = ref<string | null>(null)
+	/** Valid accounts dropped by the grant cap — drives the persistent "Showing N of M" disclosure
+	 *  rows (the one-shot notice covers only the toast; plan D-24). */
+	const hiddenAccountsCount = ref(0)
 	const error = ref<NormalizedError | null>(null)
 	// shallowRef: the SDK wallet handle must not be deep-proxied (same rationale as the balance
 	// handles - deep reactivity over a class instance is waste and can break identity checks).
@@ -634,6 +637,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			}
 			const { accounts: granted, hiddenCount } = parseGrantedAccounts(result)
 			accounts.value = granted
+			hiddenAccountsCount.value = hiddenCount
 
 			if (granted.length === 0) {
 				throw new Error("No accounts granted by wallet")
@@ -775,6 +779,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		verificationEmojis.value = null
 		pendingAccountChoice = null
 		selectionNotices.value = []
+		hiddenAccountsCount.value = 0
 	}
 
 	/** Reset all state (test helper + hard reset). Live SDK handles get the
@@ -805,6 +810,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		accounts,
 		selectedAccount,
 		selectionNotices,
+		hiddenAccountsCount,
 		error,
 		wallet,
 		discoveredWallets,

@@ -30,6 +30,20 @@ export const TESTIDS = {
 	btnSwitchWallet: "fa-btn-switch-wallet",
 	bridgeL2SwitchWallet: "fa-bridge-l2-switch-wallet",
 
+	// Choose-main-account modal - shown when >1 account is granted and none is remembered
+	accountChoice: "fa-account-choice",
+	accountChoiceRow: "fa-account-choice-row",
+	accountChoiceContinue: "fa-account-choice-continue",
+	accountChoiceTruncation: "fa-account-choice-truncation",
+
+	// Account switcher - connected chip + dropdown menu (both wallet panels)
+	accountChip: "fa-account-chip",
+	accountMenu: "fa-account-menu",
+	accountMenuRow: "fa-account-menu-row",
+	accountMenuCopy: "fa-account-menu-copy",
+	accountMenuDisconnect: "fa-account-menu-disconnect",
+	accountMenuTruncation: "fa-account-menu-truncation",
+
 	// Verification modal - 3×3 emoji grid + match/cancel
 	verificationModal: "fa-verification-modal",
 	emojiGrid: "fa-emoji-grid",
