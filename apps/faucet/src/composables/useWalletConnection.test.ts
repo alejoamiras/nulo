@@ -101,6 +101,13 @@ vi.mock("@/contracts/private-fpc", () => ({
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
 
+// Full-length canonical addresses: the hardened parser round-trips AztecAddress.fromStringUnsafe,
+// which requires 32-byte hex (short fakes are rejected as malformed grant entries).
+const ADDR_MAIN = `0x${"a1b2c3".padStart(64, "0")}`
+const ADDR_A = `0x${"aaa".padStart(64, "0")}`
+const ADDR_B = `0x${"bbb".padStart(64, "0")}`
+const ADDR_ABC = `0x${"abc".padStart(64, "0")}`
+
 function makeWallet(grantedAccounts: Array<{ alias?: string; item?: string }> = []) {
 	return {
 		requestCapabilities: vi.fn(async () => ({
@@ -125,7 +132,7 @@ function makePending(opts: { verificationHash?: string; confirmReturns?: unknown
 		verificationHash: opts.verificationHash ?? "deadbeef",
 		confirm: vi.fn(async () => {
 			if (opts.confirmThrows) throw opts.confirmThrows
-			return opts.confirmReturns ?? makeWallet([{ alias: "Main", item: "0xa1b2c3" }])
+			return opts.confirmReturns ?? makeWallet([{ alias: "Main", item: ADDR_MAIN }])
 		}),
 		cancel: vi.fn(async () => {}),
 	}
@@ -180,15 +187,15 @@ describe("useWalletConnection", () => {
 	})
 
 	it("confirmVerification() runs the capability handshake and lands in 'connected'", async () => {
-		const wallet = makeWallet([{ alias: "Main", item: "0xa1b2c3" }])
+		const wallet = makeWallet([{ alias: "Main", item: ADDR_MAIN }])
 		const pending = makePending({ confirmReturns: wallet })
 		mockEstablishSecureChannel.mockResolvedValue(pending)
 		const c = useWalletConnection()
 		await connectAndPick(c)
 		await c.confirmVerification()
 		expect(c.status.value).toBe("connected")
-		expect(c.selectedAccount.value).toBe("0xa1b2c3")
-		expect(c.accounts.value).toEqual([{ address: "0xa1b2c3", alias: "Main" }])
+		expect(c.selectedAccount.value).toBe(ADDR_MAIN)
+		expect(c.accounts.value).toEqual([{ address: ADDR_MAIN, alias: "Main" }])
 		// 7 = the combined faucet + bridge set (dripper, usdc, eth, proxy, token, bridge) + the PrivateFPC
 		// (pre-registered so the no-fuel-claim private Fee-Juice balance read works under 5.0.1).
 		expect(wallet.registerContract).toHaveBeenCalledTimes(7)
@@ -238,7 +245,7 @@ describe("useWalletConnection", () => {
 			() => {
 				throw new Error("Capability denied")
 			},
-			async () => ({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: "0xabc" }] }] }),
+			async () => ({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: ADDR_ABC }] }] }),
 		]
 		const wallet = {
 			requestCapabilities: vi.fn(async () => {
@@ -256,7 +263,7 @@ describe("useWalletConnection", () => {
 		expect(c.status.value).toBe("error")
 		await c.retryCapabilities()
 		expect(c.status.value).toBe("connected")
-		expect(c.selectedAccount.value).toBe("0xabc")
+		expect(c.selectedAccount.value).toBe(ADDR_ABC)
 	})
 
 	it("disconnect() calls provider.disconnect and resets state to idle", async () => {
@@ -327,15 +334,15 @@ describe("extractGrantedAccounts", () => {
 				{
 					type: "accounts",
 					accounts: [
-						{ alias: "Main", item: { toString: () => "0xaaa" } },
-						{ alias: "Saver", item: "0xbbb" },
+						{ alias: "Main", item: { toString: () => ADDR_A } },
+						{ alias: "Saver", item: ADDR_B },
 					],
 				},
 			],
 		})
 		expect(out).toEqual([
-			{ address: "0xaaa", alias: "Main" },
-			{ address: "0xbbb", alias: "Saver" },
+			{ address: ADDR_A, alias: "Main" },
+			{ address: ADDR_B, alias: "Saver" },
 		])
 	})
 })

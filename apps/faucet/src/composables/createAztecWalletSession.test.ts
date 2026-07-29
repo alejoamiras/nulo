@@ -9,7 +9,7 @@
  * cancellation, must be the correctness boundary.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest"
 
 vi.mock("@nulo/wallet-sdk-schema-patch/register", () => ({}))
 vi.mock("@/lib/chain-info", () => ({ readChainInfo: () => ({ chainId: 1 }) }))
@@ -22,11 +22,14 @@ vi.mock("@aztec/wallet-sdk/manager", () => ({
 	},
 }))
 
-import { createAztecWalletSession, type DiscoveredWallet } from "./createAztecWalletSession"
+import { createAztecWalletSession, type DiscoveredWallet, parseGrantedAccounts } from "./createAztecWalletSession"
 
 // ── Push-driven discovery stream ─────────────────────────────────────
 
 type AnyProvider = Record<string, unknown>
+
+// Full-length canonical address: the hardened parser rejects short fakes (32-byte hex required).
+const ADDR_MAIN = `0x${"a1".padStart(64, "0")}`
 
 function makeStream() {
 	const queue: AnyProvider[] = []
@@ -65,7 +68,7 @@ function makeProvider(over: Partial<{ id: string; name: string; type: string; ic
 		cancel: vi.fn(async () => {}),
 	}
 	const walletHandle = {
-		requestCapabilities: vi.fn(async () => ({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: "0xa1" }] }] })),
+		requestCapabilities: vi.fn(async () => ({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: ADDR_MAIN }] }] })),
 	}
 	pending.confirm.mockImplementation(async () => walletHandle)
 	const provider = {
@@ -289,7 +292,7 @@ describe("audit round: flow-ownership + interruption hardening", () => {
 		await s.retryCapabilities() // flow is owned — must not start a second request
 		expect(walletHandle.requestCapabilities).toHaveBeenCalledTimes(1)
 
-		resolveCaps({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: "0xa1" }] }] })
+		resolveCaps({ granted: [{ type: "accounts", accounts: [{ alias: "Main", item: ADDR_MAIN }] }] })
 		await confirming
 		expect(s.status.value).toBe("connected")
 	})
@@ -660,5 +663,392 @@ describe("remembered path (bounded ambiguity window)", () => {
 		s.forgetPreferredWallet()
 		expect(s.preferredWalletName.value).toBeNull()
 		expect(localStorage.getItem("test-app:preferred-wallet")).toBeNull()
+	})
+})
+
+// ── Multi-account: choose-on-connect pause, per-wallet memory, switching ─────
+
+function addr(suffix: string): string {
+	return `0x${suffix.padStart(64, "0")}`
+}
+const MA_A = addr("aa")
+const MA_B = addr("bb")
+const MA_C = addr("cc")
+const SELECTED_KEY = "test-app:selected-accounts"
+
+type GrantEntry = { alias?: unknown; item?: unknown } | null
+
+function makeMultiProvider(opts: { id?: string; accounts?: GrantEntry[] } = {}) {
+	const walletHandle = {
+		requestCapabilities: vi.fn(async () => ({
+			granted: [
+				{
+					type: "accounts",
+					accounts: opts.accounts ?? [
+						{ alias: "Main", item: MA_A },
+						{ alias: "Savings", item: MA_B },
+					],
+				},
+			],
+		})),
+	}
+	const pending = {
+		verificationHash: "deadbeef",
+		confirm: vi.fn(async () => walletHandle),
+		cancel: vi.fn(async () => {}),
+	}
+	let disconnectHandler: (() => void) | null = null
+	const provider = {
+		id: opts.id ?? "nulo",
+		name: "Nulo",
+		type: "extension",
+		icon: undefined,
+		establishSecureChannel: vi.fn(async () => pending),
+		disconnect: vi.fn(async () => {}),
+		onDisconnect: vi.fn((h: () => void) => {
+			disconnectHandler = h
+			return () => {
+				disconnectHandler = null
+			}
+		}),
+	}
+	return { provider, pending, walletHandle, fireDisconnect: () => disconnectHandler?.() }
+}
+
+function makeSessionWith(over: { registerContracts?: Mock<() => Promise<void>>; isSwitchBlocked?: () => boolean } = {}) {
+	const registerContracts = over.registerContracts ?? vi.fn(async () => {})
+	const session = createAztecWalletSession({
+		appId: "test-app",
+		buildManifest: async () => ({}),
+		registerContracts,
+		isSwitchBlocked: over.isSwitchBlocked,
+	})
+	return { session, registerContracts }
+}
+
+/** Fresh-path drive to the end of the capability handshake (grant applied or paused). */
+async function driveThroughGrant(s: ReturnType<typeof makeSessionWith>["session"], provider: Record<string, unknown>) {
+	void s.connect()
+	await flush()
+	stream.push(provider)
+	await flush()
+	s.selectWallet(s.discoveredWallets.value[0].key)
+	await flush()
+	await s.confirmVerification()
+}
+
+function storedMap(): Array<[string, string]> {
+	return JSON.parse(localStorage.getItem(SELECTED_KEY) ?? "[]")
+}
+
+describe("multi-account: choose-on-connect", () => {
+	it("two accounts, nothing remembered → pauses in choosing-account; confirm resumes, persists, connects", async () => {
+		const { provider, walletHandle } = makeMultiProvider()
+		const { session: s, registerContracts } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+
+		expect(s.status.value).toBe("choosing-account")
+		expect(s.accounts.value).toHaveLength(2)
+		expect(s.selectedAccount.value).toBeNull()
+		expect(registerContracts).not.toHaveBeenCalled()
+		expect(walletHandle.requestCapabilities).toHaveBeenCalledTimes(1)
+
+		await s.confirmAccountChoice(MA_B)
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(registerContracts).toHaveBeenCalledTimes(1)
+		expect(storedMap()).toEqual([["nulo", MA_B]])
+		// The preferred WALLET is persisted only on full success (existing rule, now via finishSetup).
+		expect(JSON.parse(localStorage.getItem("test-app:preferred-wallet") ?? "{}")).toEqual({ id: "nulo", name: "Nulo" })
+	})
+
+	it("a single granted account skips the choice step and is remembered (D-6)", async () => {
+		const { provider } = makeMultiProvider({ accounts: [{ alias: "Only", item: MA_A }] })
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_A)
+		expect(storedMap()).toEqual([["nulo", MA_A]])
+		expect(s.consumeSelectionNotices()).toEqual([])
+	})
+
+	it("a valid remembered choice skips the modal and emits exactly one auto-remembered notice", async () => {
+		localStorage.setItem(SELECTED_KEY, JSON.stringify([["nulo", MA_B]]))
+		const { provider } = makeMultiProvider()
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_B)
+		const notices = s.consumeSelectionNotices()
+		expect(notices).toHaveLength(1)
+		expect(notices[0]).toMatchObject({ kind: "auto-remembered", address: MA_B, alias: "Savings" })
+		expect(s.consumeSelectionNotices()).toEqual([]) // drained exactly once
+	})
+
+	it("a remembered address missing from the live grant re-opens the choice", async () => {
+		localStorage.setItem(SELECTED_KEY, JSON.stringify([["nulo", MA_C]]))
+		const { provider } = makeMultiProvider()
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("choosing-account")
+	})
+
+	it("a choice remembered under a DIFFERENT wallet id does not apply", async () => {
+		localStorage.setItem(SELECTED_KEY, JSON.stringify([["other-wallet", MA_B]]))
+		const { provider } = makeMultiProvider()
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("choosing-account")
+	})
+
+	it("per-wallet memory is a map: a second wallet's choice keeps the first wallet's entry (A→B→A)", async () => {
+		localStorage.setItem(SELECTED_KEY, JSON.stringify([["w1", MA_A]]))
+		const { provider } = makeMultiProvider({
+			id: "w2",
+			accounts: [
+				{ alias: "B", item: MA_B },
+				{ alias: "C", item: MA_C },
+			],
+		})
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		await s.confirmAccountChoice(MA_C)
+		expect(s.status.value).toBe("connected")
+		expect(storedMap()).toEqual([
+			["w2", MA_C],
+			["w1", MA_A],
+		])
+	})
+
+	it("the memory is bounded: writing a 9th wallet evicts the oldest entry", async () => {
+		const seeded: Array<[string, string]> = Array.from({ length: 8 }, (_, i) => [`w${i + 1}`, MA_A])
+		localStorage.setItem(SELECTED_KEY, JSON.stringify(seeded))
+		const { provider } = makeMultiProvider({ id: "w9", accounts: [{ alias: "Only", item: MA_B }] })
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		const map = storedMap()
+		expect(map).toHaveLength(8)
+		expect(map[0]).toEqual(["w9", MA_B])
+		expect(map.some(([id]) => id === "w8")).toBe(false)
+	})
+
+	it("cancelAccountChoice wipes to idle and disconnects the CAPTURED provider", async () => {
+		const { provider } = makeMultiProvider()
+		const { session: s, registerContracts } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("choosing-account")
+
+		await s.cancelAccountChoice()
+		expect(s.status.value).toBe("idle")
+		expect(s.accounts.value).toEqual([])
+		expect(provider.disconnect).toHaveBeenCalled()
+		expect(registerContracts).not.toHaveBeenCalled()
+	})
+
+	it("a wallet-side disconnect during the choice closes the pause; the late confirm is a no-op", async () => {
+		const { provider, fireDisconnect } = makeMultiProvider()
+		const { session: s, registerContracts } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		expect(s.status.value).toBe("choosing-account")
+
+		fireDisconnect()
+		expect(s.status.value).toBe("idle")
+		await s.confirmAccountChoice(MA_A)
+		expect(s.status.value).toBe("idle")
+		expect(registerContracts).not.toHaveBeenCalled()
+	})
+
+	it("double confirmAccountChoice runs setup ONCE (token claimed synchronously)", async () => {
+		let resolveSetup: () => void = () => {}
+		const registerContracts = vi.fn(
+			() =>
+				new Promise<void>((res) => {
+					resolveSetup = res
+				}),
+		)
+		const { provider } = makeMultiProvider()
+		const { session: s } = makeSessionWith({ registerContracts })
+		await driveThroughGrant(s, provider)
+
+		const first = s.confirmAccountChoice(MA_A)
+		const second = s.confirmAccountChoice(MA_B) // loses the synchronous claim → no-op
+		resolveSetup()
+		await Promise.all([first, second])
+
+		expect(s.status.value).toBe("connected")
+		expect(s.selectedAccount.value).toBe(MA_A)
+		expect(registerContracts).toHaveBeenCalledTimes(1)
+	})
+
+	it("setup failure after confirm → error; retryCapabilities auto-applies the persisted choice without re-prompting (D-20)", async () => {
+		const registerContracts = vi.fn(async () => {}).mockRejectedValueOnce(new Error("PXE unavailable"))
+		const { provider, walletHandle } = makeMultiProvider()
+		const { session: s } = makeSessionWith({ registerContracts })
+		await driveThroughGrant(s, provider)
+
+		await s.confirmAccountChoice(MA_B)
+		expect(s.status.value).toBe("error")
+		expect(storedMap()).toEqual([["nulo", MA_B]]) // persisted AT selection time
+
+		await s.retryCapabilities()
+		expect(walletHandle.requestCapabilities).toHaveBeenCalledTimes(2)
+		expect(s.status.value).toBe("connected") // remembered hit — never paused again
+		expect(s.selectedAccount.value).toBe(MA_B)
+	})
+
+	it("a throwing localStorage never blocks the choice flow (best-effort persistence)", async () => {
+		const { provider } = makeMultiProvider()
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+		const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+			throw new Error("QuotaExceededError")
+		})
+		try {
+			await s.confirmAccountChoice(MA_A)
+			expect(s.status.value).toBe("connected")
+			expect(s.selectedAccount.value).toBe(MA_A)
+		} finally {
+			setItem.mockRestore()
+		}
+	})
+
+	it("an oversized grant is truncated WITH a disclosed notice; cancel clears pending notices", async () => {
+		const seventeen: GrantEntry[] = Array.from({ length: 17 }, (_, i) => ({
+			alias: `Acct ${i}`,
+			item: addr((i + 1).toString(16)),
+		}))
+		const { provider } = makeMultiProvider({ accounts: seventeen })
+		const { session: s } = makeSessionWith()
+		await driveThroughGrant(s, provider)
+
+		expect(s.status.value).toBe("choosing-account")
+		expect(s.accounts.value).toHaveLength(16)
+		expect(s.selectionNotices.value).toEqual([expect.objectContaining({ kind: "grant-truncated", hiddenCount: 1 })])
+
+		await s.cancelAccountChoice() // wipe (cleanupSession) must clear undrained notices
+		expect(s.selectionNotices.value).toEqual([])
+	})
+})
+
+describe("multi-account: switching (selectAccount)", () => {
+	async function connectedSession(over: Parameters<typeof makeSessionWith>[0] = {}) {
+		const made = makeMultiProvider()
+		const built = makeSessionWith(over)
+		await driveThroughGrant(built.session, made.provider)
+		await built.session.confirmAccountChoice(MA_A)
+		expect(built.session.status.value).toBe("connected")
+		return { ...made, ...built }
+	}
+
+	it("switches to another granted account, persists it, and returns true", async () => {
+		const { session: s } = await connectedSession()
+		expect(s.selectAccount(MA_B)).toBe(true)
+		expect(s.selectedAccount.value).toBe(MA_B)
+		expect(storedMap()).toEqual([["nulo", MA_B]])
+	})
+
+	it("rejects an address outside the live grant", async () => {
+		const { session: s } = await connectedSession()
+		expect(s.selectAccount(MA_C)).toBe(false)
+		expect(s.selectedAccount.value).toBe(MA_A)
+	})
+
+	it("rejects when not connected", async () => {
+		const { session: s } = await connectedSession()
+		await s.disconnect()
+		expect(s.selectAccount(MA_B)).toBe(false)
+	})
+
+	it("isSwitchBlocked gates the mutation boundary itself (D-18)", async () => {
+		let blocked = true
+		const { session: s } = await connectedSession({ isSwitchBlocked: () => blocked })
+		expect(s.selectAccount(MA_B)).toBe(false)
+		expect(s.selectedAccount.value).toBe(MA_A)
+		blocked = false
+		expect(s.selectAccount(MA_B)).toBe(true)
+		expect(s.selectedAccount.value).toBe(MA_B)
+	})
+})
+
+describe("parseGrantedAccounts hardening", () => {
+	it("skips malformed, short, above-modulus, and throwing entries without crashing", () => {
+		const { accounts, hiddenCount } = parseGrantedAccounts({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "ok", item: MA_A },
+						{ alias: "short", item: "0xa1" },
+						{ alias: "junk", item: "0xzz" },
+						{ alias: "overflow", item: `0x${"ff".repeat(32)}` },
+						{
+							alias: "thrower",
+							item: {
+								toString: () => {
+									throw new Error("boom")
+								},
+							},
+						},
+						null,
+						{ alias: "no-item" },
+					],
+				},
+			],
+		})
+		expect(accounts).toEqual([{ address: MA_A, alias: "ok" }])
+		expect(hiddenCount).toBe(0)
+	})
+
+	it("canonicalizes case/prefix and dedupes by canonical address (first wins)", () => {
+		const upper = `0x${"aa".padStart(64, "0")}`.toUpperCase().replace("0X", "0x")
+		const { accounts } = parseGrantedAccounts({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "first", item: upper },
+						{ alias: "dup", item: MA_A },
+					],
+				},
+			],
+		})
+		expect(accounts).toEqual([{ address: MA_A, alias: "first" }])
+	})
+
+	it("sanitizes aliases: control/bidi characters stripped, length capped, non-strings emptied", () => {
+		const { accounts } = parseGrantedAccounts({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "Sav‮ings⁦", item: MA_A },
+						{ alias: "x".repeat(60), item: MA_B },
+						{ alias: 42, item: MA_C },
+					],
+				},
+			],
+		})
+		expect(accounts[0].alias).toBe("Savings")
+		expect(accounts[1].alias).toBe(`${"x".repeat(48)}…`)
+		expect(accounts[2].alias).toBe("")
+	})
+
+	it("accepts a syntactically valid address WITHOUT proving curve validity (documented boundary, D-30)", () => {
+		// 0x...02 round-trips fromStringUnsafe; whether it is a real curve point is NOT checked
+		// here — authorization is enforced wallet-side per RPC. This test pins the boundary.
+		const syntacticOnly = addr("2")
+		const { accounts } = parseGrantedAccounts({
+			granted: [{ type: "accounts", accounts: [{ alias: "edge", item: syntacticOnly }] }],
+		})
+		expect(accounts).toEqual([{ address: syntacticOnly, alias: "edge" }])
+	})
+
+	it("caps the list at 16 and reports the hidden remainder", () => {
+		const entries = Array.from({ length: 20 }, (_, i) => ({ alias: `a${i}`, item: addr((i + 1).toString(16)) }))
+		const { accounts, hiddenCount } = parseGrantedAccounts({ granted: [{ type: "accounts", accounts: entries }] })
+		expect(accounts).toHaveLength(16)
+		expect(hiddenCount).toBe(4)
 	})
 })

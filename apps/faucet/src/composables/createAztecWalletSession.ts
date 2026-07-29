@@ -2,6 +2,7 @@
 // Must be the first import in this module - see @nulo/wallet-sdk-schema-patch.
 import "@nulo/wallet-sdk-schema-patch/register"
 
+import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { WalletManager } from "@aztec/wallet-sdk/manager"
 import type { PendingConnection, WalletProvider } from "@aztec/wallet-sdk/manager"
@@ -10,11 +11,32 @@ import { readChainInfo } from "@/lib/chain-info"
 import { hashToEmoji } from "@/lib/emoji"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
-export type ConnectStatus = "idle" | "discovering" | "choosing" | "verifying" | "capability-approval" | "setting-up" | "connected" | "error"
+export type ConnectStatus =
+	| "idle"
+	| "discovering"
+	| "choosing"
+	| "verifying"
+	| "capability-approval"
+	| "choosing-account"
+	| "setting-up"
+	| "connected"
+	| "error"
 
 export interface GrantedAccount {
 	readonly address: string
 	readonly alias: string
+}
+
+/** One-shot UI notification from the selection logic. Emitted by the session at the triggering
+ *  moment and DRAINED exactly once by a single UI owner (a module-level watcher in
+ *  useWalletConnection) — panels must never infer these from status changes (plan D-25/D-29). */
+export interface SelectionNotice {
+	/** Monotonic per-session key — lets the consumer prove exactly-once handling. */
+	readonly key: number
+	readonly kind: "auto-remembered" | "grant-truncated"
+	readonly alias?: string
+	readonly address?: string
+	readonly hiddenCount?: number
 }
 
 /**
@@ -44,6 +66,22 @@ const REMEMBERED_AMBIGUITY_WINDOW_MS = 1_000
  *  multi-megabyte claimed name can't defeat the picker's render capping. */
 const PREFERRED_NAME_MAX = 48
 
+/** Wallet-claimed aliases are capped at parse time, same rationale as PREFERRED_NAME_MAX. */
+const ALIAS_MAX = 48
+/** Granted-list bound (DoS resistance). Truncation is DISCLOSED via a SelectionNotice, never
+ *  silent — silently hiding account 17 would recreate the hidden-account bug this feature fixes
+ *  (plan D-9/D-24). */
+const MAX_GRANTED_ACCOUNTS = 16
+/** Per-wallet selected-account memory: most-recent-first, so A→B→A keeps both (plan D-2). */
+const MAX_REMEMBERED_WALLETS = 8
+/** Bound on stored id/address strings — storage is untrusted input (plan D-23). */
+const STORED_STRING_MAX = 256
+/** Control chars + bidi override/isolate marks: a wallet-claimed alias must not reorder or hide
+ *  adjacent UI text. The address is always rendered beside the alias as the unambiguous
+ *  identity (plan D-10). */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the point
+const UNSAFE_ALIAS_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+
 /** Code-point-safe bounded truncation: a UTF-16 `slice` can split an emoji
  *  surrogate pair in a claimed wallet name. Shared by the picker's display
  *  capping and the persisted-name capping. */
@@ -64,6 +102,10 @@ export interface AztecWalletSessionConfig {
 	readonly buildManifest: () => Promise<any>
 	/** Register the feature's contracts with the wallet's PXE after capabilities are granted. */
 	readonly registerContracts: (wallet: Wallet) => Promise<void>
+	/** Mutation-boundary guard for account switching: while it returns true, `selectAccount()`
+	 *  rejects. Injected (rather than imported) so the factory stays UI-agnostic and the gate is
+	 *  unit-testable — the faucet wires it to the ops-in-flight registry (plan D-18). */
+	readonly isSwitchBlocked?: () => boolean
 }
 
 /**
@@ -84,6 +126,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	// calls `readPreferred()`, which reads this (a TDZ here silently nulls the
 	// initial name — the ReferenceError is swallowed by the best-effort catch).
 	const storageKey = `${config.appId}:preferred-wallet`
+	/** Per-wallet selected-account memory (MRU pairs, see readRememberedMap). */
+	const selectedStorageKey = `${config.appId}:selected-accounts`
 
 	const status = ref<ConnectStatus>("idle")
 	const verificationEmojis = ref<string | null>(null)
@@ -109,6 +153,27 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 	let pending: PendingConnection | null = null
 	let cancelDiscovery: (() => void) | null = null
 	let unsubscribeDisconnect: (() => void) | null = null
+
+	// Single-use pause token for the choose-account step. Like the verification step's `pending`,
+	// it is CLAIMED synchronously (nulled before any await) by whichever continuation runs first —
+	// double-confirm, confirm-vs-cancel, and racing panels all collapse to one winner. Captures
+	// the flow's own handles so stale cleanup never dereferences the mutable session fields
+	// (plan D-3).
+	let pendingAccountChoice: { flowEpoch: number; wallet: Wallet; provider: WalletProvider | null } | null = null
+
+	// One-shot UI notices (auto-remembered selection, grant truncation). Drained by the single
+	// module-level owner in useWalletConnection — see SelectionNotice (plan D-25/D-29).
+	const selectionNotices = ref<SelectionNotice[]>([])
+	let nextNoticeKey = 0
+	function pushSelectionNotice(notice: Omit<SelectionNotice, "key">): void {
+		selectionNotices.value = [...selectionNotices.value, { ...notice, key: nextNoticeKey++ }]
+	}
+	/** Drain pending notices exactly once (returns them and clears the queue). */
+	function consumeSelectionNotices(): SelectionNotice[] {
+		const drained = selectionNotices.value
+		if (drained.length > 0) selectionNotices.value = []
+		return drained
+	}
 
 	// Provider objects carry methods + a MessagePort — they must never enter reactive state.
 	const providersByKey = new Map<number, WalletProvider>()
@@ -159,6 +224,54 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			// best-effort
 		}
 		preferredWalletName.value = null
+	}
+
+	/** Per-wallet selected-account memory: `[walletId, address][]`, most-recent-first. Storage is
+	 *  untrusted input — the read path re-validates shape, bounds every string, dedupes ids, and
+	 *  re-caps the list; content is only ever used to PRE-SELECT among the live grant, never to
+	 *  select an outside address (plan D-2/D-23; validation against the grant happens at lookup
+	 *  sites). */
+	function readRememberedMap(): Array<[string, string]> {
+		try {
+			const raw = localStorage.getItem(selectedStorageKey)
+			if (!raw) return []
+			const parsed: unknown = JSON.parse(raw)
+			if (!Array.isArray(parsed)) return []
+			const out: Array<[string, string]> = []
+			for (const entry of parsed) {
+				if (!Array.isArray(entry) || entry.length !== 2) continue
+				const [id, address] = entry as [unknown, unknown]
+				if (typeof id !== "string" || typeof address !== "string") continue
+				if (id.length === 0 || id.length > STORED_STRING_MAX || address.length === 0 || address.length > STORED_STRING_MAX) continue
+				if (out.some(([seenId]) => seenId === id)) continue
+				out.push([id, address])
+				if (out.length >= MAX_REMEMBERED_WALLETS) break
+			}
+			return out
+		} catch {
+			return []
+		}
+	}
+	function readRememberedAccount(walletId: string): string | null {
+		return readRememberedMap().find(([id]) => id === walletId)?.[1] ?? null
+	}
+	function writeRememberedAccount(walletId: string, address: string): void {
+		// Atomic rebuild: filter-out + unshift + cap, then ONE setItem (plan D-23).
+		const head: [string, string] = [walletId, address]
+		const next = [head, ...readRememberedMap().filter(([id]) => id !== walletId)].slice(0, MAX_REMEMBERED_WALLETS)
+		try {
+			localStorage.setItem(selectedStorageKey, JSON.stringify(next))
+		} catch {
+			// Best-effort: a throwing storage must never affect an established session.
+		}
+	}
+
+	/** Set the active account and remember it for this wallet. Selection is persisted AT selection
+	 *  time — before setup — so a setup failure + retry re-applies it without re-prompting
+	 *  (plan D-20). */
+	function applySelection(address: string, flowProvider: WalletProvider | null): void {
+		selectedAccount.value = address
+		if (flowProvider) writeRememberedAccount(flowProvider.id, address)
 	}
 
 	function isStale(flowEpoch: number): boolean {
@@ -519,14 +632,51 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 				}
 				return
 			}
-			const granted = extractGrantedAccounts(result)
+			const { accounts: granted, hiddenCount } = parseGrantedAccounts(result)
 			accounts.value = granted
-			selectedAccount.value = granted[0]?.address ?? null
 
 			if (granted.length === 0) {
 				throw new Error("No accounts granted by wallet")
 			}
+			if (hiddenCount > 0) {
+				pushSelectionNotice({ kind: "grant-truncated", hiddenCount })
+			}
 
+			if (granted.length === 1) {
+				applySelection(granted[0].address, flowProvider)
+			} else {
+				const remembered = flowProvider ? readRememberedAccount(flowProvider.id) : null
+				const match = remembered ? granted.find((a) => a.address === remembered) : undefined
+				if (match) {
+					// Remembered choice still in the grant: auto-apply, but SAY so — a visible
+					// signal that a stored value picked the account (plan D-11).
+					applySelection(match.address, flowProvider)
+					pushSelectionNotice({ kind: "auto-remembered", alias: match.alias, address: match.address })
+				} else {
+					// >1 accounts, nothing (valid) remembered: pause for the user. The flow stays
+					// OWNED (activeFlowEpoch keeps its value), so retryCapabilities stays a no-op
+					// while the modal is up; confirm/cancel resume via the captured token.
+					pendingAccountChoice = { flowEpoch, wallet: flowWallet, provider: flowProvider }
+					status.value = "choosing-account"
+					return
+				}
+			}
+		} catch (err) {
+			if (isStale(flowEpoch)) return
+			console.error(`[${config.appId}] requestCapabilities failed`, err)
+			if (connectingViaRemembered) clearPreferred()
+			error.value = normalizeError(err)
+			status.value = "error"
+			releaseFlowIfOwner(flowEpoch)
+			return
+		}
+		await finishSetup(flowEpoch, flowWallet, flowProvider)
+	}
+
+	/** Shared post-selection tail for BOTH the auto path and the choose-account confirm path.
+	 *  Owns its errors identically for both callers (plan D-20) — it never throws. */
+	async function finishSetup(flowEpoch: number, flowWallet: Wallet, flowProvider: WalletProvider | null): Promise<void> {
+		try {
 			// The user already clicked Approve - we're now doing post-approval setup (registering
 			// contracts with the wallet's PXE). This can take 2-4s, so a dedicated state keeps the
 			// UI from saying "Awaiting permissions".
@@ -551,12 +701,54 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 			releaseFlowIfOwner(flowEpoch)
 		} catch (err) {
 			if (isStale(flowEpoch)) return
-			console.error(`[${config.appId}] requestCapabilities failed`, err)
+			console.error(`[${config.appId}] finishSetup failed`, err)
 			if (connectingViaRemembered) clearPreferred()
 			error.value = normalizeError(err)
 			status.value = "error"
 			releaseFlowIfOwner(flowEpoch)
 		}
+	}
+
+	/** The choose-account modal's Confirm. Claims the pause token SYNCHRONOUSLY (double-confirm
+	 *  and racing panels are no-ops), validates the address against the LIVE grant, then resumes
+	 *  the connect flow. The selection is persisted BEFORE setup so a setup failure + retry
+	 *  auto-applies it instead of re-prompting (plan D-20). */
+	async function confirmAccountChoice(address: string): Promise<void> {
+		if (status.value !== "choosing-account") return
+		const token = pendingAccountChoice
+		if (!token || isStale(token.flowEpoch)) return
+		if (!accounts.value.some((a) => a.address === address)) return
+		pendingAccountChoice = null // synchronous claim — closes every double-entry race
+		applySelection(address, token.provider)
+		await finishSetup(token.flowEpoch, token.wallet, token.provider)
+	}
+
+	/** Dismiss the choose-account step: abandoning the choice cancels the CONNECT (same semantics
+	 *  as cancelVerification — a half-connected session must not linger). SDK teardown happens
+	 *  AFTER the synchronous wipe, on the token's captured handle. */
+	async function cancelAccountChoice(): Promise<void> {
+		if (status.value !== "choosing-account") return
+		const token = pendingAccountChoice
+		pendingAccountChoice = null
+		wipeToIdle()
+		if (token?.provider) {
+			try {
+				await token.provider.disconnect()
+			} catch {
+				// best-effort
+			}
+		}
+	}
+
+	/** Post-connect account switching. Gated at the MUTATION BOUNDARY (plan D-18): rejects unless
+	 *  connected, the address is in the live grant, and no tracked operation is in flight. Returns
+	 *  whether the switch applied — the UI toasts on true. */
+	function selectAccount(address: string): boolean {
+		if (status.value !== "connected") return false
+		if (config.isSwitchBlocked?.()) return false
+		if (!accounts.value.some((a) => a.address === address)) return false
+		applySelection(address, provider)
+		return true
 	}
 
 	function cleanupSession(): void {
@@ -581,6 +773,8 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		accounts.value = []
 		selectedAccount.value = null
 		verificationEmojis.value = null
+		pendingAccountChoice = null
+		selectionNotices.value = []
 	}
 
 	/** Reset all state (test helper + hard reset). Live SDK handles get the
@@ -610,6 +804,7 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		verificationEmojis,
 		accounts,
 		selectedAccount,
+		selectionNotices,
 		error,
 		wallet,
 		discoveredWallets,
@@ -625,6 +820,10 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		switchWallet,
 		confirmVerification,
 		cancelVerification,
+		confirmAccountChoice,
+		cancelAccountChoice,
+		selectAccount,
+		consumeSelectionNotices,
 		retryCapabilities,
 		disconnect,
 		reset,
@@ -633,19 +832,57 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 
 interface GrantedAccountsCap {
 	type: "accounts"
-	accounts?: Array<{ alias?: string; item?: { toString(): string } | string }>
+	accounts?: Array<{ alias?: unknown; item?: { toString(): string } | string } | null>
 }
 
-export function extractGrantedAccounts(result: unknown): GrantedAccount[] {
-	if (!result || typeof result !== "object") return []
+export interface ParsedGrantedAccounts {
+	readonly accounts: GrantedAccount[]
+	/** Valid, deduped accounts dropped by the MAX_GRANTED_ACCOUNTS cap — disclosed to the user. */
+	readonly hiddenCount: number
+}
+
+/**
+ * Hardened grant parsing (plan D-9/D-10/D-21): the capability result is WALLET-CONTROLLED input.
+ * Per entry, inside try/catch: the address must round-trip `AztecAddress.fromStringUnsafe` —
+ * syntactic + canonical-form validation ONLY, NOT curve validity (authorization is enforced
+ * wallet-side per RPC); a throwing `toString` or malformed entry is skipped, never a crash.
+ * Aliases are sanitized (control/bidi strip) and capped; addresses deduped (first wins); the
+ * list is bounded with DISCLOSED truncation.
+ */
+export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
+	const none: ParsedGrantedAccounts = { accounts: [], hiddenCount: 0 }
+	if (!result || typeof result !== "object") return none
 	const granted = (result as { granted?: unknown[] }).granted
-	if (!Array.isArray(granted)) return []
+	if (!Array.isArray(granted)) return none
 	const cap = granted.find((c): c is GrantedAccountsCap => {
 		return typeof c === "object" && c !== null && (c as { type?: unknown }).type === "accounts"
 	})
-	if (!cap?.accounts) return []
-	return cap.accounts.map((a) => ({
-		address: typeof a.item === "string" ? a.item : (a.item?.toString() ?? ""),
-		alias: a.alias ?? "",
-	}))
+	if (!cap?.accounts || !Array.isArray(cap.accounts)) return none
+
+	const seen = new Set<string>()
+	const accounts: GrantedAccount[] = []
+	let hiddenCount = 0
+	for (const entry of cap.accounts) {
+		let address: string
+		try {
+			const raw = typeof entry?.item === "string" ? entry.item : (entry?.item?.toString() ?? "")
+			address = AztecAddress.fromStringUnsafe(raw).toString()
+		} catch {
+			continue
+		}
+		if (seen.has(address)) continue
+		seen.add(address)
+		if (accounts.length >= MAX_GRANTED_ACCOUNTS) {
+			hiddenCount++
+			continue
+		}
+		const rawAlias = typeof entry?.alias === "string" ? entry.alias : ""
+		accounts.push({ address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, ""), ALIAS_MAX) })
+	}
+	return { accounts, hiddenCount }
+}
+
+/** Back-compat projection of parseGrantedAccounts (existing call sites and tests). */
+export function extractGrantedAccounts(result: unknown): GrantedAccount[] {
+	return parseGrantedAccounts(result).accounts
 }
