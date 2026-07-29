@@ -216,6 +216,9 @@ export function createAztecWalletSession(config: AztecWalletSessionConfig) {
 		}
 	}
 	function writePreferred(value: PreferredWallet): void {
+		// Same write-bound as the selected-account map (D-23/codex residual): a hostile provider
+		// id must not produce oversized writes. Refusing wholesale also skips the label ref.
+		if (value.id.length === 0 || value.id.length > STORED_STRING_MAX) return
 		const capped = { id: value.id, name: truncateName(value.name, PREFERRED_NAME_MAX) }
 		try {
 			localStorage.setItem(storageKey, JSON.stringify(capped))

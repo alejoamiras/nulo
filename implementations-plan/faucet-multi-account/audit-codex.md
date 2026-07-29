@@ -121,3 +121,20 @@ No CRITICAL findings. Two HIGH blockers remain despite the green suite.
 R3 condition 2 landed fully. Condition 1 landed for the named journal continuations but not the complete invariant. Condition 3 landed in documentation, but its test is invalid. The pause-token/`finishSetup` state machine otherwise withstands disconnect, retry, stale completion, and double-entry attacks.
 
 VERDICT: reject (blocking: wrong-account journal actions and unguarded standalone Fuel Juice wallet-operation spans)
+## Post-impl round 2 (resumed session, xhigh) — VERDICT: approve
+
+No remaining CRITICAL/HIGH findings.
+
+- **Verified:** All deposit claims now reject account mismatches before wallet work. Keeping records visible while enforcing ownership is coherent and explicitly ledgered.
+- **Verified:** Both standalone Fuel Juice paths acquire independent `withOperation` spans; the detached `.catch` behavior remains intact.
+- **Verified:** Selected-account persistence rejects oversized identifiers. I independently confirmed `0x…03` round-trips syntactically and `await isValid()` returns `false`.
+- **Verified:** Modal focus/trap and disabled-row Arrow navigation fixes are correct. Withdraw consume is legitimately L1-only.
+
+Noted residuals:
+
+- **MED:** Both account guards allow execution when the active account is `null`; they only reject a truthy mismatch. Normal UI paths make this unlikely, but fail-closed enforcement should require `active === recipient`.
+- **MED:** The new standalone guard and two operation-span placements lack direct regression tests.
+- **LOW:** The preferred-wallet storage path still accepts an unbounded provider ID, although the selected-account map is now bounded.
+- **LOW:** D-30’s older ledger wording still claims a normal RPC-error-path test; the suite only tests parser acceptance. The curve-invalid fixture itself is now valid evidence.
+
+VERDICT: approve

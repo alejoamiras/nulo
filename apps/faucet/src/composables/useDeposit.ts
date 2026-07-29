@@ -223,16 +223,17 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 	if (!aztec) throw new Error("Connect your Aztec wallet first.")
 	const rec = useBridgeJournal().records.value.find((r) => r.id === id) as DepositJournalRecord | undefined
 	const fuel = rec?.fuel
-	if (!fuel?.received || !fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
+	if (!rec || !fuel?.received || !fuel.leafIndex) throw new Error("This bridge has no fuel to claim.")
 	// Post-impl audit HIGH-1/HIGH-2: the claim acts for rec.recipient — refuse under a different
-	// active account, and run the wallet send inside a tracked operation span.
+	// (or unknown — fail-closed) active account, and run the wallet send inside a tracked
+	// operation span.
 	const active = bridgeWallet.selectedAccount.value
-	if (active && rec?.recipient && active.toLowerCase() !== rec.recipient.toLowerCase()) {
+	if (!active || active.toLowerCase() !== rec.recipient.toLowerCase()) {
 		throw new Error(
 			`This gas claim belongs to ${rec.recipient.slice(0, 6)}…${rec.recipient.slice(-4)}. Switch to that account to claim.`,
 		)
 	}
-	await withOperation(() => sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec?.recipient ?? ""), fuel, id))
+	await withOperation(() => sendStandaloneFjClaim(aztec, AztecAddress.fromStringUnsafe(rec.recipient), fuel, id))
 }
 
 /** Read the account's PUBLIC Fee Juice balance — the cold-account detector for no-fuel claims. Uses the

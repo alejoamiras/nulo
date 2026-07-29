@@ -550,7 +550,9 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		// the recipient. Auto-resume respects the same rule: a mismatched record waits with a
 		// mismatch card until its account is active again.
 		const aztec = deps.connectedAztec?.() ?? null
-		if (aztec && rec.recipient && aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
+		// Fail-CLOSED (codex residual): no known active account is treated like a mismatch —
+		// never run a claim on the hope that the right account happens to be connected.
+		if (!aztec || (rec.recipient && aztec.toLowerCase() !== rec.recipient.toLowerCase())) {
 			setRuntime(id, {
 				attention: "mismatch",
 				note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,
