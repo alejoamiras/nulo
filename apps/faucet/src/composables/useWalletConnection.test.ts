@@ -101,6 +101,8 @@ vi.mock("@/contracts/private-fpc", () => ({
 
 import { extractGrantedAccounts, useWalletConnection, __resetWalletConnectionForTests } from "./useWalletConnection"
 import { __resetOpsInFlightForTests, withOperation } from "./useOpsInFlight"
+import { __resetToastsForTests, useToast } from "./useToast"
+import { nextTick } from "vue"
 
 // Full-length canonical addresses: the hardened parser round-trips AztecAddress.fromStringUnsafe,
 // which requires 32-byte hex (short fakes are rejected as malformed grant entries).
@@ -377,5 +379,36 @@ describe("switch gating during operations (D-18 wiring: session gate reads useOp
 		await span
 		expect(c.selectAccount(ADDR_B)).toBe(true)
 		expect(c.selectedAccount.value).toBe(ADDR_B)
+	})
+})
+
+describe("selection-notice toasts (D-25/D-29: single module-level owner, exactly once)", () => {
+	beforeEach(() => {
+		localStorage.clear()
+		__resetWalletConnectionForTests()
+		__resetToastsForTests()
+	})
+
+	it("auto-remembered and truncation notices each toast exactly once and drain the queue", async () => {
+		const c = useWalletConnection()
+		const { toasts } = useToast()
+		c.accounts.value = [
+			{ address: ADDR_MAIN, alias: "Main" },
+			{ address: ADDR_B, alias: "Saver" },
+		]
+		c.selectionNotices.value = [
+			{ key: 0, kind: "auto-remembered", alias: "Main", address: ADDR_MAIN },
+			{ key: 1, kind: "grant-truncated", hiddenCount: 4 },
+		]
+		await nextTick()
+		expect(toasts.value.map((t) => t.text)).toEqual([
+			"Using account Main",
+			"Your wallet granted more accounts than the app can show — using the first 2 (4 hidden).",
+		])
+		expect(c.selectionNotices.value).toEqual([]) // drained by the single owner
+
+		// The drain itself must not re-fire (empty-list retrigger is a no-op).
+		await nextTick()
+		expect(toasts.value).toHaveLength(2)
 	})
 })

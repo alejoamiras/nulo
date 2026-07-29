@@ -41,7 +41,7 @@ export const TESTIDS = {
 	accountMenu: "fa-account-menu",
 	accountMenuRow: "fa-account-menu-row",
 	accountMenuCopy: "fa-account-menu-copy",
-	accountMenuDisconnect: "fa-account-menu-disconnect",
+	// (menu Disconnect keeps the pre-switcher panel ids: fa-btn-disconnect / fa-bridge-l2-disconnect)
 	accountMenuTruncation: "fa-account-menu-truncation",
 
 	// Verification modal - 3×3 emoji grid + match/cancel

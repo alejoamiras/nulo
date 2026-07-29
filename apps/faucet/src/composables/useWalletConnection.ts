@@ -13,9 +13,11 @@ import {
 import { DRIPPER, NULO, OLUN, rebuildDripperInstance, rebuildNuloInstance, rebuildOlunInstance } from "@/contracts/deployments"
 import { getPrivateFpc } from "@/contracts/private-fpc"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
+import { watch } from "vue"
 import { buildCombinedManifest } from "@/lib/capabilities"
 import { createAztecWalletSession } from "./createAztecWalletSession"
 import { opsInFlight } from "./useOpsInFlight"
+import { useToast } from "./useToast"
 
 const APP_ID = "nulo-faucet"
 
@@ -71,6 +73,31 @@ const session = createAztecWalletSession({
 	// operation (drip / deposit / withdraw / fuel / add-token / journal continuation) is in
 	// flight — the UI's disabled rows are UX on top, not the enforcement (plan D-18).
 	isSwitchBlocked: opsInFlight,
+})
+
+// Single owner of selection notices → toasts (plan D-25/D-29). The session pushes explicit
+// one-shot notices (auto-remembered selection, grant truncation); this MODULE — one instance,
+// unlike the three always-mounted panels — drains them exactly once. Panels never infer these
+// from status changes.
+function shortAddr(address: string): string {
+	return `${address.slice(0, 6)}…${address.slice(-4)}`
+}
+watch(session.selectionNotices, (list) => {
+	if (list.length === 0) return
+	// useToast resolved lazily INSIDE the callback: calling it at module init would run before
+	// test files' mock fixtures are initialized (hoisted vi.mock factories + TDZ).
+	const { push } = useToast()
+	for (const notice of session.consumeSelectionNotices()) {
+		if (notice.kind === "auto-remembered") {
+			const label = notice.alias || (notice.address ? shortAddr(notice.address) : "")
+			push({ kind: "info", text: `Using account ${label}` })
+		} else if (notice.kind === "grant-truncated") {
+			push({
+				kind: "info",
+				text: `Your wallet granted more accounts than the app can show — using the first ${session.accounts.value.length} (${notice.hiddenCount} hidden).`,
+			})
+		}
+	}
 })
 
 export function useWalletConnection() {

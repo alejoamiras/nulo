@@ -3,7 +3,8 @@ import { computed } from "vue"
 import { truncateName } from "@/composables/createAztecWalletSession"
 import { useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
-import { AddressDisplay, Button } from "@nulo/design"
+import { Button } from "@nulo/design"
+import AccountSwitcher from "./AccountSwitcher.vue"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -69,19 +70,11 @@ function openInstall() {
 
 <template>
 	<section class="panel" :data-testid="TESTIDS.status" :data-status="status">
-		<div v-if="status === 'connected' && selectedAccount" class="chip">
-			<span class="label">Aztec</span>
-			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.account" />
-			<button
-				class="disconnect"
-				type="button"
-				aria-label="Disconnect"
-				:data-testid="TESTIDS.btnDisconnect"
-				@click="disconnect"
-			>
-				✕
-			</button>
-		</div>
+		<AccountSwitcher
+			v-if="status === 'connected' && selectedAccount"
+			:address-testid="TESTIDS.account"
+			:disconnect-testid="TESTIDS.btnDisconnect"
+		/>
 
 		<div v-else-if="showSettingUp" class="morph" :data-testid="TESTIDS.settingUp">
 			<Button loading disabled>Setting up session…</Button>
@@ -157,34 +150,6 @@ function openInstall() {
 	display: inline-flex;
 	flex-direction: column;
 	gap: 12px;
-}
-
-.chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
-	padding: 8px 12px;
-	border: 1px solid var(--nulo-outline);
-}
-
-.chip .label {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-}
-
-.disconnect {
-	color: var(--txt-secondary);
-	font: 600 12px/1 var(--font-mono);
-	cursor: pointer;
-	background: transparent;
-	border: none;
-	padding: 2px 4px;
-}
-
-.disconnect:hover {
-	color: var(--red);
 }
 
 .no-wallet {

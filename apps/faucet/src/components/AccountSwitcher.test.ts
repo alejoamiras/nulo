@@ -1,0 +1,171 @@
+import { mount } from "@vue/test-utils"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { TESTIDS } from "@/lib/testids"
+
+// Same SDK-boundary mocks as WalletPanel.test.ts: the switcher reads the REAL session
+// singleton, whose refs the tests set directly.
+vi.mock("@aztec/wallet-sdk/manager", () => ({
+	WalletManager: { configure: () => ({ getAvailableWallets: () => ({}) }) },
+}))
+vi.mock("@aztec/aztec.js/node", () => ({ createAztecNodeClient: () => ({ getContract: async () => null }) }))
+vi.mock("@/lib/emoji", () => ({ hashToEmoji: () => "🟢🔵🟡🟣🔴⚪⚫🟠🟤", toGrid: (s: string) => Array.from(s).slice(0, 9) }))
+vi.mock("@/contracts/deployments", () => ({
+	DRIPPER: { toString: () => "0x1" },
+	NULO: { toString: () => "0x2" },
+	OLUN: { toString: () => "0x3" },
+	rebuildDripperInstance: vi.fn(async () => ({ address: { toString: () => "0x1" } })),
+	rebuildNuloInstance: vi.fn(async () => ({ address: { toString: () => "0x2" } })),
+	rebuildOlunInstance: vi.fn(async () => ({ address: { toString: () => "0x3" } })),
+}))
+vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js", () => ({ DripperContractArtifact: { name: "Dripper" } }))
+vi.mock("@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js", () => ({ TokenContractArtifact: { name: "Token" } }))
+
+import { __resetOpsInFlightForTests, withOperation } from "@/composables/useOpsInFlight"
+import { __resetToastsForTests, useToast } from "@/composables/useToast"
+import { __resetWalletConnectionForTests, useWalletConnection } from "@/composables/useWalletConnection"
+import AccountSwitcher from "./AccountSwitcher.vue"
+
+const ADDR_A = `0x${"aa".padStart(64, "0")}`
+const ADDR_B = `0x${"bb".padStart(64, "0")}`
+
+const sel = (t: string) => `[data-testid="${t}"]`
+
+function connectSession(
+	accounts = [
+		{ address: ADDR_A, alias: "Main" },
+		{ address: ADDR_B, alias: "Savings" },
+	],
+) {
+	const c = useWalletConnection()
+	c.status.value = "connected"
+	c.accounts.value = accounts
+	c.selectedAccount.value = accounts[0].address
+	return c
+}
+
+function mountSwitcher() {
+	return mount(AccountSwitcher, {
+		props: { addressTestid: TESTIDS.account, disconnectTestid: TESTIDS.btnDisconnect },
+	})
+}
+
+describe("AccountSwitcher", () => {
+	beforeEach(() => {
+		localStorage.clear()
+		__resetWalletConnectionForTests()
+		__resetOpsInFlightForTests()
+		__resetToastsForTests()
+	})
+	afterEach(() => {
+		__resetWalletConnectionForTests()
+		__resetToastsForTests()
+		vi.clearAllMocks()
+	})
+
+	it("chip shows alias + short address; menu is closed until clicked", () => {
+		connectSession()
+		const w = mountSwitcher()
+		const chip = w.find(sel(TESTIDS.accountChip))
+		expect(chip.text()).toContain("Aztec")
+		expect(chip.text()).toContain("Main")
+		expect(chip.text()).toContain(`${ADDR_A.slice(0, 6)}…${ADDR_A.slice(-4)}`)
+		expect(chip.attributes("aria-expanded")).toBe("false")
+		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(false)
+	})
+
+	it("opens the menu with one row per account, active row checked", async () => {
+		connectSession()
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		const menu = w.find(sel(TESTIDS.accountMenu))
+		expect(menu.exists()).toBe(true)
+		expect(menu.text()).toContain("Granted accounts · 2")
+		const rows = w.findAll(sel(TESTIDS.accountMenuRow))
+		expect(rows).toHaveLength(2)
+		expect(rows[0].attributes("aria-checked")).toBe("true")
+		expect(rows[1].attributes("aria-checked")).toBe("false")
+	})
+
+	it("clicking another account switches, toasts once, closes the menu", async () => {
+		const c = connectSession()
+		const { toasts } = useToast()
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		await w.findAll(sel(TESTIDS.accountMenuRow))[1].trigger("click")
+
+		expect(c.selectedAccount.value).toBe(ADDR_B)
+		expect(toasts.value).toHaveLength(1)
+		expect(toasts.value[0].text).toBe("Active account: Savings")
+		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(false)
+	})
+
+	it("clicking the ACTIVE account just closes — no switch, no toast", async () => {
+		const c = connectSession()
+		const { toasts } = useToast()
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		await w.findAll(sel(TESTIDS.accountMenuRow))[0].trigger("click")
+		expect(c.selectedAccount.value).toBe(ADDR_A)
+		expect(toasts.value).toHaveLength(0)
+		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(false)
+	})
+
+	it("while an operation is in flight: rows disabled, hint shown, click does nothing", async () => {
+		const c = connectSession()
+		const w = mountSwitcher()
+		let release: () => void = () => {}
+		const span = withOperation(() => new Promise<void>((res) => (release = res)))
+
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		expect(w.find(sel(TESTIDS.accountMenu)).text()).toContain("Finish the current operation to switch.")
+		const other = w.findAll(sel(TESTIDS.accountMenuRow))[1]
+		expect(other.attributes("disabled")).toBeDefined()
+		await other.trigger("click")
+		expect(c.selectedAccount.value).toBe(ADDR_A)
+
+		release()
+		await span
+	})
+
+	it("single-account session still renders the menu — Disconnect must not disappear", async () => {
+		const c = connectSession([{ address: ADDR_A, alias: "Only" }])
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		expect(w.findAll(sel(TESTIDS.accountMenuRow))).toHaveLength(1)
+		const disconnectBtn = w.find(sel(TESTIDS.btnDisconnect))
+		expect(disconnectBtn.exists()).toBe(true)
+		await disconnectBtn.trigger("click")
+		expect(c.status.value).toBe("idle")
+	})
+
+	it("Escape closes the menu without switching", async () => {
+		const c = connectSession()
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		await w.find(sel(TESTIDS.accountMenu)).trigger("keydown", { key: "Escape" })
+		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(false)
+		expect(c.selectedAccount.value).toBe(ADDR_A)
+	})
+
+	it("copy button copies the FULL address without toggling selection", async () => {
+		const c = connectSession()
+		const writeText = vi.fn(async () => {})
+		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		await w.findAll(sel(TESTIDS.accountMenuCopy))[1].trigger("click")
+		expect(writeText).toHaveBeenCalledWith(ADDR_B)
+		expect(c.selectedAccount.value).toBe(ADDR_A) // copy is a sibling control, not selection
+		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(true) // menu stays open
+	})
+
+	it("discloses grant truncation in the menu", async () => {
+		const c = connectSession()
+		c.hiddenAccountsCount.value = 3
+		const w = mountSwitcher()
+		await w.find(sel(TESTIDS.accountChip)).trigger("click")
+		const note = w.find(sel(TESTIDS.accountMenuTruncation))
+		expect(note.exists()).toBe(true)
+		expect(note.text()).toContain("Showing 2 of 5")
+	})
+})

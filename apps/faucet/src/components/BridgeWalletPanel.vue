@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { AddressDisplay, Button } from "@nulo/design"
+import { Button } from "@nulo/design"
 import { computed } from "vue"
 import { truncateName } from "@/composables/createAztecWalletSession"
 import { useBridgeWallet } from "@/composables/useBridgeWallet"
 import { TESTIDS } from "@/lib/testids"
+import AccountSwitcher from "./AccountSwitcher.vue"
 import VerificationModal from "./VerificationModal.vue"
 
 const {
@@ -54,19 +55,11 @@ async function onClick() {
 
 <template>
 	<section class="l2-panel" :data-testid="TESTIDS.bridgeL2Status" :data-status="status">
-		<div v-if="status === 'connected' && selectedAccount" class="chip">
-			<span class="label">Aztec</span>
-			<AddressDisplay :address="selectedAccount" :data-testid="TESTIDS.bridgeL2Account" />
-			<button
-				class="disconnect"
-				type="button"
-				aria-label="Disconnect"
-				:data-testid="TESTIDS.bridgeL2Disconnect"
-				@click="disconnect"
-			>
-				✕
-			</button>
-		</div>
+		<AccountSwitcher
+			v-if="status === 'connected' && selectedAccount"
+			:address-testid="TESTIDS.bridgeL2Account"
+			:disconnect-testid="TESTIDS.bridgeL2Disconnect"
+		/>
 
 		<div v-else-if="status === 'setting-up'" class="morph">
 			<Button loading disabled>Setting up session…</Button>
@@ -125,46 +118,6 @@ async function onClick() {
 	gap: 12px;
 }
 
-.chip {
-	display: inline-flex;
-	align-items: center;
-	gap: 10px;
-	padding: 8px 12px;
-	border: 1px solid var(--nulo-outline);
-}
-
-.chip .label {
-	color: var(--txt-secondary);
-	font: 500 11px/1 var(--font-mono);
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-}
-
-.split {
-	display: inline-flex;
-}
-
-.split > :first-child {
-	border-right: 1px solid color-mix(in srgb, var(--txt-inverse) 25%, transparent);
-}
-
-.split .caret {
-	min-width: 44px;
-	padding: 0 12px;
-}
-
-.disconnect {
-	color: var(--txt-secondary);
-	font: 600 12px/1 var(--font-mono);
-	cursor: pointer;
-	background: transparent;
-	border: none;
-	padding: 2px 4px;
-}
-
-.disconnect:hover {
-	color: var(--red);
-}
 
 .morph {
 	display: inline-flex;
