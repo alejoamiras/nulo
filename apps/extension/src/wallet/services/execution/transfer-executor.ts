@@ -236,6 +236,7 @@ export class TransferExecutor {
 						getEstimatedFee(txRequest),
 						getGasDetails(txRequest),
 						fence,
+						network.id,
 					),
 			})
 			transferTask.complete()
@@ -273,10 +274,10 @@ export class TransferExecutor {
 				const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
 				if (primary) {
 					// Fingerprint the EXACT fee the txRequest was built with —
-					// not a fresh `getCurrentMinFees()` after the fact (codex
-					// audit SHOULD-FIX #3). Both FJ and FPC strategies finalize
-					// `maxFeesPerGas = currentMin * multiplier`, so on consume
-					// we compare against `liveMin * multiplier`.
+					// not a fresh fetch after the fact (codex audit
+					// SHOULD-FIX #3). Both FJ and FPC strategies finalize
+					// `maxFeesPerGas = predictedWorstMinFees * multiplier`, so
+					// on consume we compare against the same live product.
 					const builtFees = txRequest.txContext.gasSettings.maxFeesPerGas
 					const baseFeeFingerprint = fingerprintBaseFee({
 						feePerDaGas: builtFees.feePerDaGas,

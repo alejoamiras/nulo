@@ -3,9 +3,16 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { assetKindOf, buildFuelRoute, isSealTrusted, minOutputForSlippage, quoteFuelPath } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
-import { sepolia } from "viem/chains"
+import { L1_CHAIN_LABEL, NETWORK } from "@/lib/network"
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue"
-import { BRIDGE_FUEL, BRIDGE_TOKEN, BRIDGE_TOKEN_DECIMALS, BRIDGE_TOKEN_SYMBOL, L1_USDC } from "@/contracts/bridge-deployments"
+import {
+	BRIDGE_FUEL,
+	BRIDGE_TOKEN,
+	BRIDGE_TOKEN_DECIMALS,
+	BRIDGE_TOKEN_MINTABLE,
+	BRIDGE_TOKEN_SYMBOL,
+	L1_USDC,
+} from "@/contracts/bridge-deployments"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
@@ -46,7 +53,7 @@ const direction = ref<"l1-to-l2" | "l2-to-l1">("l1-to-l2")
 /** Fuel (arrive-with-gas): exact-input AZLO slice, quoted to FJ live. Renders only when the
  *  deployment configures fuel and the direction is L1→L2. */
 const fuelOn = ref(false)
-const fuelSlice = ref("0.25")
+const fuelSlice = ref("1")
 const fuelQuote = ref<{ state: "idle" | "loading" | "ok" | "error"; fj?: bigint; min?: bigint; message?: string }>({
 	state: "idle",
 })
@@ -113,7 +120,7 @@ const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (fromBalance.value !== null && amountUnits.value > fromBalance.value) {
 		return fromChain.value === "ethereum"
-			? `Amount exceeds your Sepolia ${BRIDGE_TOKEN_SYMBOL} balance.`
+			? `Amount exceeds your ${NETWORK.viemChain.name} ${BRIDGE_TOKEN_SYMBOL} balance.`
 			: `Amount exceeds your Aztec ${isPrivate.value ? "private" : "public"} balance.`
 	}
 	return null
@@ -123,14 +130,17 @@ const amountError = settledAmount.shown
 
 const fuelAvailable = computed(() => BRIDGE_FUEL !== undefined && direction.value === "l1-to-l2")
 const fuelSliceUnits = computed(() => parseAmount(fuelSlice.value || "0", BRIDGE_TOKEN_DECIMALS))
-/** Oversize fuel slices crater the (deliberately small) pools - the fork rehearsal measured a
- *  2-AZLO fill moving prices ~25%. Cap at 1 AZLO ≈ ~2,000 FJ. */
-const MAX_FUEL_SLICE = 10n ** 18n
+/** Oversize fuel slices move the pool price against the user. At the deepened testnet seeding a
+ *  25-token fill measures ~1.5% impact — comfortably inside the 3% slippage guard; bigger fills
+ *  approach the guard and start reverting on minOut. Decimals-derived, never a hardcoded 10^18
+ *  (a 6-dec token would otherwise allow 10^12 whole tokens). */
+const MAX_FUEL_SLICE = 25n * 10n ** BigInt(BRIDGE_TOKEN_DECIMALS)
 const fuelError = computed(() => {
 	if (!fuelOn.value || !fuelAvailable.value) return null
 	if (fuelSliceUnits.value === 0n) return "Enter a fuel slice."
 	if (fuelSliceUnits.value >= amountUnits.value) return "The fuel slice must be smaller than the amount."
-	if (fuelSliceUnits.value > MAX_FUEL_SLICE) return "Max fuel is 1 AZLO - bigger slices just move the pool price against you."
+	if (fuelSliceUnits.value > MAX_FUEL_SLICE)
+		return `Max fuel is 25 ${BRIDGE_TOKEN_SYMBOL} - bigger slices just move the pool price against you.`
 	if (fuelQuote.value.state === "error") return fuelQuote.value.message ?? "No fuel route available right now."
 	return null
 })
@@ -145,7 +155,7 @@ async function refreshFuelQuote() {
 			token: L1_USDC,
 			weth: BRIDGE_FUEL.weth,
 			feeJuice: BRIDGE_FUEL.feeJuice,
-			tokenWeth: BRIDGE_FUEL.pools.azloWeth,
+			tokenWeth: BRIDGE_FUEL.pools.tokenWeth,
 			ethFj: BRIDGE_FUEL.pools.ethFj,
 		})
 		const fj = await quoteFuelPath(l1.publicClient as never, BRIDGE_FUEL.quoter, route, fuelSliceUnits.value)
@@ -174,7 +184,8 @@ watch([fuelOn, fuelSlice, direction], () => {
 })
 const flowError = computed(() => depositFlow.error.value ?? withdrawFlow.error.value)
 
-const showMintHint = computed(() => fromChain.value === "ethereum" && usdc.balance.value === 0n)
+// Gated on mintability: the mainnet token is real bridged USDC with no mint affordance below.
+const showMintHint = computed(() => BRIDGE_TOKEN_MINTABLE && fromChain.value === "ethereum" && usdc.balance.value === 0n)
 
 const isFirstSeal = computed(() => {
 	const addr = l1.address.value
@@ -182,7 +193,7 @@ const isFirstSeal = computed(() => {
 	// Recompute when the journal changes: the first private bridge marks trust mid-session, and
 	// the note must stop promising "two signatures" for the second one.
 	void journal.records.value.length
-	return !isSealTrusted(localStorage, sepolia.id, addr, providerFingerprint())
+	return !isSealTrusted(localStorage, NETWORK.l1ChainId, addr, providerFingerprint())
 })
 
 // A failing balance reader must be VISIBLE, not an eternal "-": surface a hint + the real cause
@@ -356,7 +367,7 @@ function fmt(b: bigint | null): string {
 		<div class="panels">
 			<div class="panel" :data-testid="TESTIDS.bridgeFrom" :data-chain="fromChain">
 				<span class="role">FROM</span>
-				<span class="chip">{{ fromChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
+				<span class="chip">{{ fromChain === "ethereum" ? L1_CHAIN_LABEL : "AZTEC" }}</span>
 				<template v-if="fromChain === 'ethereum'">
 					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
@@ -383,7 +394,7 @@ function fmt(b: bigint | null): string {
 
 			<div class="panel" :data-testid="TESTIDS.bridgeTo" :data-chain="toChain">
 				<span class="role">TO</span>
-				<span class="chip">{{ toChain === "ethereum" ? "ETHEREUM · SEPOLIA" : "AZTEC" }}</span>
+				<span class="chip">{{ toChain === "ethereum" ? L1_CHAIN_LABEL : "AZTEC" }}</span>
 				<template v-if="toChain === 'ethereum'">
 					<span class="balance" :data-testid="TESTIDS.bridgeBalanceL1">Balance: {{ fmt(usdc.balance.value) }} {{ BRIDGE_TOKEN_SYMBOL }}</span>
 				</template>
@@ -420,7 +431,7 @@ function fmt(b: bigint | null): string {
 			<span class="unit">{{ BRIDGE_TOKEN_SYMBOL }}</span>
 		</Flex>
 		<p v-if="amountError" class="err-msg" :data-testid="TESTIDS.bridgeFormError">{{ amountError }}</p>
-		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on Sepolia yet - mint some below.</p>
+		<p v-if="showMintHint" class="hint">No test {{ BRIDGE_TOKEN_SYMBOL }} on {{ NETWORK.viemChain.name }} yet - mint some below.</p>
 
 		<!-- HOW it arrives: privacy presets (gas-follows-token); PRIVATE is the default. -->
 			<div class="flabel">How it arrives</div>

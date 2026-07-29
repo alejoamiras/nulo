@@ -7,7 +7,7 @@
  * The proven reference for these sequences is `scripts/deploy-sandbox.ts --smoke`.
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
-import { type ContractBase, waitForProven } from "@aztec/aztec.js/contracts"
+import { waitForProven } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { Fr } from "@aztec/aztec.js/fields"
 import type { createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -16,7 +16,6 @@ import { OutboxContract } from "@aztec/ethereum/contracts"
 import { type Abi, type Account, type Address, type Hex, parseEventLogs, type PublicClient, type WalletClient } from "viem"
 import { deriveTokenClaimSecret } from "./claim-secret"
 import { type BridgeWitness, bridgeWitnessPermitTypedData, hashRoute, type PoolKey } from "./l1"
-import type { SendOpts } from "./l2"
 import { PRIVATE_FPC_ADDRESS } from "./private-fuel"
 
 /** bytes32 zero — the fuel fields a bridge-only witness (and the router's bridge()) leave unset. */
@@ -154,22 +153,27 @@ export async function runRouterDeposit(
 		secretHash: secretHash.toString(),
 		isPrivate: p.isPrivate,
 	}
-	const receipt = await l1.pub.waitForTransactionReceipt({
-		hash: await l1.wallet.writeContract({
-			address: p.router,
-			abi: p.routerAbi,
-			functionName: "bridge",
-			args: [bridgeParams, { nonce: p.nonce, deadline: p.deadline, signature }],
-			account: l1.account,
-			chain: l1.wallet.chain,
-		} as never),
-	})
+	const bridgeTxHash = await l1.wallet.writeContract({
+		address: p.router,
+		abi: p.routerAbi,
+		functionName: "bridge",
+		args: [bridgeParams, { nonce: p.nonce, deadline: p.deadline, signature }],
+		account: l1.account,
+		chain: l1.wallet.chain,
+	} as never)
+	const receipt = await l1.pub.waitForTransactionReceipt({ hash: bridgeTxHash })
+	// A REVERTED bridge() has empty logs — without this check it would masquerade as the misleading
+	// "no Bridge event" below (hit live during the cutover's rapid back-to-back deposits).
+	if (receipt.status !== "success") {
+		throw new Error(`bridge() REVERTED (${bridgeTxHash}) — no funds moved; inspect the tx and retry`)
+	}
 
 	onStage?.("syncing")
 	// Leaf index + message key from the router's Bridge event (never a preflight simulate — see runDeposit's note).
 	const events = parseEventLogs({ abi: p.routerAbi, eventName: "Bridge", logs: receipt.logs })
 	const ev = events[0] as { args?: { index?: bigint; key?: Hex } } | undefined
-	if (ev?.args?.index === undefined || ev.args.key === undefined) throw new Error("bridge() emitted no Bridge event")
+	if (ev?.args?.index === undefined || ev.args.key === undefined)
+		throw new Error(`bridge() succeeded but emitted no Bridge event (${bridgeTxHash}) — RPC log gap? re-fetch the receipt`)
 	recovery?.onDeposited?.(ev.args.index)
 	onStage?.("done")
 	return {

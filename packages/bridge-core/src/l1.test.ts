@@ -7,6 +7,7 @@ import {
 	hashBridgeWitness,
 	hashRoute,
 	type PoolKey,
+	ensurePermit2Allowance,
 } from "./l1"
 
 // Reference values from contracts/bridge/evm/test/WitnessHash.t.sol — the Solidity router's
@@ -80,5 +81,60 @@ describe("l1 Permit2 witness typed-data", () => {
 		expect(td.primaryType).toBe("PermitWitnessTransferFrom")
 		expect(td.message.witness).toBe(witness)
 		expect(td.message.spender).toBe(addr(0x99))
+	})
+})
+
+describe("ensurePermit2Allowance — the one approval state machine (app + smokes)", () => {
+	const HASH = "0xabc" as `0x${string}`
+
+	it("short-circuits when the allowance is already sufficient (no tx)", async () => {
+		let approved = 0
+		const r = await ensurePermit2Allowance({
+			allowance: async () => 100n,
+			approveMax: async () => {
+				approved++
+				return HASH
+			},
+			waitReceipt: async () => ({ status: "success" }),
+			needed: 50n,
+		})
+		expect(r).toEqual({ approved: false })
+		expect(approved).toBe(0)
+	})
+
+	it("approves max, waits, re-reads, and reports the txHash", async () => {
+		const reads = [0n, 10n ** 30n]
+		const statuses: string[] = []
+		const r = await ensurePermit2Allowance({
+			allowance: async () => reads.shift() as bigint,
+			approveMax: async () => HASH,
+			waitReceipt: async () => ({ status: "success" }),
+			needed: 50n,
+			onStatus: (st) => statuses.push(st),
+		})
+		expect(r).toEqual({ approved: true, txHash: HASH })
+		expect(statuses).toEqual(["approving", "waiting", "approved"])
+	})
+
+	it("throws on a REVERTED approval receipt", async () => {
+		await expect(
+			ensurePermit2Allowance({
+				allowance: async () => 0n,
+				approveMax: async () => HASH,
+				waitReceipt: async () => ({ status: "reverted" }),
+				needed: 1n,
+			}),
+		).rejects.toThrow(/reverted/)
+	})
+
+	it("throws when the allowance is STILL insufficient after a successful approve (wrong wiring)", async () => {
+		await expect(
+			ensurePermit2Allowance({
+				allowance: async () => 0n,
+				approveMax: async () => HASH,
+				waitReceipt: async () => ({ status: "success" }),
+				needed: 1n,
+			}),
+		).rejects.toThrow(/still insufficient/)
 	})
 })

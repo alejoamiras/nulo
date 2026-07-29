@@ -69,10 +69,12 @@ jobs:
               - 'packages/wallet-bridge/src/**'
               - 'packages/wallet-bridge/package.json'
             extension:
-              # Built target — whole package; design dep lib — src + manifest.
+              # Built target — whole package; design + bridge-core dep libs — src + manifest.
               - 'apps/extension/**'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
             playground:
               - 'apps/playground/**'
             landing:
@@ -249,12 +251,17 @@ jobs:
       upload_artifacts: true
 
   build-faucet:
-    name: Build Faucet
+    name: Build Faucet (${{ matrix.target }})
     needs: changes
     if: needs.changes.outputs.needs-faucet-build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [testnet, mainnet]
     uses: ./.github/workflows/_build-faucet.yml
     with:
       ref: ${{ github.event.pull_request.head.sha || github.ref }}
+      target: ${{ matrix.target }}
       upload_artifacts: true
 
   # Smoke e2e moved to its own pr-smoke-e2e.yml workflow:

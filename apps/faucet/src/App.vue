@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
+import { IS_MAINNET } from "@/lib/network"
 import { TESTIDS } from "@/lib/testids"
 import AppToastRegion from "./components/AppToastRegion.vue"
 import WalletPickerModal from "./components/WalletPickerModal.vue"
@@ -13,8 +14,12 @@ import FuelView from "./views/FuelView.vue"
 
 type Tab = "faucet" | "bridge" | "fuel"
 
-/** Default to the Bridge tab when served from a bridge.* host; faucet otherwise. */
+// Mainnet has no faucet (real USDC, no test-token drips) — hide the tab + never default to it.
+const isMainnet = IS_MAINNET
+
+/** Default to the Bridge tab on mainnet or a bridge.* host; faucet otherwise (testnet). */
 function defaultTab(): Tab {
+	if (isMainnet) return "bridge"
 	if (typeof window !== "undefined" && window.location.hostname.startsWith("bridge")) return "bridge"
 	return "faucet"
 }

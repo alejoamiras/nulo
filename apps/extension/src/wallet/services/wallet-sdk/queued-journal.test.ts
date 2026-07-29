@@ -63,12 +63,14 @@ function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
 	const profile = makeProfileStub()
 	const dappSession = makeDappSessionStub()
 	const networkSvc = makeNetworkStub()
+	const account = makeAccountStub()
 
 	const deps: TryCreateQueuedJournalDeps = {
 		journal,
 		profile: profile as never,
 		dappSession: dappSession as never,
 		networkSvc: networkSvc as never,
+		account: account as never,
 		logger,
 		...overrides,
 	}
@@ -79,6 +81,9 @@ function makeProfileStub() {
 	return {
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
 		getActiveProfile: vi.fn<() => Promise<any>>(async () => ({ id: "profile-1" })),
+		// The creator captures the deletion epoch alongside the profile and
+		// threads it into the journal's create fence.
+		getDeletionState: vi.fn(() => ({ capture: (_id: string) => 0 })),
 	}
 }
 
@@ -95,6 +100,14 @@ function makeDappSessionStub(opts: { name?: string | null } = { name: "Example D
 			capabilityGrants: [{ capability: { type: "transaction" } }, { capability: { type: "accounts" } }],
 			dappMetadata: metadata,
 		})),
+	}
+}
+
+/** Wallet order is index-sorted, exactly as `AccountService.getAccounts` returns. */
+function makeAccountStub(addresses: string[] = ["0xabc"]) {
+	return {
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		getAccounts: vi.fn<() => Promise<any[]>>(async () => addresses.map((address, index) => ({ address, index }))),
 	}
 }
 
@@ -282,5 +295,67 @@ describe("tryCreateQueuedJournal", () => {
 		const id = await tryCreateQueuedJournal(makeNonSendTxMessage(), makeSession(), deps)
 		expect(id).toBeDefined()
 		expect((await journal.getOperation(id as string))?.title).toBe("Transaction")
+	})
+})
+
+/**
+ * Which account the record is filed under.
+ *
+ * The record must name the account the send will actually go out as, so it
+ * resolves through the same rule the dispatcher uses: a session-authorized
+ * explicit sender, else the first WALLET-ordered session account. It used to
+ * take `session.accounts[0]`, which is an unrelated ordering, so a
+ * multi-account session filed the operation under the wrong account.
+ */
+describe("tryCreateQueuedJournal — record account", () => {
+	const ADDR_A = "0xaaa"
+	const ADDR_B = "0xbbb"
+
+	/** Session lists B first while wallet order is [A, B], so the two rules disagree. */
+	function depsWithSessionOrder() {
+		return makeDeps({
+			dappSession: {
+				tryGetDappSessionByOriginAndChain: vi.fn(async () => ({
+					accounts: [`aztec:1338:${ADDR_B}`, `aztec:1338:${ADDR_A}`],
+					capabilityGrants: [{ capability: { type: "transaction" } }],
+					dappMetadata: { name: "Example Dapp" },
+				})),
+			} as never,
+			account: makeAccountStub([ADDR_A, ADDR_B]) as never,
+		})
+	}
+
+	function sendTxFrom(from: string): WalletMessage {
+		return {
+			messageId: "msg-from",
+			type: "sendTx",
+			args: [{ calls: [{ name: "transfer" }] }, { from }],
+		} as unknown as WalletMessage
+	}
+
+	test("an explicit `from` is honored", async () => {
+		const { deps, journal } = depsWithSessionOrder()
+
+		const id = await tryCreateQueuedJournal(sendTxFrom(ADDR_A), makeSession(), deps)
+
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_A)
+	})
+
+	test("NO_FROM files under the first WALLET-ordered session account, not the first listed", async () => {
+		const { deps, journal } = depsWithSessionOrder()
+
+		const id = await tryCreateQueuedJournal(sendTxFrom("NO_FROM"), makeSession(), deps)
+
+		// The session lists B first; wallet order is [A, B], so A wins.
+		expect((await journal.getOperation(id as string))?.accountAddress).toBe(ADDR_A)
+	})
+
+	test("a sender outside the session is left un-journaled rather than filed under someone else", async () => {
+		const { deps, journal } = depsWithSessionOrder()
+
+		const id = await tryCreateQueuedJournal(sendTxFrom("0xstranger"), makeSession(), deps)
+
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
 	})
 })

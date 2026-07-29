@@ -17,7 +17,7 @@ import { svc } from "@/wallet/services/composition-harness"
 import { DappSessionService } from "./service"
 import { AccessLevel, type GrantedCapabilityRecord } from "./spec"
 
-const waitFor = async (pred: () => Promise<boolean>, ms = 1000) => {
+const _waitFor = async (pred: () => Promise<boolean>, ms = 1000) => {
 	const deadline = Date.now() + ms
 	while (!(await pred())) {
 		if (Date.now() > deadline) throw new Error("waitFor timeout")

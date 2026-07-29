@@ -20,26 +20,32 @@ const APP_ID = "nulo-faucet"
 
 async function buildCapabilityManifest() {
 	const sponsoredFpc = await getSponsoredFpcInstance()
+	// The faucet tokens (Dripper/NULO/OLUN) are universal deploys (deployer ZERO, fixed salts), so
+	// the SAME addresses exist on BOTH networks — the grant includes them everywhere. The PrivateFPC +
+	// FEE_JUICE + auth-registry grants keep private fuel and private-fuel-paid claims working (DP6).
+	// The FPC is registered on both networks, so both grants must include it — the earlier bridge-only
+	// manifest omitted it and would have broken the mainnet grant vs the unconditional FPC
+	// registration (codex post-impl HIGH-1).
 	return buildCombinedManifest({
-		dripperAddress: DRIPPER,
-		usdcAddress: NULO,
-		ethAddress: OLUN,
 		bridgeAddress: BRIDGE,
 		tokenAddress: BRIDGE_TOKEN,
 		proxyAddress: BRIDGE_PROXY,
 		sponsoredFpcAddress: sponsoredFpc.address,
+		dripperAddress: DRIPPER,
+		usdcAddress: NULO,
+		ethAddress: OLUN,
 	})
 }
 
 async function registerAllContracts(w: Wallet): Promise<void> {
-	const [dripperInst, nuloInst, olunInst, proxyInst, tokenInst, bridgeInst] = await Promise.all([
-		rebuildDripperInstance(),
-		rebuildNuloInstance(),
-		rebuildOlunInstance(),
+	// The bridge trio + PrivateFPC + the faucet's Dripper/NULO/OLUN all exist on both networks now
+	// (universal deploys — identical addresses per salt+args).
+	const [proxyInst, tokenInst, bridgeInst] = await Promise.all([
 		rebuildBridgeProxyInstance(),
 		rebuildBridgeTokenInstance(),
 		rebuildBridgeInstance(),
 	])
+	const [dripperInst, nuloInst, olunInst] = await Promise.all([rebuildDripperInstance(), rebuildNuloInstance(), rebuildOlunInstance()])
 	await w.registerContract(dripperInst, DripperContractArtifact)
 	await w.registerContract(nuloInst, TokenContractArtifact)
 	await w.registerContract(olunInst, TokenContractArtifact)

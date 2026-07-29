@@ -28,12 +28,39 @@ import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
 
 /** The ONLY L1 signer authorized for this arc — pinned in the PLAN (and here), never derived
  *  from the env being checked. A different env-derived signer is a hard stop. */
-export const PLAN_PINNED_L1_SIGNER = "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5"
+/**
+ * Per-network plan-pinned L1 signers (DP4: keys never cross networks). `mainnet` stays null until
+ * the owner creates the FRESH mainnet-only EOA at Phase 8 and pins it here — until then
+ * `requirePinnedSigner("mainnet")` fails closed, so no mainnet script can broadcast with an
+ * unpinned (or testnet) key.
+ */
+export const PLAN_PINNED_L1_SIGNERS: Record<"testnet" | "mainnet", string | null> = {
+	testnet: "0xFcc2238319aC360e985f1736aBB3df6251DAF6F5",
+	// Fresh network-keyed mainnet EOA (DP4), generated 2026-07-27; key held owner-side only.
+	mainnet: "0xE75e277a6800a37429dac55FcD2f3540E371059c",
+}
 
-/** Hard per-arc exposure ceilings (reviewed at the plan gate; rc.2 precedent ~0.09 ETH + seed). */
+/** Fail-closed signer lookup — throws while a network's signer is unpinned. */
+export function requirePinnedSigner(network: "testnet" | "mainnet"): string {
+	const pinned = PLAN_PINNED_L1_SIGNERS[network]
+	if (!pinned) {
+		throw new Error(
+			`no plan-pinned L1 signer for ${network} — create the fresh network-keyed EOA and pin it in ` +
+				"PLAN_PINNED_L1_SIGNERS (live-intent.ts) before any broadcast. STOP.",
+		)
+	}
+	return pinned
+}
+
+/** The testnet pin — the historical single-network export every testnet script asserts against. */
+export const PLAN_PINNED_L1_SIGNER = requirePinnedSigner("testnet")
+
+/** Hard per-arc exposure ceilings (reviewed at the plan gate; raised from 0.5/0.25 for the
+ *  owner-directed pool deepening — a ~1.25 WETH seed to cut swap price impact to ~1.5% at a
+ *  25-token fill). Testnet ETH only; the mainnet arc re-reviews these from scratch. */
 export const CAPS = {
-	maxTotalEthSpend: "0.5", // ether — L1 gas + WETH_SEED + pool seeding, everything
-	maxWethSeed: "0.25", // ether — DeployFuelLive's WETH_SEED must be explicit and ≤ this
+	maxTotalEthSpend: "2.0", // ether — L1 gas + WETH_SEED + pool seeding, everything
+	maxWethSeed: "1.5", // ether — SeedTokenPool/DeployFuelLive's WETH_SEED must be explicit and ≤ this
 }
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -111,6 +138,8 @@ const OPERATIONAL_ALLOWLIST = [
 	"packages/bridge-core/deploy-journal.jsonl",
 	"implementations-plan/aztec-5.0.0-stable/lessons/",
 	"implementations-plan/aztec-5.0.1-line/lessons/",
+	"implementations-plan/tools-two-network/lessons/",
+	"apps/faucet/public/testnet-bridge.journal.jsonl",
 ]
 
 async function build(intentPath: string): Promise<void> {
@@ -355,25 +384,28 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 			if (candidate.l1.feeJuice.asset.toLowerCase() !== intent.l1.feeJuice.toLowerCase()) {
 				throw new Error(`candidate feeJuice.asset ${candidate.l1.feeJuice.asset} != intent pin ${intent.l1.feeJuice} — STOP`)
 			}
-			if (candidate.l1.feeJuice.feeAssetHandler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
-				throw new Error(
-					`candidate feeJuice.feeAssetHandler ${candidate.l1.feeJuice.feeAssetHandler} != intent pin ${intent.l1.feeAssetHandler} — STOP`,
-				)
-			}
 			const underlying = cast(["call", candidate.l1.feeJuice.portal, "UNDERLYING()(address)", "--rpc-url", sepolia])
 			if (underlying.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
 				throw new Error(`portal UNDERLYING ${underlying} != manifest asset ${candidate.l1.feeJuice.asset} — STOP`)
 			}
-			const feeAsset = cast(["call", candidate.l1.feeJuice.feeAssetHandler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
-			if (feeAsset.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
-				throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
+			// The FeeAssetHandler is testnet-only (permissionless mint); mainnet is BYO-$AZTEC with no
+			// handler. Verify it (intent-pin + FEE_ASSET readback) only when the manifest declares one.
+			const handler = candidate.l1.feeJuice.feeAssetHandler
+			if (handler) {
+				if (handler.toLowerCase() !== intent.l1.feeAssetHandler.toLowerCase()) {
+					throw new Error(`candidate feeJuice.feeAssetHandler ${handler} != intent pin ${intent.l1.feeAssetHandler} — STOP`)
+				}
+				const feeAsset = cast(["call", handler, "FEE_ASSET()(address)", "--rpc-url", sepolia])
+				if (feeAsset.toLowerCase() !== candidate.l1.feeJuice.asset.toLowerCase()) {
+					throw new Error(`handler FEE_ASSET ${feeAsset} != manifest asset — STOP`)
+				}
 			}
 		}
 		if (candidate.l1.fuel) {
-			const owner = cast(["call", candidate.l1.fuel.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
+			const owner = cast(["call", candidate.l1.fuel.core.router, "owner()(address)", "--rpc-url", sepolia]).toLowerCase()
 			if (owner !== intent.signer.toLowerCase()) throw new Error(`router owner ${owner} != our signer — STOP (privileged binding)`)
-			const swapTarget = cast(["call", candidate.l1.fuel.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
-			if (swapTarget !== candidate.l1.fuel.swapTarget.toLowerCase())
+			const swapTarget = cast(["call", candidate.l1.fuel.core.router, "swapTarget()(address)", "--rpc-url", sepolia]).toLowerCase()
+			if (swapTarget !== candidate.l1.fuel.core.swapTarget.toLowerCase())
 				throw new Error(`router swapTarget ${swapTarget} != manifest — STOP`)
 		}
 		console.log("✓ candidate strict-valid + privileged readbacks agree")
@@ -423,23 +455,27 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
  * candidate's `l1.fuel` section must be BYTE-carried from the current live
  * manifest — new or changed fuel infrastructure hard-fails the promotion.
  */
-async function promote(intentPath: string): Promise<void> {
+async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwap?: boolean; restoreSwap?: boolean } = {}): Promise<void> {
+	// --bridge-only: a bridge cutover that touches NO faucet deployment (codex r1 HIGH-4). The faucet
+	// candidate is not required; instead the LIVE faucet manifest is digest-pinned before/after so the
+	// promotion provably leaves it byte-identical.
+	const bridgeOnly = opts.bridgeOnly === true
 	const bridgeCandidatePath = join(repoRoot, "apps/faucet/public/testnet-bridge.candidate.json")
 	const bridgeLivePath = join(repoRoot, "apps/faucet/public/testnet-bridge.json")
 	const faucetCandidatePath = join(repoRoot, "apps/faucet/src/contracts/deployments.candidate.json")
 	const faucetLivePath = join(repoRoot, "apps/faucet/src/contracts/deployments.json")
 
-	// 0. The full gate, candidate-pinned, immediately before anything is written.
-	await verify(intentPath, bridgeCandidatePath)
-
-	// 0b. The recorded candidate digest is REQUIRED at promote time: without it, promote
-	// would be the first-ever verify (digest recorded mid-promote — the one-time recording
-	// regime never happened; review finding #5), and the re-read below could not be bound
-	// to the bytes verify actually checked.
+	// 0. The recorded candidate digest is REQUIRED BEFORE promote's own verify runs — verify
+	// RECORDS a missing digest, so checking after it would always pass (the one-time recording
+	// regime would never have happened; codex bug-bash r2 HIGH). Read + require FIRST.
 	const intent = JSON.parse(readFileSync(intentPath, "utf8")) as DeployIntent
 	if (!intent.candidateSha256) {
 		throw new Error("intent has no recorded candidateSha256 — run verify --candidate (and commit the intent) BEFORE promote — STOP")
 	}
+
+	// 0b. The full gate, candidate-pinned, immediately before anything is written (re-pins the
+	// candidate bytes against the digest required above).
+	await verify(intentPath, bridgeCandidatePath)
 
 	// 0c. The FPC require-deployed gate as CODE, not operator discipline (review finding #6):
 	// promotion enables the faucet's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
@@ -448,12 +484,18 @@ async function promote(intentPath: string): Promise<void> {
 
 	// 1. Symlink rejection on every involved path (a symlinked live target would
 	// redirect the rename; a symlinked candidate breaks the read-once contract).
-	for (const p of [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]) {
+	const involvedPaths = bridgeOnly
+		? [bridgeCandidatePath, bridgeLivePath, faucetLivePath]
+		: [bridgeCandidatePath, faucetCandidatePath, bridgeLivePath, faucetLivePath]
+	for (const p of involvedPaths) {
 		let st: ReturnType<typeof lstatSync> | undefined
 		try {
 			st = lstatSync(p)
 		} catch {
-			if (p === bridgeCandidatePath || p === faucetCandidatePath) throw new Error(`candidate missing: ${p} — nothing to promote`)
+			if (p === bridgeCandidatePath || (!bridgeOnly && p === faucetCandidatePath))
+				throw new Error(`candidate missing: ${p} — nothing to promote`)
+			if (bridgeOnly && p === faucetLivePath)
+				throw new Error(`--bridge-only requires an existing live faucet manifest to pin: ${p} — STOP`)
 			continue // a live target may not exist yet — rename will create it
 		}
 		if (st.isSymbolicLink()) throw new Error(`refusing to promote through a symlink: ${p}`)
@@ -464,22 +506,26 @@ async function promote(intentPath: string): Promise<void> {
 	// separately, and an edit between the two reads would otherwise ship bytes that
 	// skipped the digest pin + privileged readbacks (review finding #4).
 	const bridgeBytes = readFileSync(bridgeCandidatePath)
-	const faucetBytes = readFileSync(faucetCandidatePath)
+	const faucetBytes = bridgeOnly ? null : readFileSync(faucetCandidatePath)
 	const bridgeSha = createHash("sha256").update(bridgeBytes).digest("hex")
-	const faucetSha = createHash("sha256").update(faucetBytes).digest("hex")
+	const faucetSha = faucetBytes ? createHash("sha256").update(faucetBytes).digest("hex") : null
+	// The bridge-only pin: the live faucet manifest's digest BEFORE any write; re-asserted after.
+	const faucetLivePin = bridgeOnly ? createHash("sha256").update(readFileSync(faucetLivePath)).digest("hex") : null
 	if (bridgeSha !== intent.candidateSha256) {
 		throw new Error(
 			`bridge candidate bytes changed between verify and promote: ${bridgeSha} != recorded ${intent.candidateSha256} — STOP`,
 		)
 	}
 	const bridgeCandidate = parseCandidateManifest(JSON.parse(bridgeBytes.toString("utf8")))
-	assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
+	if (faucetBytes) {
+		assertFaucetCandidateShape(JSON.parse(faucetBytes.toString("utf8")))
 
-	// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
-	// previously a junk candidate failed only AFTER the live file was overwritten.
-	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
-		stdio: "inherit",
-	})
+		// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
+		// previously a junk candidate failed only AFTER the live file was overwritten.
+		execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
+			stdio: "inherit",
+		})
+	}
 
 	// 3. Zero-seed assertion: fuel section byte-carried from live (or absent in both).
 	let liveFuel: unknown
@@ -488,13 +534,19 @@ async function promote(intentPath: string): Promise<void> {
 	} catch {
 		liveFuel = undefined
 	}
-	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel)
+	assertZeroSeed(bridgeCandidate.l1.fuel, liveFuel, {
+		allowSwapDrop: opts.dropSwap === true,
+		allowSwapAdd: opts.restoreSwap === true,
+	})
 
 	// 4. Temp-write + same-directory rename, then re-hash the written outputs.
-	const writes: Array<[string, Buffer, string]> = [
-		[bridgeLivePath, bridgeBytes, bridgeSha],
-		[faucetLivePath, faucetBytes, faucetSha],
-	]
+	const writes: Array<[string, Buffer, string]> =
+		faucetBytes && faucetSha
+			? [
+					[bridgeLivePath, bridgeBytes, bridgeSha],
+					[faucetLivePath, faucetBytes, faucetSha],
+				]
+			: [[bridgeLivePath, bridgeBytes, bridgeSha]]
 	for (const [target, bytes, sha] of writes) {
 		mkdirSync(dirname(target), { recursive: true })
 		const tmp = `${target}.promote-tmp`
@@ -510,7 +562,16 @@ async function promote(intentPath: string): Promise<void> {
 	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
 	// re-prove the faucet derivation through the real gate.
 	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
-	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], { stdio: "inherit" })
+	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], {
+		stdio: "inherit",
+		env: { ...process.env, BRIDGE_MANIFEST: bridgeLivePath },
+	})
+	if (faucetLivePin) {
+		const after = createHash("sha256").update(readFileSync(faucetLivePath)).digest("hex")
+		if (after !== faucetLivePin) {
+			throw new Error(`--bridge-only violated: live faucet manifest changed (${after} != pinned ${faucetLivePin}) — investigate NOW`)
+		}
+	}
 
 	// 6. Promotion receipt — committed by the operator alongside the promoted files.
 	const receiptPath = join(repoRoot, "implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json")
@@ -523,9 +584,16 @@ async function promote(intentPath: string): Promise<void> {
 				promotedAt: new Date().toISOString(),
 				intent: intentPath,
 				commitAtPromotion: commit,
+				mode: bridgeOnly ? "bridge-only" : "bridge+faucet",
 				bridge: { candidateSha256: bridgeSha, live: "apps/faucet/public/testnet-bridge.json" },
-				faucet: { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" },
-				zeroSeed: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
+				faucet: faucetSha
+					? { candidateSha256: faucetSha, live: "apps/faucet/src/contracts/deployments.json" }
+					: { unchangedSha256: faucetLivePin, live: "apps/faucet/src/contracts/deployments.json" },
+				zeroSeed: opts.restoreSwap
+					? "l1.fuel.core byte-carried; swap RESTORED (--restore-swap, pools seeded this arc)"
+					: opts.dropSwap
+						? "l1.fuel.core byte-carried; swap RETIRED (--drop-swap, token cutover); no fuel/router deploys this arc"
+						: "l1.fuel byte-carried from live; no fuel/router deploys, no WETH seed this arc",
 			},
 			null,
 			"\t",
@@ -545,13 +613,16 @@ if (isMain) {
 	}
 	const candidateFlag = rest.indexOf("--candidate")
 	const candidatePath = candidateFlag !== -1 ? rest[candidateFlag + 1] : undefined
+	const bridgeOnly = rest.includes("--bridge-only")
+	const dropSwap = rest.includes("--drop-swap")
+	const restoreSwap = rest.includes("--restore-swap")
 	const run =
 		cmd === "build"
 			? build(intentPath)
 			: cmd === "verify"
 				? verify(intentPath, candidatePath)
 				: cmd === "promote"
-					? promote(intentPath)
+					? promote(intentPath, { bridgeOnly, dropSwap, restoreSwap })
 					: Promise.reject(new Error(`unknown command ${cmd}`))
 	run.catch((err) => {
 		console.error(`✗ ${err instanceof Error ? err.message : err}`)

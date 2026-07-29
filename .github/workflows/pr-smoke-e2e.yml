@@ -50,6 +50,8 @@ jobs:
               # Dependency libraries — consumed source + manifest:
               - 'packages/aztec-runtime/src/**'
               - 'packages/aztec-runtime/package.json'
+              - 'packages/bridge-core/src/**'
+              - 'packages/bridge-core/package.json'
               - 'packages/design/src/**'
               - 'packages/design/package.json'
               - 'packages/extension-messaging/src/**'

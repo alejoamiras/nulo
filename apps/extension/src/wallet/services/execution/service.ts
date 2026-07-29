@@ -196,6 +196,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		this.lane = new ExecutionLane({
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
+			captureProfileEpoch: (profileId) => this.profileService.getDeletionState().capture(profileId),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logInfo: (msg, ...rest) => this.logInfo(msg, ...rest),
@@ -244,10 +245,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 				deleteController: (journalId) => this.lane.deleteController(journalId),
 				acquireSlot: (networkId, queuedJournalId, onEnqueued, originKey) =>
 					this.lane.acquireSlot(networkId, queuedJournalId, onEnqueued, originKey),
-				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController) =>
-					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController),
-				beginJournal: (networkId, accountAddress, origin, calls) =>
-					this.lane.beginJournal(networkId, accountAddress, origin, calls),
+				claimOrCreateJournal: (networkId, accountAddress, origin, calls, hooks, reuseController, fence) =>
+					this.lane.claimOrCreateJournal(networkId, accountAddress, origin, calls, hooks, reuseController, fence),
+				beginJournal: (networkId, accountAddress, origin, calls, fence) =>
+					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
 			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),

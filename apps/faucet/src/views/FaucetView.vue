@@ -4,6 +4,7 @@ import { computed } from "vue"
 import TokenCard from "@/components/TokenCard.vue"
 import WalletPanel from "@/components/WalletPanel.vue"
 import { useWalletConnection } from "@/composables/useWalletConnection"
+import { IS_MAINNET } from "@/lib/network"
 import { FAUCET_TOKENS } from "@/constants/tokens"
 import { NULO, OLUN } from "@/contracts/deployments"
 
@@ -23,7 +24,12 @@ const accountAddress = computed(() => (selectedAccount.value ? AztecAddress.from
 	<Flex direction="column" gap="32">
 		<Flex tag="header" direction="column" gap="16" class="hero">
 			<h1>DRIP TEST ASSETS</h1>
-			<p class="sub">
+			<p v-if="IS_MAINNET" class="sub">
+				Play tokens on Aztec mainnet. Connect an Aztec wallet and mint fixed NULO or OLUN into a
+				public or private balance. No real value — each mint pays a small fee-juice fee from your
+				wallet (bridge some fuel first).
+			</p>
+			<p v-else class="sub">
 				Alpha-testnet only. Connect an Aztec wallet and mint fixed NULO or OLUN into a public or
 				private balance. Internal faucet. No real value.
 			</p>

@@ -1,6 +1,6 @@
 import { FeeAssetHandlerAbi } from "@aztec/l1-artifacts"
 import { awaitL1Receipt, FeeJuicePortalAbi } from "@nulo/bridge-core"
-import { sepolia } from "viem/chains"
+import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import { FUEL_ASSET, FUEL_ASSET_HANDLER, FUEL_PORTAL } from "@/contracts/bridge-deployments"
 import { ERC20_ABI } from "./useL1Usdc"
@@ -51,7 +51,7 @@ export function useL1FeeAsset() {
 			})) as bigint
 		} catch (err) {
 			// Set-only: a background poll succeeding must not clear an error a user ACTION just surfaced.
-			error.value = errorMessage(err, "Failed to read the Sepolia fee-asset balance")
+			error.value = errorMessage(err, "Failed to read the L1 fee-asset balance")
 		}
 	}
 
@@ -106,7 +106,7 @@ export function useL1FeeAsset() {
 				abi: ERC20_ABI,
 				functionName: "approve",
 				args: [FUEL_PORTAL, amount],
-				chain: sepolia,
+				chain: NETWORK.viemChain,
 				account: owner,
 			})
 			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces as
@@ -163,7 +163,7 @@ export function useL1FeeAsset() {
 				abi: FeeAssetHandlerAbi,
 				functionName: "mint",
 				args: [owner],
-				chain: sepolia,
+				chain: NETWORK.viemChain,
 				account: owner,
 			})
 			// viem RESOLVES the receipt even on an on-chain revert — check status so a mined revert surfaces

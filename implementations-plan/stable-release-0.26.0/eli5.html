@@ -1,0 +1,227 @@
+<style>
+  :root {
+    --paper: #f5f8fc; --surface: #ffffff; --raised: #eef3f9;
+    --ink: #1b2432; --muted: #5b6a7e; --line: #dae2ee;
+    --accent: #1c855a; --accent-soft: #e2f2ea; --accent-line: #bfe2d0;
+    --caution: #a9701c; --caution-soft: #f7eeda; --caution-line: #ecd7a8;
+    --danger: #b23b34;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0f141c; --surface: #161e29; --raised: #1d2733;
+      --ink: #e7edf4; --muted: #90a0b3; --line: #29343f;
+      --accent: #48b787; --accent-soft: #14261d; --accent-line: #2b4d3b;
+      --caution: #d7a24d; --caution-soft: #271f11; --caution-line: #4a3c1f;
+      --danger: #e0655c;
+    }
+  }
+  :root[data-theme="light"] {
+    --paper: #f5f8fc; --surface: #ffffff; --raised: #eef3f9;
+    --ink: #1b2432; --muted: #5b6a7e; --line: #dae2ee;
+    --accent: #1c855a; --accent-soft: #e2f2ea; --accent-line: #bfe2d0;
+    --caution: #a9701c; --caution-soft: #f7eeda; --caution-line: #ecd7a8;
+    --danger: #b23b34;
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f141c; --surface: #161e29; --raised: #1d2733;
+    --ink: #e7edf4; --muted: #90a0b3; --line: #29343f;
+    --accent: #48b787; --accent-soft: #14261d; --accent-line: #2b4d3b;
+    --caution: #d7a24d; --caution-soft: #271f11; --caution-line: #4a3c1f;
+    --danger: #e0655c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: var(--sans); line-height: 1.62;
+    margin: 0; padding: 3rem 1.25rem 5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; }
+
+  .eyebrow {
+    font-size: 0.74rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 650; margin: 0 0 0.6rem;
+  }
+  h1 { font-size: 2.05rem; line-height: 1.12; letter-spacing: -0.02em; margin: 0 0 0.4rem; text-wrap: balance; }
+  h2 { font-size: 1.28rem; letter-spacing: -0.01em; margin: 2.9rem 0 0.9rem; text-wrap: balance; }
+  h3 { font-size: 1.02rem; margin: 0 0 0.35rem; }
+  p { margin: 0 0 0.9rem; }
+  .lede { font-size: 1.08rem; color: var(--ink); }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0 0.4rem; }
+  .chip {
+    font-family: var(--mono); font-size: 0.8rem; font-weight: 600;
+    padding: 0.28rem 0.6rem; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent-line);
+  }
+  .chip.n { background: var(--raised); color: var(--muted); border-color: var(--line); }
+
+  .callout {
+    border: 1px solid var(--line); border-left: 3px solid var(--muted);
+    background: var(--surface); border-radius: 8px;
+    padding: 1rem 1.15rem; margin: 1.4rem 0;
+  }
+  .callout.time { border-left-color: var(--accent); }
+  .callout.caution { border-left-color: var(--caution); background: var(--caution-soft); border-color: var(--caution-line); }
+  .callout.approve { border-left-color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+  .callout h3 { margin-top: 0; }
+  .callout p:last-child, .callout ul:last-child { margin-bottom: 0; }
+
+  .phase {
+    display: grid; grid-template-columns: 2.1rem 1fr; gap: 0 0.9rem;
+    padding: 1.1rem 1.15rem; margin: 0.7rem 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 9px;
+  }
+  .phase .num {
+    font-family: var(--mono); font-weight: 700; font-size: 0.95rem;
+    color: var(--accent); grid-row: 1 / span 3;
+    width: 2.1rem; height: 2.1rem; display: grid; place-items: center;
+    background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 8px;
+  }
+  .phase.main-merge .num { color: var(--caution); background: var(--caution-soft); border-color: var(--caution-line); }
+  .phase .proof {
+    font-size: 0.86rem; color: var(--muted); margin: 0.4rem 0 0;
+    padding-top: 0.5rem; border-top: 1px dashed var(--line);
+  }
+  .phase .proof b { color: var(--ink); font-weight: 600; }
+  .tag-merge {
+    font-family: var(--mono); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--caution); border: 1px solid var(--caution-line); background: var(--caution-soft);
+    padding: 0.05rem 0.4rem; border-radius: 4px; vertical-align: middle; margin-left: 0.45rem; font-weight: 700;
+  }
+
+  ul { margin: 0 0 0.9rem; padding-left: 1.2rem; }
+  li { margin: 0.25rem 0; }
+  .qlist li { margin: 0.7rem 0; }
+  .qlist b { color: var(--ink); }
+
+  pre {
+    font-family: var(--mono); font-size: 0.8rem; line-height: 1.55;
+    background: var(--raised); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 0.95rem 1.05rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    margin: 0.5rem 0 1.2rem;
+  }
+  code { font-family: var(--mono); font-size: 0.88em; background: var(--raised); padding: 0.1em 0.35em; border-radius: 4px; }
+  pre code { background: none; padding: 0; }
+  .seed-rec { border: 1px solid var(--accent-line); border-radius: 9px; padding: 0.1rem 1.05rem 0.4rem; background: var(--accent-soft); margin: 0.8rem 0; }
+  .seed-rec .label, .seed-alt .label { font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
+  .seed-rec .label { color: var(--accent); }
+  .seed-alt .label { color: var(--muted); }
+  .warn { color: var(--caution); font-weight: 600; font-size: 0.9rem; }
+  .foot { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--line); font-size: 0.85rem; color: var(--muted); }
+  .foot code { font-size: 0.8rem; }
+</style>
+
+<div class="wrap">
+  <p class="eyebrow">Release blueprint · light tier</p>
+  <h1>Ship Nulo v0.26.0</h1>
+  <p class="lede">Move everything that's been merged into the day-to-day branch onto the stable branch, build the browser-extension files, publish a GitHub release, and refresh the two public websites. It's running a proven checklist for one specific version — not writing new code.</p>
+  <div class="chips">
+    <span class="chip">v0.26.0</span>
+    <span class="chip n">tier: light</span>
+    <span class="chip n">21 features</span>
+    <span class="chip n">landing + faucet</span>
+  </div>
+
+  <div class="callout time">
+    <h3>⏱ This takes a while — mostly waiting</h3>
+    <p class="muted" style="margin:0">Realistic wall-clock is <b style="color:var(--ink)">roughly 1.5–2.5 hours</b>, and almost all of it is CI running unattended. <b style="color:var(--ink)">Three</b> separate pull requests each run the full test suite including a live-network test that takes ~25–45 minutes, plus a ~15–25 minute build-and-publish step. Nothing is skipped to go faster.</p>
+  </div>
+
+  <h2>What this is — and what it isn't</h2>
+  <p>Your original ask mentioned "playground deployment." Heads-up: <b>the playground isn't a thing that gets deployed.</b> It's a local test dApp the automated browser tests drive — it has no website. The release actually refreshes two real sites: the <b>landing page (nulo.sh)</b> and the <b>faucet (faucet.nulo.sh)</b>. Both happen automatically once the release publishes.</p>
+  <p>Also: this does <b>not</b> push the extension to the Chrome or Firefox stores. Those steps are disabled stubs. The build just produces the extension files and attaches them to the GitHub release — so a bad build can't silently auto-update anyone's browser. That's the single biggest safety margin here.</p>
+
+  <h2>Why the "light" treatment</h2>
+  <p>This is the sixth-plus run of a well-worn release checklist (v0.21 through v0.25 all shipped this way), there are no users yet so there's no data to migrate, and the release itself creates no new secrets. The scored risk came out low across the board, so it gets the lightweight treatment — one outside review (done), not the heavy multi-reviewer process.</p>
+  <p class="muted">One nuance the review flagged: the <i>features</i> being shipped aren't trivial — they include bridge, account-identity, and backup changes. But each was tested and reviewed when it was originally merged; a release cut doesn't re-review them. "Light" describes the release <i>mechanics</i>. Whether you want an extra security pass or a live test-network dry-run before pressing go is Open Question 2 below.</p>
+
+  <h2>The plan, step by step</h2>
+  <p class="muted">The steps are numbered because they're a strict chain — each depends on the one before. The amber-numbered steps are the ones where I merge onto a protected branch on your behalf.</p>
+
+  <div class="phase">
+    <div class="num">1</div>
+    <h3>Freeze the release &amp; pre-flight</h3>
+    <p style="margin:0">Record the exact commit we're shipping, and confirm the coast is clear: nothing unrelated waiting to merge into the stable branch, the auto-release switch is on, and the required checks are in place.</p>
+    <p class="proof"><b>Proves itself by:</b> the release commit is pinned, there are zero unrelated pull requests into the stable branch, and the live settings check out.</p>
+  </div>
+
+  <div class="phase main-merge">
+    <div class="num">2</div>
+    <h3>Promote day-to-day → stable <span class="tag-merge">merges to main</span></h3>
+    <p style="margin:0">Open the pull request that moves the 21 merged features onto the stable branch. Wait for the full suite — including the ~25–45 min live-network test — to go green. Double-check nothing slipped into the branch since we froze it. Then merge.</p>
+    <p class="proof"><b>Proves itself by:</b> all three required checks green, the branch still sits at the frozen commit, and it lands as a real merge.</p>
+  </div>
+
+  <div class="phase main-merge">
+    <div class="num">3</div>
+    <h3>Merge the version pull request <span class="tag-merge">merges to main</span></h3>
+    <p style="margin:0">A bot automatically opens a PR that stamps the version to 0.26.0 and writes the changelog. It <i>also</i> runs the full suite (another ~25–45 min live-network run). Review the changelog, confirm the version, and merge.</p>
+    <p class="proof"><b>Proves itself by:</b> the version reads 0.26.0, the changelog looks right, all three checks are green, and it lands as a real merge.</p>
+  </div>
+
+  <div class="phase">
+    <div class="num">4</div>
+    <h3>Build &amp; publish (automatic)</h3>
+    <p style="margin:0">Merging the version PR fires the pipeline: it tags the release, builds the Chrome + Firefox files, smoke-tests the <i>real</i> build, attaches the files with checksums, and redeploys both websites. I watch it and step in only if something goes wrong (including the rare "release exists but the files didn't attach" case).</p>
+    <p class="proof"><b>Proves itself by:</b> the release lists both extension files plus a checksums file, is marked stable (not pre-release), its tag matches the merge, and the websites redeployed.</p>
+  </div>
+
+  <div class="phase main-merge">
+    <div class="num">5</div>
+    <h3>Sync the version back to day-to-day <span class="tag-merge">merges to dev</span></h3>
+    <p style="margin:0">A bot opens a PR bringing the version stamp back to the day-to-day branch. It runs the full suite again. Merge it as a real merge (not a squash) so future release-candidates count from the right baseline.</p>
+    <p class="proof"><b>Proves itself by:</b> the day-to-day branch now reads 0.26.0 and it landed as a real merge.</p>
+  </div>
+
+  <div class="phase">
+    <div class="num">6</div>
+    <h3>Verify live &amp; wrap up</h3>
+    <p style="margin:0">Open nulo.sh and faucet.nulo.sh and confirm they're serving this exact build (the faucet is checked by its build fingerprint, since it has its own separate version number). Record the outcome and close out.</p>
+    <p class="proof"><b>Proves itself by:</b> the landing page shows 0.26.0 and the faucet's build fingerprint matches this release.</p>
+  </div>
+
+  <h2>Background you might want</h2>
+  <p><b>Two branches.</b> "Day-to-day" (dev) is where features land continuously; "stable" (main) is what a release is cut from. Merging onto stable is deliberate and protected — that's why steps 2, 3, and 5 are called out.</p>
+  <p><b>Why so much waiting?</b> The long test is a live-network run: it drives the real extension against a real Aztec network with real cryptographic proving. It's the strongest signal the wallet actually works, and it's required on every merge onto stable — so it runs three times across this release. That's by design, not overhead to trim.</p>
+
+  <h2>Open questions for you</h2>
+  <ul class="qlist">
+    <li><b>1. One approval covers all three merges?</b> You chose "drive end-to-end," so I'll read your approval as authorizing all three merges (promote, version PR, sync-back) at the frozen commit — I won't stop between them unless something fails. Confirm, or tell me to pause for a check-in before a specific merge.</li>
+    <li><b>2. Any extra safety before promoting?</b> This release carries bridge, account-identity, and backup changes. Want a dedicated security pass and/or a live test-network dry-run <i>before</i> I promote — or is the per-feature testing plus the required CI enough? <span class="muted">(If you don't say otherwise, I'll rely on the existing gating — no extra dry-run.)</span></li>
+  </ul>
+
+  <div class="callout approve">
+    <h3>What I need you to approve</h3>
+    <ul style="margin:0.4rem 0 0">
+      <li>Scope &amp; exclusions: landing + faucet only; no playground; no store publish.</li>
+      <li>Tier: <code>light</code>.</li>
+      <li>Version: <code>0.26.0</code> (auto-computed).</li>
+      <li>Answer Open Questions 1 &amp; 2 above.</li>
+      <li>Then: <b>approve</b>, <b>conditionally approve</b> (with conditions), or <b>reject</b> (with blocking reasons).</li>
+    </ul>
+  </div>
+
+  <h2>How I'll run it (for reference)</h2>
+  <p class="muted">After you approve, I drive it end-to-end. If this session drops, it can be resumed autonomously with one of these — <span class="warn">use exactly one; they don't combine.</span></p>
+
+  <div class="seed-rec">
+    <p class="label" style="margin:0.8rem 0 0.2rem">▸ Recommended — /loop (best for polling long CI)</p>
+    <pre><code>/loop 10m Drive implementations-plan/stable-release-0.26.0/plan.md to a shipped v0.26.0. Never idle. Each firing: read plan.md + lessons/ (authoritative state), git fetch, gh pr list --base main, gh run list. Execute the next unfinished phase. Waiting on CI is fine (gh pr checks/gh run watch up to ~45m); a red check is a flake (re-run it) or real breakage (STOP + surface) — never weaken a gate. The three merges are all merge-commits, never squash; before the promote merge verify origin/dev == RELEASE_SHA; after each, verify the merge has 2 parents. Each of the three PRs runs full CI incl network-e2e — wait for all 3 checks green. Phase green = its validation gate passes → mark it, log lessons, advance. HARD STOPS: no marketplace publish, no force-push, no weakened check. Done = all phases done + release shows 3 assets + isPrerelease=false + sites fresh by SHA → wrap up and stop.</code></pre>
+  </div>
+
+  <div class="seed-alt">
+    <p class="label" style="margin:1.2rem 0 0.2rem">Alternative — /goal (completion is observable)</p>
+    <pre><code>/goal All phases done in implementations-plan/stable-release-0.26.0/plan.md, each backed by its validation gate passing in the transcript; the promote PR, the release 0.26.0 PR, and the sync main→dev PR all merged as merge-commits with 2 parents; gh release view v0.26.0 shows both extension zips + SHASUMS256.txt, isPrerelease=false, and a real changelog body; tag SHA == Release-PR merge SHA; nulo.sh + faucet.nulo.sh fresh by release SHA. No required check weakened; no marketplace publish; no force-push; promote merged only while origin/dev == the pinned RELEASE_SHA.</code></pre>
+  </div>
+
+  <div class="foot">
+    <p>Full technical plan, security analysis, assumptions, and the codex audit trail live in <code>implementations-plan/stable-release-0.26.0/plan.md</code> (with <code>recon.md</code> and <code>audit-codex.md</code> alongside it) in the repo.</p>
+  </div>
+</div>

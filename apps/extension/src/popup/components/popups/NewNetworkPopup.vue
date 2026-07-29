@@ -1,6 +1,7 @@
 <script setup>
 /** Utils */
 import { managers } from "@/utils/core"
+import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -65,14 +66,40 @@ const isAvailableToCreateNetwork = computed(() => {
 const isCreating = ref(false)
 const handleCreateNetwork = async () => {
 	if (!isAvailableToCreateNetwork.value) return
+	// Creating a network ACTIVATES it, so it moves the scope a send is building
+	// against. Checked up front to avoid creating one we then refuse to switch
+	// to, and again at the switch itself — a send can start during the create.
+	if (appStore.hasInFlightSend) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 
 	try {
 		isCreating.value = true
 		const network = await managers.network.addNetwork(nameTerm.value, urlTerm.value)
 		isCreating.value = false
 
-		appStore.network = network
-		await managers.network.setActiveNetwork(network.id)
+		// Guard first, persist second: the guard admits (and moves the in-memory
+		// scope) before the service write, so a refusal leaves the durable active
+		// network untouched — the network is created but NOT activated.
+		const result = await activateNetworkGuarded(
+			appStore,
+			(id) => managers.network.setActiveNetwork(id),
+			() => managers.network.getActiveNetwork(),
+			network,
+		)
+		if (result !== "activated") {
+			if (result !== "stale") {
+				const label =
+					result === "blocked"
+						? "Network added. Finish or cancel your pending transaction to switch to it"
+						: "Network added, but the switch didn't confirm — reopen the popup to verify"
+				openToast({ label, icon: result === "blocked" ? "info" : "warning" }, 4_000)
+			}
+			appStore.networks = await managers.network.getNetworks()
+			emit("onClose")
+			return
+		}
 		appStore.networks = await managers.network.getNetworks()
 
 		emit("onClose")

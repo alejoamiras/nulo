@@ -13,6 +13,7 @@
  */
 
 import { beforeEach, describe, expect, test } from "vitest"
+import { accountRowId } from "@/wallet/services/account/spec"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection, type IService } from "@/wallet/base"
@@ -394,8 +395,10 @@ describe("cross-profile isolation (standing gate)", () => {
 			services.add(txService)
 			await services.start()
 			// Seed AFTER start() so init's pending-scan doesn't ingest the fixtures.
-			await seedRow(api, "nulo:core:accounts", A1, mkAccount(A1, p1.id))
-			await seedRow(api, "nulo:core:accounts", A2, mkAccount(A2, p2.id))
+			// Account rows live under their composite id; a row seeded at the bare
+			// address is ignored as a stale-shaped leftover.
+			await seedRow(api, "nulo:core:accounts", accountRowId(p1.id, 1, A1), mkAccount(A1, p1.id))
+			await seedRow(api, "nulo:core:accounts", accountRowId(p2.id, 1, A2), mkAccount(A2, p2.id))
 			await seedRow(api, "nulo:core:txs", "h1", mkTx("h1", A1))
 			await seedRow(api, "nulo:core:txs", "h2", mkTx("h2", A2))
 		})

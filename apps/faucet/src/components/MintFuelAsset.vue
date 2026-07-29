@@ -29,7 +29,7 @@ const status = computed(() => {
 
 function onClick() {
 	if (state.value === "connect") return void l1.connect()
-	if (state.value === "switch") return void l1.switchToSepolia()
+	if (state.value === "switch") return void l1.switchL1Network()
 	void feeAsset.mint()
 }
 </script>

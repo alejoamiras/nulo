@@ -154,3 +154,39 @@ export function hashBridgeWitness(w: BridgeWitness): Hex {
 		),
 	)
 }
+
+/** Stages of the one-time Permit2 approval, surfaced to UIs/smokes via `onStatus`. */
+export type Permit2ApprovalStatus = "sufficient" | "approving" | "waiting" | "approved"
+
+/**
+ * The ONE Permit2 approval state machine — used by the app's deposit/fuel legs AND the candidate
+ * smokes, so what the smokes rehearse is exactly what users run (codex bug-bash r1 HIGH-3). Sequence:
+ * read allowance → short-circuit when sufficient → approve(Permit2, max) → wait receipt (revert =
+ * throw) → RE-READ the allowance (belt+braces: a "successful" approve against the wrong token/spender
+ * wiring still fails closed here) → done. Callers inject the transport (viem app clients, script
+ * clients, jsdom fakes) via the three callbacks.
+ */
+export async function ensurePermit2Allowance(deps: {
+	allowance: () => Promise<bigint>
+	approveMax: () => Promise<Hex>
+	waitReceipt: (txHash: Hex) => Promise<{ status?: string }>
+	needed: bigint
+	onStatus?: (status: Permit2ApprovalStatus, txHash?: Hex) => void
+}): Promise<{ approved: boolean; txHash?: Hex }> {
+	if ((await deps.allowance()) >= deps.needed) {
+		deps.onStatus?.("sufficient")
+		return { approved: false }
+	}
+	deps.onStatus?.("approving")
+	const txHash = await deps.approveMax()
+	deps.onStatus?.("waiting", txHash)
+	const receipt = await deps.waitReceipt(txHash)
+	if (receipt.status !== undefined && receipt.status !== "success") {
+		throw new Error(`Permit2 approval reverted (${txHash}) — token refuses the approve; cannot bridge`)
+	}
+	if ((await deps.allowance()) < deps.needed) {
+		throw new Error(`Permit2 allowance still insufficient after approval ${txHash} — wrong token/spender wiring; STOP`)
+	}
+	deps.onStatus?.("approved", txHash)
+	return { approved: true, txHash }
+}

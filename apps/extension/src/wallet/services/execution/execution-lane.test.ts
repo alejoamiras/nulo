@@ -184,6 +184,43 @@ describe("ExecutionLane.acquireSlot", () => {
 	})
 })
 
+describe("ExecutionLane.beginJournal fence threading", () => {
+	test("with a fence: uses the AUTHORIZATION-time profileId+epoch, never re-reads the active profile", async () => {
+		// After the FIFO wait the active profile can be a successor that reused
+		// the deleted profile's id — re-capturing here would file the stale
+		// operation into the wrong incarnation.
+		const createOperation = vi.fn(async (input: unknown) => ({ id: "op-1", ...(input as object) }) as never)
+		const { lane, deps } = makeLane({
+			operationJournal: { createOperation } as never,
+			getActiveProfile: vi.fn(async () => ({ id: "p2-successor" }) as never),
+			captureProfileEpoch: vi.fn(() => 99),
+		})
+
+		const id = await lane.beginJournal("net-1", "0xacct", { type: 1, name: "dapp" } as never, undefined, {
+			profileId: "p1",
+			epoch: 0,
+		})
+
+		expect(id).toBe("op-1")
+		expect(createOperation).toHaveBeenCalledWith(expect.objectContaining({ profileId: "p1", profileEpoch: 0 }))
+		expect(deps.getActiveProfile).not.toHaveBeenCalled()
+		expect(deps.captureProfileEpoch).not.toHaveBeenCalled()
+	})
+
+	test("without a fence: falls back to the active profile + a fresh epoch capture", async () => {
+		const createOperation = vi.fn(async (input: unknown) => ({ id: "op-2", ...(input as object) }) as never)
+		const { lane } = makeLane({
+			operationJournal: { createOperation } as never,
+			captureProfileEpoch: vi.fn(() => 3),
+		})
+
+		const id = await lane.beginJournal("net-1", "0xacct", { type: 1, name: "dapp" } as never)
+
+		expect(id).toBe("op-2")
+		expect(createOperation).toHaveBeenCalledWith(expect.objectContaining({ profileId: "p1", profileEpoch: 3 }))
+	})
+})
+
 describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole principal)", () => {
 	function makeOwnershipLane(opts: { activeProfile?: string; recordProfile?: string }) {
 		const transitions: unknown[][] = []

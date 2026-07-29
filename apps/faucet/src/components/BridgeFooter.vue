@@ -3,8 +3,20 @@
 import { computed } from "vue"
 
 /** Utils */
-import { BRIDGE, BRIDGE_FUEL, BRIDGE_PROXY, BRIDGE_TOKEN, BRIDGE_TOKEN_SYMBOL, L1_PORTAL, L1_USDC } from "@/contracts/bridge-deployments"
+import {
+	BRIDGE,
+	BRIDGE_FUEL,
+	BRIDGE_PROXY,
+	BRIDGE_TOKEN,
+	BRIDGE_TOKEN_DECIMALS,
+	BRIDGE_TOKEN_SYMBOL,
+	L1_PORTAL,
+	L1_USDC,
+} from "@/contracts/bridge-deployments"
 import { etherscanAddressUrl, explorerAddressUrl } from "@/lib/explorer"
+import { IS_MAINNET, NETWORK } from "@/lib/network"
+
+const tagline = `${IS_MAINNET ? "Real funds — keep it small" : "Testnet only"} · 1:1 ${NETWORK.viemChain.name} ↔ Aztec · ${BRIDGE_TOKEN_DECIMALS} decimals · Public or private claims`
 
 const links = computed(() => ({
 	l1Token: etherscanAddressUrl(L1_USDC),
@@ -19,7 +31,7 @@ const links = computed(() => ({
 <template>
 	<footer class="footer">
 		<p class="contracts">
-			<span class="label">Sepolia:</span>
+			<span class="label">{{ NETWORK.viemChain.name }}:</span>
 			<a v-if="links.l1Token" :href="links.l1Token" target="_blank" rel="noopener noreferrer">{{ BRIDGE_TOKEN_SYMBOL }}</a>
 			<span v-else>{{ BRIDGE_TOKEN_SYMBOL }}</span>
 			<span class="sep">·</span>
@@ -40,7 +52,7 @@ const links = computed(() => ({
 			<a v-if="links.proxy" :href="links.proxy" target="_blank" rel="noopener noreferrer">Minter</a>
 			<span v-else>Minter</span>
 		</p>
-		<p class="tagline">Testnet only · 1:1 Sepolia ↔ Aztec · 18 decimals · Public or private claims</p>
+		<p class="tagline">{{ tagline }}</p>
 	</footer>
 </template>
 

@@ -97,6 +97,24 @@ export type TxGasDetails = {
 export type Tx = {
 	/** Chain id. */
 	chainId: number
+	/**
+	 * Owning profile. Optional only because rows written before the activity
+	 * scope existed don't carry it; every new row does. Without it, two profiles
+	 * that derive the same address on one chain are indistinguishable at the
+	 * history level.
+	 */
+	profileId?: string
+	/** Owning network row id (not the chain id — a profile can hold several networks on one chain). */
+	networkId?: string
+	/**
+	 * Set when this row could not be attributed to a profile at deletion time.
+	 *
+	 * A row written before scope stamping names no profile, so when two profiles
+	 * shared its address there was no way to tell whose it was. Deleting one of
+	 * them would otherwise leave the survivor as the only owner, and the row
+	 * would silently become theirs. Marked rows are never attributed or polled.
+	 */
+	ambiguous?: boolean
 	/** Sender address. */
 	account: string
 	/** Nonce. */
@@ -155,6 +173,9 @@ const tolerantObject = (v: unknown) => typeof v === "object" && v !== null
  *  `origin` is a wallet-bridge union; results/gas are render-only). */
 export const TxSchema: z.ZodType<Tx> = z.object({
 	chainId: z.number(),
+	profileId: z.string().optional(),
+	networkId: z.string().optional(),
+	ambiguous: z.boolean().optional(),
 	account: z.string(),
 	nonce: z.string(),
 	// AccountFeePaymentMethodOptions is a NUMERIC enum in @aztec/entrypoints —

@@ -4,6 +4,7 @@ import { assetKindOf, type DepositJournalRecord } from "@nulo/bridge-core"
 import { Button } from "@nulo/design"
 import { computed, onBeforeUnmount, ref, watch } from "vue"
 import { FUEL_MIN_FJ } from "@/contracts/bridge-deployments"
+import { L1_CHAIN_LABEL, NETWORK } from "@/lib/network"
 
 /** Components */
 import BridgeReceipt, { type ReceiptSnapshot } from "./BridgeReceipt.vue"
@@ -57,7 +58,7 @@ const amountUnits = computed(() => parseAmount(amount.value || "0", FUEL_ASSET_D
 const validationError = computed(() => {
 	if (!amount.value || amountUnits.value === 0n) return null
 	if (feeAsset.balance.value !== null && amountUnits.value > feeAsset.balance.value)
-		return "Amount exceeds your Sepolia fee-asset balance."
+		return `Amount exceeds your ${NETWORK.viemChain.name} fee-asset balance.`
 	if (FUEL_MIN_FJ !== undefined && amountUnits.value < FUEL_MIN_FJ) {
 		return `Minimum is ${formatBigInt(FUEL_MIN_FJ, FUEL_ASSET_DECIMALS)}. The gas must cover its own claim.`
 	}
@@ -166,7 +167,7 @@ function fmt(b: bigint | null): string {
 		<template v-else>
 			<div class="panel">
 				<span class="role">FROM</span>
-				<span class="chip">ETHEREUM · SEPOLIA</span>
+				<span class="chip">{{ L1_CHAIN_LABEL }}</span>
 				<span class="balance" :data-testid="TESTIDS.fuelBalanceL1">Balance: {{ fmt(feeAsset.balance.value) }} $AZTEC</span>
 			</div>
 

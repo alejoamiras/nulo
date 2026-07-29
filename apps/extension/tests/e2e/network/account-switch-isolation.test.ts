@@ -371,10 +371,20 @@ test.skipIf(!hasConfig)(
 		//    genuine containment (not "the card never rendered" for some other
 		//    reason). It also brackets the positive control at step 8.
 		await gotoHistory(page, accountA)
-		await page.waitForSelector('[data-testid="tx-incoming-card"]', { visible: true, timeout: 30_000 })
-		await page.waitForSelector('[data-testid="tx-card"]', { visible: true, timeout: 30_000 })
-		expect((await page.$$('[data-testid="tx-incoming-card"]')).length).toBeGreaterThanOrEqual(1)
-		expect((await page.$$('[data-testid="tx-card"]')).length).toBeGreaterThanOrEqual(1)
+		// POLLED, not instant: the incoming list re-renders by array replacement
+		// on every refresh, so a raw count read can land inside a sub-frame child
+		// swap and see 0 while the DOM is stably populated 250ms on either side
+		// (instrumented 2026-07-27: records + both card counts stable across 15s
+		// of samples while an instant $$ read 0 — see the siloing-hardening
+		// lessons). A single poll asserting BOTH counts covers the same baseline;
+		// the containment assertions below stay instant — they assert ZERO, and
+		// the armed MutationObserver catches any flash a count read could miss.
+		await page.waitForFunction(
+			() =>
+				document.querySelectorAll('[data-testid="tx-incoming-card"]').length >= 1 &&
+				document.querySelectorAll('[data-testid="tx-card"]').length >= 1,
+			{ timeout: 30_000 },
+		)
 		console.log("✓ Baseline: A's incoming + settled cards render on A's feed")
 
 		// ── (5) Arm a MutationObserver (plan §7) that records any incoming/awaiting
@@ -427,10 +437,14 @@ test.skipIf(!hasConfig)(
 		//    Proves we suppressed a leak, not the feature itself.
 		await switchAccountByAddress(page, accountA)
 		await waitForFeedScope(page, accountA)
-		await page.waitForSelector('[data-testid="tx-incoming-card"]', { visible: true, timeout: 30_000 })
-		await page.waitForSelector('[data-testid="tx-card"]', { visible: true, timeout: 30_000 })
-		expect((await page.$$('[data-testid="tx-incoming-card"]')).length).toBeGreaterThanOrEqual(1)
-		expect((await page.$$('[data-testid="tx-card"]')).length).toBeGreaterThanOrEqual(1)
+		// Polled for the same reason as the step-4 baseline: positive counts must
+		// tolerate the list's array-replacement re-render windows.
+		await page.waitForFunction(
+			() =>
+				document.querySelectorAll('[data-testid="tx-incoming-card"]').length >= 1 &&
+				document.querySelectorAll('[data-testid="tx-card"]').length >= 1,
+			{ timeout: 30_000 },
+		)
 		console.log("✓ Positive control: A's cards reappear on switch-back")
 
 		// ── (8) No unexpected console / page errors across the whole flow.

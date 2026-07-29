@@ -32,6 +32,27 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 
 export * from "./spec"
 
+/**
+ * DROPPED-receipt debounce. The node answers DROPPED for any tx hash it does
+ * not know — including a just-submitted tx that hasn't reached the queried
+ * replica yet, so behind a load-balanced RPC the submitting `sendTx` and the
+ * receipt poll can hit different nodes and a healthy tx transiently reads as
+ * dropped (aztec.js guards its own `waitForTx` against exactly this via
+ * `ignoreDroppedReceiptsFor`). A DROPPED answer is therefore only accepted as
+ * terminal once the tx is older than the grace window AND was seen dropped on
+ * enough consecutive polls. Observations made DURING the grace window count
+ * toward the streak on purpose: a tx that read dropped consistently for the
+ * whole window finalizes right at the boundary — the sustained window itself
+ * is the evidence, not three post-window ticks.
+ */
+export const DROPPED_GRACE_MS = 60_000
+export const DROPPED_CONFIRMATIONS = 3
+/** After a tx IS marked Dropped, keep re-checking it at a slow cadence for this
+ *  long — a late mine (the receipt turning up mined after all) resurrects the
+ *  row instead of leaving a confirmed tx labeled failed forever. */
+export const DROPPED_RESURRECTION_WINDOW_MS = 30 * 60_000
+export const DROPPED_RECHECK_INTERVAL_MS = 15_000
+
 export class TransactionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
 	protected readonly rpcMethods = defineRpcMethods<Methods>()("getTransactions", "getTransaction")
 	public static name = TRANSACTION_SERVICE_NAME
@@ -42,6 +63,15 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private readonly txs: EntityStorage<Tx>
 	private readonly pending = new Map<string, Tx>()
+	// Consecutive-DROPPED counter per pending hash. In-memory on purpose: a SW
+	// restart resets the streak, which only makes the debounce MORE conservative.
+	private readonly droppedStreaks = new Map<string, number>()
+	// Resurrection watch: txs marked Dropped THIS session, re-checked at a slow
+	// cadence until the window expires. Deliberately never re-armed from storage
+	// on init — same reasoning as D16 in `restore`: a restored/aged row's
+	// `submittedEndpointUrl` must not get the sync worker dialing it again.
+	private readonly droppedWatch = new Map<string, Tx>()
+	private readonly droppedNextCheckAt = new Map<string, number>()
 	// Serializes restore's read-modify-write (contains → set) so two concurrent
 	// imports can't both pass the create-only check for the same hash.
 	private readonly lock = new Lock()
@@ -80,7 +110,15 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// fenced (see `updateTx`) so a mid-poll tx can't resurrect (finding D).
 		this.accountService.onAccountDeleted.add(this.onAccountDeleted)
 
-		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending)) {
+		// Only Pending rows are re-armed. Dropped rows are NOT added to the
+		// resurrection watch across restarts: rows can enter storage via backup
+		// restore, and their `submittedEndpointUrl` is backup-controlled — the
+		// worker must never dial it for a row this session didn't transition
+		// itself (D16 parity; see `restore`).
+		for (const tx of (await this.txs.getValues()).filter((x) => x.status === TxStatus.Pending && !x.ambiguous)) {
+			// `ambiguous` rows are excluded here too, not just when they are marked:
+			// otherwise a restart puts them straight back into the poller, against
+			// whichever profile is now active.
 			this.pending.set(tx.hash, tx)
 		}
 
@@ -124,6 +162,10 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		estimatedFee?: string,
 		gasDetails?: TxGasDetails,
 		fence?: ExecutionFence,
+		/** Owning network row id. Together with the fence's profile this is the
+		 *  row's activity scope — without it, two profiles holding the same
+		 *  address on one chain are indistinguishable in history. */
+		networkId?: string,
 	): Promise<Tx> {
 		// Under the tx lock (codex blocker): serialize the dup-check + write against
 		// restore's create-only check + the coordinator's purge (finding D).
@@ -156,6 +198,8 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			const tx: Tx = {
 				origin,
 				chainId,
+				profileId: fence?.profileId,
+				networkId,
 				account,
 				calls,
 				nonce,
@@ -186,23 +230,75 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {
-		await this.purgeForAccounts([account.address])
+		await this.purgeForAccounts([account.address], account.profileId)
+	}
+
+	/**
+	 * Whether `profileId` is the only profile holding any of `addresses`.
+	 *
+	 * Decides the fate of rows written before transactions carried a profile:
+	 * with a single owner they are unambiguously this profile's, so deletion is
+	 * safe; with more than one they could belong to either, and removing them
+	 * would destroy the surviving profile's history.
+	 */
+	private async isSoleOwner(addresses: readonly string[], profileId: string): Promise<boolean> {
+		const owners = new Set<string>()
+		for (const address of addresses) {
+			for (const account of await this.accountService.getAccountsByAddress(address)) {
+				owners.add(account.profileId)
+			}
+		}
+		owners.delete(profileId)
+		return owners.size === 0
 	}
 
 	/** Awaited tx purge for a SET of accounts — called by the deletion coordinator
 	 *  with the tombstone's authoritative address snapshot (finding D). Runs under
 	 *  the tx lock; idempotent. `onAccountDeleted` delegates here so the single-
 	 *  account (deleteNetwork chain-purge) path shares one implementation. */
-	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
+	public async purgeForAccounts(addresses: readonly string[], profileId?: string): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
 		await this.lock.enter()
 		try {
-			const txs = (await this.txs.getValues()).filter((x) => set.has(x.account))
+			// Two profiles built from one mnemonic own the same address, so an
+			// address-only match deletes the OTHER profile's history too. When the
+			// caller knows whose rows these are, a scoped row must match that
+			// profile; a row that names no profile is only safe to remove when this
+			// is the address's sole owner, and is otherwise left alone.
+			const soleOwner = profileId !== undefined ? await this.isSoleOwner(addresses, profileId) : true
+			const all = await this.txs.getValues()
+			const txs = all.filter((x) => {
+				if (!set.has(x.account)) return false
+				if (profileId === undefined) return true
+				if (x.profileId !== undefined) return x.profileId === profileId
+				return soleOwner
+			})
+			// An unscoped row shared with another profile is neither deleted (that
+			// would destroy the survivor's history) nor left plain, since deleting
+			// this profile makes the survivor the only owner and the row would
+			// silently become theirs. Mark it instead, permanently.
+			if (profileId !== undefined && !soleOwner) {
+				for (const tx of all) {
+					if (!set.has(tx.account) || tx.profileId !== undefined || tx.ambiguous) continue
+					this.pending.delete(tx.hash)
+					// A marked row must also leave the dropped-resurrection state:
+					// leaving it in `droppedWatch` would keep polling it AND let a
+					// late-mine write (built from the pre-mark in-memory object)
+					// silently erase the `ambiguous` flag.
+					this.droppedStreaks.delete(tx.hash)
+					this.droppedWatch.delete(tx.hash)
+					this.droppedNextCheckAt.delete(tx.hash)
+					await this.txs.set(tx.hash, { ...tx, ambiguous: true })
+				}
+			}
 			await purgeRows(
 				txs,
 				(tx) => {
 					this.pending.delete(tx.hash)
+					this.droppedStreaks.delete(tx.hash)
+					this.droppedWatch.delete(tx.hash)
+					this.droppedNextCheckAt.delete(tx.hash)
 					return this.txs.delete(tx.hash)
 				},
 				(tx) => this.emit("onTransactionDeleted", tx),
@@ -214,13 +310,14 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 	private async runWorker() {
 		while (true) {
-			if (this.pending.size) {
+			const due = [...this.pending.values(), ...this.collectDroppedDue()]
+			if (due.length) {
 				const activeProfile = await this.profileService.getActiveProfile()
 				if (activeProfile) {
 					try {
-						this.logDebug(`Sync ${this.pending.size} transactions...`)
+						this.logDebug(`Sync ${due.length} transactions...`)
 						const start = Date.now()
-						await Promise.allSettled([...this.pending.values()].map((x) => this.updateTx(x)))
+						await Promise.allSettled(due.map((x) => this.updateTx(x)))
 						const end = Date.now()
 						this.logDebug(`Transactions synced in ${end - start}ms`)
 					} catch (error) {
@@ -230,6 +327,25 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			}
 			await sleep(1000)
 		}
+	}
+
+	/** Dropped txs due for a resurrection re-check this tick; watch entries past
+	 *  the window are evicted (the row simply stays Dropped). */
+	private collectDroppedDue(): Tx[] {
+		const now = Date.now()
+		const due: Tx[] = []
+		for (const [hash, tx] of this.droppedWatch) {
+			if (now - tx.updatedAt > DROPPED_RESURRECTION_WINDOW_MS) {
+				this.droppedWatch.delete(hash)
+				this.droppedNextCheckAt.delete(hash)
+				continue
+			}
+			if ((this.droppedNextCheckAt.get(hash) ?? 0) <= now) {
+				this.droppedNextCheckAt.set(hash, now + DROPPED_RECHECK_INTERVAL_MS)
+				due.push(tx)
+			}
+		}
+		return due
 	}
 
 	private async updateTx(tx: Tx) {
@@ -261,6 +377,29 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		}
 		const status = this.getTxStatus(receipt.status)
 		const executionResult = this.getTxExecutionResult(receipt.executionResult)
+
+		// Debounce DROPPED for a still-pending tx: within the submission grace
+		// window, or below the consecutive-observation threshold, keep the row
+		// Pending and let the next tick re-check (see the constants' doc block —
+		// DROPPED also means "this replica has never seen the hash").
+		if (status === TxStatus.Dropped && tx.status === TxStatus.Pending) {
+			// No streak bookkeeping for a tx that is no longer the armed instance —
+			// an in-flight poll racing a purge would otherwise recreate the map
+			// entry the purge just cleaned.
+			if (this.pending.get(tx.hash) !== tx) return
+			const streak = (this.droppedStreaks.get(tx.hash) ?? 0) + 1
+			this.droppedStreaks.set(tx.hash, streak)
+			const ageMs = Date.now() - tx.createdAt
+			if (ageMs < DROPPED_GRACE_MS || streak < DROPPED_CONFIRMATIONS) {
+				this.logDebug(
+					`Tx ${tx.hash.slice(0, 8)} reported dropped (streak ${streak}, age ${Math.round(ageMs / 1000)}s) — keeping pending`,
+				)
+				return
+			}
+		} else {
+			this.droppedStreaks.delete(tx.hash)
+		}
+
 		if (status === tx.status && executionResult === tx.executionResult) {
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} still ${receipt.status}`)
 			return
@@ -270,11 +409,13 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// the tx lock: a concurrent profile-delete purge (`purgeForAccounts`, same
 		// lock) removes this tx from `this.pending` + storage. Without the guarded
 		// re-check, the worker's stale write would RESURRECT a deleted profile's tx
-		// (finding D — in-flight-write fencing). `pending.has` is the fence: the
-		// purge deletes the entry, so a purged tx is skipped here.
+		// (finding D — in-flight-write fencing). The fence is on OBJECT IDENTITY,
+		// not hash membership: after a purge, `addTransaction` may legitimately
+		// re-create the same hash as a NEW row (ABA) — a stale poll's `has(hash)`
+		// would pass and overwrite it, while `get(hash) !== tx` cannot.
 		await this.lock.enter()
 		try {
-			if (!this.pending.has(tx.hash)) return
+			if (this.pending.get(tx.hash) !== tx && this.droppedWatch.get(tx.hash) !== tx) return
 			tx.updatedAt = Date.now()
 			tx.status = status
 			tx.executionResult = executionResult
@@ -285,8 +426,21 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 			await this.txs.set(tx.hash, tx)
 			this.emit("onTransactionUpdated", tx)
-			if (tx.status !== TxStatus.Pending) {
+			// Map membership is canonical from the NEW status: Pending → polled
+			// every tick (this is how a watched-Dropped tx whose receipt reads
+			// pending again re-arms instead of stranding unpolled in neither map),
+			// Dropped → slow-cadence watch, mined → neither.
+			if (tx.status === TxStatus.Pending) {
+				this.pending.set(tx.hash, tx)
+			} else {
 				this.pending.delete(tx.hash)
+			}
+			if (tx.status === TxStatus.Dropped) {
+				this.droppedWatch.set(tx.hash, tx)
+				this.droppedNextCheckAt.set(tx.hash, Date.now() + DROPPED_RECHECK_INTERVAL_MS)
+			} else {
+				this.droppedWatch.delete(tx.hash)
+				this.droppedNextCheckAt.delete(tx.hash)
 			}
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
 		} finally {
@@ -341,7 +495,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		for (const n of networks) {
 			const accounts = await this.accountService.getAccounts(profile.id, n.chainId)
 			for (const acc of accounts) {
-				txs.push(...(await this.getTransactions(acc.address)))
+				for (const tx of await this.getTransactions(acc.address)) {
+					// The fetch is by address, which two same-seed profiles share, so a
+					// row naming another profile is not ours to export. A row that was
+					// marked unattributable is nobody's, and restore would hand it to
+					// whichever profile imported the backup.
+					if (tx.ambiguous) continue
+					if (tx.profileId !== undefined && tx.profileId !== profile.id) continue
+					if (tx.chainId !== n.chainId) continue
+					txs.push(tx)
+				}
 			}
 		}
 

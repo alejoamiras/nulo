@@ -40,6 +40,25 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
 		expectedSymbol: "cUSD",
 	},
+	{
+		chainId: CHAIN_IDS.MAINNET,
+		// Nulo's bridged Circle USDC — the L2 side of the tools.nulo.sh bridge (1:1 vs L1 USDC).
+		contract: "0x03bd1289e403c74cc919b2ead9f39e38e5f9ae044e56348bfc218c0a160232b4",
+		// Live-captured 2026-07-27 from the Alpha node; original == current; same
+		// aztec-standards Token class as cUSD.
+		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
+		expectedSymbol: "USDC",
+	},
+	{
+		chainId: CHAIN_IDS.TESTNET,
+		// Testnet "Test USDC" — the L2 side of the tools bridge on Testnet (faucet-minted,
+		// permissionless; same address as apps/faucet/public/testnet-bridge.json).
+		contract: "0x1c81a6d581e065e82d4d3b969020e9d0f899b975ae844f6e4305031ff62be9ae",
+		// Live-captured 2026-07-28 from the Testnet node; original == current; same
+		// aztec-standards Token class as the mainnet tokens.
+		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
+		expectedSymbol: "USDC",
+	},
 ]
 
 export function seedsForChain(chainId: number): DefaultTokenSeed[] {

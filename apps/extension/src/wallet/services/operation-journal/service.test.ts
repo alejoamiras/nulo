@@ -393,6 +393,144 @@ describe("OperationJournalService", () => {
 		await expect(service.transitionOperation(rec.id, { stage: "simulating" })).rejects.toBeInstanceOf(IllegalTransitionError)
 	})
 
+	test("createOperation: refuses when the profile is absent (deleted or tombstoned) — profile-deletion fence", async () => {
+		// A creator that captured its profile BEFORE a deletion began must not
+		// persist durable dApp metadata for the erased profile afterward.
+		// `getProfiles` treats tombstoned profiles as absent, so one membership
+		// check covers deletion-in-progress and fully-deleted alike.
+		const profiles = [{ id: "profile-a" }]
+		const profileStub = {
+			name: "profile",
+			dependencies: [],
+			getProfiles: async () => profiles,
+			async start() {},
+		}
+		const collection = new ServiceCollection()
+		const svc = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		collection.add(svc)
+		collection.add(profileStub as never)
+		await collection.start()
+
+		// Live profile → create succeeds.
+		const rec = await svc.createOperation(VALID_INPUT)
+		expect(rec.profileId).toBe("profile-a")
+
+		// Profile erased → create refused, nothing persisted.
+		profiles.length = 0
+		await expect(svc.createOperation(VALID_INPUT)).rejects.toThrow(/does not exist/)
+		expect((await svc.getOperations({ profileId: "profile-a" })).length).toBe(1)
+	})
+
+	test("createOperation: refuses a stale profile epoch (deleted-and-reimported incarnation)", async () => {
+		// Same id, new incarnation: membership passes but the epoch advanced —
+		// the stale creator's write must be refused.
+		let epoch = 0
+		const profileStub = {
+			name: "profile",
+			dependencies: [],
+			getProfiles: async () => [{ id: "profile-a" }],
+			getDeletionState: () => ({ isCurrent: (_id: string, captured: number) => captured === epoch }),
+			async start() {},
+		}
+		const collection = new ServiceCollection()
+		const svc = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		collection.add(svc)
+		collection.add(profileStub as never)
+		await collection.start()
+
+		// Current epoch → allowed.
+		await svc.createOperation({ ...VALID_INPUT, profileEpoch: 0 })
+		// Deletion (and re-import) happened since capture → refused.
+		epoch = 1
+		await expect(svc.createOperation({ ...VALID_INPUT, profileEpoch: 0 })).rejects.toThrow(/deleted since/)
+		// A fresh capture against the new incarnation is fine.
+		await svc.createOperation({ ...VALID_INPUT, profileEpoch: 1 })
+	})
+
+	test("createOperation: refuses when the target network is deleted or mid-deletion", async () => {
+		const live = new Set(["net-live"])
+		const networkStub = {
+			name: "network",
+			dependencies: [],
+			registerChainPurgeSubscriber: () => undefined,
+			isNetworkLive: async (id: string) => live.has(id),
+			async start() {},
+		}
+		const collection = new ServiceCollection()
+		const svc = new OperationJournalService(new LoggerStore(new ConfigStore()), api)
+		collection.add(svc)
+		collection.add(networkStub as never)
+		await collection.start()
+
+		await svc.createOperation({ ...VALID_INPUT, networkId: "net-live" })
+		await expect(svc.createOperation({ ...VALID_INPUT, networkId: "net-gone" })).rejects.toThrow(/deleted/)
+	})
+
+	test("purgeForProfile: sweeps rows and leaves other profiles untouched", async () => {
+		const mine = await service.createOperation(VALID_INPUT)
+		const theirs = await service.createOperation({ ...VALID_INPUT, profileId: "profile-b" })
+		const seen = vi.fn()
+		service.onOperationDeleted.add(seen)
+
+		await service.purgeForProfile("profile-a")
+
+		expect(await service.getOperation(mine.id)).toBeFalsy()
+		expect((await service.getOperation(theirs.id))?.id).toBe(theirs.id)
+		expect(seen).toHaveBeenCalledTimes(1)
+	})
+
+	test("refileOperationScope: refuses when the row left the allowed stages (cancel-vs-re-file arbitration)", async () => {
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			initialStage: { stage: "queued" },
+		})
+		await service.transitionOperation(rec.id, { stage: "cancelled" })
+
+		const res = await service.refileOperationScope(rec.id, { networkId: "net2", accountAddress: "0xnew" }, ["queued", "pending"])
+
+		expect(res.outcome).toBe("stage")
+		// The cancelled row survives untouched — the cancel decision is preserved.
+		const after = await service.getOperation(rec.id)
+		expect(after?.progress.stage).toBe("cancelled")
+		expect(after?.accountAddress).toBeUndefined()
+	})
+
+	test("refileOperationScope: moves a pre-claim row's scope IN PLACE — same id, updated fields, Updated emit", async () => {
+		const updated = vi.fn()
+		const deleted = vi.fn()
+		service.onOperationUpdated.add(updated)
+		service.onOperationDeleted.add(deleted)
+		const rec = await service.createOperation({
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "session-X",
+			accountAddress: "0xold",
+			networkId: "net1",
+			initialStage: { stage: "queued" },
+		})
+
+		const res = await service.refileOperationScope(rec.id, { networkId: "net2", accountAddress: "0xnew" }, ["queued", "pending"])
+
+		expect(res.outcome).toBe("refiled")
+		const after = await service.getOperation(rec.id)
+		expect(after?.id).toBe(rec.id)
+		expect(after?.networkId).toBe("net2")
+		expect(after?.accountAddress).toBe("0xnew")
+		expect(after?.progress.stage).toBe("queued")
+		// A move, not a delete+create: cancellation identity survives.
+		expect(updated).toHaveBeenCalledTimes(1)
+		expect(deleted).not.toHaveBeenCalled()
+
+		// Missing row → "missing" (caller falls back to create-fresh).
+		expect((await service.refileOperationScope("no-such-id", { networkId: "n", accountAddress: "a" }, ["queued"])).outcome).toBe(
+			"missing",
+		)
+	})
+
 	test("transitionOperation: queued → cancelled is legal (user-cancel-while-queued)", async () => {
 		const rec = await service.createOperation({
 			...VALID_INPUT,

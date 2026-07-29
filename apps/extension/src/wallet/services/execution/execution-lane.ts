@@ -34,6 +34,7 @@ import type { OperationJournalService } from "@/wallet/services/operation-journa
 import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { Network } from "@/wallet/services/network/service"
 import type { ProfileInfo } from "@/wallet/services/profile/service"
+import type { ExecutionFence } from "@/wallet/services/profile/profile-deletion-state"
 import { claimOrCreateDappExecuteJournal as claimOrCreateDappExecuteJournalImpl } from "./claim-helper"
 import {
 	type AcquireCaps,
@@ -46,6 +47,10 @@ import {
 export interface ExecutionLaneDeps {
 	operationJournal: OperationJournalService
 	getActiveProfile(): Promise<ProfileInfo | undefined>
+	/** Deletion epoch for a profile at capture time — threaded into the journal
+	 *  create fence so a profile deleted (or deleted-and-reimported) between
+	 *  capture and persist refuses the row. Optional: absent means unfenced. */
+	captureProfileEpoch?(profileId: string): number
 	getNetwork(networkId: string): Promise<Network>
 	logDebug(msg: string, ...rest: unknown[]): void
 	logInfo(msg: string, ...rest: unknown[]): void
@@ -101,15 +106,22 @@ export class ExecutionLane {
 		accountAddress: string,
 		origin: LocalTxOrigin,
 		calls?: { method?: string }[],
+		fence?: ExecutionFence,
 	): Promise<string | undefined> {
 		try {
-			const profile = await this.deps.getActiveProfile()
-			if (!profile) return undefined
+			// The fence is the AUTHORIZATION-time (profileId, epoch) capture. When
+			// present it is authoritative — re-reading the active profile (or
+			// re-capturing the epoch) here, after the FIFO wait, would resolve a
+			// successor profile that reused the deleted one's id and file the
+			// stale operation into the wrong incarnation.
+			const profileId = fence?.profileId ?? (await this.deps.getActiveProfile())?.id
+			if (!profileId) return undefined
 			const primaryMethod = pickPrimaryMethod(calls)
 			const op = await this.deps.operationJournal.createOperation({
 				kind: "dapp_execute",
 				origin: "dapp",
-				profileId: profile.id,
+				profileId,
+				profileEpoch: fence?.epoch ?? this.deps.captureProfileEpoch?.(profileId),
 				accountAddress,
 				networkId,
 				title: primaryMethod ?? "Transaction",
@@ -317,19 +329,33 @@ export class ExecutionLane {
 		calls: { method?: string }[] | undefined,
 		hooks: ExecutionHooks | undefined,
 		reuseController?: AbortController,
+		fence?: ExecutionFence,
 	): Promise<{ journalId: string | undefined; controller: AbortController | undefined }> {
 		return claimOrCreateDappExecuteJournalImpl(
 			{
 				operationJournal: this.deps.operationJournal,
 				activeControllers: this.activeControllers,
-				createFreshRecord: (n, a, o, c) => this.beginJournal(n, a, o, c),
+				createFreshRecord: (n, a, o, c) => this.beginJournal(n, a, o, c, fence),
 				logger: {
 					debug: (msg) => this.deps.logDebug(msg),
 					info: (msg) => this.deps.logInfo(msg),
 					error: (msg, raw) => this.deps.logError(msg, raw),
 				},
 			},
-			{ networkId, accountAddress, origin, calls, queuedJournalId: hooks?.queuedJournalId, reuseController },
+			{
+				networkId,
+				accountAddress,
+				// The profile execution was AUTHORIZED under (the fence capture).
+				// Preferred over a fresh active-profile read: after the FIFO wait
+				// the active profile can be a successor that reused the same id.
+				// Without a profileId the claim's scope check cannot see a profile
+				// mismatch at all.
+				profileId: fence?.profileId ?? (await this.deps.getActiveProfile())?.id,
+				origin,
+				calls,
+				queuedJournalId: hooks?.queuedJournalId,
+				reuseController,
+			},
 		)
 	}
 

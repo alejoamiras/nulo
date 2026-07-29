@@ -1,11 +1,14 @@
 import type { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
+import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import type { Wallet } from "@aztec/aztec.js/wallet"
 import { DripperContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js"
+import { predictedWorstMinFees } from "@nulo/bridge-core"
 import { reactive, ref } from "vue"
 import { DRIPPER } from "@/contracts/deployments"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
+import { IS_MAINNET, NETWORK } from "@/lib/network"
 import type { FaucetToken, TokenSymbol } from "@/constants/tokens"
 import { type NormalizedError, normalizeError } from "@/lib/errors"
 
@@ -59,19 +62,41 @@ async function drip(
 		if (typeof method !== "function") {
 			throw new Error(`Dripper missing method ${fnName}`)
 		}
-		const fpc = await getSponsoredFpcInstance()
-		// Pass the fee through `.request({ fee })` so aztec.js merges the
-		// SponsoredFPC's `sponsor_unconditionally()` call into exec.calls
-		// AND sets exec.feePayer. Tagging feePayer manually leaves the
-		// public setup phase with no sponsor call, which the sequencer
-		// rejects as "Setup function not on allow list".
+		// TESTNET: pass the fee through `.request({ fee })` so aztec.js merges the SponsoredFPC's
+		// `sponsor_unconditionally()` call into exec.calls AND sets exec.feePayer (tagging feePayer
+		// manually leaves the public setup phase with no sponsor call — "Setup function not on allow
+		// list"). MAINNET has no sponsor: pass NO fee override so the connected wallet applies the
+		// user's own fee method (the extension defaults Alpha to Private Fee Juice).
 		const interaction = method(tokenAddress, token.onchainAmount)
-		const exec = await interaction.request({
-			fee: { paymentMethod: new SponsoredFeePaymentMethod(fpc.address) },
-		})
+		const exec = IS_MAINNET
+			? await interaction.request({})
+			: await interaction.request({
+					fee: { paymentMethod: new SponsoredFeePaymentMethod((await getSponsoredFpcInstance()).address) },
+				})
 
+		// EXPLICIT padded maxFeesPerGas is REQUIRED on the sponsored path, and it must ride in the
+		// SEND OPTIONS — the wallet reads `opts.fee.gasSettings` (`processAztecJsPayload`), never
+		// the request payload. Without it the wallet caps an embedded-fee tx at
+		// `getCurrentMinFees()` — zero headroom, deliberate for budget-asserting claim flows (see
+		// the wallet's `applyEmbeddedFpcGasCap`). The base fee moves every block, so a
+		// zero-headroom tx loses the race whenever fees tick up during the ~1-2 min prove window
+		// and the pool silently drops it ("Tx dropped by P2P node"). `sponsor_unconditionally()`
+		// asserts no budget and the sponsor pays ACTUAL gas, not the max — headroom here is free.
+		// predicted-worst covers congestion drift; ×1.5 covers the prove window on top.
+		//
+		// Best-effort: a predict/node hiccup degrades to the wallet's zero-headroom default (the
+		// pre-padding behavior, fine while fees are flat) instead of failing the drip outright.
+		let paddedMaxFees: unknown
+		if (!IS_MAINNET) {
+			try {
+				paddedMaxFees = (await predictedWorstMinFees(createAztecNodeClient(NETWORK.nodeUrl))).mul(1.5)
+			} catch (feeErr) {
+				console.warn("[drip] fee padding unavailable, sending with wallet defaults:", feeErr)
+			}
+		}
+		const sendOpts = paddedMaxFees ? { from: account, fee: { gasSettings: { maxFeesPerGas: paddedMaxFees } } } : { from: account }
 		// biome-ignore lint/suspicious/noExplicitAny: SendOptions structural cast for SDK signature variance across versions
-		const tx = await (wallet as any).sendTx(exec, { from: account } as any)
+		const tx = await (wallet as any).sendTx(exec, sendOpts as any)
 		const txHash = extractTxHash(tx)
 		const result: DripResult = { kind: "txHash", value: txHash }
 		last[key] = result

@@ -20,7 +20,7 @@ import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
-import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
+import { TRANSACTION_SERVICE_NAME, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
 import { svc } from "../composition-harness"
 import { AuthRegistryService, MAX_TRACKED_AUTHWITS_PER_ACCOUNT } from "./service"
 import type { Authwit } from "./spec"
@@ -87,6 +87,51 @@ describe("AuthRegistryService — pending/reconcile/cap (Phase 5)", () => {
 		await expect(svc.assertWithinCap(A, ["0xnew1", "0xnew2"])).rejects.toThrow(/exceed the .* tracked public-authwit limit/)
 		// 255 existing + 1 unique-new ("0xe0" is already tracked → deduped) = 256 ≤ 256 ⇒ ok.
 		await expect(svc.assertWithinCap(A, ["0xe0", "0xnew1"])).resolves.toBeUndefined()
+	})
+})
+
+describe("AuthRegistryService.reconcileFromTx — dropped is non-destructive", () => {
+	let service: AuthRegistryService
+	let txUpdated: EventHandler<unknown>
+
+	beforeEach(async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		txUpdated = new EventHandler()
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, {}))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: txUpdated }))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
+		services.add(service)
+		await services.start()
+		await service.recordPendingAuthwits(A, [{ hash: "0xh1", content }], "0xtx1")
+	})
+
+	// reconcileFromTx is fired void'd off the event; give its storage ops a beat.
+	const emitTx = async (tx: Record<string, unknown>) => {
+		txUpdated.invoke(tx)
+		await new Promise((r) => setTimeout(r, 10))
+	}
+
+	test("a Dropped tx does NOT remove pending rows — dropped is reversible (resurrection); sync reconciles", async () => {
+		await emitTx({ hash: "0xtx1", status: TxStatus.Dropped, updatedAt: Date.now() })
+		expect(await service.getAuthwits(A)).toHaveLength(1)
+	})
+
+	test("a settled reverted tx removes the pending row (genuinely terminal)", async () => {
+		await emitTx({ hash: "0xtx1", status: TxStatus.Proven, executionResult: TxExecutionResult.AppLogicReverted, updatedAt: Date.now() })
+		expect(await service.getAuthwits(A)).toHaveLength(0)
+	})
+
+	test("Proven + Success confirms the pending row (kept, no longer pending)", async () => {
+		await emitTx({ hash: "0xtx1", status: TxStatus.Proven, executionResult: TxExecutionResult.Success, updatedAt: Date.now() })
+		const rows = await service.getAuthwits(A)
+		expect(rows).toHaveLength(1)
+		expect(rows[0].pending).toBeFalsy()
 	})
 })
 

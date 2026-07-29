@@ -35,6 +35,7 @@ import { privateKeyToAccount } from "viem/accounts"
 import { bridgeProxyArtifact, tokenBridgeArtifact } from "../src/artifacts"
 import { feeJuiceAddress, publicFeeJuicePayment } from "../src/fee-juice"
 import { runSwapBridge } from "../src/flows"
+import { ensurePermit2Allowance } from "../src/l1"
 import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
 import { buildFuelRoute } from "../src/route"
 
@@ -48,6 +49,9 @@ if (configArg === -1) throw new Error("pass --config <candidate manifest path>")
 const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("candidate manifest has no l1.fuel")
+const core = fuel.core
+const swap = fuel.swap
+if (!swap) throw new Error("candidate manifest has no l1.fuel.swap — this swap smoke needs the swap stack")
 
 const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
@@ -61,8 +65,13 @@ const sepolia = defineChain({
 
 const evmAbi = (name: string): Abi => JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8")).abi as Abi
 
-const TOTAL = 10n * 10n ** 18n
-const FUEL_SLICE = 25n * 10n ** 16n // 0.25 AZLO -> ~Fee Juice for the self-paying claim
+// Amounts are DECIMALS-DRIVEN from the manifest token (an 18-dec assumption against a 6-dec token
+// would request 10^19 base units into a 10^9 mint cap — instant revert; codex bug-bash r2).
+const TOKEN_DECIMALS = BigInt(CONFIG.l1.token?.decimals ?? 18)
+const TOTAL = 10n * 10n ** TOKEN_DECIMALS
+// Env-tunable: the slice must buy ENOUGH FJ for the self-paying claim at the CURRENT pool rate
+// (quote >= minFuelFj) — a fresh pool's pricing can put the old default under the floor.
+const FUEL_SLICE = BigInt(process.env.FUEL_SLICE_UNITS ?? (10n ** TOKEN_DECIMALS).toString())
 
 async function main() {
 	const t0 = Date.now()
@@ -72,22 +81,22 @@ async function main() {
 	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
 	const azlo = CONFIG.l1.usdc as `0x${string}`
-	console.log(`candidate fuel smoke: portal ${CONFIG.l1.portal} (${CONFIG.l1.portalSource ?? "legacy"}), router ${fuel.router}`)
+	console.log(`candidate fuel smoke: portal ${CONFIG.l1.portal} (${CONFIG.l1.portalSource ?? "legacy"}), router ${core.router}`)
 
 	await pub.waitForTransactionReceipt({
 		hash: await wallet.writeContract({
 			address: azlo,
-			abi: evmAbi("MintableERC20") as never,
+			abi: evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20") as never,
 			functionName: "mint",
 			args: [account.address, TOTAL] as never,
 		}),
 	})
 	const route = buildFuelRoute({
 		token: azlo,
-		weth: fuel.weth,
-		feeJuice: fuel.feeJuice,
-		tokenWeth: fuel.pools.azloWeth,
-		ethFj: fuel.pools.ethFj,
+		weth: swap.weth,
+		feeJuice: swap.feeJuice,
+		tokenWeth: swap.pools.tokenWeth ?? swap.pools.azloWeth,
+		ethFj: swap.pools.ethFj,
 	})
 
 	// ─── L2 (fresh account; sponsored FPC pays ONLY its deploy, fuel pays the claim) ──
@@ -177,17 +186,38 @@ async function main() {
 	}
 
 	// ─── deposit + swap (L1) → self-paying public claim (L2) ─────────
-	const quote = await quoteFuelPath(pub as never, fuel.quoter, route, FUEL_SLICE)
-	const minOut = minOutputForSlippage(quote, fuel.slippageBps)
+	const quote = await quoteFuelPath(pub as never, swap.quoter, route, FUEL_SLICE)
+	const minOut = minOutputForSlippage(quote, swap.slippageBps)
 	console.log(`quote: ${FUEL_SLICE} AZLO-wei → ${quote} FJ-wei (floor ${minOut}) (${mins()})`)
+
+	const tokenAbi = evmAbi((CONFIG.l1.token?.sourceContract as string | undefined) ?? "MintableERC20")
+	await ensurePermit2Allowance({
+		allowance: async () =>
+			(await pub.readContract({
+				address: azlo,
+				abi: tokenAbi as never,
+				functionName: "allowance",
+				args: [account.address, core.permit2],
+			})) as bigint,
+		approveMax: async () =>
+			await wallet.writeContract({
+				address: azlo,
+				abi: tokenAbi as never,
+				functionName: "approve",
+				args: [core.permit2, (1n << 256n) - 1n] as never,
+			}),
+		waitReceipt: async (hash) => await pub.waitForTransactionReceipt({ hash }),
+		needed: TOTAL,
+		onStatus: (st, tx) => console.log(`permit2 approval: ${st}${tx ? ` (${tx})` : ""} (${mins()})`),
+	})
 
 	const result = await runSwapBridge(
 		{ pub, wallet, account } as never,
 		{
-			router: fuel.router,
+			router: core.router,
 			routerAbi: evmAbi("SwapBridgeRouter"),
-			permit2: fuel.permit2,
-			swapTarget: fuel.swapTarget,
+			permit2: core.permit2,
+			swapTarget: core.swapTarget,
 			tokenPortal: CONFIG.l1.portal,
 			bridgeToken: azlo,
 			totalAmount: TOTAL,

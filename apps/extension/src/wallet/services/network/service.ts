@@ -6,7 +6,7 @@ import { validateParams } from "@nulo/extension-messaging/zod"
 import { AztecNodeFactoryAdapter } from "@nulo/aztec-runtime/adapters"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
 import type { ILogger } from "@/wallet/logger"
-import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextRandomId } from "@/wallet/services/id-allocators"
@@ -354,15 +354,38 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (activeId === id) {
 				throw new Error(`${ERR_ACTIVE_NETWORK}: Cannot delete the active network. Switch to another chain first.`)
 			}
-			// Purge chain-scoped state via the awaited coordinator
-			await this.purgeChain(profile.id, network.chainId, network.id)
-			await this.storage.delete(id)
+			// Reserve BEFORE the cascade: the network row deliberately survives
+			// until the cascade finishes, so "row exists" alone would admit a
+			// journal create landing between its sweep and the row delete. The
+			// reservation makes `isNetworkLive` refuse for the whole window.
+			this.deletingNetworks.add(id)
+			try {
+				// Purge chain-scoped state via the awaited coordinator
+				await this.purgeChain(profile.id, network.chainId, network.id)
+				await this.storage.delete(id)
+			} finally {
+				this.deletingNetworks.delete(id)
+			}
 			this.nodes.delete(network.chainId)
 			this.emit("onNetworkDeleted", network)
 			return network
 		} finally {
 			this.lock.leave()
 		}
+	}
+
+	/** Network ids whose delete cascade is in progress — see `isNetworkLive`. */
+	private readonly deletingNetworks = new Set<string>()
+
+	/**
+	 * Whether a network row exists AND is not mid-deletion. In-memory only:
+	 * a SW restart kills both the flag and any stale creator closure that
+	 * captured the network, so cross-restart staleness cannot occur.
+	 */
+	public async isNetworkLive(networkId: string): Promise<boolean> {
+		await this.ensureInitialized()
+		if (this.deletingNetworks.has(networkId)) return false
+		return (await this.storage.get(networkId)) !== undefined
 	}
 
 	public async setActiveNetwork(id: string): Promise<Network> {

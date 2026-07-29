@@ -12,15 +12,16 @@
  */
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import type { L2AmountClaim } from "@aztec/aztec.js/ethereum"
-import { FeeJuicePaymentMethodWithClaim, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
+import { type FeePaymentMethod, FeeJuicePaymentMethodWithClaim, SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { GasFees, ManaUsageEstimate } from "@aztec/stdlib/gas"
+import { ExecutionPayload } from "@aztec/stdlib/tx"
 import { FEE_JUICE_ADDRESS } from "@aztec/constants"
 
 /** The canonical L2 Fee Juice contract address — a protocol constant (identical on every network). */
 export const feeJuiceAddress: string = AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS).toString()
 
 /** Minimal node shape for fee prediction (avoids a hard dep on the full node client type). */
-type MinFeeNode = {
+export type MinFeeNode = {
 	getPredictedMinFees?: (manaUsage?: ManaUsageEstimate) => Promise<GasFees[]>
 	getCurrentMinFees: () => Promise<GasFees>
 }
@@ -63,6 +64,21 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 	return new GasFees(worstDa, worstL2)
 }
 
+/**
+ * The mainnet deploy sequence's worst-case L2 tx count: the deployer account deploy + the three
+ * contract deploys (proxy, token, bridge) + two wiring txs + the PrivateFPC deploy. The bridged
+ * fee-juice budget MUST cover the WHOLE sequence, not one claim — under-sizing stalls a live-money
+ * deploy mid-sequence (recoverable via the stable deployer, but a stall nonetheless).
+ */
+export const DEPLOY_SEQUENCE_TX_COUNT = 7
+
+/** The full-sequence fee-juice budget: per-tx worst-case fee limit × the whole sequence. */
+export function deploySequenceFeeBudget(perTxFeeLimit: bigint, txCount: number = DEPLOY_SEQUENCE_TX_COUNT): bigint {
+	if (perTxFeeLimit <= 0n) throw new Error("deploySequenceFeeBudget: perTxFeeLimit must be positive")
+	if (!Number.isInteger(txCount) || txCount < 1) throw new Error("deploySequenceFeeBudget: txCount must be a positive integer")
+	return perTxFeeLimit * BigInt(txCount)
+}
+
 /** The L1→L2 claim a Fee-Juice bridge deposit produced; the preimage the L2 claim consumes. */
 export type FeeJuiceClaim = Pick<L2AmountClaim, "claimAmount" | "claimSecret" | "messageLeafIndex">
 
@@ -78,6 +94,20 @@ export const publicFeeJuicePayment = (sender: AztecAddress, claim: FeeJuiceClaim
  * bridge's L2 txs before the user holds any Fee Juice of their own.
  */
 export const sponsoredFeePayment = (fpc: AztecAddress): SponsoredFeePaymentMethod => new SponsoredFeePaymentMethod(fpc)
+
+/**
+ * Pay L2 gas from the sender's ALREADY-CLAIMED public Fee-Juice balance. aztec.js 5.x ships no
+ * class for this because the protocol needs no calls at all — the account entrypoint detects a
+ * zero-call fee payload and routes it as PREEXISTING_FEE_JUICE (see aztec.js
+ * account_entrypoint_meta_payment_method), with the sender as fee payer. This is the mainnet
+ * deploy sequence's steady-state method after the claim-in-tx bootstrap.
+ */
+export const preexistingFeeJuicePayment = (sender: AztecAddress): FeePaymentMethod => ({
+	getAsset: () => Promise.resolve(AztecAddress.fromNumberUnsafe(FEE_JUICE_ADDRESS)),
+	getExecutionPayload: () => Promise.resolve(ExecutionPayload.empty()),
+	getFeePayer: () => Promise.resolve(sender),
+	getGasSettings: () => undefined,
+})
 
 /**
  * The FeeJuice claim call args for claiming bridged Fee Juice as a standalone payload

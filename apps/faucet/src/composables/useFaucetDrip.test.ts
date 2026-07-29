@@ -42,6 +42,19 @@ vi.mock("@/contracts/deployments", () => ({
 	DRIPPER: { toString: () => "0xdripper" },
 }))
 
+// The sponsored path pads maxFeesPerGas from predicted-worst min fees; both
+// the node client and the predictor are mocked so no network is dialed and
+// the padding multiplier is observable via the `_paddedBy` marker.
+vi.mock("@aztec/aztec.js/node", () => ({
+	createAztecNodeClient: vi.fn(() => ({ _node: true })),
+}))
+
+vi.mock("@nulo/bridge-core", () => ({
+	predictedWorstMinFees: vi.fn(async () => ({
+		mul: (scalar: number) => ({ _paddedBy: scalar }),
+	})),
+}))
+
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { __resetFaucetDripForTests, useFaucetDrip } from "./useFaucetDrip"
 
@@ -127,6 +140,30 @@ describe("useFaucetDrip", () => {
 		expect(interactionInstance.request).toHaveBeenCalledWith({
 			fee: { paymentMethod: expect.objectContaining({ _kind: "sponsored" }) },
 		})
+	})
+
+	it("sendTx opts carry the padded maxFeesPerGas — the wallet reads fees from SEND options only", async () => {
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const drip = useFaucetDrip(w as any, ACCOUNT)
+		await drip.drip(NULO, NULO_ADDR, "public")
+		// Load-bearing: without an explicit padded cap the wallet pins the
+		// sponsored tx at getCurrentMinFees() (zero headroom) and any base-fee
+		// uptick during proving gets it silently dropped by the pool.
+		const opts = w._calls[0]?.opts as { fee?: { gasSettings?: { maxFeesPerGas?: unknown } } }
+		expect(opts.fee?.gasSettings?.maxFeesPerGas).toEqual({ _paddedBy: 1.5 })
+	})
+
+	it("fee-padding failure degrades to wallet defaults — the drip still sends", async () => {
+		const { predictedWorstMinFees } = await import("@nulo/bridge-core")
+		vi.mocked(predictedWorstMinFees).mockRejectedValueOnce(new Error("node unreachable"))
+		const w = makeWallet()
+		// biome-ignore lint/suspicious/noExplicitAny: test stub
+		const drip = useFaucetDrip(w as any, ACCOUNT)
+		const res = await drip.drip(NULO, NULO_ADDR, "public")
+		expect(res.kind).toBe("txHash")
+		const opts = w._calls[0]?.opts as { from?: unknown; fee?: unknown }
+		expect(opts.fee).toBeUndefined()
 	})
 
 	it("sendTx receives the merged exec (sponsor call + feePayer) and the selected account", async () => {
