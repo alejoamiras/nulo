@@ -1044,6 +1044,22 @@ describe("parseGrantedAccounts hardening", () => {
 		expect(accounts[2].alias).toBe("")
 	})
 
+	it("visually-empty aliases (zero-width/whitespace) become empty; padding is trimmed", () => {
+		const { accounts } = parseGrantedAccounts({
+			granted: [
+				{
+					type: "accounts",
+					accounts: [
+						{ alias: "\u200b \u200d\ufeff", item: MA_A },
+						{ alias: "  padded  ", item: MA_B },
+					],
+				},
+			],
+		})
+		expect(accounts[0].alias).toBe("") // falls back to the address everywhere
+		expect(accounts[1].alias).toBe("padded")
+	})
+
 	it("accepts a PROVABLY curve-invalid (but syntactic) address — the documented boundary (D-30)", () => {
 		// 0x…03 is NOT a valid Grumpkin x-coordinate: `AztecAddress.fromStringUnsafe(addr("3")).isValid()`
 		// returns false (verified out-of-band with bun — isValid needs the Barretenberg WASM,

@@ -551,8 +551,11 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		// mismatch card until its account is active again.
 		const aztec = deps.connectedAztec?.() ?? null
 		// Fail-CLOSED (codex residual): no known active account is treated like a mismatch —
-		// never run a claim on the hope that the right account happens to be connected.
-		if (!aztec || (rec.recipient && aztec.toLowerCase() !== rec.recipient.toLowerCase())) {
+		// never run a claim on the hope that the right account happens to be connected. A
+		// non-string/empty recipient (tampered localStorage) is refused the same way instead of
+		// bypassing the compare and failing deep in address parsing.
+		const recipientOk = typeof rec.recipient === "string" && rec.recipient.length > 0
+		if (!aztec || !recipientOk || aztec.toLowerCase() !== rec.recipient.toLowerCase()) {
 			setRuntime(id, {
 				attention: "mismatch",
 				note: `This deposit claims to ${rec.recipient}. Switch to that Aztec account to claim.`,

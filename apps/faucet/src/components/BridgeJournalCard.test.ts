@@ -25,8 +25,9 @@ vi.mock("@/composables/useDeposit", () => ({
 // active, aliased "Main") so pre-existing tests keep their unlabeled-era behavior semantics.
 const walletAccounts = ref<Array<{ address: string; alias: string }>>([{ address: "0xaztec", alias: "Main" }])
 const walletSelected = ref<string | null>("0xaztec")
+const walletStatus = ref("connected")
 vi.mock("@/composables/useBridgeWallet", () => ({
-	useBridgeWallet: () => ({ accounts: walletAccounts, selectedAccount: walletSelected }),
+	useBridgeWallet: () => ({ accounts: walletAccounts, selectedAccount: walletSelected, status: walletStatus }),
 }))
 const switchActiveAccount = vi.fn((address: string) => {
 	walletSelected.value = address
@@ -328,6 +329,7 @@ describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
 			{ address: OTHER, alias: "Savings" },
 		]
 		walletSelected.value = "0xaztec"
+		walletStatus.value = "connected"
 		switchActiveAccount.mockClear()
 		runDepositClaim.mockClear()
 		__resetOpsInFlightForTests()
@@ -405,6 +407,20 @@ describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
 		)
 		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
 		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(true)
+	})
+
+	it("a TAMPERED (non-string) recipient renders without crashing and without a tag", () => {
+		const w = mountCard(deposit({ recipient: 42 as unknown as string, leafIndex: "1" }))
+		expect(w.find(sel(TESTIDS.journalAccount)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true) // engine guard owns the refusal
+	})
+
+	it("no switch offer while the session is not connected (selectAccount would reject)", () => {
+		walletStatus.value = "setting-up"
+		const w = mountCard(deposit({ recipient: OTHER, leafIndex: "1" }))
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
 	})
 
 	it("withdraw cards carry no account tag and FINISH is never redirected", () => {

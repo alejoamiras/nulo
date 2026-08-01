@@ -543,6 +543,17 @@ describe("useBridgeJournal engine", () => {
 		expect(isSealTrusted(kv, DEPLOY.chainId, SEALER, "rabby")).toBe(true)
 	})
 
+	it("⑧d a tampered non-string recipient is refused as a mismatch, never parsed (labels-round MED)", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xtampered", { isPrivate: false, recipient: 42 as unknown as string }))
+		await runDepositClaim("0xtampered")
+		const { runtime } = useBridgeJournal()
+		expect(runtime.value["0xtampered"]?.attention).toBe("mismatch")
+		expect(claim).not.toHaveBeenCalled()
+	})
+
 	it("⑧c wrong connected AZTEC account blocks PUBLIC claims too (post-impl HIGH-1)", async () => {
 		const deps = baseDeps(kv)
 		const claim = smartClaimFake()

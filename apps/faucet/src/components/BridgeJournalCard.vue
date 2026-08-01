@@ -69,7 +69,9 @@ function shortAddr(a: string): string {
 const acct = computed(() => {
 	if (props.record.direction !== "deposit") return null
 	const addr = (props.record as DepositJournalRecord).recipient
-	if (!addr) return null
+	// The journal is persisted state (localStorage) — a tampered record can carry a non-string
+	// recipient; rendering must never crash on it (codex labels-round MED).
+	if (typeof addr !== "string" || addr.length === 0) return null
 	const lower = addr.toLowerCase()
 	const granted = bridgeWallet.accounts.value.find((a) => a.address.toLowerCase() === lower)
 	return {
@@ -87,7 +89,9 @@ const acct = computed(() => {
  *  guard explains why it refuses). */
 const offerSwitch = computed(() => {
 	const a = acct.value
-	return !!a && !a.active && a.canonical !== null
+	// Status gate (codex labels-round MED): selectAccount() rejects unless connected — a switch
+	// button during setting-up/error states would be an enabled no-op.
+	return bridgeWallet.status.value === "connected" && !!a && !a.active && a.canonical !== null
 })
 const switchLabel = computed(() => {
 	const a = acct.value

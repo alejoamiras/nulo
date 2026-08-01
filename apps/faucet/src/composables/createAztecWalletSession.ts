@@ -80,7 +80,7 @@ const STORED_STRING_MAX = 256
  *  adjacent UI text. The address is always rendered beside the alias as the unambiguous
  *  identity (plan D-10). */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars is the point
-const UNSAFE_ALIAS_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+const UNSAFE_ALIAS_CHARS = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g
 
 /** Code-point-safe bounded truncation: a UTF-16 `slice` can split an emoji
  *  surrogate pair in a claimed wallet name. Shared by the picker's display
@@ -893,7 +893,7 @@ export function parseGrantedAccounts(result: unknown): ParsedGrantedAccounts {
 			continue
 		}
 		const rawAlias = typeof entry?.alias === "string" ? entry.alias : ""
-		accounts.push({ address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, ""), ALIAS_MAX) })
+		accounts.push({ address, alias: truncateName(rawAlias.replace(UNSAFE_ALIAS_CHARS, "").trim(), ALIAS_MAX) })
 	}
 	return { accounts, hiddenCount }
 }
