@@ -26,7 +26,15 @@ vi.mock("@/composables/useL1Wallet", () => ({
 	}),
 }))
 vi.mock("@/composables/useBridgeWallet", () => ({
-	useBridgeWallet: () => ({ status: ref("connected"), selectedAccount: ref(`0x${"10".repeat(32)}`), wallet: ref({}) }),
+	useBridgeWallet: () => ({
+		status: ref("connected"),
+		selectedAccount: ref(`0x${"10".repeat(32)}`),
+		// The session surface grew with multi-account: journal cards read accounts (tag lookup)
+		// and hiddenAccountsCount — a mock lacking them crashes card render (CI-only failure).
+		accounts: ref([{ address: `0x${"10".repeat(32)}`, alias: "Main" }]),
+		hiddenAccountsCount: ref(0),
+		wallet: ref({}),
+	}),
 }))
 vi.mock("@/composables/useL1FeeAsset", () => ({
 	useL1FeeAsset: () => ({
