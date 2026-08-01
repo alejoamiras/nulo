@@ -138,3 +138,32 @@ Noted residuals:
 - **LOW:** D-30’s older ledger wording still claims a normal RPC-error-path test; the suite only tests parser acceptance. The curve-invalid fixture itself is now valid evidence.
 
 VERDICT: approve
+## Labels round (phase 6, resumed session, xhigh) — VERDICT: conditional approve
+
+No CRITICAL/HIGH findings. Two MED bugs remain.
+
+- **MED — Malformed journal recipients can crash card rendering.** `acct` calls `addr.toLowerCase()`, but `loadJournal()` accepts any object with string `id` and valid `direction`; it does not validate `recipient`. I confirmed a numeric recipient survives loading. One otherwise valid tampered record can therefore throw during render. Empty recipients avoid the crash but produce no tag and bypass the engine’s recipient-mismatch comparison before later address parsing fails. Validate/quarantine non-string, empty, or noncanonical recipients before rendering and acting.
+
+- **MED — Switch redirects can appear enabled while switching is impossible.** `offerSwitch` ignores connection status. During `setting-up`, or after setup failure where grants remain populated, another-account cards show an enabled switch button, but `selectAccount()` rejects because status is not `"connected"`; clicking silently does nothing. Include session status in the button gate. The card test mock exposes only accounts/selection, so this state is currently untested.
+
+- **LOW — Visually empty aliases defeat fallback.** Whitespace/zero-width aliases are truthy, yielding weak toast/button text such as `SWITCH TO`. Vue escaping and alias caps prevent injection, and the tag includes the address, but label selection should use a trimmed/visibly-nonempty alias.
+
+- **LOW — Header wrapping can separate age and corner control.** Because `.age` owns `margin-left:auto` independently, narrow widths may place the age and clear/backup button awkwardly across wrapped lines.
+
+The action matrix otherwise holds: claim variants and switch are mutually exclusive; completed fuel recovery cannot overlap normal claim; discard remains available; non-granted recipients retain the guarded action. Case-insensitive matching followed by the canonical exact selection argument is correct. Withdraw and direct-Fuel handling are also correct.
+
+Targeted Vitest execution was blocked only by the read-only sandbox preventing Vite’s `.vite-temp` write.
+
+VERDICT: conditional approve (conditions: harden malformed journal recipients before rendering/matching, and disable journal switch redirects unless the session is connected)
+## Labels confirmation round — VERDICT: approve
+
+Confirmed. All conditions are addressed:
+
+- Malformed/empty recipients no longer crash rendering; the engine short-circuits to `mismatch` before parsing or wallet work.
+- Switch redirects require `"connected"` status, preserving the canonical exact-address selection path.
+- Alias sanitization now strips zero-width characters/BOM and trims whitespace, activating address fallbacks correctly.
+- Regression tests cover each path, including proving malformed recipients never reach `claim`.
+
+Only the accepted narrow-width header cosmetic remains.
+
+VERDICT: approve

@@ -164,6 +164,20 @@ See Decision ledger.
 | D-40 | Preferred-wallet id was still unbounded on write (LOW, pre-existing) | **Adopted**: same `STORED_STRING_MAX` refusal as the selected-account map. |
 | D-41 | D-30 wording overclaimed an RPC-error-path test (LOW) | **Adopted**: wording corrected in §5; only parser acceptance is tested. |
 
+## Phase 6 (user-requested follow-up, 2026-08-01) — Account labels on history cards ✓
+
+User selected Options 1+2 from the labels artifact (https://claude.ai/code/artifact/3b5f3ea3-8071-46f7-a78c-403ae7e45133): always-on account tag on deposit cards (neutral active / sand other; alias + short address, full address in title) + busy-gated `SWITCH TO <label>` replacing the account-guarded actions (claim / claim-without-fuel / claim-your-gas) for records of another GRANTED account, via a shared `switchActiveAccount()` (selectAccount + toast; canonical grant address). Non-granted recipients keep the guard-note path. **Withdraw cards untagged by design** — `WithdrawJournalRecord` persists only `recipientL1`, never the Aztec sender (additive `senderL2` field = noted follow-up).
+**Gate ✓ 2026-08-01**: typecheck 0 · lint 0 · test:faucet 587/587 (11 new tests).
+
+### Labels-round codex loop (verdict: conditional approve → fixes folded)
+
+| # | Finding (severity) | Disposition |
+|---|---|---|
+| D-42 | Tampered (non-string/empty) journal recipients crash card rendering; empty bypasses the engine compare (MED) | **Adopted**: card `acct` refuses non-string/empty (no tag, no crash); engine guard fails closed on them (`recipientOk` → mismatch). Tests: card render + engine ⑧d. |
+| D-43 | Switch offer ignored session status — enabled no-op while not connected (MED) | **Adopted**: `offerSwitch` requires `status === "connected"`; test added. |
+| D-44 | Visually-empty aliases (zero-width/whitespace) defeat fallbacks (LOW) | **Adopted**: sanitizer strips zero-widths (U+200B-200F, U+FEFF) + trims; empty alias → address fallback everywhere; test added. |
+| D-45 | Header wrap can split age/corner control on narrow widths (LOW) | **Accepted residual** — cosmetic; flagged for the user's manual smoke test. |
+
 ## Security & Adversarial Considerations
 
 - **Threat model**: malicious/compromised wallet extension feeding hostile grant payloads (addresses, aliases, list size); same-origin storage tampering; user confusion about which account funds land in. Surface: grant parsing, localStorage, the two new UI surfaces.
