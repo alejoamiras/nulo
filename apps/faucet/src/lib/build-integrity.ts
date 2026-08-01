@@ -20,11 +20,12 @@ export interface ManifestChainIdentity {
 export function checkBuildIntegrity(
 	target: Pick<FaucetTarget, "key" | "l1ChainId" | "walletChainId" | "host">,
 	manifest: ManifestChainIdentity,
-	opts: { hostname: string; isProd: boolean; allowedPreviewHost?: string },
+	opts: { hostname: string; isProd: boolean; allowedPreviewHosts?: readonly string[] },
 ): string | null {
-	// A Cloudflare PR preview is a PROD build at its EXACT baked preview hostname (CF_PAGES_URL at
-	// build time — never a wildcard, and never baked into mainnet builds; see makeFaucetConfig).
-	const hostOk = opts.hostname === target.host || (!!opts.allowedPreviewHost && opts.hostname === opts.allowedPreviewHost)
+	// A Cloudflare PR preview is a PROD build at its EXACT baked preview hostnames (the per-commit
+	// CF_PAGES_URL host + the branch alias, derived at build time — never a wildcard, and never
+	// baked into mainnet builds; see makeFaucetConfig / preview-hosts.ts).
+	const hostOk = opts.hostname === target.host || (opts.allowedPreviewHosts?.includes(opts.hostname) ?? false)
 	if (opts.isProd && !hostOk) {
 		return `hostname ${opts.hostname} != ${target.key} target host ${target.host} (mis-hosted build)`
 	}
@@ -45,7 +46,7 @@ export function assertBuildIntegrity(hostname: string = typeof window !== "undef
 	const err = checkBuildIntegrity(resolveFaucetTarget(), MANIFEST_CHAIN, {
 		hostname,
 		isProd: import.meta.env.PROD,
-		allowedPreviewHost: import.meta.env.VITE_ALLOWED_PREVIEW_HOST || undefined,
+		allowedPreviewHosts: (import.meta.env.VITE_ALLOWED_PREVIEW_HOSTS || "").split(",").filter(Boolean),
 	})
 	if (err) throw new Error(`build integrity check failed — refusing to load: ${err}`)
 }
