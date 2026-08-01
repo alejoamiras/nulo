@@ -13,6 +13,9 @@ import { computed, ref, watch } from "vue"
 
 /** Composables */
 import { useBridgeJournal } from "@/composables/useBridgeJournal"
+import { useBridgeWallet } from "@/composables/useBridgeWallet"
+import { useOpsInFlight } from "@/composables/useOpsInFlight"
+import { switchActiveAccount } from "@/composables/useWalletConnection"
 
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
@@ -51,6 +54,49 @@ watch(discardArmed, (armed) => {
 })
 
 const rt = computed(() => journal.runtime.value[props.record.id] ?? {})
+
+// ── Account attribution (Options 1+2 follow-up) ─────────────────────────────
+// Deposits persist their Aztec-side account (`recipient`); withdraws only persist recipientL1,
+// so withdraw cards carry no account tag by design (and their FINISH is an L1 action the
+// account guard deliberately ignores).
+const bridgeWallet = useBridgeWallet()
+const { busy: opsBusy } = useOpsInFlight()
+
+function shortAddr(a: string): string {
+	return a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a
+}
+
+const acct = computed(() => {
+	if (props.record.direction !== "deposit") return null
+	const addr = (props.record as DepositJournalRecord).recipient
+	if (!addr) return null
+	const lower = addr.toLowerCase()
+	const granted = bridgeWallet.accounts.value.find((a) => a.address.toLowerCase() === lower)
+	return {
+		addr,
+		/** Canonical grant address — selectAccount() matches exact strings, never record casing. */
+		canonical: granted?.address ?? null,
+		alias: granted?.alias || null,
+		active: (bridgeWallet.selectedAccount.value ?? "").toLowerCase() === lower,
+	}
+})
+
+/** Option 2: deposit claim actions are account-guarded — when the record belongs to ANOTHER
+ *  granted account, offer the one-click switch instead of bouncing off the guard's note. A
+ *  recipient that is NOT in the current grant keeps the normal action (the engine's mismatch
+ *  guard explains why it refuses). */
+const offerSwitch = computed(() => {
+	const a = acct.value
+	return !!a && !a.active && a.canonical !== null
+})
+const switchLabel = computed(() => {
+	const a = acct.value
+	return a ? `SWITCH TO ${(a.alias ?? shortAddr(a.addr)).toUpperCase()}` : ""
+})
+function onSwitchAccount() {
+	const canonical = acct.value?.canonical
+	if (canonical) switchActiveAccount(canonical)
+}
 
 // A DIRECT Fuel record (assetKind "fee-juice") IS Fee Juice — no token leg. Its `fuel` block mirrors the
 // amount, so the token-bridge surfaces (the AZLO amount line, the "+FJ" add-on, "CLAIM WITHOUT FUEL") would
@@ -257,6 +303,13 @@ function onDiscard() {
 			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
 			<span class="amt">{{ amountDisplay }} {{ amountSymbol }}<span v-if="fuelAmount && !isFuel" class="amt-fuel">{{ fuelAmount }}</span></span>
 			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
+			<span
+				v-if="acct"
+				class="acct"
+				:class="{ other: !acct.active }"
+				:title="acct.addr"
+				:data-testid="TESTIDS.journalAccount"
+			>{{ acct.alias ?? shortAddr(acct.addr) }}<span v-if="acct.alias" class="acct-addr">{{ shortAddr(acct.addr) }}</span></span>
 			<span class="age">{{ age }}</span>
 			<button
 				v-if="stage === 'done'"
@@ -282,6 +335,18 @@ function onDiscard() {
 		</header>
 		<div v-if="fuelRecoverable" class="fuel-recover">
 			<button
+				v-if="offerSwitch"
+				type="button"
+				class="action switch"
+				:disabled="opsBusy"
+				:title="opsBusy ? 'Finish the current operation to switch.' : `This gas belongs to ${acct?.addr}.`"
+				:data-testid="TESTIDS.journalSwitchAccount"
+				@click="onSwitchAccount"
+			>
+				{{ switchLabel }}
+			</button>
+			<button
+				v-else
 				type="button"
 				class="action"
 				:disabled="fuelRecovering"
@@ -313,7 +378,18 @@ function onDiscard() {
 
 		<div class="actions">
 			<button
-				v-if="showClaim"
+				v-if="showClaim && offerSwitch"
+				type="button"
+				class="action switch"
+				:disabled="opsBusy"
+				:title="opsBusy ? 'Finish the current operation to switch.' : `This deposit claims to ${acct?.addr}.`"
+				:data-testid="TESTIDS.journalSwitchAccount"
+				@click="onSwitchAccount"
+			>
+				{{ switchLabel }}
+			</button>
+			<button
+				v-if="showClaim && !offerSwitch"
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalClaim"
@@ -331,7 +407,7 @@ function onDiscard() {
 				{{ attention === "unknown-outcome" || attention === "error" ? "RETRY" : "FINISH" }}
 			</button>
 			<button
-				v-if="showClaimWithoutFuel"
+				v-if="showClaimWithoutFuel && !offerSwitch"
 				type="button"
 				class="action"
 				:data-testid="TESTIDS.journalClaimWithoutFuel"
@@ -389,6 +465,7 @@ function onDiscard() {
 	display: flex;
 	align-items: baseline;
 	gap: 10px;
+	flex-wrap: wrap;
 }
 
 .dir {
@@ -419,6 +496,35 @@ function onDiscard() {
 .tag.private {
 	color: var(--nulo-accent);
 	border-color: var(--nulo-accent);
+}
+
+.acct {
+	font: 600 10px/1 var(--font-mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--txt-secondary);
+	border: 1px solid var(--nulo-border);
+	padding: 3px 6px;
+	max-width: 24ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.acct-addr {
+	margin-left: 6px;
+	font-weight: 500;
+	opacity: 0.8;
+}
+
+.acct.other {
+	color: var(--sand);
+	border-color: var(--sand);
+}
+
+.action.switch {
+	color: var(--sand);
+	border-color: var(--sand);
 }
 
 .age {

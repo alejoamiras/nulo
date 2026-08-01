@@ -20,6 +20,23 @@ vi.mock("@/composables/useDeposit", () => ({
 	reconcileFuelConsumed: vi.fn(async () => {}),
 }))
 
+// Account attribution: the card reads the session (accounts/selectedAccount) via useBridgeWallet
+// and switches via switchActiveAccount. Defaults match the fixtures' recipient ("0xaztec" =
+// active, aliased "Main") so pre-existing tests keep their unlabeled-era behavior semantics.
+const walletAccounts = ref<Array<{ address: string; alias: string }>>([{ address: "0xaztec", alias: "Main" }])
+const walletSelected = ref<string | null>("0xaztec")
+vi.mock("@/composables/useBridgeWallet", () => ({
+	useBridgeWallet: () => ({ accounts: walletAccounts, selectedAccount: walletSelected }),
+}))
+const switchActiveAccount = vi.fn((address: string) => {
+	walletSelected.value = address
+	return true
+})
+vi.mock("@/composables/useWalletConnection", () => ({
+	switchActiveAccount: (address: string) => switchActiveAccount(address),
+}))
+
+import { __resetOpsInFlightForTests, withOperation } from "@/composables/useOpsInFlight"
 import { TESTIDS } from "@/lib/testids"
 import BridgeJournalCard from "./BridgeJournalCard.vue"
 // Amounts + symbol derive from the LIVE manifest (the token cutover changes both — a hardcoded
@@ -298,5 +315,103 @@ describe("BridgeJournalCard", () => {
 		const w = mountCard(deposit({ schema: 2, fuel, completedAt: Date.now(), claimTxHash: "0xc" }))
 		await w.find(sel(TESTIDS.journalClaimGas)).trigger("click")
 		expect(claimFuelStandalone).toHaveBeenCalledWith("0xdep")
+	})
+})
+
+describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
+	const OTHER = "0xsavings"
+
+	beforeEach(() => {
+		runtime.value = {}
+		walletAccounts.value = [
+			{ address: "0xaztec", alias: "Main" },
+			{ address: OTHER, alias: "Savings" },
+		]
+		walletSelected.value = "0xaztec"
+		switchActiveAccount.mockClear()
+		runDepositClaim.mockClear()
+		__resetOpsInFlightForTests()
+	})
+
+	it("every deposit card carries its account tag; active account renders neutral", () => {
+		const w = mountCard(deposit({ leafIndex: "1" }))
+		const tag = w.find(sel(TESTIDS.journalAccount))
+		expect(tag.exists()).toBe(true)
+		expect(tag.text()).toContain("Main")
+		expect(tag.classes()).not.toContain("other")
+		// Active account: the normal CLAIM action, no switch offer.
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
+	})
+
+	it("another granted account's card: sand tag + SWITCH replaces CLAIM; click switches (shared path)", async () => {
+		const w = mountCard(deposit({ recipient: OTHER, leafIndex: "1" }))
+		const tag = w.find(sel(TESTIDS.journalAccount))
+		expect(tag.classes()).toContain("other")
+		expect(tag.text()).toContain("Savings")
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+
+		const switchBtn = w.find(sel(TESTIDS.journalSwitchAccount))
+		expect(switchBtn.text()).toBe("SWITCH TO SAVINGS")
+		await switchBtn.trigger("click")
+		expect(switchActiveAccount).toHaveBeenCalledWith(OTHER)
+		expect(runDepositClaim).not.toHaveBeenCalled() // switch never auto-claims
+
+		// Post-switch re-render: the card becomes actionable normally.
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
+	})
+
+	it("a recipient OUTSIDE the current grant keeps the address-only tag and the normal action (guard explains)", () => {
+		const w = mountCard(deposit({ recipient: "0xrevoked", leafIndex: "1" }))
+		const tag = w.find(sel(TESTIDS.journalAccount))
+		expect(tag.classes()).toContain("other")
+		expect(tag.text()).toBe("0xrevoked") // short-addr fallback (short fixture stays as-is)
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
+	})
+
+	it("the switch action respects the ops-in-flight gate", async () => {
+		const w = mountCard(deposit({ recipient: OTHER, leafIndex: "1" }))
+		let release: () => void = () => {}
+		const span = withOperation(() => new Promise<void>((res) => (release = res)))
+		await w.vm.$nextTick()
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).attributes("disabled")).toBeDefined()
+		release()
+		await span
+	})
+
+	it("account matching is case-insensitive but switching passes the CANONICAL grant address", async () => {
+		const w = mountCard(deposit({ recipient: "0xSAVINGS", leafIndex: "1" }))
+		await w.find(sel(TESTIDS.journalSwitchAccount)).trigger("click")
+		expect(switchActiveAccount).toHaveBeenCalledWith(OTHER) // canonical "0xsavings", not record casing
+	})
+
+	it("fuel recovery on a completed mismatched card also redirects to switch", () => {
+		const w = mountCard(
+			deposit({
+				recipient: OTHER,
+				completedAt: Date.now(),
+				fuel: {
+					amount: "1",
+					secret: "0xs",
+					secretHashHex: "0xsh",
+					minOutput: "1",
+					received: "1000000000000000000",
+					leafIndex: "7",
+				},
+			}),
+		)
+		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(true)
+	})
+
+	it("withdraw cards carry no account tag and FINISH is never redirected", () => {
+		walletSelected.value = OTHER // some other account active — irrelevant to withdraws
+		const w = mountCard(withdraw({ exitBlock: 1 }))
+		expect(w.find(sel(TESTIDS.journalAccount)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalSwitchAccount)).exists()).toBe(false)
+		expect(w.find(sel(TESTIDS.journalFinish)).exists()).toBe(true)
 	})
 })

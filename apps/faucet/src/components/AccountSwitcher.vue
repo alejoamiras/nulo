@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref } from "vue"
 import { useOpsInFlight } from "@/composables/useOpsInFlight"
-import { useToast } from "@/composables/useToast"
-import { useWalletConnection } from "@/composables/useWalletConnection"
+import { switchActiveAccount, useWalletConnection } from "@/composables/useWalletConnection"
 import { TESTIDS } from "@/lib/testids"
 
 /**
@@ -29,9 +28,8 @@ const props = defineProps<{
 	disconnectTestid: string
 }>()
 
-const { accounts, selectedAccount, hiddenAccountsCount, selectAccount, disconnect } = useWalletConnection()
+const { accounts, selectedAccount, hiddenAccountsCount, disconnect } = useWalletConnection()
 const { busy } = useOpsInFlight()
-const { push } = useToast()
 
 const open = ref(false)
 const chipEl = ref<HTMLElement | null>(null)
@@ -62,12 +60,8 @@ function onPick(address: string) {
 		close()
 		return
 	}
-	const applied = selectAccount(address)
-	if (applied) {
-		const acct = accounts.value.find((a) => a.address === address)
-		push({ kind: "ok", text: `Active account: ${acct?.alias || shortAddress(address)}` })
-		close()
-	}
+	// Shared switch path (selectAccount + toast) — same behavior as the journal cards' switch action.
+	if (switchActiveAccount(address)) close()
 	// Not applied = blocked (busy) or stale — the rows are disabled while busy, so this is
 	// belt-and-braces: keep the menu open, state untouched.
 }

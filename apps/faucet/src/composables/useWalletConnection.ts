@@ -100,6 +100,20 @@ watch(session.selectionNotices, (list) => {
 	}
 })
 
+/** Switch the active account WITH user-visible feedback — the one path every UI surface uses
+ *  (AccountSwitcher rows, journal-card switch actions), so gating and toast copy stay
+ *  consistent. Returns whether the switch applied (false: busy-blocked / not granted / not
+ *  connected). */
+export function switchActiveAccount(address: string): boolean {
+	const applied = session.selectAccount(address)
+	if (applied) {
+		const acct = session.accounts.value.find((a) => a.address === address)
+		const label = acct?.alias || `${address.slice(0, 6)}…${address.slice(-4)}`
+		useToast().push({ kind: "ok", text: `Active account: ${label}` })
+	}
+	return applied
+}
+
 export function useWalletConnection() {
 	return session
 }

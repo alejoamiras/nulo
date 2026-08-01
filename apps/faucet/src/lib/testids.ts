@@ -41,6 +41,9 @@ export const TESTIDS = {
 	accountMenu: "fa-account-menu",
 	accountMenuRow: "fa-account-menu-row",
 	accountMenuCopy: "fa-account-menu-copy",
+	// Journal-card account attribution (deposit cards only — withdraws never persist their Aztec sender)
+	journalAccount: "fa-journal-account",
+	journalSwitchAccount: "fa-journal-switch-account",
 	// (menu Disconnect keeps the pre-switcher panel ids: fa-btn-disconnect / fa-bridge-l2-disconnect)
 	accountMenuTruncation: "fa-account-menu-truncation",
 
