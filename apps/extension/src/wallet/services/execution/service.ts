@@ -82,6 +82,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		"executeTransfer",
 		"executeOperations",
 		"getGasBalances",
+		"peekGasBalances",
 		"estimateTransferFee",
 		"estimateOperationFee",
 		"cancelJob",
@@ -292,10 +293,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		// PrivateFPC address is read on every getGasBalances() call to fetch
 		// `balance_of`. The cache is keyed only by `${networkId}:${account}`,
 		// so swapping the PrivateFPC address would otherwise serve stale
-		// private-FJ readouts for up to GAS_BALANCE_TTL_MS. Clear the cache
-		// on any PrivateFpc mutation. Coarse but correct.
+		// private-FJ readouts for up to GAS_BALANCE_TTL_MS. Invalidate on any
+		// PrivateFpc mutation (stale-marked, peek keeps serving last-known).
+		// Coarse but correct.
 		const invalidateOnPrivateFpc = (fpc: { type: FpcType }) => {
-			if (fpc.type === FpcType.PrivateFpc) this.gasBalances.clear()
+			if (fpc.type === FpcType.PrivateFpc) this.gasBalances.invalidateAll()
 		}
 		this.fpcService.onFpcUpdated.add(invalidateOnPrivateFpc)
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
@@ -601,6 +603,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
 		await this.ensureInitialized()
 		return this.gasBalances.get(networkId, accountAddress, forceRefresh)
+	}
+
+	public async peekGasBalances(networkId: string, accountAddress: string): Promise<{ balances: GasBalances; stale: boolean } | null> {
+		await this.ensureInitialized()
+		return this.gasBalances.peek(networkId, accountAddress)
 	}
 
 	// Aztec.js interface:

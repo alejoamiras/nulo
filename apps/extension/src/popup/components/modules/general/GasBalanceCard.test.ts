@@ -26,12 +26,18 @@ vi.mock("@/wallet/services/price/client", () => ({
 	}),
 }))
 
-let mockBalances: { publicFeeJuice: string; privateFeeJuice: string | null } = { publicFeeJuice: "0", privateFeeJuice: null }
+type Balances = { publicFeeJuice: string; privateFeeJuice: string | null }
+let mockBalances: Balances = { publicFeeJuice: "0", privateFeeJuice: null }
+let mockPeek: { balances: Balances; stale: boolean } | null = null
+/** When set, peekGasBalances runs this instead of returning mockPeek. */
+let mockPeekImpl: (() => Promise<{ balances: Balances; stale: boolean } | null>) | null = null
+let mockGetGasBalances: () => Promise<Balances> = async () => mockBalances
 vi.mock("@/wallet/services/execution/client", () => ({
 	ExecutionServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			getGasBalances: vi.fn().mockImplementation(async () => mockBalances),
+			getGasBalances: vi.fn().mockImplementation(() => mockGetGasBalances()),
+			peekGasBalances: vi.fn().mockImplementation(async () => (mockPeekImpl ? mockPeekImpl() : mockPeek)),
 		}
 	}),
 }))
@@ -82,5 +88,121 @@ describe("GasBalanceCard fiat (D2)", () => {
 		expect(w.find('[data-testid="gas-fiat-public"]').exists()).toBe(false)
 		expect(w.find('[data-testid="gas-fiat-private"]').exists()).toBe(false)
 		expect(w.text()).not.toContain("$")
+	})
+})
+
+describe("GasBalanceCard — stale-while-revalidate", () => {
+	function deferredBalances() {
+		let resolve!: (v: Balances) => void
+		mockGetGasBalances = () =>
+			new Promise<Balances>((r) => {
+				resolve = r
+			})
+		return { resolve: (v: Balances) => resolve(v) }
+	}
+
+	test("(BUG PIN) fresh peeked value paints instantly — no skeleton while the fetch round-trip is pending", async () => {
+		mockQuotes = {}
+		mockPeek = { balances: { publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null }, stale: false }
+		deferredBalances()
+		const w = await mountCard()
+
+		expect(w.find('[data-testid="gas-balance-public"]').exists()).toBe(true)
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+		// Fresh cache — no refreshing indicator either.
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+	})
+
+	test("(BUG PIN) stale peeked value shows dimmed last-known + refreshing marker until the refresh lands", async () => {
+		mockQuotes = {}
+		mockPeek = { balances: { publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null }, stale: true }
+		const d = deferredBalances()
+		const w = await mountCard()
+
+		// Last-known value visible immediately, marked as refreshing.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(true)
+
+		d.resolve({ publicFeeJuice: (43n * 10n ** 18n).toString(), privateFeeJuice: null })
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("43 FJ")
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+	})
+
+	test("no cached value at all → skeleton until the first fetch resolves", async () => {
+		mockQuotes = {}
+		mockPeek = null
+		const d = deferredBalances()
+		const w = await mountCard()
+
+		expect(w.find('[data-testid="gas-balance-public"]').exists()).toBe(false)
+
+		d.resolve({ publicFeeJuice: (7n * 10n ** 18n).toString(), privateFeeJuice: null })
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("7 FJ")
+	})
+
+	test("a FAILED refresh keeps the stale dim but clears the activity dot — stale is never blessed fresh", async () => {
+		mockQuotes = {}
+		mockPeek = { balances: { publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null }, stale: true }
+		mockGetGasBalances = async () => {
+			throw new Error("SW unreachable")
+		}
+		const w = await mountCard()
+
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+		// The attempt settled: dot gone. The data did NOT refresh: dim stays.
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+		// CSS-module class names are hashed — match by substring.
+		const classes = w.find('[data-testid="gas-balance-public"]').classes()
+		expect(classes.some((c) => c.includes("amount_stale"))).toBe(true)
+	})
+
+	test("a peek failure never blocks the real fetch", async () => {
+		mockQuotes = {}
+		let peekCalled = false
+		mockGetGasBalances = async () => ({ publicFeeJuice: (9n * 10n ** 18n).toString(), privateFeeJuice: null })
+		mockPeekImpl = async () => {
+			peekCalled = true
+			throw new Error("peek RPC failed")
+		}
+		try {
+			const w = await mountCard()
+			expect(peekCalled).toBe(true)
+			expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("9 FJ")
+		} finally {
+			mockPeekImpl = null
+		}
+	})
+
+	test("(BUG PIN) settled-tx forced refresh dims the value — never re-skeletons", async () => {
+		const { TransactionServiceClient } = await import("@/wallet/services/transaction/client")
+		mockQuotes = {}
+		mockPeek = null
+		mockGetGasBalances = async () => ({ publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null })
+		const w = await mountCard()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+
+		// Force-refresh path: a settled tx for this account.
+		const d = deferredBalances()
+		const txInstances = vi.mocked(TransactionServiceClient).mock.results
+		const txInstance = txInstances[txInstances.length - 1].value as {
+			onTransactionUpdated: { add: ReturnType<typeof vi.fn> }
+		}
+		const handler = txInstance.onTransactionUpdated.add.mock.calls[0]?.[0] as (tx: unknown) => void
+		handler({ account: "0xacct", status: "Finalized" })
+		await flushPromises()
+
+		// Old value stays visible, dimmed (it is known-invalidated) with the
+		// activity dot — never a skeleton.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(true)
+		const midRefreshClasses = w.find('[data-testid="gas-balance-public"]').classes()
+		expect(midRefreshClasses.some((c) => c.includes("amount_stale"))).toBe(true)
+
+		d.resolve({ publicFeeJuice: (40n * 10n ** 18n).toString(), privateFeeJuice: null })
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
 	})
 })
