@@ -104,24 +104,64 @@ describe("GasBalanceReader cache contract", () => {
 		expect(bvsMock.mock.calls.length).toBeGreaterThan(callsBefore)
 	})
 
-	test("PrivateFPC present → ONE batched simulation carries both reads, public leading", async () => {
-		// Public first so it stays fast-arm eligible (direct-to-node leading
-		// prefix); one invocation instead of two halves the per-read setup
-		// (block-header anchor) and the SW→offscreen round-trips.
-		bvsMock.mockReset().mockResolvedValue({ encoded: [[{ toBigInt: () => 100n }], [{ toBigInt: () => 55n }]], decoded: [] })
-		const reader = new GasBalanceReader(
-			makeDeps({
-				getFpcs: async () => [{ type: FpcType.PrivateFpc, address: "0xfpc" } as never],
-			}),
-		)
-		const result = await reader.get("net-1", "0xacc")
-		expect(result).toEqual({ publicFeeJuice: "100", privateFeeJuice: "55" })
-		expect(bvsMock.mock.calls.length).toBe(1)
-		const calls = bvsMock.mock.calls[0][0] as Array<{ method: string; contract: unknown }>
-		expect(calls).toHaveLength(2)
-		expect(calls[0].method).toBe("balance_of_public")
-		expect(calls[1].method).toBe("balance_of")
-		expect(String(calls[1].contract)).toBe("0xfpc")
+	// The two legs are SEPARATE invocations on purpose: the public read rides
+	// the direct-to-node fast arm while the PrivateFPC read executes through
+	// PXE — different failure domains, so one leg's rejection must never
+	// discard the other's result. They launch concurrently.
+	function perMethodBvs(impl: { public: () => Promise<unknown>; private: () => Promise<unknown> }) {
+		bvsMock.mockReset().mockImplementation((calls: Array<{ method: string }>) => {
+			return calls[0]?.method === "balance_of_public" ? impl.public() : impl.private()
+		})
+	}
+	const PRIVATE_FPC_DEPS = { getFpcs: async () => [{ type: FpcType.PrivateFpc, address: "0xfpc" } as never] }
+
+	test("PrivateFPC present → both legs read, result assembled from both", async () => {
+		perMethodBvs({ public: async () => encodedResult(100n), private: async () => encodedResult(55n) })
+		const reader = new GasBalanceReader(makeDeps(PRIVATE_FPC_DEPS))
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "100", privateFeeJuice: "55" })
+		expect(bvsMock.mock.calls.length).toBe(2)
+	})
+
+	test("a private-leg rejection keeps the successful public balance", async () => {
+		perMethodBvs({
+			public: async () => encodedResult(100n),
+			private: async () => {
+				throw new Error("utility sim down")
+			},
+		})
+		const reader = new GasBalanceReader(makeDeps(PRIVATE_FPC_DEPS))
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
+	})
+
+	test("a public-leg rejection keeps the successful private balance", async () => {
+		perMethodBvs({
+			public: async () => {
+				throw new Error("node down")
+			},
+			private: async () => encodedResult(55n),
+		})
+		const reader = new GasBalanceReader(makeDeps(PRIVATE_FPC_DEPS))
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "0", privateFeeJuice: "55" })
+	})
+
+	test("legs launch concurrently — FPC discovery is not serialized behind the public read", async () => {
+		let resolvePublic!: (v: unknown) => void
+		const fpcsSpy = vi.fn(async () => [])
+		perMethodBvs({
+			public: () =>
+				new Promise((r) => {
+					resolvePublic = r
+				}),
+			private: async () => encodedResult(55n),
+		})
+		const reader = new GasBalanceReader(makeDeps({ getFpcs: fpcsSpy }))
+		const pending = reader.get("net-1", "0xacc")
+		// Give the concurrent legs a tick to launch, then assert FPC discovery
+		// already ran while the public read is still pending.
+		await new Promise((r) => setTimeout(r, 0))
+		expect(fpcsSpy).toHaveBeenCalled()
+		resolvePublic(encodedResult(100n))
+		expect(await pending).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
 	})
 
 	test("public-balance failure degrades to '0' without throwing (error-path parity)", async () => {
@@ -196,6 +236,56 @@ describe("GasBalanceReader peek (stale-while-revalidate)", () => {
 		expect(reader.peek("net-1", "0xacc")).toEqual({
 			balances: { publicFeeJuice: "100", privateFeeJuice: null },
 			stale: true,
+		})
+	})
+
+	test("an invalidation landing mid-compute stamps that snapshot already-stale", async () => {
+		let resolveBvs!: (v: unknown) => void
+		bvsMock.mockReset().mockImplementation(
+			() =>
+				new Promise((r) => {
+					resolveBvs = r
+				}),
+		)
+		const reader = new GasBalanceReader(makeDeps())
+		const pending = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+		reader.invalidateAccount("0xacc")
+		resolveBvs(encodedResult(100n))
+		await pending
+		// Peekable (dimmed display) but the next get() must recompute.
+		expect(reader.peek("net-1", "0xacc")).toEqual({
+			balances: { publicFeeJuice: "100", privateFeeJuice: null },
+			stale: true,
+		})
+	})
+
+	test("a forced refresh never joins a pre-invalidation flight — it resolves to post-settlement values", async () => {
+		let resolveFirst!: (v: unknown) => void
+		bvsMock
+			.mockReset()
+			.mockImplementationOnce(
+				() =>
+					new Promise((r) => {
+						resolveFirst = r
+					}),
+			)
+			.mockResolvedValue(encodedResult(200n))
+		const reader = new GasBalanceReader(makeDeps())
+		const preSettlement = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+
+		// Settlement: facade invalidates, popup force-refreshes.
+		reader.invalidateAccount("0xacc")
+		const forced = reader.get("net-1", "0xacc", true)
+
+		resolveFirst(encodedResult(100n))
+		expect((await preSettlement).publicFeeJuice).toBe("100")
+		// The forced read waited out the old flight and recomputed.
+		expect((await forced).publicFeeJuice).toBe("200")
+		expect(reader.peek("net-1", "0xacc")).toEqual({
+			balances: { publicFeeJuice: "200", privateFeeJuice: null },
+			stale: false,
 		})
 	})
 })

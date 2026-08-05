@@ -24,8 +24,11 @@ const publicFeeJuice = ref("0")
 const privateFeeJuice = ref(null)
 const isLoading = ref(true)
 const hasLoaded = ref(false)
-/** A last-known value is on screen while a refresh runs — dim it rather
- *  than replace it with a skeleton. */
+/** Data quality vs activity, deliberately separate: `isStale` dims the
+ *  value and only a FRESH commit clears it (a failed refresh must not
+ *  bless stale data as current); `isRefreshing` drives the activity dot
+ *  and always clears when the attempt settles. */
+const isStale = ref(false)
 const isRefreshing = ref(false)
 
 const FEE_JUICE_DECIMALS = 18
@@ -82,37 +85,57 @@ function onTransactionUpdated(tx) {
 transactionService.onTransactionAdded.add(onTransactionAdded)
 transactionService.onTransactionUpdated.add(onTransactionUpdated)
 
+/** Monotonic per-call generation: identity switches and event-driven
+ *  refreshes can overlap, and a late completion from a superseded call
+ *  must neither overwrite newer values nor clear the newer call's
+ *  markers. */
+let loadGeneration = 0
+
 /** Functions */
 async function loadBalances(forceRefresh = false) {
+	const gen = ++loadGeneration
+	const isCurrent = () => gen === loadGeneration
 	try {
 		if (!hasLoaded.value) isLoading.value = true
 		if (!appStore.account?.address || !appStore.network?.id) return
+		const networkId = appStore.network.id
+		const accountAddress = appStore.account.address
 
 		if (!hasLoaded.value) {
 			// Instant paint from the SW cache — stale entries included. The
 			// skeleton is reserved for a true first-ever load, where there is
-			// genuinely nothing to show.
-			const peeked = await executionService.peekGasBalances(appStore.network.id, appStore.account.address)
-			if (peeked) {
-				publicFeeJuice.value = peeked.balances.publicFeeJuice
-				privateFeeJuice.value = peeked.balances.privateFeeJuice
-				hasLoaded.value = true
-				isLoading.value = false
-				isRefreshing.value = peeked.stale
+			// genuinely nothing to show. Peek is best-effort: its failure must
+			// never block the real fetch below.
+			try {
+				const peeked = await executionService.peekGasBalances(networkId, accountAddress)
+				if (isCurrent() && peeked) {
+					publicFeeJuice.value = peeked.balances.publicFeeJuice
+					privateFeeJuice.value = peeked.balances.privateFeeJuice
+					hasLoaded.value = true
+					isLoading.value = false
+					isStale.value = peeked.stale
+				}
+			} catch {
+				// Fall through to the real fetch; the skeleton stays meanwhile.
 			}
-		} else {
-			isRefreshing.value = true
 		}
+		if (!isCurrent()) return
+		isRefreshing.value = hasLoaded.value && (isStale.value || forceRefresh)
 
-		const balances = await executionService.getGasBalances(appStore.network.id, appStore.account.address, forceRefresh)
+		const balances = await executionService.getGasBalances(networkId, accountAddress, forceRefresh)
+		if (!isCurrent()) return
 		publicFeeJuice.value = balances.publicFeeJuice
 		privateFeeJuice.value = balances.privateFeeJuice
 		hasLoaded.value = true
+		isStale.value = false
 	} catch {
-		// silently fail — gas balance is informational
+		// Silently fail — gas balance is informational. A stale value stays
+		// visibly dimmed (isStale survives) rather than being blessed fresh.
 	} finally {
-		isLoading.value = false
-		isRefreshing.value = false
+		if (isCurrent()) {
+			isLoading.value = false
+			isRefreshing.value = false
+		}
 	}
 }
 
@@ -122,6 +145,7 @@ watch(
 	([newAccount, newNetwork], [oldAccount, oldNetwork]) => {
 		if (newAccount !== oldAccount || newNetwork !== oldNetwork) {
 			hasLoaded.value = false
+			isStale.value = false
 			loadBalances()
 		}
 	},
@@ -147,7 +171,7 @@ onBeforeUnmount(() => {
 			<div :class="$style.col">
 				<span :class="$style.label">Public Juice</span>
 				<span v-if="isLoading" :class="$style.skeleton" data-testid="gas-skeleton-public" />
-				<span v-else :class="[$style.amount, isRefreshing && $style.amount_stale]" data-testid="gas-balance-public"
+				<span v-else :class="[$style.amount, isStale && $style.amount_stale]" data-testid="gas-balance-public"
 					>{{ publicFormatted }} FJ</span
 				>
 				<span v-if="!isLoading && publicFiat" :class="$style.fiat" data-testid="gas-fiat-public">{{ publicFiat }}</span>
@@ -156,7 +180,7 @@ onBeforeUnmount(() => {
 			<div :class="[$style.col, $style.col_right]">
 				<span :class="$style.label">Private Fee Juice</span>
 				<span v-if="isLoading" :class="$style.skeleton" data-testid="gas-skeleton-private" />
-				<span v-else :class="[$style.amount, isRefreshing && $style.amount_stale]" data-testid="gas-balance-private"
+				<span v-else :class="[$style.amount, isStale && $style.amount_stale]" data-testid="gas-balance-private"
 					>{{ privateFormatted }} FJ</span
 				>
 				<span v-if="!isLoading && privateFiat" :class="$style.fiat" data-testid="gas-fiat-private">{{ privateFiat }}</span>

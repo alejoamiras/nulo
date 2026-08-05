@@ -29,13 +29,15 @@ vi.mock("@/wallet/services/price/client", () => ({
 type Balances = { publicFeeJuice: string; privateFeeJuice: string | null }
 let mockBalances: Balances = { publicFeeJuice: "0", privateFeeJuice: null }
 let mockPeek: { balances: Balances; stale: boolean } | null = null
+/** When set, peekGasBalances runs this instead of returning mockPeek. */
+let mockPeekImpl: (() => Promise<{ balances: Balances; stale: boolean } | null>) | null = null
 let mockGetGasBalances: () => Promise<Balances> = async () => mockBalances
 vi.mock("@/wallet/services/execution/client", () => ({
 	ExecutionServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
 			getGasBalances: vi.fn().mockImplementation(() => mockGetGasBalances()),
-			peekGasBalances: vi.fn().mockImplementation(async () => mockPeek),
+			peekGasBalances: vi.fn().mockImplementation(async () => (mockPeekImpl ? mockPeekImpl() : mockPeek)),
 		}
 	}),
 }))
@@ -138,6 +140,39 @@ describe("GasBalanceCard — stale-while-revalidate", () => {
 		d.resolve({ publicFeeJuice: (7n * 10n ** 18n).toString(), privateFeeJuice: null })
 		await flushPromises()
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("7 FJ")
+	})
+
+	test("a FAILED refresh keeps the stale dim but clears the activity dot — stale is never blessed fresh", async () => {
+		mockQuotes = {}
+		mockPeek = { balances: { publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null }, stale: true }
+		mockGetGasBalances = async () => {
+			throw new Error("SW unreachable")
+		}
+		const w = await mountCard()
+
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
+		// The attempt settled: dot gone. The data did NOT refresh: dim stays.
+		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+		// CSS-module class names are hashed — match by substring.
+		const classes = w.find('[data-testid="gas-balance-public"]').classes()
+		expect(classes.some((c) => c.includes("amount_stale"))).toBe(true)
+	})
+
+	test("a peek failure never blocks the real fetch", async () => {
+		mockQuotes = {}
+		let peekCalled = false
+		mockGetGasBalances = async () => ({ publicFeeJuice: (9n * 10n ** 18n).toString(), privateFeeJuice: null })
+		mockPeekImpl = async () => {
+			peekCalled = true
+			throw new Error("peek RPC failed")
+		}
+		try {
+			const w = await mountCard()
+			expect(peekCalled).toBe(true)
+			expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("9 FJ")
+		} finally {
+			mockPeekImpl = null
+		}
 	})
 
 	test("(BUG PIN) settled-tx forced refresh dims the value — never re-skeletons", async () => {

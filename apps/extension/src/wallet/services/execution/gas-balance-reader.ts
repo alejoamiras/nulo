@@ -38,6 +38,12 @@ export class GasBalanceReader {
 	private cache = new Map<string, { result: GasBalances; fetchedAt: number }>()
 	/** Single-flight dedup for concurrent callers of the same key. */
 	private inFlight = new Map<string, Promise<GasBalances>>()
+	/** Bumped on every invalidation. A compute that started before the bump
+	 *  caches its snapshot already-stale, so it can still be peeked (dimmed)
+	 *  but the next `get` recomputes. Global on purpose: over-staling a
+	 *  sibling account's concurrent compute costs one extra recompute and
+	 *  keeps the bookkeeping trivial. */
+	private epoch = 0
 
 	public constructor(private readonly deps: GasBalanceReaderDeps) {}
 
@@ -52,8 +58,17 @@ export class GasBalanceReader {
 
 		const inFlight = this.inFlight.get(cacheKey)
 		if (inFlight) {
-			this.deps.logDebug(`getGasBalances: dedup — awaiting in-flight request for ${cacheKey}`)
-			return inFlight
+			if (!forceRefresh) {
+				this.deps.logDebug(`getGasBalances: dedup — awaiting in-flight request for ${cacheKey}`)
+				return inFlight
+			}
+			// A forced read must not JOIN a flight that may predate the
+			// invalidation that triggered it (post-settlement caller, pre-
+			// settlement snapshot). Wait it out, then re-enter: the epoch
+			// stamp has marked that flight's cache entry stale, so re-entry
+			// recomputes; if someone already restarted, their flight is joined.
+			const reenter = () => this.get(networkId, accountAddress, false)
+			return inFlight.then(reenter, reenter)
 		}
 		const pending = this.compute(cacheKey, networkId, accountAddress).finally(() => {
 			this.inFlight.delete(cacheKey)
@@ -77,6 +92,7 @@ export class GasBalanceReader {
 	/** Settled-tx invalidation: mark every key for the account stale (not
 	 *  deleted — `peek` keeps the last-known value for dimmed display). */
 	public invalidateAccount(account: string): void {
+		this.epoch += 1
 		for (const [key, entry] of this.cache) {
 			if (key.endsWith(`:${account}`)) {
 				this.cache.set(key, { ...entry, fetchedAt: 0 })
@@ -89,6 +105,7 @@ export class GasBalanceReader {
 	 *  otherwise serve stale private-FJ readouts for up to the TTL.
 	 *  Coarse but correct; stale-marked, not deleted, same as above. */
 	public invalidateAll(): void {
+		this.epoch += 1
 		for (const [key, entry] of this.cache) {
 			this.cache.set(key, { ...entry, fetchedAt: 0 })
 		}
@@ -97,47 +114,53 @@ export class GasBalanceReader {
 	private async compute(cacheKey: string, networkId: string, accountAddress: string): Promise<GasBalances> {
 		const chainId = await this.deps.getChainId(networkId)
 		const deps = await this.deps.getViewDeps(networkId, accountAddress)
+		const epochAtStart = this.epoch
 
-		// PrivateFPC discovery FIRST so both reads ride one batched simulation.
-		// Two separate invocations paid the block-anchor setup twice and
-		// serialized the private read behind the public round-trip; the batch
-		// keeps `balance_of_public` leading so it stays fast-arm eligible
-		// (direct-to-node prefix — see batched-view-simulation.ts).
+		// Two invocations ON PURPOSE, launched concurrently. The public read
+		// rides the direct-to-node fast arm while the PrivateFPC read executes
+		// through PXE — different failure domains, so one leg's rejection must
+		// never discard the other's result (a single shared batch would
+		// shared-fate them and cache a fabricated "0"/null for the whole TTL).
+		// Concurrency is the win over the old shape, which serialized the
+		// private read behind the public round-trip.
 		this.deps.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
-		let bridgedFpc: FpcInfo | undefined
-		try {
-			const fpcs = await this.deps.getFpcs(chainId)
-			bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
-		} catch (err) {
-			this.deps.logDebug(`getGasBalances: FPC discovery failed, reading public only:`, getErrorMessage(err))
-		}
-
-		let publicFeeJuice = "0"
-		let privateFeeJuice: string | null = null
-		try {
-			const result = await batchedViewSimulation(
-				[
-					{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] },
-					...(bridgedFpc
-						? [{ kind: "call" as const, contract: bridgedFpc.address, method: "balance_of", args: [accountAddress] }]
-						: []),
-				],
-				deps,
-			)
-			if (result.encoded[0]?.[0]) {
-				publicFeeJuice = result.encoded[0][0].toBigInt().toString()
+		const publicPromise = (async (): Promise<string> => {
+			try {
+				const result = await batchedViewSimulation(
+					[{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] }],
+					deps,
+				)
+				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : "0"
+			} catch (err) {
+				this.deps.logDebug(`getGasBalances: Failed to get public FeeJuice balance:`, getErrorMessage(err))
+				this.deps.logError("Failed to get public FeeJuice balance", getErrorMessage(err))
+				return "0"
 			}
-			if (bridgedFpc && result.encoded[1]?.[0]) {
-				privateFeeJuice = result.encoded[1][0].toBigInt().toString()
+		})()
+		const privatePromise = (async (): Promise<string | null> => {
+			try {
+				const fpcs = await this.deps.getFpcs(chainId)
+				const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
+				if (!bridgedFpc) return null
+				const result = await batchedViewSimulation(
+					[{ kind: "call", contract: bridgedFpc.address, method: "balance_of", args: [accountAddress] }],
+					deps,
+				)
+				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
+			} catch (err) {
+				this.deps.logDebug(`getGasBalances: Failed to get private FeeJuice balance:`, getErrorMessage(err))
+				this.deps.logError("Failed to get private FeeJuice balance", getErrorMessage(err))
+				return null
 			}
-		} catch (err) {
-			this.deps.logDebug(`getGasBalances: batched FeeJuice balance read failed:`, getErrorMessage(err))
-			this.deps.logError("Failed to read FeeJuice balances", getErrorMessage(err))
-		}
+		})()
+		const [publicFeeJuice, privateFeeJuice] = await Promise.all([publicPromise, privatePromise])
 		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
 
 		const result = { publicFeeJuice, privateFeeJuice }
-		this.cache.set(cacheKey, { result, fetchedAt: Date.now() })
+		// An invalidation that landed mid-compute outranks this snapshot:
+		// cache it already-stale so peek can serve it dimmed but the next
+		// get recomputes.
+		this.cache.set(cacheKey, { result, fetchedAt: this.epoch === epochAtStart ? Date.now() : 0 })
 		return result
 	}
 }
