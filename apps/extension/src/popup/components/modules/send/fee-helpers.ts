@@ -77,9 +77,14 @@ export interface FeeSettings {
  * downstream simulators don't fire against a known-broken setup.
  *
  * `balances === undefined` means the balance read failed or timed out (a
- * silent retry is pending). Unknown is NOT a confirmed zero: only a known
- * zero blocks a method — with unknown balances the method stays usable and
- * estimation/simulation surfaces a real insufficiency error if there is one.
+ * silent retry is pending). Self-paid methods (fj / private_fpc) fail CLOSED
+ * on unknown: fee estimation simulates with `skipFeeEnforcement`, so it
+ * would NOT catch an actually-zero balance — deriving settings from a
+ * balance we never saw could walk the user into proving a transaction the
+ * sequencer must drop. Sponsored FPCs need no user balance and stay usable,
+ * which is what keeps the card operable while balances are unavailable.
+ * Unknown is still NOT a confirmed zero for messaging: the bridge nudge
+ * keys off a known "0" only (see the SFC's `feeJuiceMissing`).
  */
 export function settingsForMethod(
 	method: FeeMethodOption | undefined,
@@ -88,11 +93,11 @@ export function settingsForMethod(
 ): FeeSettings | undefined {
 	switch (method?.type) {
 		case "fj":
-			if (balances && balances.publicFeeJuice === "0") return undefined
+			if (!balances || balances.publicFeeJuice === "0") return undefined
 			return buildSettings({ kind: "fj" }, priority) as FeeSettings
 		case "private_fpc":
 			if (!method.fpc) return undefined
-			if (balances && (!balances.privateFeeJuice || balances.privateFeeJuice === "0")) return undefined
+			if (!balances || !balances.privateFeeJuice || balances.privateFeeJuice === "0") return undefined
 			return buildSettings({ kind: "fpc", fpcId: method.fpc.id }, priority) as FeeSettings
 		case "fpc": {
 			if (!method.fpc) return undefined

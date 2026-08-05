@@ -681,19 +681,30 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		w.unmount()
 	})
 
-	test("(BUG PIN) getGasBalances rejects with saved fj: unknown balance is not zero — fj settings still emit", async () => {
+	test("(BUG PIN) getGasBalances rejects with saved fj: fails closed without a nudge, sponsored still pickable", async () => {
+		// Self-paid fj must NOT derive settings from a balance we never saw
+		// (estimation runs with skipFeeEnforcement and would not catch an
+		// actually-zero balance). But the card stays operable: no misleading
+		// bridge nudge, the degraded notice shows, and the user can still
+		// pick a sponsored method manually.
 		storageBacking[FEE_METHOD_LS_KEY] = {
 			[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
 		}
 		mocks.getGasBalances.mockRejectedValue(new Error("PXE unreachable"))
-		mocks.getFpcs.mockResolvedValue([])
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
 
 		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
 		await flushPromises()
 
-		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((e) => e[0] != null)
+		expect(truthy).toEqual([])
 		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
 		expect(needs.some((e) => e[0] === true)).toBe(false)
+		expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+
+		await w.find('[data-testid="pick-fpc"]').trigger("click")
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
 		w.unmount()
 	})
 
@@ -741,6 +752,141 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			expect(mocks.getGasBalances).toHaveBeenCalledTimes(2)
 			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
 			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(false)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a hung raw RPC is reused across retries — retries never stack new requests", async () => {
+		// The transport queues pre-connect requests unboundedly and can't
+		// cancel them, so each retry must re-attach a timeout to the SAME
+		// pending call rather than issue a fresh one.
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockImplementation(() => new Promise(() => {}))
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(INIT_FETCH_TIMEOUT_MS)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			// First retry runs a full degraded cycle against the SAME raw call.
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + INIT_FETCH_TIMEOUT_MS)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
+			// The FPC leg settled, so its entry cleared and it re-fetches.
+			expect(mocks.getFpcs.mock.calls.length).toBeGreaterThan(1)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a background retry never yanks committed sponsored settings during its in-flight window", async () => {
+		// Re-arming the derivation gate on every retry made Confirm oscillate:
+		// disabled for the 20s in-flight window of each backoff cycle. A
+		// same-identity refresh must keep serving the committed snapshot.
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockImplementation(() => new Promise(() => {}))
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			await vi.advanceTimersByTimeAsync(INIT_FETCH_TIMEOUT_MS)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			const settledCount = (w.emitted<unknown[]>("update:modelValue") ?? []).length
+			// Sit inside the next retry's in-flight window.
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + INIT_FETCH_TIMEOUT_MS / 2)
+			const during = (w.emitted<unknown[]>("update:modelValue") ?? []).slice(settledCount)
+			expect(during.filter((e) => e[0] == null)).toEqual([])
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("alternating leg failures keep the last-good FPC list — a working sponsor is never erased mid-session", async () => {
+		vi.useFakeTimers()
+		try {
+			// Attempt 1: balances fail, FPCs land. Attempt 2 (retry): balances
+			// land, FPCs fail — the sponsor from attempt 1 must survive.
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValueOnce([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getFpcs.mockRejectedValue(new Error("boom"))
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0])
+			expect(mocks.getFpcs.mock.calls.length).toBeGreaterThan(1)
+			// Sponsor retained; settings still usable, dropdown still offers it.
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			expect(w.find('[data-testid="pick-fpc"]').exists()).toBe(true)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("identity switch mid-refresh closes the gate immediately — old snapshot never serves the new identity", async () => {
+		vi.useFakeTimers()
+		try {
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			// Same-identity refresh whose balance leg hangs — the committed
+			// snapshot keeps serving (no oscillation).
+			mocks.getGasBalances.mockImplementation(() => new Promise(() => {}))
+			await w.setProps({ profile: { ...profile } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			// Switch identity while that refresh is still in flight: the gate
+			// must close NOW, not when the hung fetch eventually settles.
+			await w.setProps({ account: { id: "a2", address: "0xother" } })
+			await vi.advanceTimersByTimeAsync(0)
+			const events = w.emitted<unknown[]>("update:modelValue") ?? []
+			expect(events[events.length - 1]?.[0]).toBeUndefined()
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("returning from embedded mode revives a dead retry chain", async () => {
+		// A retry that fires while the card is in embedded mode hits runInit's
+		// early-return and dies. Flipping back to "use my own method" must
+		// re-init when the last snapshot was degraded — otherwise the card is
+		// permanently stuck on it.
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockRejectedValueOnce(new Error("boom"))
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+
+			// dApp op flips the card to app-embedded fee before the retry fires.
+			await w.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0])
+
+			// Back to own method — the degraded snapshot must trigger a fresh init.
+			await w.find('[data-testid="send-fee-override"]').trigger("click")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
 			w.unmount()
 		} finally {
 			vi.useRealTimers()

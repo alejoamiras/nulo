@@ -98,23 +98,17 @@ describe("fee-helpers/settingsForMethod", () => {
 
 describe("fee-helpers/settingsForMethod — unknown balances (degraded init)", () => {
 	// `undefined` balances = the read failed or timed out and a silent retry is
-	// pending. Unknown must NOT be treated as a confirmed zero — only a known
-	// zero blocks a method; estimation surfaces a real insufficiency otherwise.
-	test("'fj' with UNKNOWN balances is allowed", () => {
-		expect(settingsForMethod({ type: "fj", title: "x", subtitle: "y" }, "normal", undefined)).toEqual({
-			paymentMethod: { kind: "fj" },
-		})
+	// pending. Self-paid methods fail CLOSED on unknown: estimation simulates
+	// with skipFeeEnforcement, so it would NOT catch an actually-zero balance —
+	// an unverified self-paid send could reach proving only to be dropped at
+	// the sequencer. Sponsored FPCs need no user balance and stay usable.
+	test("'fj' with UNKNOWN balances fails closed", () => {
+		expect(settingsForMethod({ type: "fj", title: "x", subtitle: "y" }, "normal", undefined)).toBeUndefined()
 	})
 
-	test("'private_fpc' with UNKNOWN balances is allowed when a PrivateFPC is registered", () => {
+	test("'private_fpc' with UNKNOWN balances fails closed even when a PrivateFPC is registered", () => {
 		const m = { type: "private_fpc" as const, title: "x", subtitle: "y", fpc: { id: "p1", type: FpcType.PrivateFpc } }
-		expect(settingsForMethod(m, "normal", undefined)).toEqual({
-			paymentMethod: { kind: "fpc", fpcId: "p1" },
-		})
-	})
-
-	test("'private_fpc' with UNKNOWN balances but no registered fpc still yields undefined", () => {
-		expect(settingsForMethod({ type: "private_fpc", title: "x", subtitle: "y" }, "normal", undefined)).toBeUndefined()
+		expect(settingsForMethod(m, "normal", undefined)).toBeUndefined()
 	})
 
 	test("Sponsored FPC is unaffected by unknown balances", () => {
