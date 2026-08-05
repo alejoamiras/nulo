@@ -121,6 +121,10 @@ async function loadBalances(forceRefresh = false) {
 		}
 		if (!isCurrent()) return
 		isRefreshing.value = hasLoaded.value && (isStale.value || forceRefresh)
+		// A forced refresh means the on-screen value is known-invalidated (a
+		// settled tx changed it) — mark it stale NOW so a failed refresh can't
+		// leave it rendered full-opacity as if current.
+		if (forceRefresh && hasLoaded.value) isStale.value = true
 
 		const balances = await executionService.getGasBalances(networkId, accountAddress, forceRefresh)
 		if (!isCurrent()) return

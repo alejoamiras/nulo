@@ -5,10 +5,11 @@
  * Owns the `${networkId}:${accountAddress}`-keyed TTL cache, the
  * single-flight dedup (fresh popup opens fire several concurrent
  * readouts — FeeSettingsCard + GasBalanceCard — and each independently
- * triggered FPC discovery before the guard existed), and the ONE-batched
- * compute (public FeeJuice via `balance_of_public` leading — fast-arm
- * eligible — plus the PrivateFPC's `balance_of` when one is registered,
- * in a single `batchedViewSimulation` invocation).
+ * triggered FPC discovery before the guard existed), and the two-leg
+ * compute: public FeeJuice via `balance_of_public` and the PrivateFPC's
+ * `balance_of` when one is registered, as CONCURRENT independent
+ * invocations with per-leg failure isolation (they ride different
+ * arms — direct-to-node vs PXE — so they must not shared-fate).
  *
  * Invalidation is owned by the FACADE's event subscriptions (settled-tx
  * per-account; PrivateFPC mutation full sweep) — registration order in

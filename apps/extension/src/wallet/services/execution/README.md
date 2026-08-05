@@ -22,7 +22,7 @@ dispatch, and collaborator wiring; the work lives in focused modules.
 | `authwit-discoverer.ts` | Offchain-effect-driven private authwit discovery for dApp sends. |
 | `fee/` | Fee strategies (`fj`, `fjwc`, `fpc`, `embedded`) behind `FeeStrategy`; gas-limit shaping (`suggestGasLimits` / `finalizeGasLimits`); embedded-FPC gas cap. FPC is two-pass — byte-parity-sensitive, see `strategies-structural.test.ts`. |
 | `transfer-estimate-reuse.ts` | One-shot estimate→confirm reuse cache (fingerprint-validated snapshot; fj/fpc only). |
-| `gas-balance-reader.ts` | TTL + single-flight FeeJuice balance readout in ONE batched simulation (public leading, fast-arm eligible); `peek` serves last-known values (stale-marked, never deleted) for stale-while-revalidate display; invalidation primitives called by the facade's event subscriptions. |
+| `gas-balance-reader.ts` | TTL + single-flight FeeJuice balance readout; the two legs (public direct-to-node, private via PXE) run as concurrent independent invocations with per-leg failure isolation; `peek` serves last-known values (stale-marked, never deleted) for stale-while-revalidate display; invalidation epoch + primitives called by the facade's event subscriptions. |
 | `tx-fee-details.ts` | `getEstimatedFee` / `getGasDetails` projections from finalized gas settings. |
 | `execution-mutex.ts` | FIFO mutex with abort + capacity caps. No timeout/force-release by design. |
 | `claim-helper.ts` | Queued-journal claim decision tree (cancel-during-claim safety). |

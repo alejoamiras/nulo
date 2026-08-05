@@ -193,9 +193,12 @@ describe("GasBalanceCard — stale-while-revalidate", () => {
 		handler({ account: "0xacct", status: "Finalized" })
 		await flushPromises()
 
-		// Old value stays visible (dimmed via the refreshing marker), no skeleton.
+		// Old value stays visible, dimmed (it is known-invalidated) with the
+		// activity dot — never a skeleton.
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
 		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(true)
+		const midRefreshClasses = w.find('[data-testid="gas-balance-public"]').classes()
+		expect(midRefreshClasses.some((c) => c.includes("amount_stale"))).toBe(true)
 
 		d.resolve({ publicFeeJuice: (40n * 10n ** 18n).toString(), privateFeeJuice: null })
 		await flushPromises()
