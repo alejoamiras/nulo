@@ -75,20 +75,24 @@ export interface FeeSettings {
  * (e.g. zero Fee Juice balance, no PrivateFPC registered, zero private
  * Fee Juice balance). The SFC clears `settings` in those cases so
  * downstream simulators don't fire against a known-broken setup.
+ *
+ * `balances === undefined` means the balance read failed or timed out (a
+ * silent retry is pending). Unknown is NOT a confirmed zero: only a known
+ * zero blocks a method — with unknown balances the method stays usable and
+ * estimation/simulation surfaces a real insufficiency error if there is one.
  */
 export function settingsForMethod(
 	method: FeeMethodOption | undefined,
 	priority: string,
-	gasPublicFeeJuice: string,
-	gasPrivateFeeJuice?: string | null,
+	balances: GasBalances | undefined,
 ): FeeSettings | undefined {
 	switch (method?.type) {
 		case "fj":
-			if (gasPublicFeeJuice === "0") return undefined
+			if (balances && balances.publicFeeJuice === "0") return undefined
 			return buildSettings({ kind: "fj" }, priority) as FeeSettings
 		case "private_fpc":
 			if (!method.fpc) return undefined
-			if (!gasPrivateFeeJuice || gasPrivateFeeJuice === "0") return undefined
+			if (balances && (!balances.privateFeeJuice || balances.privateFeeJuice === "0")) return undefined
 			return buildSettings({ kind: "fpc", fpcId: method.fpc.id }, priority) as FeeSettings
 		case "fpc": {
 			if (!method.fpc) return undefined
@@ -201,3 +205,35 @@ export function buildFeeMethods(
  * at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
  */
 export const FEE_JUICE_BRIDGE_URL: string = (import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://tools.nulo.sh"
+
+/**
+ * Call-site bound on each fee-card init fetch. The popup→SW transport's own
+ * 60s timer only arms after the port reaches Connected — an unreachable SW
+ * would otherwise hang init (and the Confirm gate behind it) forever.
+ */
+export const INIT_FETCH_TIMEOUT_MS = 20_000
+
+/** Silent-retry backoff after a degraded/failed init. The last step repeats
+ *  until the component unmounts or an init fully succeeds. */
+export const INIT_RETRY_BACKOFF_MS = [5_000, 10_000, 20_000, 30_000]
+
+/**
+ * Rejects with a labeled error after `ms` if `promise` hasn't settled. The
+ * underlying operation is NOT cancelled — the SW side single-flights these
+ * reads, so a later retry re-attaches to the same in-flight computation.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+		promise.then(
+			(value) => {
+				clearTimeout(timer)
+				resolve(value)
+			},
+			(error) => {
+				clearTimeout(timer)
+				reject(error)
+			},
+		)
+	})
+}

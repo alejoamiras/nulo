@@ -15,7 +15,9 @@
 defineProps({
 	method: { type: Object, default: null },
 	isLoading: { type: Boolean, default: false },
-	feeJuiceBalanceFormatted: { type: String, default: "0" },
+	/** Null = balance unknown (read failed/timed out) — rendered as an em
+	 *  dash, never as a fabricated zero. */
+	feeJuiceBalanceFormatted: { type: String, default: null },
 	privateFeeJuiceFormatted: { type: String, default: null },
 })
 </script>
@@ -26,7 +28,7 @@ defineProps({
 		<Text size="12" weight="600" color="secondary">Available</Text>
 		<span v-if="isLoading" :class="$style.skeleton" />
 		<Text v-else size="12" weight="600" color="primary">
-			{{ feeJuiceBalanceFormatted }} Fee Juice
+			{{ feeJuiceBalanceFormatted ?? '—' }} Fee Juice
 		</Text>
 	</Flex>
 

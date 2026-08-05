@@ -7,7 +7,7 @@ import FeeMethodSelector from "./FeeMethodSelector.vue"
 
 /** Vendor */
 import { getRandomHex } from "@/wallet/utils"
-import { getErrorData, getErrorMessage } from "@nulo/wallet-core/utils"
+import { getErrorData } from "@nulo/wallet-core/utils"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 
 /** Utils */
@@ -20,7 +20,16 @@ import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
-import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import {
+	buildFeeMethods,
+	FEE_JUICE_BRIDGE_URL,
+	formatGasBalance,
+	INIT_FETCH_TIMEOUT_MS,
+	INIT_RETRY_BACKOFF_MS,
+	resolveSavedSelection,
+	settingsForMethod,
+	withTimeout,
+} from "./fee-helpers"
 import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
 
@@ -92,13 +101,17 @@ const selectedMethod = ref()
 const selectedPriority = ref("normal")
 const isMethodsDropdownOpen = ref(false)
 
-const gasBalances = ref({ publicFeeJuice: "0", privateFeeJuice: null })
+/** UNKNOWN until the first successful read for the current identity.
+ *  `undefined` must stay distinguishable from a confirmed zero: a failed or
+ *  timed-out read commits `undefined`, never a fabricated "0", so method
+ *  gating and the bridge nudge can't act on a balance we never saw. */
+const gasBalances = ref(undefined)
 const isLoading = ref(false)
 const error = ref("")
 
-const feeJuiceBalanceFormatted = computed(() => formatGasBalance(gasBalances.value.publicFeeJuice))
+const feeJuiceBalanceFormatted = computed(() => (gasBalances.value ? formatGasBalance(gasBalances.value.publicFeeJuice) : null))
 const privateFeeJuiceFormatted = computed(() =>
-	gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
+	gasBalances.value && gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
 )
 
 /** Fee USD is derived LIVE from the estimate's raw FJ amount × the current
@@ -130,22 +143,26 @@ const derivedSettings = computed(() => {
 	if (!isInitComplete.value) return undefined
 	const m = selectedMethod.value
 	if (!m) return undefined
-	return settingsForMethod(m, selectedPriority.value, gasBalances.value.publicFeeJuice, gasBalances.value.privateFeeJuice)
+	return settingsForMethod(m, selectedPriority.value, gasBalances.value)
 })
 
 /** True when the selected fee-juice method (public or private) can't pay because
  *  its balance is zero — the trigger for the get-fee-juice nudge (banner + CTA). */
 const feeJuiceMissing = computed(() => {
 	if (!isInitComplete.value || useEmbeddedFee.value) return false
+	// Unknown balances (failed/timed-out read, silent retry pending) never
+	// trigger the nudge — only a confirmed zero does.
+	const balances = gasBalances.value
+	if (!balances) return false
 	const m = selectedMethod.value
 	if (!m) return false
 	if (m.type === "private_fpc") {
 		// Only a CONFIRMED zero triggers the bridge nudge. `null` means the PrivateFPC
 		// read failed or isn't registered — an unknown state, not a confirmed empty
 		// balance — so we don't tell a possibly-funded user to go bridge.
-		return gasBalances.value.privateFeeJuice === "0"
+		return balances.privateFeeJuice === "0"
 	}
-	if (m.type === "fj") return gasBalances.value.publicFeeJuice === "0"
+	if (m.type === "fj") return balances.publicFeeJuice === "0"
 	return false
 })
 watch(
@@ -228,6 +245,33 @@ let initInFlight = null
 let initRequested = false
 let isMounted = true
 
+// Silent auto-retry: a degraded/failed init reschedules itself with capped
+// backoff. Deliberately no user-facing retry affordance — nothing the user
+// can do fixes a failed balance read, and the degraded state keeps the card
+// usable meanwhile (sponsored selectable, fee juice treated as unknown, not
+// zero). The SW single-flights these reads, so retries are cheap: they
+// re-attach to any still-running computation instead of stacking new ones.
+const FEE_DATA_UNAVAILABLE = "Couldn't load fee data — retrying in the background."
+let retryTimer = null
+let retryAttempt = 0
+
+const clearRetryTimer = () => {
+	if (retryTimer) {
+		clearTimeout(retryTimer)
+		retryTimer = null
+	}
+}
+const scheduleRetry = () => {
+	if (!isMounted) return
+	clearRetryTimer()
+	const delay = INIT_RETRY_BACKOFF_MS[Math.min(retryAttempt, INIT_RETRY_BACKOFF_MS.length - 1)]
+	retryAttempt += 1
+	retryTimer = setTimeout(() => {
+		retryTimer = null
+		void init()
+	}, delay)
+}
+
 const init = async () => {
 	if (!isMounted) return
 	if (initInFlight) {
@@ -277,9 +321,14 @@ const runInit = async () => {
 		const baseline = selectedMethod.value
 
 		isLoading.value = true
-		const [gasResult, fpcs] = await Promise.all([
-			executionService.getGasBalances(props.network.id, props.account.address),
-			fpcService.getFpcs(props.network.chainId),
+		// The legs settle independently: a failed balance read must not discard
+		// a good FPC list (sponsored methods need no balance), and vice versa.
+		// Each leg is time-boxed at the call site — the transport's own 60s
+		// timer only arms once the port reaches Connected, so an unreachable SW
+		// would otherwise pin this await (and the Confirm gate behind it) forever.
+		const [gasResult, fpcResult] = await Promise.allSettled([
+			withTimeout(executionService.getGasBalances(props.network.id, props.account.address), INIT_FETCH_TIMEOUT_MS, "getGasBalances"),
+			withTimeout(fpcService.getFpcs(props.network.chainId), INIT_FETCH_TIMEOUT_MS, "getFpcs"),
 		])
 		// Discard if the profile/network/account switched mid-flight — the props watcher
 		// already queued a fresh init for the new identity. Everything past this guard is
@@ -287,8 +336,8 @@ const runInit = async () => {
 		if (!isMounted || props.profile?.id !== reqProfileId || props.network?.id !== reqNetworkId || props.account?.address !== reqAccount)
 			return
 
-		gasBalances.value = gasResult
-		registeredFpcs.value = fpcs ?? []
+		gasBalances.value = gasResult.status === "fulfilled" ? gasResult.value : undefined
+		registeredFpcs.value = fpcResult.status === "fulfilled" ? (fpcResult.value ?? []) : []
 
 		const userPickedDuringInit = selectedMethod.value !== baseline
 
@@ -316,10 +365,26 @@ const runInit = async () => {
 			}
 		}
 
+		// The gate opens on EVERY settled init — degraded included. Holding it
+		// closed on failure is the bug this fixes: `derivedSettings` stayed
+		// `undefined` forever, so the Send/dApp-Confirm gates froze with no
+		// error and no retry.
 		isInitComplete.value = true
+
+		const rejected = [gasResult, fpcResult].filter((r) => r.status === "rejected")
+		if (rejected.length > 0) {
+			console.error("Fee init degraded", ...rejected.map((r) => getErrorData(r.reason)))
+			error.value = FEE_DATA_UNAVAILABLE
+			scheduleRetry()
+		} else {
+			error.value = ""
+			retryAttempt = 0
+			clearRetryTimer()
+		}
 	} catch (e) {
 		console.error("Failed to init", getErrorData(e))
-		error.value = getErrorMessage(e)
+		error.value = FEE_DATA_UNAVAILABLE
+		scheduleRetry()
 	} finally {
 		isLoading.value = false
 	}
@@ -335,6 +400,10 @@ watch(
 watch(
 	() => [props.profile, props.network, props.account],
 	async () => {
+		// Fresh identity, fresh backoff — a pending retry for the old identity
+		// must not fire between this init and its commit.
+		retryAttempt = 0
+		clearRetryTimer()
 		await init()
 	},
 )
@@ -359,6 +428,7 @@ onBeforeUnmount(() => {
 	// torn-down refs.
 	isMounted = false
 	initRequested = false
+	clearRetryTimer()
 	fpcService.disconnect()
 	executionService.disconnect()
 	prices.dispose()
@@ -410,8 +480,8 @@ onBeforeUnmount(() => {
 				</Flex>
 			</Flex>
 
-			<!-- Error -->
-			<Flex v-if="error" align="start" gap="6" wide :class="$style.detail_row">
+			<!-- Degraded fee data (silent retry pending) -->
+			<Flex v-if="error" align="start" gap="6" wide :class="$style.detail_row" data-testid="fee-init-degraded">
 				<Icon name="info" size="14" color="primary" />
 				<Text size="12" weight="600" color="secondary" :style="{ paddingTop: '1px' }">
 					{{ error }}

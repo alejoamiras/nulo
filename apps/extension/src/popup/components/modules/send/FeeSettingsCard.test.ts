@@ -59,6 +59,7 @@ vi.mock("@/wallet/services/fpc/client", () => ({
 }))
 
 import FeeSettingsCard from "./FeeSettingsCard.vue"
+import { INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS } from "./fee-helpers"
 
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
@@ -657,5 +658,113 @@ describe("FeeSettingsCard — per-network defaults + fee-juice nudge", () => {
 
 		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "p1" } })
 		expect(w.find('[data-testid="pick-fpc"]').exists()).toBe(false)
+	})
+})
+
+describe("FeeSettingsCard — init failure resilience (degraded settings + silent retry)", () => {
+	test("(BUG PIN) getGasBalances rejects: FPC leg still lands — sponsored auto-selected, Confirm not held hostage", async () => {
+		// The reported bug: a failed balance read left `isInitComplete` false forever,
+		// so `feeSettings` never populated and the Send/Confirm gates stayed disabled
+		// with no error, no retry. A failed balance read must NOT discard the good
+		// FPC list — sponsored methods need no balance at all.
+		mocks.getGasBalances.mockRejectedValue(new Error("PXE unreachable"))
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		// The degraded state is visible (quietly), not a stuck skeleton.
+		expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+		// And never the misleading bridge nudge — the balance is UNKNOWN, not zero.
+		expect(w.text()).not.toContain("You have no fee juice yet")
+		w.unmount()
+	})
+
+	test("(BUG PIN) getGasBalances rejects with saved fj: unknown balance is not zero — fj settings still emit", async () => {
+		storageBacking[FEE_METHOD_LS_KEY] = {
+			[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
+		}
+		mocks.getGasBalances.mockRejectedValue(new Error("PXE unreachable"))
+		mocks.getFpcs.mockResolvedValue([])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
+		expect(needs.some((e) => e[0] === true)).toBe(false)
+		w.unmount()
+	})
+
+	test("(BUG PIN) getGasBalances never settles: init times out into the degraded state instead of loading forever", async () => {
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockReturnValue(new Promise(() => {}))
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+
+			await vi.advanceTimersByTimeAsync(INIT_FETCH_TIMEOUT_MS)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("failed init retries silently with backoff and recovers", async () => {
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockRejectedValueOnce(new Error("boom"))
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
+			const truthyBefore = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((e) => e[0] != null)
+			expect(truthyBefore).toEqual([])
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+
+			// Nothing until the first backoff step elapses…
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] - 1)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
+
+			// …then the retry fires — silently — and recovers.
+			await vi.advanceTimersByTimeAsync(1)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(2)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(false)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("unmount cancels the pending silent retry", async () => {
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockRejectedValue(new Error("boom"))
+			mocks.getFpcs.mockRejectedValue(new Error("boom"))
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
+
+			w.unmount()
+			// One full backoff step + margin is enough to prove the retry was
+			// cancelled (kept < 60s so unrelated service-client RPC timers,
+			// also running on faked time, don't fire spurious timeouts).
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 10_000)
+			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })
