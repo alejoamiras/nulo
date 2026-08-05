@@ -42,6 +42,15 @@ export type Methods = {
 	getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): GasBalances
 
 	/**
+	 * Cache-only peek at the last-known FeeJuice balances — instant, never
+	 * triggers a fetch. `stale: true` marks an entry past the TTL or
+	 * invalidated (settled tx / PrivateFPC change); callers render it dimmed
+	 * while a real `getGasBalances` refresh runs. `null` means this key was
+	 * never fetched in the current service-worker lifetime.
+	 */
+	peekGasBalances(networkId: string, accountAddress: string): { balances: GasBalances; stale: boolean } | null
+
+	/**
 	 * Estimates the fee for a transfer without executing it.
 	 * Runs simulation in the background and returns fee breakdown.
 	 */

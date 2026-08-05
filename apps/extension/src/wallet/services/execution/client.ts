@@ -12,6 +12,7 @@ const EXECUTION_METHODS = [
 	"executeTransfer",
 	"executeOperations",
 	"getGasBalances",
+	"peekGasBalances",
 	"estimateTransferFee",
 	"estimateOperationFee",
 	"cancelJob",

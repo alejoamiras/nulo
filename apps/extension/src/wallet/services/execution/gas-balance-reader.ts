@@ -5,14 +5,17 @@
  * Owns the `${networkId}:${accountAddress}`-keyed TTL cache, the
  * single-flight dedup (fresh popup opens fire several concurrent
  * readouts — FeeSettingsCard + GasBalanceCard — and each independently
- * triggered FPC discovery before the guard existed), and the two-call
- * compute (public FeeJuice via `balance_of_public`, private FeeJuice via
- * the PrivateFPC's `balance_of` when one is registered).
+ * triggered FPC discovery before the guard existed), and the ONE-batched
+ * compute (public FeeJuice via `balance_of_public` leading — fast-arm
+ * eligible — plus the PrivateFPC's `balance_of` when one is registered,
+ * in a single `batchedViewSimulation` invocation).
  *
  * Invalidation is owned by the FACADE's event subscriptions (settled-tx
- * per-account eviction; PrivateFPC mutation full clear) — registration
- * order in `init()` is load-bearing and stays there. The module exposes
- * the two eviction primitives those subscribers call.
+ * per-account; PrivateFPC mutation full sweep) — registration order in
+ * `init()` is load-bearing and stays there. Invalidation MARKS STALE
+ * rather than deleting: `get()` recomputes past-TTL entries either way,
+ * while `peek()` keeps serving the last-known value so the UI can render
+ * it dimmed instead of a skeleton (stale-while-revalidate).
  */
 
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -59,11 +62,24 @@ export class GasBalanceReader {
 		return pending
 	}
 
-	/** Settled-tx invalidation: evict every key for the account. */
+	/**
+	 * Cache-only read of the last-known balances — instant, never fetches.
+	 * Serves expired AND invalidated entries with `stale: true` so the UI
+	 * can paint the last value dimmed while a real refresh runs; `null`
+	 * only when this key was never fetched in this SW lifetime.
+	 */
+	public peek(networkId: string, accountAddress: string): { balances: GasBalances; stale: boolean } | null {
+		const entry = this.cache.get(`${networkId}:${accountAddress}`)
+		if (!entry) return null
+		return { balances: entry.result, stale: Date.now() - entry.fetchedAt >= GAS_BALANCE_TTL_MS }
+	}
+
+	/** Settled-tx invalidation: mark every key for the account stale (not
+	 *  deleted — `peek` keeps the last-known value for dimmed display). */
 	public invalidateAccount(account: string): void {
-		for (const key of this.cache.keys()) {
+		for (const [key, entry] of this.cache) {
 			if (key.endsWith(`:${account}`)) {
-				this.cache.delete(key)
+				this.cache.set(key, { ...entry, fetchedAt: 0 })
 			}
 		}
 	}
@@ -71,63 +87,52 @@ export class GasBalanceReader {
 	/** PrivateFPC-mutation invalidation: the cache is keyed only by
 	 *  `${networkId}:${account}`, so swapping the PrivateFPC address would
 	 *  otherwise serve stale private-FJ readouts for up to the TTL.
-	 *  Coarse but correct. */
-	public clear(): void {
-		this.cache.clear()
+	 *  Coarse but correct; stale-marked, not deleted, same as above. */
+	public invalidateAll(): void {
+		for (const [key, entry] of this.cache) {
+			this.cache.set(key, { ...entry, fetchedAt: 0 })
+		}
 	}
 
 	private async compute(cacheKey: string, networkId: string, accountAddress: string): Promise<GasBalances> {
 		const chainId = await this.deps.getChainId(networkId)
 		const deps = await this.deps.getViewDeps(networkId, accountAddress)
 
-		// Public FeeJuice balance via balance_of_public on the FeeJuice contract
+		// PrivateFPC discovery FIRST so both reads ride one batched simulation.
+		// Two separate invocations paid the block-anchor setup twice and
+		// serialized the private read behind the public round-trip; the batch
+		// keeps `balance_of_public` leading so it stays fast-arm eligible
+		// (direct-to-node prefix — see batched-view-simulation.ts).
 		this.deps.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
-		let publicFeeJuice = "0"
+		let bridgedFpc: FpcInfo | undefined
 		try {
-			const publicResult = await batchedViewSimulation(
+			const fpcs = await this.deps.getFpcs(chainId)
+			bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
+		} catch (err) {
+			this.deps.logDebug(`getGasBalances: FPC discovery failed, reading public only:`, getErrorMessage(err))
+		}
+
+		let publicFeeJuice = "0"
+		let privateFeeJuice: string | null = null
+		try {
+			const result = await batchedViewSimulation(
 				[
-					{
-						kind: "call",
-						contract: feeJuiceAddress,
-						method: "balance_of_public",
-						args: [accountAddress],
-					},
+					{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] },
+					...(bridgedFpc
+						? [{ kind: "call" as const, contract: bridgedFpc.address, method: "balance_of", args: [accountAddress] }]
+						: []),
 				],
 				deps,
 			)
-			if (publicResult.encoded[0]?.[0]) {
-				publicFeeJuice = publicResult.encoded[0][0].toBigInt().toString()
+			if (result.encoded[0]?.[0]) {
+				publicFeeJuice = result.encoded[0][0].toBigInt().toString()
+			}
+			if (bridgedFpc && result.encoded[1]?.[0]) {
+				privateFeeJuice = result.encoded[1][0].toBigInt().toString()
 			}
 		} catch (err) {
-			this.deps.logDebug(`getGasBalances: Failed to get public FeeJuice balance:`, getErrorMessage(err))
-			this.deps.logError("Failed to get public FeeJuice balance", getErrorMessage(err))
-		}
-		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}`)
-
-		// Private FeeJuice balance via balance_of on PrivateFPC
-		let privateFeeJuice: string | null = null
-		try {
-			const fpcs = await this.deps.getFpcs(chainId)
-			const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
-			if (bridgedFpc) {
-				const privateResult = await batchedViewSimulation(
-					[
-						{
-							kind: "call",
-							contract: bridgedFpc.address,
-							method: "balance_of",
-							args: [accountAddress],
-						},
-					],
-					deps,
-				)
-				if (privateResult.encoded[0]?.[0]) {
-					privateFeeJuice = privateResult.encoded[0][0].toBigInt().toString()
-				}
-			}
-		} catch (err) {
-			this.deps.logDebug(`getGasBalances: Failed to get private FeeJuice balance:`, getErrorMessage(err))
-			this.deps.logError("Failed to get private FeeJuice balance", getErrorMessage(err))
+			this.deps.logDebug(`getGasBalances: batched FeeJuice balance read failed:`, getErrorMessage(err))
+			this.deps.logError("Failed to read FeeJuice balances", getErrorMessage(err))
 		}
 		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
 

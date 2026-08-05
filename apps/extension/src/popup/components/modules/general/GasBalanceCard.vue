@@ -24,6 +24,9 @@ const publicFeeJuice = ref("0")
 const privateFeeJuice = ref(null)
 const isLoading = ref(true)
 const hasLoaded = ref(false)
+/** A last-known value is on screen while a refresh runs — dim it rather
+ *  than replace it with a skeleton. */
+const isRefreshing = ref(false)
 
 const FEE_JUICE_DECIMALS = 18
 
@@ -85,6 +88,22 @@ async function loadBalances(forceRefresh = false) {
 		if (!hasLoaded.value) isLoading.value = true
 		if (!appStore.account?.address || !appStore.network?.id) return
 
+		if (!hasLoaded.value) {
+			// Instant paint from the SW cache — stale entries included. The
+			// skeleton is reserved for a true first-ever load, where there is
+			// genuinely nothing to show.
+			const peeked = await executionService.peekGasBalances(appStore.network.id, appStore.account.address)
+			if (peeked) {
+				publicFeeJuice.value = peeked.balances.publicFeeJuice
+				privateFeeJuice.value = peeked.balances.privateFeeJuice
+				hasLoaded.value = true
+				isLoading.value = false
+				isRefreshing.value = peeked.stale
+			}
+		} else {
+			isRefreshing.value = true
+		}
+
 		const balances = await executionService.getGasBalances(appStore.network.id, appStore.account.address, forceRefresh)
 		publicFeeJuice.value = balances.publicFeeJuice
 		privateFeeJuice.value = balances.privateFeeJuice
@@ -93,6 +112,7 @@ async function loadBalances(forceRefresh = false) {
 		// silently fail — gas balance is informational
 	} finally {
 		isLoading.value = false
+		isRefreshing.value = false
 	}
 }
 
@@ -122,18 +142,23 @@ onBeforeUnmount(() => {
 
 <template>
 	<div :class="$style.wrapper">
+		<span v-if="isRefreshing" :class="$style.refreshing_dot" data-testid="gas-balance-refreshing" aria-hidden="true" />
 		<div :class="$style.grid">
 			<div :class="$style.col">
 				<span :class="$style.label">Public Juice</span>
-				<span v-if="isLoading" :class="$style.skeleton" />
-				<span v-else :class="$style.amount" data-testid="gas-balance-public">{{ publicFormatted }} FJ</span>
+				<span v-if="isLoading" :class="$style.skeleton" data-testid="gas-skeleton-public" />
+				<span v-else :class="[$style.amount, isRefreshing && $style.amount_stale]" data-testid="gas-balance-public"
+					>{{ publicFormatted }} FJ</span
+				>
 				<span v-if="!isLoading && publicFiat" :class="$style.fiat" data-testid="gas-fiat-public">{{ publicFiat }}</span>
 			</div>
 
 			<div :class="[$style.col, $style.col_right]">
 				<span :class="$style.label">Private Fee Juice</span>
-				<span v-if="isLoading" :class="$style.skeleton" />
-				<span v-else :class="$style.amount" data-testid="gas-balance-private">{{ privateFormatted }} FJ</span>
+				<span v-if="isLoading" :class="$style.skeleton" data-testid="gas-skeleton-private" />
+				<span v-else :class="[$style.amount, isRefreshing && $style.amount_stale]" data-testid="gas-balance-private"
+					>{{ privateFormatted }} FJ</span
+				>
 				<span v-if="!isLoading && privateFiat" :class="$style.fiat" data-testid="gas-fiat-private">{{ privateFiat }}</span>
 			</div>
 		</div>
@@ -142,11 +167,29 @@ onBeforeUnmount(() => {
 
 <style module>
 .wrapper {
+	position: relative;
 	width: 100%;
 	max-width: 280px;
 	margin: 0 auto;
 	padding-top: 16px;
 	border-top: 1px solid rgba(74, 70, 63, 0.2);
+}
+
+.refreshing_dot {
+	position: absolute;
+	top: 20px;
+	right: -10px;
+	width: 4px;
+	height: 4px;
+	border-radius: 50%;
+	background: var(--nulo-secondary);
+	animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+	0%,
+	100% { opacity: 0.25; }
+	50% { opacity: 0.9; }
 }
 
 .grid {
@@ -178,6 +221,11 @@ onBeforeUnmount(() => {
 	font-size: 12px;
 	font-weight: 500;
 	color: var(--nulo-accent);
+	transition: opacity 0.2s var(--bezier, ease);
+}
+
+.amount_stale {
+	opacity: 0.55;
 }
 
 .fiat {
