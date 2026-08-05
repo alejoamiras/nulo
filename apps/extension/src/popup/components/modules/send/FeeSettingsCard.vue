@@ -7,7 +7,7 @@ import FeeMethodSelector from "./FeeMethodSelector.vue"
 
 /** Vendor */
 import { getRandomHex } from "@/wallet/utils"
-import { getErrorData, getErrorMessage } from "@nulo/wallet-core/utils"
+import { getErrorData } from "@nulo/wallet-core/utils"
 import { UI_STORAGE_KEYS } from "@/popup/constants/storage-keys"
 
 /** Utils */
@@ -20,7 +20,16 @@ import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
-import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
+import {
+	buildFeeMethods,
+	FEE_JUICE_BRIDGE_URL,
+	formatGasBalance,
+	INIT_FETCH_TIMEOUT_MS,
+	INIT_RETRY_BACKOFF_MS,
+	resolveSavedSelection,
+	settingsForMethod,
+	withTimeout,
+} from "./fee-helpers"
 import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
 
@@ -92,13 +101,17 @@ const selectedMethod = ref()
 const selectedPriority = ref("normal")
 const isMethodsDropdownOpen = ref(false)
 
-const gasBalances = ref({ publicFeeJuice: "0", privateFeeJuice: null })
+/** UNKNOWN until the first successful read for the current identity.
+ *  `undefined` must stay distinguishable from a confirmed zero: a failed or
+ *  timed-out read commits `undefined`, never a fabricated "0", so method
+ *  gating and the bridge nudge can't act on a balance we never saw. */
+const gasBalances = ref(undefined)
 const isLoading = ref(false)
 const error = ref("")
 
-const feeJuiceBalanceFormatted = computed(() => formatGasBalance(gasBalances.value.publicFeeJuice))
+const feeJuiceBalanceFormatted = computed(() => (gasBalances.value ? formatGasBalance(gasBalances.value.publicFeeJuice) : null))
 const privateFeeJuiceFormatted = computed(() =>
-	gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
+	gasBalances.value && gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
 )
 
 /** Fee USD is derived LIVE from the estimate's raw FJ amount × the current
@@ -130,22 +143,26 @@ const derivedSettings = computed(() => {
 	if (!isInitComplete.value) return undefined
 	const m = selectedMethod.value
 	if (!m) return undefined
-	return settingsForMethod(m, selectedPriority.value, gasBalances.value.publicFeeJuice, gasBalances.value.privateFeeJuice)
+	return settingsForMethod(m, selectedPriority.value, gasBalances.value)
 })
 
 /** True when the selected fee-juice method (public or private) can't pay because
  *  its balance is zero — the trigger for the get-fee-juice nudge (banner + CTA). */
 const feeJuiceMissing = computed(() => {
 	if (!isInitComplete.value || useEmbeddedFee.value) return false
+	// Unknown balances (failed/timed-out read, silent retry pending) never
+	// trigger the nudge — only a confirmed zero does.
+	const balances = gasBalances.value
+	if (!balances) return false
 	const m = selectedMethod.value
 	if (!m) return false
 	if (m.type === "private_fpc") {
 		// Only a CONFIRMED zero triggers the bridge nudge. `null` means the PrivateFPC
 		// read failed or isn't registered — an unknown state, not a confirmed empty
 		// balance — so we don't tell a possibly-funded user to go bridge.
-		return gasBalances.value.privateFeeJuice === "0"
+		return balances.privateFeeJuice === "0"
 	}
-	if (m.type === "fj") return gasBalances.value.publicFeeJuice === "0"
+	if (m.type === "fj") return balances.publicFeeJuice === "0"
 	return false
 })
 watch(
@@ -228,6 +245,72 @@ let initInFlight = null
 let initRequested = false
 let isMounted = true
 
+// Silent auto-retry: a degraded/failed init reschedules itself with capped
+// backoff. Deliberately no user-facing retry affordance — nothing the user
+// can do fixes a failed balance read, and the degraded state keeps the card
+// operable meanwhile (sponsored methods stay usable; self-paid methods stay
+// fail-closed until a read succeeds — see settingsForMethod).
+const FEE_DATA_UNAVAILABLE = "Couldn't load fee data — retrying in the background."
+let retryTimer = null
+let retryAttempt = 0
+
+// One raw in-flight RPC per service per identity KEY: a retry re-attaches a
+// fresh timeout to the SAME pending request instead of issuing a new one.
+// The transport queues pre-connect requests unboundedly and cannot cancel
+// them, so re-issuing on every backoff tick while the SW is unreachable
+// would accumulate abandoned requests for as long as the outage lasts.
+// Keyed maps (not single slots) so an identity flap A→B→A can't drop A's
+// still-pending entry and start a duplicate. Entries self-clear on settle;
+// unsettled entries are bounded by the distinct identities visited.
+const rawRequests = { gas: new Map(), fpc: new Map() }
+
+const reuseRawRequest = (requests, key, start) => {
+	const existing = requests.get(key)
+	if (existing) return existing
+	const promise = start()
+	requests.set(key, promise)
+	promise
+		.finally(() => {
+			if (requests.get(key) === promise) requests.delete(key)
+		})
+		.catch(() => {
+			// The settle-probe chain must never surface as an unhandled rejection;
+			// the real rejection is observed by the awaiting init.
+		})
+	return promise
+}
+
+// FPC last-good key: a failed FPC leg keeps the previous list only when it
+// belongs to the SAME identity — an alternating gas-ok/fpc-fail retry must
+// not erase a working sponsor — while another identity's list never leaks.
+// Balances get NO such retention: a stale balance would quietly extend trust
+// in a figure another transaction may have spent, defeating the fail-closed
+// rule for self-paid methods. A failed balance read always commits UNKNOWN.
+let lastGoodFpcKey = null
+
+// Identity of the last fully-committed snapshot. Lets a background refresh
+// (silent retry, same-identity watcher refire) keep serving the committed
+// snapshot instead of yanking settings — and the Confirm gate behind them —
+// for the length of every in-flight window.
+let committedKey = null
+
+const clearRetryTimer = () => {
+	if (retryTimer) {
+		clearTimeout(retryTimer)
+		retryTimer = null
+	}
+}
+const scheduleRetry = () => {
+	if (!isMounted) return
+	clearRetryTimer()
+	const delay = INIT_RETRY_BACKOFF_MS[Math.min(retryAttempt, INIT_RETRY_BACKOFF_MS.length - 1)]
+	retryAttempt += 1
+	retryTimer = setTimeout(() => {
+		retryTimer = null
+		void init()
+	}, delay)
+}
+
 const init = async () => {
 	if (!isMounted) return
 	if (initInFlight) {
@@ -239,6 +322,10 @@ const init = async () => {
 		initInFlight = null
 		if (initRequested && isMounted) {
 			initRequested = false
+			// The immediate re-run subsumes any retry the finished run just
+			// scheduled — leaving the timer armed would let it fire mid-run
+			// and defeat the backoff pacing with back-to-back reruns.
+			clearRetryTimer()
 			void init()
 		}
 	})
@@ -249,17 +336,23 @@ const runInit = async () => {
 	try {
 		if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return
 
-		// Re-arm the gate. Anything that read derivedSettings while it was
-		// `true` from a previous init now reads `undefined` until we
-		// re-resolve.
-		isInitComplete.value = false
-
 		// Snapshot the identity this run targets (profile+network+account). A prop change
 		// during the awaits queues a coalesced re-run; we must NOT apply this run's stale
-		// balances/fpcs against the new identity.
+		// balances/fpcs against the new identity. The request closures below read ONLY
+		// these snapshots — reading live props after an await could cache another
+		// identity's response under this run's key.
 		const reqProfileId = props.profile?.id
 		const reqNetworkId = props.network.id
+		const reqChainId = props.network.chainId
 		const reqAccount = props.account.address
+		const reqKey = `${reqProfileId}|${reqNetworkId}|${reqAccount}`
+
+		// Close the derivation gate only when no snapshot is committed for THIS
+		// identity: first loads and identity switches must not derive against
+		// partially-resolved state, but a same-identity background refresh keeps
+		// the committed snapshot live (re-arming unconditionally made Confirm
+		// oscillate disabled for the length of every retry's in-flight window).
+		if (committedKey !== reqKey) isInitComplete.value = false
 
 		// Pre-fill from local storage BEFORE the slow SW fetch so the
 		// dropdown trigger displays the user's last-used method while the
@@ -277,9 +370,22 @@ const runInit = async () => {
 		const baseline = selectedMethod.value
 
 		isLoading.value = true
-		const [gasResult, fpcs] = await Promise.all([
-			executionService.getGasBalances(props.network.id, props.account.address),
-			fpcService.getFpcs(props.network.chainId),
+		// The legs settle independently: a failed balance read must not discard
+		// a good FPC list (sponsored methods need no balance), and vice versa.
+		// Each leg is time-boxed at the call site — the transport's own 60s
+		// timer only arms once the port reaches Connected, so an unreachable SW
+		// would otherwise pin this await (and the Confirm gate behind it) forever.
+		const [gasResult, fpcResult] = await Promise.allSettled([
+			withTimeout(
+				reuseRawRequest(rawRequests.gas, reqKey, () => executionService.getGasBalances(reqNetworkId, reqAccount)),
+				INIT_FETCH_TIMEOUT_MS,
+				"getGasBalances",
+			),
+			withTimeout(
+				reuseRawRequest(rawRequests.fpc, reqKey, () => fpcService.getFpcs(reqChainId)),
+				INIT_FETCH_TIMEOUT_MS,
+				"getFpcs",
+			),
 		])
 		// Discard if the profile/network/account switched mid-flight — the props watcher
 		// already queued a fresh init for the new identity. Everything past this guard is
@@ -287,8 +393,16 @@ const runInit = async () => {
 		if (!isMounted || props.profile?.id !== reqProfileId || props.network?.id !== reqNetworkId || props.account?.address !== reqAccount)
 			return
 
-		gasBalances.value = gasResult
-		registeredFpcs.value = fpcs ?? []
+		// UNKNOWN on any failed balance read, never a fabricated zero and never
+		// a stale last-good figure — self-paid derivation fails closed on it.
+		gasBalances.value = gasResult.status === "fulfilled" ? gasResult.value : undefined
+		if (fpcResult.status === "fulfilled") {
+			registeredFpcs.value = fpcResult.value ?? []
+			lastGoodFpcKey = reqKey
+		} else if (lastGoodFpcKey !== reqKey) {
+			registeredFpcs.value = []
+			lastGoodFpcKey = null
+		}
 
 		const userPickedDuringInit = selectedMethod.value !== baseline
 
@@ -316,10 +430,32 @@ const runInit = async () => {
 			}
 		}
 
+		// The gate opens on EVERY settled init — degraded included. Holding it
+		// closed on failure is the bug this fixes: `derivedSettings` stayed
+		// `undefined` forever, so the Send/dApp-Confirm gates froze with no
+		// error and no retry.
+		committedKey = reqKey
 		isInitComplete.value = true
+
+		const rejected = [gasResult, fpcResult].filter((r) => r.status === "rejected")
+		if (rejected.length > 0) {
+			console.error("Fee init degraded", ...rejected.map((r) => getErrorData(r.reason)))
+			error.value = FEE_DATA_UNAVAILABLE
+			scheduleRetry()
+		} else {
+			error.value = ""
+			retryAttempt = 0
+			clearRetryTimer()
+		}
 	} catch (e) {
+		// Deliberately does NOT open `isInitComplete`: an exception here may
+		// have fired mid-commit, and deriving settings from a half-written
+		// snapshot would break the resolved-state invariant the gate exists
+		// for. The scheduled retry re-runs the whole init instead — the state
+		// is degraded-with-notice, never silently frozen.
 		console.error("Failed to init", getErrorData(e))
-		error.value = getErrorMessage(e)
+		error.value = FEE_DATA_UNAVAILABLE
+		scheduleRetry()
 	} finally {
 		isLoading.value = false
 	}
@@ -335,6 +471,16 @@ watch(
 watch(
 	() => [props.profile, props.network, props.account],
 	async () => {
+		// Fresh identity, fresh backoff — a pending retry for the old identity
+		// must not fire between this init and its commit.
+		retryAttempt = 0
+		clearRetryTimer()
+		// Close the gate NOW on a real identity change: if a same-identity
+		// refresh is in flight, the coalesced re-run won't start (and re-arm)
+		// until that fetch settles — the old identity's snapshot must not keep
+		// serving settings for the new one in the meantime.
+		const liveKey = `${props.profile?.id}|${props.network?.id}|${props.account?.address}`
+		if (liveKey !== committedKey) isInitComplete.value = false
 		await init()
 	},
 )
@@ -342,7 +488,10 @@ watch(useOwnMethod, async (val) => {
 	// Switching from embedded → "use my own" needs to load balances/fpcs
 	// for the dropdown. Pre-#fix this was broken: clicking "Override with
 	// my method" on an embedded op never triggered the fetch pipeline.
-	if (val && !isInitComplete.value) {
+	// Also re-init on a DEGRADED snapshot (`error` set): a retry that fired
+	// while embedded hit runInit's early-return and died — this is where the
+	// chain revives, so a degraded state can't become permanently stuck.
+	if (val && (error.value || !isInitComplete.value)) {
 		await init()
 	}
 })
@@ -359,6 +508,7 @@ onBeforeUnmount(() => {
 	// torn-down refs.
 	isMounted = false
 	initRequested = false
+	clearRetryTimer()
 	fpcService.disconnect()
 	executionService.disconnect()
 	prices.dispose()
@@ -410,8 +560,8 @@ onBeforeUnmount(() => {
 				</Flex>
 			</Flex>
 
-			<!-- Error -->
-			<Flex v-if="error" align="start" gap="6" wide :class="$style.detail_row">
+			<!-- Degraded fee data (silent retry pending) -->
+			<Flex v-if="error" align="start" gap="6" wide :class="$style.detail_row" data-testid="fee-init-degraded">
 				<Icon name="info" size="14" color="primary" />
 				<Text size="12" weight="600" color="secondary" :style="{ paddingTop: '1px' }">
 					{{ error }}
