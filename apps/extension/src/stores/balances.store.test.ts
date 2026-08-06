@@ -404,6 +404,72 @@ describe("balances store — tx-settle forced refresh + cause-specific signals",
 		sub.release()
 	})
 
+	it("an inverted settlement order never lets the older forced run overwrite the newer one", async () => {
+		// Authority follows trigger recency, not settlement order: plain flight
+		// P is joined-waited by BOTH F1 (settle S1) and F2 (settle S2); their
+		// replacement RPCs overlap, and F2's (newer) resolves FIRST. F1's late
+		// result must be discarded wholesale — no data overwrite, no stale
+		// clear, no forcedVersion bump.
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const sub = store.subscribe(SCOPE_A, CAPS_CARD)
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		let resolveP!: (v: unknown) => void
+		let resolveF1!: (v: unknown) => void
+		let resolveF2!: (v: unknown) => void
+		mocks.getGasBalances
+			.mockImplementationOnce(() => new Promise((r) => (resolveP = r)))
+			.mockImplementationOnce(() => new Promise((r) => (resolveF1 = r)))
+			.mockImplementationOnce(() => new Promise((r) => (resolveF2 = r)))
+		const plain = store.ensure(SCOPE_A, { legs: ["gas"] })
+		await vi.advanceTimersByTimeAsync(0)
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		const fvBefore = store.entry(SCOPE_A)!.gas.forcedVersion
+		resolveP(BAL)
+		await plain
+		await vi.advanceTimersByTimeAsync(0)
+		// Newer trigger's fetch lands first...
+		resolveF2({ publicFeeJuice: "900", privateFeeJuice: null })
+		await vi.advanceTimersByTimeAsync(0)
+		expect(store.entry(SCOPE_A)?.gas.display).toEqual({ publicFeeJuice: "900", privateFeeJuice: null })
+		expect(store.entry(SCOPE_A)?.stale).toBe(false)
+		expect(store.entry(SCOPE_A)?.gas.forcedVersion).toBe(fvBefore + 1)
+		// ...and the older trigger's late settle changes NOTHING.
+		resolveF1({ publicFeeJuice: "111", privateFeeJuice: null })
+		await vi.advanceTimersByTimeAsync(10)
+		expect(store.entry(SCOPE_A)?.gas.display).toEqual({ publicFeeJuice: "900", privateFeeJuice: null })
+		expect(store.entry(SCOPE_A)?.stale).toBe(false)
+		expect(store.entry(SCOPE_A)?.gas.forcedVersion).toBe(fvBefore + 1)
+		sub.release()
+	})
+
+	it("a slow fresh peek never un-dims a pending forced refresh", async () => {
+		// The forced stale-mark changes no version, so the peek's version
+		// guard alone cannot see it — the peek must defer to the force.
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		let resolvePeek!: (v: unknown) => void
+		mocks.peekGasBalances.mockImplementation(() => new Promise((r) => (resolvePeek = r)))
+		let resolveRaw!: (v: unknown) => void
+		mocks.getGasBalances.mockImplementationOnce(() => new Promise((r) => (resolveRaw = r)))
+		const sub = store.subscribe(SCOPE_A, CAPS_CARD)
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		expect(store.entry(SCOPE_A)?.stale).toBe(true)
+		resolvePeek({ balances: BAL, stale: false })
+		await vi.advanceTimersByTimeAsync(0)
+		// The peek is discarded outright: no display, dim retained.
+		expect(store.entry(SCOPE_A)?.stale).toBe(true)
+		expect(store.entry(SCOPE_A)?.gas.display).toBeUndefined()
+		resolveRaw({ publicFeeJuice: "900", privateFeeJuice: null })
+		await vi.advanceTimersByTimeAsync(10)
+		expect(store.entry(SCOPE_A)?.stale).toBe(false)
+		sub.release()
+	})
+
 	it("a pre-trigger ensure success never clears the forced stale-mark", async () => {
 		// The forced stale-mark means "the on-screen value is known-invalidated
 		// by a settlement". A refresh that was ALREADY in flight when the

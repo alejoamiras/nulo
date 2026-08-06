@@ -1069,6 +1069,106 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		}
 	})
 
+	test("an identity switch during a recovery recommit's storage read discards the late commit", async () => {
+		// A's retry recovery fires recommit; the user switches to B while it
+		// awaits storage. The resumed recommit must NOT re-open the gate with
+		// A's data (settings for B would derive from A's balances).
+		vi.useFakeTimers()
+		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
+		const chromeAny = (globalThis as any).chrome
+		const origGet = chromeAny.storage.local.get
+		try {
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+
+			// Gate the NEXT storage read (recommit's), one-shot.
+			let gateArmed = true
+			let release!: () => void
+			const gate = new Promise<void>((r) => {
+				release = r
+			})
+			chromeAny.storage.local.get = async (keys: unknown) => {
+				if (gateArmed) {
+					gateArmed = false
+					await gate
+				}
+				return origGet(keys)
+			}
+			// Retry recovers → recovery watch → recommit blocks on the gate.
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
+
+			// Identity switch while the recommit is parked.
+			await w.setProps({ account: { id: "a2", address: "0xother" } })
+			await vi.advanceTimersByTimeAsync(0)
+			const emitted = (w.emitted<unknown[]>("update:modelValue") ?? []).length
+
+			release()
+			await vi.advanceTimersByTimeAsync(0)
+			// The late recommit was a no-op: nothing further emitted.
+			expect((w.emitted<unknown[]>("update:modelValue") ?? []).length).toBe(emitted)
+			w.unmount()
+		} finally {
+			chromeAny.storage.local.get = origGet
+			vi.useRealTimers()
+		}
+	})
+
+	test("a superseded run's late storage read never re-applies the saved pre-fill", async () => {
+		// Run 1's storage read resolves AFTER run 2 committed and the user
+		// picked a method — its pre-fill must not clobber that pick.
+		vi.useFakeTimers()
+		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
+		const chromeAny = (globalThis as any).chrome
+		const origGet = chromeAny.storage.local.get
+		try {
+			storageBacking[FEE_METHOD_LS_KEY] = {
+				[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
+			}
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			// Gate the FIRST storage read (mount's run), one-shot.
+			let gateArmed = true
+			let release!: () => void
+			const gate = new Promise<void>((r) => {
+				release = r
+			})
+			chromeAny.storage.local.get = async (keys: unknown) => {
+				if (gateArmed) {
+					gateArmed = false
+					await gate
+				}
+				return origGet(keys)
+			}
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			// Same-identity refire: run 2 completes normally (saved fj resolves).
+			await w.setProps({ profile: { ...profile } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fj" } })
+
+			// The user picks the sponsored method mid-flight.
+			await w.find('[data-testid="pick-fpc"]').trigger("click")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			// Run 1 finally resumes: it must abort, not re-apply the saved fj.
+			release()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			w.unmount()
+		} finally {
+			chromeAny.storage.local.get = origGet
+			vi.useRealTimers()
+		}
+	})
+
 	test("unmount cancels the pending silent retry", async () => {
 		vi.useFakeTimers()
 		try {

@@ -177,6 +177,12 @@ export const useBalancesStore = defineStore("balances", () => {
 	// value stays known-invalidated (dim + dot) until the post-trigger fetch
 	// itself commits.
 	const forcedGasPending = new Map<string, number>()
+	// Monotonic per-key forced-TRIGGER sequence. Authority follows trigger
+	// recency, never settlement order: a forced run whose seq is no longer
+	// current was overtaken by a newer settle — its data pre-dates that
+	// trigger, so its commit is skipped wholesale (an inverted settlement
+	// order must not let the older run overwrite the newer run's result).
+	const forcedGasSeq = new Map<string, number>()
 	const retryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; attempt: number }>()
 	const lruTouch = new Map<string, number>()
 	let subToken = 0
@@ -197,6 +203,11 @@ export const useBalancesStore = defineStore("balances", () => {
 				stopRetry(key)
 				lruTouch.delete(key)
 				keyProfile.delete(key)
+				// Per-key forced state dies with the fence: old-epoch runs must
+				// not be counted against (or grant authority to) the next
+				// epoch's fetches. Their own finally is epoch-guarded.
+				forcedGasPending.delete(key)
+				forcedGasSeq.delete(key)
 			}
 		}
 		entries.value = next
@@ -297,6 +308,10 @@ export const useBalancesStore = defineStore("balances", () => {
 			if (!peeked || !entry) return
 			// A late peek must never overwrite a newer fetch/forced commit.
 			if (entry.gas.version !== versionAtStart) return
+			// A forced fetch marks stale without bumping the version — a slow
+			// fresh peek landing mid-force would pass the version guard and
+			// un-dim the known-invalidated value. Defer to the force entirely.
+			if (forcedGasPending.has(key)) return
 			commitEntry(key, {
 				...entry,
 				// Honor the SW's own staleness verdict: a within-TTL peek is
@@ -335,13 +350,18 @@ export const useBalancesStore = defineStore("balances", () => {
 	async function fetchGas(key: string, scope: BalanceScope, epoch: number, opts: FetchOpts): Promise<void> {
 		const inFlight = legFlights.get(`${key}|gas|${epoch}`)
 		if (inFlight && opts.cause !== "forced") return inFlight
+		let mySeq = 0
 		const run = (async () => {
 			const entry0 = entries.value[key]
 			if (!entry0) return
 			// A forced refresh means the on-screen value is known-invalidated:
 			// mark it stale at START so the card dims immediately and a FAILED
 			// force can't leave it rendered as current (settle-refresh dim rule).
-			if (opts.cause === "forced") forcedGasPending.set(key, (forcedGasPending.get(key) ?? 0) + 1)
+			if (opts.cause === "forced") {
+				forcedGasPending.set(key, (forcedGasPending.get(key) ?? 0) + 1)
+				mySeq = (forcedGasSeq.get(key) ?? 0) + 1
+				forcedGasSeq.set(key, mySeq)
+			}
 			commitEntry(key, {
 				...entry0,
 				stale: opts.cause === "forced" ? true : entry0.stale,
@@ -378,16 +398,17 @@ export const useBalancesStore = defineStore("balances", () => {
 				failed = err instanceof Error ? err.message : String(err)
 			}
 			if (epochOf(scope.profileId) !== epoch) return // fenced: no cross-epoch commit
+			// An OUTRANKED forced run (a newer settle started since this one's
+			// trigger) is superseded wholesale: success or failure, its data
+			// pre-dates the newer trigger — the newer run owns the entry.
+			if (opts.cause === "forced" && mySeq !== forcedGasSeq.get(key)) return
 			const entry = entries.value[key]
 			if (!entry) return
 			if (result !== undefined) {
-				// A success only counts as POST-trigger when no NEWER forced run
-				// is live: a pre-trigger run's data (plain refresh overtaken by a
-				// settle, or forced run F1 overtaken by settle S2) must neither
-				// clear the stale-mark nor signal the overlay reset — the newest
-				// forced run's own commit does both.
-				const isLastForced = opts.cause === "forced" && (forcedGasPending.get(key) ?? 0) <= 1
-				const preTrigger = opts.cause === "forced" ? !isLastForced : forcedGasPending.has(key)
+				// A non-forced success while ANY forced run is live carries
+				// PRE-trigger data (a post-trigger non-forced fetch would have
+				// JOINED the forced leg run): it must not clear the stale-mark.
+				const preTrigger = opts.cause !== "forced" && forcedGasPending.has(key)
 				commitEntry(key, {
 					...entry,
 					stale: preTrigger ? entry.stale : false,
@@ -398,7 +419,7 @@ export const useBalancesStore = defineStore("balances", () => {
 						status: "ready",
 						version: entry.gas.version + 1,
 						retryVersion: opts.cause === "retry" ? entry.gas.retryVersion + 1 : entry.gas.retryVersion,
-						forcedVersion: isLastForced ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
+						forcedVersion: opts.cause === "forced" ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
 						// Debt clears ONLY on a retry-path success (D11): a plain
 						// ensure landing fresh data leaves the loop to finish its
 						// own cycle — the retry success is what bumps retryVersion
@@ -426,7 +447,10 @@ export const useBalancesStore = defineStore("balances", () => {
 		try {
 			await run
 		} finally {
-			if (opts.cause === "forced") {
+			// Epoch-guarded: after a profile fence the per-key forced state was
+			// already cleared — decrementing here would corrupt the NEW epoch's
+			// counter if a fresh forced run started since.
+			if (opts.cause === "forced" && epochOf(scope.profileId) === epoch) {
 				const left = (forcedGasPending.get(key) ?? 1) - 1
 				if (left <= 0) forcedGasPending.delete(key)
 				else forcedGasPending.set(key, left)

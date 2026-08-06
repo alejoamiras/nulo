@@ -254,6 +254,15 @@ const committedScope = ref(null)
 let subscription = null
 let subscribedKey = null
 
+// Run supersession: deleting the old init-coalescing left overlapping runs
+// (watcher refires) racing on CARD-LOCAL state — a superseded run's late
+// storage read must not re-apply the saved pre-fill over a newer run's (or
+// the user's) selection, and its finally must not clear a newer run's
+// loading flag. The store single-flights the RPCs; this serializes the
+// card-side effects.
+let runSeq = 0
+let loadingRun = 0
+
 /** Re-lease on every identity change: the old key must not stay subscribed —
  *  and store-retrying — after the card moves on. Subscribe the NEW key BEFORE
  *  releasing the old: a same-profile switch must not transit zero subscribers,
@@ -335,6 +344,7 @@ const commitFromEntry = (scope, reqKey, saved, baseline) => {
 }
 
 const runInit = async () => {
+	const myRun = ++runSeq
 	try {
 		if (!props.profile || !props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) {
 			// Embedded ops (and identity-less mounts) hold no subscription: the
@@ -371,6 +381,10 @@ const runInit = async () => {
 		// fetch is in flight. The `isInitComplete` gate ensures this
 		// pre-fill doesn't drive settings derivation against stale state.
 		const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+		// A newer run owns the card now: a superseded run resuming from its
+		// storage read must not re-apply the pre-fill (it would clobber the
+		// newer run's reconcile or the user's mid-flight pick).
+		if (myRun !== runSeq || !isMounted) return
 		if (saved[props.account.address]) {
 			selectedMethod.value = saved[props.account.address]
 		}
@@ -395,6 +409,7 @@ const runInit = async () => {
 		)
 			return
 
+		loadingRun = myRun
 		isLoading.value = true
 		subscribeTo(scope, reqKey)
 		try {
@@ -432,7 +447,9 @@ const runInit = async () => {
 		console.error("Failed to init", getErrorData(e))
 		error.value = FEE_DATA_UNAVAILABLE
 	} finally {
-		isLoading.value = false
+		// Only the run that owns the loading flag may clear it — a superseded
+		// run's finally must not blank a newer run's in-flight spinner.
+		if (loadingRun === myRun) isLoading.value = false
 	}
 }
 
@@ -458,22 +475,26 @@ watch(
 const recommit = async () => {
 	const scope = committedScope.value
 	if (!scope || !isMounted) return
-	// Mirror runInit's entry conditions: a recovery landing while embedded
-	// must die exactly like a retry hitting the old early-return did.
-	if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return
-	// The recovery targets the committed identity; if props moved on, the
-	// identity watcher owns the transition.
-	if (
-		props.profile?.id !== scope.profileId ||
-		props.network?.id !== scope.networkId ||
-		props.network?.chainId !== scope.chainId ||
-		props.account?.address !== scope.accountAddress
-	)
-		return
+	// The recovery targets the committed identity; if props moved on (or the
+	// card is embedded-visible), the identity/useOwnMethod watchers own it.
+	if (!recommitStillValid(scope)) return
 	const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+	// Re-validate AFTER the await: an identity switch during the storage read
+	// must not let this late commit re-open the gate with the OLD identity's
+	// data (the switch closed it; only the new identity's init may commit).
+	if (!isMounted || committedScope.value !== scope || !recommitStillValid(scope)) return
 	const baseline = selectedMethod.value
-	if (!isMounted) return
 	commitFromEntry(scope, `${scope.profileId}|${scope.networkId}|${scope.chainId}|${scope.accountAddress}`, saved, baseline)
+}
+
+const recommitStillValid = (scope) => {
+	if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return false
+	return (
+		props.profile?.id === scope.profileId &&
+		props.network?.id === scope.networkId &&
+		props.network?.chainId === scope.chainId &&
+		props.account?.address === scope.accountAddress
+	)
 }
 
 watch(
