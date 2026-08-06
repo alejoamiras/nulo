@@ -247,6 +247,9 @@ export const useBalancesStore = defineStore("balances", () => {
 			delete next[k]
 			lruTouch.delete(k)
 			keyProfile.delete(k)
+			// Keep auxiliary metadata aligned with the LRU (a settled force's
+			// seq row would otherwise outlive its evicted entry).
+			forcedGasSeq.delete(k)
 			stopRetry(k)
 		}
 		entries.value = next

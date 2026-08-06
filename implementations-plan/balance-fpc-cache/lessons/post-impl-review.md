@@ -25,6 +25,13 @@ Fixed (commit `code-review round 2`), each failure mode empirically reproduced b
 
 `setActivePinia(createPinia())` in a beforeEach does NOT isolate the component suites: the SFC transform chain resolves a different pinia module copy than the test file's import, so all mounts silently shared one store across tests (proved by an entry version accumulating across tests). Both card suites now INJECT a fresh pinia per mount/test (`global.plugins` / `config.global.plugins`); the plain-TS store suite is unaffected (single module copy).
 
+## Codex post-impl audit — 3 rounds to explicit "approve" (one resumed session)
+
+- **Round 1 (reject, 2 blocking + 3 should-fix)** — all five accepted and fixed (`codex round 1` commit): recovery `recommit` re-validates identity/scope AFTER its storage await; forced-refresh authority moved from settlement order to a per-key **trigger sequence** (`forcedGasSeq` — an outranked forced run skips its commit wholesale, success or failure, so an inverted settlement order can't let older data overwrite newer); per-key forced state cleared by the profile fence + epoch-guarded finally decrement; `primeFromPeek` defers outright to a pending force (the version guard alone can't see a forced stale-mark); `runSeq` run-supersession + `loadingRun` ownership replace the deleted init-coalescing's serialization of card-local effects (late pre-fill clobber, loading-flag blanking).
+- **Round 2 (conditional approve, 3 conditions)** — all three accepted and fixed (`codex round 2` commit): the post-ensure guard also checks run-supersession + the embedded-visible condition AND the embedded-flip watcher bumps `runSeq` (a held-open ensure — second same-profile subscriber preventing the fence — could otherwise commit and overwrite the dApp's embedded v-model); forced-pending keys exempt from LRU eviction (an evicted key's forced count would orphan past the profile fence); recommit's `baseline` captured before its storage await (a stale snapshot could reconcile over a mid-read user pick).
+- **Round 3: "approve"**, all prior findings closed. Its one non-blocking hygiene note (a settled force's `forcedGasSeq` row outliving an evicted entry) fixed post-approve — `evictIfNeeded` deletes the row.
+- Every codex finding got a discriminating pin in the shape codex specified (held-open subscriber, P→S1→S2 inversion, snapshot-then-park storage gate).
+
 ## Residual nitpicks — reviewed, deliberately not fixed
 
 - `retryDebt` can strand `true` on a ready slice when only a non-retry-capable observer saw the degraded state (dormant; costs at most one extra TTL-cache-served refetch; self-corrects on the next degradation).
