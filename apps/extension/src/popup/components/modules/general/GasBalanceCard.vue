@@ -1,9 +1,7 @@
 <script setup>
 /** Services */
-import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
-import { TxStatus } from "@/wallet/services/transaction/spec"
 
 /** Services (prices) */
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -15,21 +13,59 @@ import { usePrices } from "@/composables/usePrices"
 import { formatBaseUnits } from "@/utils/amount"
 import { tokenAmountToUsdMicro, formatUsdMicro } from "@/wallet/services/price/convert"
 
-/** Store */
+/** Stores */
 import { useAppStore } from "@/stores/app.store"
+import { useBalancesStore } from "@/stores/balances.store"
 const appStore = useAppStore()
+const balancesStore = useBalancesStore()
 
-/** Reactive state */
-const publicFeeJuice = ref("0")
-const privateFeeJuice = ref(null)
-const isLoading = ref(true)
-const hasLoaded = ref(false)
-/** Data quality vs activity, deliberately separate: `isStale` dims the
- *  value and only a FRESH commit clears it (a failed refresh must not
- *  bless stale data as current); `isRefreshing` drives the activity dot
- *  and always clears when the attempt settles. */
-const isStale = ref(false)
-const isRefreshing = ref(false)
+/** This card's capabilities: gas only, live-rendering (peek + tx-settle
+ *  refresh), no backoff retry — exactly its pre-store traffic. */
+const CARD_CAPS = { legs: ["gas"], retry: false, txRefresh: true, peek: true }
+
+const scope = computed(() =>
+	appStore.profile?.id && appStore.network?.id && appStore.account?.address
+		? {
+				profileId: appStore.profile.id,
+				networkId: appStore.network.id,
+				chainId: appStore.network.chainId,
+				accountAddress: appStore.account.address,
+			}
+		: null,
+)
+const entry = computed(() => (scope.value ? balancesStore.entry(scope.value) : undefined))
+const gas = computed(() => entry.value?.gas)
+
+/** Optimistic deduction: a CARD-LOCAL display overlay — never mutates the
+ *  shared entry (a deducted figure must not leak into fee gating). Reset
+ *  ONLY by a successful forced (tx-settle) commit, signalled by
+ *  forcedVersion; never by generic refreshes. */
+const deduction = ref(0n)
+watch(
+	() => gas.value?.forcedVersion,
+	(next, prev) => {
+		if (prev !== undefined && next !== undefined && next !== prev) deduction.value = 0n
+	},
+)
+
+const displayedPublic = computed(() => {
+	const raw = gas.value?.display?.publicFeeJuice
+	if (raw === undefined) return undefined
+	if (raw === null) return null
+	const next = BigInt(raw) - deduction.value
+	return (next < 0n ? 0n : next).toString()
+})
+const displayedPrivate = computed(() => gas.value?.display?.privateFeeJuice ?? null)
+
+/** Display state, derived from the shared entry:
+ *  - skeleton only when there is genuinely nothing to show (first-ever);
+ *  - dim while the shown value is stale (peeked-stale, degraded, or a
+ *    known-invalidated forced refresh) — only a fresh commit clears it;
+ *  - the activity dot only while a fetch is live over a stale value. */
+const hasLoaded = computed(() => gas.value?.display !== undefined)
+const isLoading = computed(() => !hasLoaded.value)
+const isStale = computed(() => (entry.value?.stale ?? false) || gas.value?.status === "degraded")
+const isRefreshing = computed(() => gas.value?.status === "fetching" && hasLoaded.value && isStale.value)
 
 const FEE_JUICE_DECIMALS = 18
 
@@ -38,7 +74,7 @@ const FEE_JUICE_DECIMALS = 18
 const formatBalance = (raw) => formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
 
 // Null = the read failed (unknown) — an em dash, never a confident zero.
-const publicFormatted = computed(() => (publicFeeJuice.value === null ? "—" : formatBalance(publicFeeJuice.value)))
+const publicFormatted = computed(() => (displayedPublic.value === null ? "—" : formatBalance(displayedPublic.value)))
 
 /** D2: fiat under non-zero balances, only with a usable AZTEC quote. */
 const priceService = new PriceServiceClient()
@@ -50,18 +86,17 @@ const fiatFor = (raw) => {
 	if (rawBig === 0n) return null
 	return `≈ ${formatUsdMicro(tokenAmountToUsdMicro(rawBig, FEE_JUICE_DECIMALS, quote.usd))}`
 }
-const publicFiat = computed(() => fiatFor(publicFeeJuice.value))
-const privateFiat = computed(() => fiatFor(privateFeeJuice.value))
+const publicFiat = computed(() => fiatFor(displayedPublic.value))
+const privateFiat = computed(() => fiatFor(displayedPrivate.value))
 // Treat null (PrivateFPC not yet discovered or query errored) as 0 so the
 // column always renders. Keeps the gas-balance card stable instead of
 // collapsing/expanding mid-load.
-const privateFormatted = computed(() => formatBalance(privateFeeJuice.value ?? "0"))
+const privateFormatted = computed(() => formatBalance(displayedPrivate.value ?? "0"))
 
-/** Service clients */
-const executionService = new ExecutionServiceClient()
+/** Service clients — tx client is retained for the ADDED event only (the
+ *  optimistic overlay); the settle→refresh trigger is owned by the store. */
 const transactionService = new TransactionServiceClient()
 
-/** Transaction subscription handlers */
 function onTransactionAdded(tx) {
 	if (tx.account !== appStore.account?.address) return
 	if (!tx.estimatedFee) return
@@ -70,102 +105,45 @@ function onTransactionAdded(tx) {
 		tx.feePaymentMethod === AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE ||
 		tx.feePaymentMethod === AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM
 	) {
-		// Unknown balance stays unknown — BigInt(null) would throw (silently:
-		// the EventHandler swallows it) and there is nothing to deduct FROM.
-		if (publicFeeJuice.value === null) return
-		const next = BigInt(publicFeeJuice.value) - BigInt(tx.estimatedFee)
-		publicFeeJuice.value = (next < 0n ? 0n : next).toString()
+		// Unknown balance stays unknown — there is nothing to deduct FROM.
+		if (displayedPublic.value === null || displayedPublic.value === undefined) return
+		deduction.value += BigInt(tx.estimatedFee)
 	}
 	// For External (FPC): skip optimistic deduction — real refresh on completion handles it.
 }
 
-function onTransactionUpdated(tx) {
-	if (tx.account !== appStore.account?.address) return
-	if (tx.status !== TxStatus.Pending) {
-		loadBalances(true)
-	}
-}
-
 transactionService.onTransactionAdded.add(onTransactionAdded)
-transactionService.onTransactionUpdated.add(onTransactionUpdated)
 
-/** Monotonic per-call generation: identity switches and event-driven
- *  refreshes can overlap, and a late completion from a superseded call
- *  must neither overwrite newer values nor clear the newer call's
- *  markers. */
-let loadGeneration = 0
-
-/** Functions */
-async function loadBalances(forceRefresh = false) {
-	const gen = ++loadGeneration
-	const isCurrent = () => gen === loadGeneration
-	try {
-		if (!hasLoaded.value) isLoading.value = true
-		if (!appStore.account?.address || !appStore.network?.id) return
-		const networkId = appStore.network.id
-		const accountAddress = appStore.account.address
-
-		if (!hasLoaded.value) {
-			// Instant paint from the SW cache — stale entries included. The
-			// skeleton is reserved for a true first-ever load, where there is
-			// genuinely nothing to show. Peek is best-effort: its failure must
-			// never block the real fetch below.
-			try {
-				const peeked = await executionService.peekGasBalances(networkId, accountAddress)
-				if (isCurrent() && peeked) {
-					publicFeeJuice.value = peeked.balances.publicFeeJuice
-					privateFeeJuice.value = peeked.balances.privateFeeJuice
-					hasLoaded.value = true
-					isLoading.value = false
-					isStale.value = peeked.stale
-				}
-			} catch {
-				// Fall through to the real fetch; the skeleton stays meanwhile.
-			}
-		}
-		if (!isCurrent()) return
-		isRefreshing.value = hasLoaded.value && (isStale.value || forceRefresh)
-		// A forced refresh means the on-screen value is known-invalidated (a
-		// settled tx changed it) — mark it stale NOW so a failed refresh can't
-		// leave it rendered full-opacity as if current.
-		if (forceRefresh && hasLoaded.value) isStale.value = true
-
-		const balances = await executionService.getGasBalances(networkId, accountAddress, forceRefresh)
-		if (!isCurrent()) return
-		publicFeeJuice.value = balances.publicFeeJuice
-		privateFeeJuice.value = balances.privateFeeJuice
-		hasLoaded.value = true
-		isStale.value = false
-	} catch {
-		// Silently fail — gas balance is informational. A stale value stays
-		// visibly dimmed (isStale survives) rather than being blessed fresh.
-	} finally {
-		if (isCurrent()) {
-			isLoading.value = false
-			isRefreshing.value = false
-		}
-	}
+/** Subscription lifecycle: release-before-subscribe on every identity
+ *  change (the store's fence rules require the old key's lease to die
+ *  before the new one fetches), overlay reset with it. */
+let subscription = null
+function resubscribe() {
+	subscription?.release()
+	subscription = null
+	deduction.value = 0n
+	if (!scope.value) return
+	subscription = balancesStore.subscribe(scope.value, CARD_CAPS)
+	// Every mount/switch issues one real read (served from the SW TTL cache
+	// when warm — today's per-mount pattern). EnsureSuperseded = identity
+	// moved on mid-flight; the new subscription's ensure covers it.
+	void balancesStore.ensure(scope.value, { legs: ["gas"] }).catch(() => {})
 }
 
 /** Watchers */
-watch(
-	() => [appStore.account?.address, appStore.network?.id],
-	([newAccount, newNetwork], [oldAccount, oldNetwork]) => {
-		if (newAccount !== oldAccount || newNetwork !== oldNetwork) {
-			hasLoaded.value = false
-			isStale.value = false
-			loadBalances()
-		}
-	},
-)
+watch(scope, (next, prev) => {
+	if (next?.profileId !== prev?.profileId || next?.networkId !== prev?.networkId || next?.accountAddress !== prev?.accountAddress) {
+		resubscribe()
+	}
+})
 
 /** Lifecycle */
-onMounted(async () => {
+onMounted(() => {
 	transactionService.connect()
-	await loadBalances()
+	resubscribe()
 })
 onBeforeUnmount(() => {
-	executionService.disconnect()
+	subscription?.release()
 	transactionService.disconnect()
 	prices.dispose()
 	priceService.disconnect()

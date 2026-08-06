@@ -262,7 +262,9 @@ export const useBalancesStore = defineStore("balances", () => {
 			if (entry.gas.version !== versionAtStart) return
 			commitEntry(key, {
 				...entry,
-				stale: true,
+				// Honor the SW's own staleness verdict: a within-TTL peek is
+				// FRESH and must not dim the card (today's fresh-peek behavior).
+				stale: peeked.stale,
 				gas: { ...entry.gas, display: peeked.balances, version: entry.gas.version + 1 },
 			})
 		} catch {
@@ -299,7 +301,14 @@ export const useBalancesStore = defineStore("balances", () => {
 		const run = (async () => {
 			const entry0 = entries.value[key]
 			if (!entry0) return
-			commitEntry(key, { ...entry0, gas: { ...entry0.gas, status: "fetching" } })
+			// A forced refresh means the on-screen value is known-invalidated:
+			// mark it stale at START so the card dims immediately and a FAILED
+			// force can't leave it rendered as current (the #343 rule).
+			commitEntry(key, {
+				...entry0,
+				stale: opts.cause === "forced" ? true : entry0.stale,
+				gas: { ...entry0.gas, status: "fetching" },
+			})
 			let result: GasBalances | undefined
 			let failed: string | undefined
 			try {

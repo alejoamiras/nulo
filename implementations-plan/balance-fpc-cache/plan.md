@@ -231,7 +231,8 @@ Producer flip + fail-closed `settingsForMethod` guard + `buildFeeMethods` null-d
 Full pipeline per architecture v2 (structured scope, epoch fence, split slices, raw-reuse, capabilities, tx-settle subscription, LRU-with-subscribed-exemption). New `balances.store.test.ts` porting semantic pins + the codex-mandated suite (testing directive).
 **Gate**: `bun run audit:vue` exit 0; store test file green explicitly. Layers: typecheck/lint/unit.
 
-### Phase 3 — GasBalanceCard onto the store
+### Phase 3 ✓ — GasBalanceCard onto the store
+*(gate passed 2026-08-06: `bun run audit:vue` exit 0, GasBalanceCard suite 13/13 incl. the D9 overlay-reset trio; lessons/phase-3.md)*
 Subscriber rewrite ({legs:[gas], retry:false, txRefresh:true, peek:true}); deduction → card-local overlay with retained tx-added subscription, cleared via `gas.forcedVersion`; delete fetch/generation machinery. Mocks re-pointed at the client layer against the real store.
 **Gate**: `bun run audit:vue` exit 0, all GasBalanceCard pins green. Layers: typecheck/lint/component.
 
