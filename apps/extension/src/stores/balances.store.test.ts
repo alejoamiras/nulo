@@ -375,6 +375,35 @@ describe("balances store — tx-settle forced refresh + cause-specific signals",
 		subCard.release()
 	})
 
+	it("a forced run overtaken by a NEWER settle neither un-dims nor signals the overlay reset", async () => {
+		// Settle S1's forced run F1 is still in flight when settle S2 lands:
+		// F1's data pre-dates S2, so F1's success must not clear S2's
+		// stale-mark or bump forcedVersion — S2's own run F2 does both.
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const sub = store.subscribe(SCOPE_A, CAPS_CARD)
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		let resolveF1!: (v: unknown) => void
+		let resolveF2!: (v: unknown) => void
+		mocks.getGasBalances
+			.mockImplementationOnce(() => new Promise((r) => (resolveF1 = r)))
+			.mockImplementationOnce(() => new Promise((r) => (resolveF2 = r)))
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		const fvBefore = store.entry(SCOPE_A)!.gas.forcedVersion
+		resolveF1(BAL)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(store.entry(SCOPE_A)?.stale).toBe(true)
+		expect(store.entry(SCOPE_A)?.gas.forcedVersion).toBe(fvBefore)
+		resolveF2({ publicFeeJuice: "900", privateFeeJuice: null })
+		await vi.advanceTimersByTimeAsync(10)
+		expect(store.entry(SCOPE_A)?.stale).toBe(false)
+		expect(store.entry(SCOPE_A)?.gas.forcedVersion).toBe(fvBefore + 1)
+		sub.release()
+	})
+
 	it("a pre-trigger ensure success never clears the forced stale-mark", async () => {
 		// The forced stale-mark means "the on-screen value is known-invalidated
 		// by a settlement". A refresh that was ALREADY in flight when the

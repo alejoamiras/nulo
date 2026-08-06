@@ -389,6 +389,7 @@ const runInit = async () => {
 			!isMounted ||
 			props.profile?.id !== reqProfileId ||
 			props.network?.id !== reqNetworkId ||
+			props.network?.chainId !== reqChainId ||
 			props.account?.address !== reqAccount ||
 			(isCustomMethod.value && !useOwnMethod.value)
 		)
@@ -408,11 +409,17 @@ const runInit = async () => {
 			if (e instanceof EnsureSuperseded) return
 			throw e
 		}
-		// Discard if the profile/network/account switched mid-flight — the props
-		// watcher already fired a fresh init for the new identity. Everything
-		// past this guard is synchronous (no awaits), so the commit is atomic
-		// against the checked identity.
-		if (!isMounted || props.profile?.id !== reqProfileId || props.network?.id !== reqNetworkId || props.account?.address !== reqAccount)
+		// Discard if the profile/network/chain/account switched mid-flight — the
+		// props watcher already fired a fresh init for the new identity.
+		// Everything past this guard is synchronous (no awaits), so the commit
+		// is atomic against the checked identity.
+		if (
+			!isMounted ||
+			props.profile?.id !== reqProfileId ||
+			props.network?.id !== reqNetworkId ||
+			props.network?.chainId !== reqChainId ||
+			props.account?.address !== reqAccount
+		)
 			return
 
 		commitFromEntry(scope, reqKey, saved, baseline)

@@ -48,6 +48,11 @@ export class GasBalanceReader {
 	 *  sibling account's concurrent compute costs one extra recompute and
 	 *  keeps the bookkeeping trivial. */
 	private epoch = 0
+	/** Bumped only by `evictAll`. A compute in flight across an eviction must
+	 *  not write its snapshot back at all — a stale-marked write-back would
+	 *  resurrect another profile's figures as peekable last-knowns, re-opening
+	 *  the leak eviction exists to close. */
+	private evictGeneration = 0
 
 	public constructor(private readonly deps: GasBalanceReaderDeps) {}
 
@@ -78,7 +83,8 @@ export class GasBalanceReader {
 			return inFlight.promise.then(reenter, reenter)
 		}
 		const epochAtStart = this.epoch
-		const pending = this.compute(cacheKey, networkId, accountAddress, epochAtStart).finally(() => {
+		const evictGenAtStart = this.evictGeneration
+		const pending = this.compute(cacheKey, networkId, accountAddress, epochAtStart, evictGenAtStart).finally(() => {
 			this.inFlight.delete(cacheKey)
 		})
 		this.inFlight.set(cacheKey, { promise: pending, epoch: epochAtStart })
@@ -126,10 +132,17 @@ export class GasBalanceReader {
 	 *  profile would paint the old profile's figures dimmed. Evict outright. */
 	public evictAll(): void {
 		this.epoch += 1
+		this.evictGeneration += 1
 		this.cache.clear()
 	}
 
-	private async compute(cacheKey: string, networkId: string, accountAddress: string, epochAtStart: number): Promise<GasBalances> {
+	private async compute(
+		cacheKey: string,
+		networkId: string,
+		accountAddress: string,
+		epochAtStart: number,
+		evictGenAtStart: number,
+	): Promise<GasBalances> {
 		const chainId = await this.deps.getChainId(networkId)
 		const deps = await this.deps.getViewDeps(networkId, accountAddress)
 
@@ -176,9 +189,14 @@ export class GasBalanceReader {
 		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
 
 		const result = { publicFeeJuice, privateFeeJuice }
-		// An invalidation that landed mid-compute outranks this snapshot:
-		// cache it already-stale so peek can serve it dimmed but the next
-		// get recomputes.
+		// An eviction that landed mid-compute means this snapshot belongs to
+		// ANOTHER profile's context: return it to the (pre-switch) caller but
+		// never write it back — a stale-marked write-back would still be
+		// peekable under the new profile.
+		if (this.evictGeneration !== evictGenAtStart) return result
+		// A stale-marking invalidation that landed mid-compute outranks this
+		// snapshot: cache it already-stale so peek can serve it dimmed but the
+		// next get recomputes.
 		this.cache.set(cacheKey, { result, fetchedAt: this.epoch === epochAtStart ? Date.now() : 0 })
 		return result
 	}

@@ -381,11 +381,16 @@ export const useBalancesStore = defineStore("balances", () => {
 			const entry = entries.value[key]
 			if (!entry) return
 			if (result !== undefined) {
+				// A success only counts as POST-trigger when no NEWER forced run
+				// is live: a pre-trigger run's data (plain refresh overtaken by a
+				// settle, or forced run F1 overtaken by settle S2) must neither
+				// clear the stale-mark nor signal the overlay reset — the newest
+				// forced run's own commit does both.
+				const isLastForced = opts.cause === "forced" && (forcedGasPending.get(key) ?? 0) <= 1
+				const preTrigger = opts.cause === "forced" ? !isLastForced : forcedGasPending.has(key)
 				commitEntry(key, {
 					...entry,
-					// A PRE-trigger run's success must not clear a live forced
-					// stale-mark — its data predates the trigger (see the set).
-					stale: opts.cause !== "forced" && forcedGasPending.has(key) ? entry.stale : false,
+					stale: preTrigger ? entry.stale : false,
 					gas: {
 						...entry.gas,
 						display: result,
@@ -393,7 +398,7 @@ export const useBalancesStore = defineStore("balances", () => {
 						status: "ready",
 						version: entry.gas.version + 1,
 						retryVersion: opts.cause === "retry" ? entry.gas.retryVersion + 1 : entry.gas.retryVersion,
-						forcedVersion: opts.cause === "forced" ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
+						forcedVersion: isLastForced ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
 						// Debt clears ONLY on a retry-path success (D11): a plain
 						// ensure landing fresh data leaves the loop to finish its
 						// own cycle — the retry success is what bumps retryVersion
@@ -497,15 +502,11 @@ export const useBalancesStore = defineStore("balances", () => {
 		// JOINED a failing forced flight (whose own failure creates no debt —
 		// D11) still has a retry-capable stake in the outcome. Without this,
 		// the degraded card would paint its retrying notice while no loop runs
-		// and retryVersion never bumps to wake its recovery watch.
-		const gasDebtDue = opts.legs.includes("gas") && entry.gas.status === "degraded" && !entry.gas.retryDebt
-		const fpcDebtDue = opts.legs.includes("fpc") && entry.fpc.status === "degraded" && !entry.fpc.retryDebt
-		if (gasDebtDue || fpcDebtDue) {
-			commitEntry(key, {
-				...entry,
-				gas: gasDebtDue ? { ...entry.gas, retryDebt: true } : entry.gas,
-				fpc: fpcDebtDue ? { ...entry.fpc, retryDebt: true } : entry.fpc,
-			})
+		// and retryVersion never bumps to wake its recovery watch. Gas-only:
+		// the fpc leg has no forced cause, so every degraded fpc already
+		// carries its debt from the failure commit.
+		if (opts.legs.includes("gas") && entry.gas.status === "degraded" && !entry.gas.retryDebt) {
+			commitEntry(key, { ...entry, gas: { ...entry.gas, retryDebt: true } })
 		}
 		const degraded =
 			(opts.legs.includes("gas") && entry.gas.status === "degraded") || (opts.legs.includes("fpc") && entry.fpc.status === "degraded")

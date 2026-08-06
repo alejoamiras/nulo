@@ -272,6 +272,28 @@ describe("GasBalanceReader peek (stale-while-revalidate)", () => {
 		expect(bvsMock.mock.calls.length).toBeGreaterThan(callsBefore)
 	})
 
+	test("a compute in flight across evictAll never writes back — no resurrected peekable entry", async () => {
+		// A stale-marked write-back after eviction would resurrect another
+		// profile's figures as peekable last-knowns — the exact leak evictAll
+		// exists to close.
+		let resolveBvs!: (v: unknown) => void
+		bvsMock.mockReset().mockImplementation(
+			() =>
+				new Promise((r) => {
+					resolveBvs = r
+				}),
+		)
+		const reader = new GasBalanceReader(makeDeps())
+		const pending = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+		reader.evictAll()
+		resolveBvs(encodedResult(100n))
+		// The pre-switch caller still receives its value...
+		expect((await pending).publicFeeJuice).toBe("100")
+		// ...but nothing survives as a last-known.
+		expect(reader.peek("net-1", "0xacc")).toBeNull()
+	})
+
 	test("a plain get() after an invalidation never joins the pre-invalidation flight — the value must not cross the fence", async () => {
 		// The stale-marking commit only demotes the CACHE entry; the promise
 		// value still crosses to joiners. A post-switch joiner would receive

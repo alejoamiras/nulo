@@ -200,6 +200,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks()
+	config.global.plugins = []
 })
 
 const lastEmittedSettings = (w: ReturnType<typeof mount>) => {
@@ -1002,6 +1003,36 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			await vi.advanceTimersByTimeAsync(0)
 
 			expect(mocks.getGasBalances.mock.calls.filter((c) => c[1] === "0xacct").length).toBe(1)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a chainId swap under a stable networkId mid-init discards the stale-chain run", async () => {
+		// The testnet-reset shape: same network id, new chainId. The stale
+		// run's late completion must not commit the OLD chain's FPC list last.
+		vi.useFakeTimers()
+		try {
+			let resolveOldGas!: (v: unknown) => void
+			mocks.getGasBalances
+				.mockImplementationOnce(() => new Promise((r) => (resolveOldGas = r)))
+				.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockImplementation(async (chainId: number) => [
+				{ id: chainId === 11155111 ? "s-old" : "s-new", type: 1, name: "Sponsor" },
+			])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+
+			await w.setProps({ network: { id: "n1", chainId: 222 } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s-new" } })
+
+			// The old chain's hung gas leg settles late — its run is discarded.
+			resolveOldGas({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s-new" } })
 			w.unmount()
 		} finally {
 			vi.useRealTimers()
