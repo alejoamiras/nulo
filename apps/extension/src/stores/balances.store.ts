@@ -39,7 +39,6 @@ import { type ActivityScope, activityScopeKey } from "@nulo/wallet-core/activity
 import { defineStore } from "pinia"
 import { ref, watch } from "vue"
 import { useAppStore } from "@/stores/app.store"
-import { INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS, withTimeout } from "@/popup/components/modules/send/fee-helpers"
 import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import type { GasBalances } from "@/wallet/services/execution/models"
 import { FpcServiceClient } from "@/wallet/services/fpc/client"
@@ -103,6 +102,38 @@ export class EnsureSuperseded extends Error {
 		super("ensure superseded by a profile switch")
 		this.name = "EnsureSuperseded"
 	}
+}
+
+/**
+ * Call-site bound on each store fetch. The popup→SW transport's own 60s
+ * timer only arms after the port reaches Connected — an unreachable SW
+ * would otherwise hang ensure (and the Confirm gate behind it) forever.
+ */
+export const INIT_FETCH_TIMEOUT_MS = 20_000
+
+/** Silent-retry backoff after a degraded fetch. The last step repeats until
+ *  the key's last retry-capable subscriber releases or a retry succeeds. */
+export const INIT_RETRY_BACKOFF_MS = [5_000, 10_000, 20_000, 30_000]
+
+/**
+ * Rejects with a labeled error after `ms` if `promise` hasn't settled. The
+ * underlying operation is NOT cancelled — the SW side single-flights these
+ * reads, so a later retry re-attaches to the same in-flight computation.
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+		promise.then(
+			(value) => {
+				clearTimeout(timer)
+				resolve(value)
+			},
+			(error) => {
+				clearTimeout(timer)
+				reject(error)
+			},
+		)
+	})
 }
 
 /** How many unsubscribed entries to keep before evicting the least recent. */

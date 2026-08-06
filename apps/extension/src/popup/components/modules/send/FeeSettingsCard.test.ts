@@ -78,8 +78,7 @@ vi.mock("@/stores/app.store", () => ({
 }))
 
 import FeeSettingsCard from "./FeeSettingsCard.vue"
-import { useBalancesStore } from "@/stores/balances.store"
-import { INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS } from "./fee-helpers"
+import { INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS, useBalancesStore } from "@/stores/balances.store"
 
 const STUBS = {
 	Flex: { template: "<div><slot /></div>" },

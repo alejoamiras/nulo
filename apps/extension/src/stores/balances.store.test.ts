@@ -47,9 +47,8 @@ vi.mock("@/stores/app.store", async () => {
 	return { useAppStore: () => fake }
 })
 
-import { INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS } from "@/popup/components/modules/send/fee-helpers"
 import { TxStatus } from "@/wallet/services/transaction/spec"
-import { EnsureSuperseded, useBalancesStore } from "./balances.store"
+import { EnsureSuperseded, INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS, useBalancesStore, withTimeout } from "./balances.store"
 
 const SCOPE_A = { profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
 const SCOPE_B = { profileId: "p2", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
@@ -356,5 +355,23 @@ describe("balances store — LRU", () => {
 		expect(store.entry(SCOPE_A)).toBeDefined() // subscribed → exempt
 		expect(Object.keys(store.entries).length).toBeLessThanOrEqual(33)
 		sub.release()
+	})
+})
+
+describe("withTimeout", () => {
+	it("resolves through when the promise settles first", async () => {
+		await expect(withTimeout(Promise.resolve(42), 1_000, "x")).resolves.toBe(42)
+	})
+
+	it("rejects through when the promise rejects first", async () => {
+		await expect(withTimeout(Promise.reject(new Error("inner")), 1_000, "x")).rejects.toThrow("inner")
+	})
+
+	it("rejects with a labeled error once the deadline passes", async () => {
+		vi.useFakeTimers()
+		const p = withTimeout(new Promise(() => {}), 1_000, "getGasBalances")
+		const assertion = expect(p).rejects.toThrow(/getGasBalances timed out/)
+		await vi.advanceTimersByTimeAsync(1_000)
+		await assertion
 	})
 })

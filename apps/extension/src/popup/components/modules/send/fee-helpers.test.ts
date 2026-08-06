@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/client"
-import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod, withTimeout } from "./fee-helpers"
+import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod } from "./fee-helpers"
 
 describe("fee-helpers/formatGasBalance", () => {
 	test("returns '0' for zero raw value", () => {
@@ -116,28 +116,6 @@ describe("fee-helpers/settingsForMethod — unknown balances (degraded init)", (
 		expect(settingsForMethod(m, "normal", undefined)).toEqual({
 			paymentMethod: { kind: "fpc", fpcId: "s1" },
 		})
-	})
-})
-
-describe("fee-helpers/withTimeout", () => {
-	test("resolves through when the promise settles first", async () => {
-		await expect(withTimeout(Promise.resolve(42), 1_000, "x")).resolves.toBe(42)
-	})
-
-	test("rejects through when the promise rejects first", async () => {
-		await expect(withTimeout(Promise.reject(new Error("inner")), 1_000, "x")).rejects.toThrow("inner")
-	})
-
-	test("rejects with a labeled error once the deadline passes", async () => {
-		vi.useFakeTimers()
-		try {
-			const p = withTimeout(new Promise(() => {}), 1_000, "getGasBalances")
-			const assertion = expect(p).rejects.toThrow(/getGasBalances timed out/)
-			await vi.advanceTimersByTimeAsync(1_000)
-			await assertion
-		} finally {
-			vi.useRealTimers()
-		}
 	})
 })
 

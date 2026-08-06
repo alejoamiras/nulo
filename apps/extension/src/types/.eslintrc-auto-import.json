@@ -34,6 +34,7 @@
     "ExtractDefaultPropTypes": true,
     "ExtractPropTypes": true,
     "ExtractPublicPropTypes": true,
+    "FEE_JUICE_DECIMALS": true,
     "FEE_METHODS": true,
     "FeeEstimate": true,
     "FieldDef": true,
@@ -44,6 +45,8 @@
     "FromDisplay": true,
     "GasSlice": true,
     "IMPORT_ACTIVATION_TIMEOUT_MS": true,
+    "INIT_FETCH_TIMEOUT_MS": true,
+    "INIT_RETRY_BACKOFF_MS": true,
     "ImportCompletionDeps": true,
     "ImportCompletionOutcome": true,
     "ImportedContactV1": true,
@@ -140,6 +143,7 @@
     "formatCallSummary": true,
     "formatFeeJuice": true,
     "formatGas": true,
+    "formatGasBalance": true,
     "formatTransferType": true,
     "getAccount": true,
     "getCallCountLabel": true,
@@ -291,6 +295,7 @@
     "watch": true,
     "watchEffect": true,
     "watchPostEffect": true,
-    "watchSyncEffect": true
+    "watchSyncEffect": true,
+    "withTimeout": true
   }
 }

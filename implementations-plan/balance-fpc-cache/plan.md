@@ -241,7 +241,8 @@ Subscriber rewrite ({legs:[gas], retry:false, txRefresh:true, peek:true}); deduc
 subscribe+ensure+snapshot-commit+slice-scoped recovery watch; event-only FpcServiceClient retained; release on unmount AND embedded early-return; delete coalescing/rawRequests/timers. `runInit` explicitly catches `EnsureSuperseded` as a NO-OP before its generic failure handling (the post-await identity guard cannot observe a rejected promise) — pinned: a superseded ensure creates no degraded state and no retry. Pins migrated per recon §1 with client-layer anchoring (raw-count pins keep their meaning).
 **Gate**: `bun run audit:vue` exit 0, all FeeSettingsCard pins green. Layers: typecheck/lint/component.
 
-### Phase 5 — Cleanup, docs, end-to-end proof
+### Phase 5 ✓ — Cleanup, docs, end-to-end proof
+*(gates passed 2026-08-06: `bun run audit:vue` exit 0; smoke `bun run test:e2e` 79 passed/0 failed (fixture-armed build); `bun run e2e:agent tests/e2e/network/fee-methods.test.ts` 5/5; lessons/phase-5.md)*
 Dead-code deletion, `formatGasBalance` dedup, README/CLAUDE.md touchpoints, `implementations-plan/index.md`.
 **Gate**: `bun run audit:vue` exit 0 AND `bun run test:e2e` (smoke) green AND `bun run e2e:agent tests/e2e/network/fee-methods.test.ts` green locally (5/5). Layers: full ladder incl. e2e + live-network e2e.
 
