@@ -982,3 +982,60 @@ describe("deploymentMatches — assetKind binding (plan §5 DQ2)", () => {
 		expect(deploymentMatches(dep({ portal: "0xportal", bridge: "0xbridge", chainId: 1 }))).toBe(false)
 	})
 })
+
+describe("confirm quiet flip - proposed receipt surfaces as confirmLanded", () => {
+	let kv: KV
+
+	beforeEach(() => {
+		__resetJournalForTests()
+		kv = memKV()
+	})
+
+	it("a proposed receipt sets confirmLanded, and the claim still completes on the checkpointed one", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const statuses: Array<"proposed" | "success"> = ["proposed", "proposed", "success"]
+		deps.claimReceiptStatus = vi.fn(async () => statuses.shift() ?? "success") as never
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xflip"))
+		markSessionLive("0xflip")
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			const { runtime } = useBridgeJournal()
+			expect(runtime.value["0xflip"]?.confirmLanded).toBe(true)
+		})
+		await vi.waitFor(() => {
+			const { records } = useBridgeJournal()
+			expect(records.value.find((r) => r.id === "0xflip")?.completedAt).toBe(999)
+		})
+	})
+
+	it("a drop after proposed clears the flag with the hash - no stale mint dot on a dead claim", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		let landedMidFlight: boolean | undefined
+		let calls = 0
+		deps.claimReceiptStatus = vi.fn(async () => {
+			calls++
+			if (calls <= 1) return "proposed"
+			// Snapshot the runtime as the drop streak starts - the flag must be live here.
+			if (calls === 2) landedMidFlight = useBridgeJournal().runtime.value["0xdrop"]?.confirmLanded
+			return "dropped"
+		}) as never
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xdrop"))
+		markSessionLive("0xdrop")
+		resumeSessionWork()
+		// The whole send → drop-streak arc completes between waitFor polls (waitMs is a no-op
+		// fake), so wait for the drop path's TERMINAL state; the mid-flight snapshot inside the
+		// receipt mock is what proves the flag was live while the hash existed.
+		await vi.waitFor(() => {
+			expect(useBridgeJournal().runtime.value["0xdrop"]?.attention).toBe("error")
+		})
+		expect(landedMidFlight).toBe(true)
+		const { runtime, records } = useBridgeJournal()
+		const dropped = records.value.find((r) => r.id === "0xdrop") as DepositJournalRecord | undefined
+		expect(dropped?.claimTxHash).toBeUndefined()
+		expect(runtime.value["0xdrop"]?.confirmLanded).toBeUndefined()
+	})
+})

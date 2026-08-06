@@ -86,6 +86,10 @@ export interface RecordRuntime {
 	proven?: boolean
 	/** Current L2 block during the sync countdown - feeds the SYNC progress bar. */
 	syncBlock?: number
+	/** Deposit CONFIRM quiet flip: the receipt poll saw the claim in a PROPOSED block. Display-only
+	 *  evidence (the rail's dot goes mint) - NEVER settlement-grade; a proposed tx can still drop,
+	 *  and the flag is cleared with the hash when it does. */
+	confirmLanded?: boolean
 }
 
 /**
@@ -113,7 +117,7 @@ export interface JournalEngineDeps {
 	}>
 	/** Aztec-node receipt lookup. "unreachable" = transport failure - a dead RPC must read as a
 	 *  connectivity problem, never as a slow ("pending") claim. */
-	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">
+	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "proposed" | "pending" | "unreachable">
 	/** Complete a deposit record's L1 leg from its recorded `depositTxHash`: fetch the mined
 	 *  receipt, parse the deposit event, and PATCH the record (leafIndex + variant fields).
 	 *  "pending" = not mined yet (caller bails softly and retries later); throws on a reverted
@@ -718,6 +722,8 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		log("claim sent", { id, txHash })
 		patchRecord(id, { claimTxHash: txHash })
 		receiptRounds.delete(id)
+		// A fresh attempt starts un-landed: never inherit a previous claim's mint dot.
+		setRuntime(id, { confirmLanded: undefined })
 		// F12: the forge-resistant provenance - THIS process watched claimable → sent.
 		localClaimProvenance.add(id)
 		// Cross-tab guard: the record can vanish remotely between the send and this reread.
@@ -746,6 +752,11 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 		const status = await deps.claimReceiptStatus(rec.claimTxHash)
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
+		if (status === "proposed" && runtime.value[rec.id]?.confirmLanded !== true) {
+			// Quiet flip: real evidence the claim was accepted into a proposed block. Display-only
+			// (the rail's dot goes mint); the round keeps polling to inclusion exactly as before.
+			setRuntime(rec.id, { confirmLanded: true })
+		}
 		if (status === "success") {
 			// A checkpointed receipt for the recorded claimTxHash IS confirmation (owner decision:
 			// the node's word beats the wallet's lagging PXE). The message probe is best-effort:
@@ -783,7 +794,12 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 			droppedStreak++
 			if (droppedStreak >= 3) {
 				patchRecord(rec.id, { claimTxHash: undefined })
-				setRuntime(rec.id, { attention: "error", note: "The claim was dropped - claim again from this card. Nothing was lost." })
+				// The mint dot dies with the hash: proposed-then-dropped must not keep signaling.
+				setRuntime(rec.id, {
+					attention: "error",
+					note: "The claim was dropped - claim again from this card. Nothing was lost.",
+					confirmLanded: undefined,
+				})
 				return "stop"
 			}
 		} else {

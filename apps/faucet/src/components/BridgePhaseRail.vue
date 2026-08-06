@@ -65,7 +65,7 @@ function liveElapsed(startedAt?: number): string | null {
 				v-for="phase in phases"
 				:key="phase.key"
 				class="cell"
-				:class="phase.state"
+				:class="[phase.state, { landed: phase.state === 'active' && phase.landed }]"
 				:data-testid="TESTIDS.journalPhase"
 				:data-phase="phase.key"
 				:data-state="phase.state"
@@ -92,7 +92,9 @@ function liveElapsed(startedAt?: number): string | null {
 			:data-phase="phase.key"
 			:data-state="phase.state"
 		>
-			<span class="glyph" :class="{ pulse: phase.state === 'active' }">{{ GLYPH[phase.state] }}</span>
+			<span class="glyph" :class="{ pulse: phase.state === 'active', landed: phase.state === 'active' && phase.landed }">{{
+				GLYPH[phase.state]
+			}}</span>
 			<span class="label">{{ phase.label }}</span>
 			<span v-if="phase.state === 'done' && phase.elapsedMs !== undefined" class="took">{{ formatElapsed(phase.elapsedMs) }}</span>
 			<span v-else-if="phase.state === 'active' && liveElapsed(phase.startedAt)" class="clock">
@@ -211,6 +213,12 @@ function liveElapsed(startedAt?: number): string | null {
 	color: var(--nulo-accent);
 }
 
+/* The quiet flip: once the claim is seen PROPOSED, the live dot adopts the
+ * done-family color. Same glyph, same pulse - the only change is the hue. */
+.phase.active .glyph.landed {
+	color: var(--mint);
+}
+
 .phase.failed .glyph {
 	color: var(--red);
 }
@@ -287,6 +295,10 @@ function liveElapsed(startedAt?: number): string | null {
 .cell.active {
 	color: var(--nulo-accent);
 	animation: pulse 1.2s ease-in-out infinite;
+}
+
+.cell.active.landed {
+	color: var(--mint);
 }
 
 .cell.failed {

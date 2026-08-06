@@ -22,6 +22,9 @@ export interface BridgePhase {
 	progress?: { current: number; target: number; fraction: number }
 	/** Deliberately OVERESTIMATED duration hint (queue psychology: beat the estimate, never miss it). */
 	eta?: string
+	/** Deposit CONFIRM quiet flip: the claim was seen in a PROPOSED block. The rail renders the
+	 *  active dot in the done-family color - display-only evidence, never a completion signal. */
+	landed?: boolean
 }
 
 /** L2 blocks between the deposit-time snapshot and presumed message arrival (raven-style pacing). */
@@ -120,7 +123,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		deposit: "usually under 1 min",
 		sync: "usually 1-4 min",
 		claim: "your signature + a few sec",
-		confirm: "usually 1-5 min",
+		confirm: "usually 1-2 min",
 	}
 
 	// SYNC progress: real blocks against the deposit-time snapshot + margin (the countdown).
@@ -137,7 +140,7 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		}
 	}
 
-	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt)
+	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt, rt.confirmLanded)
 }
 
 function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePhase[] {
@@ -189,6 +192,8 @@ function buildPhases(
 	activeKey: BridgePhase["key"],
 	completed: boolean,
 	rt: RecordRuntime,
+	/** Deposit-only: the withdraw CONFIRM is an L1 wait and never lights the quiet flip. */
+	landedConfirm?: boolean,
 ): BridgePhase[] {
 	const activeIndex = keys.indexOf(activeKey)
 	const failed = !!rt.attention && FAILED_ATTENTIONS.has(rt.attention)
@@ -203,6 +208,7 @@ function buildPhases(
 				detail: failed ? rt.note : (rt.stepDetail ?? prompts[key]),
 				progress: progress[key],
 				eta: failed ? undefined : etas[key],
+				...(key === "confirm" && landedConfirm && !failed ? { landed: true } : {}),
 			}
 		}
 		return { key, label: labels[key], state: "pending" as const }
