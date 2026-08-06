@@ -97,7 +97,7 @@
 	<p>Delete the now-dead code, deduplicate a copy-pasted formatter, update docs.</p>
 	<p class="gate">Proves itself by: full check suite + browser smoke tests + the real-network end-to-end suite (including the "reopened popup paints instantly" test) all green.</p>
 </div>
-<p class="muted">After the phases: an automated code review with fixes, a final Codex audit of the diff, then a PR that must pass every CI gate before auto-merging. No extra hardening pass (your call, recorded).</p>
+<p class="muted">After the phases: an automated code review iterated until clean, a Codex audit of the diff iterated until it explicitly approves, then a PR babysat until every CI gate is green — <strong>and then it stops and waits for your go-ahead; the merge is yours</strong>. No extra hardening pass (your call, recorded).</p>
 
 <h2>Human context</h2>
 <p>
