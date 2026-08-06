@@ -86,6 +86,11 @@ export interface RecordRuntime {
 	proven?: boolean
 	/** Current L2 block during the sync countdown - feeds the SYNC progress bar. */
 	syncBlock?: number
+	/** Deposit CONFIRM quiet flip: the receipt poll saw THIS claim tx in a PROPOSED block. Display-
+	 *  only evidence (the rail's dot goes mint) - NEVER settlement-grade. Hash-scoped on purpose:
+	 *  the view lights only while it equals the record's CURRENT claimTxHash, so a dropped/replaced
+	 *  claim (any tab) can never inherit a previous claim's mint dot. */
+	confirmLandedTxHash?: string
 }
 
 /**
@@ -113,7 +118,7 @@ export interface JournalEngineDeps {
 	}>
 	/** Aztec-node receipt lookup. "unreachable" = transport failure - a dead RPC must read as a
 	 *  connectivity problem, never as a slow ("pending") claim. */
-	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "pending" | "unreachable">
+	claimReceiptStatus?: (txHash: string) => Promise<"success" | "dropped" | "reverted" | "proposed" | "pending" | "unreachable">
 	/** Complete a deposit record's L1 leg from its recorded `depositTxHash`: fetch the mined
 	 *  receipt, parse the deposit event, and PATCH the record (leafIndex + variant fields).
 	 *  "pending" = not mined yet (caller bails softly and retries later); throws on a reverted
@@ -746,6 +751,11 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 		const status = await deps.claimReceiptStatus(rec.claimTxHash)
 		log("receipt check", { id: rec.id, checkNo, status })
 		if (genOf(rec.id) !== gen) return "stop"
+		if (status === "proposed" && runtime.value[rec.id]?.confirmLandedTxHash !== rec.claimTxHash) {
+			// Quiet flip: real evidence THIS claim was accepted into a proposed block. Display-only
+			// (the rail's dot goes mint); the round keeps polling to inclusion exactly as before.
+			setRuntime(rec.id, { confirmLandedTxHash: rec.claimTxHash })
+		}
 		if (status === "success") {
 			// A checkpointed receipt for the recorded claimTxHash IS confirmation (owner decision:
 			// the node's word beats the wallet's lagging PXE). The message probe is best-effort:
@@ -772,9 +782,12 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 			return "done"
 		}
 		if (status === "reverted") {
+			// Terminal revert keeps the hash (a retry rechecks the same receipt), so the hash-scoped
+			// landed view WOULD re-light during the recheck window - clear the flag explicitly.
 			setRuntime(rec.id, {
 				attention: "error",
 				note: "The claim reverted on Aztec. You can retry from this card - the deposit remains claimable.",
+				confirmLandedTxHash: undefined,
 			})
 			return "stop"
 		}
@@ -782,8 +795,14 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 			// Debounced: a freshly-proposed tx can read dropped/unknown transiently.
 			droppedStreak++
 			if (droppedStreak >= 3) {
+				// Hash-scoping alone doesn't cover a SAME-hash resurrection (a restored backup can
+				// re-import the dropped hash into this record) - clear the flag with the hash.
 				patchRecord(rec.id, { claimTxHash: undefined })
-				setRuntime(rec.id, { attention: "error", note: "The claim was dropped - claim again from this card. Nothing was lost." })
+				setRuntime(rec.id, {
+					attention: "error",
+					note: "The claim was dropped - claim again from this card. Nothing was lost.",
+					confirmLandedTxHash: undefined,
+				})
 				return "stop"
 			}
 		} else {

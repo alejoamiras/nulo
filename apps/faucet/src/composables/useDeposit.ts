@@ -35,6 +35,7 @@ import {
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
+import { classifyClaimReceipt } from "@/lib/claim-receipt"
 import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import {
@@ -594,19 +595,7 @@ export function ensureDepositJournalDeps(): void {
 			const node = createAztecNodeClient(NODE_URL)
 			try {
 				const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
-				// TxStatus (4.2.0) is BLOCK-finalization state with NO "success" value: a confirmed tx
-				// reads checkpointed -> proven -> finalized. Inclusion at ANY of those = landed; the
-				// separate executionResult carries the revert signal. Waiting for "finalized" alone
-				// stranded confirmed claims at "Confirming" for epochs.
-				const status = String(receipt?.status ?? "pending").toLowerCase()
-				const included = /checkpointed|proven|finalized|success|mined/.test(status)
-				if (included) {
-					const exec = String(receipt?.executionResult ?? "success").toLowerCase()
-					return exec.includes("revert") ? "reverted" : "success"
-				}
-				if (status.includes("dropped")) return "dropped"
-				if (status.includes("reverted")) return "reverted"
-				return "pending"
+				return classifyClaimReceipt(receipt as { status?: unknown; executionResult?: unknown })
 			} catch (e) {
 				// A dead RPC must read as connectivity, never as a slow claim (plan D2).
 				log("receipt lookup failed:", e instanceof Error ? e.message : String(e))

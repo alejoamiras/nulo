@@ -269,3 +269,31 @@ describe("fueled deposit rail", () => {
 		expect(phases.map((p) => p.key)).toEqual(["sign", "deposit", "sync", "claim", "confirm"])
 	})
 })
+
+describe("stepperPhases - confirm quiet flip (landed)", () => {
+	it("active CONFIRM carries landed once the runtime saw THIS claim proposed", () => {
+		const confirm = stepperPhases(dep({ claimTxHash: "0xc" }), { confirmLandedTxHash: "0xc" }).find((p) => p.key === "confirm")
+		expect(confirm?.state).toBe("active")
+		expect(confirm?.landed).toBe(true)
+	})
+
+	it("a landed flag for a PREVIOUS claim hash never lights the replacement (hash-scoped)", () => {
+		const confirm = stepperPhases(dep({ claimTxHash: "0xnew" }), { confirmLandedTxHash: "0xold" }).find((p) => p.key === "confirm")
+		expect(confirm?.landed).toBeUndefined()
+	})
+
+	it("no landed flag before the proposed receipt", () => {
+		const confirm = stepperPhases(dep({ claimTxHash: "0xc" }), {}).find((p) => p.key === "confirm")
+		expect(confirm?.landed).toBeUndefined()
+	})
+
+	it("deposit CONFIRM eta reflects the observed 1-2 minute checkpoint window", () => {
+		const confirm = stepperPhases(dep({ claimTxHash: "0xc" }), {}).find((p) => p.key === "confirm")
+		expect(confirm?.eta).toBe("usually 1-2 min")
+	})
+
+	it("withdraw CONFIRM (an L1 wait) never carries landed", () => {
+		const confirm = stepperPhases(wd({ consumeTxHash: "0xk" }), { confirmLandedTxHash: "0xk" }).find((p) => p.key === "confirm")
+		expect(confirm?.landed).toBeUndefined()
+	})
+})
