@@ -140,7 +140,10 @@ function depositPhases(rec: DepositJournalRecord, rt: RecordRuntime): BridgePhas
 		}
 	}
 
-	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt, rt.confirmLanded)
+	// Hash-scoped: light only for the record's CURRENT claim tx, so a dropped/replaced claim can
+	// never inherit a previous attempt's mint dot (any tab).
+	const landedConfirm = rt.confirmLandedTxHash !== undefined && rt.confirmLandedTxHash === rec.claimTxHash
+	return buildPhases(keys, labels, prompts, etas, progress, activeKey, rec.completedAt !== undefined, rt, landedConfirm)
 }
 
 function withdrawPhases(rec: WithdrawJournalRecord, rt: RecordRuntime): BridgePhase[] {

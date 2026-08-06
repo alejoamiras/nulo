@@ -10,6 +10,7 @@ import {
 	sealDepositEnvelope,
 } from "@nulo/bridge-core"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { stepperPhases } from "@/lib/bridge-steps"
 
 vi.mock("@/contracts/bridge-deployments", () => ({
 	BRIDGE_FUEL: undefined,
@@ -1002,24 +1003,26 @@ describe("confirm quiet flip - proposed receipt surfaces as confirmLanded", () =
 		resumeSessionWork()
 		await vi.waitFor(() => {
 			const { runtime } = useBridgeJournal()
-			expect(runtime.value["0xflip"]?.confirmLanded).toBe(true)
+			expect(runtime.value["0xflip"]?.confirmLandedTxHash).toBe("0xclaimtx")
 		})
 		await vi.waitFor(() => {
 			const { records } = useBridgeJournal()
 			expect(records.value.find((r) => r.id === "0xflip")?.completedAt).toBe(999)
 		})
+		// Proposed never completed anything: all three receipt polls ran to the checkpointed one.
+		expect(deps.claimReceiptStatus).toHaveBeenCalledTimes(3)
 	})
 
 	it("a drop after proposed clears the flag with the hash - no stale mint dot on a dead claim", async () => {
 		const deps = baseDeps(kv)
 		const claim = smartClaimFake()
-		let landedMidFlight: boolean | undefined
+		let landedMidFlight: string | undefined
 		let calls = 0
 		deps.claimReceiptStatus = vi.fn(async () => {
 			calls++
 			if (calls <= 1) return "proposed"
 			// Snapshot the runtime as the drop streak starts - the flag must be live here.
-			if (calls === 2) landedMidFlight = useBridgeJournal().runtime.value["0xdrop"]?.confirmLanded
+			if (calls === 2) landedMidFlight = useBridgeJournal().runtime.value["0xdrop"]?.confirmLandedTxHash
 			return "dropped"
 		}) as never
 		connectJournalDeps({ ...deps, claim })
@@ -1032,10 +1035,27 @@ describe("confirm quiet flip - proposed receipt surfaces as confirmLanded", () =
 		await vi.waitFor(() => {
 			expect(useBridgeJournal().runtime.value["0xdrop"]?.attention).toBe("error")
 		})
-		expect(landedMidFlight).toBe(true)
+		expect(landedMidFlight).toBe("0xclaimtx")
 		const { runtime, records } = useBridgeJournal()
 		const dropped = records.value.find((r) => r.id === "0xdrop") as DepositJournalRecord | undefined
 		expect(dropped?.claimTxHash).toBeUndefined()
-		expect(runtime.value["0xdrop"]?.confirmLanded).toBeUndefined()
+		// Hash-scoped: the stale flag (if any) can no longer light a hash-less record.
+		const confirm = stepperPhases(dropped as DepositJournalRecord, runtime.value["0xdrop"]).find((ph) => ph.key === "confirm")
+		expect(confirm?.landed).toBeUndefined()
+	})
+
+	it("a terminal revert clears the flag - RETRY's recheck window shows no mint dot", async () => {
+		const deps = baseDeps(kv)
+		const claim = smartClaimFake()
+		const statuses: Array<"proposed" | "reverted"> = ["proposed", "reverted"]
+		deps.claimReceiptStatus = vi.fn(async () => statuses.shift() ?? "reverted") as never
+		connectJournalDeps({ ...deps, claim })
+		addRecord(mkDeposit("0xrevflip"))
+		markSessionLive("0xrevflip")
+		resumeSessionWork()
+		await vi.waitFor(() => {
+			expect(useBridgeJournal().runtime.value["0xrevflip"]?.attention).toBe("error")
+		})
+		expect(useBridgeJournal().runtime.value["0xrevflip"]?.confirmLandedTxHash).toBeUndefined()
 	})
 })

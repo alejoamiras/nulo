@@ -99,7 +99,7 @@ describe("BridgePhaseRail", () => {
 	})
 
 	it("full rail: a landed active CONFIRM renders the mint glyph class (quiet flip)", () => {
-		runtime.value = { "0xrail": { confirmLanded: true } }
+		runtime.value = { "0xrail": { confirmLandedTxHash: "0xc" } }
 		const w = mount(BridgePhaseRail, { props: { record: dep({ claimTxHash: "0xc" }) } })
 		const glyph = w.find('[data-phase="confirm"][data-state="active"] .glyph')
 		expect(glyph.exists()).toBe(true)
@@ -109,7 +109,7 @@ describe("BridgePhaseRail", () => {
 	})
 
 	it("compact rail: the landed active cell carries the landed class", () => {
-		runtime.value = { "0xrail": { confirmLanded: true } }
+		runtime.value = { "0xrail": { confirmLandedTxHash: "0xc" } }
 		const w = mount(BridgePhaseRail, { props: { record: dep({ claimTxHash: "0xc" }), compact: true } })
 		const cell = w.find('[data-phase="confirm"][data-state="active"]')
 		expect(cell.exists()).toBe(true)
