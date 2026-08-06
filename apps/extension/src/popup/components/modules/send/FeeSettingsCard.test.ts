@@ -11,8 +11,8 @@
  */
 
 import { describe, expect, test, vi, beforeEach, afterEach } from "vitest"
-import { flushPromises, mount } from "@vue/test-utils"
-import { createPinia, setActivePinia } from "pinia"
+import { config, flushPromises, mount } from "@vue/test-utils"
+import { createPinia } from "pinia"
 
 const mocks = vi.hoisted(() => ({
 	getGasBalances: vi.fn(),
@@ -180,7 +180,13 @@ function deferred<T>(): Deferred<T> {
 }
 
 beforeEach(() => {
-	setActivePinia(createPinia())
+	// A FRESH pinia is INJECTED into every mount via the global config:
+	// `setActivePinia` does not isolate component suites here — the SFC's
+	// transform chain resolves a different pinia module copy than this file's
+	// import, so stores would silently SHARE state across tests. The injected
+	// plugin wins inside the component; post-mount `useBalancesStore()` calls
+	// in tests resolve to the same instance.
+	config.global.plugins = [createPinia()]
 	storageBacking = {}
 	stubChromeStorage()
 	mocks.getGasBalances.mockReset()
@@ -945,6 +951,90 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			w.unmount()
 		} finally {
 			vi.useRealTimers()
+		}
+	})
+
+	test("an account switch releases the old key — its retry loop dies with the lease", async () => {
+		// Release-before-subscribe: after A→B the old key must not stay
+		// subscribed and store-retrying. Discriminated by args: a leaked lease
+		// would keep fetching with A's address on the backoff ticks.
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockImplementation(async (_net: string, account: string) => {
+				if (account === "0xacct") throw new Error("boom")
+				return { publicFeeJuice: "1000000000000000000", privateFeeJuice: null }
+			})
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+
+			await w.setProps({ account: { id: "a2", address: "0xother" } })
+			await vi.advanceTimersByTimeAsync(0)
+			const callsForA = mocks.getGasBalances.mock.calls.filter((c) => c[1] === "0xacct").length
+
+			// A full backoff window later, the OLD key must not have re-fetched.
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 10_000)
+			expect(mocks.getGasBalances.mock.calls.filter((c) => c[1] === "0xacct").length).toBe(callsForA)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("an A→B→A account flap re-attaches to A's still-pending raw flight — no duplicate request", async () => {
+		// Keyed flights (not single slots): the flap must not drop A's pending
+		// entry and start a second RPC for the same identity.
+		vi.useFakeTimers()
+		try {
+			mocks.getGasBalances.mockImplementation(async (_net: string, account: string) => {
+				if (account === "0xacct") return new Promise<never>(() => {})
+				return { publicFeeJuice: "1000000000000000000", privateFeeJuice: null }
+			})
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			await w.setProps({ account: { id: "a2", address: "0xother" } })
+			await vi.advanceTimersByTimeAsync(0)
+			await w.setProps({ account: { id: "a1", address: "0xacct" } })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(mocks.getGasBalances.mock.calls.filter((c) => c[1] === "0xacct").length).toBe(1)
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("an embedded flip during runInit's storage await aborts the run before it takes the lease", async () => {
+		// The [isCustomMethod, useOwnMethod] watcher released; a run resuming
+		// from its storage await must re-validate instead of re-subscribing —
+		// else the card renders the embedded banner while holding a
+		// retry-capable subscription.
+		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
+		const chromeAny = (globalThis as any).chrome
+		const origGet = chromeAny.storage.local.get
+		let release!: () => void
+		const gate = new Promise<void>((r) => {
+			release = r
+		})
+		chromeAny.storage.local.get = async (keys: unknown) => {
+			await gate
+			return origGet(keys)
+		}
+		try {
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await w.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
+			release()
+			await flushPromises()
+			// The aborted run never subscribed, so no fetch ever fired.
+			expect(mocks.getGasBalances).not.toHaveBeenCalled()
+			expect(w.find('[data-testid="send-fee-override"]').exists()).toBe(true)
+			w.unmount()
+		} finally {
+			chromeAny.storage.local.get = origGet
 		}
 	})
 

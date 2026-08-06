@@ -254,15 +254,19 @@ const committedScope = ref(null)
 let subscription = null
 let subscribedKey = null
 
-/** Release-before-subscribe on every identity change (codex round 2): the
- *  old key must not stay subscribed — and store-retrying — after the card
- *  moves on. The store resets backoff attempts on the 0→1 retry-capable
+/** Re-lease on every identity change: the old key must not stay subscribed —
+ *  and store-retrying — after the card moves on. Subscribe the NEW key BEFORE
+ *  releasing the old: a same-profile switch must not transit zero subscribers,
+ *  which would fire the store's last-release fence and abandon the old
+ *  identity's still-joinable flights (the A→B→A flap would re-issue its RPC).
+ *  The store resets backoff attempts on the new key's 0→1 retry-capable
  *  transition, reproducing today's fresh-identity-fresh-backoff rule. */
 const subscribeTo = (scope, reqKey) => {
 	if (subscribedKey === reqKey) return
-	subscription?.release()
+	const previous = subscription
 	subscription = balancesStore.subscribe(scope, CARD_CAPS)
 	subscribedKey = reqKey
+	previous?.release()
 }
 
 const releaseSubscription = () => {
@@ -332,7 +336,7 @@ const commitFromEntry = (scope, reqKey, saved, baseline) => {
 
 const runInit = async () => {
 	try {
-		if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) {
+		if (!props.profile || !props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) {
 			// Embedded ops (and identity-less mounts) hold no subscription: the
 			// release kills the store's retry loop for this key, preserving the
 			// old retry-chain death on this early-return; the useOwnMethod
@@ -349,7 +353,10 @@ const runInit = async () => {
 		const reqNetworkId = props.network.id
 		const reqChainId = props.network.chainId
 		const reqAccount = props.account.address
-		const reqKey = `${reqProfileId}|${reqNetworkId}|${reqAccount}`
+		// chainId is part of the STORE key, so it must be part of this card's
+		// identity too — else a chainId change under a stable networkId keeps
+		// the old key's lease while ensure populates the new one.
+		const reqKey = `${reqProfileId}|${reqNetworkId}|${reqChainId}|${reqAccount}`
 		const scope = { profileId: reqProfileId, networkId: reqNetworkId, chainId: reqChainId, accountAddress: reqAccount }
 
 		// Close the derivation gate only when no snapshot is committed for THIS
@@ -373,6 +380,19 @@ const runInit = async () => {
 		// than `baseline`, and we skip the reconcile path so we don't clobber
 		// their choice.
 		const baseline = selectedMethod.value
+
+		// Re-validate AFTER the storage await, BEFORE taking the lease: a
+		// mid-await embedded flip (its watcher just released) or identity
+		// change means a fresh runInit owns the new state — subscribing here
+		// would re-lease a key this run no longer represents.
+		if (
+			!isMounted ||
+			props.profile?.id !== reqProfileId ||
+			props.network?.id !== reqNetworkId ||
+			props.account?.address !== reqAccount ||
+			(isCustomMethod.value && !useOwnMethod.value)
+		)
+			return
 
 		isLoading.value = true
 		subscribeTo(scope, reqKey)
@@ -424,7 +444,7 @@ watch(
 	},
 	(next, prev) => {
 		if (next === null || prev === null || next === prev) return
-		void recommit()
+		recommit().catch((e) => console.error("Fee recovery recommit failed", getErrorData(e)))
 	},
 )
 
@@ -436,12 +456,17 @@ const recommit = async () => {
 	if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return
 	// The recovery targets the committed identity; if props moved on, the
 	// identity watcher owns the transition.
-	if (props.profile?.id !== scope.profileId || props.network?.id !== scope.networkId || props.account?.address !== scope.accountAddress)
+	if (
+		props.profile?.id !== scope.profileId ||
+		props.network?.id !== scope.networkId ||
+		props.network?.chainId !== scope.chainId ||
+		props.account?.address !== scope.accountAddress
+	)
 		return
 	const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
 	const baseline = selectedMethod.value
 	if (!isMounted) return
-	commitFromEntry(scope, `${scope.profileId}|${scope.networkId}|${scope.accountAddress}`, saved, baseline)
+	commitFromEntry(scope, `${scope.profileId}|${scope.networkId}|${scope.chainId}|${scope.accountAddress}`, saved, baseline)
 }
 
 watch(
@@ -459,7 +484,7 @@ watch(
 		// identity's snapshot must not keep serving settings for the new one
 		// in the meantime. (Fresh identity → fresh backoff is the store's
 		// 0→1 retry-capable transition inside subscribeTo's resubscribe.)
-		const liveKey = `${props.profile?.id}|${props.network?.id}|${props.account?.address}`
+		const liveKey = `${props.profile?.id}|${props.network?.id}|${props.network?.chainId}|${props.account?.address}`
 		if (liveKey !== committedKey) isInitComplete.value = false
 		await runInit()
 	},

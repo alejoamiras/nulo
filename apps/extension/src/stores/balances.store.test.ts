@@ -51,7 +51,6 @@ import { TxStatus } from "@/wallet/services/transaction/spec"
 import { EnsureSuperseded, INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS, useBalancesStore, withTimeout } from "./balances.store"
 
 const SCOPE_A = { profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
-const SCOPE_B = { profileId: "p2", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
 const SCOPE_A2 = { profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xother" }
 
 const BAL = { publicFeeJuice: "1000", privateFeeJuice: null }
@@ -223,7 +222,7 @@ describe("balances store — subscriber capabilities drive traffic", () => {
 		sub.release()
 	})
 
-	it("peek priming marks the entry stale and is version-guarded against later commits", async () => {
+	it("a late peek never overwrites a newer fetch commit (version-guarded)", async () => {
 		const store = useBalancesStore()
 		let resolvePeek!: (v: unknown) => void
 		mocks.peekGasBalances.mockImplementation(() => new Promise((r) => (resolvePeek = r)))
@@ -262,6 +261,27 @@ describe("balances store — subscriber capabilities drive traffic", () => {
 		await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
 		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(false)
 		expect(store.entry(SCOPE_A)?.gas.retryVersion).toBe(rvBefore + 1)
+		sub.release()
+	})
+
+	it("an ensure-path success does not clear retry debt — the loop runs to its retry success (D11)", async () => {
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const sub = store.subscribe(SCOPE_A, CAPS_FEE)
+		mocks.getGasBalances.mockRejectedValueOnce(new Error("down")).mockResolvedValue(BAL)
+		mocks.getFpcs.mockResolvedValue([])
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(true)
+		// A same-identity refresh lands fresh data mid-backoff...
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		// ...debt survives — only a retry-path success clears it...
+		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(true)
+		const rv = store.entry(SCOPE_A)!.gas.retryVersion
+		// ...and the armed loop finishes its cycle: the retry success clears
+		// the debt AND bumps retryVersion (the degraded card's wake signal).
+		await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
+		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(false)
+		expect(store.entry(SCOPE_A)?.gas.retryVersion).toBe(rv + 1)
 		sub.release()
 	})
 })
@@ -324,6 +344,64 @@ describe("balances store — tx-settle forced refresh + cause-specific signals",
 		await new Promise((r) => setTimeout(r, 10))
 		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(false)
 		expect(store.entry(SCOPE_A)?.gas.display).toEqual(BAL) // SWR retained
+		sub.release()
+	})
+
+	it("an ensure joining a failing forced flight takes on the debt and arms the retry", async () => {
+		// The forced failure itself creates no debt (D11) — but the OBSERVING
+		// ensure has a retry-capable stake. Without observer-side debt, the
+		// degraded card would paint its retrying notice while no loop runs and
+		// retryVersion never bumps to wake its recovery watch.
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const subFee = store.subscribe(SCOPE_A, CAPS_FEE)
+		const subCard = store.subscribe(SCOPE_A, CAPS_CARD)
+		mocks.getFpcs.mockResolvedValue([])
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		let rejectRaw!: (e: unknown) => void
+		mocks.getGasBalances.mockImplementationOnce(() => new Promise((_r, rej) => (rejectRaw = rej))).mockResolvedValue(BAL)
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		const joined = store.ensure(SCOPE_A, { legs: ["gas"] })
+		rejectRaw(new Error("down"))
+		const snap = await joined
+		expect(snap.degraded).toBe(true)
+		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(true)
+		const rv = store.entry(SCOPE_A)!.gas.retryVersion
+		await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
+		expect(store.entry(SCOPE_A)?.gas.retryDebt).toBe(false)
+		expect(store.entry(SCOPE_A)?.gas.retryVersion).toBe(rv + 1)
+		subFee.release()
+		subCard.release()
+	})
+
+	it("a pre-trigger ensure success never clears the forced stale-mark", async () => {
+		// The forced stale-mark means "the on-screen value is known-invalidated
+		// by a settlement". A refresh that was ALREADY in flight when the
+		// settle landed carries pre-settle data — its success commit must not
+		// un-dim the card; only the post-trigger fetch's own commit does.
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const sub = store.subscribe(SCOPE_A, CAPS_CARD)
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		let resolvePre!: (v: unknown) => void
+		let resolvePost!: (v: unknown) => void
+		mocks.getGasBalances
+			.mockImplementationOnce(() => new Promise((r) => (resolvePre = r)))
+			.mockImplementationOnce(() => new Promise((r) => (resolvePost = r)))
+		const pre = store.ensure(SCOPE_A, { legs: ["gas"] })
+		await vi.advanceTimersByTimeAsync(0)
+		fireSettled("0xacct")
+		await vi.advanceTimersByTimeAsync(0)
+		expect(store.entry(SCOPE_A)?.stale).toBe(true)
+		resolvePre(BAL)
+		await pre
+		// Pre-trigger data landed: display refreshed, dim RETAINED.
+		expect(store.entry(SCOPE_A)?.stale).toBe(true)
+		resolvePost({ publicFeeJuice: "900", privateFeeJuice: null })
+		await vi.advanceTimersByTimeAsync(10)
+		expect(store.entry(SCOPE_A)?.stale).toBe(false)
+		expect(store.entry(SCOPE_A)?.gas.display).toEqual({ publicFeeJuice: "900", privateFeeJuice: null })
 		sub.release()
 	})
 })

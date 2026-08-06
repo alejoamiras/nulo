@@ -108,16 +108,20 @@ function onTransactionAdded(tx) {
 
 transactionService.onTransactionAdded.add(onTransactionAdded)
 
-/** Subscription lifecycle: release-before-subscribe on every identity
- *  change (the store's fence rules require the old key's lease to die
- *  before the new one fetches), overlay reset with it. */
+/** Subscription lifecycle: re-lease on every identity change, overlay reset
+ *  with it. Subscribe the NEW key BEFORE releasing the old — a same-profile
+ *  switch must not transit zero subscribers, which would fire the store's
+ *  last-release fence and abandon the old identity's still-joinable flights. */
 let subscription = null
 function resubscribe() {
-	subscription?.release()
+	const previous = subscription
 	subscription = null
 	deduction.value = 0n
+	if (scope.value) {
+		subscription = balancesStore.subscribe(scope.value, CARD_CAPS)
+	}
+	previous?.release()
 	if (!scope.value) return
-	subscription = balancesStore.subscribe(scope.value, CARD_CAPS)
 	// Every mount/switch issues one real read (served from the SW TTL cache
 	// when warm — today's per-mount pattern). EnsureSuperseded = identity
 	// moved on mid-flight; the new subscription's ensure covers it.
@@ -126,7 +130,12 @@ function resubscribe() {
 
 /** Watchers */
 watch(scope, (next, prev) => {
-	if (next?.profileId !== prev?.profileId || next?.networkId !== prev?.networkId || next?.accountAddress !== prev?.accountAddress) {
+	if (
+		next?.profileId !== prev?.profileId ||
+		next?.networkId !== prev?.networkId ||
+		next?.chainId !== prev?.chainId ||
+		next?.accountAddress !== prev?.accountAddress
+	) {
 		resubscribe()
 	}
 })

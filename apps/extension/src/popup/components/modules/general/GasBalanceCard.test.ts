@@ -5,20 +5,31 @@
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
-import { createPinia, setActivePinia } from "pinia"
+import { createPinia } from "pinia"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { PriceState } from "@/wallet/services/price/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import GasBalanceCard from "./GasBalanceCard.vue"
 
-vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({
+// Reactive so tests can drive identity changes (the card's `scope` computed
+// and the store's belt watcher both read it live).
+vi.mock("@/stores/app.store", async () => {
+	const { reactive } = await import("vue")
+	const fake = reactive({
 		profile: { id: "p1" },
 		account: { address: "0xacct" },
 		network: { id: "n1", chainId: 111 },
-	}),
-}))
+	})
+	return { useAppStore: () => fake, __mockAppStore: fake }
+})
+
+async function appStoreMock() {
+	const mod = (await import("@/stores/app.store")) as unknown as {
+		__mockAppStore: { profile: { id: string }; account: { address: string }; network: { id: string; chainId: number } }
+	}
+	return mod.__mockAppStore
+}
 
 let mockQuotes: PriceState = {}
 vi.mock("@/wallet/services/price/client", () => ({
@@ -70,16 +81,18 @@ const AZTEC_FRESH = () => ({ aztec: { coingeckoId: "aztec", usd: 0.02, fetchedAt
 /** Must mirror the mocked app.store identity — it is what the card's `scope` computed derives. */
 const SCOPE = { profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
 
-beforeEach(() => {
+beforeEach(async () => {
 	vi.clearAllMocks()
-	// Real balances store, fresh per test (the plan's testing directive: mocks
-	// live at the CLIENT layer, never as store stubs).
-	setActivePinia(createPinia())
 	mockQuotes = {}
 	mockBalances = { publicFeeJuice: "0", privateFeeJuice: null }
 	mockPeek = null
 	mockPeekImpl = null
 	mockGetGasBalances = async () => mockBalances
+	// The reactive mock persists across tests — reset the identity.
+	const app = await appStoreMock()
+	app.profile = { id: "p1" }
+	app.account = { address: "0xacct" }
+	app.network = { id: "n1", chainId: 111 }
 })
 
 /** Two tx-client instances exist per mount (the store's settle subscriber and
@@ -95,7 +108,14 @@ function txHandlerFor(event: "onTransactionAdded" | "onTransactionUpdated"): (tx
 }
 
 async function mountCard() {
-	const w = mount(GasBalanceCard, { global: { stubs: STUBS } })
+	// A FRESH pinia is INJECTED per mount: `setActivePinia` in a beforeEach
+	// does not isolate here (the SFC's transform chain resolves a different
+	// pinia module copy than this file's import, so the active-pinia global
+	// it writes is never the one the component reads — stores would silently
+	// SHARE state across tests). The injected plugin wins inside the
+	// component, and pinia re-points its own active-pinia to it during setup,
+	// so post-mount `useBalancesStore()` calls in tests see the same instance.
+	const w = mount(GasBalanceCard, { global: { stubs: STUBS, plugins: [createPinia()] } })
 	await flushPromises()
 	return w
 }
@@ -268,6 +288,30 @@ describe("GasBalanceCard — null public balance (unknown wire slot)", () => {
 		await flushPromises()
 		// Still the honest unknown — not NaN, not a crash, not a fabricated number.
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("— FJ")
+	})
+})
+
+describe("GasBalanceCard — identity switch", () => {
+	test("an account switch re-leases the store key, resets the overlay, and fetches the new identity", async () => {
+		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		mockQuotes = {}
+		mockGetGasBalances = async () => ({ publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null })
+		const w = await mountCard()
+		// Seed a deduction overlay on the OLD identity.
+		txHandlerFor("onTransactionAdded")({
+			account: "0xacct",
+			estimatedFee: (2n * 10n ** 18n).toString(),
+			feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		})
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
+
+		mockGetGasBalances = async () => ({ publicFeeJuice: (10n * 10n ** 18n).toString(), privateFeeJuice: null })
+		const app = await appStoreMock()
+		app.account = { address: "0xother" }
+		await flushPromises()
+		// Fresh identity: overlay gone (10, not 8), value from a fresh ensure.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("10 FJ")
 	})
 })
 

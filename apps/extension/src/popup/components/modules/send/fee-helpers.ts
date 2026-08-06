@@ -1,6 +1,6 @@
 import { FpcType } from "@/wallet/services/fpc/client"
 
-export { FEE_JUICE_DECIMALS, formatGasBalance } from "@/utils/fee-estimation"
+export { formatGasBalance } from "@/utils/fee-estimation"
 
 export interface FeeMethodOption {
 	type: "fj" | "private_fpc" | "fpc"

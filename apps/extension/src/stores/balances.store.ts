@@ -171,6 +171,12 @@ export const useBalancesStore = defineStore("balances", () => {
 	const legFlights = new Map<string, Promise<void>>() // `${key}|${leg}|${epoch}` single-flight per attempt
 	// Epoch-scoped like raw flights: a post-switch ensure must never JOIN a
 	// pre-switch leg flight (it would await work fenced out of committing).
+	// Keys with a forced gas fetch live (counted — forced runs can overlap):
+	// while present, a PRE-trigger run's success commit must not clear the
+	// forced stale-mark — its data predates the trigger, so the on-screen
+	// value stays known-invalidated (dim + dot) until the post-trigger fetch
+	// itself commits.
+	const forcedGasPending = new Map<string, number>()
 	const retryTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; attempt: number }>()
 	const lruTouch = new Map<string, number>()
 	let subToken = 0
@@ -334,7 +340,8 @@ export const useBalancesStore = defineStore("balances", () => {
 			if (!entry0) return
 			// A forced refresh means the on-screen value is known-invalidated:
 			// mark it stale at START so the card dims immediately and a FAILED
-			// force can't leave it rendered as current (the #343 rule).
+			// force can't leave it rendered as current (settle-refresh dim rule).
+			if (opts.cause === "forced") forcedGasPending.set(key, (forcedGasPending.get(key) ?? 0) + 1)
 			commitEntry(key, {
 				...entry0,
 				stale: opts.cause === "forced" ? true : entry0.stale,
@@ -345,9 +352,21 @@ export const useBalancesStore = defineStore("balances", () => {
 			try {
 				if (opts.cause === "forced") {
 					// Never join a raw flight that predates the trigger: wait it
-					// out, then start fresh.
+					// out, then start fresh. The wait is BOUNDED — an unbounded
+					// wait on a wedged transport would hold every joiner of this
+					// run past the fetch bound the constant promises; on timeout
+					// we re-enter anyway (one stacked RPC, transport-bounded).
 					const stale = rawFlights.get(`${key}|gas|${epoch}`)
-					if (stale) await stale.catch(() => {})
+					if (stale) {
+						await withTimeout(
+							stale.then(
+								() => {},
+								() => {},
+							),
+							INIT_FETCH_TIMEOUT_MS,
+							"pre-trigger gas flight",
+						).catch(() => {})
+					}
 					rawFlights.delete(`${key}|gas|${epoch}`)
 				}
 				result = await withTimeout(
@@ -364,7 +383,9 @@ export const useBalancesStore = defineStore("balances", () => {
 			if (result !== undefined) {
 				commitEntry(key, {
 					...entry,
-					stale: false,
+					// A PRE-trigger run's success must not clear a live forced
+					// stale-mark — its data predates the trigger (see the set).
+					stale: opts.cause !== "forced" && forcedGasPending.has(key) ? entry.stale : false,
 					gas: {
 						...entry.gas,
 						display: result,
@@ -373,7 +394,11 @@ export const useBalancesStore = defineStore("balances", () => {
 						version: entry.gas.version + 1,
 						retryVersion: opts.cause === "retry" ? entry.gas.retryVersion + 1 : entry.gas.retryVersion,
 						forcedVersion: opts.cause === "forced" ? entry.gas.forcedVersion + 1 : entry.gas.forcedVersion,
-						retryDebt: opts.cause === "retry" || opts.cause === "ensure" ? false : entry.gas.retryDebt,
+						// Debt clears ONLY on a retry-path success (D11): a plain
+						// ensure landing fresh data leaves the loop to finish its
+						// own cycle — the retry success is what bumps retryVersion
+						// and wakes the degraded card's recovery watch.
+						retryDebt: opts.cause === "retry" ? false : entry.gas.retryDebt,
 						lastError: undefined,
 					},
 				})
@@ -396,6 +421,11 @@ export const useBalancesStore = defineStore("balances", () => {
 		try {
 			await run
 		} finally {
+			if (opts.cause === "forced") {
+				const left = (forcedGasPending.get(key) ?? 1) - 1
+				if (left <= 0) forcedGasPending.delete(key)
+				else forcedGasPending.set(key, left)
+			}
 			if (legFlights.get(`${key}|gas|${epoch}`) === run) legFlights.delete(`${key}|gas|${epoch}`)
 		}
 	}
@@ -430,7 +460,8 @@ export const useBalancesStore = defineStore("balances", () => {
 						status: "ready",
 						version: entry.fpc.version + 1,
 						retryVersion: opts.cause === "retry" ? entry.fpc.retryVersion + 1 : entry.fpc.retryVersion,
-						retryDebt: false,
+						// Same D11 rule as the gas leg: only a retry-path success clears debt.
+						retryDebt: opts.cause === "retry" ? false : entry.fpc.retryDebt,
 						lastError: undefined,
 					},
 				})
@@ -462,6 +493,20 @@ export const useBalancesStore = defineStore("balances", () => {
 		if (epochOf(scope.profileId) !== epoch) throw new EnsureSuperseded()
 		const entry = entries.value[key]
 		if (!entry) throw new EnsureSuperseded()
+		// Debt follows the OBSERVING cause, not the flight's: an ensure that
+		// JOINED a failing forced flight (whose own failure creates no debt —
+		// D11) still has a retry-capable stake in the outcome. Without this,
+		// the degraded card would paint its retrying notice while no loop runs
+		// and retryVersion never bumps to wake its recovery watch.
+		const gasDebtDue = opts.legs.includes("gas") && entry.gas.status === "degraded" && !entry.gas.retryDebt
+		const fpcDebtDue = opts.legs.includes("fpc") && entry.fpc.status === "degraded" && !entry.fpc.retryDebt
+		if (gasDebtDue || fpcDebtDue) {
+			commitEntry(key, {
+				...entry,
+				gas: gasDebtDue ? { ...entry.gas, retryDebt: true } : entry.gas,
+				fpc: fpcDebtDue ? { ...entry.fpc, retryDebt: true } : entry.fpc,
+			})
+		}
 		const degraded =
 			(opts.legs.includes("gas") && entry.gas.status === "degraded") || (opts.legs.includes("fpc") && entry.fpc.status === "degraded")
 		if (degraded) scheduleRetry(key, scope)
@@ -490,6 +535,11 @@ export const useBalancesStore = defineStore("balances", () => {
 	}
 
 	function armRetry(key: string, scope: BalanceScope, attempt: number): void {
+		// One chain per key: a concurrent ensure can arm a timer while a
+		// runRetry is mid-flight; overwriting its map entry without clearing
+		// would orphan a still-pending setTimeout into a duplicate chain.
+		const existing = retryTimers.get(key)
+		if (existing) clearTimeout(existing.timer)
 		const delay = INIT_RETRY_BACKOFF_MS[Math.min(attempt, INIT_RETRY_BACKOFF_MS.length - 1)]
 		const timer = setTimeout(() => {
 			retryTimers.delete(key)
@@ -552,7 +602,5 @@ export const useBalancesStore = defineStore("balances", () => {
 		ensure,
 		entry,
 		invalidateProfile,
-		scopeKeyFor: activityScopeKey,
-		__testing: { capsUnion, epochOf },
 	}
 })

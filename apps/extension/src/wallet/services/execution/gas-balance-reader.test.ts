@@ -260,6 +260,46 @@ describe("GasBalanceReader peek (stale-while-revalidate)", () => {
 		})
 	})
 
+	test("evictAll clears peek — a cross-profile switch leaves no other-profile last-knowns", async () => {
+		bvsMock.mockReset().mockResolvedValue(encodedResult(100n))
+		const reader = new GasBalanceReader(makeDeps())
+		await reader.get("net-1", "0xacc")
+		reader.evictAll()
+		// No dimmed paint of another profile's figures — cold start.
+		expect(reader.peek("net-1", "0xacc")).toBeNull()
+		const callsBefore = bvsMock.mock.calls.length
+		await reader.get("net-1", "0xacc")
+		expect(bvsMock.mock.calls.length).toBeGreaterThan(callsBefore)
+	})
+
+	test("a plain get() after an invalidation never joins the pre-invalidation flight — the value must not cross the fence", async () => {
+		// The stale-marking commit only demotes the CACHE entry; the promise
+		// value still crosses to joiners. A post-switch joiner would receive
+		// balances computed under the previous profile's FPC context.
+		let resolveFirst!: (v: unknown) => void
+		bvsMock
+			.mockReset()
+			.mockImplementationOnce(
+				() =>
+					new Promise((r) => {
+						resolveFirst = r
+					}),
+			)
+			.mockResolvedValue(encodedResult(200n))
+		const reader = new GasBalanceReader(makeDeps())
+		const preSwitch = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+
+		// Profile switch mid-flight: facade evicts; the new profile reads.
+		reader.evictAll()
+		const postSwitch = reader.get("net-1", "0xacc")
+
+		resolveFirst(encodedResult(100n))
+		expect((await preSwitch).publicFeeJuice).toBe("100")
+		// The post-switch read waited the old flight out and recomputed.
+		expect((await postSwitch).publicFeeJuice).toBe("200")
+	})
+
 	test("a forced refresh never joins a pre-invalidation flight — it resolves to post-settlement values", async () => {
 		let resolveFirst!: (v: unknown) => void
 		bvsMock
