@@ -20,13 +20,12 @@ export interface FeeMethodOption {
 	fpc?: { id: string; type: FpcType; name?: string } | null
 }
 
-/** Fee Juice balances surfaced from `executionService.getGasBalances`.
- *  `privateFeeJuice` is null when the PrivateFPC isn't registered or the
- *  query errored — the dropdown treats null the same as "0". */
-export interface GasBalances {
-	publicFeeJuice: string
-	privateFeeJuice: string | null
-}
+/** Fee Juice balances surfaced from `executionService.getGasBalances` —
+ *  the CANONICAL wire type (a hand-written copy lived here before and
+ *  drifted only by luck). `null` on either leg = UNKNOWN (read failed):
+ *  fail closed for gating, render as an em dash for display. */
+export type { GasBalances } from "@/wallet/services/execution/models"
+import type { GasBalances } from "@/wallet/services/execution/models"
 
 export function formatGasBalance(raw: string | null | undefined): string {
 	// Truncated to 4 decimals — full 18-decimal precision drowned the row.
@@ -93,7 +92,10 @@ export function settingsForMethod(
 ): FeeSettings | undefined {
 	switch (method?.type) {
 		case "fj":
-			if (!balances || balances.publicFeeJuice === "0") return undefined
+			// null (unknown, per-leg) fails closed exactly like the whole-object
+			// unknown: pre-wire-fix this held only because failures fabricated
+			// "0" — the explicit null guard is what keeps it true now.
+			if (!balances || balances.publicFeeJuice === null || balances.publicFeeJuice === "0") return undefined
 			return buildSettings({ kind: "fj" }, priority) as FeeSettings
 		case "private_fpc":
 			if (!method.fpc) return undefined
@@ -165,12 +167,17 @@ export function buildFeeMethods(
 	const allowSponsored = options?.allowSponsored ?? true
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc)
 	const publicFeeJuiceZero = gasBalances?.publicFeeJuice === "0"
+	// Unknown (null) disables too — but with an honest reason, never "no balance".
+	const publicFeeJuiceUnknown = gasBalances !== undefined && gasBalances.publicFeeJuice === null
 	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
 
 	const fj: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
 	if (publicFeeJuiceZero) {
 		fj.disabled = true
 		fj.disabledReason = "no balance"
+	} else if (publicFeeJuiceUnknown) {
+		fj.disabled = true
+		fj.disabledReason = "couldn't check balance"
 	}
 
 	const privateFj: FeeMethodOption = {

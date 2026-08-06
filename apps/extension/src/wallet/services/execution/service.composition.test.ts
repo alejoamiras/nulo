@@ -19,6 +19,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
@@ -112,6 +113,9 @@ async function makeHarness() {
 	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
 	// addTransaction assert against the SAME epoch map (D13 fence wiring).
 	const deletionState = new ProfileDeletionState()
+	// Real handler so the facade's profile-switch invalidation (D12) is both
+	// subscribable by the service and firable by tests.
+	const profileChanged = new EventHandler<unknown>()
 	collection.add(
 		svc(ProfileService.name, {
 			getActiveProfile: async () => ({ id: "p1" }),
@@ -120,9 +124,11 @@ async function makeHarness() {
 			getProfiles: async () => [{ id: "p1" }],
 			getDeletionState: () => deletionState,
 			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+			onActiveProfileChanged: profileChanged,
 		}),
 	)
-	collection.add(svc(NetworkService.name, { getNetwork: async () => NETWORK, getNode: async () => fakeNode }))
+	const getNetwork = vi.fn(async () => NETWORK)
+	collection.add(svc(NetworkService.name, { getNetwork, getNode: async () => fakeNode }))
 	collection.add(svc(AccountService.name, { getAccountContract: async () => ({ address: ACCOUNT }) }))
 	collection.add(
 		svc(TransactionService.name, {
@@ -185,7 +191,19 @@ async function makeHarness() {
 	const reuse = (service as unknown as { estimateReuse: TransferEstimateReuse }).estimateReuse
 	reuse.stash("estimate-1", entry)
 
-	return { service, ctrl, req, estimateId: "estimate-1", journal, stages, sendTx, toTx, getJournalId: () => journalId }
+	return {
+		service,
+		ctrl,
+		req,
+		estimateId: "estimate-1",
+		journal,
+		stages,
+		sendTx,
+		toTx,
+		getJournalId: () => journalId,
+		profileChanged,
+		getNetwork,
+	}
 }
 
 const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
@@ -311,5 +329,23 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		held.release()
 		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
 		held2.release()
+	}, 15_000)
+})
+
+describe("ExecutionService composition — profile-switch gas-cache invalidation (D12)", () => {
+	test("active-profile change invalidates cached gas balances: the next read recomputes", async () => {
+		const h = await makeHarness()
+		// Prime the reader's TTL cache (the compute path degrades to null
+		// balances against these shallow fakes — irrelevant here; the WIRING is
+		// under test, observed via getNetwork calls per compute).
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		const afterPrime = h.getNetwork.mock.calls.length
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		expect(h.getNetwork.mock.calls.length).toBe(afterPrime) // TTL hit — no recompute
+
+		h.profileChanged.invoke(undefined)
+
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(afterPrime) // invalidated → recompute
 	}, 15_000)
 })

@@ -109,7 +109,9 @@ const gasBalances = ref(undefined)
 const isLoading = ref(false)
 const error = ref("")
 
-const feeJuiceBalanceFormatted = computed(() => (gasBalances.value ? formatGasBalance(gasBalances.value.publicFeeJuice) : null))
+const feeJuiceBalanceFormatted = computed(() =>
+	gasBalances.value && gasBalances.value.publicFeeJuice !== null ? formatGasBalance(gasBalances.value.publicFeeJuice) : null,
+)
 const privateFeeJuiceFormatted = computed(() =>
 	gasBalances.value && gasBalances.value.privateFeeJuice !== null ? formatGasBalance(gasBalances.value.privateFeeJuice) : null,
 )

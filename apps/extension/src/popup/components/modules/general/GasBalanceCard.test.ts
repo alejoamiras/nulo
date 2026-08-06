@@ -26,7 +26,7 @@ vi.mock("@/wallet/services/price/client", () => ({
 	}),
 }))
 
-type Balances = { publicFeeJuice: string; privateFeeJuice: string | null }
+type Balances = { publicFeeJuice: string | null; privateFeeJuice: string | null }
 let mockBalances: Balances = { publicFeeJuice: "0", privateFeeJuice: null }
 let mockPeek: { balances: Balances; stale: boolean } | null = null
 /** When set, peekGasBalances runs this instead of returning mockPeek. */
@@ -204,5 +204,38 @@ describe("GasBalanceCard — stale-while-revalidate", () => {
 		await flushPromises()
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
 		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+	})
+})
+
+describe("GasBalanceCard — null public balance (unknown wire slot)", () => {
+	test("a NULL public balance renders an em dash, never a confident zero", async () => {
+		mockQuotes = {}
+		mockGetGasBalances = async () => ({ publicFeeJuice: null, privateFeeJuice: null })
+		const w = await mountCard()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("— FJ")
+	})
+
+	test("optimistic deduction is skipped on a NULL balance — no silent BigInt throw", async () => {
+		// BigInt(null) throws; EventHandler swallows it, so pre-fix this was a
+		// silent no-op regression on an entirely untested path.
+		const { TransactionServiceClient } = await import("@/wallet/services/transaction/client")
+		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		mockQuotes = {}
+		mockGetGasBalances = async () => ({ publicFeeJuice: null, privateFeeJuice: null })
+		const w = await mountCard()
+
+		const txInstances = vi.mocked(TransactionServiceClient).mock.results
+		const txInstance = txInstances[txInstances.length - 1].value as {
+			onTransactionAdded: { add: ReturnType<typeof vi.fn> }
+		}
+		const handler = txInstance.onTransactionAdded.add.mock.calls[0]?.[0] as (tx: unknown) => void
+		handler({
+			account: "0xacct",
+			estimatedFee: "1000",
+			feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		})
+		await flushPromises()
+		// Still the honest unknown — not NaN, not a crash, not a fabricated number.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("— FJ")
 	})
 })

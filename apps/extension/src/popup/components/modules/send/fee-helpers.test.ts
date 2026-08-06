@@ -248,3 +248,25 @@ describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
 		expect(FEE_JUICE_BRIDGE_URL).toBe("https://tools.nulo.sh")
 	})
 })
+
+describe("fee-helpers - null public balance (unknown wire slot)", () => {
+	test("'fj' with NULL public Fee Juice fails closed (settingsForMethod)", () => {
+		// The load-bearing guard: without it, flipping the producer to null turns
+		// today's accidental fail-closed ("0" fabricated on failure) into fail-open.
+		expect(
+			settingsForMethod({ type: "fj", title: "x", subtitle: "y" }, "normal", { publicFeeJuice: null, privateFeeJuice: null }),
+		).toBeUndefined()
+	})
+
+	test("buildFeeMethods disables fj on NULL public balance with the honest reason", () => {
+		const m = buildFeeMethods([], { publicFeeJuice: null, privateFeeJuice: null })
+		const fj = m.find((x) => x.type === "fj")
+		expect(fj?.disabled).toBe(true)
+		expect(fj?.disabledReason).toBe("couldn't check balance")
+	})
+
+	test("buildFeeMethods keeps 'no balance' for a CONFIRMED zero", () => {
+		const m = buildFeeMethods([], { publicFeeJuice: "0", privateFeeJuice: null })
+		expect(m.find((x) => x.type === "fj")?.disabledReason).toBe("no balance")
+	})
+})

@@ -125,17 +125,19 @@ export class GasBalanceReader {
 		// Concurrency is the win over the old shape, which serialized the
 		// private read behind the public round-trip.
 		this.deps.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
-		const publicPromise = (async (): Promise<string> => {
+		const publicPromise = (async (): Promise<string | null> => {
 			try {
 				const result = await batchedViewSimulation(
 					[{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] }],
 					deps,
 				)
-				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : "0"
+				// A missing return slot or a thrown leg is UNKNOWN, never a
+				// fabricated zero — consumers fail closed / render an em dash.
+				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
 			} catch (err) {
 				this.deps.logDebug(`getGasBalances: Failed to get public FeeJuice balance:`, getErrorMessage(err))
 				this.deps.logError("Failed to get public FeeJuice balance", getErrorMessage(err))
-				return "0"
+				return null
 			}
 		})()
 		const privatePromise = (async (): Promise<string | null> => {

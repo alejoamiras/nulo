@@ -290,6 +290,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			}
 		})
 
+		// The cache key is profile-FREE while the private leg reads through the
+		// profile-FILTERED getFpcs — without this, switching profiles can serve
+		// profile A's cached PrivateFPC balance to profile B for up to the TTL.
+		this.profileService.onActiveProfileChanged.add(() => this.gasBalances.invalidateAll())
+
 		// PrivateFPC address is read on every getGasBalances() call to fetch
 		// `balance_of`. The cache is keyed only by `${networkId}:${account}`,
 		// so swapping the PrivateFPC address would otherwise serve stale

@@ -141,7 +141,7 @@ describe("GasBalanceReader cache contract", () => {
 			private: async () => encodedResult(55n),
 		})
 		const reader = new GasBalanceReader(makeDeps(PRIVATE_FPC_DEPS))
-		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "0", privateFeeJuice: "55" })
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: null, privateFeeJuice: "55" })
 	})
 
 	test("legs launch concurrently — FPC discovery is not serialized behind the public read", async () => {
@@ -164,11 +164,11 @@ describe("GasBalanceReader cache contract", () => {
 		expect(await pending).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
 	})
 
-	test("public-balance failure degrades to '0' without throwing (error-path parity)", async () => {
+	test("public-balance failure degrades to NULL (unknown) without throwing", async () => {
 		bvsMock.mockReset().mockRejectedValue(new Error("sim down"))
 		const reader = new GasBalanceReader(makeDeps())
 		const result = await reader.get("net-1", "0xacc")
-		expect(result).toEqual({ publicFeeJuice: "0", privateFeeJuice: null })
+		expect(result).toEqual({ publicFeeJuice: null, privateFeeJuice: null })
 	})
 
 	test("FPC discovery failure still reads the public balance", async () => {

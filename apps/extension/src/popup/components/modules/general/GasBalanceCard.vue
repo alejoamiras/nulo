@@ -37,7 +37,8 @@ const FEE_JUICE_DECIMALS = 18
 // contract as token-balance display.
 const formatBalance = (raw) => formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
 
-const publicFormatted = computed(() => formatBalance(publicFeeJuice.value))
+// Null = the read failed (unknown) — an em dash, never a confident zero.
+const publicFormatted = computed(() => (publicFeeJuice.value === null ? "—" : formatBalance(publicFeeJuice.value)))
 
 /** D2: fiat under non-zero balances, only with a usable AZTEC quote. */
 const priceService = new PriceServiceClient()
@@ -69,6 +70,9 @@ function onTransactionAdded(tx) {
 		tx.feePaymentMethod === AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE ||
 		tx.feePaymentMethod === AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM
 	) {
+		// Unknown balance stays unknown — BigInt(null) would throw (silently:
+		// the EventHandler swallows it) and there is nothing to deduct FROM.
+		if (publicFeeJuice.value === null) return
 		const next = BigInt(publicFeeJuice.value) - BigInt(tx.estimatedFee)
 		publicFeeJuice.value = (next < 0n ? 0n : next).toString()
 	}

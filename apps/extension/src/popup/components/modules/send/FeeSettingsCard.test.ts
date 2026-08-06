@@ -914,3 +914,65 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		}
 	})
 })
+
+describe("FeeSettingsCard — null public balance (unknown wire slot)", () => {
+	test("a RESOLVING read with NULL public balance fails closed for fj — never derives settings", async () => {
+		// The fail-open landmine: the fetch SUCCEEDS but the public leg is
+		// unknown. Pre-guard, `null !== "0"` would derive real fj settings from
+		// a balance nobody verified (skipFeeEnforcement means estimation can't
+		// catch it). Distinct from the whole-call-rejection pins above.
+		storageBacking[FEE_METHOD_LS_KEY] = {
+			[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
+		}
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: null })
+		mocks.getFpcs.mockResolvedValue([])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((e) => e[0] != null)
+		expect(truthy).toEqual([])
+		w.unmount()
+	})
+
+	test("NULL public balance never shows the get-fee-juice nudge (deviation 4, owner-approved)", async () => {
+		storageBacking[FEE_METHOD_LS_KEY] = {
+			[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
+		}
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: null })
+		mocks.getFpcs.mockResolvedValue([])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		const needs = w.emitted<unknown[]>("update:needsFeeJuice") ?? []
+		expect(needs.some((e) => e[0] === true)).toBe(false)
+		expect(w.text()).not.toContain("You have no fee juice yet")
+		w.unmount()
+	})
+
+	test("a saved fj selection stays put on unknown balance — no settings derive, sponsored manually pickable (deviation 2, corrected)", async () => {
+		// Reconcile-timing fact (found red-first): resolveSavedSelection runs
+		// against PRE-commit methods (balances not yet applied), so the saved
+		// fj row is not disabled at reconcile time and stays selected. Today's
+		// behavior is identical (fabricated "0", same timing) — preserved. The
+		// disabled row + fail-closed derivation + no nudge are the honest bits.
+		storageBacking[FEE_METHOD_LS_KEY] = {
+			[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
+		}
+		mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: null, privateFeeJuice: null })
+		mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+		const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+		await flushPromises()
+
+		const truthy = (w.emitted<unknown[]>("update:modelValue") ?? []).filter((e) => e[0] != null)
+		expect(truthy).toEqual([])
+
+		// The card stays operable: sponsored is one click away.
+		await w.find('[data-testid="pick-fpc"]').trigger("click")
+		await flushPromises()
+		expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+		w.unmount()
+	})
+})

@@ -15,7 +15,7 @@
 ## Approved deviations (the wire-shape honesty ripple — the ONLY user-visible changes)
 
 1. A failed public-balance read displays `— FJ` instead of a confident `0 FJ` (GasBalanceCard + FeeMethodRow). *Pinned.*
-2. `buildFeeMethods` disables the fee-juice row on unknown balance with reason `"couldn't check balance"` (vs `"no balance"` for confirmed zero). Consequence (fable audit): a SAVED fj selection now falls through to the network-default method while the balance is unknown (`resolveSavedSelection` skips disabled rows) — previously a failed read (fabricated "0") produced the same fallthrough, so this is behavior-preserved-by-accident made explicit. *Pinned.*
+2. `buildFeeMethods` disables the fee-juice row on unknown balance with reason `"couldn't check balance"` (vs `"no balance"` for confirmed zero). **Corrected during Phase 1 red-testing**: fable's inferred saved-selection fallthrough does NOT occur — `resolveSavedSelection` runs against pre-commit methods (balances not yet applied), so a saved fj selection stays selected with no derived settings, exactly as today with the fabricated "0". Pinned as actually preserved: no settings derive, no nudge, sponsored one click away.
 3. The get-fee-juice bridge nudge fires ONLY on a confirmed zero. **Deviation 4 (fable audit — needs explicit owner sign-off at the gate): today the nudge DOES fire after a failed public read** (the fabricated "0" is indistinguishable from a real zero), telling a possibly-funded user to go bridge. Post-flip it correctly stays quiet on unknown. This is an honesty IMPROVEMENT but a visible change beyond the original three. *Pinned.*
 
 Everything else is pixel-identical.
@@ -221,7 +221,8 @@ export type GasBalances = {
 
 ## Phases
 
-### Phase 1 — Wire shape + SW cross-profile fix, atomically with their guards
+### Phase 1 ✓ — Wire shape + SW cross-profile fix, atomically with their guards
+*(gate passed 2026-08-06: `bun run audit:vue` exit 0, 3758 tests; lessons/phase-1.md)*
 Producer flip + fail-closed `settingsForMethod` guard + `buildFeeMethods` null-disable + `BigInt(null)` deduction guard + display honesty + hand-copied-type deletion, in ONE phase, tests red-first (they are the only guard — see testing directive). Includes the deviation-2 fallthrough pin and the deviation-4 nudge pin. **Plus (Ask 2, fresh-pass critical): the SW-side cross-profile fix** — `ExecutionService` subscribes to active-profile change and calls `gasBalances.invalidateAll()` (matching its existing invalidation-subscription style), closing the pre-existing leak where `GasBalanceReader`'s profile-free cache serves profile A's PrivateFPC balance to profile B for up to the TTL. A facade/composition-level test pins the WIRING (profile-change event → invalidateAll observed through the service — a reader unit test cannot see it).
 **Gate**: `bun run audit:vue` exit 0. Layers: typecheck/lint/unit/component.
 
