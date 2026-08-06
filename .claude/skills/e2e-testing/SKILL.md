@@ -67,9 +67,9 @@ This prevents guessing at selectors and ensures tests assert on real observable 
 - **Sandbox-boot signature `deploy_aztec_l1_contracts … required arguments were not provided:
   --batch` → node never healthy → exit 86 = a `~/.aztec/current` DRIFT poisoning forge resolution
   (ROOT-CAUSED + FIXED 2026-08-06).** `@aztec/ethereum`'s `resolveFoundryBinary` checks
-  `$FORGE_BIN` → **`~/.aztec/current/internal-bin/forge`** → `~/.foundry/bin` → PATH — the
-  `current` check outranks PATH, so global-setup's internal-bin PATH prepend never protected the L1
-  deploy. Any `aztec-up install` on the machine re-points `current`; an install carrying a newer
+  `$FORGE_BIN` → **`~/.aztec/current/internal-bin/forge`** → `~/.aztec/current/bin/aztec-forge` →
+  `~/.foundry/bin` → PATH — the `current` checks outrank PATH, so global-setup's internal-bin PATH
+  prepend never protected the L1 deploy. Any `aztec-up install` on the machine re-points `current`; an install carrying a newer
   forge fork (whose `forge script` requires `--batch`) then breaks the deploy for EVERY version's
   boot, deterministically, while CI stays green (fresh runners have `current` == the pin). Fix in
   `global-setup.ts`: resolve the whole toolchain from the repo's `@aztec/aztec.js` pin

@@ -34,20 +34,42 @@ const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
 // source) are exported at node spawn to close that hole. Falls back to
 // `current` only when the pinned version isn't installed, with a warning
 // logged at boot naming the fix.
-const AZTEC_PIN: string | undefined = (() => {
+const AZTEC_PIN_READ: { pin?: string; error?: string } = (() => {
 	try {
 		const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8")) as {
 			dependencies?: Record<string, string>
 		}
-		return pkg.dependencies?.["@aztec/aztec.js"]
-	} catch {
-		return undefined
+		const pin = pkg.dependencies?.["@aztec/aztec.js"]
+		if (typeof pin !== "string" || pin.length === 0) {
+			return { error: "dependencies['@aztec/aztec.js'] missing or not a string" }
+		}
+		return { pin }
+	} catch (err) {
+		return { error: err instanceof Error ? err.message : String(err) }
 	}
 })()
+const AZTEC_PIN = AZTEC_PIN_READ.pin
+
+function isExecutable(p: string): boolean {
+	try {
+		fs.accessSync(p, fs.constants.X_OK)
+		return true
+	} catch {
+		return false
+	}
+}
+
 const AZTEC_HOME = path.resolve(process.env.HOME || "~", ".aztec")
+// The pinned root is usable only as a COMPLETE toolchain. A partial install
+// (CLI present, internal-bin/forge missing) would let the L1 deploy resolve
+// forge through mutable `current` again — the exact hole this closes.
+const AZTEC_TOOLCHAIN_RELPATHS = ["node_modules/.bin/aztec", "bin/aztec-anvil", "internal-bin/forge", "internal-bin/anvil"] as const
 const AZTEC_PINNED_ROOT = AZTEC_PIN ? path.join(AZTEC_HOME, "versions", AZTEC_PIN) : undefined
-const AZTEC_PIN_INSTALLED = !!AZTEC_PINNED_ROOT && fs.existsSync(path.join(AZTEC_PINNED_ROOT, "node_modules/.bin/aztec"))
-const AZTEC_ROOT = AZTEC_PIN_INSTALLED && AZTEC_PINNED_ROOT ? AZTEC_PINNED_ROOT : path.join(AZTEC_HOME, "current")
+const AZTEC_PIN_MISSING: readonly string[] = AZTEC_PINNED_ROOT
+	? AZTEC_TOOLCHAIN_RELPATHS.filter((rel) => !isExecutable(path.join(AZTEC_PINNED_ROOT, rel)))
+	: AZTEC_TOOLCHAIN_RELPATHS
+const AZTEC_PIN_USABLE = AZTEC_PIN_MISSING.length === 0
+const AZTEC_ROOT = AZTEC_PIN_USABLE && AZTEC_PINNED_ROOT ? AZTEC_PINNED_ROOT : path.join(AZTEC_HOME, "current")
 const AZTEC_BIN = path.join(AZTEC_ROOT, "node_modules/.bin/aztec")
 // 5.0 renamed bundled bare binaries to aztec-* on PATH: `anvil` → `aztec-anvil` (drop-in).
 const ANVIL_BIN = path.join(AZTEC_ROOT, "bin/aztec-anvil")
@@ -384,10 +406,20 @@ export async function setup(project: TestProject) {
 		weStartedNode = false
 	} else {
 		console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
-		if (!AZTEC_PIN_INSTALLED) {
+		if (!AZTEC_PIN_USABLE) {
+			const reason = AZTEC_PIN
+				? `pinned aztec ${AZTEC_PIN} at ${AZTEC_PINNED_ROOT} is missing: ${AZTEC_PIN_MISSING.join(", ")}`
+				: `repo aztec pin unreadable (${AZTEC_PIN_READ.error})`
+			// Strict runs fail CLOSED: falling back to the mutable `current`
+			// symlink is exactly the drift that breaks the L1 deploy, and a
+			// silent skip/pass would hide it.
+			if (process.env.E2E_REQUIRE_SETUP === "1") {
+				throw new Error(
+					`[e2e-setup] FATAL: ${reason}, and E2E_REQUIRE_SETUP=1 forbids the ~/.aztec/current fallback. Fix: aztec-up install ${AZTEC_PIN ?? "<repo @aztec/aztec.js pin>"}`,
+				)
+			}
 			console.warn(
-				`[e2e-setup] pinned aztec ${AZTEC_PIN ?? "<unknown>"} not found under ${AZTEC_HOME}/versions — ` +
-					`falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
+				`[e2e-setup] ${reason} — falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
 			)
 		}
 		if (!fs.existsSync(AZTEC_BIN)) {
@@ -395,8 +427,9 @@ export async function setup(project: TestProject) {
 			if (process.env.E2E_REQUIRE_SETUP === "1") {
 				throw new Error(
 					`[e2e-setup] FATAL: aztec CLI not found at ${AZTEC_BIN} and E2E_REQUIRE_SETUP=1 is set. ` +
-						`Aborting run to prevent silent pass-by-skip. Ensure setup-aztec installed Aztec CLI ` +
-						`AND created the ~/.aztec/current symlink (CI: see .github/actions/setup-aztec/action.yml).`,
+						`Aborting run to prevent silent pass-by-skip. Ensure the repo's pinned aztec version is ` +
+						`installed under ~/.aztec/versions (aztec-up install ${AZTEC_PIN ?? "<pin>"}; ` +
+						`CI: see .github/actions/setup-aztec/action.yml).`,
 				)
 			}
 			console.warn("[e2e-setup] aztec CLI not found at", AZTEC_BIN, "— skipping network setup")
@@ -443,11 +476,16 @@ export async function setup(project: TestProject) {
 					// reads `~/.aztec/current/internal-bin/forge` regardless of
 					// which version's CLI is booting — a `current` re-pointed by
 					// any other install on the machine then breaks the deploy
-					// with a forge-CLI arg mismatch. Guarded by existsSync
-					// because the resolver THROWS on a set-but-missing override
-					// rather than falling back.
-					...(fs.existsSync(path.join(AZTEC_INTERNAL_BIN, "forge")) ? { FORGE_BIN: path.join(AZTEC_INTERNAL_BIN, "forge") } : {}),
-					...(fs.existsSync(path.join(AZTEC_INTERNAL_BIN, "anvil")) ? { ANVIL_BIN: path.join(AZTEC_INTERNAL_BIN, "anvil") } : {}),
+					// with a forge-CLI arg mismatch. A caller-supplied override
+					// wins (same rule as the resolver itself); the executable
+					// guard matters because the resolver THROWS on a
+					// set-but-missing override rather than falling back.
+					...(!process.env.FORGE_BIN && isExecutable(path.join(AZTEC_INTERNAL_BIN, "forge"))
+						? { FORGE_BIN: path.join(AZTEC_INTERNAL_BIN, "forge") }
+						: {}),
+					...(!process.env.ANVIL_BIN && isExecutable(path.join(AZTEC_INTERNAL_BIN, "anvil"))
+						? { ANVIL_BIN: path.join(AZTEC_INTERNAL_BIN, "anvil") }
+						: {}),
 				},
 			},
 		)
