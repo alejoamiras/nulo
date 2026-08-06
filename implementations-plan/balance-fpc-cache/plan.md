@@ -226,7 +226,8 @@ export type GasBalances = {
 Producer flip + fail-closed `settingsForMethod` guard + `buildFeeMethods` null-disable + `BigInt(null)` deduction guard + display honesty + hand-copied-type deletion, in ONE phase, tests red-first (they are the only guard — see testing directive). Includes the deviation-2 fallthrough pin and the deviation-4 nudge pin. **Plus (Ask 2, fresh-pass critical): the SW-side cross-profile fix** — `ExecutionService` subscribes to active-profile change and calls `gasBalances.invalidateAll()` (matching its existing invalidation-subscription style), closing the pre-existing leak where `GasBalanceReader`'s profile-free cache serves profile A's PrivateFPC balance to profile B for up to the TTL. A facade/composition-level test pins the WIRING (profile-change event → invalidateAll observed through the service — a reader unit test cannot see it).
 **Gate**: `bun run audit:vue` exit 0. Layers: typecheck/lint/unit/component.
 
-### Phase 2 — The store, test-first
+### Phase 2 ✓ — The store, test-first
+*(gate passed 2026-08-06: `bun run audit:vue` exit 0, 3778 tests, store suite 20/20; lessons/phase-2.md)*
 Full pipeline per architecture v2 (structured scope, epoch fence, split slices, raw-reuse, capabilities, tx-settle subscription, LRU-with-subscribed-exemption). New `balances.store.test.ts` porting semantic pins + the codex-mandated suite (testing directive).
 **Gate**: `bun run audit:vue` exit 0; store test file green explicitly. Layers: typecheck/lint/unit.
 
