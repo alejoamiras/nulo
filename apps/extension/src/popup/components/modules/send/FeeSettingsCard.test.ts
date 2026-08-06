@@ -58,7 +58,27 @@ vi.mock("@/wallet/services/fpc/client", () => ({
 	FpcType: { DefaultSponsoredFpc: 1, PrivateFpc: 2 },
 }))
 
+// The balances store owns a tx-settle subscription; this card never uses it.
+vi.mock("@/wallet/services/transaction/client", () => ({
+	TransactionServiceClient: vi.fn().mockImplementation(function () {
+		return {
+			connect: vi.fn(),
+			disconnect: vi.fn(),
+			onTransactionAdded: { add: vi.fn(), remove: vi.fn() },
+			onTransactionUpdated: { add: vi.fn(), remove: vi.fn() },
+		}
+	}),
+}))
+
+// The balances store's belt watcher reads the app store's active profile; this
+// suite drives identity via PROPS, so an inert stand-in keeps the belt quiet
+// (and keeps the real app.store's chrome.storage.onChanged wiring out).
+vi.mock("@/stores/app.store", () => ({
+	useAppStore: () => ({ profile: undefined }),
+}))
+
 import FeeSettingsCard from "./FeeSettingsCard.vue"
+import { useBalancesStore } from "@/stores/balances.store"
 import { INIT_FETCH_TIMEOUT_MS, INIT_RETRY_BACKOFF_MS } from "./fee-helpers"
 
 const STUBS = {
@@ -776,8 +796,9 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			// First retry runs a full degraded cycle against the SAME raw call.
 			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + INIT_FETCH_TIMEOUT_MS)
 			expect(mocks.getGasBalances).toHaveBeenCalledTimes(1)
-			// The FPC leg settled, so its entry cleared and it re-fetches.
-			expect(mocks.getFpcs.mock.calls.length).toBeGreaterThan(1)
+			// The FPC leg settled healthy (no retry debt) — the store's
+			// debt-scoped backoff never re-fetches a working leg.
+			expect(mocks.getFpcs).toHaveBeenCalledTimes(1)
 			w.unmount()
 		} finally {
 			vi.useRealTimers()
@@ -809,12 +830,14 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		}
 	})
 
-	test("alternating leg failures keep the last-good FPC list — a working sponsor is never erased mid-session", async () => {
+	test("a refresh whose FPC leg fails keeps the last-good list — a working sponsor is never erased mid-session", async () => {
+		// The debt-scoped backoff never re-fetches a healthy leg, so the
+		// FPC-failure-after-success arc now runs through a same-identity
+		// refresh: attempt 1 lands both legs; the refresh's FPC leg fails —
+		// the sponsor from attempt 1 must survive (the store's per-key
+		// retention; the retry-path arc is pinned in balances.store.test.ts).
 		vi.useFakeTimers()
 		try {
-			// Attempt 1: balances fail, FPCs land. Attempt 2 (retry): balances
-			// land, FPCs fail — the sponsor from attempt 1 must survive.
-			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
 			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
 			mocks.getFpcs.mockResolvedValueOnce([{ id: "s1", type: 1, name: "Sponsor" }])
 			mocks.getFpcs.mockRejectedValue(new Error("boom"))
@@ -823,7 +846,8 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			await vi.advanceTimersByTimeAsync(0)
 			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
 
-			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0])
+			await w.setProps({ profile: { ...profile } })
+			await vi.advanceTimersByTimeAsync(0)
 			expect(mocks.getFpcs.mock.calls.length).toBeGreaterThan(1)
 			// Sponsor retained; settings still usable, dropdown still offers it.
 			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
@@ -857,6 +881,38 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 			await vi.advanceTimersByTimeAsync(0)
 			const events = w.emitted<unknown[]>("update:modelValue") ?? []
 			expect(events[events.length - 1]?.[0]).toBeUndefined()
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a profile-switch-superseded ensure is a NO-OP — no degraded state, no retry", async () => {
+		// The epoch fence rejects the in-flight ensure with the typed
+		// EnsureSuperseded; runInit must swallow it silently (the post-await
+		// drift guard can't observe a rejection) — never paint the degraded
+		// row or arm a retry for a run the store already discarded.
+		vi.useFakeTimers()
+		try {
+			const gas = deferred<{ publicFeeJuice: string | null; privateFeeJuice: string | null }>()
+			mocks.getGasBalances.mockReturnValue(gas.promise)
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+
+			// Fence the run out mid-flight — the path a real profile switch takes.
+			useBalancesStore().invalidateProfile(profile.id)
+			gas.resolve({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(false)
+			expect(lastEmittedSettings(w)).toBeUndefined()
+			// The discarded run armed no retry chain (window kept < 60s so
+			// unrelated service-client RPC timers don't fire spurious timeouts).
+			const gasCalls = mocks.getGasBalances.mock.calls.length
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 10_000)
+			expect(mocks.getGasBalances.mock.calls.length).toBe(gasCalls)
 			w.unmount()
 		} finally {
 			vi.useRealTimers()

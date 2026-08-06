@@ -236,7 +236,8 @@ Full pipeline per architecture v2 (structured scope, epoch fence, split slices, 
 Subscriber rewrite ({legs:[gas], retry:false, txRefresh:true, peek:true}); deduction → card-local overlay with retained tx-added subscription, cleared via `gas.forcedVersion`; delete fetch/generation machinery. Mocks re-pointed at the client layer against the real store.
 **Gate**: `bun run audit:vue` exit 0, all GasBalanceCard pins green. Layers: typecheck/lint/component.
 
-### Phase 4 — FeeSettingsCard onto the store
+### Phase 4 ✓ — FeeSettingsCard onto the store
+*(gate passed 2026-08-06: `bun run audit:vue` exit 0, FeeSettingsCard suite 38/38 incl. the EnsureSuperseded no-op pin; two retry-traffic pins updated to the debt-scoped design — lessons/phase-4.md)*
 subscribe+ensure+snapshot-commit+slice-scoped recovery watch; event-only FpcServiceClient retained; release on unmount AND embedded early-return; delete coalescing/rawRequests/timers. `runInit` explicitly catches `EnsureSuperseded` as a NO-OP before its generic failure handling (the post-await identity guard cannot observe a rejected promise) — pinned: a superseded ensure creates no degraded state and no retry. Pins migrated per recon §1 with client-layer anchoring (raw-count pins keep their meaning).
 **Gate**: `bun run audit:vue` exit 0, all FeeSettingsCard pins green. Layers: typecheck/lint/component.
 

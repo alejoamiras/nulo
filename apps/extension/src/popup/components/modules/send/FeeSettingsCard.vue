@@ -16,20 +16,10 @@ import { CHAIN_IDS } from "@/utils/chain-ids"
 
 /** Services */
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
-import { ExecutionServiceClient } from "@/wallet/services/execution/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
 /** Helpers */
-import {
-	buildFeeMethods,
-	FEE_JUICE_BRIDGE_URL,
-	formatGasBalance,
-	INIT_FETCH_TIMEOUT_MS,
-	INIT_RETRY_BACKOFF_MS,
-	resolveSavedSelection,
-	settingsForMethod,
-	withTimeout,
-} from "./fee-helpers"
+import { buildFeeMethods, FEE_JUICE_BRIDGE_URL, formatGasBalance, resolveSavedSelection, settingsForMethod } from "./fee-helpers"
 import { feeJuicePricingFromUsd, feeToUsd } from "@/utils/fee-estimation"
 import { usePrices } from "@/composables/usePrices"
 
@@ -39,7 +29,9 @@ const { openToast } = useToast()
 
 /** Stores */
 import { useCacheStore } from "@/stores/cache.store"
+import { EnsureSuperseded, useBalancesStore } from "@/stores/balances.store"
 const cacheStore = useCacheStore()
+const balancesStore = useBalancesStore()
 
 const props = defineProps({
 	profile: { type: Object },
@@ -236,118 +228,129 @@ const fpcService = new FpcServiceClient()
 fpcService.onFpcDeleted.add(onFpcDeleted)
 fpcService.onFpcUpdated.add(onFpcUpdated)
 
-const executionService = new ExecutionServiceClient()
-
-// Coalesces concurrent init() invocations. `onBeforeMount` and the
-// props watcher both fire init() when the component mounts with
-// populated props, and the SW's PXE is single-threaded — letting
-// two parallel getGasBalances/getFpcs pairs queue up caused the
-// 60s timeout regression users hit during QA.
-let initInFlight = null
-let initRequested = false
 let isMounted = true
 
-// Silent auto-retry: a degraded/failed init reschedules itself with capped
-// backoff. Deliberately no user-facing retry affordance — nothing the user
-// can do fixes a failed balance read, and the degraded state keeps the card
+// Silent degraded notice: the store owns the capped-backoff retry loop (it
+// runs while this card's retry-capable subscription holds the key), so the
+// card's job is only to SHOW the degraded state and re-commit on recovery.
+// Deliberately no user-facing retry affordance — nothing the user can do
+// fixes a failed balance read, and the degraded state keeps the card
 // operable meanwhile (sponsored methods stay usable; self-paid methods stay
 // fail-closed until a read succeeds — see settingsForMethod).
 const FEE_DATA_UNAVAILABLE = "Couldn't load fee data — retrying in the background."
-let retryTimer = null
-let retryAttempt = 0
 
-// One raw in-flight RPC per service per identity KEY: a retry re-attaches a
-// fresh timeout to the SAME pending request instead of issuing a new one.
-// The transport queues pre-connect requests unboundedly and cannot cancel
-// them, so re-issuing on every backoff tick while the SW is unreachable
-// would accumulate abandoned requests for as long as the outage lasts.
-// Keyed maps (not single slots) so an identity flap A→B→A can't drop A's
-// still-pending entry and start a duplicate. Entries self-clear on settle;
-// unsettled entries are bounded by the distinct identities visited.
-const rawRequests = { gas: new Map(), fpc: new Map() }
-
-const reuseRawRequest = (requests, key, start) => {
-	const existing = requests.get(key)
-	if (existing) return existing
-	const promise = start()
-	requests.set(key, promise)
-	promise
-		.finally(() => {
-			if (requests.get(key) === promise) requests.delete(key)
-		})
-		.catch(() => {
-			// The settle-probe chain must never surface as an unhandled rejection;
-			// the real rejection is observed by the awaiting init.
-		})
-	return promise
-}
-
-// FPC last-good key: a failed FPC leg keeps the previous list only when it
-// belongs to the SAME identity — an alternating gas-ok/fpc-fail retry must
-// not erase a working sponsor — while another identity's list never leaks.
-// Balances get NO such retention: a stale balance would quietly extend trust
-// in a figure another transaction may have spent, defeating the fail-closed
-// rule for self-paid methods. A failed balance read always commits UNKNOWN.
-let lastGoodFpcKey = null
+/** This card's capabilities: both legs, backoff retry while mounted, no
+ *  tx-settle refresh and no peek — exactly its pre-store traffic. */
+const CARD_CAPS = { legs: ["gas", "fpc"], retry: true, txRefresh: false, peek: false }
 
 // Identity of the last fully-committed snapshot. Lets a background refresh
-// (silent retry, same-identity watcher refire) keep serving the committed
+// (store retry, same-identity watcher refire) keep serving the committed
 // snapshot instead of yanking settings — and the Confirm gate behind them —
 // for the length of every in-flight window.
 let committedKey = null
+/** Structured scope of the committed snapshot — the recovery watch's target. */
+const committedScope = ref(null)
 
-const clearRetryTimer = () => {
-	if (retryTimer) {
-		clearTimeout(retryTimer)
-		retryTimer = null
-	}
-}
-const scheduleRetry = () => {
-	if (!isMounted) return
-	clearRetryTimer()
-	const delay = INIT_RETRY_BACKOFF_MS[Math.min(retryAttempt, INIT_RETRY_BACKOFF_MS.length - 1)]
-	retryAttempt += 1
-	retryTimer = setTimeout(() => {
-		retryTimer = null
-		void init()
-	}, delay)
+let subscription = null
+let subscribedKey = null
+
+/** Release-before-subscribe on every identity change (codex round 2): the
+ *  old key must not stay subscribed — and store-retrying — after the card
+ *  moves on. The store resets backoff attempts on the 0→1 retry-capable
+ *  transition, reproducing today's fresh-identity-fresh-backoff rule. */
+const subscribeTo = (scope, reqKey) => {
+	if (subscribedKey === reqKey) return
+	subscription?.release()
+	subscription = balancesStore.subscribe(scope, CARD_CAPS)
+	subscribedKey = reqKey
 }
 
-const init = async () => {
-	if (!isMounted) return
-	if (initInFlight) {
-		initRequested = true
-		return initInFlight
-	}
-	initRequested = false
-	initInFlight = runInit().finally(() => {
-		initInFlight = null
-		if (initRequested && isMounted) {
-			initRequested = false
-			// The immediate re-run subsumes any retry the finished run just
-			// scheduled — leaving the timer armed would let it fire mid-run
-			// and defeat the backoff pacing with back-to-back reruns.
-			clearRetryTimer()
-			void init()
+const releaseSubscription = () => {
+	subscription?.release()
+	subscription = null
+	subscribedKey = null
+}
+
+/**
+ * The SNAPSHOT COMMIT (synchronous): copies the store entry into local refs —
+ * never live-binds — then reconciles the selection and opens the gate. Order
+ * matters and is preserved verbatim from the pre-store init: refs commit
+ * BEFORE the reconcile (on a first load the still-closed gate means `methods`
+ * resolves against undefined balances), and the gate opens after — degraded
+ * included (holding it closed on failure was the frozen-Confirm bug).
+ */
+const commitFromEntry = (scope, reqKey, saved, baseline) => {
+	const entry = balancesStore.entry(scope)
+	if (!entry) return
+
+	// UNKNOWN (undefined) on any failed balance read, never a fabricated zero
+	// and never a stale last-good figure — self-paid derivation fails closed.
+	// `verified` is exactly that: cleared by every failed refresh. The store
+	// retains last-good FPC data per key, matching the old lastGoodFpcKey rule.
+	gasBalances.value = entry.gas.verified
+	registeredFpcs.value = entry.fpc.data ?? []
+
+	const userPickedDuringInit = selectedMethod.value !== baseline
+
+	if (!userPickedDuringInit) {
+		// Resolve saved selection against fresh `methods` by semantic
+		// key — never trust the stored `fpc.name`. Returns undefined
+		// when the saved fpc.id is dangling (e.g. v3→v4 migration wiped
+		// the row, or the user deleted it while the popup was closed).
+		const resolved = resolveSavedSelection(saved[scope.accountAddress], methods.value)
+		if (resolved) {
+			selectedMethod.value = resolved
+		} else {
+			// A dangling saved selection (e.g. a deleted FPC) is simply ignored — it
+			// re-resolves to undefined every time and we fall through to the default. We
+			// deliberately do NOT prune it from storage here: a whole-map write would race
+			// persistSelection / another mounted FeeSettingsCard and could clobber a newer
+			// selection (last-write-wins on a stale snapshot).
+			// Fall through to the network's default method: Alpha (mainnet) → Private Fee
+			// Juice; every other network → Sponsored FPC (its historical default).
+			const preferred =
+				props.network?.chainId === CHAIN_IDS.MAINNET
+					? methods.value.find((m) => m.type === "private_fpc")
+					: methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
+			selectedMethod.value = preferred ? { ...preferred } : undefined
 		}
-	})
-	return initInFlight
+	}
+
+	// The gate opens on EVERY settled init — degraded included.
+	committedKey = reqKey
+	committedScope.value = scope
+	isInitComplete.value = true
+
+	const degraded = entry.gas.status === "degraded" || entry.fpc.status === "degraded"
+	if (degraded) {
+		console.error("Fee init degraded", entry.gas.lastError, entry.fpc.lastError)
+		error.value = FEE_DATA_UNAVAILABLE
+	} else {
+		error.value = ""
+	}
 }
 
 const runInit = async () => {
 	try {
-		if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return
+		if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) {
+			// Embedded ops (and identity-less mounts) hold no subscription: the
+			// release kills the store's retry loop for this key, preserving the
+			// old retry-chain death on this early-return; the useOwnMethod
+			// watcher below is where the chain revives.
+			releaseSubscription()
+			return
+		}
 
-		// Snapshot the identity this run targets (profile+network+account). A prop change
-		// during the awaits queues a coalesced re-run; we must NOT apply this run's stale
-		// balances/fpcs against the new identity. The request closures below read ONLY
-		// these snapshots — reading live props after an await could cache another
-		// identity's response under this run's key.
+		// Snapshot the identity this run targets (profile+network+account). A
+		// prop change during the awaits fires a fresh init; this run's commit is
+		// discarded by the drift guard below rather than applied to the new
+		// identity.
 		const reqProfileId = props.profile?.id
 		const reqNetworkId = props.network.id
 		const reqChainId = props.network.chainId
 		const reqAccount = props.account.address
 		const reqKey = `${reqProfileId}|${reqNetworkId}|${reqAccount}`
+		const scope = { profileId: reqProfileId, networkId: reqNetworkId, chainId: reqChainId, accountAddress: reqAccount }
 
 		// Close the derivation gate only when no snapshot is committed for THIS
 		// identity: first loads and identity switches must not derive against
@@ -365,102 +368,80 @@ const runInit = async () => {
 			selectedMethod.value = saved[props.account.address]
 		}
 		// Snapshot the (possibly-prefilled) selection AFTER any pre-fill
-		// assignment. If the user picks something during the Promise.all
-		// await, `selectedMethod.value` will be a different reactive
-		// proxy reference than `baseline`, and we skip the reconcile
-		// path so we don't clobber their choice.
+		// assignment. If the user picks something during the ensure await,
+		// `selectedMethod.value` will be a different reactive proxy reference
+		// than `baseline`, and we skip the reconcile path so we don't clobber
+		// their choice.
 		const baseline = selectedMethod.value
 
 		isLoading.value = true
-		// The legs settle independently: a failed balance read must not discard
-		// a good FPC list (sponsored methods need no balance), and vice versa.
-		// Each leg is time-boxed at the call site — the transport's own 60s
-		// timer only arms once the port reaches Connected, so an unreachable SW
-		// would otherwise pin this await (and the Confirm gate behind it) forever.
-		const [gasResult, fpcResult] = await Promise.allSettled([
-			withTimeout(
-				reuseRawRequest(rawRequests.gas, reqKey, () => executionService.getGasBalances(reqNetworkId, reqAccount)),
-				INIT_FETCH_TIMEOUT_MS,
-				"getGasBalances",
-			),
-			withTimeout(
-				reuseRawRequest(rawRequests.fpc, reqKey, () => fpcService.getFpcs(reqChainId)),
-				INIT_FETCH_TIMEOUT_MS,
-				"getFpcs",
-			),
-		])
-		// Discard if the profile/network/account switched mid-flight — the props watcher
-		// already queued a fresh init for the new identity. Everything past this guard is
-		// synchronous (no awaits), so the commit is atomic against the checked identity.
+		subscribeTo(scope, reqKey)
+		try {
+			// The store fetches the legs with per-leg isolation, timeout, and
+			// raw-promise reuse; ensure settles when both requested legs settle,
+			// ready OR degraded.
+			await balancesStore.ensure(scope, { legs: ["gas", "fpc"] })
+		} catch (e) {
+			// A superseded ensure means a profile switch fenced this run out —
+			// the new identity's own init covers it. Explicit NO-OP: no degraded
+			// state, no notice (the drift guard below cannot observe a rejection).
+			if (e instanceof EnsureSuperseded) return
+			throw e
+		}
+		// Discard if the profile/network/account switched mid-flight — the props
+		// watcher already fired a fresh init for the new identity. Everything
+		// past this guard is synchronous (no awaits), so the commit is atomic
+		// against the checked identity.
 		if (!isMounted || props.profile?.id !== reqProfileId || props.network?.id !== reqNetworkId || props.account?.address !== reqAccount)
 			return
 
-		// UNKNOWN on any failed balance read, never a fabricated zero and never
-		// a stale last-good figure — self-paid derivation fails closed on it.
-		gasBalances.value = gasResult.status === "fulfilled" ? gasResult.value : undefined
-		if (fpcResult.status === "fulfilled") {
-			registeredFpcs.value = fpcResult.value ?? []
-			lastGoodFpcKey = reqKey
-		} else if (lastGoodFpcKey !== reqKey) {
-			registeredFpcs.value = []
-			lastGoodFpcKey = null
-		}
-
-		const userPickedDuringInit = selectedMethod.value !== baseline
-
-		if (!userPickedDuringInit) {
-			// Resolve saved selection against fresh `methods` by semantic
-			// key — never trust the stored `fpc.name`. Returns undefined
-			// when the saved fpc.id is dangling (e.g. v3→v4 migration wiped
-			// the row, or the user deleted it while the popup was closed).
-			const resolved = resolveSavedSelection(saved[props.account.address], methods.value)
-			if (resolved) {
-				selectedMethod.value = resolved
-			} else {
-				// A dangling saved selection (e.g. a deleted FPC) is simply ignored — it
-				// re-resolves to undefined every time and we fall through to the default. We
-				// deliberately do NOT prune it from storage here: a whole-map write would race
-				// persistSelection / another mounted FeeSettingsCard and could clobber a newer
-				// selection (last-write-wins on a stale snapshot).
-				// Fall through to the network's default method: Alpha (mainnet) → Private Fee
-				// Juice; every other network → Sponsored FPC (its historical default).
-				const preferred =
-					props.network?.chainId === CHAIN_IDS.MAINNET
-						? methods.value.find((m) => m.type === "private_fpc")
-						: methods.value.find((m) => m.fpc?.type === FpcType.DefaultSponsoredFpc)
-				selectedMethod.value = preferred ? { ...preferred } : undefined
-			}
-		}
-
-		// The gate opens on EVERY settled init — degraded included. Holding it
-		// closed on failure is the bug this fixes: `derivedSettings` stayed
-		// `undefined` forever, so the Send/dApp-Confirm gates froze with no
-		// error and no retry.
-		committedKey = reqKey
-		isInitComplete.value = true
-
-		const rejected = [gasResult, fpcResult].filter((r) => r.status === "rejected")
-		if (rejected.length > 0) {
-			console.error("Fee init degraded", ...rejected.map((r) => getErrorData(r.reason)))
-			error.value = FEE_DATA_UNAVAILABLE
-			scheduleRetry()
-		} else {
-			error.value = ""
-			retryAttempt = 0
-			clearRetryTimer()
-		}
+		commitFromEntry(scope, reqKey, saved, baseline)
 	} catch (e) {
 		// Deliberately does NOT open `isInitComplete`: an exception here may
 		// have fired mid-commit, and deriving settings from a half-written
 		// snapshot would break the resolved-state invariant the gate exists
-		// for. The scheduled retry re-runs the whole init instead — the state
-		// is degraded-with-notice, never silently frozen.
+		// for. The state is degraded-with-notice, never silently frozen — the
+		// identity/useOwnMethod watchers are the re-entry paths.
 		console.error("Failed to init", getErrorData(e))
 		error.value = FEE_DATA_UNAVAILABLE
-		scheduleRetry()
 	} finally {
 		isLoading.value = false
 	}
+}
+
+/** Recovery from degraded commits: re-commit when a store retry lands. The
+ *  source observes retryVersion ONLY (never gas.version — tx-settle commits
+ *  must not re-enter this card; D4 structural), and only for the committed
+ *  key. A non-degraded slice's retryVersion cannot bump while committed, so
+ *  the pair-signal is exactly "a slice this card committed degraded
+ *  recovered". */
+watch(
+	() => {
+		const scope = committedScope.value
+		if (!scope) return null
+		const entry = balancesStore.entry(scope)
+		return entry ? `${entry.gas.retryVersion}|${entry.fpc.retryVersion}` : null
+	},
+	(next, prev) => {
+		if (next === null || prev === null || next === prev) return
+		void recommit()
+	},
+)
+
+const recommit = async () => {
+	const scope = committedScope.value
+	if (!scope || !isMounted) return
+	// Mirror runInit's entry conditions: a recovery landing while embedded
+	// must die exactly like a retry hitting the old early-return did.
+	if (!props.network || !props.account || (isCustomMethod.value && !useOwnMethod.value)) return
+	// The recovery targets the committed identity; if props moved on, the
+	// identity watcher owns the transition.
+	if (props.profile?.id !== scope.profileId || props.network?.id !== scope.networkId || props.account?.address !== scope.accountAddress)
+		return
+	const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
+	const baseline = selectedMethod.value
+	if (!isMounted) return
+	commitFromEntry(scope, `${scope.profileId}|${scope.networkId}|${scope.accountAddress}`, saved, baseline)
 }
 
 watch(
@@ -473,46 +454,50 @@ watch(
 watch(
 	() => [props.profile, props.network, props.account],
 	async () => {
-		// Fresh identity, fresh backoff — a pending retry for the old identity
-		// must not fire between this init and its commit.
-		retryAttempt = 0
-		clearRetryTimer()
 		// Close the gate NOW on a real identity change: if a same-identity
-		// refresh is in flight, the coalesced re-run won't start (and re-arm)
-		// until that fetch settles — the old identity's snapshot must not keep
-		// serving settings for the new one in the meantime.
+		// refresh is in flight, its commit is drift-guarded away — the old
+		// identity's snapshot must not keep serving settings for the new one
+		// in the meantime. (Fresh identity → fresh backoff is the store's
+		// 0→1 retry-capable transition inside subscribeTo's resubscribe.)
 		const liveKey = `${props.profile?.id}|${props.network?.id}|${props.account?.address}`
 		if (liveKey !== committedKey) isInitComplete.value = false
-		await init()
+		await runInit()
 	},
 )
+watch([isCustomMethod, useOwnMethod], ([custom, own]) => {
+	// Entering the embedded-visible state (a dApp op's v-model flip lands
+	// here without any runInit call) releases the subscription, killing the
+	// store's retry loop for this key — today's retry-chain death when a
+	// retry tick hit the embedded early-return. The useOwnMethod watcher
+	// below is the revival path.
+	if (custom && !own) releaseSubscription()
+})
 watch(useOwnMethod, async (val) => {
 	// Switching from embedded → "use my own" needs to load balances/fpcs
 	// for the dropdown. Pre-#fix this was broken: clicking "Override with
 	// my method" on an embedded op never triggered the fetch pipeline.
-	// Also re-init on a DEGRADED snapshot (`error` set): a retry that fired
-	// while embedded hit runInit's early-return and died — this is where the
-	// chain revives, so a degraded state can't become permanently stuck.
+	// Also re-init on a DEGRADED snapshot (`error` set): while embedded the
+	// card holds no subscription (runInit's early-return released it), so the
+	// store's retry loop is dead — this is where the chain revives, so a
+	// degraded state can't become permanently stuck.
 	if (val && (error.value || !isInitComplete.value)) {
-		await init()
+		await runInit()
 	}
 })
 
 onBeforeMount(async () => {
 	console.log(`[fee:${methodId}] mounting`)
 	fpcService.connect()
-	await init()
+	await runInit()
 })
 onBeforeUnmount(() => {
 	console.log(`[fee:${methodId}] unmounting`)
-	// Cancel any pending init re-run before tearing down the clients, so
-	// the queued void init() can't fire against disconnected clients or
-	// torn-down refs.
+	// Release before tearing down the clients: the store's retry loop for
+	// this key must die with the card's subscription (today's unmount
+	// retry-chain death).
 	isMounted = false
-	initRequested = false
-	clearRetryTimer()
+	releaseSubscription()
 	fpcService.disconnect()
-	executionService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
 	cacheStore.feePaymentMethods = cacheStore.feePaymentMethods.filter((m) => m.id !== methodId)
