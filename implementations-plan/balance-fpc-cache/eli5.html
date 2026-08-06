@@ -1,0 +1,156 @@
+<title>Blueprint — one shared balance cache</title>
+<style>
+	:root {
+		--bg: #ffffff; --ink: #1e1c1a; --muted: #6b6459; --accent: #a8480c;
+		--panel: #f4f2ee; --line: #ddd8d0; --good: #0da583; --warn: #b45309;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root { --bg: #141312; --ink: #f5f0e6; --muted: #999187; --accent: #f8f1e7; --panel: #1d1b1a; --line: #3d3a35; --good: #18d2a5; --warn: #e8a04c; }
+	}
+	:root[data-theme="dark"] { --bg: #141312; --ink: #f5f0e6; --muted: #999187; --accent: #f8f1e7; --panel: #1d1b1a; --line: #3d3a35; --good: #18d2a5; --warn: #e8a04c; }
+	:root[data-theme="light"] { --bg: #ffffff; --ink: #1e1c1a; --muted: #6b6459; --accent: #a8480c; --panel: #f4f2ee; --line: #ddd8d0; --good: #0da583; --warn: #b45309; }
+	body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem 4rem; color: var(--ink); background: var(--bg); line-height: 1.6; }
+	h1 { font-size: 1.7rem; font-weight: 650; text-wrap: balance; }
+	h2 { font-size: 1.25rem; font-weight: 650; margin-top: 2.4rem; }
+	h3 { font-size: 1.02rem; font-weight: 650; margin-top: 1.4rem; }
+	code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; }
+	pre { background: var(--panel); padding: 1rem; border: 1px solid var(--line); overflow-x: auto; white-space: pre-wrap; }
+	.phase { margin: 1.2rem 0; padding: 0.9rem 1.1rem; border-left: 3px solid var(--line); background: var(--panel); }
+	.gate { color: var(--muted); font-size: 0.9rem; margin: 0.4rem 0 0; }
+	.approval { background: var(--panel); border-left: 3px solid var(--accent); padding: 1rem 1.2rem; margin: 1.4rem 0; }
+	.decision { border-left: 3px solid var(--warn); background: var(--panel); padding: 0.9rem 1.1rem; margin: 1.2rem 0; }
+	.recommended { border-left-color: var(--good); }
+	.warning { color: var(--warn); font-weight: 600; }
+	.muted { color: var(--muted); font-size: 0.92rem; }
+	ul { padding-left: 1.2rem; }
+</style>
+
+<h1>One shared balance cache for the wallet popup</h1>
+<p>
+	Two parts of the wallet — the fee selector on the Send screen and the fee-juice card on the home screen —
+	each grew their own private copy of the same plumbing: fetching your gas balances, retrying quietly when the
+	network hiccups, showing last-known values instantly. It all works and it's all covered by tests, but the same
+	logic living in two places is how bugs creep in later. This plan moves that plumbing into <strong>one shared
+	place</strong>, turns both screens into simple readers of it, and fixes one long-standing dishonesty: today, when
+	a balance <em>check fails</em>, the wallet shows a confident <code>0</code> — after this plan it shows an honest
+	"unknown" (<code>—</code>) instead.
+</p>
+
+<h2>Why this tier (mid)</h2>
+<p class="muted">
+	Rubric: novelty LOW (everything reuses patterns the codebase already has) · blast radius MEDIUM (Send screen,
+	dApp-approval window, home card) · irreversibility LOW · no migrations · no external services · security MEDIUM
+	but fully mapped. One medium-high dimension → <code>mid</code>: one plan + one competing alternative, audited in
+	parallel by Codex and an independent Claude reviewer, then a final fresh Codex pass. Both auditors materially
+	improved the design (details in plan.md at <code>implementations-plan/balance-fpc-cache/</code>).
+</p>
+
+<h2>The one thing changing for users</h2>
+<p>
+	Nothing — except honesty when a balance check fails. Three approved changes, plus one that needs your explicit
+	sign-off below:
+</p>
+<ul>
+	<li>A failed balance check shows <code>— FJ</code> instead of <code>0 FJ</code>.</li>
+	<li>The fee dropdown marks fee-juice "couldn't check balance" instead of "no balance" when the check failed (a saved fee-juice preference temporarily falls back to the default method while unknown — same as today, now deliberate).</li>
+	<li>The "get fee juice" nudge still appears when your balance is genuinely zero.</li>
+</ul>
+<div class="decision">
+	<h3>Needs your sign-off: deviation 4</h3>
+	<p>
+		Today, when a balance <em>check fails</em>, the wallet wrongly tells you to go bridge gas — because a failed
+		check looks identical to a zero balance. After this plan, that nudge only appears on a <em>confirmed</em> zero.
+		Strictly more honest, but it is a visible change beyond the original three, so the auditors required it to be
+		approved by you explicitly rather than slipped in.
+	</p>
+</div>
+
+<h2>Phases</h2>
+<div class="phase">
+	<h3>Phase 1 — Make "unknown" representable, safely</h3>
+	<p>Change the data shape so a failed check is "unknown" instead of a fake zero — together, in the same step, with
+	the safety guard that keeps unknown balances from ever enabling a fee method they shouldn't. (The audits proved
+	the type system cannot catch this mistake; tests written before the change are the only guard, so they come first.)</p>
+	<p class="gate">Proves itself by: the full check suite (types, all unit + component tests, lint, build) green.</p>
+</div>
+<div class="phase">
+	<h3>Phase 2 — Build the shared cache, tests first</h3>
+	<p>The one shared place: knows who's asking and what they need, never fires more network requests than the two
+	screens do today (the auditors made this a hard, test-enforced requirement), survives profile switches without
+	leaking one profile's data to another, and retries quietly exactly the way the Send screen does now.</p>
+	<p class="gate">Proves itself by: a dedicated test suite for the cache covering every audited edge case, plus the full check suite.</p>
+</div>
+<div class="phase">
+	<h3>Phase 3 — Home-screen card reads from the cache</h3>
+	<p>The fee-juice card keeps its look and feel (instant paint, dimmed-while-refreshing) but deletes its private plumbing.</p>
+	<p class="gate">Proves itself by: every existing test for that card still green, plus the full check suite.</p>
+</div>
+<div class="phase">
+	<h3>Phase 4 — Fee selector reads from the cache</h3>
+	<p>The Send screen's fee selector keeps ALL its careful behavior (when it locks, when it retries, how it protects
+	your selection mid-load) and deletes its private plumbing — the largest deletion of the plan.</p>
+	<p class="gate">Proves itself by: every existing fee-selector test still green, plus the full check suite.</p>
+</div>
+<div class="phase">
+	<h3>Phase 5 — Cleanup and end-to-end proof</h3>
+	<p>Delete the now-dead code, deduplicate a copy-pasted formatter, update docs.</p>
+	<p class="gate">Proves itself by: full check suite + browser smoke tests + the real-network end-to-end suite (including the "reopened popup paints instantly" test) all green.</p>
+</div>
+<p class="muted">After the phases: an automated code review with fixes, a final Codex audit of the diff, then a PR that must pass every CI gate before auto-merging. No extra hardening pass (your call, recorded).</p>
+
+<h2>Human context</h2>
+<p>
+	This is the cleanup we parked after the two fee-juice fixes earlier this week (#342/#343): those PRs made the two
+	screens correct under failure, at the cost of each carrying its own machinery. The audits caught real problems in
+	the first draft of this plan — most importantly that a shared cache keyed the "obvious" way could leak one
+	profile's fee-payment contracts to another profile, and that a naive rewrite would quietly lose a protection
+	against runaway network requests. Both are designed out and pinned by tests now; the audit trail is in the plan
+	folder.
+</p>
+
+<div class="decision">
+	<h3>Needs your sign-off: fix a live cross-profile leak (found by the final audit)</h3>
+	<p>
+		The final fresh-eyes audit found a bug that exists in the wallet <em>today</em>, unrelated to this refactor:
+		after switching profiles, the background cache can show the NEW profile the OLD profile's private-gas balance
+		for up to five minutes (the cache doesn't know profiles exist, but the private balance is profile-specific).
+		The plan proposes fixing it at the source — one small, well-tested change: forget cached balances whenever the
+		active profile changes. It's technically outside the original scope (it changes when re-fetches happen), so it
+		needs your explicit yes. Recommended: yes. If you say no, the refactor still protects its own new cache, and
+		the old leak is documented as accepted risk.
+	</p>
+</div>
+
+<h2>Open questions</h2>
+<ul>
+	<li><strong>Deviation 4</strong> (above) — approve the nudge behavior change?</li>
+	<li><strong>Cross-profile leak fix</strong> (above) — approve fixing it in this plan? (The two decisions are independent — any combination works.)</li>
+</ul>
+
+<div class="approval">
+	<h2>Approval decision needed from you</h2>
+	<ul>
+		<li>Confirm scope: the shared cache + the honest-unknown data fix; no push-events (deferred), no other UX changes.</li>
+		<li>Confirm tier <code>mid</code> (rubric above).</li>
+		<li>Confirm the validation ladder: full check suite every phase; smoke + real-network e2e on the final phase.</li>
+		<li><strong>Approve or reject deviation 4</strong> (nudge honesty).</li>
+		<li><strong>Approve or reject the cross-profile leak fix</strong> (independent of deviation 4).</li>
+		<li>Verdict: approve / conditional approve (with conditions) / reject (with blocking findings).</li>
+	</ul>
+</div>
+
+<section>
+	<h2>Implementation seeds (draft — finalized after approval)</h2>
+	<p class="muted">Start the implementation session inside the plan's worktree (<code>agent-worktree resume balance-fpc-cache</code>), in the permission mode you intend.</p>
+	<p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+	<div class="phase recommended">
+		<h3>Recommended: /goal (completion is transcript-observable)</h3>
+		<pre><code>/goal All five phases marked ✓ in implementations-plan/balance-fpc-cache/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as defined in plan.md reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/balance-fpc-cache/lessons/phase-N.md in the transcript; /code-review max --fix complete with findings applied and committed separately; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` reports exit 0 in the transcript, and Phase 5's gate additionally shows `bun run test:e2e` green and `bun run e2e:agent tests/e2e/network/fee-methods.test.ts` green (5/5).</code></pre>
+	</div>
+
+	<h3>Alternative: /loop 15m</h3>
+	<pre><code>/loop 15m Drive implementations-plan/balance-fpc-cache forward. Never idle waiting for my input. Each firing: (1) Reality check: read plan.md + lessons/ (authoritative state), `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. (2) Waiting on CI is fine if it's progressing — use the wait to review the diff or prep the next phase. (3) No task in hand? Pick the next pending step from plan.md and start it; after each meaningful edit run `bun run lint` + the touched package's tests; commit → push. (4) Stuck or facing a decision? Call /codex xhigh with full context, reach a defensible decision together, act, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to main, never publish/deploy, never expand scope beyond plan.md. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase green means ITS VALIDATION GATE in plan.md passes — run the full gate, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=implementations-plan/balance-fpc-cache/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up report with every contentious decision explained ELI5 → surface and stop.</code></pre>
+</section>
+
+<p class="muted">Full technical plan: <code>implementations-plan/balance-fpc-cache/plan.md</code> in the worktree (with recon.md, audit-codex.md, audit-fable.md alongside).</p>
