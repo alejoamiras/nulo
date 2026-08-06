@@ -6,6 +6,8 @@
 
 **eli5_mode**: artifact
 
+**APPROVED 2026-08-06 (owner)**: full approve. Ask 1 (deviation 4, nudge honesty) — **approved**. Ask 2 (SW cross-profile leak fix, D12) — **approved**. No conditions; the plan implements as written (no reject branches taken).
+
 ## Summary
 
 `FeeSettingsCard.vue` and `GasBalanceCard.vue` each own a private copy of balance/FPC fetch machinery (init coalescing, per-identity single-flight with timeout-survivor raw-request reuse, retry backoff, SWR peek, generation guards) accumulated across #342/#343. This plan lifts the fetch layer into one Pinia store that owns app-lifetime service clients and a profile-scoped keyed cache with split gas/fpc slices, makes the two cards subscribers with declared capabilities, and fixes the fabricated-`"0"` wire-shape debt (`publicFeeJuice: string | null`). The SW-side `GasBalanceReader` keeps its role (TTL, cross-popup dedup, invalidation epochs) untouched.
@@ -307,8 +309,16 @@ Composable-only, pull-only, minimal-diff: module-singleton composable sharing in
 - **Fresh-pass re-verdict on v3 (resumed)** (`audit-codex.md`): **reject** — 3 findings + 1 process note, ALL adopted in v3.1: superseded ensures CANCEL (typed `EnsureSuperseded`), never re-enter — only a live lease retries (+A-pending→B test); `GasSlice.forcedVersion` gives D9 an implementable signal (+failed-force retention pin); the D12 file-map contradiction fixed (`service.ts` modified, composition-level test); independent accept/reject branches specified for both Asks. D10/D11 confirmed genuinely closed.
 - **Fresh-pass re-verdict on v3.1 (resumed)** (`audit-codex.md`): **conditional approve → approve** — "the substantive designs are closed"; four normative-consistency corrections required and applied in v3.2 (ensure() comment states typed cancellation; Phase 4 catches `EnsureSuperseded` as no-op + pin; Phase 1 pins D12 via the composition test; caps prose/Phase 3 include `peek`). Per the verdict's own words: "With those consistency fixes, approve."
 
-## Seeds
+## Seeds (FINAL — approved scope, both Asks yes)
 
-*(DRAFT — finalized post-approval; canonical copies in the ELI5 artifact)*
+**ELI5 artifact**: https://claude.ai/code/artifact/080ef192-76fb-41d4-b9eb-642e4b612a77 (source: `implementations-plan/balance-fpc-cache/eli5.html`).
 
-**ELI5 artifact**: https://claude.ai/code/artifact/080ef192-76fb-41d4-b9eb-642e4b612a77 (source: `implementations-plan/balance-fpc-cache/eli5.html` — redeploy the same path to update the same URL).
+Recommended: `/goal` (completion is transcript-observable). Run inside this worktree (`agent-worktree resume balance-fpc-cache`). Use exactly one per session.
+
+```
+/goal All five phases marked ✓ in implementations-plan/balance-fpc-cache/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as defined in plan.md reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/balance-fpc-cache/lessons/phase-N.md in the transcript; /code-review max --fix complete with findings applied and committed separately; codex post-impl audit complete with high/critical findings addressed; `bun run audit:vue` reports exit 0 in the transcript, and Phase 5's gate additionally shows `bun run test:e2e` green and `bun run e2e:agent tests/e2e/network/fee-methods.test.ts` green (5/5).
+```
+
+```
+/loop 15m Drive implementations-plan/balance-fpc-cache forward. Never idle waiting for my input. Each firing: (1) Reality check: read plan.md + lessons/ (authoritative state), `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. (2) Waiting on CI is fine if it's progressing — use the wait to review the diff or prep the next phase. (3) No task in hand? Pick the next pending step from plan.md and start it; after each meaningful edit run `bun run lint` + the touched package's tests; commit → push. (4) Stuck or facing a decision? Call /codex xhigh with full context, reach a defensible decision together, act, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge to main, never publish/deploy, never expand scope beyond plan.md. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase green means ITS VALIDATION GATE in plan.md passes — run the full gate, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=implementations-plan/balance-fpc-cache/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up report with every contentious decision explained ELI5 → surface and stop.
+```

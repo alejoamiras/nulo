@@ -26,6 +26,7 @@
 </style>
 
 <h1>One shared balance cache for the wallet popup</h1>
+<p class="muted"><strong style="color: var(--good)">APPROVED 2026-08-06</strong> — full approve; deviation 4 and the cross-profile leak fix both approved. Seeds below are final.</p>
 <p>
 	Two parts of the wallet — the fee selector on the Send screen and the fee-juice card on the home screen —
 	each grew their own private copy of the same plumbing: fetching your gas balances, retrying quietly when the
@@ -140,7 +141,7 @@
 </div>
 
 <section>
-	<h2>Implementation seeds (draft — finalized after approval)</h2>
+	<h2>Implementation seeds (FINAL — approved scope)</h2>
 	<p class="muted">Start the implementation session inside the plan's worktree (<code>agent-worktree resume balance-fpc-cache</code>), in the permission mode you intend.</p>
 	<p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
 
