@@ -21,14 +21,40 @@ const EXTENSION_PATH = path.resolve(__dirname, "../../dist/chrome")
 const PLAYGROUND_DIR = path.resolve(__dirname, "../../../playground")
 const FAUCET_DIR = path.resolve(__dirname, "../../../faucet")
 const CONFIG_PATH = path.resolve(__dirname, ".test-config.json")
-const AZTEC_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/node_modules/.bin/aztec")
+// ── Aztec toolchain resolution ──────────────────────────────────────────
+// Resolve from the repo's `@aztec/aztec.js` pin (the SAME rule CI's
+// setup-aztec action uses), NOT from the mutable `~/.aztec/current`
+// symlink: ANY `aztec-up install` on the machine re-points `current`
+// (other projects, other agents' worktrees), and @aztec/ethereum's
+// `resolveFoundryBinary` hard-codes `current/internal-bin/forge` AHEAD of
+// PATH — so a mismatched install there kills the L1 deploy for EVERY
+// version's boot ("forge script: the following required arguments were
+// not provided: --batch"), which the PATH prepend below cannot prevent.
+// The FORGE_BIN/ANVIL_BIN env overrides (that resolver's highest-priority
+// source) are exported at node spawn to close that hole. Falls back to
+// `current` only when the pinned version isn't installed, with a warning
+// logged at boot naming the fix.
+const AZTEC_PIN: string | undefined = (() => {
+	try {
+		const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, "../../package.json"), "utf8")) as {
+			dependencies?: Record<string, string>
+		}
+		return pkg.dependencies?.["@aztec/aztec.js"]
+	} catch {
+		return undefined
+	}
+})()
+const AZTEC_HOME = path.resolve(process.env.HOME || "~", ".aztec")
+const AZTEC_PINNED_ROOT = AZTEC_PIN ? path.join(AZTEC_HOME, "versions", AZTEC_PIN) : undefined
+const AZTEC_PIN_INSTALLED = !!AZTEC_PINNED_ROOT && fs.existsSync(path.join(AZTEC_PINNED_ROOT, "node_modules/.bin/aztec"))
+const AZTEC_ROOT = AZTEC_PIN_INSTALLED && AZTEC_PINNED_ROOT ? AZTEC_PINNED_ROOT : path.join(AZTEC_HOME, "current")
+const AZTEC_BIN = path.join(AZTEC_ROOT, "node_modules/.bin/aztec")
 // 5.0 renamed bundled bare binaries to aztec-* on PATH: `anvil` → `aztec-anvil` (drop-in).
-const ANVIL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/bin/aztec-anvil")
+const ANVIL_BIN = path.join(AZTEC_ROOT, "bin/aztec-anvil")
 // We spawn node_modules/.bin/aztec directly (AZTEC_BIN), bypassing the bin/aztec wrapper that
-// prepends `internal-bin` to PATH. Replicate that prepend so the node's L1 deploy uses the
-// version-matched bundled `forge`, not a system/CI foundry whose `forge script` args differ — 5.0
-// otherwise fails with "deploy_aztec_l1_contracts: the following required arguments were not provided".
-const AZTEC_INTERNAL_BIN = path.resolve(process.env.HOME || "~", ".aztec/current/internal-bin")
+// prepends `internal-bin` to PATH. Replicate that prepend so subprocesses that DO resolve from
+// PATH use the version-matched bundled binaries.
+const AZTEC_INTERNAL_BIN = path.join(AZTEC_ROOT, "internal-bin")
 
 /**
  * Port resolution. Falls back to today's defaults if the agent wrapper
@@ -358,6 +384,12 @@ export async function setup(project: TestProject) {
 		weStartedNode = false
 	} else {
 		console.log("[e2e-setup] Starting local Aztec network at", LOCAL_NODE_URL, "...")
+		if (!AZTEC_PIN_INSTALLED) {
+			console.warn(
+				`[e2e-setup] pinned aztec ${AZTEC_PIN ?? "<unknown>"} not found under ${AZTEC_HOME}/versions — ` +
+					`falling back to ~/.aztec/current, which may mismatch the repo pin. Fix: aztec-up install ${AZTEC_PIN ?? "<pin>"}`,
+			)
+		}
 		if (!fs.existsSync(AZTEC_BIN)) {
 			// See comment above the matching ANVIL_BIN gate for the rationale.
 			if (process.env.E2E_REQUIRE_SETUP === "1") {
@@ -406,6 +438,16 @@ export async function setup(project: TestProject) {
 					ETHEREUM_HOSTS: ANVIL_URL,
 					ANVIL_PORT: String(ANVIL_PORT),
 					AZTEC_PORT: String(AZTEC_PORT),
+					// Highest-priority override for @aztec/ethereum's
+					// resolveFoundryBinary: without these, the node's L1 deploy
+					// reads `~/.aztec/current/internal-bin/forge` regardless of
+					// which version's CLI is booting — a `current` re-pointed by
+					// any other install on the machine then breaks the deploy
+					// with a forge-CLI arg mismatch. Guarded by existsSync
+					// because the resolver THROWS on a set-but-missing override
+					// rather than falling back.
+					...(fs.existsSync(path.join(AZTEC_INTERNAL_BIN, "forge")) ? { FORGE_BIN: path.join(AZTEC_INTERNAL_BIN, "forge") } : {}),
+					...(fs.existsSync(path.join(AZTEC_INTERNAL_BIN, "anvil")) ? { ANVIL_BIN: path.join(AZTEC_INTERNAL_BIN, "anvil") } : {}),
 				},
 			},
 		)

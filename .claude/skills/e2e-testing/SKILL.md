@@ -64,15 +64,20 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   `anvil --port "$ANVIL_PORT"` even though global-setup already started ours on that port; the inner
   bind fails, the wrapper continues, the node boots fine (~30s). Do not diagnose port collisions from
   this line alone — check whether the node reached ready + deployments after it.
-- **Sandbox-boot signature `deploy_aztec_l1_contracts … required arguments were not provided` → `cli
-  … exited with code 2` → node never healthy → exit 86 is a MACHINE-LOCAL env failure, root cause
-  OPEN.** Observed deterministic across clean retries (2026-08-05, aztec 5.0.0-rc.1, node v24.18.0)
-  while CI ran the same suite green the same hour on the same node major — so it is not the code and
-  not the node version. The cosmetic os-error-98 line precedes it as usual (see above) — don't
-  conflate. A foreign long-lived `~/.aztec` 5.0.1 global sandbox (anvil :8545, not owned by the run)
-  was alive at the time; neither ruled in nor out. When this signature appears locally: don't chase
-  the port line, rely on the PR's required `network-e2e-status` CI gate, and note the repro here if
-  you root-cause it.
+- **Sandbox-boot signature `deploy_aztec_l1_contracts … required arguments were not provided:
+  --batch` → node never healthy → exit 86 = a `~/.aztec/current` DRIFT poisoning forge resolution
+  (ROOT-CAUSED + FIXED 2026-08-06).** `@aztec/ethereum`'s `resolveFoundryBinary` checks
+  `$FORGE_BIN` → **`~/.aztec/current/internal-bin/forge`** → `~/.foundry/bin` → PATH — the
+  `current` check outranks PATH, so global-setup's internal-bin PATH prepend never protected the L1
+  deploy. Any `aztec-up install` on the machine re-points `current`; an install carrying a newer
+  forge fork (whose `forge script` requires `--batch`) then breaks the deploy for EVERY version's
+  boot, deterministically, while CI stays green (fresh runners have `current` == the pin). Fix in
+  `global-setup.ts`: resolve the whole toolchain from the repo's `@aztec/aztec.js` pin
+  (`~/.aztec/versions/<pin>`, CI's own rule) and export `FORGE_BIN`/`ANVIL_BIN` into the node spawn
+  env (the resolver's highest-priority source). Diagnosis discipline: global-setup truncates
+  `[aztec-node]` lines to 200 chars — the missing-argument NAMES get cut off; reproduce the boot
+  manually to see full stderr before theorizing. The cosmetic os-error-98 line precedes this as
+  usual — don't conflate.
 - **Full-backup import has a bounded two-stage clock**: restore (slow on hosted runners) THEN possibly
   the app's own 30s recovery wait before it routes (`import.vue` completeImportWithRecovery). Any
   navigation wait below restore+30s+margin fails STRUCTURALLY whenever the recovery leg runs — it looks
