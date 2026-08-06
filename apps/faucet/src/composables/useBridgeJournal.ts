@@ -795,9 +795,14 @@ async function runReceiptRound(rec: DepositJournalRecord, gen: number): Promise<
 			// Debounced: a freshly-proposed tx can read dropped/unknown transiently.
 			droppedStreak++
 			if (droppedStreak >= 3) {
-				// No flag clear needed: the landed view is hash-scoped, and the hash dies here.
+				// Hash-scoping alone doesn't cover a SAME-hash resurrection (a restored backup can
+				// re-import the dropped hash into this record) - clear the flag with the hash.
 				patchRecord(rec.id, { claimTxHash: undefined })
-				setRuntime(rec.id, { attention: "error", note: "The claim was dropped - claim again from this card. Nothing was lost." })
+				setRuntime(rec.id, {
+					attention: "error",
+					note: "The claim was dropped - claim again from this card. Nothing was lost.",
+					confirmLandedTxHash: undefined,
+				})
 				return "stop"
 			}
 		} else {
