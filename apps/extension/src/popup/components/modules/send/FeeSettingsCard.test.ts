@@ -1069,6 +1069,93 @@ describe("FeeSettingsCard — init failure resilience (degraded settings + silen
 		}
 	})
 
+	test("an embedded flip during a held-open ensure never overwrites the dApp's embedded settings", async () => {
+		// A second same-profile subscriber prevents the release fence, so the
+		// old run's ensure resolves normally — its commit must still be
+		// discarded, or derivedSettings would replace the embedded v-model
+		// with a self-paid method.
+		vi.useFakeTimers()
+		try {
+			let resolveGas!: (v: unknown) => void
+			mocks.getGasBalances.mockImplementationOnce(() => new Promise((r) => (resolveGas = r)))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			const holder = useBalancesStore().subscribe(
+				{ profileId: profile.id, networkId: network.id, chainId: network.chainId, accountAddress: account.address },
+				{ legs: ["gas"], retry: false, txRefresh: false, peek: false },
+			)
+
+			await w.setProps({ modelValue: { paymentMethod: { kind: "embedded" } } })
+			await vi.advanceTimersByTimeAsync(0)
+			const emitted = (w.emitted<unknown[]>("update:modelValue") ?? []).length
+
+			resolveGas({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			await vi.advanceTimersByTimeAsync(0)
+			// The superseded run committed nothing: no further v-model pushes.
+			expect((w.emitted<unknown[]>("update:modelValue") ?? []).length).toBe(emitted)
+			holder.release()
+			w.unmount()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("a user pick during a recovery recommit's storage read survives a stale storage snapshot", async () => {
+		// The recommit's read RESOLVES with a pre-pick snapshot but its
+		// resumption is delayed past the pick: the stale saved record must not
+		// be reconciled over the user's choice (baseline is captured before
+		// the await, same rule as runInit).
+		vi.useFakeTimers()
+		// biome-ignore lint/suspicious/noExplicitAny: test-only global stub
+		const chromeAny = (globalThis as any).chrome
+		const origGet = chromeAny.storage.local.get
+		try {
+			storageBacking[FEE_METHOD_LS_KEY] = {
+				[account.address]: { type: "fj", title: "Fee Juice", subtitle: "public" },
+			}
+			mocks.getGasBalances.mockRejectedValueOnce(new Error("boom"))
+			mocks.getGasBalances.mockResolvedValue({ publicFeeJuice: "1000000000000000000", privateFeeJuice: null })
+			mocks.getFpcs.mockResolvedValue([{ id: "s1", type: 1, name: "Sponsor" }])
+
+			const w = mount(FeeSettingsCard, { props: baseProps(), global: { stubs: STUBS } })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(w.find('[data-testid="fee-init-degraded"]').exists()).toBe(true)
+
+			// Snapshot-then-park: the read completes with pre-pick data, the
+			// awaiting recommit resumes only when released.
+			let gateArmed = true
+			let release!: () => void
+			const gate = new Promise<void>((r) => {
+				release = r
+			})
+			chromeAny.storage.local.get = async (keys: unknown) => {
+				const result = await origGet(keys)
+				if (gateArmed) {
+					gateArmed = false
+					await gate
+				}
+				return result
+			}
+			// Retry recovers → recommit reads (parks holding the fj snapshot).
+			await vi.advanceTimersByTimeAsync(INIT_RETRY_BACKOFF_MS[0] + 50)
+
+			await w.find('[data-testid="pick-fpc"]').trigger("click")
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+
+			release()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(lastEmittedSettings(w)).toEqual({ paymentMethod: { kind: "fpc", fpcId: "s1" } })
+			w.unmount()
+		} finally {
+			chromeAny.storage.local.get = origGet
+			vi.useRealTimers()
+		}
+	})
+
 	test("an identity switch during a recovery recommit's storage read discards the late commit", async () => {
 		// A's retry recovery fires recommit; the user switches to B while it
 		// awaits storage. The resumed recommit must NOT re-open the gate with

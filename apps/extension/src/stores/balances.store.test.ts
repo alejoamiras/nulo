@@ -517,6 +517,28 @@ describe("balances store — the app-store belt", () => {
 })
 
 describe("balances store — LRU", () => {
+	it("a forced-pending key is never LRU-evicted — the profile fence can always clear its state", async () => {
+		const store = useBalancesStore()
+		const sub = store.subscribe(SCOPE_A, CAPS_CARD)
+		await store.ensure(SCOPE_A, { legs: ["gas"] })
+		let resolveRaw!: (v: unknown) => void
+		mocks.getGasBalances.mockImplementationOnce(() => new Promise((r) => (resolveRaw = r))).mockResolvedValue(BAL)
+		const handler = txAdd.mock.calls[0]?.[0] as (tx: unknown) => void
+		handler(settledTx("0xacct"))
+		// Another key keeps the profile alive so the release fences nothing.
+		const hold = store.subscribe(SCOPE_A2, CAPS_FEE)
+		sub.release()
+		// Flood well past the cap: the unsubscribed-but-forced key survives.
+		for (let i = 0; i < 40; i++) {
+			await store.ensure({ ...SCOPE_A2, accountAddress: `0x${i}` }, { legs: ["gas"] })
+		}
+		expect(store.entry(SCOPE_A)).toBeDefined()
+		resolveRaw({ publicFeeJuice: "900", privateFeeJuice: null })
+		await new Promise((r) => setTimeout(r, 10))
+		expect(store.entry(SCOPE_A)?.gas.display).toEqual({ publicFeeJuice: "900", privateFeeJuice: null })
+		hold.release()
+	})
+
 	it("subscribed keys are never evicted; unsubscribed LRU entries are", async () => {
 		const store = useBalancesStore()
 		const sub = store.subscribe(SCOPE_A, CAPS_FEE)

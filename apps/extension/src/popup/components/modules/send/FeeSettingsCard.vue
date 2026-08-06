@@ -424,12 +424,16 @@ const runInit = async () => {
 			if (e instanceof EnsureSuperseded) return
 			throw e
 		}
-		// Discard if the profile/network/chain/account switched mid-flight — the
-		// props watcher already fired a fresh init for the new identity.
-		// Everything past this guard is synchronous (no awaits), so the commit
-		// is atomic against the checked identity.
+		// Discard if the profile/network/chain/account switched mid-flight, a
+		// newer run took over, or the card flipped embedded-visible during the
+		// ensure (its watcher released the lease; committing here would open
+		// the gate and let derivedSettings overwrite the dApp's embedded
+		// v-model). Everything past this guard is synchronous (no awaits), so
+		// the commit is atomic against the checked state.
 		if (
 			!isMounted ||
+			myRun !== runSeq ||
+			(isCustomMethod.value && !useOwnMethod.value) ||
 			props.profile?.id !== reqProfileId ||
 			props.network?.id !== reqNetworkId ||
 			props.network?.chainId !== reqChainId ||
@@ -478,12 +482,16 @@ const recommit = async () => {
 	// The recovery targets the committed identity; if props moved on (or the
 	// card is embedded-visible), the identity/useOwnMethod watchers own it.
 	if (!recommitStillValid(scope)) return
+	// Baseline BEFORE the await (same rule as runInit): a user pick landing
+	// while the storage read is pending makes the selection differ from this
+	// baseline, so the reconcile is skipped instead of re-applying a stale
+	// storage snapshot over the pick.
+	const baseline = selectedMethod.value
 	const saved = (await storageLocalGet(FEE_METHOD_LS_KEY))[FEE_METHOD_LS_KEY] || {}
 	// Re-validate AFTER the await: an identity switch during the storage read
 	// must not let this late commit re-open the gate with the OLD identity's
 	// data (the switch closed it; only the new identity's init may commit).
 	if (!isMounted || committedScope.value !== scope || !recommitStillValid(scope)) return
-	const baseline = selectedMethod.value
 	commitFromEntry(scope, `${scope.profileId}|${scope.networkId}|${scope.chainId}|${scope.accountAddress}`, saved, baseline)
 }
 
@@ -521,9 +529,13 @@ watch([isCustomMethod, useOwnMethod], ([custom, own]) => {
 	// Entering the embedded-visible state (a dApp op's v-model flip lands
 	// here without any runInit call) releases the subscription, killing the
 	// store's retry loop for this key — today's retry-chain death when a
-	// retry tick hit the embedded early-return. The useOwnMethod watcher
+	// retry tick hit the embedded early-return. Bumping runSeq supersedes
+	// any in-flight run at its next checkpoint. The useOwnMethod watcher
 	// below is the revival path.
-	if (custom && !own) releaseSubscription()
+	if (custom && !own) {
+		runSeq += 1
+		releaseSubscription()
+	}
 })
 watch(useOwnMethod, async (val) => {
 	// Switching from embedded → "use my own" needs to load balances/fpcs

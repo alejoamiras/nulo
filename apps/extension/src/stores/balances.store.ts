@@ -236,7 +236,10 @@ export const useBalancesStore = defineStore("balances", () => {
 		const keys = Object.keys(entries.value)
 		if (keys.length <= MAX_CACHED_ENTRIES) return
 		const evictable = keys
-			.filter((k) => !subscribers.has(k) || subscribers.get(k)?.size === 0)
+			// Forced-pending keys are exempt (transient, fetch-bounded): evicting
+			// one would orphan its keyProfile row, so a later profile fence could
+			// no longer clear its forced state — a permanently stranded count.
+			.filter((k) => (!subscribers.has(k) || subscribers.get(k)?.size === 0) && !forcedGasPending.has(k))
 			.sort((a, b) => (lruTouch.get(a) ?? 0) - (lruTouch.get(b) ?? 0))
 		const excess = keys.length - MAX_CACHED_ENTRIES
 		const next = { ...entries.value }
