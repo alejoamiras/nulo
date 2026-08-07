@@ -206,7 +206,7 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 - **Codex (round 1, fresh, xhigh)**: `reject` — 2 blocking findings, both main-agent-verified and adopted (Sponsored-only collapse; fold deferred/safety-fixed). [audit-codex.md](audit-codex.md)
 - **Fable (round 1, fresh Plan agent)**: `conditional approve` — all 4 conditions adopted (F-1 via deferral+charter; F-2 table corrected + decoupled; F-3/F-4 pinned in-plan; F-5 via envelope). Advisories F-6–F-11 adopted. [audit-fable.md](audit-fable.md)
 - **Codex (final fresh-context pass on rev 2 + ledger)**: `reject` — 5 High (handoff race, fast-path custom-limits behavior change, FPC-identity binding, fingerprint completeness, cancellation caps) + 1 Medium (extractor contract impossible as written) + 1 Low (address-derivation misstatement). ALL adopted into revision 3 (ledger #11–14 + edits throughout). [audit-codex.md](audit-codex.md)
-- **Codex (re-verdict on revision 3, resumed session)**: _pending_
+- **Codex (re-verdict on revisions 3/3.1, resumed session)**: rev 3 → `reject` (one residual: cap admission not enforceable — cancel-oldest doesn't free non-preemptible capacity); rev 3.1 (atomic admission + coalesce-on-settle + job-count invariant test) → **`approve`** — "No remaining blocking contradiction or incomplete adoption found."
 
 ## ELI5 companion
 

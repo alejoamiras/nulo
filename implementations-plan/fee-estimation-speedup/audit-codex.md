@@ -45,4 +45,8 @@
 
 ## Re-verdict on revision 3 — resumed final-pass session
 
-_Recorded below when it lands._
+`reject (with blocking findings: the active-estimate cap is still not enforceable as specified)` — cancel-oldest cannot free capacity held by non-preemptible queued/in-flight jobs; repeated requests grow the queue past N (exploitable while the PXE write lock is occupied). Required an atomic admission contract: reject-newcomer, or cancel-oldest + defer/coalesce-newest until settlement, with a job-count invariant test. Confirmed the other six rev-3 adoptions "complete and coherent."
+
+## Re-verdict on revision 3.1 — same session
+
+`approve` — verbatim: "Revision 3.1 closes the remaining blocker. The atomic admission rule bounds actual unsettled work, correctly retains capacity for non-preemptible cancelled jobs, and admits coalesced replacements only after settlement. The job-count invariant test validates the resource — not token bookkeeping — and ledger row 15 accurately records the decision. No remaining blocking contradiction or incomplete adoption found."
