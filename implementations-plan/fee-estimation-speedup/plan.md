@@ -1,201 +1,204 @@
 # Plan — fee-estimation-speedup
 
-- **Status**: DRAFT — pending dual audit (codex + fable) + approval gate
-- **Tier**: `/blueprint mid` (rubric: blast radius HIGH — every tx's fee sizing; novelty LOW — upstream reference + in-repo precedent for every pattern; irreversibility LOW; migration NONE; external coupling LOW — pinned 5.0.1; security MEDIUM — authwit derivation is an authorization surface)
+- **Status**: REVISION 2 (post dual audit) — pending final fresh-context codex pass + approval gate
+- **Tier**: `/blueprint mid` (rubric: blast radius HIGH — every tx's fee sizing; novelty LOW; irreversibility LOW; migration NONE; external coupling LOW — pinned 5.0.1; security MEDIUM — authwit derivation is an authorization surface)
 - **eli5_mode**: artifact
-- **Recon**: [recon.md](recon.md) — read it first; every design choice below cites it
+- **Recon**: [recon.md](recon.md) · **Audits**: [audit-codex.md](audit-codex.md) (r1: reject — both blockers verified and folded in) · [audit-fable.md](audit-fable.md) (r1: conditional approve — all 4 conditions folded in)
+
+## Revision 2 — what changed and why
+
+The dual audit invalidated two pillars of the r1 draft; both auditors' findings were re-verified against source before adoption:
+
+1. **The FPC one-pass collapse is now canonical-Sponsored-only** (codex, blocking). PrivateFPC's Noir contract reads the tx's gas-settings envelope (`get_max_gas_cost` in `@alejoamiras/private-fee-juice`) inside `pay_fee` — Pass 1's real job is installing a *bounded* envelope before the FPC call simulates, not seeding gas numbers. PrivateFPC and user-added FPCs keep the two-pass. Canonical `SponsoredFPC.sponsor_unconditionally` is envelope-independent (verified in Noir source: sets fee payer + `end_setup()`, reads nothing) — the collapse ships for it alone.
+2. **The discovery fold does not ship in this plan** (fable F-1 + F-2, codex Critical 2 — convergent). As drafted it widened the auto-sign surface (a malicious *user-registered* FPC's `CallAuthorizationRequest`s would be auto-signed where today's app-only discovery structurally denies them), and in conservative mode it saves **zero** simulations (the collapse alone already delivers dApp 3→2). Only its mechanical prep lands now; the fold itself moves to a measurement-gated follow-up charter (below) with the F-1 resolution (app-only sim A) as its entry condition.
 
 ## Goal
 
 Cut the number of full ACVM simulations behind every "estimating fee" spinner and every post-confirm dead gap, **without changing what the user sees or how fees are chosen**. Simulations are serialized (PXE write lock + upstream `SerialQueue`), so fewer sims is the only lever.
 
-Committed sim-count targets (default fee method `fpc`, asserted by unit tests):
+Committed sim-count targets (unit-test-asserted; `fpc` kind = both Sponsored and PrivateFPC):
 
 | Flow | Today | After | Mechanism |
 |---|---|---|---|
-| Send estimate | 2 sims | **1** | FPC one-pass collapse (Phase 3) |
-| dApp op estimate | 3 sims | **2** | collapse + discovery fold (Phases 3–4) |
-| dApp confirm (reuse hit) | 3 sims | **0** | estimate→confirm reuse (Phase 5) |
-| dApp confirm (reuse miss) | 3 sims | 2 | falls back to the estimate pipeline |
-| Every sim/prove | +1 node RPC (`[SYNC-DEBUG]`) | +0 | deletion (Phase 1) |
+| Send estimate — canonical Sponsored FPC (default everywhere except mainnet) | 2 sims | **1** | Sponsored-only collapse (Phase 3) |
+| Send estimate — PrivateFPC (mainnet default) | 2 sims | 2 | unchanged **by design** (envelope-dependent two-pass is load-bearing) |
+| dApp op estimate — canonical Sponsored | 3 sims | **2** | collapse (Phase 3) |
+| dApp op estimate — PrivateFPC / user-added | 3 sims | 3 | follow-up target: 2 (charter below) |
+| dApp confirm — `fj`/`fpc` standard mode, reuse hit | 3 sims | **0** | estimate→confirm reuse (Phase 4) |
+| dApp confirm — reuse miss | 3 sims | = estimate cost | fingerprint/drift ladder fail-closed |
+| Every sim/prove | +1 node RPC (`[SYNC-DEBUG]`) | +0 | deletion (Phase 1) — also shortens the exclusive-lock hold (both blocks sit inside `withPxeWrite`) |
 
-Non-goals (owner-directed): no UX/product changes; no `getNodeInfo` caching; no approval-window pipeline consolidation; no `/harden` scheduling (owner accepted skip). Out of scope by design: `EmbeddedStrategy`/embedded-FPC cap path, NO_FROM/`default_entrypoint`, `fjwc` reuse eligibility — all keep today's behavior.
+Non-goals (owner-directed): no UX/product changes; no `getNodeInfo` caching; no approval-window pipeline consolidation; no `/harden` scheduling. Out of scope by design: `EmbeddedStrategy`/embedded-FPC cap path, NO_FROM/`default_entrypoint`, `fjwc` reuse eligibility, and — this revision — the discovery-fold pipeline change.
 
 ## Architecture & Implementation
 
 ### Proposed architecture
 
-Three structural moves, all inside `apps/extension/src/wallet/services/execution/` + `packages/aztec-runtime/`, reusing the machinery recon mapped:
-
-1. **`FpcStrategy` collapses to the `fjwc` single-pass shape.** Recon facts 3–4: `buildStandard` already applies `GasSettings.forEstimation()` sizing on every call, and both shipped FPC handlers (`pay_fee`, `sponsor_unconditionally`) take zero args and ignore `maxFee` — Pass 1 exists only to seed Pass 2's gas settings, which `forEstimation` sizing makes redundant. New shape: prepend `fpc.getFeePayload(...)` (inert placeholder `maxFee`) to actions → one `buildStandard(EXTERNAL)` → one sim (`skipFeeEnforcement: true`, as both passes already use) → compute final `maxFee` from measured gas → `finalizeGasLimits` → splice final fee payload + `originalActions` (preserving the audit-pinned mutation discipline verbatim).
-2. **Authwit discovery becomes a stage of the strategy pipeline, not a pre-pass.** `AuthwitDiscoverer` splits into (a) a sim runner and (b) a pure extractor `TxSimulationResult → AddPrivateAuthwitAction[]` (same `CallAuthorizationRequest` parse + `computeAuthWitMessageHash` + live-chain-identity assert). On the dApp path the strategy's own pipeline becomes: **sim A** (stubbed + `skipTxValidation` — the stub is the discovery mechanism, recon fact 5 — built with the *real* payment method and FPC payload, unlike today's hardcoded `PREEXISTING_FEE_JUICE` throwaway) → extract effects → if any, splice authwit actions → rebuild → **sim B** (unstubbed, validated — the sizing sim, preserving the in-repo "never size gas off a stub" stance, recon fact 6). No effects ⇒ sim B runs on the identical request. Send path is untouched (it never discovered authwits). Conservative mode is sim-count-neutral for `fj` dApp ops (2→2) and −1 for `fpc` (3→2); its value is one fewer build, a faithful discovery request, and being the enabler for the measurement-gated stretch (see Asks).
-3. **`OperationEstimateReuse` generalizes `TransferEstimateReuse`.** Same snapshot fields (`baseFeeFingerprint`, endpoint identity, profile, `pendingHashes`, TTL, single-shot consume), new input fingerprint: a canonical explicit-switch hash over the operation's full `Action[]` graph + fee settings (never `JSON.stringify` — codex-audit-pinned pattern, recon fact 18). `estimateOperationFee` stashes and returns `estimateId` (field already on the wire type, recon fact 9); the execute window records it per op and embeds it in the `Operation[]` payload at approve (the window closes before execution starts — a sibling RPC arg cannot work); `executeAztecSendTx` consumes inside the `runInSlot` scaffold, skipping discovery + `buildAndEstimate` on a hit. Eligibility: `fj`/`fpc`, standard execution mode only — the exact exclusions the existing cache documents.
-
-Supporting moves: delete the unconditional `[SYNC-DEBUG]` header/blockNumber round-trips (deletion, not flag-gating — `ILogger` has no level predicate, recon fact 12); estimate cancellation via an SW-side `AbortController` registry keyed by a per-estimate token with a new `cancelEstimate` RPC modeled on `cancelJob`'s id-keyed pattern (journal-free — estimates have no journal record, recon fact 11). Cancellation stops the next stage from starting; it cannot kill an in-flight ACVM run — stated honestly in tests and docs.
+1. **`FpcStrategy` grows a canonical-Sponsored fast path; the two-pass stays for everything else.** Branch condition (checked against `FpcService`-provided info, never dApp input): handler type `DefaultSponsoredFpc` AND address equal to the chain's canonical protocol Sponsored-FPC address. Fast path: prepend `fpc.getFeePayload(...)` → one `buildStandard(EXTERNAL)` → one sim (`skipFeeEnforcement: true`) → `finalizeGasLimits`. Two constraints from the audits, pinned in the new header comment: (a) **finalize args are FPC's own, not fjwc's** — `finalizeGasLimits(node, txReq, sim, padding, baseFees)` with the multiplier pre-baked into `baseFees` and NO `customLimits`/`feeMultiplier` params (copying fjwc's arg list would double-apply the multiplier and newly honor `op.fee.gasLimits` — a behavior change); keep Pass 1's `suggestGasLimits(txRequest, ctx.op.fee)` pre-sim call in the fast path for parity. (b) The header records the fable-verified status-quo fact that the shipped two-pass **never rebuilt after the final splice** — built bytes never carried a post-sim `maxFee` — which is what makes the placeholder-`maxFee` fast path byte-honest, and notes the limit-context shift (a budget-asserting `fpc`-kind contract fails estimation loudly under `forEstimation` limits; fail-loud is the accepted posture).
+2. **`OperationEstimateReuse` generalizes `TransferEstimateReuse`** — the audited rejection ladder + deps-injection shape reused, with these audit-hardened specifics:
+   - **Entry field list (exact, pinned here per fable F-3 / codex F3)**: inputs-fingerprint fields (below) + `profileId`, `baseFeeFingerprint`, `primaryEndpointId`, `primaryEndpointUrl`, `pendingHashes`, `builtAt`, **chain-identity snapshot (`l1ChainId`, `rollupVersion`)** (codex A2 — reuse bypasses `buildStandard`'s live-chain assert; consume re-fetches and fails closed) + built state `txRequest`, `nonce`, `feePaymentMethod`, **`txCalls`, `pendingPublicAuthwits`** (post-send bookkeeping: a reuse-hit tx granting a public authwit MUST still produce its auth-registry row — dedicated test). **Never cached**: `pxe`/`node`/`account`/`network` handles — consume re-resolves all four (the cross-profile fail-closed property depends on it).
+   - **Fingerprint scope (pinned per fable F-4 / codex F2)**: the **post-planner, pre-discovery, pre-payload** `Action[]` set (stash and consume fingerprint the same normalization point — stated invariant), canonically encoded via an explicit exhaustive switch over action kinds with a **strict value-type allowlist** for nested `args` (reject-unsupported, never best-effort), plus `networkId`, `accountAddress`, **`executionMode`**, **`opts.from`**, wallet `FeeSettings` (existing `fingerprintFeeSettings`) **and normalized `op.fee` FeeOptions** (`gasLimits`, `maxFeesPerGas`, `gasPadding`, `embeddedFeePayment`).
+   - **Consume order**: ownership/eligibility checks precede the single-shot delete where cheap, and a forged id can at worst evict-nothing/miss — never execute a mismatched op.
+3. **`estimateId` never touches `packages/wallet-bridge`** (fable F-5 + codex boundary critique — adopted, strengthened from r1). `estimateOperationFee` returns it on the (already-existing) `TransferFeeEstimate.estimateId` field; the popup holds it per op and passes it at approve via a **popup-privileged envelope on the `approveInteraction` RPC** (extension-local spec): `estimateIds?: (string | undefined)[]` aligned with the executable ops array. dApp-facing request types never see the field; nothing needs stripping because the shared `Operation` shape is untouched.
+4. **Estimate cancellation with a real resource contract** (fable F-6 / codex A3): SW-side registry keyed by caller-minted token, entries tagged with `profileId` at registration; `cancelEstimate(token)` no-ops silently on unknown/foreign tokens (existence non-disclosure, `cancelJob` parity); duplicate-token registration rejected; opportunistic TTL sweep (reuse-cache idiom) so a hung RPC can't leak controllers past SW restart; **cancel = abort-if-running AND evict-if-stashed** (cancel racing completion must not leave a signed `txRequest` cached). Stage-boundary `checkCancelled` before each build/sim/finalize; honest limitation stated: an in-flight ACVM run (or one queued inside `withPxeWrite`) cannot be killed — cancellation stops the *next* stage and prevents stashing.
+5. **Reuse-entry lifecycle beyond TTL** (fable F-10): interaction reject / execute-window close evicts that interaction's stashed entries. Retention posture (signed `txRequest` cached ≤5 min TTL in SW memory, matching the shipped Send-page precedent) is surfaced as Ask 4.
+6. **Mechanical prep for the follow-up, shipping now because it's a pure refactor**: split `AuthwitDiscoverer` into a sim-runner and a pure extractor (`TxSimulationResult → AddPrivateAuthwitAction[]`, unchanged parse + `computeAuthWitMessageHash` + live-chain assert), and thread `stubAccountAddresses` through `SimulateTxFn`/`ExecutionCoordinator.simulateTxTask` (opts-bag; plumbing below already exists end-to-end). Zero behavior change; call-sites keep today's choreography. The *pipeline fold itself* is deferred — see the follow-up charter.
 
 ### Key interfaces / types / schemas
 
-- `packages/wallet-bridge` `Operation` (dApp-send shapes): gains **optional** `estimateId?: string`. Popup-injected only; the SW treats it as an untrusted hint — consume validates the full fingerprint against the operation actually executing, so a forged/stale id degrades to a rebuild, never to executing something else.
-- `SimulateTxFn` (`fee/fee-strategy.ts:74-79`) + `ExecutionCoordinator.simulateTxTask`: opts gain `stubAccountAddresses?: string[]` (plumbing below the coordinator already exists end-to-end, recon fact 7).
-- `ExecutionService` spec/client: new `cancelEstimate(estimateToken: string): Promise<void>` passthrough; `estimateTransferFee`/`estimateOperationFee` accept an optional caller-minted token.
-- `FeeStrategyContext`: gains `discovery?: { extract: (sim: TxSimulationResult) => AddPrivateAuthwitAction[] }` (or equivalent) + `signal?: AbortSignal` for stage-boundary checks.
-- `IFpcHandler.getFeePayload(fpc, account, maxFee)` signature is **left unchanged** — the params are unused by both shipped handlers but a future budget-checking FPC (the embedded-cap class exists on-chain today) legitimately needs them; a doc comment records this.
+- `approveInteraction` (extension-local dApp-interaction spec): + optional `estimateIds` envelope (popup-privileged; index-aligned).
+- `ExecutionService` spec/client: + `cancelEstimate(token)`; `estimateTransferFee`/`estimateOperationFee` + optional caller token.
+- `SimulateTxFn` opts: + `stubAccountAddresses?: string[]` (prep; unused by strategies this plan).
+- `packages/wallet-bridge`: **no changes** (r1's `Operation.estimateId` dropped per audits).
+- `IFpcHandler.getFeePayload(fpc, account, maxFee)`: unchanged; doc comment records both the future budget-checking-FPC rationale AND the never-rebuilt-final-splice status-quo fact (fable F-11).
 
-### Data & control flow (target, default `fpc`)
+### Data & control flow (target)
 
-- **Send estimate**: `send.vue` → `useFeeEstimation` (cancel-on-refire) → `estimateTransferFee(token)` → planner → `FpcStrategy`: build(EXTERNAL, payload) → sim (validated, unstubbed) → finalize → stash reuse entry → return `estimateId`. **1 sim.**
-- **dApp estimate**: `execute/index.vue` → `useFeeEstimationMap` (cancel-on-refire) → `estimateOperationFee(token)` → strategy pipeline: build(real method + payload) → sim A (stub, `skipTxValidation`) → extract effects → [splice authwits → rebuild] → sim B (validated) → finalize → stash `OperationEstimateReuse` entry → return `estimateId`. **2 sims.**
-- **dApp confirm**: `approve()` embeds `estimateId` per op → `approveInteraction` → `executeOperations` → `executeAztecSendTx`: inside slot, `tryConsume(estimateId, op)` — hit ⇒ straight to `proveAndSend` (**0 sims**); miss ⇒ estimate pipeline (2 sims), then `proveAndSend`.
+- **Send estimate, canonical Sponsored**: `send.vue` → `useFeeEstimation` (token; cancel-on-refire) → `estimateTransferFee` → `FpcStrategy` fast path: build(EXTERNAL + payload) → sim (validated, unstubbed) → finalize → stash → return `estimateId`. **1 sim.**
+- **Send estimate, PrivateFPC**: unchanged two-pass. **2 sims.**
+- **dApp estimate**: `execute/index.vue` → `useFeeEstimationMap` (token; cancel-on-refire) → `estimateOperationFee` → discovery sim (app-only, stubbed — **unchanged**) → strategy (fast path or two-pass) → stash → return `estimateId`. **2 sims (Sponsored) / 3 (PrivateFPC).**
+- **dApp confirm**: `approve()` → `approveInteraction(requestId, executable, {estimateIds})` → `executeOperations` → `executeAztecSendTx`: inside `runInSlot`, `tryConsume(estimateId, op)` — hit ⇒ `proveAndSend` directly **with the full post-send tail intact** (`addTransaction(txCalls, …)` + `recordPendingAuthwits(pendingPublicAuthwits, hash)`); miss ⇒ estimate pipeline then `proveAndSend`. **0 sims on hit.**
 
 ### File-level change map
 
 | File | Change |
 |---|---|
-| `packages/aztec-runtime/src/pxe/service.ts` | delete both `[SYNC-DEBUG]` blocks (proveTx + simulateTx) |
-| `apps/extension/src/wallet/services/execution/fee/fpc-strategy.ts` | two-pass → single-pass; header comment rewritten to the new invariant |
-| `fee/fee-strategy.ts` | `SimulateTxFn` opts + `FeeStrategyContext` extensions |
-| `fee/strategies-structural.test.ts`, `fee/fee-structural-parity.test.ts` | deliberate pin updates: call counts, arg order, gas-slot composition (old-vs-new structural pins live here) |
-| `authwit-discoverer.ts` (+ test) | split runner/extractor; extractor takes a `TxSimulationResult` |
-| `execution-coordinator.ts` | thread stub opts |
-| `dapp-send-executor.ts` (+ test) | drop standalone discovery pre-pass in `estimateOperationFee` + `executeAztecSendTx`; consume reuse inside `runInSlot`; NO_FROM path untouched |
-| `transfer-estimate-reuse.ts` → generalized (new `operation-estimate-reuse.ts` or parameterized entry) (+ tests) | shared ladder; new action-graph fingerprint fn (+ exhaustive-switch unit tests) |
-| `transfer-executor.ts` | unchanged semantics; estimate token + signal wiring |
-| `service.ts` | estimate-cancel registry, `cancelEstimate`, reuse carve-out comment updated to the new scope |
-| `client.ts` / `spec.ts` | `cancelEstimate` passthrough + token params |
-| `packages/wallet-bridge/src/…` (Operation shape) | optional `estimateId` |
-| `apps/extension/src/composables/useFeeEstimation.ts` / `useFeeEstimationMap.ts` (+ tests) | mint token, cancel-on-refire/unmount |
-| `apps/extension/src/popup/windows/execute/index.vue` | record per-op `estimateId`, embed at approve |
+| `packages/aztec-runtime/src/pxe/service.ts` | delete both `[SYNC-DEBUG]` blocks |
+| `apps/extension/src/wallet/services/execution/fee/fpc-strategy.ts` | canonical-Sponsored fast path + rewritten invariant header; two-pass retained |
+| `fee/fee-strategy.ts`, `execution-coordinator.ts` | `SimulateTxFn` stub-opt threading (prep); `signal` stage-boundary support |
+| `fee/strategies-structural.test.ts` | pins updated: Sponsored fast path ×1/×1 + EXTERNAL arg; PrivateFPC two-pass pins RETAINED verbatim; finalize-arg fidelity pins |
+| `authwit-discoverer.ts` (+ test) | runner/extractor split (pure refactor; call-sites unchanged) |
+| `dapp-send-executor.ts` (+ test) | consume inside `runInSlot`; post-send tail on reuse hit; discovery choreography unchanged |
+| `transfer-estimate-reuse.ts` → + `operation-estimate-reuse.ts` (+ tests) | generalized ladder, entry + fingerprint per §2 |
+| `service.ts` | cancel registry + `cancelEstimate`; estimate stash wiring; carve-out comment updated |
+| `client.ts` / `spec.ts` | `cancelEstimate` + token params |
+| dApp-interaction `service.ts`/spec | `estimateIds` envelope; reject/close eviction hook |
+| `apps/extension/src/composables/useFeeEstimation.ts` / `useFeeEstimationMap.ts` (+ tests) | token mint, cancel-on-refire/unmount |
+| `apps/extension/src/popup/windows/execute/index.vue` | hold per-op `estimateId`, pass envelope at approve |
 
 ### Algorithms / non-obvious mechanics
 
-- **Action-graph fingerprint**: explicit `switch` over every `Action` kind (`call`, `encoded_call`, `add_capsule`, `add_extra_args`, `add_private_authwit`, `add_public_authwit`) hashing each field deterministically (stable field order, length-prefixed), plus network/account/fee-settings (reusing `fingerprintFeeSettings`). A new `Action` kind must fail the switch at compile time (`never` exhaustiveness) so it can't silently escape the fingerprint.
-- **Reuse rejection ladder** (inherited): TTL → fingerprint match → profile → endpoint id+url → base-fee re-fetch compare → pending-tx set. Same-batch drift (op #1 broadcasts between estimate and confirm of op #2) must trip the `pendingHashes` step — covered by a dedicated test.
-- **Discovery equivalence**: a test asserts the folded sim A discovers the same authwit set as today's standalone discovery for representative fixtures (recon fact 17: today's discovery builds with a hardcoded wrong payment method; the fold makes the request faithful — the assertion is "superset-faithful, equal on fixtures").
+- Fingerprint: exhaustive-switch canonical encoding (compile-time `never` guard on new `Action` kinds; strict nested-value allowlist, reject-unsupported), over the pinned normalization point (§2).
+- Ladder additions: chain-identity re-fetch compare (fail closed) alongside the inherited TTL/profile/endpoint/base-fee/pending-tx steps; same-batch drift covered because `recordTransaction` is awaited inside `proveAndSend` before `executeOperations` advances — pinned by a dedicated test.
+- Sponsored-canonical check: type + protocol-address equality from wallet-side FPC info; never trusts dApp/user input for the branch.
 
 ### Trade-offs & alternatives not taken
 
-- **Conservative gas sizing (sim B) over upstream's stub-gas single-sim.** Upstream sizes gas off the stubbed sim + 10% pad; our codebase explicitly refuses ("never for … gas estimation", recon fact 6). We keep our stance — semantics-preserving, zero fee-number drift risk — and collect real stub-vs-real gas deltas in Phase 6 to inform a possible follow-up. Rejected-for-now: adopt upstream parity immediately (would make every dApp estimate 1 sim, but changes gas numbers on an unquantified delta).
-- **Payload-embedded `estimateId` over a sibling RPC arg or SW-side correlation.** Forced by the window-closes-before-execution timing (recon fact 9). Rejected: keying by interaction `requestId` (one per window, not per op; discarded before execution).
-- **Deletion of `[SYNC-DEBUG]` over flag-gating.** Gating needs an `ILogger.isEnabled` predicate threaded through three packages for a debug line no test reads. Rejected: predicate plumbing (cost > value; can be reintroduced deliberately if wanted).
-- **Generalizing the reuse cache over a parallel copy-paste class.** Shared ladder + deps shape, distinct entry/fingerprint types. Rejected: full copy (duplicates the audited validation ladder — rot risk).
-- **PR mapping deviation from the pre-recon sketch** (was: collapse isolated last). Recon showed the collapse is near-vestigial-code-removal while the dApp surgery (fold + reuse) is the deep end — so PR B = collapse, PR C = fold + reuse. Surfaced as an Ask.
+- **Per-handler collapse over uniform collapse** (r1's uniform version was invalid for PrivateFPC — codex). PrivateFPC 2→1 is *not* achievable by this technique at all; its envelope dependency is contract-side.
+- **Fold deferral over fold-now** (fable's zero-benefit proof + auto-sign widening; codex independently proposed the safe app-only fold shape). Disagreement recorded in the ledger: codex's revised order included the app-only fold now; fable argued defer-entirely. Deferred — the follow-up charter adopts codex's app-only shape as the entry design, fable's conditions as its gate.
+- **Conservative sizing over upstream stub-gas parity** (unchanged from r1; both auditors endorsed; upstream disagrees with itself on the margin — wallets pad 10%, aztec-kit 0 — which is an argument for measuring first).
+- **`approveInteraction` envelope over `Operation.estimateId`** (both auditors; keeps the shared wire type clean and the field structurally unreachable from dApps).
+- **Deletion of `[SYNC-DEBUG]` over flag-gating**; **generalized ladder over copy-paste cache**; **outline B rejected** (see audits — repeats the PrivateFPC bug, unproven pad, one-PR risk concentration) and re-positioned as the possible measurement-gated convergence target.
+
+## Follow-up charter (NOT in this plan): discovery fold + single-sim estimates
+
+Entry conditions: Phase 6 measurement shows stub-vs-real gas deltas comfortably inside padding; owner accepts. Design constraints fixed by this plan's audits: sim A is **app-only** (no fee payload — preserves the fail-loud denial for FPC-originated authwit requests; fable F-1 option (a), codex's "fold onto the app-only first pass"); implemented as a `DiscoveryAwareEstimator` decorator owned by `dapp-send-executor`, NOT a `FeeStrategyContext` hook (strategies stay payment-only); adversarial-FPC test fixture required (an FPC whose payload emits `CallAuthorizationRequest` must fail estimation loudly, never get auto-signed); its own network-e2e milestone (`tx-sendTx-default.test.ts` at minimum). Prize: dApp PrivateFPC estimate 3→2 (merge discovery into pass 1), and — if stub gas is accepted — estimates converge toward 1 sim (outline B-lite).
 
 ## Phases
 
-PR mapping (GitHub stacked PRs, official `gh-stack` extension — compatibility with `dev`'s squash ruleset verified in Phase 0; classic chained PRs as fallback):
+PR mapping (stacked; Phase 0 verifies `gh-stack` — note the codex-vs-changelog public/private-preview dispute — fallback: classic chained PRs):
 **PR A** = Phases 0–2 · **PR B** = Phase 3 · **PR C** = Phases 4–6.
 
 ### Phase 0 — Preflight: gh-stack + baseline
 
-Install `gh extension install github/gh-stack`; verify a trivial stack against this repo's `dev` ruleset (squash for feature PRs, required checks on mid-stack PRs) on a scratch branch pair; record the workflow (or fall back to classic chained PRs) in `lessons/phase-0.md`. Capture baseline sim counts by running the existing structural tests and noting today's pinned call counts.
+`gh extension install github/gh-stack`; verify stacking against `dev`'s ruleset on a scratch branch pair (enablement may be required if codex's private-preview claim is right); record stack-vs-fallback in `lessons/phase-0.md`. Note baseline structural-test call counts.
 
-**Validation gate** — Commands: `gh stack --help` (or documented fallback decision); `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0 everywhere; stack-vs-fallback decision recorded. Layers: typecheck/lint/unit.
+**Gate** — `gh stack --help` (or recorded fallback decision); `bun run lint && bun run typecheck:all && bun run test` → all exit 0. Layers: typecheck/lint/unit.
 
 ### Phase 1 — Delete the `[SYNC-DEBUG]` round-trips (PR A)
 
-Remove both blocks in `packages/aztec-runtime/src/pxe/service.ts` (proveTx ~415-424, simulateTx ~452-459). No replacement logging that costs an RPC.
+Both blocks in `packages/aztec-runtime/src/pxe/service.ts`. No replacement logging that costs an RPC.
 
-**Validation gate** — Commands: `grep -rn "SYNC-DEBUG" packages/ apps/ | wc -l` → `0`; `bun run lint && bun run typecheck:all && bun run test`. Pass: zero matches, exit 0. Layers: typecheck/lint/unit.
+**Gate** — `grep -rn "SYNC-DEBUG" packages/ apps/ | wc -l` → 0; `bun run lint && bun run typecheck:all && bun run test` → exit 0. Layers: typecheck/lint/unit.
 
 ### Phase 2 — Estimate cancellation (PR A)
 
-SW-side: per-token `AbortController` registry in `ExecutionService`; `cancelEstimate(token)` RPC (id-keyed, journal-free, `rpc-cancel.ts` boundary translation reused); stage-boundary `checkCancelled` in the estimate pipelines (before each build / sim / finalize — never mid-sim, stated honestly). A cancelled estimate must NOT stash a reuse entry. Popup-side: `useFeeEstimation`/`useFeeEstimationMap` mint the token, fire `cancelEstimate` on debounce re-fire and unmount. Registry entries removed on completion/cancel (bounded).
+Per architecture §4 (profile-tagged registry, duplicate rejection, TTL sweep, abort-and-evict, silent no-op on foreign tokens, stage-boundary checks, no-stash-on-cancel). Popup: token mint + cancel on refire/unmount.
 
-**Validation gate** — Commands: `bun run --cwd apps/extension vitest run src/wallet/services/execution src/composables/useFeeEstimation.test.ts src/composables/useFeeEstimationMap.test.ts` then `bun run lint && bun run typecheck:all && bun run test`. Pass: new cancel tests green (cancel-before-pipeline idiom from `transfer-executor.test.ts:170-186`; no-stash-on-cancel; registry cleanup), full suite exit 0. Layers: typecheck/lint/unit.
+**Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution src/composables` then `bun run lint && bun run typecheck:all && bun run test`. Pass: cancel-before-pipeline, no-stash-on-cancel, foreign-token no-op, duplicate-rejection, evict-on-cancel-race tests green; full suite exit 0. Layers: typecheck/lint/unit.
 
-### Phase 3 — FPC one-pass collapse (PR B)
+### Phase 3 — Canonical-Sponsored FPC fast path (PR B)
 
-Rewrite `FpcStrategy.buildAndEstimate` to the single-pass shape (architecture §1). Preserve the `originalActions` capture/splice discipline verbatim. Update `strategies-structural.test.ts` pins deliberately: `buildStandard` ×1 with `EXTERNAL`, `simulateTxTask` ×1, and add the **old-vs-new structural pin**: final `txRequest.txContext.gasSettings` composition (totalGas/teardown/baseFee slots via the sentinel idiom) and final action ordering (fee payload first, then `originalActions`) match the two-pass output shape. Send-page estimate sim count drops 2→1 (asserted).
+Per architecture §1. Structural pins: fast path `buildStandard` ×1 (EXTERNAL) + `simulateTxTask` ×1; **PrivateFPC/user-added pins retained verbatim** (two-pass unchanged); finalize-arg fidelity (no `customLimits`, no double multiplier); old-vs-new gas-slot sentinel pin for the fast path.
 
-**Validation gate** — Commands: `bun run --cwd apps/extension vitest run src/wallet/services/execution/fee` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/transfers.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` (Sponsored-FPC-paid transfer confirmed on-chain + dApp execute with real proof). Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
+**Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution/fee` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/transfers.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` (both Sponsored-FPC-paid, prover-ON canary pair). Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
 
-### Phase 4 — Discovery fold (PR C)
+### Phase 4 — dApp estimate→confirm reuse (PR C)
 
-Split `AuthwitDiscoverer` into runner + pure extractor; thread `stubAccountAddresses` through `SimulateTxFn`/coordinator; make the dApp-path strategy pipeline run sim A (stub + `skipTxValidation`, real method + payload) → extract → conditional splice/rebuild → sim B (validated, sizing). Remove the standalone pre-pass from `estimateOperationFee` and `executeAztecSendTx`. NO_FROM and `EmbeddedStrategy` opt-outs untouched. Discovery-equivalence test (architecture §Algorithms).
+Per architecture §2–3, §5. Tests pin: every ladder exit incl. chain-identity drift + same-batch `pendingHashes`; consume-hit skips discovery + `buildAndEstimate` AND still runs `addTransaction` + `recordPendingAuthwits` (the auth-registry row must exist — fable F-3's silent-break scenario); forged/foreign `estimateId` ⇒ miss/no-evict; reject/window-close eviction; fingerprint normalization-point invariant (stash and consume hash the same set).
 
-**Validation gate** — Commands: `bun run --cwd apps/extension vitest run src/wallet/services/execution` then `bun run lint && bun run typecheck:all && bun run test`. Pass: updated structural pins green (dApp `fpc` estimate: builds ×2, sims ×2; `fj`: ×2/×2), extractor + equivalence tests green, full suite exit 0. Layers: typecheck/lint/unit.
+**Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution src/popup/windows/execute` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`. Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
 
-### Phase 5 — dApp estimate→confirm reuse (PR C)
+### Phase 5 — Mechanical prep: discoverer split + stub-opt threading (PR C)
 
-Generalized reuse cache + action-graph fingerprint (+ exhaustive-switch compile guard); `estimateOperationFee` stashes + returns `estimateId`; `execute/index.vue` embeds per-op `estimateId` at approve; `executeAztecSendTx` consumes inside `runInSlot`; eligibility `fj`/`fpc` standard mode; cancelled estimates never stash (ties to Phase 2). Update the `service.ts` carve-out comment to the new scope.
+Per architecture §6. Pure refactor: identical choreography, identical sim options, call-sites updated mechanically; extractor unit-tested standalone on recorded `TxSimulationResult` fixtures.
 
-**Validation gate** — Commands: `bun run --cwd apps/extension vitest run src/wallet/services/execution src/popup/windows/execute` then `bun run lint && bun run typecheck:all && bun run test`. Pass: full rejection-ladder tests (every exit, incl. same-batch `pendingHashes` drift), consume-path pin (discovery + `buildAndEstimate` NOT called on hit — `transfer-executor.test.ts:121` idiom), forged/stale-id degrades-to-rebuild test, full suite exit 0. Layers: typecheck/lint/unit.
+**Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution` then `bun run lint && bun run typecheck:all && bun run test`. Pass: zero pin changes needed in `strategies-structural.test.ts` (proof of no behavior change); full suite exit 0. Layers: typecheck/lint/unit.
 
 ### Phase 6 — End-to-end validation + stub-gas measurement (PR C)
 
-Full gates: `bun run audit:vue`; `bun run test:e2e` (smoke — execute window + composables were touched); **full** `bun run e2e:agent` (network suite; includes the canary pair and the dApp sendTx files). Then the measurement task: a throwaway instrumented run (local only, not committed) logging sim A (stub) vs sim B (real) `gasUsed` for representative ops; record the deltas in `lessons/phase-6.md` — this is the data for the deferred stub-gas stretch decision, not an implementation.
+`bun run audit:vue`; `bun run test:e2e` (smoke — popup surfaces touched); **full** `bun run e2e:agent`. Measurement task (throwaway, uncommitted): log stubbed-discovery vs validated-strategy `gasUsed` per dApp op across representative flows; record the delta table in `lessons/phase-6.md` — the data for the follow-up charter's entry condition.
 
-**Validation gate** — Commands: `bun run audit:vue && bun run test:e2e && bun run e2e:agent`. Pass: all exit 0 (known-skipped network cases per `network-test-triage` remain skipped, not newly red); measurement table present in lessons. Layers: typecheck/lint/unit + smoke e2e + full network e2e.
+**Gate** — `bun run audit:vue && bun run test:e2e && bun run e2e:agent` → all exit 0 (pre-existing triaged skips remain skips); measurement table present. Layers: all.
 
 ## Security & Adversarial Considerations
 
-- **Threat model**: a malicious dApp (hostile `Operation` payloads via the RPC bridge), a compromised popup renderer is out of scope (it already holds approval power), and ourselves (fee-sizing bugs costing users money or stranding txs).
-- **Authwit surface (the sharp edge)**: discovered authwits become real signatures via `account.createAuthWit` at build time. The fold must not widen what gets auto-signed: the extractor keeps the exact `CallAuthorizationRequest.fromFields` parse + `computeAuthWitMessageHash` + live-chain-identity assertion (the F-012/A-01 V-01 pattern) — pinned by the discovery-equivalence test. Sim A runs with the *real* fee payload, so a hostile payload can't cause authwits to be derived for calls that aren't in the tx being signed.
-- **Reuse-cache integrity**: `estimateId` is SW-minted (`crypto.randomUUID`), single-shot, TTL-bounded; the consume path re-validates the full action-graph fingerprint against the operation actually executing plus profile/endpoint/base-fee/pending-tx drift. A dApp-forged or replayed id can only cause a cache miss → full rebuild. The fingerprint's exhaustive switch fails compilation on new `Action` kinds — no silent field escapes. `ExecutionFence` stays confirm-time-captured, never cached.
-- **No stub output ever reaches proving**: stub sims produce only `AddPrivateAuthwitAction` hashes; gas is sized exclusively from validated unstubbed sims; the reused `txRequest` at confirm is the validated build. Test-pinned.
-- **Cancellation**: id-keyed, profile-scoped like `cancelJob`; cancelling an estimate can't touch journalled executions; registry is bounded and cleaned up.
-- **Input validation**: all popup/dApp-supplied fields crossing to the SW (`estimateId`, token) are treated as untrusted strings — length-capped, used only as map keys.
-- **Least privilege / supply chain / crypto**: no new dependencies, no workflow changes, no crypto code — all hashing via existing in-repo fingerprint utilities and `@aztec/*` 5.0.1 primitives already pinned. Lockfile untouched except nothing.
-- **Domain risks**: front-running/replay unaffected (nonce semantics unchanged — reuse carries the estimate-time `Fr.random()` nonce exactly as the shipped Send reuse does); fee-griefing bounded by unchanged `gasPadding` 1.05 and `predictedWorstMinFees` basis; censorship/reorg posture unchanged.
+- **Threat model principals**: a malicious dApp (hostile `Operation` payloads); a **malicious user-registered FPC** (arbitrary contract behind an ABI-shape check — added per fable F-1/codex C2); ourselves (fee-sizing bugs).
+- **Authwit surface: unchanged by this plan.** Discovery keeps today's app-only, fee-payload-excluded build — an FPC-originated `CallAuthorizationRequest` still produces a loud validated-sim failure, never an auto-signed authwit. The extractor split preserves the exact parse + message-hash + live-chain assertion. The fold that would touch this surface is deferred with its safety design fixed in the charter.
+- **Reuse-cache integrity**: SW-minted UUID tokens; single-shot; TTL + reject/close eviction; consume re-validates fingerprint (pinned normalization point, strict value allowlist) + profile + endpoint + chain identity (fail-closed re-fetch) + base fee + pending set; entries carry no live handles; `ExecutionFence` stays confirm-time. Forged ids: miss or no-op — the `estimateIds` envelope is popup-privileged and never dApp-reachable (no shared-type field at all).
+- **Bookkeeping integrity on reuse hits**: `txCalls` + `pendingPublicAuthwits` ride the entry so activity records and the auth registry are written identically to the non-reuse path (dedicated test — a missing auth-registry row was the identified silent break).
+- **Fee correctness**: PrivateFPC's envelope-dependent path untouched; Sponsored fast path is envelope-independent by verified contract source; padding (1.05) and `predictedWorstMinFees` basis unchanged; no stub output ever feeds sizing or proving in this plan.
+- **Cancellation**: profile-gated, existence-nondisclosing, duplicate-rejecting, TTL-swept, bounded.
+- **Least privilege / supply chain / crypto**: no new dependencies, no workflow/token changes, no crypto code; `@aztec/*` stays exact-pinned 5.0.1.
 
 ## Assumptions
 
-### Facts (verified — see recon.md for file:line)
+### Facts (verified — recon.md + audit verifications)
 
-1. Both shipped FPC handlers ignore `account`/`maxFee` and take no args (`pay_fee`, `sponsor_unconditionally`) — recon fact 4.
-2. `buildStandard` unconditionally applies `forEstimation` gas sizing via `NuloAccount.buildTxExecutionRequest` → `completeFeeOptions({forEstimation: true})` — recon fact 3.
-3. All Nulo sims already run kernel-less (`skipKernels: true` upstream default, never overridden) — recon fact 1.
-4. `TxSimulationResult` exposes `offchainEffects` + `gasUsed` off one object at 5.0.1 — recon fact 2.
-5. `stubAccountAddresses` plumbing exists end-to-end below the coordinator; the coordinator drops it — recon fact 7.
-6. `TransferFeeEstimate.estimateId` exists on the wire type, unpopulated on the dApp path; no per-op identity survives approve (window closes, fire-and-forget) — recon fact 9.
-7. `cancelJob` is journal-gated and no-ops for estimates; no `AbortSignal` crosses the messaging layer — recon fact 11.
-8. `ILogger` has no level predicate; the `[SYNC-DEBUG]` RPCs fire before any filtering; no test reads those lines — recon fact 12.
-9. Composition tests cannot cover fee estimation (shallow-PXE ∧ bb-free ∧ no-simulate rules); the unit idiom for call-count pins already exists in `strategies-structural.test.ts` — recon facts 13–14.
-10. GitHub stacked PRs are in public preview with the official `github/gh-stack` extension — recon §Environment.
+1. PrivateFPC computes `max_gas_cost` from the tx gas-settings envelope in-contract (`@alejoamiras/private-fee-juice`; codex C1, main-agent verified). Canonical `SponsoredFPC.sponsor_unconditionally` reads nothing from it (Noir source verified).
+2. `buildStandard` unconditionally applies `forEstimation` sizing (`nulo-account.ts:133-137`).
+3. All sims run kernel-less by upstream default; `TxSimulationResult` exposes `offchainEffects` + `gasUsed` at 5.0.1.
+4. Users can register arbitrary FPC addresses (`FpcService.addFpc`, ABI-shape validation only) — the F-1 principal.
+5. Today's discovery build is app-only (`PREEXISTING_FEE_JUICE`, no payload) and stubbed; the shipped two-pass never rebuilds after the final splice (built bytes never carried a post-sim `maxFee`) — fable-verified.
+6. Reuse-hit confirms must still run `addTransaction` + `recordPendingAuthwits` (`dapp-send-executor.ts:453-470`); `recordTransaction` is awaited inside `proveAndSend`, making same-batch pending-hash visibility sequential.
+7. `estimateId` exists on `TransferFeeEstimate`; the execute window closes before execution starts (fire-and-forget `approveInteraction`).
+8. `cancelJob` is journal+profile-gated and no-ops for estimates; no `AbortSignal` crosses the messaging layer.
+9. `ILogger` has no level predicate; the `[SYNC-DEBUG]` RPCs fire before filtering, inside the exclusive write lock; no test reads those lines.
+10. Sim-count pins live at the unit layer (`strategies-structural.test.ts` idiom); composition tests are prohibited for this surface.
 
 ### Inferences (attackable)
 
-1. `skipTxValidation: true` does not change `gasUsed` for a tx that needs no authwits (sim B exists precisely so this only matters for the no-effects fast-path equivalence; if wrong, sim B still corrects it). Confidence: moderate.
-2. The FPC fee-payload calls never require caller authwits (empirical: today's validated, unstubbed Pass-2 sims succeed with no discovery over the payload). Confidence: high.
-3. Sim A with the real payment method + payload discovers a superset-faithful (equal on our fixtures) authwit set vs today's `PREEXISTING_FEE_JUICE` throwaway build. Confidence: high; test-pinned in Phase 4.
-4. Collapsing FPC to one pass leaves the final `gasSettings`/`maxFee` within normal estimate variance (both passes already ran `skipFeeEnforcement`; `finalizeGasLimits` recomputes from measured gas either way). Displayed fee numbers may shift marginally — surfaced as Ask 3. Confidence: high for correctness, certain for "numbers may shift".
-5. `gh-stack` works under `dev`'s ruleset (squash-for-feature-PRs + required checks). Confidence: low — that's why Phase 0 verifies before anything lands; fallback is classic chained PRs.
+1. The Sponsored fast path's single sim yields `gasUsed`/`maxFee` within normal estimate variance of the two-pass (envelope-independence verified at the contract; `finalizeGasLimits` recomputes from measured gas either way). Confidence: high. Displayed numbers may shift marginally — Ask 3.
+2. `gh-stack` works under `dev`'s ruleset (public-vs-private preview disputed between the GitHub changelog and codex's doc read). Confidence: low; Phase 0 verifies, fallback exists.
+3. The canonical-address check (type + protocol address) is a stable discriminator across network resets (protocol addresses are chain-derived, re-verified per `aztec-update` runbook on resets). Confidence: moderate.
 
 ### Asks (approval-gate decisions)
 
-1. **Stub-gas stretch**: defer the upstream-parity single-sim mode (size gas off the stubbed sim + pad) to a possible follow-up, decided on Phase 6's measured deltas? **Recommendation: defer + measure.**
-2. **PR mapping deviation**: PR B = FPC collapse, PR C = fold + reuse (recon inverted the risk ranking vs the pre-recon sketch you approved). **Recommendation: accept.**
-3. **Marginal fee-number drift**: the collapse computes `maxFee` from one sim instead of two — displayed estimates may differ by small amounts (same padding, same fee basis). Confirm this counts as "backend-only" under your no-UX-changes constraint. **Recommendation: accept.**
+1. **Stub-gas / discovery-fold follow-up**: defer per the charter, decided later on Phase-6 data? **Recommendation: defer** (both auditors concur).
+2. **PR mapping**: A = quick wins, B = Sponsored collapse, C = reuse + prep + validation. **Recommendation: accept.**
+3. **Marginal fee-number drift** on the Sponsored fast path (mainnet PrivateFPC now fully unchanged). **Recommendation: accept.**
+4. **Signed-artifact retention posture**: dApp reuse entries hold a fully-signed `txRequest` in SW memory ≤5-min TTL (Send-page precedent), now with reject/close eviction. **Recommendation: accept as stated.**
 
 ## Decision ledger
 
 | # | Decision | Chosen | Rejected | Source | Status |
 |---|---|---|---|---|---|
-| 1 | Gas sizing basis | validated unstubbed sim (in-repo stance) | upstream stub-gas + pad (now) | recon facts 5–6 | open Ask 1 (defer+measure) |
-| 2 | estimateId transport | embedded in `Operation[]` payload | sibling RPC arg; requestId correlation | recon fact 9 | settled |
-| 3 | SYNC-DEBUG | delete | flag-gate via new `ILogger` predicate | recon fact 12 | settled |
-| 4 | Reuse cache shape | generalize ladder, new entry+fingerprint | parallel copy | recon fact 18 | settled |
-| 5 | PR ordering | A=quick wins, B=collapse, C=fold+reuse | collapse-last (pre-recon sketch) | recon facts 3–4 | open Ask 2 |
-| 6 | `IFpcHandler` signature | keep unused params + doc | drop params | recon fact 4 (embedded-cap contrast) | settled |
-| 7 | Sim-count test layer | unit (`strategies-structural` idiom) | composition | recon facts 13–14 | settled |
-
-(Audit outcomes appended below as they land.)
+| 1 | Gas sizing basis | validated unstubbed sims only | upstream stub-gas + pad (now) | recon 5–6; both audits endorse | settled (measure in Ph. 6) |
+| 2 | FPC collapse scope | canonical Sponsored only | uniform collapse (r1 — invalid for PrivateFPC) | codex C1 (verified) | settled |
+| 3 | Discovery fold timing | **defer to charter** (prep only now) | fold-now conservative (r1); codex's app-only-fold-now | fable F-1/F-2; codex C2 | settled; **residual disagreement recorded**: codex would fold (app-only) now, fable defers — deferral chosen (zero sim benefit now, one less risk surface); codex's shape becomes the charter design |
+| 4 | estimateId transport | `approveInteraction` popup-privileged envelope | `Operation.estimateId` (r1); sibling RPC; requestId correlation | fable F-5; codex boundary | settled |
+| 5 | SYNC-DEBUG | delete | flag-gate | recon 12 | settled |
+| 6 | Reuse cache shape | generalized ladder; entry list + fingerprint scope pinned in-plan | parallel copy; r1's underspecified "same fields" | fable F-3/F-4; codex F2/F3/A2 | settled |
+| 7 | PR ordering | A=quick wins, B=collapse, C=reuse+prep | r1 mapping (fold in C); pre-recon sketch | fable | open Ask 2 |
+| 8 | `IFpcHandler` signature | keep + dual-fact doc comment | drop params | fable F-11; codex | settled |
+| 9 | Sim-count test layer | unit | composition | recon 13–14 | settled |
+| 10 | Outline B | rejected now; charter convergence target | adopt B | both audits | settled |
 
 ## Audit verdicts
 
-- Codex (round 1): _pending_
-- Fable (round 1): _pending_
-- Codex (final fresh-context): _pending_
-
-## Appendix — Competing outline B: upstream-parity rewrite
-
-*The deliberately different angle, per protocol. Goes to both auditors alongside the main draft.*
-
-**Thesis**: stop maintaining a divergent estimation pipeline; adopt the upstream `EmbeddedWallet.sendTx` shape wholesale. ONE stubbed, kernel-less, `skipTxValidation` sim per estimate — for every strategy, both flows — whose result yields authwits (offchain effects) AND gas (accept stub-derived `gasUsed`, raise `gasPadding` 1.05 → 1.10 to match upstream's margin). All four strategies share one pipeline (`build(real method + payload) → stub sim → splice authwits → rebuild`) differing only in payload preparation. Estimate→confirm reuse identical to outline A. Land as one PR (the strategies stop being independently shaped, so slicing fights the diff).
-
-**Wins**: every estimate (send AND dApp, all kinds) = **1 sim**; dApp confirm = 0/1; ~40% less strategy code; maximal upstream alignment (future 5.x bumps track `EmbeddedWallet` semantics directly).
-**Costs/risks**: sizes gas off stub sims against the explicit in-repo prohibition (unquantified delta — if stub gas under-measures beyond the pad, txs fail at proving/inclusion); changes displayed fee numbers more than outline A (padding bump); one big PR concentrates review risk; touches `fj`/`fjwc`/`embedded` semantics that outline A leaves untouched, widening the e2e surface that must re-prove.
-**When B beats A**: if Phase-6-style measurement shows stub-vs-real deltas are consistently ≪ 5%, outline A's sim B is pure waste and B's shape is where this should converge — A is then the safe first step of B, not a competitor.
+- **Codex (round 1, fresh, xhigh)**: `reject` — 2 blocking findings, both main-agent-verified and adopted (Sponsored-only collapse; fold deferred/safety-fixed). [audit-codex.md](audit-codex.md)
+- **Fable (round 1, fresh Plan agent)**: `conditional approve` — all 4 conditions adopted (F-1 via deferral+charter; F-2 table corrected + decoupled; F-3/F-4 pinned in-plan; F-5 via envelope). Advisories F-6–F-11 adopted. [audit-fable.md](audit-fable.md)
+- **Codex (final fresh-context pass on rev 2 + ledger)**: _pending_
 
 ## Seeds (DRAFT — finalized post-approval)
 
@@ -208,7 +211,7 @@ Full gates: `bun run audit:vue`; `bun run test:e2e` (smoke — execute window + 
 ### Alternative: `/loop 15m`
 
 ```
-/loop 15m Drive implementations-plan/fee-estimation-speedup forward. Never idle waiting for my input. Each firing: (1) Reality check: read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if PRs exist, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses (gh run watch <id> ≤10 min); use waits to review the diff or prep the next phase. (3) No task in hand? Pick the next pending phase from plan.md and start it; after each meaningful edit run bun run lint + targeted vitest for touched packages; commit → push. (4) Stuck or facing a decision you'd bring to the owner? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/phase-N.md. Hard limits: never merge to main/release branches, never publish/deploy, never expand scope beyond plan.md. (5) Same step failed 5 times? Stop retrying, reassess with codex. (6) Phase green = its validation gate in plan.md passes verbatim — run it, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=implementations-plan/fee-estimation-speedup/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review max --fix → commit fixes separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → wrap-up report. Keep the ASCII checklist visible each firing.
+/loop 15m Drive implementations-plan/fee-estimation-speedup forward. Never idle waiting for my input. Each firing: (1) Reality check: read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if PRs exist, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses (gh run watch <id> ≤10 min); use waits to review the diff or prep the next phase. (3) No task in hand? Pick the next pending phase from plan.md and start it; after each meaningful edit run bun run lint + targeted vitest for touched packages; commit → push. (4) Stuck or facing a decision you'd bring to the owner? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/phase-N.md. Hard limits: never merge to main/release branches, never publish/deploy, never expand scope beyond plan.md (the discovery fold is OUT of scope — charter only). (5) Same step failed 5 times? Stop retrying, reassess with codex. (6) Phase green = its validation gate in plan.md passes verbatim — run it, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=implementations-plan/fee-estimation-speedup/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review max --fix → commit fixes separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → wrap-up report. Keep the ASCII checklist visible each firing.
 ```
 
 Use exactly ONE per session — they don't compose.
