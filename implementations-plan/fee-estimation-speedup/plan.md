@@ -137,7 +137,7 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution` then `bun run lint && bun run typecheck:all && bun run test`. Pass: zero pin changes needed in `strategies-structural.test.ts` (proof of no behavior change); full suite exit 0. Layers: typecheck/lint/unit.
 
-### Phase 6 — End-to-end validation + stub-gas measurement (PR C)
+### Phase 6 — End-to-end validation + stub-gas measurement (PR C) ✓
 
 `bun run audit:vue`; `bun run test:e2e` (smoke — popup surfaces touched); **full** `bun run e2e:agent`. Measurement task (throwaway, uncommitted): log stubbed-discovery vs validated-strategy `gasUsed` per dApp op across representative flows; record the delta table in `lessons/phase-6.md` — the data for the follow-up charter's entry condition.
 
