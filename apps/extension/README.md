@@ -27,7 +27,7 @@ The sink. The four browser contexts (service worker, popup, content script, offs
 | `src/popup/` | Vue 3 popup app: `pages/` (L6), `components/modules/` (L4), `components/popups/` + `windows/` (L5), `constants/`, `utils/`. |
 | `src/components/` | L1 `core/`, L2 `ui/`, L3 `composite/` primitives, plus flat service-bound visuals. |
 | `src/composables/` | C0 pure utilities + C1 service hooks. |
-| `src/stores/` | Pinia state (`app.store.ts`, `popup.store.ts`, `cache.store.ts`). |
+| `src/stores/` | Pinia state (`app.store.ts`, `popup.store.ts`, `cache.store.ts`, `balances.store.ts` — the one popup-side owner of fee-juice-balance/FPC fetching; the fee cards are capability-declaring subscribers). |
 | `src/design/` | Design tokens + Storybook story files for the token catalog. |
 | `src/content-script/` | Content script + in-page injection bridge. |
 | `src/offscreen/` | Offscreen entry shim; pulls the PXE entry from `@nulo/aztec-runtime`. |

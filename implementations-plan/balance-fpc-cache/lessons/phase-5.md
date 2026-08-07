@@ -1,0 +1,7 @@
+# Phase 5 lessons — cleanup, docs, end-to-end proof
+
+- **The deferred Phase-2 move landed cleanly**: `withTimeout` + `INIT_FETCH_TIMEOUT_MS`/`INIT_RETRY_BACKOFF_MS` now live in `balances.store.ts` (their only runtime consumer); fee-helpers lost them; the three importing test files re-pointed. The `withTimeout` unit describe moved to the store suite (its fake-timer discipline is per-test there — `vi.useFakeTimers()` inside the test, `useRealTimers` in the shared afterEach).
+- **`formatGasBalance` dedup consolidated THREE copies, not two**: fee-helpers' export, GasBalanceCard's local `formatBalance`, and `fee-estimation.ts`'s own private `FEE_JUICE_DECIMALS`. Canonical home: `@/utils/fee-estimation` (utils layer — importable by both L4 cards without cross-feature-module coupling); fee-helpers re-exports so its call sites and tests are untouched.
+- **Local smoke needs the migration fixture ARMED**: `bun run test:e2e` against an `audit:vue`-built `dist/chrome` fails the backup-migration arming-contract test by design (unarmed repo-build runs may not silently skip). Local recipe: `VITE_NULO_E2E_MIGRATION_FIXTURE=1 bun run build` then `NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e` (mirrors `_smoke-e2e.yml`).
+- Gate results: `bun run audit:vue` clean (repo root); smoke 79 passed / 6 skipped / 0 failed; `bun run e2e:agent tests/e2e/network/fee-methods.test.ts` 5/5 (worktree-owned sandbox, exit 0).
+- Docs: `apps/extension/README.md` stores row names the balances store; `implementations-plan/index.md` bumped to implemented/in-review.

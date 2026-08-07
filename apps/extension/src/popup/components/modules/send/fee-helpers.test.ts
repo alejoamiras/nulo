@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import { FpcType } from "@/wallet/services/fpc/client"
-import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod, withTimeout } from "./fee-helpers"
+import { buildFeeMethods, buildSettings, FEE_JUICE_BRIDGE_URL, formatGasBalance, settingsForMethod } from "./fee-helpers"
 
 describe("fee-helpers/formatGasBalance", () => {
 	test("returns '0' for zero raw value", () => {
@@ -119,28 +119,6 @@ describe("fee-helpers/settingsForMethod — unknown balances (degraded init)", (
 	})
 })
 
-describe("fee-helpers/withTimeout", () => {
-	test("resolves through when the promise settles first", async () => {
-		await expect(withTimeout(Promise.resolve(42), 1_000, "x")).resolves.toBe(42)
-	})
-
-	test("rejects through when the promise rejects first", async () => {
-		await expect(withTimeout(Promise.reject(new Error("inner")), 1_000, "x")).rejects.toThrow("inner")
-	})
-
-	test("rejects with a labeled error once the deadline passes", async () => {
-		vi.useFakeTimers()
-		try {
-			const p = withTimeout(new Promise(() => {}), 1_000, "getGasBalances")
-			const assertion = expect(p).rejects.toThrow(/getGasBalances timed out/)
-			await vi.advanceTimersByTimeAsync(1_000)
-			await assertion
-		} finally {
-			vi.useRealTimers()
-		}
-	})
-})
-
 describe("fee-helpers/buildFeeMethods", () => {
 	test("emits exactly FJ + private_fpc placeholders when no fpcs are registered", () => {
 		const m = buildFeeMethods([])
@@ -246,5 +224,27 @@ describe("fee-helpers/buildFeeMethods", () => {
 describe("fee-helpers/FEE_JUICE_BRIDGE_URL", () => {
 	test("defaults to the tools fee-juice bridge", () => {
 		expect(FEE_JUICE_BRIDGE_URL).toBe("https://tools.nulo.sh")
+	})
+})
+
+describe("fee-helpers - null public balance (unknown wire slot)", () => {
+	test("'fj' with NULL public Fee Juice fails closed (settingsForMethod)", () => {
+		// The load-bearing guard: without it, flipping the producer to null turns
+		// today's accidental fail-closed ("0" fabricated on failure) into fail-open.
+		expect(
+			settingsForMethod({ type: "fj", title: "x", subtitle: "y" }, "normal", { publicFeeJuice: null, privateFeeJuice: null }),
+		).toBeUndefined()
+	})
+
+	test("buildFeeMethods disables fj on NULL public balance with the honest reason", () => {
+		const m = buildFeeMethods([], { publicFeeJuice: null, privateFeeJuice: null })
+		const fj = m.find((x) => x.type === "fj")
+		expect(fj?.disabled).toBe(true)
+		expect(fj?.disabledReason).toBe("couldn't check balance")
+	})
+
+	test("buildFeeMethods keeps 'no balance' for a CONFIRMED zero", () => {
+		const m = buildFeeMethods([], { publicFeeJuice: "0", privateFeeJuice: null })
+		expect(m.find((x) => x.type === "fj")?.disabledReason).toBe("no balance")
 	})
 })

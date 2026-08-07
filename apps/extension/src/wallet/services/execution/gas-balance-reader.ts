@@ -37,14 +37,22 @@ export interface GasBalanceReaderDeps {
 
 export class GasBalanceReader {
 	private cache = new Map<string, { result: GasBalances; fetchedAt: number }>()
-	/** Single-flight dedup for concurrent callers of the same key. */
-	private inFlight = new Map<string, Promise<GasBalances>>()
+	/** Single-flight dedup for concurrent callers of the same key. Flights
+	 *  carry the epoch they started under: a joiner from a later epoch must
+	 *  not receive the flight's VALUE — the stale-marking commit fence only
+	 *  demotes the cache entry, not the promise result crossing to joiners. */
+	private inFlight = new Map<string, { promise: Promise<GasBalances>; epoch: number }>()
 	/** Bumped on every invalidation. A compute that started before the bump
 	 *  caches its snapshot already-stale, so it can still be peeked (dimmed)
 	 *  but the next `get` recomputes. Global on purpose: over-staling a
 	 *  sibling account's concurrent compute costs one extra recompute and
 	 *  keeps the bookkeeping trivial. */
 	private epoch = 0
+	/** Bumped only by `evictAll`. A compute in flight across an eviction must
+	 *  not write its snapshot back at all — a stale-marked write-back would
+	 *  resurrect another profile's figures as peekable last-knowns, re-opening
+	 *  the leak eviction exists to close. */
+	private evictGeneration = 0
 
 	public constructor(private readonly deps: GasBalanceReaderDeps) {}
 
@@ -59,22 +67,27 @@ export class GasBalanceReader {
 
 		const inFlight = this.inFlight.get(cacheKey)
 		if (inFlight) {
-			if (!forceRefresh) {
+			if (!forceRefresh && inFlight.epoch === this.epoch) {
 				this.deps.logDebug(`getGasBalances: dedup — awaiting in-flight request for ${cacheKey}`)
-				return inFlight
+				return inFlight.promise
 			}
 			// A forced read must not JOIN a flight that may predate the
 			// invalidation that triggered it (post-settlement caller, pre-
-			// settlement snapshot). Wait it out, then re-enter: the epoch
-			// stamp has marked that flight's cache entry stale, so re-entry
-			// recomputes; if someone already restarted, their flight is joined.
+			// settlement snapshot), and a caller from a LATER epoch must not
+			// receive a value computed under the previous context (a profile
+			// switch mid-flight: the private leg reads the OLD profile's FPCs).
+			// Wait it out, then re-enter: the epoch stamp has marked that
+			// flight's cache entry stale, so re-entry recomputes; if someone
+			// already restarted, their current-epoch flight is joined.
 			const reenter = () => this.get(networkId, accountAddress, false)
-			return inFlight.then(reenter, reenter)
+			return inFlight.promise.then(reenter, reenter)
 		}
-		const pending = this.compute(cacheKey, networkId, accountAddress).finally(() => {
+		const epochAtStart = this.epoch
+		const evictGenAtStart = this.evictGeneration
+		const pending = this.compute(cacheKey, networkId, accountAddress, epochAtStart, evictGenAtStart).finally(() => {
 			this.inFlight.delete(cacheKey)
 		})
-		this.inFlight.set(cacheKey, pending)
+		this.inFlight.set(cacheKey, { promise: pending, epoch: epochAtStart })
 		return pending
 	}
 
@@ -112,10 +125,26 @@ export class GasBalanceReader {
 		}
 	}
 
-	private async compute(cacheKey: string, networkId: string, accountAddress: string): Promise<GasBalances> {
+	/** Cross-profile invalidation (active-profile switch). Unlike the
+	 *  same-profile sweeps above, the cached values were computed under
+	 *  ANOTHER profile's context (the private leg reads profile-filtered
+	 *  FPCs), so they must not survive as peekable last-knowns — the new
+	 *  profile would paint the old profile's figures dimmed. Evict outright. */
+	public evictAll(): void {
+		this.epoch += 1
+		this.evictGeneration += 1
+		this.cache.clear()
+	}
+
+	private async compute(
+		cacheKey: string,
+		networkId: string,
+		accountAddress: string,
+		epochAtStart: number,
+		evictGenAtStart: number,
+	): Promise<GasBalances> {
 		const chainId = await this.deps.getChainId(networkId)
 		const deps = await this.deps.getViewDeps(networkId, accountAddress)
-		const epochAtStart = this.epoch
 
 		// Two invocations ON PURPOSE, launched concurrently. The public read
 		// rides the direct-to-node fast arm while the PrivateFPC read executes
@@ -125,17 +154,19 @@ export class GasBalanceReader {
 		// Concurrency is the win over the old shape, which serialized the
 		// private read behind the public round-trip.
 		this.deps.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
-		const publicPromise = (async (): Promise<string> => {
+		const publicPromise = (async (): Promise<string | null> => {
 			try {
 				const result = await batchedViewSimulation(
 					[{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] }],
 					deps,
 				)
-				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : "0"
+				// A missing return slot or a thrown leg is UNKNOWN, never a
+				// fabricated zero — consumers fail closed / render an em dash.
+				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
 			} catch (err) {
 				this.deps.logDebug(`getGasBalances: Failed to get public FeeJuice balance:`, getErrorMessage(err))
 				this.deps.logError("Failed to get public FeeJuice balance", getErrorMessage(err))
-				return "0"
+				return null
 			}
 		})()
 		const privatePromise = (async (): Promise<string | null> => {
@@ -158,9 +189,14 @@ export class GasBalanceReader {
 		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
 
 		const result = { publicFeeJuice, privateFeeJuice }
-		// An invalidation that landed mid-compute outranks this snapshot:
-		// cache it already-stale so peek can serve it dimmed but the next
-		// get recomputes.
+		// An eviction that landed mid-compute means this snapshot belongs to
+		// ANOTHER profile's context: return it to the (pre-switch) caller but
+		// never write it back — a stale-marked write-back would still be
+		// peekable under the new profile.
+		if (this.evictGeneration !== evictGenAtStart) return result
+		// A stale-marking invalidation that landed mid-compute outranks this
+		// snapshot: cache it already-stale so peek can serve it dimmed but the
+		// next get recomputes.
 		this.cache.set(cacheKey, { result, fetchedAt: this.epoch === epochAtStart ? Date.now() : 0 })
 		return result
 	}

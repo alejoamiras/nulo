@@ -72,4 +72,10 @@ describe("FeeMethodRow", () => {
 		})
 		expect(w.find('[data-testid="send-fee-visibility-toggle"]').exists()).toBe(false)
 	})
+
+	test("'fj' method with NULL formatted balance falls back to em dash (unknown, never zero)", () => {
+		const w = factory({ method: { type: "fj" }, feeJuiceBalanceFormatted: null })
+		expect(w.text()).toContain("— Fee Juice")
+		expect(w.text()).not.toContain("0 Fee Juice")
+	})
 })

@@ -5,14 +5,31 @@
  */
 
 import { flushPromises, mount } from "@vue/test-utils"
-import { describe, expect, test, vi } from "vitest"
+import { createPinia } from "pinia"
+import { beforeEach, describe, expect, test, vi } from "vitest"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { PriceState } from "@/wallet/services/price/spec"
+import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import GasBalanceCard from "./GasBalanceCard.vue"
 
-vi.mock("@/stores/app.store", () => ({
-	useAppStore: () => ({ account: { address: "0xacct" }, network: { id: "n1" } }),
-}))
+// Reactive so tests can drive identity changes (the card's `scope` computed
+// and the store's belt watcher both read it live).
+vi.mock("@/stores/app.store", async () => {
+	const { reactive } = await import("vue")
+	const fake = reactive({
+		profile: { id: "p1" },
+		account: { address: "0xacct" },
+		network: { id: "n1", chainId: 111 },
+	})
+	return { useAppStore: () => fake, __mockAppStore: fake }
+})
+
+async function appStoreMock() {
+	const mod = (await import("@/stores/app.store")) as unknown as {
+		__mockAppStore: { profile: { id: string }; account: { address: string }; network: { id: string; chainId: number } }
+	}
+	return mod.__mockAppStore
+}
 
 let mockQuotes: PriceState = {}
 vi.mock("@/wallet/services/price/client", () => ({
@@ -26,7 +43,7 @@ vi.mock("@/wallet/services/price/client", () => ({
 	}),
 }))
 
-type Balances = { publicFeeJuice: string; privateFeeJuice: string | null }
+type Balances = { publicFeeJuice: string | null; privateFeeJuice: string | null }
 let mockBalances: Balances = { publicFeeJuice: "0", privateFeeJuice: null }
 let mockPeek: { balances: Balances; stale: boolean } | null = null
 /** When set, peekGasBalances runs this instead of returning mockPeek. */
@@ -53,11 +70,52 @@ vi.mock("@/wallet/services/transaction/client", () => ({
 	}),
 }))
 
+vi.mock("@/wallet/services/fpc/client", () => ({
+	FpcServiceClient: vi.fn(function () {
+		return { disconnect: vi.fn(), getFpcs: vi.fn(async () => []) }
+	}),
+}))
+
 const STUBS = { Flex: { template: "<div><slot /></div>" } }
 const AZTEC_FRESH = () => ({ aztec: { coingeckoId: "aztec", usd: 0.02, fetchedAt: Date.now(), providerUpdatedAt: null } })
+/** Must mirror the mocked app.store identity — it is what the card's `scope` computed derives. */
+const SCOPE = { profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xacct" }
+
+beforeEach(async () => {
+	vi.clearAllMocks()
+	mockQuotes = {}
+	mockBalances = { publicFeeJuice: "0", privateFeeJuice: null }
+	mockPeek = null
+	mockPeekImpl = null
+	mockGetGasBalances = async () => mockBalances
+	// The reactive mock persists across tests — reset the identity.
+	const app = await appStoreMock()
+	app.profile = { id: "p1" }
+	app.account = { address: "0xacct" }
+	app.network = { id: "n1", chainId: 111 }
+})
+
+/** Two tx-client instances exist per mount (the store's settle subscriber and
+ *  the card's added subscriber) — find the one that registered `event`. */
+function txHandlerFor(event: "onTransactionAdded" | "onTransactionUpdated"): (tx: unknown) => void {
+	const results = vi.mocked(TransactionServiceClient).mock.results
+	for (let i = results.length - 1; i >= 0; i--) {
+		const inst = results[i].value as Record<string, { add: ReturnType<typeof vi.fn> }>
+		const handler = inst[event].add.mock.calls[0]?.[0]
+		if (handler) return handler as (tx: unknown) => void
+	}
+	throw new Error(`no TransactionServiceClient instance subscribed to ${event}`)
+}
 
 async function mountCard() {
-	const w = mount(GasBalanceCard, { global: { stubs: STUBS } })
+	// A FRESH pinia is INJECTED per mount: `setActivePinia` in a beforeEach
+	// does not isolate here (the SFC's transform chain resolves a different
+	// pinia module copy than this file's import, so the active-pinia global
+	// it writes is never the one the component reads — stores would silently
+	// SHARE state across tests). The injected plugin wins inside the
+	// component, and pinia re-points its own active-pinia to it during setup,
+	// so post-mount `useBalancesStore()` calls in tests see the same instance.
+	const w = mount(GasBalanceCard, { global: { stubs: STUBS, plugins: [createPinia()] } })
 	await flushPromises()
 	return w
 }
@@ -104,13 +162,17 @@ describe("GasBalanceCard — stale-while-revalidate", () => {
 	test("(BUG PIN) fresh peeked value paints instantly — no skeleton while the fetch round-trip is pending", async () => {
 		mockQuotes = {}
 		mockPeek = { balances: { publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null }, stale: false }
-		deferredBalances()
+		const d = deferredBalances()
 		const w = await mountCard()
 
 		expect(w.find('[data-testid="gas-balance-public"]').exists()).toBe(true)
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
 		// Fresh cache — no refreshing indicator either.
 		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+
+		// Cleanup only: settle the in-flight fetch so no real 20s timeout leaks.
+		d.resolve({ publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null })
+		await flushPromises()
 	})
 
 	test("(BUG PIN) stale peeked value shows dimmed last-known + refreshing marker until the refresh lands", async () => {
@@ -176,21 +238,16 @@ describe("GasBalanceCard — stale-while-revalidate", () => {
 	})
 
 	test("(BUG PIN) settled-tx forced refresh dims the value — never re-skeletons", async () => {
-		const { TransactionServiceClient } = await import("@/wallet/services/transaction/client")
 		mockQuotes = {}
 		mockPeek = null
 		mockGetGasBalances = async () => ({ publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null })
 		const w = await mountCard()
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42 FJ")
 
-		// Force-refresh path: a settled tx for this account.
+		// Force-refresh path: a settled tx for this account, delivered via the
+		// STORE's settle subscription (the card no longer owns that trigger).
 		const d = deferredBalances()
-		const txInstances = vi.mocked(TransactionServiceClient).mock.results
-		const txInstance = txInstances[txInstances.length - 1].value as {
-			onTransactionUpdated: { add: ReturnType<typeof vi.fn> }
-		}
-		const handler = txInstance.onTransactionUpdated.add.mock.calls[0]?.[0] as (tx: unknown) => void
-		handler({ account: "0xacct", status: "Finalized" })
+		txHandlerFor("onTransactionUpdated")({ account: "0xacct", status: "Finalized" })
 		await flushPromises()
 
 		// Old value stays visible, dimmed (it is known-invalidated) with the
@@ -204,5 +261,102 @@ describe("GasBalanceCard — stale-while-revalidate", () => {
 		await flushPromises()
 		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
 		expect(w.find('[data-testid="gas-balance-refreshing"]').exists()).toBe(false)
+	})
+})
+
+describe("GasBalanceCard — null public balance (unknown wire slot)", () => {
+	test("a NULL public balance renders an em dash, never a confident zero", async () => {
+		mockQuotes = {}
+		mockGetGasBalances = async () => ({ publicFeeJuice: null, privateFeeJuice: null })
+		const w = await mountCard()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("— FJ")
+	})
+
+	test("optimistic deduction is skipped on a NULL balance — no silent BigInt throw", async () => {
+		// BigInt(null) throws; EventHandler swallows it, so pre-fix this was a
+		// silent no-op regression on an entirely untested path.
+		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		mockQuotes = {}
+		mockGetGasBalances = async () => ({ publicFeeJuice: null, privateFeeJuice: null })
+		const w = await mountCard()
+
+		txHandlerFor("onTransactionAdded")({
+			account: "0xacct",
+			estimatedFee: "1000",
+			feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		})
+		await flushPromises()
+		// Still the honest unknown — not NaN, not a crash, not a fabricated number.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("— FJ")
+	})
+})
+
+describe("GasBalanceCard — identity switch", () => {
+	test("an account switch re-leases the store key, resets the overlay, and fetches the new identity", async () => {
+		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		mockQuotes = {}
+		mockGetGasBalances = async () => ({ publicFeeJuice: (42n * 10n ** 18n).toString(), privateFeeJuice: null })
+		const w = await mountCard()
+		// Seed a deduction overlay on the OLD identity.
+		txHandlerFor("onTransactionAdded")({
+			account: "0xacct",
+			estimatedFee: (2n * 10n ** 18n).toString(),
+			feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		})
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
+
+		mockGetGasBalances = async () => ({ publicFeeJuice: (10n * 10n ** 18n).toString(), privateFeeJuice: null })
+		const app = await appStoreMock()
+		app.account = { address: "0xother" }
+		await flushPromises()
+		// Fresh identity: overlay gone (10, not 8), value from a fresh ensure.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("10 FJ")
+	})
+})
+
+describe("GasBalanceCard — optimistic-deduction overlay reset (D9)", () => {
+	const FJ = (n: bigint) => ({ publicFeeJuice: (n * 10n ** 18n).toString(), privateFeeJuice: null })
+
+	async function mountWithDeduction() {
+		const { AccountFeePaymentMethodOptions } = await import("@aztec/entrypoints/account")
+		const { useBalancesStore } = await import("@/stores/balances.store")
+		mockQuotes = {}
+		mockGetGasBalances = async () => FJ(42n)
+		const w = await mountCard()
+		txHandlerFor("onTransactionAdded")({
+			account: "0xacct",
+			estimatedFee: (2n * 10n ** 18n).toString(),
+			feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE,
+		})
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
+		return { w, store: useBalancesStore() }
+	}
+
+	test("a generic (non-forced) refresh commit never clears the overlay", async () => {
+		const { w, store } = await mountWithDeduction()
+		// Same 42 re-committed via a plain ensure: gas.version bumps, forcedVersion does not.
+		await store.ensure(SCOPE, { legs: ["gas"] })
+		await flushPromises()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
+	})
+
+	test("a FAILED forced refresh retains the overlay — only a successful forced commit clears it", async () => {
+		const { w } = await mountWithDeduction()
+
+		mockGetGasBalances = async () => {
+			throw new Error("SW unreachable")
+		}
+		txHandlerFor("onTransactionUpdated")({ account: "0xacct", status: "Finalized" })
+		await flushPromises()
+		// Failure → no forcedVersion bump → the deducted last-known stays (dimmed).
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("40 FJ")
+
+		mockGetGasBalances = async () => FJ(41n)
+		txHandlerFor("onTransactionUpdated")({ account: "0xacct", status: "Finalized" })
+		await flushPromises()
+		// Success → forcedVersion bump → overlay reset: the real balance, undeducted.
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("41 FJ")
 	})
 })

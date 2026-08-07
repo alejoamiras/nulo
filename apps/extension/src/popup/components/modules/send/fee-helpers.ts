@@ -1,12 +1,6 @@
-import { formatBaseUnits } from "@/utils/amount"
 import { FpcType } from "@/wallet/services/fpc/client"
 
-/**
- * Aztec Fee Juice has a fixed 18-decimal scale; the wallet does not
- * read this from chain and the value is unlikely to change for the
- * lifetime of the network.
- */
-export const FEE_JUICE_DECIMALS = 18
+export { formatGasBalance } from "@/utils/fee-estimation"
 
 export interface FeeMethodOption {
 	type: "fj" | "private_fpc" | "fpc"
@@ -20,18 +14,12 @@ export interface FeeMethodOption {
 	fpc?: { id: string; type: FpcType; name?: string } | null
 }
 
-/** Fee Juice balances surfaced from `executionService.getGasBalances`.
- *  `privateFeeJuice` is null when the PrivateFPC isn't registered or the
- *  query errored — the dropdown treats null the same as "0". */
-export interface GasBalances {
-	publicFeeJuice: string
-	privateFeeJuice: string | null
-}
-
-export function formatGasBalance(raw: string | null | undefined): string {
-	// Truncated to 4 decimals — full 18-decimal precision drowned the row.
-	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
-}
+/** Fee Juice balances surfaced from `executionService.getGasBalances` —
+ *  the CANONICAL wire type (a hand-written copy lived here before and
+ *  drifted only by luck). `null` on either leg = UNKNOWN (read failed):
+ *  fail closed for gating, render as an em dash for display. */
+export type { GasBalances } from "@/wallet/services/execution/models"
+import type { GasBalances } from "@/wallet/services/execution/models"
 
 export interface BuildSettingsInput {
 	paymentMethod: { kind: string; fpcId?: string } | undefined
@@ -93,7 +81,10 @@ export function settingsForMethod(
 ): FeeSettings | undefined {
 	switch (method?.type) {
 		case "fj":
-			if (!balances || balances.publicFeeJuice === "0") return undefined
+			// null (unknown, per-leg) fails closed exactly like the whole-object
+			// unknown: pre-wire-fix this held only because failures fabricated
+			// "0" — the explicit null guard is what keeps it true now.
+			if (!balances || balances.publicFeeJuice === null || balances.publicFeeJuice === "0") return undefined
 			return buildSettings({ kind: "fj" }, priority) as FeeSettings
 		case "private_fpc":
 			if (!method.fpc) return undefined
@@ -165,12 +156,17 @@ export function buildFeeMethods(
 	const allowSponsored = options?.allowSponsored ?? true
 	const privateFpc = registeredFpcs.find((f) => f.type === FpcType.PrivateFpc)
 	const publicFeeJuiceZero = gasBalances?.publicFeeJuice === "0"
+	// Unknown (null) disables too — but with an honest reason, never "no balance".
+	const publicFeeJuiceUnknown = gasBalances !== undefined && gasBalances.publicFeeJuice === null
 	const privateFeeJuiceZero = gasBalances !== undefined && (gasBalances.privateFeeJuice === null || gasBalances.privateFeeJuice === "0")
 
 	const fj: FeeMethodOption = { type: "fj", title: "Fee Juice", subtitle: "public" }
 	if (publicFeeJuiceZero) {
 		fj.disabled = true
 		fj.disabledReason = "no balance"
+	} else if (publicFeeJuiceUnknown) {
+		fj.disabled = true
+		fj.disabledReason = "couldn't check balance"
 	}
 
 	const privateFj: FeeMethodOption = {
@@ -210,35 +206,3 @@ export function buildFeeMethods(
  * at build time with `VITE_FEE_JUICE_BRIDGE_URL`.
  */
 export const FEE_JUICE_BRIDGE_URL: string = (import.meta.env.VITE_FEE_JUICE_BRIDGE_URL as string | undefined) ?? "https://tools.nulo.sh"
-
-/**
- * Call-site bound on each fee-card init fetch. The popup→SW transport's own
- * 60s timer only arms after the port reaches Connected — an unreachable SW
- * would otherwise hang init (and the Confirm gate behind it) forever.
- */
-export const INIT_FETCH_TIMEOUT_MS = 20_000
-
-/** Silent-retry backoff after a degraded/failed init. The last step repeats
- *  until the component unmounts or an init fully succeeds. */
-export const INIT_RETRY_BACKOFF_MS = [5_000, 10_000, 20_000, 30_000]
-
-/**
- * Rejects with a labeled error after `ms` if `promise` hasn't settled. The
- * underlying operation is NOT cancelled — the SW side single-flights these
- * reads, so a later retry re-attaches to the same in-flight computation.
- */
-export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-	return new Promise<T>((resolve, reject) => {
-		const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-		promise.then(
-			(value) => {
-				clearTimeout(timer)
-				resolve(value)
-			},
-			(error) => {
-				clearTimeout(timer)
-				reject(error)
-			},
-		)
-	})
-}

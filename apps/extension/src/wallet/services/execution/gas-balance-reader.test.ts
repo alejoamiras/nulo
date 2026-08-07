@@ -141,7 +141,7 @@ describe("GasBalanceReader cache contract", () => {
 			private: async () => encodedResult(55n),
 		})
 		const reader = new GasBalanceReader(makeDeps(PRIVATE_FPC_DEPS))
-		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "0", privateFeeJuice: "55" })
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: null, privateFeeJuice: "55" })
 	})
 
 	test("legs launch concurrently — FPC discovery is not serialized behind the public read", async () => {
@@ -164,11 +164,11 @@ describe("GasBalanceReader cache contract", () => {
 		expect(await pending).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
 	})
 
-	test("public-balance failure degrades to '0' without throwing (error-path parity)", async () => {
+	test("public-balance failure degrades to NULL (unknown) without throwing", async () => {
 		bvsMock.mockReset().mockRejectedValue(new Error("sim down"))
 		const reader = new GasBalanceReader(makeDeps())
 		const result = await reader.get("net-1", "0xacc")
-		expect(result).toEqual({ publicFeeJuice: "0", privateFeeJuice: null })
+		expect(result).toEqual({ publicFeeJuice: null, privateFeeJuice: null })
 	})
 
 	test("FPC discovery failure still reads the public balance", async () => {
@@ -258,6 +258,68 @@ describe("GasBalanceReader peek (stale-while-revalidate)", () => {
 			balances: { publicFeeJuice: "100", privateFeeJuice: null },
 			stale: true,
 		})
+	})
+
+	test("evictAll clears peek — a cross-profile switch leaves no other-profile last-knowns", async () => {
+		bvsMock.mockReset().mockResolvedValue(encodedResult(100n))
+		const reader = new GasBalanceReader(makeDeps())
+		await reader.get("net-1", "0xacc")
+		reader.evictAll()
+		// No dimmed paint of another profile's figures — cold start.
+		expect(reader.peek("net-1", "0xacc")).toBeNull()
+		const callsBefore = bvsMock.mock.calls.length
+		await reader.get("net-1", "0xacc")
+		expect(bvsMock.mock.calls.length).toBeGreaterThan(callsBefore)
+	})
+
+	test("a compute in flight across evictAll never writes back — no resurrected peekable entry", async () => {
+		// A stale-marked write-back after eviction would resurrect another
+		// profile's figures as peekable last-knowns — the exact leak evictAll
+		// exists to close.
+		let resolveBvs!: (v: unknown) => void
+		bvsMock.mockReset().mockImplementation(
+			() =>
+				new Promise((r) => {
+					resolveBvs = r
+				}),
+		)
+		const reader = new GasBalanceReader(makeDeps())
+		const pending = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+		reader.evictAll()
+		resolveBvs(encodedResult(100n))
+		// The pre-switch caller still receives its value...
+		expect((await pending).publicFeeJuice).toBe("100")
+		// ...but nothing survives as a last-known.
+		expect(reader.peek("net-1", "0xacc")).toBeNull()
+	})
+
+	test("a plain get() after an invalidation never joins the pre-invalidation flight — the value must not cross the fence", async () => {
+		// The stale-marking commit only demotes the CACHE entry; the promise
+		// value still crosses to joiners. A post-switch joiner would receive
+		// balances computed under the previous profile's FPC context.
+		let resolveFirst!: (v: unknown) => void
+		bvsMock
+			.mockReset()
+			.mockImplementationOnce(
+				() =>
+					new Promise((r) => {
+						resolveFirst = r
+					}),
+			)
+			.mockResolvedValue(encodedResult(200n))
+		const reader = new GasBalanceReader(makeDeps())
+		const preSwitch = reader.get("net-1", "0xacc")
+		await new Promise((r) => setTimeout(r, 0))
+
+		// Profile switch mid-flight: facade evicts; the new profile reads.
+		reader.evictAll()
+		const postSwitch = reader.get("net-1", "0xacc")
+
+		resolveFirst(encodedResult(100n))
+		expect((await preSwitch).publicFeeJuice).toBe("100")
+		// The post-switch read waited the old flight out and recomputed.
+		expect((await postSwitch).publicFeeJuice).toBe("200")
 	})
 
 	test("a forced refresh never joins a pre-invalidation flight — it resolves to post-settlement values", async () => {
