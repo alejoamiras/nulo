@@ -1,31 +1,67 @@
 /**
  * FpcStrategy — external FPC (Fee Payment Contract) fee payment (kind "fpc").
  *
- * Two-pass estimation:
+ * TWO shapes, selected per resolved FPC row:
+ *
+ * ## Canonical-Sponsored fast path (single-pass)
+ *
+ * Eligibility (all wallet-side facts, never dApp input): handler type
+ * DefaultSponsoredFpc AND `isProtocol` (the row's address equals the pinned
+ * canonical SponsoredFPC address — artifact-derived, recomputed at read time
+ * from the row's own chain; a cold protocol-address cache decorates
+ * `isProtocol: false` and falls safely to two-pass) AND the operation carries
+ * NO dApp-supplied gas limits (`op.fee.gasLimits`/`teardownGasLimits` — a
+ * custom limit would constrain app+FPC here where the two-pass constrains the
+ * app only, a behavior change; such ops stay two-pass).
+ *
+ * Why single-pass is byte-honest for this contract and only this contract:
+ * `sponsor_unconditionally` takes no arguments and reads nothing from the
+ * transaction's gas-settings envelope (verified against the Noir source), so
+ * simulating it under `forEstimation` limits measures the same gas as under
+ * Pass-1-derived limits, and the `maxFee` handed to `getFeePayload` is inert
+ * (`args: []`). NOTE the shipped two-pass never rebuilt after its final
+ * splice either — built bytes have never carried a post-sim `maxFee` — so the
+ * placeholder-`maxFee` build is the status quo, not a relaxation. A
+ * budget-asserting `fpc`-kind contract (the embedded-cap class) would fail
+ * estimation loudly under the huge `forEstimation` envelope — fail-loud is
+ * the accepted posture; PrivateFPC never reaches this path at all.
+ *
+ * ## Two-pass (PrivateFPC + every non-canonical/user-added FPC)
+ *
  *   Pass 1: build + simulate with FeeJuice to get total gas used
  *   Between: fetch baseFees (with priority multiplier), compute maxFee,
  *     prepend FPC fee payload to op.actions
  *   Pass 2: re-build + re-simulate with External + override gasSettings
  *   Finish: re-compute maxFee with padded gas, splice in final fee payload
  *
+ * Pass 1 is LOAD-BEARING for PrivateFPC: its Noir `pay_fee` computes
+ * `max_gas_cost` from the transaction's gas-settings envelope, so the FPC
+ * call must simulate under the bounded Pass-1-derived envelope, never under
+ * `forEstimation` limits. Do NOT extend the fast path to it.
+ *
+ * ## Finalization fidelity (both paths)
+ *
+ * `finalizeGasLimits(node, txRequest, sim, padding, baseFees)` — the
+ * multiplier is pre-baked into `baseFees`, and there is deliberately NO
+ * `customLimits`/`feeMultiplier` argument (fjwc's arg list would double-apply
+ * the multiplier and newly honor `op.fee.gasLimits`).
+ *
  * ## Action array mutation (CAUTION — audited)
  *
- * The FPC 2-pass path mutates `op.actions` twice: once via `unshift`
- * after Pass 1, once via `splice(0, op.actions.length, ...)` after Pass 2.
- * The final splice preserves `originalActions` captured before Pass 1's
- * mutation. This sequence is intentional and load-bearing — the audit
- * flagged it explicitly. Do NOT refactor to a non-mutating shape
- * without re-verifying the TxExecutionRequest bytes match the original
- * pipeline.
- *
- * The `originalActions` capture + restore sequence is intentional and
- * load-bearing — preserves the pre-strategy tx-request bytes verbatim.
+ * Both paths mutate `op.actions` (unshift, then `splice(0, len, ...)` with
+ * `originalActions` captured up front). This sequence is intentional and
+ * load-bearing — the audit flagged it explicitly. Do NOT refactor to a
+ * non-mutating shape without re-verifying the TxExecutionRequest bytes match
+ * the original pipeline.
  */
 
+import { Fr } from "@aztec/foundation/curves/bn254"
 import { GasSettings } from "@aztec/stdlib/gas"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
+import type { Fpc } from "@/wallet/services/fpc/fpc"
+import { FpcType } from "@/wallet/services/fpc/service"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { DEFAULT_FEE_MULTIPLIER, finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
 
@@ -40,6 +76,54 @@ export class FpcStrategy implements FeeStrategy {
 		}
 		const { fpcId } = ctx.feeSettings.paymentMethod
 		const fpc = await this.deps.fpcService.getFpcImpl(fpcId)
+		if (this.isSponsoredFastPathEligible(fpc, ctx)) {
+			return this.buildAndEstimateSponsoredFastPath(ctx, fpc)
+		}
+		return this.buildAndEstimateTwoPass(ctx, fpc)
+	}
+
+	/** Wallet-side discriminator — see the header. Optional chaining keeps
+	 *  every undecorated/legacy shape on the conservative two-pass. */
+	private isSponsoredFastPathEligible(fpc: Fpc, ctx: FeeStrategyContext): boolean {
+		const info = fpc.infoData
+		return (
+			info?.type === FpcType.DefaultSponsoredFpc &&
+			info.isProtocol === true &&
+			ctx.op.fee?.gasLimits === undefined &&
+			ctx.op.fee?.teardownGasLimits === undefined
+		)
+	}
+
+	private async buildAndEstimateSponsoredFastPath(ctx: FeeStrategyContext, fpc: Fpc): Promise<FeeEstimate> {
+		const originalActions = [...ctx.op.actions]
+		const multiplier = ctx.feeMultiplier ?? DEFAULT_FEE_MULTIPLIER
+		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)
+
+		try {
+			// Payload included from the start (`maxFee` inert — args: []), so the
+			// single sim measures app + FPC together, mirroring Pass 2's coverage.
+			ctx.op.actions.unshift(...fpc.getFeePayload(ctx.op.accountAddress, Fr.ZERO))
+			const built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.EXTERNAL, task)
+			suggestGasLimits(built.txRequest, ctx.op.fee)
+			const simulatedTx = await this.deps.simulateTxTask(
+				built.pxe,
+				built.txRequest,
+				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
+				task,
+			)
+			const baseFees = (await predictedWorstMinFees(built.node)).mul(multiplier)
+			const maxFee = simulatedTx.gasUsed.totalGas.mul(ctx.gasPadding).computeFee(baseFees)
+			ctx.op.actions.splice(0, ctx.op.actions.length, ...fpc.getFeePayload(ctx.op.accountAddress, maxFee), ...originalActions)
+			await finalizeGasLimits(built.node, built.txRequest, simulatedTx, ctx.gasPadding, baseFees)
+			task.complete()
+			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL }
+		} catch (error) {
+			task.fail(error)
+			throw error
+		}
+	}
+
+	private async buildAndEstimateTwoPass(ctx: FeeStrategyContext, fpc: Fpc): Promise<FeeEstimate> {
 		const originalActions = [...ctx.op.actions]
 		const multiplier = ctx.feeMultiplier ?? DEFAULT_FEE_MULTIPLIER
 		const task = startEstimateTask(this.deps.tasks, ctx.parentTask)

@@ -17,6 +17,7 @@ import { describe, expect, test, vi } from "vitest"
 import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { TxSimulationResult } from "@aztec/stdlib/tx"
+import { FpcType } from "@/wallet/services/fpc/service"
 import type { FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { FeeJuiceStrategy } from "./fee-juice-strategy"
 import { FpcStrategy } from "./fpc-strategy"
@@ -207,5 +208,107 @@ describe("FpcStrategy structural parity (two-pass choreography — byte-parity c
 		expect([s.feeDa, s.feeL2]).toEqual([1_110n, 1_332n])
 		// Limits from finalize: second sim × padding 1.
 		expect([s.gasDa, s.gasL2]).toEqual([31_000, 32_000])
+	})
+})
+
+describe("FpcStrategy canonical-Sponsored fast path (single-pass)", () => {
+	function makeSponsoredFpc(overrides: Partial<{ type: FpcType; isProtocol: boolean }> = {}) {
+		const feePayloadAction = { kind: "call", contract: "0xsfpc", method: "sponsor_unconditionally", args: [] } as unknown as Action
+		return {
+			infoData: { type: FpcType.DefaultSponsoredFpc, isProtocol: true, ...overrides },
+			getTotalGas: () => new Gas(1_000, 2_000),
+			getTeardownGas: () => new Gas(100, 200),
+			getFeePayload: vi.fn(() => [feePayloadAction]),
+			feePayloadAction,
+		}
+	}
+
+	function makeFpcDeps(fpc: ReturnType<typeof makeSponsoredFpc>) {
+		const buildStandard = vi.fn(async () => makeBuilt())
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn(async () => fpc) },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		return { deps, buildStandard, simulateTxTask }
+	}
+
+	function makeFpcCtx(opOverrides: Partial<FeeStrategyContext["op"]> = {}): FeeStrategyContext {
+		const originalAction = { kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action
+		const ctx = makeCtx({ actions: [originalAction], ...opOverrides })
+		ctx.feeSettings = { paymentMethod: { kind: "fpc", fpcId: "fpc-1" } } as never
+		return ctx
+	}
+
+	test("SIM-COUNT PIN: build×1 (EXTERNAL only) + sim×1 — send fpc estimate 2→1", async () => {
+		const fpc = makeSponsoredFpc()
+		const { deps, buildStandard, simulateTxTask } = makeFpcDeps(fpc)
+		const ctx = makeFpcCtx()
+
+		const result = await new FpcStrategy(deps).buildAndEstimate(ctx)
+
+		expect(buildStandard).toHaveBeenCalledTimes(1)
+		expect((buildStandard.mock.calls[0] as unknown[])[1]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect(simulateTxTask).toHaveBeenCalledTimes(1)
+		expect(result.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+
+		// Final action shape identical to the two-pass output: payload first,
+		// then originals, nothing else.
+		expect(ctx.op.actions[0]).toBe(fpc.feePayloadAction)
+		expect(ctx.op.actions).toHaveLength(2)
+
+		// OLD-VS-NEW GAS-SLOT PIN: finalize composes the same sentinel shape
+		// the two-pass produced — sim limits × padding 1, fees = min × 2.
+		expect(shape(result.txRequest as never)).toEqual({
+			gasDa: 31_000,
+			gasL2: 32_000,
+			teardownDa: 3_500,
+			teardownL2: 3_600,
+			feeDa: 1_110n,
+			feeL2: 1_332n,
+		})
+	})
+
+	test("dApp-supplied custom gas limits force the two-pass path (H2 carve-out)", async () => {
+		const fpc = makeSponsoredFpc()
+		const { deps, buildStandard, simulateTxTask } = makeFpcDeps(fpc)
+		const ctx = makeFpcCtx({ fee: { gasLimits: { daGas: 9, l2Gas: 9 } } as never })
+
+		await new FpcStrategy(deps).buildAndEstimate(ctx)
+
+		expect(buildStandard).toHaveBeenCalledTimes(2)
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+	})
+
+	test("non-protocol (user-added) Sponsored address stays two-pass", async () => {
+		const fpc = makeSponsoredFpc({ isProtocol: false })
+		const { deps, buildStandard } = makeFpcDeps(fpc)
+
+		await new FpcStrategy(deps).buildAndEstimate(makeFpcCtx())
+
+		expect(buildStandard).toHaveBeenCalledTimes(2)
+	})
+
+	test("PrivateFPC stays two-pass (envelope-dependent pay_fee — load-bearing Pass 1)", async () => {
+		const fpc = makeSponsoredFpc({ type: FpcType.PrivateFpc, isProtocol: true })
+		const { deps, buildStandard, simulateTxTask } = makeFpcDeps(fpc)
+
+		await new FpcStrategy(deps).buildAndEstimate(makeFpcCtx())
+
+		expect(buildStandard).toHaveBeenCalledTimes(2)
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+	})
+
+	test("undecorated FPC shape (cold protocol cache) fails safe to two-pass", async () => {
+		const fpc = makeSponsoredFpc()
+		;(fpc as { infoData?: unknown }).infoData = undefined
+		const { deps, buildStandard } = makeFpcDeps(fpc)
+
+		await new FpcStrategy(deps).buildAndEstimate(makeFpcCtx())
+
+		expect(buildStandard).toHaveBeenCalledTimes(2)
 	})
 })
