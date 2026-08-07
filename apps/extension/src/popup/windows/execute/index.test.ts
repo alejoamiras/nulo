@@ -129,6 +129,10 @@ vi.mock("@/composables/useFeeEstimationMap", () => ({
 		results: ref({}),
 		estimating: ref({}),
 		estimate: vi.fn(),
+		cancel: vi.fn(),
+		cancelAll: vi.fn(),
+		handoffAll: vi.fn(() => ({})),
+		dispose: vi.fn(),
 	})),
 }))
 

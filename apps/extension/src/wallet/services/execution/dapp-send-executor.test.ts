@@ -114,6 +114,14 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 			beginJournal: vi.fn(async () => "j1"),
 			markJournal: vi.fn(async () => {}),
 		},
+		operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
+		getActiveProfile: vi.fn(async () => ({ id: "p1" })),
+		getNetwork: vi.fn(async () => network),
+		getNode: vi.fn(async () => node as never),
+		getPXE: vi.fn(() => pxe as never),
+		getAccountContract: vi.fn(async () => account as never),
+		getPendingForAccount: vi.fn(() => [] as { hash: string }[]),
+		getFpcInfo: vi.fn(async () => ({ id: "fpc-1", type: 2, address: "0xfpc", chainId: 7, isProtocol: true }) as never),
 		buildAndEstimate: vi.fn(async () => built as never),
 		addTransaction: vi.fn(async () => ({}) as never),
 		recordPendingAuthwits: vi.fn(async () => {}),
@@ -546,5 +554,91 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 		await expect(executor.executeAztecSendTx(op as never, ORIGIN)).rejects.toThrow("calls boom")
 		expect(deps.lane.acquireSlot).toHaveBeenCalledTimes(1)
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
+	test("estimateOperationFee (aztec_sendTx, fj): stash written with bookkeeping fields, estimateId returned", async () => {
+		const { executor, deps, built } = makeHarness()
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+
+		expect(result.estimateId).toBeDefined()
+		const stash = (deps.operationEstimateReuse.stash as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(stash[0]).toBe(result.estimateId)
+		expect(stash[1]).toMatchObject({
+			profileId: "p1",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			primaryEndpointId: "ep1",
+			pendingHashes: [],
+			// Post-send bookkeeping rides the entry — the reuse-hit tail needs both.
+			txCalls: built.txCalls,
+			pendingPublicAuthwits: built.pendingPublicAuthwits,
+		})
+	})
+
+	test("embedded payment method: no stash, estimateId undefined", async () => {
+		const { executor, deps } = makeHarness()
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "embedded" } } as never)
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("stash failure is best-effort: estimate still returned, estimateId dropped", async () => {
+		const { executor } = makeHarness({
+			operationEstimateReuse: {
+				tryConsume: vi.fn(),
+				stash: vi.fn(() => {
+					throw new Error("cache write failed")
+				}),
+				evict: vi.fn(),
+			} as never,
+		})
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.maxFee).toBeDefined()
+		expect(result.estimateId).toBeUndefined()
+	})
+
+	test("CONSUME-HIT PIN: discovery + buildAndEstimate SKIPPED; addTransaction AND recordPendingAuthwits still run", async () => {
+		const pendingPublicAuthwits = [{ account: "0xacct", hash: "0xph", content: { kind: "message_hash", messageHash: "0xm" } }]
+		const entry = {
+			txRequest: makeTxRequest(),
+			nonce: { toString: () => "77" },
+			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
+			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
+			pendingPublicAuthwits,
+		}
+		const { executor, deps } = makeHarness({
+			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
+		})
+
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-1")
+
+		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith("est-1", expect.objectContaining({ accountAddress: "0xacct" }))
+		expect(deps.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		// The auth-registry row must exist on a reuse hit — the silent-break
+		// scenario the audit pinned (fable F-3).
+		expect(deps.addTransaction).toHaveBeenCalledTimes(1)
+		expect(deps.recordPendingAuthwits).toHaveBeenCalledWith("0xacct", pendingPublicAuthwits, "0xhash")
+		// The reused nonce + payment method flow into the activity record.
+		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(txArgs[4]).toBe("77")
+		expect(txArgs[5]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+	})
+
+	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline", async () => {
+		const { executor, deps } = makeHarness()
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-forged")
+		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
+		expect(deps.authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
+		expect(deps.buildAndEstimate).toHaveBeenCalledTimes(1)
+	})
+
+	test("no estimateId: tryConsume never touched", async () => {
+		const { executor, deps } = makeHarness()
+		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
+		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).toHaveBeenCalledTimes(1)
 	})
 })

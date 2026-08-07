@@ -99,7 +99,15 @@ export type DiscoveryResult = {
 
 export type Methods = {
 	getInteractionPayload(id: string): ExecutionPayload | CapabilityPayload | DiscoveryPayload
-	approveInteraction(id: string, operations: Operation[], origin: LocalTxOrigin): void
+	approveInteraction(
+		id: string,
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		/** Popup-privileged estimate→confirm reuse ids, index-aligned with
+		 *  `operations`. Deliberately NOT a field on the shared `Operation`
+		 *  wire shape — a dApp payload can never carry one. */
+		estimateIds?: (string | undefined)[],
+	): void
 	resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): void
 	rejectInteraction(id: string, reason: string): void
 }

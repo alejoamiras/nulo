@@ -113,6 +113,14 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 			})) as never,
 			addTransaction: vi.fn(async () => ({})) as never,
 			recordPendingAuthwits: vi.fn(async () => {}) as never,
+			operationEstimateReuse: { tryConsume: vi.fn(async () => undefined), stash: vi.fn(), evict: vi.fn() } as never,
+			getActiveProfile: vi.fn(async () => ({ id: "p1" })) as never,
+			getNetwork: vi.fn() as never,
+			getNode: vi.fn() as never,
+			getPXE: vi.fn() as never,
+			getAccountContract: vi.fn() as never,
+			getPendingForAccount: vi.fn(() => []) as never,
+			getFpcInfo: vi.fn() as never,
 			logDebug: () => {},
 		})
 

@@ -125,6 +125,7 @@ const {
 	estimating: estimatingOps,
 	estimate: scheduleFeeEstimate,
 	handoffAll: handoffFeeEstimates,
+	cancelAll: cancelAllFeeEstimates,
 } = useFeeEstimationMap<number, { op: UIOperation; feeSettings: FeeSettings }, unknown>({
 	// Cast op → Operation (strict): the estimate is only scheduled AFTER the
 	// user picks a fee, so feeSettings is set on the op by the time we get here.
@@ -379,12 +380,23 @@ const approve = async () => {
 		// Ownership handoff: approval transfers the estimates to the execution
 		// path — the window's unmount cleanup must NOT remote-cancel them, or
 		// the eviction would race the fire-and-forget executeOperations out of
-		// its (future) reuse hits and needlessly abort still-running estimates.
+		// its reuse hits and needlessly abort still-running estimates.
 		handoffFeeEstimates()
-		await interactionService.approveInteraction(requestId.value!, executable, {
-			type: OriginType.DAPP,
-			name: dapp.value?.name ?? "Unknown app",
-		})
+		// Estimate→confirm reuse ids, index-aligned with `executable`. Rides
+		// this popup-privileged RPC as an envelope — never the shared
+		// Operation wire shape, so a dApp payload can't forge one.
+		const estimateIds = operations.value.map(
+			(_op, index) => (feeEstimates.value[index] as { estimateId?: string } | null | undefined)?.estimateId,
+		)
+		await interactionService.approveInteraction(
+			requestId.value!,
+			executable,
+			{
+				type: OriginType.DAPP,
+				name: dapp.value?.name ?? "Unknown app",
+			},
+			estimateIds,
+		)
 		closeWindow(true)
 	} catch (error) {
 		setError("Processing error.", getErrorMessage(error))
@@ -395,6 +407,10 @@ const approve = async () => {
 
 const reject = async () => {
 	if (isInteractionCancelled.value || !requestId.value) return
+	// Reject-time eviction: abort in-flight estimates and drop any stashed
+	// signed requests NOW — window teardown alone isn't guaranteed to run
+	// dispose before the window dies.
+	cancelAllFeeEstimates()
 	rejectViaInteractionService("User rejected")
 	closeWindow(true)
 }

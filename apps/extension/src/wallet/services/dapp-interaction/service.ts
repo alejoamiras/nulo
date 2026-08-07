@@ -91,7 +91,12 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		return interactionRequest.payload
 	}
 
-	public async approveInteraction(id: string, operations: Operation[], origin: LocalTxOrigin): Promise<void> {
+	public async approveInteraction(
+		id: string,
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		estimateIds?: (string | undefined)[],
+	): Promise<void> {
 		const interaction = this.storage.get(id)
 		if (!interaction) {
 			throw new Error("Invalid id")
@@ -106,7 +111,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// the request enqueues on the execution mutex) via the hooks carried on
 		// `interaction`, NOT here — releasing at approval would let a later
 		// request overtake this one in the execution FIFO.
-		this.executeAndResolve(interaction, operations, origin)
+		this.executeAndResolve(interaction, operations, origin, estimateIds)
 	}
 
 	public async resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): Promise<void> {
@@ -131,7 +136,12 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.windowManager.cancel(interactionRequest.handleId, reason)
 	}
 
-	private async executeAndResolve(interaction: DappInteraction, operations: Operation[], origin: LocalTxOrigin): Promise<void> {
+	private async executeAndResolve(
+		interaction: DappInteraction,
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		estimateIds?: (string | undefined)[],
+	): Promise<void> {
 		const kinds = operations.map((o) => o.kind).join(", ")
 		this.logInfo(`executeAndResolve: starting [${kinds}] for ${origin.name}`)
 		try {
@@ -154,7 +164,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the
 			// popup handoff because we stash them on the interaction record.
-			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks)
+			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks, estimateIds)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
