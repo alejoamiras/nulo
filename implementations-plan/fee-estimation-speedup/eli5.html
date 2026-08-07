@@ -114,7 +114,7 @@
     <li><b>Defer the bigger speedup?</b> Both auditors say yes — collect measurements first. Recommended: defer.</li>
     <li><b>Ship as three stacked PRs</b> — quick wins → sponsor fast path → reuse? Recommended: yes.</li>
     <li><b>Tiny fee-number drift.</b> The sponsor fast path may show marginally different estimate numbers (same padding, same pricing basis). Does that still count as "no UX change"? Recommended: yes.</li>
-    <li><b>Keeping a signed, ready-to-send transaction in memory for up to 5 minutes</b> after an estimate (it's how Send already works; dApp rejections now clear it immediately). Recommended: accept.</li>
+    <li><b>Keeping a signed, ready-to-send transaction in memory for up to 2 minutes</b> after an estimate — <em>settled: you asked for a shorter window; it dropped from 5 minutes to 120 seconds, everywhere (including today's Send page).</em> Freshness itself is guarded separately: anything meaningfully changed (fees, pending transactions, network, the sponsor's address) forces a recompute regardless of age.</li>
   </ul>
 
   <div class="approval">

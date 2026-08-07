@@ -179,7 +179,7 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 1. **Stub-gas / discovery-fold follow-up**: defer per the charter, decided later on Phase-6 data? **Recommendation: defer** (both auditors concur).
 2. **PR mapping**: A = quick wins, B = Sponsored collapse, C = reuse + prep + validation. **Recommendation: accept.**
 3. **Marginal fee-number drift** on the Sponsored fast path (mainnet PrivateFPC now fully unchanged). **Recommendation: accept.**
-4. **Signed-artifact retention posture**: dApp reuse entries hold a fully-signed `txRequest` in SW memory ≤5-min TTL (Send-page precedent), now with reject/close eviction. **Recommendation: accept as stated.**
+4. **Signed-artifact retention posture** — RESOLVED by owner at gate (2026-08-07): TTL lowered to **120 s** (owner asked 1.5–2 min; 120 s chosen to keep headroom for dApp-approval deliberation), applied to BOTH caches via the shared `ESTIMATE_REUSE_TTL_MS` constant (the existing Send-page 5-min value changes too — consistency, pre-production). Reject/close eviction unchanged. Note: the TTL is the retention bound, not the staleness guard — the consume ladder (base-fee drift, pending-tx set, chain/FPC identity, fingerprint) recomputes anything meaningfully stale regardless of age; past ~2 min entries mostly miss on fee drift anyway, so the hit-rate cost is minimal.
 
 ## Decision ledger
 
@@ -200,6 +200,7 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 | 13 | Confirm handoff | ownership transfer disarms unmount cancel; reject/dismiss evicts | r2's unconditional cancel-on-unmount (raced its own reuse win) | final-pass H1 | settled |
 | 14 | FPC identity in reuse | snapshot + revalidate `{id,type,address,chainId,isProtocol}` | fpcId-only binding (r2 — in-place row edit sent stale address) | final-pass H3 | settled |
 | 15 | Cap admission semantics | atomic: ≤N unsettled jobs; overflow = cancel-oldest + coalesce-newest (latest-wins pending slot), admit on settle | r3's cancel-oldest-only (didn't bound the queue — cancelled jobs are non-preemptible) | final-pass re-verdict | settled |
+| 16 | Reuse TTL | 120 s shared constant (both caches; Send drops from 5 min) | 5-min Send precedent carried over (r3.1) | owner, at gate | settled |
 
 ## Audit verdicts
 
