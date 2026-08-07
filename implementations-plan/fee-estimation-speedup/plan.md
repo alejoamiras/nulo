@@ -200,6 +200,11 @@ Per architecture §6. Pure refactor: identical choreography, identical sim optio
 - **Fable (round 1, fresh Plan agent)**: `conditional approve` — all 4 conditions adopted (F-1 via deferral+charter; F-2 table corrected + decoupled; F-3/F-4 pinned in-plan; F-5 via envelope). Advisories F-6–F-11 adopted. [audit-fable.md](audit-fable.md)
 - **Codex (final fresh-context pass on rev 2 + ledger)**: _pending_
 
+## ELI5 companion
+
+- **Artifact URL**: https://claude.ai/code/artifact/76d189cd-bafa-4b70-97ae-d20a2bfd81db (default-private; redeploy by republishing the same source file)
+- **Source**: `implementations-plan/fee-estimation-speedup/eli5.html`
+
 ## Seeds (DRAFT — finalized post-approval)
 
 ### Recommended: `/goal`

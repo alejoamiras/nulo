@@ -1,0 +1,148 @@
+<title>Fee Estimation Speedup — Plan ELI5</title>
+<style>
+  :root {
+    --paper: #FAFBF9; --ink: #1A2328; --muted: #5A6B70; --accent: #0F6E6B;
+    --tint: #EAF2F0; --line: #D8E0DD; --warn-ink: #7A5200; --warn-bg: #FBF3DF;
+    --ok: #2E7D32; --card: #F3F6F4; --mono-bg: #10201F; --mono-ink: #D7E7E4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #101718; --ink: #E6EDEA; --muted: #93A5A3; --accent: #4FB3AC;
+      --tint: #16302E; --line: #2A3B39; --warn-ink: #E4B85E; --warn-bg: #2A2213;
+      --ok: #7CC47F; --card: #16201F; --mono-bg: #0B1514; --mono-ink: #C9DCD9;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #101718; --ink: #E6EDEA; --muted: #93A5A3; --accent: #4FB3AC;
+    --tint: #16302E; --line: #2A3B39; --warn-ink: #E4B85E; --warn-bg: #2A2213;
+    --ok: #7CC47F; --card: #16201F; --mono-bg: #0B1514; --mono-ink: #C9DCD9;
+  }
+  :root[data-theme="light"] {
+    --paper: #FAFBF9; --ink: #1A2328; --muted: #5A6B70; --accent: #0F6E6B;
+    --tint: #EAF2F0; --line: #D8E0DD; --warn-ink: #7A5200; --warn-bg: #FBF3DF;
+    --ok: #2E7D32; --card: #F3F6F4; --mono-bg: #10201F; --mono-ink: #D7E7E4;
+  }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    line-height: 1.65; margin: 0; padding: 2.5rem 1.25rem 4rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; text-wrap: balance; }
+  h1 { font-size: 2.1rem; line-height: 1.2; margin: 0 0 .4rem; }
+  h2 { font-size: 1.35rem; margin: 2.8rem 0 .8rem; }
+  h3 { font-size: 1.05rem; margin: 0 0 .3rem; }
+  .kicker { color: var(--accent); font-size: .78rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; margin-bottom: .8rem; }
+  .lede { font-size: 1.06rem; color: var(--ink); }
+  .muted { color: var(--muted); font-size: .92rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; margin: 1.2rem 0; }
+  th { text-align: left; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  th, td { padding: .5rem .75rem .5rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.num { white-space: nowrap; }
+  .drop { color: var(--ok); font-weight: 600; }
+  .same { color: var(--muted); }
+  .phase { margin: 1.1rem 0; padding: 1rem 1.2rem; background: var(--card); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; }
+  .phase p { margin: .3rem 0 0; }
+  .gate { color: var(--muted); font-size: .88rem; margin-top: .5rem; }
+  .gate b { color: var(--ink); font-weight: 600; }
+  .approval { background: var(--tint); border-left: 3px solid var(--accent); padding: 1.1rem 1.3rem; border-radius: 0 6px 6px 0; margin: 1.4rem 0; }
+  .approval ul { margin: .6rem 0 0; padding-left: 1.2rem; }
+  .approval li { margin: .45rem 0; }
+  .warning { background: var(--warn-bg); color: var(--warn-ink); font-weight: 600; padding: .7rem 1rem; border-radius: 6px; font-size: .92rem; }
+  pre { background: var(--mono-bg); color: var(--mono-ink); padding: 1rem 1.1rem; border-radius: 8px; overflow-x: auto; font-size: .82rem; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  p code, li code { background: var(--tint); padding: .1em .35em; border-radius: 4px; font-size: .88em; }
+  .seedcard { margin: 1.2rem 0; padding: 1rem 1.2rem; border: 1px solid var(--line); border-radius: 8px; }
+  .seedcard.rec { border-color: var(--accent); background: var(--card); }
+  .pill { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: .15rem .55rem; border-radius: 999px; background: var(--accent); color: var(--paper); margin-bottom: .5rem; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .35rem 0; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+<main>
+  <div class="kicker">Blueprint · mid tier · plan ELI5</div>
+  <h1>Fee Estimation Speedup</h1>
+  <p class="lede">Make the wallet's "estimating fee…" spinner — and the dead pause after you hit Confirm — dramatically shorter, by doing less redundant work behind the scenes. Nothing about the screens, the flows, or how fees are chosen changes. The full technical plan lives in the repo at <code>implementations-plan/fee-estimation-speedup/plan.md</code>.</p>
+
+  <h2>Why it's slow today</h2>
+  <p>On Aztec, the only way to know a transaction's fee is to <em>actually run the whole transaction locally</em> — a heavy cryptographic dry-run that takes seconds. The wallet can only run one dry-run at a time; they queue single-file. Today, one fee estimate runs <b>two or three</b> of these dry-runs, and when you confirm a dApp transaction the wallet throws all of them away and runs them <b>again</b> before it even starts proving. That's the wait you've been feeling.</p>
+
+  <h2>What we're changing (five things, all invisible)</h2>
+  <ul>
+    <li><b>Stop re-doing the estimate when you confirm.</b> The wallet already keeps Send-page estimates and reuses them at confirm; dApp approvals get the same treatment, with strict safety checks (anything changed since the estimate → it recomputes).</li>
+    <li><b>One dry-run instead of two</b> for the default fee sponsor used everywhere except mainnet. We verified in the sponsor contract's source that the second run adds nothing there.</li>
+    <li><b>Let typing cancel stale work.</b> Today, editing the amount mid-estimate leaves the old estimate hogging the queue. Cancellation stops it at the next checkpoint.</li>
+    <li><b>Delete a hidden network call</b> the wallet makes before <em>every</em> dry-run and every proof, purely to print a debug log line.</li>
+    <li><b>Prep work</b> for a bigger future speedup (details below), shipped as a pure refactor with zero behavior change.</li>
+  </ul>
+
+  <div class="tablewrap">
+    <table>
+      <tr><th>Moment you feel it</th><th>Dry-runs today</th><th>After</th></tr>
+      <tr><td>Send page estimate (default sponsor, non-mainnet)</td><td class="num">2</td><td class="num drop">1</td></tr>
+      <tr><td>Send page estimate (mainnet's private fee contract)</td><td class="num">2</td><td class="num same">2 — deliberately unchanged</td></tr>
+      <tr><td>dApp approval estimate (default sponsor)</td><td class="num">3</td><td class="num drop">2</td></tr>
+      <tr><td>Clicking Confirm on a dApp transaction</td><td class="num">3 more, hidden</td><td class="num drop">0</td></tr>
+    </table>
+  </div>
+  <p class="muted">Each number is enforced by tests, so a future change can't quietly re-add dry-runs.</p>
+
+  <h2>What the audits changed — and why some numbers say "unchanged"</h2>
+  <p>Two independent reviewers (Codex and a second Claude) attacked the first draft. Both verdicts reshaped it:</p>
+  <ul>
+    <li>The mainnet fee contract genuinely <em>needs</em> its double dry-run — its code reads the transaction's gas budget internally. First draft would have broken it; it now stays exactly as is. That's why the mainnet row says "unchanged": correctness beat speed there.</li>
+    <li>A planned rewiring of how the wallet discovers required signatures turned out to save <em>zero</em> dry-runs in its safe form — while opening a subtle door for a malicious fee contract to get an auto-signed permission. It's cut from this plan entirely; only its risk-free prep ships. It can return later, gated on real measurements this plan will collect.</li>
+  </ul>
+
+  <h2>Why the "mid" tier</h2>
+  <p>One high-risk dimension (this touches how every transaction's fee is computed), but no novel territory — the reference implementation and every building block already exist and were mapped before drafting. Mid means: one plan plus a competing alternative, two independent audits, and a final fresh review before you approve.</p>
+
+  <h2>The phases</h2>
+  <div class="phase"><h3>Phase 0 — Preflight</h3><p>Set up GitHub's new stacked-PRs tooling (with a plain fallback if it isn't available for this repo) and record today's baseline numbers.</p><p class="gate"><b>Proves itself by:</b> lint, typecheck and full unit suite green; the stacking decision written down.</p></div>
+  <div class="phase"><h3>Phase 1 — Delete the debug network call</h3><p class="gate"><b>Proves itself by:</b> a repo-wide search showing it's gone, plus the full unit suite green.</p></div>
+  <div class="phase"><h3>Phase 2 — Cancellable estimates</h3><p>Typing or closing the window stops stale estimate work at its next checkpoint (honestly: a dry-run already in flight finishes — it just can't start the next step).</p><p class="gate"><b>Proves itself by:</b> dedicated cancellation tests + full unit suite.</p></div>
+  <div class="phase"><h3>Phase 3 — One dry-run for the default sponsor</h3><p class="gate"><b>Proves itself by:</b> tests pinning the exact dry-run counts, plus two real end-to-end transactions on a local network with real proofs.</p></div>
+  <div class="phase"><h3>Phase 4 — Reuse the estimate at Confirm (dApp)</h3><p>The biggest felt win: Confirm goes straight to proving.</p><p class="gate"><b>Proves itself by:</b> tests for every way reuse must refuse (stale, wrong account, changed fees, changed network…), plus two end-to-end dApp transactions.</p></div>
+  <div class="phase"><h3>Phase 5 — Risk-free prep for the future speedup</h3><p class="gate"><b>Proves itself by:</b> the existing behavior-pinning tests passing with zero changes — the proof nothing moved.</p></div>
+  <div class="phase"><h3>Phase 6 — Full validation + measurements</h3><p class="gate"><b>Proves itself by:</b> the repo's full pre-PR gate, the smoke suite, the entire network e2e suite, and a recorded measurement table for the future decision.</p></div>
+
+  <h2>Open questions (your call at approval)</h2>
+  <ul>
+    <li><b>Defer the bigger speedup?</b> Both auditors say yes — collect measurements first. Recommended: defer.</li>
+    <li><b>Ship as three stacked PRs</b> — quick wins → sponsor fast path → reuse? Recommended: yes.</li>
+    <li><b>Tiny fee-number drift.</b> The sponsor fast path may show marginally different estimate numbers (same padding, same pricing basis). Does that still count as "no UX change"? Recommended: yes.</li>
+    <li><b>Keeping a signed, ready-to-send transaction in memory for up to 5 minutes</b> after an estimate (it's how Send already works; dApp rejections now clear it immediately). Recommended: accept.</li>
+  </ul>
+
+  <div class="approval">
+    <h2 style="margin-top:0">Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm the scope: the five changes above; the mainnet fee path and the discovery rewiring stay untouched.</li>
+      <li>Confirm the tier (mid) and the validation plan (fast checks every phase; real-network e2e at Phases 3, 4 and 6).</li>
+      <li>Answer the four open questions (recommendations attached to each).</li>
+      <li>No <code>/harden</code> pass scheduled — this doesn't touch auth, secrets, CI or publishing. Override if you disagree.</li>
+      <li>Approve · conditionally approve (with conditions) · reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <hr>
+
+  <h2>Implementation seeds (draft — finalized after approval)</h2>
+  <p class="muted">Two ways to run the autonomous implementation session. Pick the one matching how you want completion judged.</p>
+  <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+  <div class="seedcard rec">
+    <span class="pill">Recommended for this plan</span>
+    <h3>/goal</h3>
+    <pre><code>/goal All phases 0–6 marked ✓ in implementations-plan/fee-estimation-speedup/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/fee-estimation-speedup/lessons/phase-N.md in the transcript; the three stacked PRs (A: phases 0-2, B: phase 3, C: phases 4-6) opened against dev with required checks green; /code-review max --fix complete with findings applied and committed; codex post-impl audit complete with high/critical findings addressed; bun run test and bun run lint both report exit 0 in the transcript.</code></pre>
+  </div>
+
+  <div class="seedcard">
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/fee-estimation-speedup forward. Never idle waiting for my input. Each firing: (1) Reality check: read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if PRs exist, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses (gh run watch &lt;id&gt; ≤10 min); use waits to review the diff or prep the next phase. (3) No task in hand? Pick the next pending phase from plan.md and start it; after each meaningful edit run bun run lint + targeted vitest for touched packages; commit → push. (4) Stuck or facing a decision you'd bring to the owner? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/phase-N.md. Hard limits: never merge to main/release branches, never publish/deploy, never expand scope beyond plan.md (the discovery fold is OUT of scope — charter only). (5) Same step failed 5 times? Stop retrying, reassess with codex. (6) Phase green = its validation gate in plan.md passes verbatim — run it, paste the result, mark ✓ in plan.md, file lessons, print LESSONS_FILE=implementations-plan/fee-estimation-speedup/lessons/phase-N.md, advance. (7) All phases ✓? Run /code-review max --fix → commit fixes separately → codex post-impl audit (net diff + code-review summary + adversarial ask) → address high/critical → wrap-up report. Keep the ASCII checklist visible each firing.</code></pre>
+  </div>
+
+  <p class="muted">Full plan: <code>implementations-plan/fee-estimation-speedup/plan.md</code> · audits: <code>audit-codex.md</code>, <code>audit-fable.md</code> · recon: <code>recon.md</code> — all in the repo worktree.</p>
+</main>
