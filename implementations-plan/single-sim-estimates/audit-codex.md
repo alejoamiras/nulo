@@ -21,6 +21,21 @@
 | A-vs-B: B's measure-first ordering, A1 retained as inert checkpoint | **Adopted** verbatim |
 | Positive: Sponsored identity pin survived attack ("no non-canonical payload route found"); add service-level reset/restore tests | **Adopted** into fixtures |
 
-## Final fresh-context pass (rev 2)
+## Final fresh-context pass — new session, xhigh, on REVISION 2 + ledger + both r1 transcripts
+
+- **Verdict**: `reject (with blocking findings: PrivateFPC cannot pass the proposed unfunded gate, and silent inner-hash authorization remains misclassified)`
+- **Verbatim**: [audit-codex-final-response.md](audit-codex-final-response.md)
+
+### Dispositions (ALL adopted → rev 3)
+
+| Finding | Disposition |
+|---|---|
+| Critical: Ask-4(b) "free envelope-sim comparison" non-executable — P2 executes `pay_fee`, which asserts private-FJ balance in-circuit (`skipFeeEnforcement` doesn't bypass Noir asserts); funding = the L1 Sepolia route; r1's fragmented-note inclusion canary requirement silently dropped | **Adopted** — Ask 4 rewritten as a real fork: key ⇒ funded full measurement + fragmented-note canary ⇒ A2 eligible; no key ⇒ A2 DEFERRED (B2 proceeds independently — its shapes are genuinely free). Ledger #11 |
+| H1: standalone `assert_inner_hash_valid_authwit` WITHOUT any attached witness action emits nothing — folded sim reports no-effects, sizes from stub, failure surfaces as loud pre-submit prove error (today it fails at estimate). F-4's pre-attached rule can't catch it (nothing to detect) | **Adopted** — named explicitly in Ask 1 with the honest failure-mode delta + a dedicated adversarial fixture. Ledger #12 |
+| H2: probe ownership unpinned — the shared `buildAndEstimate` dep serves probe-forbidden `executeSendTransaction` too; two-instance ownership alone doesn't close the route | **Adopted** — split distinctly-typed deps (`buildAndEstimateValidated` vs `estimateWithDiscovery`); zero-probe/zero-stub OPTION pins (not just counts) on Transfer/send_transaction/embedded/NO_FROM; A1 gate pins sim options. Ledger #13 |
+| M1: clamp blast radius understated (embedded + NO_FROM also served by `finalizeGasLimits`); live `txsLimits` fetch would negate the −1 RPC win | **Adopted** — full per-path enumeration in Ask 2; `BuiltStandardTx` retains `txsLimits` (zero new RPCs). Ledger #14 |
+| Holds: e2e root cause, Inference-1 resolution, Sponsored identity fence, three-PR ordering | — |
+
+## Re-verdict on revision 3 — resumed final-pass session
 
 _Recorded below when it lands._
