@@ -95,6 +95,10 @@ export type FeeStrategyContext = {
 	/** From op.fee?.gasPadding, defaulted to 1.05 by caller. */
 	gasPadding: number
 	parentTask?: WrappedTask
+	/** Estimate-cancellation signal. Multi-pass strategies check it between
+	 *  passes and bail with `JobCancelledSentinel` — a sim already in flight
+	 *  cannot be preempted, but the next pass must not start. */
+	signal?: AbortSignal
 }
 
 /** Dependencies injected once at construction. */

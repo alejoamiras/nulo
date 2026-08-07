@@ -2,6 +2,86 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { effectScope, nextTick } from "vue"
 import { useFeeEstimationMap } from "./useFeeEstimationMap"
 
+describe("useFeeEstimationMap — remote cancellation + handoff", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	const flushAll = async () => {
+		await Promise.resolve()
+		await Promise.resolve()
+		await nextTick()
+	}
+
+	const make = () => {
+		const cancelRemote = vi.fn()
+		const calls: { token: string; flowKey: string }[] = []
+		const scope = effectScope()
+		const composable = scope.run(() =>
+			useFeeEstimationMap<number, number, number>({
+				estimate: async (n, token, flowKey) => {
+					calls.push({ token, flowKey })
+					return n * 2
+				},
+				cancelRemote,
+			}),
+		)!
+		return { scope, composable, cancelRemote, calls }
+	}
+
+	it("passes a per-attempt token and an op-scoped flow key", async () => {
+		const { scope, composable, calls } = make()
+		composable.estimate(0, 1)
+		composable.estimate(3, 1)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		expect(calls.map((c) => c.flowKey).sort()).toEqual(["op:0", "op:3"])
+		expect(calls[0]!.token).not.toBe(calls[1]!.token)
+		scope.stop()
+	})
+
+	it("refire on the same key supersedes its completed estimate: remote cancel fires for the old token only", async () => {
+		const { scope, composable, cancelRemote, calls } = make()
+		composable.estimate(0, 1)
+		composable.estimate(1, 1)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		composable.estimate(0, 2)
+		const key0Token = calls.find((c) => c.flowKey === "op:0")!.token
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(key0Token)
+		scope.stop()
+	})
+
+	it("(HANDOFF RACE PIN) approve → handoffAll → window close: NO remote cancel for any handed-off token", async () => {
+		const { scope, composable, cancelRemote, calls } = make()
+		composable.estimate(0, 1)
+		composable.estimate(1, 2)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		const handed = composable.handoffAll()
+		expect(Object.keys(handed).sort()).toEqual(["0", "1"])
+		expect(new Set(Object.values(handed))).toEqual(new Set(calls.map((c) => c.token)))
+		composable.dispose()
+		scope.stop()
+		expect(cancelRemote).not.toHaveBeenCalled()
+	})
+
+	it("dispose without handoff remote-cancels every completed estimate", async () => {
+		const { scope, composable, cancelRemote, calls } = make()
+		composable.estimate(0, 1)
+		composable.estimate(1, 2)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		composable.dispose()
+		expect(cancelRemote).toHaveBeenCalledTimes(2)
+		expect(new Set(cancelRemote.mock.calls.map((c) => c[0]))).toEqual(new Set(calls.map((c) => c.token)))
+		scope.stop()
+	})
+})
+
 const flush = async () => {
 	await Promise.resolve()
 	await Promise.resolve()
@@ -92,7 +172,7 @@ describe("useFeeEstimationMap", () => {
 		await vi.advanceTimersByTimeAsync(100)
 		await flush()
 		expect(estimator).toHaveBeenCalledTimes(1)
-		expect(estimator).toHaveBeenCalledWith(3)
+		expect(estimator).toHaveBeenCalledWith(3, expect.any(String), "op:0")
 		expect(result.results.value[0]).toBe(6)
 		scope.stop()
 	})
@@ -191,7 +271,7 @@ describe("useFeeEstimationMap", () => {
 		await vi.advanceTimersByTimeAsync(200)
 		await flush()
 		expect(estimator).toHaveBeenCalledTimes(1)
-		expect(estimator).toHaveBeenCalledWith(2)
+		expect(estimator).toHaveBeenCalledWith(2, expect.any(String), "op:1")
 		scope.stop()
 	})
 

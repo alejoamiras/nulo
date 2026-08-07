@@ -263,11 +263,15 @@ const {
 	isEstimating,
 	estimate: scheduleFeeEstimate,
 	cancel: cancelFeeEstimate,
+	handoff: handoffFeeEstimate,
 } = useFeeEstimation({
 	debounceMs: 800,
-	estimate: ({ networkId, accountAddress, tokenId, transferType: tt, destination, amount, settings }) => {
+	estimate: ({ networkId, accountAddress, tokenId, transferType: tt, destination, amount, settings }, estimateToken) => {
 		console.log(`[send:${sendInstanceId}] estimateTransferFee firing`)
-		return executionService.estimateTransferFee(networkId, accountAddress, tokenId, tt, destination, amount, settings)
+		return executionService.estimateTransferFee(networkId, accountAddress, tokenId, tt, destination, amount, settings, estimateToken)
+	},
+	cancelRemote: (estimateToken) => {
+		executionService.cancelEstimate(estimateToken).catch(() => {})
 	},
 	onError: (err) => {
 		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
@@ -306,6 +310,10 @@ const handleSend = async () => {
 	// redundant `buildAndEstimateTxRequest` round-trip and reuse the
 	// pre-built TxRequest. The SW validates a snapshot (base fee, primary
 	// endpoint, inputs) at consume time and rebuilds on any drift.
+	// Ownership handoff: submitting transfers the estimate to the execution
+	// path — unmount cleanup must NOT remote-cancel it, or the eviction
+	// would race the fire-and-forget executeTransfer out of its reuse hit.
+	handoffFeeEstimate()
 	const precomputedEstimateId = feeEstimate.value?.estimateId
 	const transferArgs = [
 		appStore.network.id,

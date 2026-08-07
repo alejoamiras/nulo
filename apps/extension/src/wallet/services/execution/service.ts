@@ -29,6 +29,9 @@ import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { classifyOperationCatch } from "./rpc-cancel"
+import { EstimateCancelRegistry } from "./estimate-cancel-registry"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import {
@@ -86,6 +89,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		"estimateTransferFee",
 		"estimateOperationFee",
 		"cancelJob",
+		"cancelEstimate",
 	)
 	public static name = EXECUTION_SERVICE_NAME
 
@@ -132,6 +136,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	 *  and default_entrypoint variants take divergent code paths that the
 	 *  reuse contract doesn't yet cover. */
 	private estimateReuse: TransferEstimateReuse = null!
+	private estimateCancel: EstimateCancelRegistry = null!
 	private transferExecutor: TransferExecutor = null!
 	private dappSendExecutor: DappSendExecutor = null!
 	private viewExecutor: ViewExecutor = null!
@@ -194,6 +199,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			logDebug: (msg) => this.logDebug(msg),
 		})
+		this.estimateCancel = new EstimateCancelRegistry({
+			evictStash: (estimateId) => this.estimateReuse.evict(estimateId),
+			logDebug: (msg) => this.logDebug(msg),
+		})
 		this.lane = new ExecutionLane({
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
@@ -219,7 +228,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
-			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
+			buildAndEstimate: (op, feeSettings, parentTask, signal) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			createJournalOperation: (input) => this.operationJournal.createOperation(input),
 			transitionJournal: (journalId, progress, error) => this.operationJournal.transitionOperation(journalId, progress, error),
 			logDebug: (msg) => this.logDebug(msg),
@@ -252,7 +261,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
-			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
+			buildAndEstimate: (op, feeSettings, parentTask, signal) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
 			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
 			logDebug: (msg) => this.logDebug(msg),
@@ -347,18 +356,63 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		recipientAddress: string,
 		amount: bigint,
 		feeSettings: FeeSettings,
+		estimateToken?: string,
 	): Promise<TransferFeeEstimate> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
-		return this.transferExecutor.estimateFee({
-			networkId,
-			accountAddress,
-			tokenId,
-			transferType,
-			recipientAddress,
-			amount,
-			feeSettings,
-		})
+		return this.withEstimateAdmission(estimateToken, "send", (signal) =>
+			this.transferExecutor.estimateFee(
+				{
+					networkId,
+					accountAddress,
+					tokenId,
+					transferType,
+					recipientAddress,
+					amount,
+					feeSettings,
+				},
+				signal,
+			),
+		)
+	}
+
+	/** Admission + cancellation envelope for the estimate entry points.
+	 *  Tokenless calls (legacy/internal) run un-tracked; tokened calls are
+	 *  admitted through the registry's per-profile cap, get an AbortSignal
+	 *  for stage-boundary checks, and ALWAYS settle — the settle carries the
+	 *  stashed estimateId so a post-completion `cancelEstimate` can still
+	 *  evict the cached signed request. The internal sentinel converts to the
+	 *  structured `JobCancelledError` at this RPC boundary. */
+	private async withEstimateAdmission(
+		estimateToken: string | undefined,
+		flowKey: string,
+		run: (signal?: AbortSignal) => Promise<TransferFeeEstimate>,
+	): Promise<TransferFeeEstimate> {
+		if (!estimateToken) return run()
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+		const signal = await this.estimateCancel.admit(estimateToken, profile.id, flowKey)
+		let estimateId: string | undefined
+		try {
+			const result = await run(signal)
+			estimateId = result.estimateId
+			return result
+		} catch (error) {
+			if (error instanceof JobCancelledSentinel) {
+				throw new JobCancelledError(undefined, { jobId: estimateToken })
+			}
+			throw error
+		} finally {
+			this.estimateCancel.settle(estimateToken, estimateId)
+		}
+	}
+
+	/** Cancel an in-flight or just-completed estimate. Best-effort: locked
+	 *  wallet or unknown/foreign tokens no-op silently. */
+	public async cancelEstimate(estimateToken: string): Promise<void> {
+		await this.ensureInitialized()
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		this.estimateCancel.cancel(estimateToken, profile.id)
 	}
 
 	/** Cancel an in-flight job. Semantics live on {@link ExecutionLane.cancelJob}
@@ -368,9 +422,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		return this.lane.cancelJob(jobId)
 	}
 
-	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings): Promise<TransferFeeEstimate> {
+	public async estimateOperationFee(
+		operation: Operation,
+		feeSettings: FeeSettings,
+		estimateToken?: string,
+		flowKey?: string,
+	): Promise<TransferFeeEstimate> {
 		await this.ensureInitialized()
-		return this.dappSendExecutor.estimateOperationFee(operation, feeSettings)
+		return this.withEstimateAdmission(estimateToken, flowKey ?? "op", (signal) =>
+			this.dappSendExecutor.estimateOperationFee(operation, feeSettings, signal),
+		)
 	}
 
 	public async executeOperations(
@@ -760,6 +821,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		},
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
+		signal?: AbortSignal,
 	): Promise<FeeEstimate> {
 		// Clone the op + its actions array. fjwc / fpc branches mutate
 		// `op.actions` (unshift / splice) to prepend fee payloads; leaking
@@ -778,6 +840,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			feeMultiplier,
 			gasPadding,
 			parentTask,
+			signal,
 		}
 		return strategy.buildAndEstimate(ctx)
 	}

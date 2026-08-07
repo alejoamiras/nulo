@@ -24,6 +24,7 @@
 
 import { GasSettings } from "@aztec/stdlib/gas"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
+import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { predictedWorstMinFees } from "@nulo/bridge-core/fee-juice"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
 import { DEFAULT_FEE_MULTIPLIER, finalizeGasLimits, startEstimateTask, suggestGasLimits } from "./fee-strategy"
@@ -58,6 +59,9 @@ export class FpcStrategy implements FeeStrategy {
 			const baseFees = (await predictedWorstMinFees(built.node)).mul(multiplier)
 			let maxFee = simulatedTx.gasUsed.totalGas.add(fpc.getTotalGas()).computeFee(baseFees)
 			ctx.op.actions.unshift(...fpc.getFeePayload(ctx.op.accountAddress, maxFee))
+			// A cancel landing during Pass 1's sim must not start Pass 2 —
+			// the second full ACVM run is the whole cost being cancelled.
+			if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
 			// precise estimation (rebuild — the rebinding of `built` is the
 			// two-pass shape the byte-parity constraint freezes; the
 			// gasSettings below deliberately reads the FIRST pass's sim)

@@ -62,12 +62,26 @@ export type Methods = {
 		recipientAddress: string,
 		amount: bigint,
 		feeSettings: FeeSettings,
+		estimateToken?: string,
 	): TransferFeeEstimate
 
 	/**
 	 * Estimates the fee for a pre-built operation (send_transaction or aztec_sendTx).
 	 */
-	estimateOperationFee(operation: Operation, feeSettings: FeeSettings): TransferFeeEstimate
+	estimateOperationFee(operation: Operation, feeSettings: FeeSettings, estimateToken?: string, flowKey?: string): TransferFeeEstimate
+
+	/**
+	 * Cancel an in-flight fee estimate by its caller-minted token.
+	 *
+	 * Estimates have no journal record, so this is the estimate-side sibling
+	 * of {@link cancelJob}, backed by the SW's EstimateCancelRegistry:
+	 * abort-if-running (the pipeline stops at its next stage boundary — an
+	 * ACVM simulation already in flight cannot be preempted) AND
+	 * evict-if-stashed (a completed estimate's cached reuse entry is dropped,
+	 * so a cancelled estimate can never be consumed at confirm). Unknown or
+	 * foreign-profile tokens no-op silently.
+	 */
+	cancelEstimate(estimateToken: string): void
 
 	/**
 	 * Cancel an in-flight job by its operation-journal id.

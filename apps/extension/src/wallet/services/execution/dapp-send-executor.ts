@@ -117,6 +117,7 @@ export interface DappSendExecutorDeps {
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
+		signal?: AbortSignal,
 	): Promise<FeeEstimate>
 	/** Mirrors `TransactionService.addTransaction` — indexed type keeps the
 	 *  seam in sync with the source signature. */
@@ -214,10 +215,15 @@ export class DappSendExecutor {
 		}
 	}
 
-	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings): Promise<TransferFeeEstimate> {
+	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings, signal?: AbortSignal): Promise<TransferFeeEstimate> {
 		if (operation.kind !== "send_transaction" && operation.kind !== "aztec_sendTx") {
 			throw new Error("Only send_transaction and aztec_sendTx operations support fee estimation")
 		}
+		// Stage-boundary cancellation — see TransferExecutor.estimateFee.
+		const checkCancelled = (): void => {
+			if (signal?.aborted) throw new JobCancelledSentinel("")
+		}
+		checkCancelled()
 
 		// Build actions array — clone to prevent mutation side effects
 		let actions: Action[]
@@ -234,6 +240,7 @@ export class DappSendExecutor {
 		}
 
 		// Discover auth witnesses via offchain effects (single-pass)
+		checkCancelled()
 		const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
 			async (op, method) => {
@@ -248,8 +255,9 @@ export class DappSendExecutor {
 			actions.push(...authWitActions)
 		}
 
+		checkCancelled()
 		const op = { ...operation, actions: [...actions], ...(detectedFee ? { fee: detectedFee } : {}) } as SendTransactionOperation
-		const { txRequest } = await this.deps.buildAndEstimate(op, feeSettings)
+		const { txRequest } = await this.deps.buildAndEstimate(op, feeSettings, undefined, signal)
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 		return {

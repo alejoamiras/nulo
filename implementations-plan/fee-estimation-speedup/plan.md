@@ -113,7 +113,7 @@ Both blocks in `packages/aztec-runtime/src/pxe/service.ts`. No replacement loggi
 
 **Gate** — `grep -rn "SYNC-DEBUG" packages/ apps/ | wc -l` → 0; `bun run lint && bun run typecheck:all && bun run test` → exit 0. Layers: typecheck/lint/unit.
 
-### Phase 2 — Estimate cancellation (PR A)
+### Phase 2 — Estimate cancellation (PR A) ✓
 
 Per architecture §4 (profile-tagged registry, duplicate rejection, TTL sweep, abort-and-evict, silent no-op on foreign tokens, stage-boundary checks, no-stash-on-cancel). Popup: token mint + cancel on refire/unmount.
 
