@@ -119,7 +119,8 @@
 
   <div class="approval">
     <h2 style="margin-top:0">✅ Approved — 2026-08-07</h2>
-    <p>Owner approved rev 3.2. All four open questions resolved: bigger speedup deferred pending measurements; three stacked PRs; marginal fee-number drift accepted; signed-transaction retention shortened to <b>2 minutes</b> at the owner's request. No <code>/harden</code> pass scheduled. Implementation is underway — the seeds below are final.</p>
+    <p>Owner approved rev 3.2. All four open questions resolved: bigger speedup deferred pending measurements; three stacked PRs; marginal fee-number drift accepted; signed-transaction retention shortened to <b>2 minutes</b> at the owner's request. No <code>/harden</code> pass scheduled.</p>
+    <p><b>Implementation complete:</b> all 7 phases green, stacked PRs #347 → #348 → #349 open against <code>dev</code> with every required check passing. Post-implementation, two independent max-effort code reviews and a three-round Codex audit ran against the built code — every finding was fixed (including a subtle chain-identity comparison the audit caught) except one deliberately deferred hardening item, recorded in the plan's follow-up charter with the auditor's concurrence. Measured bonus: the "stub vs real account" gas difference came out at exactly zero, strongly supporting the future single-simulation speedup.</p>
   </div>
 
   <hr>
