@@ -23,7 +23,7 @@
 |---|---|---|---|
 | dApp Sponsored estimate (no-authwit) | 2 | **1** | folded stubbed payload-inclusive sim; contract-identity pin (audited airtight); B1-gated |
 | dApp `fj` estimate (no-effects) | 2 | **1** | folded stubbed app-only sim (payload-free); B1-gated |
-| dApp PrivateFPC / user-added estimate | 3 | **2** | discovery folds into stubbed P1; P2 real+validated forever; B1 shape-gated |
+| dApp PrivateFPC / user-added estimate | 3 | **2** — CONDITIONAL on Ask 4(a) | discovery folds into stubbed P1; P2 real+validated forever; gated on the FUNDED measurement (no key ⇒ stays 3, A2 deferred) |
 | dApp any-method, authwit-bearing / intent-carrying | 2–3 | 2 | forced validated path (F-4 rule) — validation REGAINED relative to r1 |
 | Send page / confirm-reuse / embedded / NO_FROM | — | unchanged | out of reach or fenced |
 
@@ -43,7 +43,7 @@ Workstream C (e2e arming fix) unchanged from r1. Non-goals unchanged.
 
 **`DiscoveryProbe`** (chain-bound, ledger-#11-compliant): `extractEffects(sim: TxSimulationResult, ctx: {node: AztecNode; network: Network}): Promise<AddPrivateAuthwitAction[]>` — wraps `AuthwitDiscoverer`'s existing extraction chain verbatim: `collectOffchainEffects` → parse → lazy `node.getNodeInfo()` ONLY if effects → `assertLiveChainIdentity(network, nodeInfo)` → `computeAuthWitMessageHash`. The standalone discoverer remains for the validated path.
 
-**`finalizeGasLimits` clamp** (own commit): auto-derived limits capped at min(live `txsLimits.gas`, protocol maxima), throw-on-exceed for measured usage; `customLimits` assert-and-throw per Ask 3. Per-path pins for fj/fjwc/fpc/send.
+**`finalizeGasLimits` clamp** (own commit): auto-derived limits capped at min(retained `txsLimits`, protocol maxima), throw-on-exceed for measured usage; `customLimits` assert-and-throw per **Ask 2**. Per-path pins for **every** served path: fj/fjwc/fpc/send/**embedded/NO_FROM** (ledger #14).
 
 **Measurement script** (`packages/bridge-core/scripts/gas-delta-testnet.local.ts`, disposable): shapes = (1) public transfer + sponsor payload [Nulo-pipeline cross-check shape], (2) `transfer_private_to_private`, (3) delegated private call consuming a call-shaped authwit, (4) undeployed-account, (5) PrivateFPC P1 app-only, (6) PrivateFPC P2-envelope comparison. Arm-fidelity invariant + ≥2 interleaved repeats + DA/L2 split. Sponsored inclusion canary (free); PrivateFPC inclusion canary per Ask 4.
 
@@ -95,12 +95,12 @@ As r1, plus: preflight = file-level hard abort; runner scans formal marker.
 ### Phase A1 — Inert decorator extraction (PR 2)
 
 Behavior-preserving: decorator + probe-bearing instances constructed but the probed path NOT yet enabled (probe wired, fold flags off — all sims validated, counts unchanged). Assertion-surface migration for the discovery pins done here deliberately.
-**Gate** — all count pins unchanged in value; send-path-no-probe structural pin; `preDiscoveryActions` symmetry test; full unit suite exit 0.
+**Gate** — all count pins unchanged in value; **sim-OPTION pins on every unchanged route** (Transfer, `executeSendTransaction`, embedded, NO_FROM, all send-page strategies: `stubAccountAddresses` absent AND `skipTxValidation` not set — inertness proven at the options level, not counts alone); send-path-no-probe structural pin; `preDiscoveryActions` symmetry test; full unit suite exit 0.
 
 ### Phase B1 — Testnet measurement + decision checkpoint (PR 2 data)
 
 Free shapes (1–4: public+sponsor, private transfer, delegated call-authwit, undeployed account) + Sponsored inclusion canary always run. **PrivateFPC shapes (5: P1 app-only; 6: P2-envelope comparison) and the fragmented-note PrivateFPC inclusion canary run ONLY under Ask 4(a)** — they require funded private fee juice (no unfunded path exists; final-pass Critical). Arm-fidelity invariant, interleaved repeats, noise floor, DA/L2 split, Nulo-pipeline cross-check. Table → `lessons/phase-B1.md`.
-**Checkpoint (owner rule)**: every delta <1% ⇒ proceed to A2/B2; any ≥1% ⇒ STOP workstream A2/B2, present numbers, mark deferred.
+**Checkpoint (owner rule, SPLIT per workstream)**: **B2 gate** = free shapes 1–4 + Sponsored inclusion canary — every delta <1% ⇒ B2 proceeds; any ≥1% ⇒ B2 deferred, numbers presented. **A2 gate** = funded shapes 5–6 + fragmented-note PrivateFPC canary — requires Ask 4(a); ran AND every delta <1% ⇒ A2 proceeds; not run (no key) OR any ≥1% ⇒ A2 deferred. The gates are independent — a no-key arc can still ship B2.
 **Gate** — table complete per spec; zero committed script footprint.
 
 ### Phase A2 — PrivateFPC fold (PR 3; B1-gated AND Ask-4(a)-conditional)
@@ -122,14 +122,14 @@ Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild);
 | # | Decision | Chosen | Rejected | Source | Status |
 |---|---|---|---|---|---|
 | 1 | Fold boundary | decorator + constructor-injected chain-bound probe; two-instance ownership; send-path structural pin | ctx-hook (forbidden); one-arg pure extractor (ledger-#11 trap, re-caught) | charter + both audits | settled |
-| 2 | Reach | dApp Sponsored 2→1, fj 2→1, PrivateFPC 3→2; authwit/intent-bearing ⇒ validated | r1's fj omission (codex: "lazy"); send-page; P2 stubbing (permanent fence) | codex H1 + recon | settled |
+| 2 | Reach | dApp Sponsored 2→1, fj 2→1 (B2, free-gated); PrivateFPC 3→2 (A2, **Ask-4(a)-conditional** per #11); authwit/intent-bearing ⇒ validated | r1's fj omission (codex: "lazy"); send-page; P2 stubbing (permanent fence) | codex H1 + recon + final pass | settled |
 | 3 | Sponsored 1-sim safety | contract identity — audited airtight; fixture incl. type-spoofed row | app-only rule | fable §1a | settled |
 | 4 | Sequencing | measure-first: B1 before any stub adoption; PR2 merge-gated on checkpoint | r1's A2-before-B1 (violated own gate) | both (blocking) | settled |
 | 5 | A2 fallback | stub-or-abandon (unstubbed discovery proven impossible) | r1's unstubbed-P1 fallback; flag | both, from source | settled |
 | 6 | Intent-hash authwits | excluded from folds (forced validated path) | effect synthesis | fable F-4 | settled |
 | 7 | Ask-1 framing | full honesty: no pre-proof validation on happy path | r1's false reuse-miss backstop | codex H2 + fable F-5 | open Ask 1 |
 | 8 | Clamp | full upstream semantics + customLimits assert-throw line-item, own commit | constants-only cap | both | open Ask 2 |
-| 9 | PrivateFPC canary | Ask 4 (key vs proceed-without) | silent zero-env claim (wrong — needs L1) | codex C2 | open Ask 4 |
+| 9 | PrivateFPC canary (r2 framing) | SUPERSEDED by #11 — the r2 "proceed-without" option was non-executable | — | codex C2 → final-pass Critical | superseded |
 | 10 | Outline B | rejected; measure-first insight absorbed | adopt B (stall risk; spike moot — resolved from source) | both | settled |
 | 11 | PrivateFPC measurement/A2 | key-conditional: funded full measurement + fragmented-note canary, else A2 DEFERRED | r2's "free envelope-sim fallback" (non-executable — P2 needs funded private FJ) | final-pass Critical | open Ask 4 |
 | 12 | Inner-hash silent class | named in Ask 1 + adversarial fixture (loud pre-submit prove failure; estimate-time catch lost) | r2's claim of full coverage via pre-attached rule | final-pass H1 | open Ask 1 |
@@ -148,7 +148,7 @@ Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild);
 ### Recommended: `/goal`
 
 ```
-/goal All phases (C1, A1, B1, A2, B2, B3) marked ✓ in implementations-plan/single-sim-estimates/plan.md, each ✓ backed by its validation gate passing in the transcript; B1's measurement table in lessons with the checkpoint outcome stated (if any delta ≥1%: A2/B2 marked DEFERRED in plan.md counts as complete); LESSONS_FILE=implementations-plan/single-sim-estimates/lessons/phase-<id>.md printed per completed phase; the gh stack (PR1 e2e → PR2 inert decorator + measurement, merge-gated on the checkpoint → PR3 folds + clamp) open against dev with required checks green; /code-review max --fix applied + committed separately; codex post-impl audit complete with high/critical addressed; bun run test and bun run lint exit 0 in the transcript.
+/goal All phases (C1, A1, B1, A2, B2, B3) marked ✓ OR DEFERRED in implementations-plan/single-sim-estimates/plan.md, each ✓ backed by its validation gate passing in the transcript; B1's measurement table in lessons with BOTH split checkpoint outcomes stated (B2 gate: free shapes; A2 gate: funded shapes — A2 marked DEFERRED counts as complete when the key wasn't provisioned OR any funded delta ≥1%; B2 marked DEFERRED counts as complete when any free delta ≥1%); LESSONS_FILE=implementations-plan/single-sim-estimates/lessons/phase-<id>.md printed per completed phase; the gh stack (PR1 e2e → PR2 inert decorator + measurement, merge-gated on the B2 checkpoint → PR3 remaining folds + clamp) open against dev with required checks green; /code-review max --fix applied + committed separately; codex post-impl audit complete with high/critical addressed; bun run test and bun run lint exit 0 in the transcript.
 ```
 
 ### Alternative: `/loop 15m`
