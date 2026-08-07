@@ -101,7 +101,7 @@ Entry conditions: Phase 6 measurement shows stub-vs-real gas deltas comfortably 
 PR mapping (stacked; Phase 0 verifies `gh-stack` — note the codex-vs-changelog public/private-preview dispute — fallback: classic chained PRs):
 **PR A** = Phases 0–2 · **PR B** = Phase 3 · **PR C** = Phases 4–6.
 
-### Phase 0 — Preflight: gh-stack + baseline
+### Phase 0 — Preflight: gh-stack + baseline ✓
 
 `gh extension install github/gh-stack`; verify stacking against `dev`'s ruleset on a scratch branch pair (enablement may be required if codex's private-preview claim is right); record stack-vs-fallback in `lessons/phase-0.md`. Note baseline structural-test call counts.
 
