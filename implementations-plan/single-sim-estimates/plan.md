@@ -1,6 +1,6 @@
 # Plan — single-sim-estimates
 
-- **Status**: REVISION 3 (post dual audit + final codex pass) — pending codex re-verdict + approval gate
+- **Status**: REVISION 3.2 — codex final `approve`; AWAITING OWNER APPROVAL at the gate
 - **Tier**: `/blueprint mid` (rubric: security HIGH — authwit auto-sign surface + contract-identity argument; blast radius MED-HIGH — dApp estimate gas sizing; novelty LOW; irreversibility LOW; migration NONE; external coupling LOW. `deep` arguable; `mid` per owner invocation, hazard surfaces flagged hostile in every packet)
 - **eli5_mode**: file
 - **Recon**: [recon.md](recon.md) (incl. audit erratum) · **Audits**: [audit-codex.md](audit-codex.md) (r1 `reject` — both blockers verified, adopted) · [audit-fable.md](audit-fable.md) (r1 `conditional approve` — all 4 conditions adopted; advisories F-5–F-10 adopted) · **Binding precedent**: `implementations-plan/fee-estimation-speedup/` charter + ledger
@@ -141,7 +141,7 @@ Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild);
 - **Codex (r1, fresh, xhigh)**: `reject` — 2 blockers (sequencing, measurement gaps incl. PrivateFPC funding) + H1 fj fold + H2 Ask-1 backstop + H3 probe — ALL adopted. [audit-codex.md](audit-codex.md)
 - **Fable (r1, fresh)**: `conditional approve` — 4 conditions (probe respec, Inference-1 fact + resequencing, injection story, F-4 rule) + advisories F-5–F-10 — ALL adopted. Sponsored pin verified airtight. [audit-fable.md](audit-fable.md)
 - **Codex (final fresh-context pass on rev 2)**: `reject` — Critical (Ask-4(b) fallback non-executable: P2 sims need funded private FJ, no unfunded path; fragmented-note canary requirement silently dropped), H1 (standalone inner-hash authwit class undetectable at estimate — Ask 1 must name it + fixture), H2 (probe route unpinned through the shared `buildAndEstimate` dep — split typed deps + options-pins), M1 (clamp blast radius incl. embedded/NO_FROM + RPC posture via retained `txsLimits`). ALL adopted into rev 3 (ledger #11–14). [audit-codex.md](audit-codex.md)
-- **Codex (re-verdict on rev 3, resumed session)**: _pending_
+- **Codex (re-verdicts, resumed final-pass session)**: rev 3 → `conditional approve` (4 spec-consistency conditions — applied as rev 3.1); rev 3.1 → `conditional approve` (one residual: /loop seed coupling the split gates — applied as rev 3.2); rev 3.2 → **`approve`** — "fully resolves the remaining contradiction... ready to build under its stated owner asks and measurement gates."
 
 ## Seeds (DRAFT — finalized post-approval)
 
