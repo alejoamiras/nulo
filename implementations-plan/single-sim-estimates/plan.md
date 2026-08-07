@@ -85,7 +85,7 @@ r1 facts 1–10 stand, with fact 10 corrected (upstream ships stub-sized + clamp
 
 ## Phases
 
-PR mapping (one `gh stack`): **PR 1** = C1 · **PR 2** = A1 + B1 (lessons/data only) — **PR 2 merges only after B1's checkpoint passes** · **PR 3** = A2 + B2 + B3.
+PR mapping (one `gh stack`): **PR 1** = C1 · **PR 2** = A1 + B1 (lessons/data only) — **PR 2 merges only after B1's B2/free checkpoint passes** · **PR 3** = A2 + B2 + B3.
 
 ### Phase C1 — e2e verify + arming preflight (PR 1)
 
@@ -124,7 +124,7 @@ Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild);
 | 1 | Fold boundary | decorator + constructor-injected chain-bound probe; two-instance ownership; send-path structural pin | ctx-hook (forbidden); one-arg pure extractor (ledger-#11 trap, re-caught) | charter + both audits | settled |
 | 2 | Reach | dApp Sponsored 2→1, fj 2→1 (B2, free-gated); PrivateFPC 3→2 (A2, **Ask-4(a)-conditional** per #11); authwit/intent-bearing ⇒ validated | r1's fj omission (codex: "lazy"); send-page; P2 stubbing (permanent fence) | codex H1 + recon + final pass | settled |
 | 3 | Sponsored 1-sim safety | contract identity — audited airtight; fixture incl. type-spoofed row | app-only rule | fable §1a | settled |
-| 4 | Sequencing | measure-first: B1 before any stub adoption; PR2 merge-gated on checkpoint | r1's A2-before-B1 (violated own gate) | both (blocking) | settled |
+| 4 | Sequencing | measure-first: B1 before any stub adoption; PR2 merge-gated on the B2/free checkpoint | r1's A2-before-B1 (violated own gate) | both (blocking) | settled |
 | 5 | A2 fallback | stub-or-abandon (unstubbed discovery proven impossible) | r1's unstubbed-P1 fallback; flag | both, from source | settled |
 | 6 | Intent-hash authwits | excluded from folds (forced validated path) | effect synthesis | fable F-4 | settled |
 | 7 | Ask-1 framing | full honesty: no pre-proof validation on happy path | r1's false reuse-miss backstop | codex H2 + fable F-5 | open Ask 1 |
@@ -154,7 +154,7 @@ Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild);
 ### Alternative: `/loop 15m`
 
 ```
-/loop 15m Drive implementations-plan/single-sim-estimates forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status/log; PRs → gh pr view --json statusCheckRollup. (2) CI waits fine if progressing; prep next phase meanwhile. (3) No task? Next pending phase; fast layers after each edit; commit → push. (4) Owner-grade decisions → /codex xhigh, decide, act, log — EXCEPT: the B1 checkpoint (any delta ≥1% ⇒ STOP A2/B2, mark DEFERRED, surface numbers, continue C/A1) and Ask 4 (never touch L1 keys/funding without explicit owner provision). Hard limits: never merge main/release, never publish, never stub a payload-inclusive sim for any non-canonical FPC, never let an intent-authwit-carrying op take a 1-sim fold, no scope beyond plan.md. (5) 5× failed step ⇒ reassess with codex. (6) Phase green = plan.md gate verbatim ⇒ ✓ + lessons + LESSONS_FILE line. (7) All ✓ (or A2/B2 DEFERRED)? /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up with contentious calls ELI5'd. ASCII checklist visible.
+/loop 15m Drive implementations-plan/single-sim-estimates forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status/log; PRs → gh pr view --json statusCheckRollup. (2) CI waits fine if progressing; prep next phase meanwhile. (3) No task? Next pending phase; fast layers after each edit; commit → push. (4) Owner-grade decisions → /codex xhigh, decide, act, log — EXCEPT: the SPLIT B1 checkpoints (free shapes ≥1% ⇒ defer B2 only; funded shapes ≥1% OR no key ⇒ defer A2 only; each independently — surface numbers, continue everything not deferred) and Ask 4 (never touch L1 keys/funding without explicit owner provision). Hard limits: never merge main/release, never publish, never stub a payload-inclusive sim for any non-canonical FPC, never let an intent-authwit-carrying op take a 1-sim fold, no scope beyond plan.md. (5) 5× failed step ⇒ reassess with codex. (6) Phase green = plan.md gate verbatim ⇒ ✓ + lessons + LESSONS_FILE line. (7) All ✓ (or A2/B2 DEFERRED)? /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up with contentious calls ELI5'd. ASCII checklist visible.
 ```
 
 Use exactly ONE per session — they don't compose.
