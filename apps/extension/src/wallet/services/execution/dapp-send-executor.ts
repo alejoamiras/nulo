@@ -344,8 +344,6 @@ export class DappSendExecutor {
 					isProtocol: info.isProtocol ?? false,
 				}
 			}
-			// Exact live pair, not the XOR composite — see the entry's doc.
-			const nodeInfo = await built.node.getNodeInfo()
 			const builtFees = built.txRequest.txContext.gasSettings.maxFeesPerGas
 			const estimateId = crypto.randomUUID()
 			this.deps.operationEstimateReuse.stash(estimateId, {
@@ -354,7 +352,10 @@ export class DappSendExecutor {
 				networkId: operation.networkId,
 				feeSettings,
 				profileId: profile.id,
-				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+				// The BUILDER's asserted pair, never a refetch — a refetch after
+				// an endpoint flip would snapshot a chain this request was not
+				// signed under (consume would then compare live-vs-live).
+				chainIdentity: built.chainIdentity,
 				baseFeeFingerprint: fingerprintBaseFee({
 					feePerDaGas: builtFees.feePerDaGas,
 					feePerL2Gas: builtFees.feePerL2Gas,

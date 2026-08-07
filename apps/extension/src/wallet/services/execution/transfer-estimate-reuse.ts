@@ -123,11 +123,7 @@ export interface TransferEstimateReuseDeps {
 export class TransferEstimateReuse {
 	private cache = new Map<string, TransferEstimateReuseEntry>()
 
-	public constructor(private readonly deps: TransferEstimateReuseDeps) {
-		// Timed sweep so an abandoned signed request is actually dropped at
-		// TTL, not merely unconsumable until the next stash happens to sweep.
-		setInterval(() => this.evictStale(), 60_000)
-	}
+	public constructor(private readonly deps: TransferEstimateReuseDeps) {}
 
 	/** Store an entry under a fresh id, then opportunistically sweep
 	 *  expired entries so the map doesn't grow unboundedly when the popup
@@ -135,6 +131,9 @@ export class TransferEstimateReuse {
 	public stash(estimateId: string, entry: TransferEstimateReuseEntry): void {
 		this.cache.set(estimateId, entry)
 		this.evictStale()
+		// Per-entry timer so the signed request is physically dropped AT the
+		// TTL (idempotent vs consume/evict; dies with the SW, as does the map).
+		setTimeout(() => this.cache.delete(estimateId), ESTIMATE_REUSE_TTL_MS + 1)
 	}
 
 	/** Drop a stashed entry (cancelled estimate, rejected interaction).

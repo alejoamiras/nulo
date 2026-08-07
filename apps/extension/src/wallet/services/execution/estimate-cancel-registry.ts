@@ -121,20 +121,12 @@ export class EstimateCancelRegistry {
 			return Promise.resolve(this.activate(token, profileId, flowKey))
 		}
 
-		// Over capacity. Latest-intent-wins applies WITHIN a flow slot only:
-		// a newer arrival for the SAME slot supersedes its predecessor (that
-		// is the newer intent for that operation), but a different slot's job
-		// must survive — aborting it would silently destroy an estimate the
-		// user still needs, and no path ever refires it (a 5-operation
-		// approval window would lose operation #1's estimate outright).
-		const oldest = this.oldestActive(profileId, flowKey)
-		if (oldest) this.abortEntry(oldest.token, oldest.entry)
-
+		// Over capacity. Decide parkability BEFORE retiring anything: a
+		// newcomer that will be rejected must not first destroy the estimate
+		// it was meant to replace.
 		const key = this.pendingKey(profileId, flowKey)
 		const superseded = this.pending.get(key)
-		if (superseded) {
-			superseded.reject(new JobCancelledSentinel(superseded.token))
-		} else {
+		if (!superseded) {
 			// Bound the parked set: distinct flow slots each hold one promise,
 			// so without a cap a many-op interaction mints unbounded parked
 			// work. Reject-newcomer (not evict-oldest): the oldest parked ops
@@ -146,6 +138,15 @@ export class EstimateCancelRegistry {
 			if (parkedForProfile >= MAX_PENDING_ESTIMATES_PER_PROFILE) {
 				throw new JobCancelledSentinel(token)
 			}
+		}
+		// The newcomer WILL park — latest-intent-wins may now retire the same
+		// flow slot's predecessors. Within-slot only: a different slot's job
+		// must survive (no path ever refires an aborted estimate; a 5-op
+		// approval window would lose operation #1's estimate outright).
+		const oldest = this.oldestActive(profileId, flowKey)
+		if (oldest) this.abortEntry(oldest.token, oldest.entry)
+		if (superseded) {
+			superseded.reject(new JobCancelledSentinel(superseded.token))
 		}
 		return new Promise<AbortSignal>((resolve, reject) => {
 			this.pending.set(key, { token, profileId, flowKey, parkedAt: this.now(), resolve, reject })

@@ -93,16 +93,14 @@ export interface OperationEstimateReuseDeps {
 export class OperationEstimateReuse {
 	private cache = new Map<string, OperationEstimateReuseEntry>()
 
-	public constructor(private readonly deps: OperationEstimateReuseDeps) {
-		// Timed sweep so an abandoned signed request is actually dropped at
-		// TTL, not merely unconsumable until the next stash happens to sweep.
-		// Dies with the service worker, which also clears the map.
-		setInterval(() => this.evictStale(), 60_000)
-	}
+	public constructor(private readonly deps: OperationEstimateReuseDeps) {}
 
 	public stash(estimateId: string, entry: OperationEstimateReuseEntry): void {
 		this.cache.set(estimateId, entry)
 		this.evictStale()
+		// Per-entry timer so the signed request is physically dropped AT the
+		// TTL (idempotent vs consume/evict; dies with the SW, as does the map).
+		setTimeout(() => this.cache.delete(estimateId), ESTIMATE_REUSE_TTL_MS + 1)
 	}
 
 	/** Drop a stashed entry (cancelled estimate, rejected interaction).
