@@ -355,17 +355,23 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		// suppress the write-back (a stale-marked re-insert would paint the old
 		// profile's figures dimmed under the new one via peek).
 		const h = await makeHarness()
+		// Park the compute at its SECOND network dependency (the view-deps
+		// resolution, AFTER the profile context is acquired) — parking on the
+		// first would fence before any old-profile context existed, proving
+		// only the wiring, not the dangerous old-context write-back.
 		let releaseNet: (() => void) | undefined
-		h.getNetwork.mockImplementationOnce(
-			() =>
-				new Promise((r) => {
-					releaseNet = () => r(NETWORK)
-				}),
-		)
+		h.getNetwork
+			.mockImplementationOnce(async () => NETWORK)
+			.mockImplementationOnce(
+				() =>
+					new Promise((r) => {
+						releaseNet = () => r(NETWORK)
+					}),
+			)
 		const inFlight = h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
-		// Yield until the compute reaches its (deferred) network dependency.
+		// Yield until the compute reaches the deferred dependency.
 		for (let i = 0; i < 50 && !releaseNet; i++) await new Promise((r) => setTimeout(r, 0))
-		if (!releaseNet) throw new Error("compute never reached getNetwork")
+		if (!releaseNet) throw new Error("compute never reached its second getNetwork call")
 		h.profileChanged.invoke(undefined) // switch lands while the compute is parked
 		releaseNet()
 		await inFlight // the pre-switch caller still receives its value

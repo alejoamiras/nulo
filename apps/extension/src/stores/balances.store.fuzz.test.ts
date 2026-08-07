@@ -68,24 +68,28 @@ vi.mock("@/stores/app.store", async () => {
 import { TxStatus } from "@/wallet/services/transaction/spec"
 import { type BalanceScope, type SubscribeCaps, useBalancesStore } from "./balances.store"
 
-// Account addresses are PROFILE-UNIQUE so the mock (which only sees RPC args,
-// never the profile) can attribute every call to its owning profile.
+// Account addresses AND chainIds are PROFILE-UNIQUE so the mock (which only
+// sees RPC args, never the profile) can attribute every call — gas/peek by
+// account, fpc by chainId — to its owning profile.
 const SCOPES: BalanceScope[] = [
 	{ profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xa1" },
 	{ profileId: "p1", networkId: "n1", chainId: 111, accountAddress: "0xa2" },
-	{ profileId: "p2", networkId: "n1", chainId: 111, accountAddress: "0xb1" },
-	{ profileId: "p2", networkId: "n1", chainId: 111, accountAddress: "0xb2" },
+	{ profileId: "p2", networkId: "n1", chainId: 222, accountAddress: "0xb1" },
+	{ profileId: "p2", networkId: "n1", chainId: 222, accountAddress: "0xb2" },
 ]
 const PROFILE_OF_ACCOUNT = new Map(SCOPES.map((s) => [s.accountAddress, s.profileId]))
+const PROFILE_OF_CHAIN = new Map(SCOPES.map((s) => [s.chainId, s.profileId]))
 
 interface PendingCall {
 	id: number
 	kind: "gas" | "fpc" | "peek"
 	account?: string
-	settle: (ok: boolean) => void
+	settle: (ok: boolean, stale?: boolean) => void
 }
 interface CallMeta {
+	kind: "gas" | "fpc" | "peek"
 	account?: string
+	profile: string
 	fencesAtCall: number
 }
 
@@ -103,6 +107,21 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 		const numRuns = Number(process.env.NULO_FUZZ_RUNS ?? 120)
 		await fc.assert(
 			fc.asyncProperty(fc.array(fc.nat({ max: 999_983 }), { minLength: 40, maxLength: 120 }), async (tape) => {
+				try {
+					await runTape(tape)
+				} finally {
+					// A run that FAILED mid-tape leaves armed store timers and its
+					// tx handler behind; without this, shrink attempts inherit them
+					// and the printed seed/path may not reproduce in isolation.
+					vi.clearAllTimers()
+					txAdd.mockClear()
+				}
+			}),
+			{ numRuns },
+		)
+
+		async function runTape(tape: number[]) {
+			{
 				// ── per-run world ────────────────────────────────────────────
 				setActivePinia(createPinia())
 				const pending: PendingCall[] = []
@@ -116,7 +135,8 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 						new Promise((resolve, reject) => {
 							const id = nextCallId++
 							totalCalls++
-							callMeta.set(id, { account, fencesAtCall: fences[PROFILE_OF_ACCOUNT.get(account) ?? "p1"] ?? 0 })
+							const profile = PROFILE_OF_ACCOUNT.get(account) ?? "p1"
+							callMeta.set(id, { kind: "gas", account, profile, fencesAtCall: fences[profile] ?? 0 })
 							pending.push({
 								id,
 								kind: "gas",
@@ -129,14 +149,12 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 						}),
 				)
 				mocks.getFpcs.mockReset().mockImplementation(
-					() =>
+					(chainId: number) =>
 						new Promise((resolve, reject) => {
 							const id = nextCallId++
 							totalCalls++
-							// FPC RPCs carry no account; provenance binds via the store
-							// key the awaiting fetch commits to (checked against fences
-							// through the entry's own profile at observation time).
-							callMeta.set(id, { fencesAtCall: Math.max(fences.p1, fences.p2) })
+							const profile = PROFILE_OF_CHAIN.get(chainId) ?? "p1"
+							callMeta.set(id, { kind: "fpc", profile, fencesAtCall: fences[profile] ?? 0 })
 							pending.push({
 								id,
 								kind: "fpc",
@@ -150,14 +168,18 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 						new Promise((resolve, reject) => {
 							const id = nextCallId++
 							totalCalls++
-							callMeta.set(id, { account, fencesAtCall: fences[PROFILE_OF_ACCOUNT.get(account) ?? "p1"] ?? 0 })
+							const profile = PROFILE_OF_ACCOUNT.get(account) ?? "p1"
+							callMeta.set(id, { kind: "peek", account, profile, fencesAtCall: fences[profile] ?? 0 })
 							pending.push({
 								id,
 								kind: "peek",
 								account,
-								settle: (ok) =>
+								settle: (ok, stale) =>
 									ok
-										? resolve({ balances: { publicFeeJuice: `${id}`, privateFeeJuice: null }, stale: id % 2 === 0 })
+										? resolve({
+												balances: { publicFeeJuice: `${id}`, privateFeeJuice: null },
+												stale: stale ?? id % 2 === 0,
+											})
 										: reject(new Error(`peek ${id}`)),
 							})
 						}),
@@ -166,6 +188,15 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 				const store = useBalancesStore()
 				const subs: Array<{ scope: BalanceScope; caps: SubscribeCaps; release: () => void; released: boolean }> = []
 				let txHandler: ((tx: unknown) => void) | undefined
+				// Keys whose ensure resolved DEGRADED while a retry-capable
+				// covering subscriber was live — the store armed (or re-armed) a
+				// backoff loop, so a clean drain must recover them. Dropped when
+				// the key's retry capability dies (loop dies with it) or a fence
+				// clears the entry.
+				const expectGasRecovery = new Set<string>()
+				const scopeKey = (s: BalanceScope) => JSON.stringify([s.profileId, s.networkId, s.chainId, s.accountAddress])
+				const retryCoves = (s: BalanceScope, leg: "gas" | "fpc") =>
+					subs.some((x) => !x.released && x.caps.retry && x.caps.legs.includes(leg) && scopeKey(x.scope) === scopeKey(s))
 
 				const liveSubs = () => subs.filter((s) => !s.released)
 				const lastOfProfile = (profileId: string, releasing: (typeof subs)[number]) =>
@@ -187,19 +218,28 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 						if (entry.gas.verified?.publicFeeJuice != null) {
 							const meta = callMeta.get(Number(entry.gas.verified.publicFeeJuice))
 							expect(meta, `verified payload of ${key} must come from a tracked RPC`).toBeDefined()
+							expect(meta?.kind, `verified payload of ${key} must come from a real fetch, never a peek`).toBe("gas")
 							expect(meta?.account, `verified payload of ${key} fetched for the wrong account`).toBe(accountAddress)
 							expect(
 								meta?.fencesAtCall,
 								`verified payload of ${key} was fetched BEFORE the last fence of ${profileId} — cross-epoch commit`,
 							).toBe(fences[profileId])
 						}
+						// Display is SWR/peek-primed (fence-exempt by design), but it
+						// must never carry another ACCOUNT's figures.
+						if (entry.gas.display?.publicFeeJuice != null) {
+							const meta = callMeta.get(Number(entry.gas.display.publicFeeJuice))
+							expect(meta, `display payload of ${key} must come from a tracked RPC`).toBeDefined()
+							expect(meta?.account, `display payload of ${key} leaked from another account`).toBe(accountAddress)
+						}
 						if (entry.fpc.data?.[0]) {
 							const meta = callMeta.get(Number(String(entry.fpc.data[0].id).replace("fpc-", "")))
 							expect(meta, `fpc data of ${key} must come from a tracked RPC`).toBeDefined()
+							expect(meta?.profile, `fpc data of ${key} fetched for the wrong profile`).toBe(profileId)
 							expect(
-								(meta?.fencesAtCall ?? -1) >= fences[profileId],
-								`fpc data of ${key} predates the last fence of ${profileId}`,
-							).toBe(true)
+								meta?.fencesAtCall,
+								`fpc data of ${key} was fetched BEFORE the last fence of ${profileId} — cross-epoch commit`,
+							).toBe(fences[profileId])
 						}
 					}
 				}
@@ -230,21 +270,39 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 							// Shadow the suspenders: the last release of a profile
 							// fences it inside the store.
 							if (wasLast) fences[target.scope.profileId] += 1
+							// The retry loop dies with the key's last retry-capable
+							// lease — recovery is no longer owed.
+							if (!retryCoves(target.scope, "gas")) expectGasRecovery.delete(scopeKey(target.scope))
 						}
 					} else if (op < 60) {
 						const scope = SCOPES[p1]
 						const legs: ("gas" | "fpc")[] = p2 % 2 === 0 ? ["gas"] : ["gas", "fpc"]
-						void store.ensure(scope, { legs }).catch(() => {})
+						void store
+							.ensure(scope, { legs })
+							.then(() => {
+								// Model hook: a GAS-degraded resolution with live retry
+								// coverage means the store owes a recovery (checked at
+								// the slice, not the combined flag — an fpc-only
+								// degradation owes nothing for gas).
+								if (legs.includes("gas") && store.entry(scope)?.gas.status === "degraded" && retryCoves(scope, "gas")) {
+									expectGasRecovery.add(scopeKey(scope))
+								}
+							})
+							.catch(() => {})
 					} else if (op < 70) {
 						if (txHandler) txHandler({ account: SCOPES[p1].accountAddress, status: TxStatus.Proven })
 					} else if (op < 78) {
 						const profileId = p1 % 2 === 0 ? "p1" : "p2"
 						store.invalidateProfile(profileId)
 						fences[profileId] += 1
+						for (const s of SCOPES) {
+							if (s.profileId === profileId) expectGasRecovery.delete(scopeKey(s))
+						}
 					} else if (op < 98) {
 						if (pending.length > 0) {
-							const idx = p1 * 4 + p2
-							const call = pending.splice(idx % pending.length, 1)[0]
+							// Full-span pick so ANY in-flight call can settle next.
+							const idx = Math.floor(n / 1600) % pending.length
+							const call = pending.splice(idx, 1)[0]
 							call.settle(n % 5 !== 0) // ~20% of settlements are failures
 						}
 					} else {
@@ -270,16 +328,55 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					expect(entry.gas.status, `gas slice of ${key} stuck fetching after drain`).not.toBe("fetching")
 					expect(entry.fpc.status, `fpc slice of ${key} stuck fetching after drain`).not.toBe("fetching")
 				}
-				// C — post-drain silence: every retry resolved successfully, so
-				// no timer, no stranded forced state, may produce further calls.
+				// C1 — owed recoveries happened: every key whose ensure resolved
+				// gas-degraded under live retry coverage must have recovered
+				// through the all-success drain (debt cleared, slice ready).
+				for (const key of expectGasRecovery) {
+					const entry = store.entries[key]
+					expect(entry, `recovery-owed entry ${key} vanished before recovering`).toBeDefined()
+					expect(entry?.gas.retryDebt, `recovery-owed key ${key} still carries retry debt after a clean drain`).toBe(false)
+					expect(entry?.gas.status, `recovery-owed key ${key} never recovered`).toBe("ready")
+				}
+				// C2 — post-drain silence: every retry resolved successfully, so
+				// no timer may produce further calls.
 				const callsAfterDrain = totalCalls
 				await vi.advanceTimersByTimeAsync(35_000)
 				await vi.advanceTimersByTimeAsync(35_000)
-				expect(totalCalls, "client calls after a clean drain — an orphaned timer or stranded counter is firing").toBe(
-					callsAfterDrain,
-				)
-			}),
-			{ numRuns },
-		)
+				expect(totalCalls, "client calls after a clean drain — an orphaned timer is firing").toBe(callsAfterDrain)
+				// C3 — stranded-forced probe: with no forced run live, a stale
+				// peek followed by a plain successful fetch must ALWAYS un-dim.
+				// A stranded forced counter keeps the non-forced success from
+				// clearing the stale-mark (and blocks the peek outright).
+				for (const scope of SCOPES) {
+					if (!store.entries[scopeKey(scope)]) continue
+					const probeSub = store.subscribe(scope, { legs: ["gas"], retry: false, txRefresh: false, peek: true })
+					await flush()
+					const peek = pending.find((c) => c.kind === "peek" && c.account === scope.accountAddress)
+					peek?.settle(true, true)
+					await flush()
+					const probeEnsure = store.ensure(scope, { legs: ["gas"] }).catch(() => {})
+					await flush()
+					pending.splice(0).forEach((c) => c.settle(true))
+					await flush()
+					await probeEnsure
+					expect(
+						store.entries[scopeKey(scope)]?.stale,
+						`plain fetch on ${scope.accountAddress} failed to clear peek-stale — stranded forced counter`,
+					).toBe(false)
+					probeSub.release()
+				}
+				// C4 — every timer dies with its lease: release everything, then
+				// further virtual time must be silent.
+				for (const s of liveSubs()) {
+					s.released = true
+					s.release()
+				}
+				await flush()
+				const callsAfterRelease = totalCalls
+				await vi.advanceTimersByTimeAsync(35_000)
+				await vi.advanceTimersByTimeAsync(35_000)
+				expect(totalCalls, "client calls after releasing every lease — an orphaned timer survived release").toBe(callsAfterRelease)
+			}
+		}
 	}, 120_000)
 })

@@ -158,9 +158,13 @@ describe("fee cards co-mounted on one key", () => {
 		txHandlerFor("onTransactionUpdated")({ account: "0xacct", status: "Proven" })
 		await vi.advanceTimersByTimeAsync(0)
 
-		// The fee card's same-identity refire JOINS the in-flight forced run.
+		// The fee card's same-identity refire JOINS the in-flight forced run —
+		// proven by count: mount fetch + forced fetch, and the refire adds NO
+		// third gas RPC of its own.
+		const gasCallsBeforeRefire = mocks.getGasBalances.mock.calls.length
 		await fee.setProps({ profile: { ...profile } })
 		await vi.advanceTimersByTimeAsync(0)
+		expect(mocks.getGasBalances.mock.calls.length).toBe(gasCallsBeforeRefire)
 		rejectRaw(new Error("SW unreachable"))
 		await vi.advanceTimersByTimeAsync(0)
 		await flushPromises()
@@ -187,6 +191,8 @@ describe("fee cards co-mounted on one key", () => {
 				.classes()
 				.some((c) => c.includes("amount_stale")),
 		).toBe(false)
+		gas.unmount()
+		fee.unmount()
 	})
 
 	test("a forced success resets the gas overlay without re-entering the fee card's snapshot", async () => {
@@ -214,5 +220,7 @@ describe("fee cards co-mounted on one key", () => {
 		expect(gas.find('[data-testid="gas-balance-public"]').text()).toBe("44 FJ")
 		// D4: the fee card's committed snapshot is untouched — no new emissions.
 		expect((fee.emitted<unknown[]>("update:modelValue") ?? []).length).toBe(feeEmits)
+		gas.unmount()
+		fee.unmount()
 	})
 })
