@@ -1,213 +1,155 @@
 # Plan — single-sim-estimates
 
-- **Status**: DRAFT — pending dual audit (codex + fable) + approval gate
-- **Tier**: `/blueprint mid` (rubric: security HIGH — authwit auto-sign surface restructuring + a NEW contract-identity safety argument; blast radius MED-HIGH — dApp estimate gas sizing, both fee methods; novelty LOW — charter pre-designed, surface triple-audited last month; irreversibility LOW; migration NONE; external coupling LOW. 1–2 HIGH: `deep` arguable by the letter; `mid` chosen per owner invocation + the pre-audited charter, with the Sponsored contract-identity argument flagged for hostile attention in every audit packet)
-- **eli5_mode**: file (the prior arc's Artifact became unwritable after a session re-login; file mode avoids a URL orphan — revisit if the owner wants a fresh Artifact)
-- **Recon**: [recon.md](recon.md) · **Binding precedent**: `implementations-plan/fee-estimation-speedup/` charter + audit constraints (fable F-1/F-2, codex C1/C2, post-impl r1–r3)
+- **Status**: REVISION 2 (post dual audit) — pending final fresh-context codex pass + approval gate
+- **Tier**: `/blueprint mid` (rubric: security HIGH — authwit auto-sign surface + contract-identity argument; blast radius MED-HIGH — dApp estimate gas sizing; novelty LOW; irreversibility LOW; migration NONE; external coupling LOW. `deep` arguable; `mid` per owner invocation, hazard surfaces flagged hostile in every packet)
+- **eli5_mode**: file
+- **Recon**: [recon.md](recon.md) (incl. audit erratum) · **Audits**: [audit-codex.md](audit-codex.md) (r1 `reject` — both blockers verified, adopted) · [audit-fable.md](audit-fable.md) (r1 `conditional approve` — all 4 conditions adopted; advisories F-5–F-10 adopted) · **Binding precedent**: `implementations-plan/fee-estimation-speedup/` charter + ledger
+
+## Revision 2 — what the audits changed
+
+1. **Measure-first resequencing (both auditors, blocking).** The r1 draft shipped the stubbed PrivateFPC fold (A2) in PR 2 *before* the PR-3 measurement gating stub adoption — violating the plan's own ledger and the owner's rule. New order: **C1 → A1 (inert) → B1 (measurement) → gate → A2 → B2 → B3**; nothing stub-influenced lands before its measurement.
+2. **Inference 1 is now a verified FACT (both, from source): unstubbed discovery is impossible.** `UtilityExecutionOracle.getAuthWitness` throws on a missing witness before any result exists (`utility_execution_oracle.js:266-271`, reached via the account's `verify_private_authwit` oracle call); `skipTxValidation` only gates the post-execution `node.isValidTx`. The r1 "unstubbed P1 fallback" is deleted; **if B1 fails the gate, the PrivateFPC fold is abandoned (A2 reverted), not tweaked**.
+3. **dApp `fj` fold added (codex H1)**: `FeeJuiceStrategy`'s sim is app-only and payload-free — with measured stub gas, no-effects dApp `fj` folds **2→1** more safely than Sponsored (no payload in the stub at all). The r1 narrowing was incomplete.
+4. **`DiscoveryProbe` respecified (both — the ledger-#11 trap, again).** Extraction is chain-bound: the probe is `extractEffects(sim, {node, network}): Promise<AddPrivateAuthwitAction[]>`, preserving the lazy `getNodeInfo`-only-if-effects ordering AND the `assertLiveChainIdentity` guard (F-012/A-01 — dropping it would weaken hash derivation against a drifted RPC). **Constructor-injected** (the "into the strategy call" wording is dead — that reading is the forbidden context-hook): the service keeps its probe-free strategy map for the send path; the decorator owns a second, probe-bearing `FpcStrategy`/`FeeJuiceStrategy` instance pair. A structural pin asserts the send-path instances carry no probe. Owned trade, stated plainly: `FpcStrategy` DOES grow dApp-only branching (extract/splice/conditional-rebuild) — accepted as strictly better than exporting the pass structure.
+5. **Intent-hash authwit corner closed (fable F-4, from Noir source).** Call-shaped authwit consumption emits its `CallAuthorizationRequest` effect UNCONDITIONALLY (even with a valid witness attached) — so call-authwit ops always surface effects under a stub and re-validate via the rebuild. But standalone intent-hash authwits emit NOTHING: an op pre-carrying `add_private_authwit` actions could size from a stub with unverified witnesses. **Rule: any op whose pre-discovery actions already contain `add_private_authwit` takes the validated path (no 1-sim fold)**; extraction runs on the FIRST sim only (re-sims re-emit — double-splice hazard); discovered hashes dedup against pre-attached ones. The safety sentence, restated precisely: call-shaped authwits re-validate by unconditional emission; intent-shaped are excluded by rule; nothing sizes from a stub carrying unverified witnesses.
+6. **Ask 1 rewritten honestly (codex H2 + fable F-5).** There is NO validation backstop on the happy path: reuse-miss runs this same pipeline, and a reuse-HIT runs zero sims — so post-B2 the no-authwit dApp Sponsored/fj flow has no pre-proof `isValidTx` anywhere (losses: node-side double-spend/nullifier, instance validity, gas admission, expiry — failure moves to post-proof `sendTx`; the node still rejects, no on-chain safety loss). Counterweights: −1 node RPC per estimate (validation's own round-trip), and the inclusion canary. The owner accepts THIS, or B2 shrinks.
+7. **Clamp respecified (both).** Full upstream semantics: cap auto-derived limits at min(node-advertised `txsLimits.gas`, protocol maxima) and **throw when simulated usage already exceeds admission**; dApp `customLimits` are validated (assert-and-throw), not silently capped — an explicit behavior line-item since it touches fj/fjwc custom-limit ops beyond B's scope. Lands as its own commit with per-path pins.
+8. **Measurement hardened (both)**: arms must hold the build shape constant (Nulo-shaped entrypoints — EXTERNAL+payload / PREEXISTING app-only — not aztec.js defaults), differ ONLY in `{stub, skipTxValidation}`; ≥2 interleaved repeats per arm with the noise floor reported; one shape cross-checked through Nulo's own pipeline (the prior datum's higher-fidelity method); shapes now include a real delegated-private-call (`CallAuthorizationRequest`-emitting) transfer, an undeployed-account shape, per-dimension (DA vs L2) deltas, and the **PrivateFPC P2-envelope comparison** (P2 simmed under stub-P1-derived vs real-P1-derived envelopes). The **funded PrivateFPC inclusion canary** needs L1 fee-juice (Sepolia key — `fuel-testnet.ts` route); surfaced as Ask 4 with a stated fallback.
+9. **Smaller adoptions**: cross-chain-row bail re-enters the FOLDED two-pass (fable F-8; B2 gate test); C1 preflight is a file-level hard abort, not a sibling test (F-10); the runner guard scans a formal marker, not prose (codex Low); recon fact-10 erratum recorded (upstream ships stub-sized+clamped — strengthens this plan's direction); adversarial fixture must include the user-mintable sponsored-TYPED non-canonical row (fable §1a).
 
 ## Goal
 
-Three workstreams, one stack:
-
-- **A — Discovery fold**: dApp estimates stop paying a separate authwit-discovery simulation. `DiscoveryAwareEstimator` (decorator owned by `dapp-send-executor` — charter-fixed boundary) merges discovery into the strategy pipeline. dApp PrivateFPC estimate **3→2 sims**.
-- **B — Stub-gas adoption ("B-lite"), where it can reach**: dApp Sponsored estimate **2→1 sim** (one stubbed, payload-inclusive sim serving discovery + sizing — safety from *contract identity*: eligibility already pins the Noir-verified-inert canonical contract). Gated on **real Testnet measurements** (owner rule: auto-adopt if delta ≪ the 5% pad; else pause and present the number). Send-page paths and PrivateFPC's Pass 2 are **unreachable by design** (recon verdict table) — "everywhere it can reach" honestly = these two dApp paths.
-- **C — e2e arming fix**: `account-switch-isolation` local red is a root-caused invocation trap (unarmed proverless build; gate tree-shaken out; silent 3-minute timeout). Fix = fail-fast arming preflight + runner guard + skill lesson; verify green armed.
-
-Sim-count targets (unit-pinned):
-
-| Flow | Today | After | Mechanism |
+| Flow | Today | After | Mechanism / gate |
 |---|---|---|---|
-| dApp Sponsored estimate | 2 | **1** | folded stubbed sim (B, gated on measurement) |
-| dApp PrivateFPC / user-added estimate | 3 | **2** | discovery folds into Pass 1 (A) |
-| dApp confirm (reuse hit) | 0 | 0 | unchanged — must not regress |
-| Send page (all methods) | 1–2 | unchanged | no discovery to fold; validated sims stay |
-| embedded / NO_FROM | — | unchanged | carried exclusion |
+| dApp Sponsored estimate (no-authwit) | 2 | **1** | folded stubbed payload-inclusive sim; contract-identity pin (audited airtight); B1-gated |
+| dApp `fj` estimate (no-effects) | 2 | **1** | folded stubbed app-only sim (payload-free); B1-gated |
+| dApp PrivateFPC / user-added estimate | 3 | **2** | discovery folds into stubbed P1; P2 real+validated forever; B1 shape-gated |
+| dApp any-method, authwit-bearing / intent-carrying | 2–3 | 2 | forced validated path (F-4 rule) — validation REGAINED relative to r1 |
+| Send page / confirm-reuse / embedded / NO_FROM | — | unchanged | out of reach or fenced |
 
-Non-goals: send-page restructuring; PrivateFPC Pass-2 stubbing (permanently fenced — user-registered-FPC auto-sign hazard); offscreen job-ack; reuse hit-rate observability; `getNodeInfo` caching. No UX/product change anywhere.
+Workstream C (e2e arming fix) unchanged from r1. Non-goals unchanged.
 
 ## Architecture & Implementation
 
-### Proposed architecture
+### Components
 
-**A. `DiscoveryAwareEstimator`** (new file, `apps/extension/src/wallet/services/execution/discovery-aware-estimator.ts`): a decorator over `buildAndEstimate`, owned and invoked ONLY by `dapp-send-executor` (send path provably cannot acquire discovery behavior — the charter's boundary). It replaces the two inline `discoverPrivateAuthwits` call sites (`dapp-send-executor.ts:263-275` estimate, `:577-594` confirm-miss):
+**`DiscoveryAwareEstimator`** (`execution/discovery-aware-estimator.ts`, owned + invoked only by `dapp-send-executor`): replaces both inline discovery call sites. Holds its OWN probe-bearing strategy instances (constructed once with `DiscoveryProbe`); the service's map stays probe-free for the send path (structural pin: send instances have no probe). Pipeline per estimate/confirm-miss:
 
-- For strategies without a foldable pass (`fj`, `fjwc`): behavior-preserving — run the existing discoverer (stubbed app-only sim), splice, delegate to the strategy. Sim counts unchanged (2).
-- For `fpc` two-pass (PrivateFPC/user-added): the decorator passes a discovery capability into the strategy call such that **Pass 1 becomes the discovery sim** — stubbed (`stubAccountAddresses` through the already-wired `SimulateTxFn` opts), `skipTxValidation: true`, app-only (`PREEXISTING_FEE_JUICE`, no payload — F-1 preserved verbatim), offchain effects extracted via the discoverer's existing extraction chain, discovered authwit actions spliced before Pass 2's build. Pass 2 unchanged: real, validated, payload-inclusive — the fail-loud gate for user-added FPCs. 3→2.
-- For `fpc` Sponsored fast path: see B.
-- **Mechanism**: rather than a `FeeStrategyContext` hook (forbidden), the decorator wraps the strategy Map lookup: `dapp-send-executor` receives a `buildAndEstimateWithDiscovery(op, feeSettings, parentTask, signal)` dep that internally coordinates discovery + strategy. The strategies gain one narrowly-typed optional constructor collaborator (`DiscoveryProbe`: `{extractEffects(sim: TxSimulationResult): Promise<AddPrivateAuthwitAction[]>}`) — pure extraction, no sim-running, injected ONLY into `FpcStrategy` by the decorator path. (Alternative shapes in Trade-offs.)
-- **Fingerprint invariant**: `preDiscoveryActions` normalization point (`dapp-send-executor.ts:259`) is untouched — the decorator operates strictly after the snapshot; a dedicated test pins stash/consume symmetry across the refactor.
+1. Snapshot check: pre-discovery actions containing `add_private_authwit` ⇒ **validated path** (today's choreography: standalone discovery + validated strategy sims) — the F-4 rule.
+2. Else dispatch to the probed strategy: the strategy's first sim runs stubbed (`stubAccountAddresses` via the wired opts) + `skipTxValidation`; the strategy calls `probe.extractEffects(sim, {node, network})` — first sim only.
+3. No effects ⇒ (fj/Sponsored) that sim is also the sizing sim (1 total) / (PrivateFPC) proceed to validated P2 (2 total).
+4. Effects ⇒ dedup vs pre-attached → splice → rebuild → **validated** re-sim → size from the validated sim (2 total; validation regained).
+5. Cross-chain-row bail (fpc fast path) re-enters the FOLDED two-pass, not the legacy one.
 
-**B. Stub-gas for the Sponsored fast path** (`fpc-strategy.ts:97-134`): the fast path's single sim becomes stubbed + `skipTxValidation: true` (payload stays IN — it must, to measure the sponsor call). Its result feeds BOTH sizing (`finalizeGasLimits`, unchanged math) AND discovery extraction (dApp path only). 2→1.
+**`DiscoveryProbe`** (chain-bound, ledger-#11-compliant): `extractEffects(sim: TxSimulationResult, ctx: {node: AztecNode; network: Network}): Promise<AddPrivateAuthwitAction[]>` — wraps `AuthwitDiscoverer`'s existing extraction chain verbatim: `collectOffchainEffects` → parse → lazy `node.getNodeInfo()` ONLY if effects → `assertLiveChainIdentity(network, nodeInfo)` → `computeAuthWitMessageHash`. The standalone discoverer remains for the validated path.
 
-- **Safety justification (NEW, explicitly hostile-review-target)**: the F-1 hazard is a malicious FPC's `CallAuthorizationRequest` being auto-signed from a stubbed sim. The fast path's eligibility gate (`isSponsoredFastPathEligible` + the cross-chain row check) pins handler type + `isProtocol` (address equality with the pinned canonical contract, recomputed at read time, never storable) — the payload in this sim is BY CONSTRUCTION the Noir-verified-inert `sponsor_unconditionally` (reads nothing, emits nothing, `end_setup` only). An adversarial-FPC fixture pins the negative: a non-canonical sponsored-shaped FPC must take the two-pass (fold-free payload-exclusive discovery) and fail loudly if its payload demands an authwit.
-- **Validation-loss trade (stated honestly)**: the Sponsored dApp estimate loses its estimate-time validated sim; structural/authwit failures surface at post-proof `sendTx` instead. Bounded by: the confirm path's reuse-miss rebuild still validates (miss ⇒ full pipeline), and the canary phase proves inclusion end-to-end. Send-page Sponsored keeps its validated sim (unchanged), so the send flow's early-failure UX is untouched.
-- **Network-limit clamp adoption**: alongside stub sizing, `finalizeGasLimits` gains the upstream clamp (`assertGasLimitsWithinNetworkLimits`-equivalent: cap at `MAX_TX_DA_GAS`/`MAX_PROCESSABLE_L2_GAS`, from `@aztec/wallet-sdk` or constants) — Nulo currently has NO clamp; adopting stub gas with a thinner effective margin than either upstream posture without the clamp would be strictly weaker than both references (recon fact 10).
+**`finalizeGasLimits` clamp** (own commit): auto-derived limits capped at min(live `txsLimits.gas`, protocol maxima), throw-on-exceed for measured usage; `customLimits` assert-and-throw per Ask 3. Per-path pins for fj/fjwc/fpc/send.
 
-**C. Testnet measurement (gate for B, data for the ledger)**: disposable `packages/bridge-core/scripts/gas-delta-testnet.local.ts` (gitignored pattern), architecture per recon fact 15: ephemeral proverless `EmbeddedWallet` → fresh Nulo-shaped account → SponsoredFPC-registered → dripper-funded (public + private conversion) → measure stub-vs-real `gasUsed` for: (1) public transfer + sponsor payload (replicates the n=1 datum), (2) `transfer_private_to_private`, (3) the authwit grant/consume pair, (4) the PrivateFPC `pay_fee` two-pass shape (P1 app-only stub-vs-real — the envelope-seed question, recon fact 9). Then the **inclusion canary** (owner's real-tx-failure concern, tested directly): recreate prover-ON, size gas from the STUB arm's numbers + 1.05 pad, send one real sponsored tx, assert receipt success. Decision rule (owner-set): every delta < 1% ⇒ proceed; any delta ≥ 1% ⇒ STOP, present numbers + recommendation.
+**Measurement script** (`packages/bridge-core/scripts/gas-delta-testnet.local.ts`, disposable): shapes = (1) public transfer + sponsor payload [Nulo-pipeline cross-check shape], (2) `transfer_private_to_private`, (3) delegated private call consuming a call-shaped authwit, (4) undeployed-account, (5) PrivateFPC P1 app-only, (6) PrivateFPC P2-envelope comparison. Arm-fidelity invariant + ≥2 interleaved repeats + DA/L2 split. Sponsored inclusion canary (free); PrivateFPC inclusion canary per Ask 4.
 
-**D. e2e arming fix**: (1) arming-contract preflight in `account-switch-isolation.test.ts` copying the `backup-migration.test.ts:31-42` idiom — assert the proverless build stamp is present in the loaded extension, failing in seconds with the exact remedial command instead of a silent 3-minute poll; (2) `agent.sh` guard: when invoked WITHOUT `NULO_E2E_PROVERLESS=1` but the requested file list contains a proverless-gated test (marker comment scan), print a loud warning naming the flag; (3) durable lesson → `e2e-testing` skill (per the CLAUDE.md routing table); (4) verified-green armed run.
+**e2e fix**: preflight as file-level `beforeAll` hard abort (stamp check, remedial message); `agent.sh` scans a formal `// @requires-proverless` marker; skill lesson.
 
-### Key interfaces / types / schemas
+### Interfaces, flow, files — deltas from r1 only
 
-- `DiscoveryAwareEstimator` (extension-internal): `estimate(op, feeSettings, parentTask?, signal?): Promise<FeeEstimate & {discoveredActions: AddPrivateAuthwitAction[]}>` — the discovered actions surfaced so `estimateOperationFee`/`executeAztecSendTx` keep their existing splice-into-`actions` bookkeeping.
-- `DiscoveryProbe` (narrow, extraction-only): injected into `FpcStrategy` construction for the dApp path; `undefined` on the send path (compile-visible absence).
-- `FeeEstimate extends BuiltStandardTx` — **unchanged, byte-for-byte** (stash reads it; recon fact 11).
-- `SimulateTxFn` — unchanged (stub opt exists); strategies begin passing `stubAccountAddresses` on folded sims only.
-- No wallet-bridge/wire changes anywhere.
+- `FeeStrategyContext` untouched (no hook). `FeeEstimate extends BuiltStandardTx` untouched. Wire types untouched. `preDiscoveryActions` normalization point untouched (symmetry test).
+- File map r1 + `fee/fee-juice-strategy.ts` (probe variant), minus the impossible fallback branch.
 
-### Data & control flow (target)
+### Trade-offs (post-audit)
 
-- **dApp Sponsored estimate**: `estimateOperationFee` → decorator → fast path: build(EXTERNAL+payload) → **1 stubbed sim** → extract effects (expect none for canonical payload; app-call effects spliced + REBUILD if present — see Algorithms) → finalize → stash. 1 sim (no-effects case), 2 (effects case — rebuild+resim to attach authwits validated).
-- **dApp PrivateFPC estimate**: decorator → two-pass: P1 build(PREEXISTING, app-only) → **stubbed sim** → extract + splice → P2 build(EXTERNAL+payload, envelope from P1) → validated sim → finalize. 2 sims.
-- **Send page**: `transfer-executor` path calls `buildAndEstimate` directly — decorator not in the call chain; zero change.
-- **Confirm**: reuse-hit unchanged (0 sims); reuse-miss runs the same decorator pipeline as estimate.
-
-### File-level change map
-
-| File | Change |
-|---|---|
-| `execution/discovery-aware-estimator.ts` (+test) | NEW — decorator per §A |
-| `execution/dapp-send-executor.ts` (+test) | both discovery call sites → decorator; splice bookkeeping via `discoveredActions` |
-| `execution/fee/fpc-strategy.ts` (+pins) | P1 stub+skipTxValidation+probe; Sponsored fast path stub+probe; headers rewritten |
-| `execution/fee/fee-strategy.ts` | `finalizeGasLimits` network-limit clamp |
-| `execution/fee/strategies-structural.test.ts` | deliberate pin rewrite per recon fact 12 + adversarial-FPC fixture |
-| `execution/authwit-discoverer.ts` (+test) | extraction chain exposed as the probe (runner retained for `fj`/`fjwc` paths) |
-| `tests/e2e/network/account-switch-isolation.test.ts` | arming preflight |
-| `apps/extension/scripts/e2e/agent.sh` | proverless-file warning |
-| `.claude/skills/e2e-testing/` | arming lesson |
-| `packages/bridge-core/scripts/gas-delta-testnet.local.ts` | disposable, never committed |
-
-### Algorithms / non-obvious mechanics
-
-- **Sponsored fold with unexpected effects**: canonical payload emits nothing, but the APP portion of a dApp op may demand authwits. In the folded single sim those surface together. If effects exist: splice authwit actions → rebuild → **validated** re-sim (attaching real authwits) → size from the validated sim. So 1 sim is the no-authwit fast case; authwit-bearing ops cost 2 (same as today) and REGAIN validation. No path sizes from a stub while carrying unverified authwits.
-- **PrivateFPC envelope-seed**: P2's envelope derives from stubbed P1 gas — measurement shape (4) exists precisely to bound this; if its delta ≥ 1%, workstream A still lands (fold is sim-count-neutral-or-better and preserves P2's real sizing) but P1's stub flips OFF (validated P1, fold retains the merge of discovery into P1 — discovery's `skipTxValidation` requirement then forces P1 unvalidated-but-unstubbed; see Trade-offs).
-- **Adversarial-FPC fixture**: a test FPC whose payload method emits a `CallAuthorizationRequest`; pins (a) it never qualifies for the fast path, (b) the two-pass P2 validated sim fails loudly, (c) nothing auto-signs its request.
-
-### Trade-offs & alternatives not taken
-
-- **Decorator + narrow probe over a `FeeStrategyContext` hook** (forbidden by negotiated audit terms) and over full strategy-external discovery (would need the strategy's internal pass structure exposed — leakier than a one-method probe).
-- **P1 stub via measurement-gate, not assumption** — if measurement fails the gate, fallback shape: P1 unstubbed + `skipTxValidation: true` (discovery still requires unvalidated; stub only needed to soften authwit asserts into effects — *open question for audit: can an UNSTUBBED sim discover effects, or do real-account authwit asserts hard-fail first?* If hard-fail, the fallback is discovery-as-today + fold abandoned for PrivateFPC).
-- **Sponsored 1-sim via contract identity over blanket app-only** — app-only can't size the sponsor call; identity-pinning is the only route to 1 sim, hence the dedicated fixture + hostile-review flag.
-- **Clamp adoption now over later** — sizing-basis change and safety-margin hardening belong in the same diff.
-- **e2e fix as preflight over skip-if-unarmed** — a skip hides breakage; a loud fail teaches the flag (owner chose root-cause+robust over skip).
+- **A-with-resequencing over outline B**: fable's stall-hedge argument decides it (a flaky-testnet week must not block C + the inert fold), with B's one structural insight (measure before stub) absorbed. A1's inert interlude retained — last arc proved inert checkpoints make this surface auditable.
+- **Stub-or-abandon over stub-or-flag** for A2: the fallback is now known-impossible; a flag would be dead-code theater.
+- **F-4 exclusion rule over intent-hash effect synthesis**: synthesizing effects for intent authwits would mean re-implementing account semantics wallet-side; exclusion is honest and cheap (intent-carrying dApp ops are rare and keep today's exact behavior).
 
 ## Security & Adversarial Considerations
 
-- **Threat model**: malicious dApp (op payloads); malicious user-registered FPC (the F-1 principal — ABI-shape validation only); ourselves (gas under-sizing → real user tx fails on-chain — the owner's named BIG-deal risk).
-- **Auto-sign surface**: unchanged for every non-canonical FPC (payload-exclusive discovery; P2 validated fail-loud). The ONLY payload ever inside a stubbed sim is the identity-pinned canonical `sponsor_unconditionally`. Pinned by the adversarial-FPC fixture + the existing eligibility tests + `isProtocol` never being storable (recomputed at read).
-- **Gas-sizing safety**: measurement-gated adoption (owner's <1% rule); 1.05 pad unchanged; NEW network-limit clamp; inclusion canary proves a stub-sized real tx lands on testnet before any user is exposed; PrivateFPC's user-facing sizing stays real-sim-derived.
-- **Validation-loss**: enumerated per-path in §B; authwit-bearing dApp ops always end on a validated sim.
-- **Input validation**: no new wire surfaces; script inputs are constants + derived keys, no secrets, no `.env`.
-- **Least privilege / supply chain**: no new deps; testnet script uses public RPC + protocol constants only; nothing committed carries addresses beyond the already-committed deployment JSONs.
-- **Domain risks**: replay/front-running unchanged (nonce semantics untouched); fee-griefing bounded by pad+clamp; the measurement script sends at most one canary tx from a throwaway account.
+r1 model plus the audit outcomes: the Sponsored identity pin is **verified airtight** (storage laundering, type-spoofed rows, cold cache, resets — every failure direction denies the fast path); the adversarial fixture must include the sponsored-typed non-canonical row; the F-4 rule guarantees nothing sizes from a stub with unverified witnesses (call-shaped: by unconditional protocol emission; intent-shaped: by exclusion); validation-loss is enumerated honestly in Ask 1 (no pre-proof `isValidTx` on the no-authwit happy path — node still rejects post-proof); measurement + canary gate all sizing changes; the `assertLiveChainIdentity` guard is pinned as preserved through the probe.
 
 ## Assumptions
 
-### Facts (verified — recon.md file:line)
+### Facts (verified; recon.md + erratum)
 
-1. Stub ⟹ `skipKernels` forced ⟹ practically requires `skipTxValidation` (upstream throw + validator mismatch; every in-repo stub site sets it) — recon fact 6.
-2. All estimate sims are already kernel-less; stub-vs-real differs only in account-swap + validation — recon fact 5.
-3. Discovery's sim is already stubbed/unvalidated/app-only and its `gasUsed` discarded — recon facts 3, verdict table.
-4. Canonical `sponsor_unconditionally` reads nothing, emits nothing (Noir source, verified last arc); eligibility pins it via non-storable `isProtocol` + cross-chain check — recon table.
-5. PrivateFPC's P2 envelope-dependency and its user-added reachability — recon facts 1, 9.
-6. `stubAccountAddresses` plumbing wired end-to-end, unused by strategies — recon fact 8.
-7. Testnet has everything free: canonical Sponsored (salt-derived), canonical PrivateFPC (pinned addr), Dripper+token (deployments.json); `drip-canary-testnet.ts` is the zero-env template — recon facts 13–14.
-8. e2e root cause is the unarmed proverless build (dist forensics); CI always arms; `backup-migration.test.ts:31-42` is the preflight idiom — recon facts 18–20.
-9. Reuse caches are provenance-agnostic; `FeeEstimate` contract is the one restructuring trap — recon fact 11.
-10. Nulo has no network-limit clamp today; upstream helpers exist unused at 5.0.1 — recon fact 10.
+r1 facts 1–10 stand, with fact 10 corrected (upstream ships stub-sized + clamped + padded sends). NEW: 11. Unstubbed discovery hard-fails pre-result (oracle throw; source refs in erratum) — both auditors, independently. 12. Call-shaped authwit consumption emits effects unconditionally; standalone intent-hash emits nothing (aztec-nr v5.0.1 Noir source — fable). 13. Estimate-time validation costs one `node.isValidTx` RPC (`pxe.js:796-806`). 14. No bridge-core `.env` exists on this machine (PrivateFPC canary funding not currently available).
 
 ### Inferences (attackable)
 
-1. An unstubbed `skipTxValidation` sim may still hard-fail in-circuit on missing authwits (the stub's bytecode swap, not validation, is what converts asserts into effects) — the P1-fallback question flagged in Trade-offs. Confidence: moderate; audit + a quick spike resolve it.
-2. Stub-vs-real deltas on private/authwit shapes will match the public-shape datum (0). Confidence: moderate — that's why we measure; nothing ships on this inference.
-3. A fresh ephemeral PXE syncs against testnet in seconds-to-low-minutes for a fresh account. Confidence: moderate (recon reasoning, unmeasured); the script's first task validates it.
-4. The armed `account-switch-isolation` run is green on this machine (mechanism fully explains the red; last known green documented). Confidence: high; Phase C1 verifies first.
+1. Stub-vs-real deltas on the new shapes match the 0 datum. Moderate; nothing ships on it (B1 gates).
+2. Fresh ephemeral PXE syncs against testnet in acceptable time. Moderate; B1's first task validates.
+3. Armed `account-switch-isolation` is green locally. High; C1 verifies first.
 
 ### Asks (approval-gate decisions)
 
-1. **Sponsored 1-sim validation-loss**: accept moving structural failure detection from estimate-time to post-proof for the no-authwit dApp Sponsored case (authwit-bearing ops keep validation), in exchange for 2→1? **Recommendation: accept** — the confirm-miss path still validates, and the canary covers inclusion.
-2. **Network-limit clamp**: adopt alongside stub sizing? **Recommendation: yes** (pure hardening).
-3. **Canary tx**: one real SponsoredFPC-paid tx from a throwaway account on public testnet (visible on-chain, zero cost). Confirm you're fine with that footprint. **Recommendation: accept.**
+1. **Validation-loss, stated fully**: post-B2, the no-authwit dApp Sponsored/fj estimate has NO pre-proof node validation anywhere on the reuse-hit happy path (enumerated losses above; failure surfaces post-proof; authwit-bearing ops keep validation; −1 RPC per estimate as the side win). Accept in exchange for 2→1? **Recommendation: accept, given the B1 gate + canary.**
+2. **Clamp adoption** incl. the customLimits assert-and-throw behavior change for fj/fjwc custom-limit dApp ops. **Recommendation: yes.**
+3. **Sponsored canary tx** on public testnet (free, throwaway account). **Recommendation: accept.**
+4. **PrivateFPC inclusion canary needs your Sepolia key** (L1 fee-juice deposit via the `fuel-testnet.ts` route; `packages/bridge-core/.env` absent on this machine). Options: (a) provision the key for one funded canary; (b) proceed without it — the free P1-delta + P2-envelope-sim comparisons still gate A2, and the PrivateFPC fold's user-facing sizing remains real-sim-derived (fable's bounded-consequence analysis), with the canary noted as not-run. **Recommendation: (b) unless the key is trivially available — the envelope-sim comparison covers the mechanism the canary would smoke-test.**
 
 ## Phases
 
-PR mapping — one `gh stack` of three (owner-chosen): **PR 1** = Phase C (e2e fix, stack base) · **PR 2** = Phases A1–A2 (fold) · **PR 3** = Phases B1–B3 (measurement-gated stub adoption + clamp).
+PR mapping (one `gh stack`): **PR 1** = C1 · **PR 2** = A1 + B1 (lessons/data only) — **PR 2 merges only after B1's checkpoint passes** · **PR 3** = A2 + B2 + B3.
 
 ### Phase C1 — e2e verify + arming preflight (PR 1)
 
-Armed run first (`NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts`) to confirm green; then the preflight assert, `agent.sh` warning, skill lesson.
+As r1, plus: preflight = file-level hard abort; runner scans formal marker.
+**Gate** — armed run 2/2 green; unarmed run aborts <30 s with remedial text; `lint`/`typecheck:all`/`test` exit 0.
 
-**Gate** — armed run: 2/2 tests pass; unarmed run: fails in <30 s with the remedial message (manual check of the failure text); `bun run lint && bun run typecheck:all && bun run test` exit 0. Layers: lint/typecheck/unit + targeted network e2e.
+### Phase A1 — Inert decorator extraction (PR 2)
 
-### Phase A1 — Decorator extraction, behavior-preserving (PR 2)
+Behavior-preserving: decorator + probe-bearing instances constructed but the probed path NOT yet enabled (probe wired, fold flags off — all sims validated, counts unchanged). Assertion-surface migration for the discovery pins done here deliberately.
+**Gate** — all count pins unchanged in value; send-path-no-probe structural pin; `preDiscoveryActions` symmetry test; full unit suite exit 0.
 
-`DiscoveryAwareEstimator` replaces both inline call sites; all strategies still called exactly as today (discovery separate, counts unchanged). Pin proof: sim/build counts identical, `preDiscoveryActions` symmetry test, reuse consume-hit/miss pins updated to the decorator surface deliberately.
+### Phase B1 — Testnet measurement + decision checkpoint (PR 2 data)
 
-**Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution` + full `lint`/`typecheck:all`/`test` exit 0; count pins unchanged in value. Layers: lint/typecheck/unit.
+Six shapes, arm-fidelity invariant, interleaved repeats, noise floor, DA/L2 split, Nulo-pipeline cross-check, Sponsored inclusion canary (+ PrivateFPC canary iff Ask 4(a)). Table → `lessons/phase-B1.md`.
+**Checkpoint (owner rule)**: every delta <1% ⇒ proceed to A2/B2; any ≥1% ⇒ STOP workstream A2/B2, present numbers, mark deferred.
+**Gate** — table complete per spec; zero committed script footprint.
 
-### Phase A2 — PrivateFPC fold: discovery into Pass 1 (PR 2)
+### Phase A2 — PrivateFPC fold (PR 3; B1-gated)
 
-P1 becomes stubbed + `skipTxValidation` + probe-extracting (pending Inference 1's spike — if unstubbed discovery is viable and measurement later fails the stub gate, the stub flag is a one-line revert); splice before P2; dApp `fpc` estimate pins 3→2; adversarial-FPC fixture lands here (two-pass path).
+P1 stubbed + probe; F-4 rule + first-sim-only + dedup; folded bail; adversarial fixture (incl. sponsored-typed non-canonical row). dApp `fpc` 3→2 pins.
+**Gate** — pins + fixtures + discovery-equivalence; full unit; milestone e2e: `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`.
 
-**Gate** — updated structural pins (dApp fpc: builds ×2, sims ×2; consume-miss identical); adversarial fixture green; discovery-equivalence test (folded vs standalone discovery on representative fixtures); full unit suite; **milestone e2e**: `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`. Layers: lint/typecheck/unit + network e2e.
+### Phase B2 — Sponsored + fj 1-sim folds + clamp (PR 3; B1-gated)
 
-### Phase B1 — Testnet measurement (PR 3, data-only)
-
-The disposable script; four shapes + inclusion canary per §C. Results table → `lessons/phase-B1.md`. **Decision checkpoint**: all deltas <1% ⇒ proceed; else STOP and present.
-
-**Gate** — measurement table complete (all four shapes, stub AND real arms, plus canary receipt success); script leaves zero committed footprint (`git status` clean of it). Layers: live-testnet validation.
-
-### Phase B2 — Sponsored 1-sim fold + clamp (PR 3)
-
-Fast path stub+probe (payload-inclusive, identity-justified); effects-present path rebuilds validated; `finalizeGasLimits` clamp; adversarial fixture extended (non-canonical sponsored-shape never fast-paths); pins: dApp Sponsored 2→1 (no-authwit), send Sponsored unchanged ×1 validated.
-
-**Gate** — updated pins + fixture + full unit; **milestone e2e**: same dApp pair, prover-ON. Layers: lint/typecheck/unit + network e2e.
+Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild); clamp commit with per-path pins; fixture extension.
+**Gate** — updated pins (dApp Sponsored/fj 2→1 no-authwit; authwit-bearing ⇒ validated 2); full unit; same milestone e2e pair prover-ON.
 
 ### Phase B3 — Full validation (PR 3)
 
-`bun run audit:vue`; armed smoke; **full** `bun run e2e:agent` with `NULO_E2E_PROVERLESS=1`.
-
-**Gate** — all exit 0 (pre-existing triaged skips remain skips). Layers: all.
+**Gate** — `bun run audit:vue`; armed smoke; full `NULO_E2E_PROVERLESS=1 bun run e2e:agent` — all exit 0.
 
 ## Decision ledger
 
 | # | Decision | Chosen | Rejected | Source | Status |
 |---|---|---|---|---|---|
-| 1 | Fold boundary | decorator in dapp-send-executor + narrow extraction probe | FeeStrategyContext hook (forbidden); full-external discovery | charter (binding) + recon | settled |
-| 2 | B-lite reach | dApp Sponsored 2→1, dApp PrivateFPC 3→2 only | "everywhere" incl. send-page (nothing to fold; validation loss for zero gain); P2 stubbing (auto-sign hazard) | recon verdict table | settled — honest narrowing of the owner's "everywhere" answer |
-| 3 | Sponsored 1-sim safety basis | contract identity (pinned canonical, Noir-inert) | app-only rule (can't size the payload) | recon | open — flagged for hostile audit |
-| 4 | Adoption gate | real Testnet measurement, <1% auto-adopt else pause; inclusion canary | sandbox-only measurement; adopt on n=1 datum | owner | settled |
-| 5 | Clamp | adopt network-limit clamp with stub sizing | keep clamp-free | recon fact 10 | open Ask 2 |
-| 6 | e2e fix shape | fail-fast preflight + runner warning + skill lesson | skip-if-unarmed; docs-only | owner (root-cause+robust) | settled |
-| 7 | PR shape | one gh stack of three (C base → fold → B-lite) | independent PRs; two-PR split | owner | settled |
+| 1 | Fold boundary | decorator + constructor-injected chain-bound probe; two-instance ownership; send-path structural pin | ctx-hook (forbidden); one-arg pure extractor (ledger-#11 trap, re-caught) | charter + both audits | settled |
+| 2 | Reach | dApp Sponsored 2→1, fj 2→1, PrivateFPC 3→2; authwit/intent-bearing ⇒ validated | r1's fj omission (codex: "lazy"); send-page; P2 stubbing (permanent fence) | codex H1 + recon | settled |
+| 3 | Sponsored 1-sim safety | contract identity — audited airtight; fixture incl. type-spoofed row | app-only rule | fable §1a | settled |
+| 4 | Sequencing | measure-first: B1 before any stub adoption; PR2 merge-gated on checkpoint | r1's A2-before-B1 (violated own gate) | both (blocking) | settled |
+| 5 | A2 fallback | stub-or-abandon (unstubbed discovery proven impossible) | r1's unstubbed-P1 fallback; flag | both, from source | settled |
+| 6 | Intent-hash authwits | excluded from folds (forced validated path) | effect synthesis | fable F-4 | settled |
+| 7 | Ask-1 framing | full honesty: no pre-proof validation on happy path | r1's false reuse-miss backstop | codex H2 + fable F-5 | open Ask 1 |
+| 8 | Clamp | full upstream semantics + customLimits assert-throw line-item, own commit | constants-only cap | both | open Ask 2 |
+| 9 | PrivateFPC canary | Ask 4 (key vs proceed-without) | silent zero-env claim (wrong — needs L1) | codex C2 | open Ask 4 |
+| 10 | Outline B | rejected; measure-first insight absorbed | adopt B (stall risk; spike moot — resolved from source) | both | settled |
 
 ## Audit verdicts
 
-- Codex (round 1): _pending_
-- Fable (round 1): _pending_
-- Codex (final fresh-context): _pending_
-
-## Appendix — Competing outline B: "measure-first minimalism"
-
-*The deliberately different angle for the audits.*
-
-**Thesis**: don't restructure anything until the data exists. Phase order inverted: (1) e2e fix; (2) the Testnet measurement script FIRST — including a shape that directly measures what the FOLD needs (can an unstubbed `skipTxValidation` sim discover effects? what's the stub delta on every shape?); (3) then implement ONLY what the data licenses in one shot: if deltas are ~0 across all shapes, skip the conservative intermediate fold entirely and go straight to the end-state (Sponsored 1-sim + PrivateFPC folded P1-stubbed 2-sim) in a single PR — no behavior-preserving decorator interlude, no A1/A2 stepping stones.
-**Wins**: no intermediate choreography that exists only to be replaced; the Inference-1 spike becomes a measured fact before any code; fewer pin rewrites (one rewrite instead of two).
-**Costs/risks**: a measurement-blocked arc (if testnet is flaky/slow the whole arc stalls, vs outline A landing the fold + e2e fix regardless); the single implementation PR concentrates review; skipping the behavior-preserving extraction step loses the cheap "decorator is provably inert" checkpoint that made last arc's refactors auditable.
-**When B beats A**: if the measurement comes back clean in the first day, B ships the same end state with strictly less intermediate code. If measurement stalls or fails the gate, A's structure (fold lands independent of stub adoption) is the better hedge.
+- **Codex (r1, fresh, xhigh)**: `reject` — 2 blockers (sequencing, measurement gaps incl. PrivateFPC funding) + H1 fj fold + H2 Ask-1 backstop + H3 probe — ALL adopted. [audit-codex.md](audit-codex.md)
+- **Fable (r1, fresh)**: `conditional approve` — 4 conditions (probe respec, Inference-1 fact + resequencing, injection story, F-4 rule) + advisories F-5–F-10 — ALL adopted. Sponsored pin verified airtight. [audit-fable.md](audit-fable.md)
+- **Codex (final fresh-context pass on rev 2)**: _pending_
 
 ## Seeds (DRAFT — finalized post-approval)
 
 ### Recommended: `/goal`
 
 ```
-/goal All phases (C1, A1, A2, B1, B2, B3) marked ✓ in implementations-plan/single-sim-estimates/plan.md (the per-phase headers in the file), each ✓ backed by its validation gate reported passing in the transcript; the B1 measurement table present in lessons with the decision checkpoint outcome stated (proceed vs paused-for-owner — if paused, B2/B3 marked deferred in plan.md counts as complete for this goal); for each completed phase LESSONS_FILE=implementations-plan/single-sim-estimates/lessons/phase-<id>.md printed; the gh stack (PR1 e2e fix → PR2 fold → PR3 measurement+stub) open against dev with required checks green; /code-review max --fix complete with fixes committed separately; codex post-impl audit complete with high/critical findings addressed; bun run test and bun run lint both exit 0 in the transcript.
+/goal All phases (C1, A1, B1, A2, B2, B3) marked ✓ in implementations-plan/single-sim-estimates/plan.md, each ✓ backed by its validation gate passing in the transcript; B1's measurement table in lessons with the checkpoint outcome stated (if any delta ≥1%: A2/B2 marked DEFERRED in plan.md counts as complete); LESSONS_FILE=implementations-plan/single-sim-estimates/lessons/phase-<id>.md printed per completed phase; the gh stack (PR1 e2e → PR2 inert decorator + measurement, merge-gated on the checkpoint → PR3 folds + clamp) open against dev with required checks green; /code-review max --fix applied + committed separately; codex post-impl audit complete with high/critical addressed; bun run test and bun run lint exit 0 in the transcript.
 ```
 
 ### Alternative: `/loop 15m`
 
 ```
-/loop 15m Drive implementations-plan/single-sim-estimates forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status, git log --oneline -5; PRs → gh pr view --json statusCheckRollup. (2) CI waits are fine if progressing (gh run watch ≤10 min); use waits to prep the next phase. (3) No task? Take the next pending phase; after each meaningful edit run bun run lint + targeted vitest; commit → push. (4) Decisions you'd bring to the owner → /codex xhigh, decide, act, log the consult — EXCEPT the B1 measurement checkpoint: if any delta ≥1%, STOP workstream B, mark B2/B3 deferred in plan.md, surface the numbers, and continue the other workstreams. Hard limits: never merge to main/release branches, never publish/deploy, never stub a payload-inclusive sim for any non-canonical FPC, no scope beyond plan.md. (5) Same step failed 5×? Reassess with codex. (6) Phase green = its plan.md gate passes verbatim → mark ✓, file lessons, print LESSONS_FILE=implementations-plan/single-sim-estimates/lessons/phase-<id>.md. (7) All phases ✓ (or B-deferred)? /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up report with every contentious call explained ELI5. Keep the ASCII checklist visible.
+/loop 15m Drive implementations-plan/single-sim-estimates forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status/log; PRs → gh pr view --json statusCheckRollup. (2) CI waits fine if progressing; prep next phase meanwhile. (3) No task? Next pending phase; fast layers after each edit; commit → push. (4) Owner-grade decisions → /codex xhigh, decide, act, log — EXCEPT: the B1 checkpoint (any delta ≥1% ⇒ STOP A2/B2, mark DEFERRED, surface numbers, continue C/A1) and Ask 4 (never touch L1 keys/funding without explicit owner provision). Hard limits: never merge main/release, never publish, never stub a payload-inclusive sim for any non-canonical FPC, never let an intent-authwit-carrying op take a 1-sim fold, no scope beyond plan.md. (5) 5× failed step ⇒ reassess with codex. (6) Phase green = plan.md gate verbatim ⇒ ✓ + lessons + LESSONS_FILE line. (7) All ✓ (or A2/B2 DEFERRED)? /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up with contentious calls ELI5'd. ASCII checklist visible.
 ```
 
 Use exactly ONE per session — they don't compose.
