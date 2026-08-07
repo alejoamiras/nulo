@@ -1,6 +1,6 @@
 # Plan — fee-estimation-speedup
 
-- **Status**: REVISION 3 (post dual audit + final codex pass) — pending codex re-verdict + approval gate
+- **Status**: **APPROVED by owner 2026-08-07** (rev 3.2; codex `approve` on rev 3.1; Asks 1–3 accepted per recommendations, Ask 4 resolved → 120 s TTL) — implementation may begin at Phase 0
 - **Tier**: `/blueprint mid` (rubric: blast radius HIGH — every tx's fee sizing; novelty LOW; irreversibility LOW; migration NONE; external coupling LOW — pinned 5.0.1; security MEDIUM — authwit derivation is an authorization surface)
 - **eli5_mode**: artifact
 - **Recon**: [recon.md](recon.md) · **Audits**: [audit-codex.md](audit-codex.md) (r1: reject — both blockers verified and folded in) · [audit-fable.md](audit-fable.md) (r1: conditional approve — all 4 conditions folded in)
@@ -174,11 +174,11 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 2. `gh-stack` works under `dev`'s ruleset (public-vs-private preview disputed between the GitHub changelog and codex's doc read). Confidence: low; Phase 0 verifies, fallback exists.
 3. The canonical-address check is a stable discriminator: the canonical Sponsored-FPC address is **artifact-derived and network-independent** (corrected per final-pass L1 — r2 wrongly said "chain-derived"); the discriminator is type + exact pinned address + row/network chain match, with cold-cache and purge/reset races failing safely to two-pass (test-pinned in Phase 3). Confidence: high after correction.
 
-### Asks (approval-gate decisions)
+### Asks — ALL RESOLVED at gate (owner approval 2026-08-07)
 
-1. **Stub-gas / discovery-fold follow-up**: defer per the charter, decided later on Phase-6 data? **Recommendation: defer** (both auditors concur).
-2. **PR mapping**: A = quick wins, B = Sponsored collapse, C = reuse + prep + validation. **Recommendation: accept.**
-3. **Marginal fee-number drift** on the Sponsored fast path (mainnet PrivateFPC now fully unchanged). **Recommendation: accept.**
+1. **Stub-gas / discovery-fold follow-up**: **DEFERRED** per the charter; decided later on Phase-6 data.
+2. **PR mapping**: **ACCEPTED** — A = quick wins, B = Sponsored collapse, C = reuse + prep + validation.
+3. **Marginal fee-number drift** on the Sponsored fast path: **ACCEPTED** (mainnet PrivateFPC fully unchanged).
 4. **Signed-artifact retention posture** — RESOLVED by owner at gate (2026-08-07): TTL lowered to **120 s** (owner asked 1.5–2 min; 120 s chosen to keep headroom for dApp-approval deliberation), applied to BOTH caches via the shared `ESTIMATE_REUSE_TTL_MS` constant (the existing Send-page 5-min value changes too — consistency, pre-production). Reject/close eviction unchanged. Note: the TTL is the retention bound, not the staleness guard — the consume ladder (base-fee drift, pending-tx set, chain/FPC identity, fingerprint) recomputes anything meaningfully stale regardless of age; past ~2 min entries mostly miss on fee drift anyway, so the hit-rate cost is minimal.
 
 ## Decision ledger
@@ -214,7 +214,7 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 - **Artifact URL**: https://claude.ai/code/artifact/76d189cd-bafa-4b70-97ae-d20a2bfd81db (default-private; redeploy by republishing the same source file)
 - **Source**: `implementations-plan/fee-estimation-speedup/eli5.html`
 
-## Seeds (DRAFT — finalized post-approval)
+## Seeds (FINAL — approved scope: phases 0–6, fold out of scope, 120 s TTL)
 
 ### Recommended: `/goal`
 
