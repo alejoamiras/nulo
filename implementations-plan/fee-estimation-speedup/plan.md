@@ -125,7 +125,7 @@ Per architecture §1. Structural pins: fast path `buildStandard` ×1 (EXTERNAL) 
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution/fee` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/transfers.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` (both Sponsored-FPC-paid, prover-ON canary pair). Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
 
-### Phase 4 — dApp estimate→confirm reuse (PR C)
+### Phase 4 — dApp estimate→confirm reuse (PR C) ✓
 
 Per architecture §2–3, §5. Tests pin: every ladder exit incl. chain-identity drift, **resolved-FPC-identity drift (in-place address edit ⇒ miss)**, + same-batch `pendingHashes`; consume-hit skips discovery + `buildAndEstimate` AND still runs `addTransaction` + `recordPendingAuthwits` (the auth-registry row must exist — fable F-3's silent-break scenario); forged/foreign `estimateId` ⇒ miss/no-evict; reject/window-close eviction; **approve handoff-race** (window close after approve does NOT evict the handed-off entries; queued `tryConsume` hits); fingerprint normalization-point invariant (stash and consume hash the same set, full FeeOptions incl. teardown + priority fees).
 
