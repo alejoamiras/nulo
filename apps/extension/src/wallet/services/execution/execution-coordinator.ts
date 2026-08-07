@@ -92,13 +92,17 @@ export class ExecutionCoordinator {
 	public async simulateTxTask(
 		pxe: IPXE,
 		txRequest: TxExecutionRequest,
-		opts: SimulateTxOpts,
+		opts: SimulateTxOpts & { stubAccountAddresses?: string[] },
 		parentTask?: WrappedTask,
 	): Promise<TxSimulationResult> {
 		const step = new StepContent("Simulating transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
 		try {
-			const simulatedTx = await pxe.simulateTx(txRequest, opts)
+			// The stub list rides IPXE.simulateTx's third parameter, not the
+			// upstream opts object (the runtime schema-parses opts — an extra
+			// key there would be stripped or rejected).
+			const { stubAccountAddresses, ...simOpts } = opts
+			const simulatedTx = await pxe.simulateTx(txRequest, simOpts, stubAccountAddresses)
 			task.complete()
 			return simulatedTx
 		} catch (error) {

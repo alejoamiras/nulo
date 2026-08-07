@@ -131,7 +131,7 @@ Per architecture §2–3, §5. Tests pin: every ladder exit incl. chain-identity
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution src/popup/windows/execute` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`. Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
 
-### Phase 5 — Mechanical prep: stub-opt threading (PR C)
+### Phase 5 — Mechanical prep: stub-opt threading (PR C) ✓
 
 Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAddresses` through the opts-bag; no strategy uses it; no call-site behavior changes. The discoverer split is out (charter).
 

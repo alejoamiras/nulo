@@ -70,11 +70,15 @@ export interface FeeEstimate extends BuiltStandardTx {
 }
 
 /** Simulate callback — facade owns the TaskService wrapping so that
- *  strategies stay decoupled from task bookkeeping. */
+ *  strategies stay decoupled from task bookkeeping.
+ *  `stubAccountAddresses` (unused by the shipped strategies) is follow-up
+ *  plumbing for discovery-flavored sims: the runtime swaps those accounts
+ *  for the stub artifact so unverifiable authwits surface as offchain
+ *  effects instead of hard asserts. */
 export type SimulateTxFn = (
 	pxe: IPXE,
 	txRequest: TxExecutionRequest,
-	opts: { simulatePublic: boolean; skipFeeEnforcement: boolean; scopes: AztecAddress[] },
+	opts: { simulatePublic: boolean; skipFeeEnforcement: boolean; scopes: AztecAddress[]; stubAccountAddresses?: string[] },
 	parentTask?: WrappedTask,
 ) => Promise<TxSimulationResult>
 
