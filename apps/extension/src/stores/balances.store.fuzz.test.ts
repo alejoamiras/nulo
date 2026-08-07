@@ -344,9 +344,17 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 				await vi.advanceTimersByTimeAsync(35_000)
 				expect(totalCalls, "client calls after a clean drain — an orphaned timer is firing").toBe(callsAfterDrain)
 				// C3 — stranded-forced probe: with no forced run live, a stale
-				// peek followed by a plain successful fetch must ALWAYS un-dim.
-				// A stranded forced counter keeps the non-forced success from
-				// clearing the stale-mark (and blocks the peek outright).
+				// peek must COMMIT (a stranded forced counter discards it) and a
+				// plain successful fetch afterwards must un-dim. Per-profile
+				// holder subs keep the last-release fence from firing mid-loop —
+				// releasing one probe must not delete a sibling key before its
+				// turn.
+				const holders = SCOPES.filter((s, i) => SCOPES.findIndex((x) => x.profileId === s.profileId) === i).map((s) =>
+					store.subscribe(s, { legs: ["gas"], retry: false, txRefresh: false, peek: false }),
+				)
+				await flush()
+				pending.splice(0).forEach((c) => c.settle(true))
+				await flush()
 				for (const scope of SCOPES) {
 					if (!store.entries[scopeKey(scope)]) continue
 					const probeSub = store.subscribe(scope, { legs: ["gas"], retry: false, txRefresh: false, peek: true })
@@ -354,6 +362,10 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					const peek = pending.find((c) => c.kind === "peek" && c.account === scope.accountAddress)
 					peek?.settle(true, true)
 					await flush()
+					expect(
+						store.entries[scopeKey(scope)]?.stale,
+						`stale peek on ${scope.accountAddress} was discarded with no force live — stranded forced counter`,
+					).toBe(true)
 					const probeEnsure = store.ensure(scope, { legs: ["gas"] }).catch(() => {})
 					await flush()
 					pending.splice(0).forEach((c) => c.settle(true))
@@ -365,6 +377,7 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 					).toBe(false)
 					probeSub.release()
 				}
+				holders.forEach((h) => h.release())
 				// C4 — every timer dies with its lease: release everything, then
 				// further virtual time must be silent.
 				for (const s of liveSubs()) {
@@ -376,6 +389,24 @@ describe("balances store — randomized interleavings (fuzz)", () => {
 				await vi.advanceTimersByTimeAsync(35_000)
 				await vi.advanceTimersByTimeAsync(35_000)
 				expect(totalCalls, "client calls after releasing every lease — an orphaned timer survived release").toBe(callsAfterRelease)
+				// C5 — a retry ARMED at release time dies with its last lease:
+				// arm a backoff deliberately (sole retry-capable sub + a failed
+				// fetch), release before the tick, and demand silence. This is
+				// the behavioral invariant — whichever internal guard provides
+				// it (release-time stop or the dead-caps check at the tick).
+				const armedScope = SCOPES[0]
+				const armedSub = store.subscribe(armedScope, { legs: ["gas"], retry: true, txRefresh: false, peek: false })
+				const armedEnsure = store.ensure(armedScope, { legs: ["gas"] }).catch(() => {})
+				await flush()
+				pending.splice(0).forEach((c) => c.settle(false))
+				await flush()
+				await armedEnsure
+				armedSub.release()
+				await flush()
+				const callsAfterArmedRelease = totalCalls
+				await vi.advanceTimersByTimeAsync(35_000)
+				await vi.advanceTimersByTimeAsync(35_000)
+				expect(totalCalls, "a retry armed at release time fired after its last lease died").toBe(callsAfterArmedRelease)
 			}
 		}
 	}, 120_000)
