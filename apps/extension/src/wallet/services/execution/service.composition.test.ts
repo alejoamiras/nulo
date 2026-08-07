@@ -348,4 +348,31 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
 		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(afterPrime) // invalidated → recompute
 	}, 15_000)
+
+	test("a compute in flight across the profile switch neither caches nor peeks — the new profile starts cold", async () => {
+		// The reader's unit suite pins this against a mocked view layer; this
+		// runs it through the REAL facade wiring: eviction mid-compute must
+		// suppress the write-back (a stale-marked re-insert would paint the old
+		// profile's figures dimmed under the new one via peek).
+		const h = await makeHarness()
+		let releaseNet: (() => void) | undefined
+		h.getNetwork.mockImplementationOnce(
+			() =>
+				new Promise((r) => {
+					releaseNet = () => r(NETWORK)
+				}),
+		)
+		const inFlight = h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		// Yield until the compute reaches its (deferred) network dependency.
+		for (let i = 0; i < 50 && !releaseNet; i++) await new Promise((r) => setTimeout(r, 0))
+		if (!releaseNet) throw new Error("compute never reached getNetwork")
+		h.profileChanged.invoke(undefined) // switch lands while the compute is parked
+		releaseNet()
+		await inFlight // the pre-switch caller still receives its value
+
+		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).toBeNull()
+		const before = h.getNetwork.mock.calls.length
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(before) // cold → recompute
+	}, 15_000)
 })
