@@ -313,8 +313,11 @@ const handleSend = async () => {
 	// Ownership handoff: submitting transfers the estimate to the execution
 	// path — unmount cleanup must NOT remote-cancel it, or the eviction
 	// would race the fire-and-forget executeTransfer out of its reuse hit.
-	handoffFeeEstimate()
+	// Only when a consumable id exists: handing off a still-in-flight
+	// estimate would orphan its eventual stash (nobody consumes, nobody can
+	// cancel) for the full TTL.
 	const precomputedEstimateId = feeEstimate.value?.estimateId
+	if (precomputedEstimateId) handoffFeeEstimate()
 	const transferArgs = [
 		appStore.network.id,
 		appStore.account.address,

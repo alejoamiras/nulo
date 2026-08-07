@@ -38,7 +38,7 @@ describe("useFeeEstimationMap — remote cancellation + handoff", () => {
 		composable.estimate(3, 1)
 		await vi.advanceTimersByTimeAsync(500)
 		await flushAll()
-		expect(calls.map((c) => c.flowKey).sort()).toEqual(["op:0", "op:3"])
+		expect(calls.map((c) => c.flowKey.replace(/^op:[a-z0-9]+:/, "op:")).sort()).toEqual(["op:0", "op:3"])
 		expect(calls[0]!.token).not.toBe(calls[1]!.token)
 		scope.stop()
 	})
@@ -50,7 +50,7 @@ describe("useFeeEstimationMap — remote cancellation + handoff", () => {
 		await vi.advanceTimersByTimeAsync(500)
 		await flushAll()
 		composable.estimate(0, 2)
-		const key0Token = calls.find((c) => c.flowKey === "op:0")!.token
+		const key0Token = calls.find((c) => c.flowKey.endsWith(":0"))!.token
 		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(key0Token)
 		scope.stop()
 	})
@@ -172,7 +172,7 @@ describe("useFeeEstimationMap", () => {
 		await vi.advanceTimersByTimeAsync(100)
 		await flush()
 		expect(estimator).toHaveBeenCalledTimes(1)
-		expect(estimator).toHaveBeenCalledWith(3, expect.any(String), "op:0")
+		expect(estimator).toHaveBeenCalledWith(3, expect.any(String), expect.stringMatching(/^op:[a-z0-9]+:0$/))
 		expect(result.results.value[0]).toBe(6)
 		scope.stop()
 	})
@@ -271,7 +271,7 @@ describe("useFeeEstimationMap", () => {
 		await vi.advanceTimersByTimeAsync(200)
 		await flush()
 		expect(estimator).toHaveBeenCalledTimes(1)
-		expect(estimator).toHaveBeenCalledWith(2, expect.any(String), "op:1")
+		expect(estimator).toHaveBeenCalledWith(2, expect.any(String), expect.stringMatching(/^op:[a-z0-9]+:1$/))
 		scope.stop()
 	})
 

@@ -419,9 +419,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	): Promise<TransferFeeEstimate> {
 		if (!estimateToken) return run()
 		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
-		const signal = await this.estimateCancel.admit(estimateToken, profile.id, flowKey)
+		let admitted = false
 		let estimateId: string | undefined
 		try {
+			// Inside the try: a parked admission rejected by supersede/cancel
+			// throws the internal sentinel too, and it must cross the RPC
+			// boundary as the structured error like every other cancel.
+			const signal = await this.estimateCancel.admit(estimateToken, profile.id, flowKey)
+			admitted = true
 			const result = await run(signal)
 			estimateId = result.estimateId
 			return result
@@ -431,7 +436,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			}
 			throw error
 		} finally {
-			this.estimateCancel.settle(estimateToken, estimateId)
+			if (admitted) this.estimateCancel.settle(estimateToken, estimateId)
 		}
 	}
 

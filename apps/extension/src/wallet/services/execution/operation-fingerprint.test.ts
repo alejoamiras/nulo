@@ -43,7 +43,7 @@ describe("fingerprintOperation", () => {
 		)
 	})
 
-	test("FULL FeeOptions bound — incl. teardownGasLimits and maxPriorityFeesPerGas (final-pass H4)", () => {
+	test("FULL FeeOptions bound — incl. teardownGasLimits and maxPriorityFeesPerGas", () => {
 		const base = fingerprintOperation(makeInput({ fee: { gasPadding: 1.05 } }))
 		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.1 } }))).not.toBe(base)
 		expect(fingerprintOperation(makeInput({ fee: { gasPadding: 1.05, gasLimits: { daGas: 1, l2Gas: 2 } } }))).not.toBe(base)
@@ -87,6 +87,16 @@ describe("fingerprintOperation", () => {
 		for (let i = 0; i < 10; i++) deep = [deep]
 		const tooDeep: Action = { kind: "call", contract: "0xc", method: "m", args: [deep] } as unknown as Action
 		expect(fingerprintOperation(makeInput({ actions: [tooDeep] }))).toBeNull()
+	})
+
+	test("delimiter injection cannot collide adjacent fields (length-prefixed scalars)", () => {
+		const a: Action = { kind: "call", contract: "0xa|b", method: "c", args: [] }
+		const b: Action = { kind: "call", contract: "0xa", method: "b|c", args: [] }
+		expect(fingerprintOperation(makeInput({ actions: [a] }))).not.toBe(fingerprintOperation(makeInput({ actions: [b] })))
+		// undefined scope vs empty-string scope must stay distinct too.
+		const withScope: Action = { kind: "add_capsule", contract: "0xc", storageSlot: "0x1", capsule: [], scope: "" }
+		const noScope: Action = { kind: "add_capsule", contract: "0xc", storageSlot: "0x1", capsule: [] }
+		expect(fingerprintOperation(makeInput({ actions: [withScope] }))).not.toBe(fingerprintOperation(makeInput({ actions: [noScope] })))
 	})
 
 	test("plain nested objects/arrays/bigints ARE supported and order-normalized by key", () => {

@@ -125,6 +125,7 @@ const {
 	estimating: estimatingOps,
 	estimate: scheduleFeeEstimate,
 	handoffAll: handoffFeeEstimates,
+	rearm: rearmFeeEstimates,
 	cancelAll: cancelAllFeeEstimates,
 } = useFeeEstimationMap<number, { op: UIOperation; feeSettings: FeeSettings }, unknown>({
 	// Cast op → Operation (strict): the estimate is only scheduled AFTER the
@@ -399,6 +400,9 @@ const approve = async () => {
 		)
 		closeWindow(true)
 	} catch (error) {
+		// The execution path never took ownership — re-arm so a later
+		// reject/unmount can still cancel + evict the handed-off estimates.
+		rearmFeeEstimates()
 		setError("Processing error.", getErrorMessage(error))
 	} finally {
 		isLoading.value = false

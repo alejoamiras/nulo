@@ -15,8 +15,8 @@
  *   banned pattern: recursive key-filter stringify silently dropped nested
  *   fields and let distinct inputs collide).
  * - Binds the FULL normalized `FeeOptions` (incl. `teardownGasLimits` and
- *   `maxPriorityFeesPerGas` — final-pass H4) plus `executionMode` and
- *   `opts.from`, alongside the wallet `FeeSettings` hash.
+ *   `maxPriorityFeesPerGas`) plus `executionMode` and `opts.from`,
+ *   alongside the wallet `FeeSettings` hash.
  */
 
 import type { Action, FeeOptions } from "@nulo/wallet-bridge"
@@ -66,15 +66,29 @@ function encodeValue(value: unknown, depth: number): string | null {
 	}
 }
 
+/** Length-prefixed string — free-form fields MUST go through this (or
+ *  `encodeValue`), never raw interpolation: bare `|`-joins let
+ *  `{contract:"a|b", method:"c"}` collide with `{contract:"a", method:"b|c"}`.
+ *  Today every fingerprinted scalar is planner-normalized hex, but the
+ *  encoding must not rely on its inputs staying tame. */
+function str(value: string): string {
+	return `s${value.length}:${value}`
+}
+
+/** Optional string — undefined and "" must not collide. */
+function optStr(value: string | undefined): string {
+	return value === undefined ? "u" : str(value)
+}
+
 function encodeStringArray(values: readonly string[]): string {
-	return `a${values.length}[${values.map((v) => `s${v.length}:${v}`).join(",")}]`
+	return `a${values.length}[${values.map(str).join(",")}]`
 }
 
 /** Exhaustive per-kind action encoder. */
 function encodeAction(action: Action): string | null {
 	switch (action.kind) {
 		case "add_capsule":
-			return `capsule(${action.contract}|${action.storageSlot}|${encodeStringArray(action.capsule)}|${action.scope ?? ""})`
+			return `capsule(${str(action.contract)}|${str(action.storageSlot)}|${encodeStringArray(action.capsule)}|${optStr(action.scope)})`
 		case "add_extra_args":
 			return `extra(${encodeStringArray(action.args)})`
 		case "add_private_authwit":
@@ -87,17 +101,17 @@ function encodeAction(action: Action): string | null {
 					contentEnc =
 						args === null
 							? null
-							: `call(${content.caller}|${content.contract}|${content.method}|${args}|${content.hideSender ?? false})`
+							: `call(${str(content.caller)}|${str(content.contract)}|${str(content.method)}|${args}|${content.hideSender ?? false})`
 					break
 				}
 				case "encoded_call":
-					contentEnc = `enc(${content.caller}|${content.to}|${content.selector}|${encodeStringArray(content.args)}|${content.hideMsgSender ?? false})`
+					contentEnc = `enc(${str(content.caller)}|${str(content.to)}|${str(content.selector)}|${encodeStringArray(content.args)}|${content.hideMsgSender ?? false})`
 					break
 				case "intent":
-					contentEnc = `intent(${content.consumer}|${encodeStringArray(content.intent)})`
+					contentEnc = `intent(${str(content.consumer)}|${encodeStringArray(content.intent)})`
 					break
 				case "message_hash":
-					contentEnc = `hash(${content.messageHash})`
+					contentEnc = `hash(${str(content.messageHash)})`
 					break
 				default: {
 					const _exhaustive: never = content
@@ -112,10 +126,10 @@ function encodeAction(action: Action): string | null {
 		case "call": {
 			const args = encodeValue(action.args, 0)
 			if (args === null) return null
-			return `call(${action.contract}|${action.method}|${args}|${action.hideSender ?? false})`
+			return `call(${str(action.contract)}|${str(action.method)}|${args}|${action.hideSender ?? false})`
 		}
 		case "encoded_call":
-			return `enc(${action.to}|${action.selector}|${encodeStringArray(action.args)}|${action.hideMsgSender ?? false}|${action.isStatic ?? false})`
+			return `enc(${str(action.to)}|${str(action.selector)}|${encodeStringArray(action.args)}|${action.hideMsgSender ?? false}|${action.isStatic ?? false})`
 		default: {
 			const _exhaustive: never = action
 			void _exhaustive
@@ -161,12 +175,12 @@ export function fingerprintOperation(input: OperationFingerprintInput): string |
 		actionParts.push(enc)
 	}
 	return [
-		`net=${input.networkId}`,
-		`acct=${input.accountAddress}`,
-		`mode=${input.executionMode}`,
-		`from=${input.from}`,
-		`fee=${encodeFeeOptions(input.fee)}`,
-		`fs=${fingerprintFeeSettings(input.feeSettings)}`,
+		`net=${str(input.networkId)}`,
+		`acct=${str(input.accountAddress)}`,
+		`mode=${str(input.executionMode)}`,
+		`from=${str(input.from)}`,
+		`fee=${str(encodeFeeOptions(input.fee))}`,
+		`fs=${str(fingerprintFeeSettings(input.feeSettings))}`,
 		`actions=${actionParts.length}[${actionParts.join(";")}]`,
 	].join("&")
 }

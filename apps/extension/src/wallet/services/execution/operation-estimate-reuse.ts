@@ -38,7 +38,9 @@ import { fingerprintOperation, type OperationFingerprintInput } from "./operatio
 import type { BuiltStandardTx } from "./tx-request-builder"
 import type { FeeSettings } from "./spec"
 
-/** Snapshot of the resolved FPC row at estimate time (final-pass H3). */
+/** Snapshot of the resolved FPC row at estimate time. An FPC row can be
+ * edited in place; a request signed against the old address must never
+ * consume after such an edit. */
 export type FpcIdentitySnapshot = {
 	readonly id: string
 	readonly type: FpcInfo["type"]

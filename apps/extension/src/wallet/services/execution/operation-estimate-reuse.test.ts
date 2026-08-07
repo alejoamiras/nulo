@@ -148,7 +148,7 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
 	})
 
-	test("FPC-IDENTITY drift: an in-place row address edit misses (final-pass H3)", async () => {
+	test("FPC-IDENTITY drift: an in-place row address edit misses", async () => {
 		const { reuse } = makeReuse({
 			getFpcInfo: vi.fn(async () => ({ ...FPC_SNAPSHOT, address: "0xEVIL" }) as never),
 		})

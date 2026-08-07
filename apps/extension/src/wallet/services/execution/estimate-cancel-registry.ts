@@ -42,7 +42,6 @@ interface ActiveEntry {
 	readonly flowKey: string
 	readonly controller: AbortController
 	readonly startedAt: number
-	estimateId?: string
 }
 
 interface PendingEntry {
@@ -113,10 +112,13 @@ export class EstimateCancelRegistry {
 			return Promise.resolve(this.activate(token, profileId, flowKey))
 		}
 
-		// Over capacity: signal latest-intent-wins by aborting the oldest job
-		// (it stops at its next stage boundary but keeps its slot until it
-		// settles), then park the newcomer.
-		const oldest = this.oldestActive(profileId)
+		// Over capacity. Latest-intent-wins applies WITHIN a flow slot only:
+		// a newer arrival for the SAME slot supersedes its predecessor (that
+		// is the newer intent for that operation), but a different slot's job
+		// must survive — aborting it would silently destroy an estimate the
+		// user still needs, and no path ever refires it (a 5-operation
+		// approval window would lose operation #1's estimate outright).
+		const oldest = this.oldestActive(profileId, flowKey)
 		if (oldest) this.abortEntry(oldest.token, oldest.entry)
 
 		const key = this.pendingKey(profileId, flowKey)
@@ -135,19 +137,24 @@ export class EstimateCancelRegistry {
 	 * capacity slot and admits the oldest parked job that now fits. When the
 	 * runner produced a stashed reuse entry, the token→estimateId mapping is
 	 * retained for post-completion eviction — unless the job was aborted
-	 * mid-flight, in which case the stash is evicted right here (the runner's
-	 * stash may have landed before its next cancellation checkpoint).
+	 * mid-flight (the runner's stash may have landed before its next
+	 * cancellation checkpoint) or already TTL-reaped, in which cases the
+	 * stash is evicted right here.
 	 */
 	public settle(token: string, estimateId?: string): void {
 		const entry = this.active.get(token)
-		if (!entry) return
+		if (!entry) {
+			// A TTL-reaped runner completing late: its slot is long gone and no
+			// caller can cancel it anymore, so its stash must not outlive it.
+			if (estimateId) this.deps.evictStash(estimateId)
+			return
+		}
 		this.active.delete(token)
-		const stashedId = estimateId ?? entry.estimateId
-		if (stashedId) {
+		if (estimateId) {
 			if (entry.controller.signal.aborted) {
-				this.deps.evictStash(stashedId)
+				this.deps.evictStash(estimateId)
 			} else {
-				this.settled.set(token, { profileId: entry.profileId, estimateId: stashedId, settledAt: this.now() })
+				this.settled.set(token, { profileId: entry.profileId, estimateId, settledAt: this.now() })
 			}
 		}
 		this.admitNext()
@@ -187,17 +194,13 @@ export class EstimateCancelRegistry {
 
 	private abortEntry(token: string, entry: ActiveEntry): void {
 		if (!entry.controller.signal.aborted) entry.controller.abort()
-		if (entry.estimateId) {
-			this.deps.evictStash(entry.estimateId)
-			entry.estimateId = undefined
-		}
 		this.deps.logDebug(`estimate ${token.slice(0, 8)}… aborted (${entry.flowKey})`)
 	}
 
-	private oldestActive(profileId: string): { token: string; entry: ActiveEntry } | undefined {
+	private oldestActive(profileId: string, flowKey: string): { token: string; entry: ActiveEntry } | undefined {
 		let found: { token: string; entry: ActiveEntry } | undefined
 		for (const [token, entry] of this.active) {
-			if (entry.profileId !== profileId) continue
+			if (entry.profileId !== profileId || entry.flowKey !== flowKey) continue
 			// Skip already-aborted jobs — re-aborting frees nothing, and the
 			// point of overflow-abort is to stop the oldest STILL-LIVE job.
 			if (entry.controller.signal.aborted) continue
@@ -214,6 +217,16 @@ export class EstimateCancelRegistry {
 	}
 
 	private admitNext(): void {
+		// Reap dead parked entries HERE, not only in sweep(): settle() calls
+		// admitNext directly, and admitting a caller that gave up long ago
+		// would run a full pipeline for nobody.
+		const now = this.now()
+		for (const [key, entry] of this.pending) {
+			if (now - entry.parkedAt <= ESTIMATE_JOB_TTL_MS) continue
+			this.pending.delete(key)
+			entry.reject(new JobCancelledSentinel(entry.token))
+			this.deps.logDebug(`estimate ${entry.token.slice(0, 8)}… reaped: parked past TTL`)
+		}
 		let oldest: { key: string; entry: PendingEntry } | undefined
 		for (const [key, entry] of this.pending) {
 			if (this.activeCount(entry.profileId) >= MAX_ACTIVE_ESTIMATES_PER_PROFILE) continue

@@ -95,7 +95,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 	const deps: DappSendExecutorDeps = {
 		planner: {
 			processAztecJsPayload: vi.fn(async () => ({
-				actions: [{ kind: "call", method: "dapp_method" }],
+				actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
 				feePaymentMethod: undefined,
 				feeOptions: {},
 			})),
@@ -151,7 +151,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			networkId: "net-1",
 			accountAddress: "0xacct",
 			feeSettings: { paymentMethod: { kind: "fj" } },
-			actions: [{ kind: "call", method: "dapp_method" }],
+			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
 		} as never
 		const result = await executor.executeSendTransaction(op, ORIGIN)
 
@@ -180,7 +180,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 			networkId: "net-1",
 			accountAddress: "0xacct",
 			feeSettings: { paymentMethod: { kind: "fj" } },
-			actions: [{ kind: "call", method: "dapp_method" }],
+			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
 		} as never
 		await executor.executeSendTransaction(op, ORIGIN)
 
@@ -416,7 +416,7 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 		const { executor, deps } = makeHarness({
 			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) } as never,
 		})
-		const originalActions = [{ kind: "call", method: "dapp_method" }]
+		const originalActions = [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }]
 		const op = {
 			kind: "send_transaction",
 			networkId: "net-1",
@@ -584,6 +584,21 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
 	})
 
+	test("dApp-supplied maxFeesPerGas: no stash (entry would always miss on base-fee drift)", async () => {
+		const { executor, deps } = makeHarness({
+			planner: {
+				processAztecJsPayload: vi.fn(async () => ({
+					actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+					feePaymentMethod: undefined,
+					feeOptions: { maxFeesPerGas: { feePerDaGas: 5, feePerL2Gas: 6 } },
+				})),
+			} as never,
+		})
+		const result = await executor.estimateOperationFee(makeAztecOp(), { paymentMethod: { kind: "fj" } } as never)
+		expect(result.estimateId).toBeUndefined()
+		expect(deps.operationEstimateReuse.stash).not.toHaveBeenCalled()
+	})
+
 	test("stash failure is best-effort: estimate still returned, estimateId dropped", async () => {
 		const { executor } = makeHarness({
 			operationEstimateReuse: {
@@ -618,7 +633,7 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		expect(deps.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
 		// The auth-registry row must exist on a reuse hit — the silent-break
-		// scenario the audit pinned (fable F-3).
+		// scenario: a missing auth-registry row after a reuse-hit grant.
 		expect(deps.addTransaction).toHaveBeenCalledTimes(1)
 		expect(deps.recordPendingAuthwits).toHaveBeenCalledWith("0xacct", pendingPublicAuthwits, "0xhash")
 		// The reused nonce + payment method flow into the activity record.

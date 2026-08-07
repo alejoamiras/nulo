@@ -310,6 +310,11 @@ export class DappSendExecutor {
 			operation.kind === "aztec_sendTx" &&
 			((operation as AztecSendTxOperation).executionMode ?? "standard") !== "default_entrypoint" &&
 			!detectedFee?.embeddedFeePayment &&
+			// A dApp-supplied fee cap makes the built request's maxFees diverge
+			// from the predicted-worst basis the consume ladder re-derives, so
+			// such an entry would ALWAYS miss on "base fee drift" — stashing it
+			// only parks an unusable signed request for the TTL.
+			!detectedFee?.maxFeesPerGas &&
 			(kind === "fj" || kind === "fpc")
 		if (!eligible) return undefined
 		try {
