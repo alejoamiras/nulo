@@ -61,6 +61,10 @@ export type OperationEstimateReuseEntry = {
 	readonly primaryEndpointId: string
 	readonly primaryEndpointUrl: string
 	readonly pendingHashes: readonly string[]
+	/** EXACT live chain identity at estimate time. The network row's stored
+	 *  chainId is an XOR composite — `(1,4)` and `(2,7)` collide — so consume
+	 *  must compare the raw pair, not the composite. */
+	readonly chainIdentity: { readonly l1ChainId: number; readonly rollupVersion: number }
 	readonly fpcIdentity?: FpcIdentitySnapshot
 	/** Built downstream state — reused on confirm. Live handles excluded. */
 	readonly txRequest: TxExecutionRequest
@@ -76,8 +80,10 @@ export interface OperationEstimateReuseDeps {
 	getActiveProfile(): Promise<{ id: string } | undefined>
 	getNetwork(networkId: string): Promise<Network>
 	getNode(chainId: number): Promise<MinFeeNode>
-	/** Live-chain re-assert for the reused request (throws on drift). */
-	assertChainIdentity(network: Network): Promise<void>
+	/** Live-chain re-assert for the reused request: runs the composite
+	 *  assertion (throws on drift vs the network row) AND returns the raw
+	 *  pair for exact comparison against the entry's snapshot. */
+	getLiveChainIdentity(network: Network): Promise<{ l1ChainId: number; rollupVersion: number }>
 	/** Fresh resolved-FPC lookup for identity revalidation. */
 	getFpcInfo(fpcId: string): Promise<FpcInfo>
 	getPendingForAccount(account: string): { hash: string }[]
@@ -87,7 +93,12 @@ export interface OperationEstimateReuseDeps {
 export class OperationEstimateReuse {
 	private cache = new Map<string, OperationEstimateReuseEntry>()
 
-	public constructor(private readonly deps: OperationEstimateReuseDeps) {}
+	public constructor(private readonly deps: OperationEstimateReuseDeps) {
+		// Timed sweep so an abandoned signed request is actually dropped at
+		// TTL, not merely unconsumable until the next stash happens to sweep.
+		// Dies with the service worker, which also clears the map.
+		setInterval(() => this.evictStale(), 60_000)
+	}
 
 	public stash(estimateId: string, entry: OperationEstimateReuseEntry): void {
 		this.cache.set(estimateId, entry)
@@ -135,7 +146,10 @@ export class OperationEstimateReuse {
 			return this.reject("pending tx set changed")
 		}
 		try {
-			await this.deps.assertChainIdentity(network)
+			const live = await this.deps.getLiveChainIdentity(network)
+			if (live.l1ChainId !== entry.chainIdentity.l1ChainId || live.rollupVersion !== entry.chainIdentity.rollupVersion) {
+				return this.reject("chain identity drift (exact pair mismatch)")
+			}
 		} catch (error) {
 			return this.reject(`chain identity drift: ${getErrorMessage(error)}`)
 		}

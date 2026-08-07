@@ -302,6 +302,33 @@ describe("FpcStrategy canonical-Sponsored fast path (single-pass)", () => {
 		expect(simulateTxTask).toHaveBeenCalledTimes(2)
 	})
 
+	test("row-chain vs operation-chain mismatch bails to two-pass after the probe build", async () => {
+		// isProtocol was decorated against the row's OWN chain — a cross-chain
+		// row selection must not ride that stale signal into the fast path.
+		const fpc = makeSponsoredFpc()
+		;(fpc.infoData as { chainId?: number }).chainId = 999
+		const buildStandard = vi.fn(async () => ({ ...makeBuilt(), network: { marker: "network", chainId: 7 } }))
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn(async () => fpc) },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const ctx = makeFpcCtx()
+		const originalAction = ctx.op.actions[0]
+
+		await new FpcStrategy(deps).buildAndEstimate(ctx)
+
+		// 1 probe build (fast path) + 2 two-pass builds; two-pass sims only.
+		expect(buildStandard).toHaveBeenCalledTimes(3)
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+		// Final action shape is the two-pass output: payload + originals.
+		expect(ctx.op.actions[1]).toBe(originalAction)
+		expect(ctx.op.actions).toHaveLength(2)
+	})
+
 	test("undecorated FPC shape (cold protocol cache) fails safe to two-pass", async () => {
 		const fpc = makeSponsoredFpc()
 		;(fpc as { infoData?: unknown }).infoData = undefined

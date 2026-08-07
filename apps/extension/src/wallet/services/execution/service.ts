@@ -208,9 +208,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
 			getNode: (chainId) => this.networkService.getNode(chainId),
-			assertChainIdentity: async (network) => {
+			getLiveChainIdentity: async (network) => {
 				const node = await this.networkService.getNode(network.chainId)
-				assertLiveChainIdentity(network, await node.getNodeInfo())
+				const info = await node.getNodeInfo()
+				assertLiveChainIdentity(network, info)
+				return { l1ChainId: info.l1ChainId, rollupVersion: info.rollupVersion }
 			},
 			getFpcInfo: (fpcId) => this.fpcService.getFpc(fpcId),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),

@@ -39,6 +39,7 @@ function makeEntry(overrides: Partial<OperationEstimateReuseEntry> = {}): Operat
 		primaryEndpointId: "e1",
 		primaryEndpointUrl: "http://primary",
 		pendingHashes: ["0xpending"],
+		chainIdentity: { l1ChainId: 1, rollupVersion: 4 },
 		fpcIdentity: { ...FPC_SNAPSHOT, type: FPC_SNAPSHOT.type as never },
 		txRequest: { marker: "txRequest" } as never,
 		nonce: { toString: () => "42" },
@@ -62,7 +63,7 @@ function makeReuse(depOverrides: Partial<OperationEstimateReuseDeps> = {}) {
 				}) as never,
 		),
 		getNode: vi.fn(async () => ({ marker: "node" }) as never),
-		assertChainIdentity: vi.fn(async () => {}),
+		getLiveChainIdentity: vi.fn(async () => ({ l1ChainId: 1, rollupVersion: 4 })),
 		getFpcInfo: vi.fn(async () => ({ ...FPC_SNAPSHOT }) as never),
 		getPendingForAccount: vi.fn(() => [{ hash: "0xpending" }]),
 		logDebug: vi.fn(),
@@ -138,13 +139,23 @@ describe("OperationEstimateReuse.tryConsume — the drift ladder", () => {
 		expect(await reuse.tryConsume("id-2", makeInput())).toBeUndefined()
 	})
 
-	test("CHAIN-IDENTITY drift: assertChainIdentity throwing fails closed to a miss", async () => {
+	test("CHAIN-IDENTITY drift: the composite assert throwing fails closed to a miss", async () => {
 		const { reuse } = makeReuse({
-			assertChainIdentity: vi.fn(async () => {
+			getLiveChainIdentity: vi.fn(async () => {
 				throw new Error("Chain identity mismatch")
 			}),
 		})
 		reuse.stash("id-1", makeEntry())
+		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
+	})
+
+	test("CHAIN-IDENTITY drift: an XOR-composite collision misses on the exact pair", async () => {
+		// (1,4) and (2,7) share the composite 1^4 === 2^7 === 5 — the stored
+		// network chainId cannot tell them apart; the entry's raw pair must.
+		const { reuse } = makeReuse({
+			getLiveChainIdentity: vi.fn(async () => ({ l1ChainId: 2, rollupVersion: 7 })),
+		})
+		reuse.stash("id-1", makeEntry({ chainIdentity: { l1ChainId: 1, rollupVersion: 4 } }))
 		expect(await reuse.tryConsume("id-1", makeInput())).toBeUndefined()
 	})
 

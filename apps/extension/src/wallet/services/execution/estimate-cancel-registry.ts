@@ -32,8 +32,17 @@
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
 export const MAX_ACTIVE_ESTIMATES_PER_PROFILE = 4
-/** A runner that hasn't settled after this long is presumed dead and reaped. */
-export const ESTIMATE_JOB_TTL_MS = 3 * 60 * 1000
+/** Parked admissions beyond this per profile are rejected outright — a
+ *  many-operation dApp interaction must not mint unbounded parked promises. */
+export const MAX_PENDING_ESTIMATES_PER_PROFILE = 8
+/** A runner that hasn't settled after this long is presumed dead and reaped.
+ *  MUST stay comfortably above the worst-case estimate transport chain
+ *  (~5 sequential PXE RPCs × their 90 s timeouts): every RPC rejection
+ *  reaches `withEstimateAdmission`'s finally → settle, so by this horizon a
+ *  reaped entry's underlying job has provably settled or died at the
+ *  transport layer — freeing its slot then cannot over-admit past the cap
+ *  while non-preemptible ACVM work still runs. */
+export const ESTIMATE_JOB_TTL_MS = 15 * 60 * 1000
 /** How long a settled token can still evict its stash — mirrors the reuse TTL. */
 export const SETTLED_STASH_TTL_MS = 120_000
 
@@ -125,6 +134,18 @@ export class EstimateCancelRegistry {
 		const superseded = this.pending.get(key)
 		if (superseded) {
 			superseded.reject(new JobCancelledSentinel(superseded.token))
+		} else {
+			// Bound the parked set: distinct flow slots each hold one promise,
+			// so without a cap a many-op interaction mints unbounded parked
+			// work. Reject-newcomer (not evict-oldest): the oldest parked ops
+			// are the ones the user has been waiting on longest.
+			let parkedForProfile = 0
+			for (const entry of this.pending.values()) {
+				if (entry.profileId === profileId) parkedForProfile++
+			}
+			if (parkedForProfile >= MAX_PENDING_ESTIMATES_PER_PROFILE) {
+				throw new JobCancelledSentinel(token)
+			}
 		}
 		return new Promise<AbortSignal>((resolve, reject) => {
 			this.pending.set(key, { token, profileId, flowKey, parkedAt: this.now(), resolve, reject })
@@ -246,7 +267,10 @@ export class EstimateCancelRegistry {
 			this.deps.logDebug(`estimate ${token.slice(0, 8)}… reaped: runner never settled`)
 		}
 		for (const [token, done] of this.settled) {
-			if (now - done.settledAt > SETTLED_STASH_TTL_MS) this.settled.delete(token)
+			if (now - done.settledAt <= SETTLED_STASH_TTL_MS) continue
+			this.settled.delete(token)
+			// Expiring the eviction handle must not strand the stash itself.
+			this.deps.evictStash(done.estimateId)
 		}
 		this.admitNext()
 	}

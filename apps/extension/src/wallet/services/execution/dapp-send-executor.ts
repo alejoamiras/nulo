@@ -344,6 +344,8 @@ export class DappSendExecutor {
 					isProtocol: info.isProtocol ?? false,
 				}
 			}
+			// Exact live pair, not the XOR composite — see the entry's doc.
+			const nodeInfo = await built.node.getNodeInfo()
 			const builtFees = built.txRequest.txContext.gasSettings.maxFeesPerGas
 			const estimateId = crypto.randomUUID()
 			this.deps.operationEstimateReuse.stash(estimateId, {
@@ -352,6 +354,7 @@ export class DappSendExecutor {
 				networkId: operation.networkId,
 				feeSettings,
 				profileId: profile.id,
+				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
 				baseFeeFingerprint: fingerprintBaseFee({
 					feePerDaGas: builtFees.feePerDaGas,
 					feePerL2Gas: builtFees.feePerL2Gas,

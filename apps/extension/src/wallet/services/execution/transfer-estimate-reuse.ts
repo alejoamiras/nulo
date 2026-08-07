@@ -123,7 +123,11 @@ export interface TransferEstimateReuseDeps {
 export class TransferEstimateReuse {
 	private cache = new Map<string, TransferEstimateReuseEntry>()
 
-	public constructor(private readonly deps: TransferEstimateReuseDeps) {}
+	public constructor(private readonly deps: TransferEstimateReuseDeps) {
+		// Timed sweep so an abandoned signed request is actually dropped at
+		// TTL, not merely unconsumable until the next stash happens to sweep.
+		setInterval(() => this.evictStale(), 60_000)
+	}
 
 	/** Store an entry under a fresh id, then opportunistically sweep
 	 *  expired entries so the map doesn't grow unboundedly when the popup

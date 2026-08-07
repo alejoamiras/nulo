@@ -104,6 +104,16 @@ export class FpcStrategy implements FeeStrategy {
 			// single sim measures app + FPC together, mirroring Pass 2's coverage.
 			ctx.op.actions.unshift(...fpc.getFeePayload(ctx.op.accountAddress, Fr.ZERO))
 			const built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.EXTERNAL, task)
+			// The row's chain must equal the operation's resolved network —
+			// `isProtocol` was decorated against the row's OWN chain, so a
+			// cross-chain row selection would ride a stale eligibility signal.
+			// Only knowable post-build (the strategy has no networkId→chainId
+			// map); a mismatch restores the actions and takes the two-pass.
+			if (fpc.infoData.chainId !== built.network.chainId) {
+				ctx.op.actions.splice(0, ctx.op.actions.length, ...originalActions)
+				task.complete()
+				return this.buildAndEstimateTwoPass(ctx, fpc)
+			}
 			suggestGasLimits(built.txRequest, ctx.op.fee)
 			const simulatedTx = await this.deps.simulateTxTask(
 				built.pxe,

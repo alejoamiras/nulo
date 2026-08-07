@@ -209,14 +209,27 @@ describe("TTL sweeps", () => {
 		expect(registry.unsettledCount("p1")).toBe(1)
 	})
 
-	test("settled stash mappings expire after their TTL", async () => {
+	test("settled-mapping expiry evicts the stash itself, not just the handle", async () => {
 		const { registry, evicted, advance } = makeRegistry()
 		await registry.admit("t1", "p1", "send")
 		registry.settle("t1", "stash-1")
 		advance(SETTLED_STASH_TTL_MS + 1)
-		await registry.admit("t2", "p1", "send")
+		await registry.admit("t2", "p1", "send") // sweep fires
+		expect(evicted).toEqual(["stash-1"])
+		// A later cancel of the expired token is a no-op (single eviction).
 		registry.cancel("t1", "p1")
-		expect(evicted).toEqual([])
+		expect(evicted).toEqual(["stash-1"])
+	})
+
+	test("parked admissions are bounded per profile: newcomers beyond the cap are rejected", async () => {
+		const { registry } = makeRegistry()
+		for (let i = 0; i < N; i++) await registry.admit(`t${i}`, "p1", `op:${i}`)
+		for (let i = 0; i < 8; i++) registry.admit(`park-${i}`, "p1", `op:${N + i}`).catch(() => {})
+		expect(() => registry.admit("overflow", "p1", "op:99")).toThrow(JobCancelledSentinel)
+		// A same-slot supersede is still allowed at the cap (replaces, not adds).
+		const superseding = registry.admit("park-0b", "p1", `op:${N}`)
+		superseding.catch(() => {})
+		expect(registry.unsettledCount("p1")).toBe(N)
 	})
 
 	test("parked admissions past the TTL are rejected, never admitted as zombies", async () => {
