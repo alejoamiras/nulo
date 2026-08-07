@@ -32,6 +32,16 @@ Fixed (commit `code-review round 2`), each failure mode empirically reproduced b
 - **Round 3: "approve"**, all prior findings closed. Its one non-blocking hygiene note (a settled force's `forcedGasSeq` row outliving an evicted entry) fixed post-approve — `evictIfNeeded` deletes the row.
 - Every codex finding got a discriminating pin in the shape codex specified (held-open subscriber, P→S1→S2 inversion, snapshot-then-park storage gate).
 
+## Confidence test layers (owner-commissioned follow-up) — codex-audited to "approve"
+
+Three layers added on top of the approved implementation, each mutation-validated (a deliberate store break must fail the test, then reverted):
+
+- **`balances.store.fuzz.test.ts`** — fast-check randomized interleaving explorer (120 runs/CI ≈1s; `NULO_FUZZ_RUNS` for deep soaks). Random op tapes (subscribe/release/ensure/settle-fires/fences) with RANDOM RPC settlement order; machine-wide invariants after every step: provenance (verified/fpc data must come from a kind-correct RPC for the entry's own account/profile issued after the profile's last fence — a shadow model mirrors the suspenders), coherence (degraded⇔no-verified), and quiescence (owed recoveries happened, post-drain silence, stranded-forced probe, release-all + armed-release silence). Failures print a seed + shrunk tape; try/finally keeps shrink attempts uncontaminated.
+- **`fee-cards.comount.test.ts`** — both cards on ONE shared store: the join-a-failing-forced-flight arc (degraded row + live recovery + gas SWR dim, join proven by RPC count) and forced-success overlay reset with zero fee-card re-entry.
+- **`service.composition.test.ts` +1** — the reader's evict write-back fence through the real facade, parked at the SECOND network dependency (post profile-context).
+
+Codex audited JUST these in the same resumed session: round 1 conditional (unsound FPC oracle, peek-as-verified hole, vacuous quiescence, shrink contamination, pre-context parking) → all fixed; round 2 conditional (stale-commit assert missing, holder subs, armed-release scenario) → fixed; round 3 **approve**. Mutation probes M1–M5 all caught by their intended assertions.
+
 ## Residual nitpicks — reviewed, deliberately not fixed
 
 - `retryDebt` can strand `true` on a ready slice when only a non-retry-capable observer saw the degraded state (dormant; costs at most one extra TTL-cache-served refetch; self-corrects on the next degradation).
