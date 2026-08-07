@@ -107,7 +107,7 @@ PR mapping (stacked; Phase 0 verifies `gh-stack` — note the codex-vs-changelog
 
 **Gate** — `gh stack --help` (or recorded fallback decision); `bun run lint && bun run typecheck:all && bun run test` → all exit 0. Layers: typecheck/lint/unit.
 
-### Phase 1 — Delete the `[SYNC-DEBUG]` round-trips (PR A)
+### Phase 1 — Delete the `[SYNC-DEBUG]` round-trips (PR A) ✓
 
 Both blocks in `packages/aztec-runtime/src/pxe/service.ts`. No replacement logging that costs an RPC.
 
