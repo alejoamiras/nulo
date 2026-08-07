@@ -66,6 +66,7 @@ export interface TransferExecutorDeps {
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
+		signal?: AbortSignal,
 	): Promise<FeeEstimate>
 	createJournalOperation(input: NewOperationInput): Promise<OperationRecord>
 	transitionJournal(journalId: string, progress: JobProgress, error?: JobError | null): Promise<unknown>
@@ -253,12 +254,21 @@ export class TransferExecutor {
 		}
 	}
 
-	public async estimateFee(req: TransferRequest): Promise<TransferFeeEstimate> {
+	public async estimateFee(req: TransferRequest, signal?: AbortSignal): Promise<TransferFeeEstimate> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 
+		// Stage-boundary cancellation: an in-flight sim can't be preempted, but
+		// each next stage — and critically the stash — must not run after a
+		// cancel. A cancelled estimate never leaves a signed request cached.
+		const checkCancelled = (): void => {
+			if (signal?.aborted) throw new JobCancelledSentinel("")
+		}
+		checkCancelled()
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
+		checkCancelled()
 
-		const { txRequest, network, nonce, feePaymentMethod } = await this.deps.buildAndEstimate(op, op.feeSettings)
+		const { txRequest, network, nonce, feePaymentMethod } = await this.deps.buildAndEstimate(op, op.feeSettings, undefined, signal)
+		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 

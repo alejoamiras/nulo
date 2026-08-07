@@ -9,6 +9,7 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
 import type { TransferRequest } from "./operation-planner"
 import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor"
@@ -227,5 +228,41 @@ describe("TransferExecutor.estimateFee", () => {
 
 		expect(result.maxFee).toBe("880")
 		expect(result.estimateId).toBeUndefined()
+	})
+})
+
+describe("TransferExecutor.estimateFee cancellation", () => {
+	test("pre-aborted signal: sentinel thrown before any pipeline work, nothing stashed", async () => {
+		const { executor, deps } = makeHarness()
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(executor.estimateFee(makeReq(), controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("cancel landing during the sim: estimate rejects and NO reuse entry is stashed", async () => {
+		const controller = new AbortController()
+		const { executor, deps, built } = makeHarness()
+		// The abort arrives while buildAndEstimate (the simulation stage) is
+		// in flight — the post-sim checkpoint must block the stash so a
+		// cancelled estimate never leaves a signed request cached.
+		;(deps.buildAndEstimate as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			controller.abort()
+			return built as never
+		})
+
+		await expect(executor.estimateFee(makeReq(), controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("signal forwarded into buildAndEstimate so multi-pass strategies can bail between passes", async () => {
+		const { executor, deps } = makeHarness()
+		const controller = new AbortController()
+		await executor.estimateFee(makeReq(), controller.signal)
+		const call = (deps.buildAndEstimate as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(call[3]).toBe(controller.signal)
 	})
 })

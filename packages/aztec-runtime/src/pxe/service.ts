@@ -413,16 +413,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	public async proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult> {
-		return this.withPxeWrite("proveTx", network, async (pxe, node) => {
-			// DEBUG: log PXE sync state before proving
-			try {
-				const header = await pxe.getSyncedBlockHeader()
-				const nodeTip = await node.getBlockNumber()
-				this.logDebug(`[SYNC-DEBUG] proveTx: PXE anchor block=${header.getBlockNumber()}, node tip=${nodeTip}`)
-			} catch (e) {
-				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
-			}
-
+		return this.withPxeWrite("proveTx", network, async (pxe) => {
 			// 5.0 tags private-log messages with the sender; PXE throws "Sender for tags is not set"
 			// during private execution (before proving) when it is absent — so any private-note-emitting
 			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
@@ -448,16 +439,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		opts: SimulateTxOpts,
 		stubAccountAddresses?: string[],
 	): Promise<TxSimulationResult> {
-		return this.withPxeWrite("simulateTx", network, async (pxe, node) => {
-			// DEBUG: log PXE sync state before simulation
-			try {
-				const header = await pxe.getSyncedBlockHeader()
-				const nodeTip = await node.getBlockNumber()
-				this.logDebug(`[SYNC-DEBUG] simulateTx: PXE anchor block=${header.getBlockNumber()}, node tip=${nodeTip}`)
-			} catch (e) {
-				this.logDebug(`[SYNC-DEBUG] simulateTx: failed to read sync state: ${e}`)
-			}
-
+		return this.withPxeWrite("simulateTx", network, async (pxe) => {
 			let overrides = await SimulationOverrides.schema.optional().parseAsync(opts.overrides)
 
 			// Source the stub artifact from `@aztec/accounts/stub/schnorr`

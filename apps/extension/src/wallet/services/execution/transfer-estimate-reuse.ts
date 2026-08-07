@@ -28,7 +28,11 @@ import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
 import type { TransferRequest } from "./operation-planner"
 import type { FeeSettings } from "./spec"
 
-export const ESTIMATE_REUSE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+// 120 s, owner-set (plan decision #16): the retention bound on signed tx
+// requests held in SW memory. Staleness itself is guarded by the consume
+// ladder, not this TTL — past ~2 min entries mostly miss on base-fee drift
+// anyway, so the shorter window costs almost no hit rate.
+export const ESTIMATE_REUSE_TTL_MS = 120_000
 
 /** Stable fingerprint for a fee basis so we can compare the snapshot
  *  taken at estimate time against the value at confirm.
@@ -127,6 +131,12 @@ export class TransferEstimateReuse {
 	public stash(estimateId: string, entry: TransferEstimateReuseEntry): void {
 		this.cache.set(estimateId, entry)
 		this.evictStale()
+	}
+
+	/** Drop a stashed entry (cancelled estimate, rejected interaction).
+	 *  Idempotent; unknown ids are a no-op. */
+	public evict(estimateId: string): void {
+		this.cache.delete(estimateId)
 	}
 
 	/** Pop a cached estimate if (a) the id exists, (b) inputs match

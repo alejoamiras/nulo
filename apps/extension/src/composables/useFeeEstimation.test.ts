@@ -2,6 +2,122 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { effectScope, nextTick } from "vue"
 import { useFeeEstimation } from "./useFeeEstimation"
 
+describe("useFeeEstimation — remote cancellation + handoff", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	const flushAll = async () => {
+		await Promise.resolve()
+		await Promise.resolve()
+		await nextTick()
+	}
+
+	const make = () => {
+		const cancelRemote = vi.fn()
+		const tokens: string[] = []
+		const scope = effectScope()
+		const composable = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: async (n, token) => {
+					tokens.push(token)
+					return n * 2
+				},
+				cancelRemote,
+			}),
+		)!
+		return { scope, composable, cancelRemote, tokens }
+	}
+
+	it("mints a distinct token per attempt and passes it to the estimator", async () => {
+		const { scope, composable, tokens } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		composable.estimate(2)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		expect(tokens).toHaveLength(2)
+		expect(tokens[0]).not.toBe(tokens[1])
+		scope.stop()
+	})
+
+	it("refire before the RPC started: no remote cancel (nothing to cancel server-side)", async () => {
+		const { scope, composable, cancelRemote } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(100) // debounce still pending
+		composable.estimate(2)
+		expect(cancelRemote).not.toHaveBeenCalled()
+		scope.stop()
+	})
+
+	it("refire supersedes a COMPLETED estimate: its token is remote-cancelled (stash evicted)", async () => {
+		const { scope, composable, cancelRemote, tokens } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		expect(cancelRemote).not.toHaveBeenCalled()
+		composable.estimate(2)
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[0])
+		scope.stop()
+	})
+
+	it("dispose remote-cancels the completed estimate", async () => {
+		const { scope, composable, cancelRemote, tokens } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		composable.dispose()
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[0])
+		scope.stop()
+	})
+
+	it("(HANDOFF RACE PIN) submit → handoff → unmount: NO remote cancel fires for the handed-off token", async () => {
+		const { scope, composable, cancelRemote, tokens } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		const handed = composable.handoff()
+		expect(handed).toBe(tokens[0])
+		composable.dispose()
+		scope.stop()
+		expect(cancelRemote).not.toHaveBeenCalled()
+	})
+
+	it("handoff with nothing completed or in flight returns null", () => {
+		const { scope, composable } = make()
+		expect(composable.handoff()).toBeNull()
+		scope.stop()
+	})
+
+	it("cancel() remote-cancels an in-flight (started) estimate", async () => {
+		const { scope, cancelRemote } = make()
+		let release: (n: number) => void = () => {}
+		const gate = new Promise<number>((r) => {
+			release = r
+		})
+		const tokens: string[] = []
+		const slow = effectScope().run(() =>
+			useFeeEstimation<number, number>({
+				estimate: async (_n, token) => {
+					tokens.push(token)
+					return gate
+				},
+				cancelRemote,
+			}),
+		)!
+		slow.estimate(1)
+		await vi.advanceTimersByTimeAsync(800) // RPC now in flight
+		slow.cancel()
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[0])
+		release(0)
+		scope.stop()
+	})
+})
+
 const flush = async () => {
 	await Promise.resolve()
 	await Promise.resolve()
@@ -74,7 +190,7 @@ describe("useFeeEstimation", () => {
 		await vi.advanceTimersByTimeAsync(100)
 		await flush()
 		expect(estimator).toHaveBeenCalledTimes(1)
-		expect(estimator).toHaveBeenCalledWith(3)
+		expect(estimator).toHaveBeenCalledWith(3, expect.any(String))
 		expect(result.result.value).toBe(6)
 		scope.stop()
 	})

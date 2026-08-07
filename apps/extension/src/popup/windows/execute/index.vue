@@ -124,13 +124,18 @@ const {
 	results: feeEstimates,
 	estimating: estimatingOps,
 	estimate: scheduleFeeEstimate,
+	handoffAll: handoffFeeEstimates,
 } = useFeeEstimationMap<number, { op: UIOperation; feeSettings: FeeSettings }, unknown>({
 	// Cast op → Operation (strict): the estimate is only scheduled AFTER the
 	// user picks a fee, so feeSettings is set on the op by the time we get here.
 	// The wallet-bridge Operation type carries a slightly different AztecAddress/
 	// Fr surface than the popup-resolved DraftUIOperation; the cast bridges that
 	// pre-existing mismatch.
-	estimate: ({ op, feeSettings }) => executionService.estimateOperationFee(op as unknown as Operation, feeSettings),
+	estimate: ({ op, feeSettings }, estimateToken, flowKey) =>
+		executionService.estimateOperationFee(op as unknown as Operation, feeSettings, estimateToken, flowKey),
+	cancelRemote: (estimateToken) => {
+		executionService.cancelEstimate(estimateToken).catch(() => {})
+	},
 	debounceMs: 500,
 	onError: (key, err) => {
 		console.error(`[Execute] Fee estimation failed for op ${key}:`, getErrorMessage(err), getErrorData(err))
@@ -371,6 +376,11 @@ const approve = async () => {
 			}
 			return draft
 		})
+		// Ownership handoff: approval transfers the estimates to the execution
+		// path — the window's unmount cleanup must NOT remote-cancel them, or
+		// the eviction would race the fire-and-forget executeOperations out of
+		// its (future) reuse hits and needlessly abort still-running estimates.
+		handoffFeeEstimates()
 		await interactionService.approveInteraction(requestId.value!, executable, {
 			type: OriginType.DAPP,
 			name: dapp.value?.name ?? "Unknown app",

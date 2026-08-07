@@ -16,6 +16,7 @@ const EXECUTION_METHODS = [
 	"estimateTransferFee",
 	"estimateOperationFee",
 	"cancelJob",
+	"cancelEstimate",
 ] as const satisfies readonly (keyof Methods)[]
 // Completeness: if any `Methods` key is missing from the list above, the
 // declaration-merged type would advertise a method the runtime never installs.
