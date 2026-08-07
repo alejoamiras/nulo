@@ -113,6 +113,11 @@ export function useFeeEstimation<TParams, TResult>(
 			} catch (err) {
 				if (disposed || myCounter !== counter) return
 				result.value = null
+				// A transport failure (RPC timeout) leaves the SW-side runner
+				// alive with no local owner — without this cancel it would be
+				// unreachable by every later cleanup path and its stash would
+				// sit un-evictable for the full TTL.
+				if (inflight?.token && !handedOff.has(inflight.token)) cancelRemote?.(inflight.token)
 				inflight = null
 				onError?.(err)
 			} finally {

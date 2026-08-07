@@ -47,6 +47,16 @@
 
 `reject (with blocking findings: the active-estimate cap is still not enforceable as specified)` — cancel-oldest cannot free capacity held by non-preemptible queued/in-flight jobs; repeated requests grow the queue past N (exploitable while the PXE write lock is occupied). Required an atomic admission contract: reject-newcomer, or cancel-oldest + defer/coalesce-newest until settlement, with a job-count invariant test. Confirmed the other six rev-3 adoptions "complete and coherent."
 
+## POST-IMPLEMENTATION audit — new session, xhigh, on the built stack (#347–349)
+
+Three rounds against the net diff + the code-review cleanup commit:
+
+- **r1 `reject`**: H1 active-TTL reap could over-admit past the cap (non-preemptible work); H2 the chain-identity snapshot was the XOR composite — `(1,4)`/`(2,7)` collide; M3 TTL was consume-side only (no physical eviction); M4 Sponsored fast path missed the row-chain==op-chain equality. Confirmed sound: PrivateFPC untouched, no new auto-sign surface, popup-only envelope, `send_transaction` exclusion "correct, not over-cautious", code-review pass introduced no blocker.
+- **r2 `reject`**: after the first fix round — H1' sharpened (RPC-timeout settle frees a slot while the offscreen sim runs on; no job-ack channel exists); H2' TOCTOU (stash refetched the pair instead of using the builder's); M cap-order (abort-before-reject); M retention (60 s sweep ⇒ ≤180 s physical).
+- **r3 `conditional approve`** — H2'/M/M adopted verbatim (builder-bound `BuiltStandardTx.chainIdentity`, park-before-abort, per-entry TTL timers); H1' deferral CONCURRED ("user-mediated local availability residual — not a high/critical merge blocker; strictly safer than pre-arc"), conditions: plan.md cap-wording amendment + offscreen job-ack added to the follow-up charter (both applied in the final docs commit). "No new defect found."
+
+Verbatim responses: session files `response.md` / `response-1.md` / `response-2.md` (this session's CODEX_DIR; key content quoted above).
+
 ## Re-verdict on revision 3.1 — same session
 
 `approve` — verbatim: "Revision 3.1 closes the remaining blocker. The atomic admission rule bounds actual unsettled work, correctly retains capacity for non-preemptible cancelled jobs, and admits coalesced replacements only after settlement. The job-count invariant test validates the resource — not token bookkeeping — and ledger row 15 accurately records the decision. No remaining blocking contradiction or incomplete adoption found."

@@ -92,7 +92,9 @@ Non-goals (owner-directed): no UX/product changes; no `getNodeInfo` caching; no 
 - **`approveInteraction` envelope over `Operation.estimateId`** (both auditors; keeps the shared wire type clean and the field structurally unreachable from dApps).
 - **Deletion of `[SYNC-DEBUG]` over flag-gating**; **generalized ladder over copy-paste cache**; **outline B rejected** (see audits — repeats the PrivateFPC bug, unproven pad, one-PR risk concentration) and re-positioned as the possible measurement-gated convergence target.
 
-## Follow-up charter (NOT in this plan): discovery fold + single-sim estimates
+## Follow-up charter (NOT in this plan): discovery fold + single-sim estimates + offscreen job-ack
+
+**Offscreen job-acknowledgement channel** (post-impl codex H1', deferred with codex concurrence): the estimate admission cap counts SW-side lifecycles; a simulation whose RPC times out keeps running in the offscreen SerialQueue untracked. A completion-ack (or cancellation) signal from the offscreen per job would let the registry hold the slot until the UNDERLYING work drains, making the ≤N cap literal. New protocol surface — belongs with the fold work below.
 
 Entry conditions: Phase 6 measurement shows stub-vs-real gas deltas comfortably inside padding; owner accepts. Design constraints fixed by this plan's audits: sim A is **app-only** (no fee payload — preserves the fail-loud denial for FPC-originated authwit requests; fable F-1 option (a), codex's "fold onto the app-only first pass"); implemented as a `DiscoveryAwareEstimator` decorator owned by `dapp-send-executor`, NOT a `FeeStrategyContext` hook (strategies stay payment-only); adversarial-FPC test fixture required (an FPC whose payload emits `CallAuthorizationRequest` must fail estimation loudly, never get auto-signed); its own network-e2e milestone (`tx-sendTx-default.test.ts` at minimum). Prize: dApp PrivateFPC estimate 3→2 (merge discovery into pass 1), and — if stub gas is accepted — estimates converge toward 1 sim (outline B-lite).
 
@@ -125,19 +127,19 @@ Per architecture §1. Structural pins: fast path `buildStandard` ×1 (EXTERNAL) 
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution/fee` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/transfers.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` (both Sponsored-FPC-paid, prover-ON canary pair). Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
 
-### Phase 4 — dApp estimate→confirm reuse (PR C)
+### Phase 4 — dApp estimate→confirm reuse (PR C) ✓
 
 Per architecture §2–3, §5. Tests pin: every ladder exit incl. chain-identity drift, **resolved-FPC-identity drift (in-place address edit ⇒ miss)**, + same-batch `pendingHashes`; consume-hit skips discovery + `buildAndEstimate` AND still runs `addTransaction` + `recordPendingAuthwits` (the auth-registry row must exist — fable F-3's silent-break scenario); forged/foreign `estimateId` ⇒ miss/no-evict; reject/window-close eviction; **approve handoff-race** (window close after approve does NOT evict the handed-off entries; queued `tryConsume` hits); fingerprint normalization-point invariant (stash and consume hash the same set, full FeeOptions incl. teardown + priority fees).
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution src/popup/windows/execute` then `bun run lint && bun run typecheck:all && bun run test`; **milestone e2e**: `bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts` and `bun run e2e:agent tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`. Pass: all exit 0. Layers: typecheck/lint/unit + network e2e.
 
-### Phase 5 — Mechanical prep: stub-opt threading (PR C)
+### Phase 5 — Mechanical prep: stub-opt threading (PR C) ✓
 
 Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAddresses` through the opts-bag; no strategy uses it; no call-site behavior changes. The discoverer split is out (charter).
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution` then `bun run lint && bun run typecheck:all && bun run test`. Pass: zero pin changes needed in `strategies-structural.test.ts` (proof of no behavior change); full suite exit 0. Layers: typecheck/lint/unit.
 
-### Phase 6 — End-to-end validation + stub-gas measurement (PR C)
+### Phase 6 — End-to-end validation + stub-gas measurement (PR C) ✓
 
 `bun run audit:vue`; `bun run test:e2e` (smoke — popup surfaces touched); **full** `bun run e2e:agent`. Measurement task (throwaway, uncommitted): log stubbed-discovery vs validated-strategy `gasUsed` per dApp op across representative flows; record the delta table in `lessons/phase-6.md` — the data for the follow-up charter's entry condition.
 
@@ -199,8 +201,8 @@ Per architecture §6 (slimmed): `SimulateTxFn`/coordinator carry `stubAccountAdd
 | 12 | Sponsored fast-path eligibility | + no dApp custom gas limits (custom-limit ops stay two-pass) | uniform fast path (r2 — behavior change under `op.fee.gasLimits`) | final-pass H2 | settled |
 | 13 | Confirm handoff | ownership transfer disarms unmount cancel; reject/dismiss evicts | r2's unconditional cancel-on-unmount (raced its own reuse win) | final-pass H1 | settled |
 | 14 | FPC identity in reuse | snapshot + revalidate `{id,type,address,chainId,isProtocol}` | fpcId-only binding (r2 — in-place row edit sent stale address) | final-pass H3 | settled |
-| 15 | Cap admission semantics | atomic: ≤N unsettled jobs; overflow = cancel-oldest + coalesce-newest (latest-wins pending slot), admit on settle | r3's cancel-oldest-only (didn't bound the queue — cancelled jobs are non-preemptible) | final-pass re-verdict | settled |
-| 16 | Reuse TTL | 120 s shared constant (both caches; Send drops from 5 min) | 5-min Send precedent carried over (r3.1) | owner, at gate | settled |
+| 15 | Cap admission semantics | atomic: ≤N **SW-admitted** jobs; overflow = same-flow-slot cancel-oldest + coalesce-newest (park bounded per profile), admit on settle. AS-BUILT REFINEMENT (post-impl audit): the cap counts SW-side job lifecycles — an offscreen simulation that outlives its RPC timeout is NOT tracked (the offscreen drops timed-out results and exposes no completion signal), so "≤N underlying offscreen jobs" is not literally guaranteed across timeout windows. Popup-gated surface + per-window bound keep it a local-availability residual; the true fix is charter item (offscreen job-ack). | r3's cancel-oldest-only (didn't bound the queue); literal underlying-job cap (needs the job-ack channel that doesn't exist yet) | final-pass re-verdict + post-impl codex r1–r3 | settled |
+| 16 | Reuse TTL | 120 s shared constant (both caches; Send drops from 5 min); per-entry timers drop entries physically at the TTL | 5-min Send precedent carried over (r3.1); coarse interval sweep (≤180 s physical retention) | owner, at gate + post-impl codex | settled |
 
 ## Audit verdicts
 

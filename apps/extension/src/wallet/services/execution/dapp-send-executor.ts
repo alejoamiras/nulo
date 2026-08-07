@@ -42,9 +42,15 @@ import type { ExecutionHooks } from "@/wallet/services/dapp-interaction/spec"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transaction/service"
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
+import type { Network } from "@/wallet/services/network/service"
+import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
 import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
+import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
+import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
+import { fingerprintBaseFee } from "./transfer-estimate-reuse"
+import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { applyEmbeddedFpcGasCap } from "./fee/embedded-fpc-cap"
 import { type FeeEstimate, finalizeGasLimits, suggestGasLimits } from "./fee/fee-strategy"
 import type { OperationPlanner } from "./operation-planner"
@@ -113,6 +119,16 @@ export interface DappSendExecutorDeps {
 	txBuilder: TxRequestBuilder
 	coordinator: ExecutionCoordinator
 	lane: DappSendExecutorLane
+	/** Estimate→confirm reuse for standard-mode aztec_sendTx (fj/fpc). */
+	operationEstimateReuse: OperationEstimateReuse
+	getActiveProfile(): Promise<{ id: string } | undefined>
+	getNetwork(networkId: string): Promise<Network>
+	getNode(chainId: number): Promise<FeeEstimate["node"]>
+	getPXE(network: Network): FeeEstimate["pxe"]
+	getAccountContract(profileId: string, chainId: number, accountAddress: string): Promise<FeeEstimate["account"]>
+	getPendingForAccount(account: string): { hash: string }[]
+	/** Fresh decorated FPC row — identity snapshot for fpc-kind reuse entries. */
+	getFpcInfo(fpcId: string): Promise<FpcInfo>
 	buildAndEstimate(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
@@ -238,6 +254,9 @@ export class DappSendExecutor {
 		} else {
 			actions = [...(operation as SendTransactionOperation).actions]
 		}
+		// Reuse fingerprints bind the POST-PLANNER, PRE-DISCOVERY action set —
+		// the consume side re-derives the same normalization point.
+		const preDiscoveryActions = [...actions]
 
 		// Discover auth witnesses via offchain effects (single-pass)
 		checkCancelled()
@@ -257,13 +276,106 @@ export class DappSendExecutor {
 
 		checkCancelled()
 		const op = { ...operation, actions: [...actions], ...(detectedFee ? { fee: detectedFee } : {}) } as SendTransactionOperation
-		const { txRequest } = await this.deps.buildAndEstimate(op, feeSettings, undefined, signal)
+		const built = await this.deps.buildAndEstimate(op, feeSettings, undefined, signal)
+		const { txRequest } = built
+		checkCancelled()
+
+		const estimateId = await this.stashOperationEstimate(operation, feeSettings, detectedFee, preDiscoveryActions, built)
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
 		return {
 			maxFee: maxFeeRaw.toString(),
 			maxFeeFormatted: formatFeeJuice(maxFeeRaw),
 			gasDetails: getGasDetails(txRequest),
+			estimateId,
+		}
+	}
+
+	/** Best-effort reuse stash. Eligibility mirrors the Send-page cache's
+	 *  fj/fpc rule, narrowed to standard-mode `aztec_sendTx`:
+	 *  `send_transaction`'s confirm path skips authwit discovery today, so
+	 *  reusing a discovery-inclusive estimate there would CHANGE its
+	 *  behavior — it stays carve-out. Embedded fee payments keep their
+	 *  divergent-path exclusion. A non-fingerprintable op (exotic arg
+	 *  values) is silently ineligible — the estimate itself still returns. */
+	private async stashOperationEstimate(
+		operation: Operation,
+		feeSettings: FeeSettings,
+		detectedFee: FeeOptions | undefined,
+		preDiscoveryActions: readonly Action[],
+		built: FeeEstimate,
+	): Promise<string | undefined> {
+		const kind = feeSettings.paymentMethod.kind
+		const eligible =
+			operation.kind === "aztec_sendTx" &&
+			((operation as AztecSendTxOperation).executionMode ?? "standard") !== "default_entrypoint" &&
+			!detectedFee?.embeddedFeePayment &&
+			// A dApp-supplied fee cap makes the built request's maxFees diverge
+			// from the predicted-worst basis the consume ladder re-derives, so
+			// such an entry would ALWAYS miss on "base fee drift" — stashing it
+			// only parks an unusable signed request for the TTL.
+			!detectedFee?.maxFeesPerGas &&
+			(kind === "fj" || kind === "fpc")
+		if (!eligible) return undefined
+		try {
+			const input: OperationFingerprintInput = {
+				networkId: operation.networkId,
+				accountAddress: operation.accountAddress,
+				executionMode: (operation as AztecSendTxOperation).executionMode ?? "standard",
+				from: (operation as AztecSendTxOperation).opts?.from?.toString() ?? "",
+				actions: preDiscoveryActions,
+				fee: detectedFee,
+				feeSettings,
+			}
+			const fingerprint = fingerprintOperation(input)
+			if (fingerprint === null) return undefined
+			const primary = built.network.endpoints.find((e) => e.id === built.network.primaryEndpointId)
+			if (!primary) return undefined
+			const profile = await this.deps.getActiveProfile()
+			if (!profile) return undefined
+			let fpcIdentity: OperationEstimateReuseEntry["fpcIdentity"]
+			if (feeSettings.paymentMethod.kind === "fpc") {
+				const info = await this.deps.getFpcInfo(feeSettings.paymentMethod.fpcId)
+				fpcIdentity = {
+					id: info.id,
+					type: info.type,
+					address: info.address,
+					chainId: info.chainId,
+					isProtocol: info.isProtocol ?? false,
+				}
+			}
+			const builtFees = built.txRequest.txContext.gasSettings.maxFeesPerGas
+			const estimateId = crypto.randomUUID()
+			this.deps.operationEstimateReuse.stash(estimateId, {
+				fingerprint,
+				accountAddress: operation.accountAddress,
+				networkId: operation.networkId,
+				feeSettings,
+				profileId: profile.id,
+				// The BUILDER's asserted pair, never a refetch — a refetch after
+				// an endpoint flip would snapshot a chain this request was not
+				// signed under (consume would then compare live-vs-live).
+				chainIdentity: built.chainIdentity,
+				baseFeeFingerprint: fingerprintBaseFee({
+					feePerDaGas: builtFees.feePerDaGas,
+					feePerL2Gas: builtFees.feePerL2Gas,
+				}),
+				primaryEndpointId: primary.id,
+				primaryEndpointUrl: primary.rpcUrl,
+				pendingHashes: this.deps.getPendingForAccount(operation.accountAddress).map((tx) => tx.hash),
+				fpcIdentity,
+				txRequest: built.txRequest,
+				nonce: built.nonce,
+				feePaymentMethod: built.feePaymentMethod,
+				txCalls: built.txCalls,
+				pendingPublicAuthwits: built.pendingPublicAuthwits,
+				builtAt: Date.now(),
+			})
+			return estimateId
+		} catch (error) {
+			// Cache write is best-effort — the estimate result still goes out.
+			this.deps.logDebug(`estimateOperationFee: cache write skipped: ${getErrorMessage(error)}`)
+			return undefined
 		}
 	}
 
@@ -362,6 +474,7 @@ export class DappSendExecutor {
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
 		fence?: ExecutionFence,
+		estimateId?: string,
 	): Promise<SendReturn<InteractionWaitOptions>> {
 		// `default_entrypoint` is a special dApp path that bypasses the
 		// standard tx-build pipeline and runs its own kernelless discovery.
@@ -416,30 +529,74 @@ export class DappSendExecutor {
 				await markJournal({ stage: "simulating" })
 				checkCancelled()
 
-				// Skip auth witness discovery for embedded fee payments — the dApp handles its own
-				// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
-				// simulation's dummy fee method.
-				if (!fee.embeddedFeePayment) {
-					const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
-						{ ...op, actions: [...actions] },
-						async (o, method) => {
-							const { txRequest, node, pxe, account, network } = await this.deps.txBuilder.buildStandard(
-								o as SendTransactionOperation,
-								method,
+				// Estimate→confirm reuse: consume validates the full drift ladder
+				// (fingerprint at the same pre-discovery normalization point, profile,
+				// endpoint, pending set, chain identity, FPC identity, base fee).
+				// Any miss falls through to the full discovery + build below.
+				const reused = estimateId
+					? await this.deps.operationEstimateReuse.tryConsume(estimateId, {
+							networkId: op.networkId,
+							accountAddress: op.accountAddress,
+							executionMode: op.executionMode ?? "standard",
+							from: op.opts?.from?.toString() ?? "",
+							actions,
+							fee,
+							feeSettings: op.feeSettings,
+						})
+					: undefined
+
+				let txRequest: FeeEstimate["txRequest"]
+				let node: FeeEstimate["node"]
+				let pxe: FeeEstimate["pxe"]
+				let account: FeeEstimate["account"]
+				let network: Network
+				let nonce: { toString(): string }
+				let txCalls: FeeEstimate["txCalls"]
+				let feePaymentMethod: FeeEstimate["feePaymentMethod"]
+				let pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
+
+				if (reused) {
+					this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
+					// Live handles are re-resolved, never cached — the cross-profile
+					// fail-closed property depends on this.
+					network = await this.deps.getNetwork(op.networkId)
+					node = await this.deps.getNode(network.chainId)
+					pxe = this.deps.getPXE(network)
+					const profile = await this.deps.getActiveProfile()
+					if (!profile) throw new Error("Wallet locked")
+					account = await this.deps.getAccountContract(profile.id, network.chainId, op.accountAddress)
+					txRequest = reused.txRequest
+					nonce = reused.nonce
+					txCalls = reused.txCalls
+					feePaymentMethod = reused.feePaymentMethod
+					pendingPublicAuthwits = [...reused.pendingPublicAuthwits]
+				} else {
+					// Skip auth witness discovery for embedded fee payments — the dApp handles its own
+					// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
+					// simulation's dummy fee method.
+					if (!fee.embeddedFeePayment) {
+						const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
+							{ ...op, actions: [...actions] },
+							async (o, method) => {
+								const { txRequest, node, pxe, account, network } = await this.deps.txBuilder.buildStandard(
+									o as SendTransactionOperation,
+									method,
+								)
+								return { txRequest, node, pxe, account, network }
+							},
+						)
+						if (authWitActions.length) {
+							this.deps.logDebug(
+								`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`,
 							)
-							return { txRequest, node, pxe, account, network }
-						},
-					)
-					if (authWitActions.length) {
-						this.deps.logDebug(`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`)
-						actions.push(...authWitActions)
+							actions.push(...authWitActions)
+						}
 					}
+
+					checkCancelled()
+					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
+						await this.deps.buildAndEstimate({ ...op, actions, fee }, op.feeSettings, parentTask))
 				}
-
-				checkCancelled()
-
-				const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-					await this.deps.buildAndEstimate({ ...op, actions, fee }, op.feeSettings, parentTask)
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
 				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({

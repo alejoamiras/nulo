@@ -72,6 +72,11 @@ export interface BuiltStandardTx {
 	pxe: IPXE
 	account: IAccountContract
 	network: Network
+	/** The EXACT chain-identity pair the build asserted and signed under —
+	 *  consumers snapshotting chain identity must use THIS, never refetch
+	 *  (a refetch after an endpoint flip would bind the snapshot to a chain
+	 *  the request was not built for). */
+	chainIdentity: { l1ChainId: number; rollupVersion: number }
 	nonce: Fr
 	txCalls: TxCall[]
 	/** Public authwits this build will write on-chain (`set_authorized`). Recording
@@ -361,7 +366,17 @@ export class TxRequestBuilder {
 			)
 
 			task.complete()
-			return { txRequest, node, pxe, account, network, nonce, txCalls, pendingPublicAuthwits }
+			return {
+				txRequest,
+				node,
+				pxe,
+				account,
+				network,
+				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+				nonce,
+				txCalls,
+				pendingPublicAuthwits,
+			}
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -482,7 +497,16 @@ export class TxRequestBuilder {
 
 			task.complete()
 			// NO_FROM emits no add_public_authwit, so there is nothing to record.
-			return { txRequest, node, pxe, account, network, txCalls, pendingPublicAuthwits: [] }
+			return {
+				txRequest,
+				node,
+				pxe,
+				account,
+				network,
+				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+				txCalls,
+				pendingPublicAuthwits: [],
+			}
 		} catch (error) {
 			task.fail(error)
 			throw error

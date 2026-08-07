@@ -94,13 +94,14 @@ describe("useFeeEstimation — remote cancellation + handoff", () => {
 	})
 
 	it("cancel() remote-cancels an in-flight (started) estimate", async () => {
-		const { scope, cancelRemote } = make()
+		const cancelRemote = vi.fn()
 		let release: (n: number) => void = () => {}
 		const gate = new Promise<number>((r) => {
 			release = r
 		})
 		const tokens: string[] = []
-		const slow = effectScope().run(() =>
+		const slowScope = effectScope()
+		const slow = slowScope.run(() =>
 			useFeeEstimation<number, number>({
 				estimate: async (_n, token) => {
 					tokens.push(token)
@@ -114,6 +115,27 @@ describe("useFeeEstimation — remote cancellation + handoff", () => {
 		slow.cancel()
 		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[0])
 		release(0)
+		slowScope.stop()
+	})
+
+	it("a transport failure (RPC timeout) remote-cancels the orphaned SW-side token", async () => {
+		const cancelRemote = vi.fn()
+		const tokens: string[] = []
+		const scope = effectScope()
+		const composable = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: async (_n, token) => {
+					tokens.push(token)
+					throw new Error("RPC timeout")
+				},
+				cancelRemote,
+				onError: () => {},
+			}),
+		)!
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800)
+		await flush()
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[0])
 		scope.stop()
 	})
 })

@@ -35,12 +35,17 @@ export interface UseFeeEstimationMapResult<TKey extends string | number, TParams
 	/** Cancel every pending estimation. Useful before tearing down a multi-op view. */
 	cancelAll: () => void
 	/**
-	 * Disarm cancellation for every key's current estimate — call on approve,
-	 * BEFORE the window closes, so unmount cleanup cannot race the
-	 * fire-and-forget execution out of its stashed reuse entries. Returns the
-	 * handed-off token per key (undefined where a key has none).
+	 * Disarm cancellation for every key's COMPLETED estimate — call on
+	 * approve, BEFORE the window closes, so unmount cleanup cannot race the
+	 * fire-and-forget execution out of its stashed reuse entries. In-flight
+	 * estimates are deliberately left armed: their ids never reach the
+	 * approve payload, so handing them off would only orphan their eventual
+	 * stashes. Returns the handed-off token per key.
 	 */
 	handoffAll: () => Partial<Record<TKey, string>>
+	/** Undo handoffAll after a FAILED approve — the execution path never
+	 *  took ownership, so normal cancellation must apply again. */
+	rearm: () => void
 	/** Manually dispose. Auto-runs on scope stop. */
 	dispose: () => void
 }
@@ -58,6 +63,11 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 	const inflight = new Map<TKey, { token: string; started: boolean }>()
 	const completed = new Map<TKey, string>()
 	const handedOff = new Set<string>()
+	// Scopes the SW-side coalescing slot to THIS composable instance: two
+	// concurrent approval windows both estimating op 0 must never share a
+	// latest-wins slot, or one window's parked estimate would evict the
+	// other's under capacity pressure.
+	const instanceId = Math.random().toString(36).slice(2, 8)
 	let disposed = false
 
 	const clearTimerFor = (key: TKey) => {
@@ -107,7 +117,7 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 			try {
 				const flight = inflight.get(key)
 				if (flight?.token === token) flight.started = true
-				const r = await estimate(params, token, `op:${String(key)}`)
+				const r = await estimate(params, token, `op:${instanceId}:${String(key)}`)
 				if (disposed || myCounter !== counters.get(key)) return
 				results.value[key] = r
 				completed.set(key, token)
@@ -115,6 +125,10 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 			} catch (err) {
 				if (disposed || myCounter !== counters.get(key)) return
 				results.value[key] = null
+				// See useFeeEstimation: a transport failure must not orphan the
+				// SW-side runner + its stash.
+				const flight = inflight.get(key)
+				if (flight?.token && !handedOff.has(flight.token)) cancelRemote?.(flight.token)
 				inflight.delete(key)
 				onError?.(key, err)
 			} finally {
@@ -128,14 +142,15 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 
 	const handoffAll = (): Partial<Record<TKey, string>> => {
 		const tokens: Partial<Record<TKey, string>> = {}
-		const keys = new Set<TKey>([...inflight.keys(), ...completed.keys()])
-		for (const key of keys) {
-			const token = completed.get(key) ?? inflight.get(key)?.token
-			if (!token) continue
+		for (const [key, token] of completed) {
 			handedOff.add(token)
 			tokens[key] = token
 		}
 		return tokens
+	}
+
+	const rearm = (): void => {
+		handedOff.clear()
 	}
 
 	const dispose = () => {
@@ -150,5 +165,5 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 
 	onScopeDispose(dispose)
 
-	return { results, estimating, estimate: schedule, cancel, cancelAll, handoffAll, dispose }
+	return { results, estimating, estimate: schedule, cancel, cancelAll, handoffAll, rearm, dispose }
 }

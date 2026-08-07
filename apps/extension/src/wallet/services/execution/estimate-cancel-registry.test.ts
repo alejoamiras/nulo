@@ -67,11 +67,25 @@ describe("cap invariant — non-preemptible jobs", () => {
 		expect(registry.unsettledCount("p1")).toBe(N)
 	})
 
-	test("overflow aborts the oldest still-live job but does not free its slot", async () => {
+	test("overflow NEVER aborts a different flow slot's live job (a 5-op batch keeps op #0's estimate)", async () => {
 		const { registry, advance } = makeRegistry()
 		const signals: AbortSignal[] = []
 		for (let i = 0; i < N; i++) {
 			signals.push(await registry.admit(`t${i}`, "p1", `op:${i}`))
+			advance(10)
+		}
+		// A 5th distinct operation parks without killing anyone — no path
+		// refires an aborted estimate, so cross-slot aborts lose it forever.
+		registry.admit("late", "p1", `op:${N}`).catch(() => {})
+		for (let i = 0; i < N; i++) expect(signals[i]!.aborted).toBe(false)
+		expect(registry.unsettledCount("p1")).toBe(N)
+	})
+
+	test("overflow aborts the oldest live job of the SAME flow slot (latest intent wins) without freeing its slot", async () => {
+		const { registry, advance } = makeRegistry()
+		const signals: AbortSignal[] = []
+		for (let i = 0; i < N; i++) {
+			signals.push(await registry.admit(`t${i}`, "p1", i === 0 ? "send" : `op:${i}`))
 			advance(10)
 		}
 		registry.admit("late", "p1", "send").catch(() => {})
@@ -195,13 +209,48 @@ describe("TTL sweeps", () => {
 		expect(registry.unsettledCount("p1")).toBe(1)
 	})
 
-	test("settled stash mappings expire after their TTL", async () => {
+	test("settled-mapping expiry evicts the stash itself, not just the handle", async () => {
 		const { registry, evicted, advance } = makeRegistry()
 		await registry.admit("t1", "p1", "send")
 		registry.settle("t1", "stash-1")
 		advance(SETTLED_STASH_TTL_MS + 1)
-		await registry.admit("t2", "p1", "send")
+		await registry.admit("t2", "p1", "send") // sweep fires
+		expect(evicted).toEqual(["stash-1"])
+		// A later cancel of the expired token is a no-op (single eviction).
 		registry.cancel("t1", "p1")
-		expect(evicted).toEqual([])
+		expect(evicted).toEqual(["stash-1"])
+	})
+
+	test("parked admissions are bounded per profile: newcomers beyond the cap are rejected", async () => {
+		const { registry } = makeRegistry()
+		for (let i = 0; i < N; i++) await registry.admit(`t${i}`, "p1", `op:${i}`)
+		for (let i = 0; i < 8; i++) registry.admit(`park-${i}`, "p1", `op:${N + i}`).catch(() => {})
+		expect(() => registry.admit("overflow", "p1", "op:99")).toThrow(JobCancelledSentinel)
+		// A same-slot supersede is still allowed at the cap (replaces, not adds).
+		const superseding = registry.admit("park-0b", "p1", `op:${N}`)
+		superseding.catch(() => {})
+		expect(registry.unsettledCount("p1")).toBe(N)
+	})
+
+	test("parked admissions past the TTL are rejected, never admitted as zombies", async () => {
+		const { registry, advance } = makeRegistry()
+		for (let i = 0; i < N; i++) await registry.admit(`t${i}`, "p1", `op:${i}`)
+		const parked = registry.admit("late", "p1", "send")
+		const rejection = parked.catch((e) => e)
+		advance(ESTIMATE_JOB_TTL_MS + 1)
+		// Sweep runs on the next admit; the dead parked entry must be rejected
+		// rather than admitted when capacity frees.
+		registry.settle("t0")
+		await registry.admit("fresh", "p1", "op:9")
+		expect(await rejection).toBeInstanceOf(JobCancelledSentinel)
+	})
+
+	test("a TTL-reaped runner settling late has its stash evicted immediately", async () => {
+		const { registry, evicted, advance } = makeRegistry()
+		await registry.admit("t1", "p1", "send")
+		advance(ESTIMATE_JOB_TTL_MS + 1)
+		await registry.admit("t2", "p1", "send") // sweep reaps t1
+		registry.settle("t1", "stash-late")
+		expect(evicted).toContain("stash-late")
 	})
 })
