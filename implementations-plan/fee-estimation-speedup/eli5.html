@@ -90,10 +90,11 @@
   <p class="muted">Each number is enforced by tests, so a future change can't quietly re-add dry-runs.</p>
 
   <h2>What the audits changed — and why some numbers say "unchanged"</h2>
-  <p>Two independent reviewers (Codex and a second Claude) attacked the first draft. Both verdicts reshaped it:</p>
+  <p>Two independent reviewers (Codex and a second Claude) attacked the first draft, and a third fresh Codex pass attacked the revision. All three reshaped it:</p>
   <ul>
     <li>The mainnet fee contract genuinely <em>needs</em> its double dry-run — its code reads the transaction's gas budget internally. First draft would have broken it; it now stays exactly as is. That's why the mainnet row says "unchanged": correctness beat speed there.</li>
-    <li>A planned rewiring of how the wallet discovers required signatures turned out to save <em>zero</em> dry-runs in its safe form — while opening a subtle door for a malicious fee contract to get an auto-signed permission. It's cut from this plan entirely; only its risk-free prep ships. It can return later, gated on real measurements this plan will collect.</li>
+    <li>A planned rewiring of how the wallet discovers required signatures turned out to save <em>zero</em> dry-runs in its safe form — while opening a subtle door for a malicious fee contract to get an auto-signed permission. It's cut from this plan entirely; only a tiny risk-free piece of its plumbing ships. It can return later, gated on real measurements this plan will collect.</li>
+    <li>The final pass caught a race that would have silently nullified the Confirm speedup (the cleanup that runs when a window closes would have thrown away the very estimate the confirmation was about to reuse — now there's an explicit hand-off), plus two narrower safety carve-outs: dApps that supply their own gas limits keep today's exact behavior, and a fee sponsor whose stored address was edited between estimate and confirm can never be paid at the old address.</li>
   </ul>
 
   <h2>Why the "mid" tier</h2>
