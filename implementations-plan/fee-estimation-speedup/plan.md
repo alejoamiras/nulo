@@ -119,7 +119,7 @@ Per architecture §4 (profile-tagged registry, duplicate rejection, TTL sweep, a
 
 **Gate** — `bun run --cwd apps/extension vitest run src/wallet/services/execution src/composables` then `bun run lint && bun run typecheck:all && bun run test`. Pass: cancel-before-pipeline, no-stash-on-cancel, foreign-token no-op, duplicate-rejection, evict-on-cancel-race, **cap-invariant (unsettled jobs ≤ N under non-preemptible cancellation, coalesced newcomer admitted on settle)**, and **Send handoff-race** (submit disarms unmount cancel; reuse entry survives navigation) tests green; full suite exit 0. Layers: typecheck/lint/unit.
 
-### Phase 3 — Canonical-Sponsored FPC fast path (PR B)
+### Phase 3 — Canonical-Sponsored FPC fast path (PR B) ✓
 
 Per architecture §1. Structural pins: fast path `buildStandard` ×1 (EXTERNAL) + `simulateTxTask` ×1; **PrivateFPC/user-added pins retained verbatim** (two-pass unchanged); finalize-arg fidelity (no `customLimits`, no double multiplier); old-vs-new gas-slot sentinel pin for the fast path.
 
