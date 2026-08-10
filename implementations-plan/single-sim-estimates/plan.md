@@ -87,7 +87,7 @@ r1 facts 1–10 stand, with fact 10 corrected (upstream ships stub-sized + clamp
 
 PR mapping (one `gh stack`): **PR 1** = C1 · **PR 2** = A1 + B1 (lessons/data only) — **PR 2 merges only after B1's B2/free checkpoint passes** · **PR 3** = A2 + B2 + B3.
 
-### Phase C1 — e2e verify + arming preflight (PR 1)
+### Phase C1 — e2e verify + arming preflight (PR 1) ✓
 
 As r1, plus: preflight = file-level hard abort; runner scans formal marker.
 **Gate** — armed run 2/2 green; unarmed run aborts <30 s with remedial text; `lint`/`typecheck:all`/`test` exit 0.
