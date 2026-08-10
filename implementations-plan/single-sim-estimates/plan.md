@@ -97,11 +97,23 @@ As r1, plus: preflight = file-level hard abort; runner scans formal marker.
 Behavior-preserving: decorator + probe-bearing instances constructed but the probed path NOT yet enabled (probe wired, fold flags off — all sims validated, counts unchanged). Assertion-surface migration for the discovery pins done here deliberately.
 **Gate** — all count pins unchanged in value; **sim-OPTION pins on every unchanged route** (Transfer, `executeSendTransaction`, embedded, NO_FROM, all send-page strategies: `stubAccountAddresses` absent AND `skipTxValidation` not set — inertness proven at the options level, not counts alone); send-path-no-probe structural pin; `preDiscoveryActions` symmetry test; full unit suite exit 0.
 
-### Phase B1 — Testnet measurement + decision checkpoint (PR 2 data)
+### Phase B1 — Testnet measurement + decision checkpoint (PR 2 data) ✓
 
 Free shapes (1–4: public+sponsor, private transfer, delegated call-authwit, undeployed account) + Sponsored inclusion canary always run. **PrivateFPC shapes (5: P1 app-only; 6: P2-envelope comparison) and the fragmented-note PrivateFPC inclusion canary run ONLY under Ask 4(a)** — they require funded private fee juice (no unfunded path exists; final-pass Critical). Arm-fidelity invariant, interleaved repeats, noise floor, DA/L2 split, Nulo-pipeline cross-check. Table → `lessons/phase-B1.md`.
 **Checkpoint (owner rule, SPLIT per workstream)**: **B2 gate** = free shapes 1–4 + Sponsored inclusion canary — every delta <1% ⇒ B2 proceeds; any ≥1% ⇒ B2 deferred, numbers presented. **A2 gate** = funded shapes 5–6 + fragmented-note PrivateFPC canary — requires Ask 4(a); ran AND every delta <1% ⇒ A2 proceeds; not run (no key) OR any ≥1% ⇒ A2 deferred. The gates are independent — a no-key arc can still ship B2.
 **Gate** — table complete per spec; zero committed script footprint.
+**RESULT (2026-08-10, live testnet)**: **BOTH checkpoints PASS at 0.00% delta** — stub gas ==
+validated gas byte-for-byte on every runnable shape across 2 interleaved rounds AND across a
+note-set change (structural reason: Aztec prices private execution by side effects, which the
+stub preserves). Both inclusion canaries (Sponsored; PrivateFPC paying from the owner's real
+491-FJ credit) MINED on stub-derived limits. Shape 4 (undeployed first-tx) fold-excluded by
+structure; fragmented-note canary deferred (needs L1 deposits — no key by design; real
+credit-note subtract path exercised by the mined canary). **Bonus finding (HIGH): the shipped
+stub mechanism never engages** — `new SimulationOverrides({...contracts})` drops the map
+(aztec-runtime service.ts:463), proven live (delegated shape fails "Unknown auth witness"
+under the replica mechanism, succeeds with the upstream classId-swap mechanism). A2 must ship
+the corrected override build — it is simultaneously a production bug fix for discovery.
+Full table + gotchas: `lessons/phase-B1.md`.
 
 ### Phase A2 — PrivateFPC fold (PR 3; B1-gated AND Ask-4(a)-conditional)
 
