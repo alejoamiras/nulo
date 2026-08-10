@@ -340,6 +340,90 @@ describe("FpcStrategy canonical-Sponsored fast path (single-pass)", () => {
 	})
 })
 
+describe("FeeJuiceStrategy folded (probed) runs", () => {
+	const DISCOVERED_FJ = { kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xfj" } } as unknown as Action
+
+	function fjFoldedCtx(probe: unknown, actions: Action[]): FeeStrategyContext {
+		const ctx = makeCtx({ actions })
+		;(ctx as { probe?: unknown }).probe = probe
+		return ctx
+	}
+
+	test("SIM-COUNT PIN: no effects ⇒ ONE stubbed sim, one build — dApp fj estimate 2→1", async () => {
+		const builtA = makeBuilt()
+		const buildStandard = vi.fn(async () => builtA)
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn() },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const probe = { extractEffects: vi.fn(async () => []), collected: [] }
+		const original = { kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action
+		const ctx = fjFoldedCtx(probe, [original])
+
+		const result = await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
+
+		expect(buildStandard).toHaveBeenCalledTimes(1)
+		expect(simulateTxTask).toHaveBeenCalledTimes(1)
+		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			skipTxValidation: true,
+			scopes: [builtA.account.address],
+			stubAccountAddresses: ["0xaccount"],
+		})
+		expect(probe.extractEffects).toHaveBeenCalledTimes(1)
+		expect(result.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(ctx.op.actions).toEqual([original])
+	})
+
+	test("effects ⇒ VALIDATED rebuild + re-sim (both builds PREEXISTING); discovered actions after originals", async () => {
+		const builtA = makeBuilt()
+		const builtB = makeBuilt()
+		const buildStandard = vi.fn().mockResolvedValueOnce(builtA).mockResolvedValueOnce(builtB)
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn() },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const probe = { extractEffects: vi.fn(async () => [DISCOVERED_FJ]), collected: [DISCOVERED_FJ] }
+		const original = { kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action
+		const ctx = fjFoldedCtx(probe, [original])
+
+		const result = await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
+
+		expect(buildStandard).toHaveBeenCalledTimes(2)
+		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			scopes: [builtB.account.address],
+		})
+		// Result carries the rebuild's identities; finalize reads the SECOND sim.
+		expect(result.txRequest).toBe(builtB.txRequest)
+		expect(ctx.op.actions).toEqual([original, DISCOVERED_FJ])
+	})
+
+	test("probe-free fj run keeps ONE validated sim byte-for-byte (inertness)", async () => {
+		const { deps, simulateTxTask, built } = makeDeps()
+		await new FeeJuiceStrategy(deps).buildAndEstimate(makeCtx())
+		expect(simulateTxTask).toHaveBeenCalledTimes(1)
+		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			scopes: [built.account.address],
+		})
+	})
+})
+
 describe("FpcStrategy folded (probed) runs — discovery collapses into the first sim", () => {
 	const DISCOVERED = { kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xm" } } as unknown as Action
 

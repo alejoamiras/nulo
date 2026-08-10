@@ -5,7 +5,9 @@ import type { Action } from "./spec"
 
 const CALL: Action = { kind: "call", contract: "0xtoken", method: "transfer", args: [] }
 const OPERATION = { kind: "aztec_sendTx", networkId: "net-1", accountAddress: "0xacct" } as never
-const FEE_SETTINGS = { paymentMethod: { kind: "fj" } } as never
+// fjwc keeps the CLASSIC choreography (fold covers fpc + fj only), so the
+// inertness pins below keep their meaning unchanged.
+const FEE_SETTINGS = { paymentMethod: { kind: "fjwc" } } as never
 const BUILT = { txRequest: { marker: "req" }, nonce: { toString: () => "1" } } as never
 
 function makeEstimator(discovered: unknown[] = []) {
@@ -182,13 +184,25 @@ describe("DiscoveryAwareEstimator (fold routing)", () => {
 		expect(buildAndEstimateValidated).toHaveBeenCalledTimes(1)
 	})
 
-	test("non-fpc payment kinds keep the classic choreography untouched", async () => {
+	test("fj payment folds too (probed pipeline, no standalone discovery)", async () => {
 		const { estimator, authwit, buildAndEstimateValidated, buildAndEstimateFolded } = makeEstimator()
 
-		await estimator.estimate(OPERATION, [CALL], undefined, FEE_SETTINGS)
+		await estimator.estimate(OPERATION, [CALL], undefined, { paymentMethod: { kind: "fj" } } as never)
 
-		expect(buildAndEstimateFolded).not.toHaveBeenCalled()
-		expect(authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
-		expect(buildAndEstimateValidated).toHaveBeenCalledTimes(1)
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(buildAndEstimateValidated).not.toHaveBeenCalled()
+	})
+
+	test("non-foldable payment kinds (fjwc, embedded) keep the classic choreography untouched", async () => {
+		for (const kind of ["fjwc", "embedded"] as const) {
+			const { estimator, authwit, buildAndEstimateValidated, buildAndEstimateFolded } = makeEstimator()
+
+			await estimator.estimate(OPERATION, [CALL], undefined, { paymentMethod: { kind } } as never)
+
+			expect(buildAndEstimateFolded).not.toHaveBeenCalled()
+			expect(authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
+			expect(buildAndEstimateValidated).toHaveBeenCalledTimes(1)
+		}
 	})
 })

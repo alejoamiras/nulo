@@ -135,6 +135,21 @@ export interface FeeStrategy {
 	buildAndEstimate(ctx: FeeStrategyContext): Promise<FeeEstimate>
 }
 
+/** First-sim options shared by every probed (folded) strategy: stubbed
+ *  (+`skipTxValidation` — the validator rejects the substituted class) under a
+ *  probe, the shipped validated options byte-for-byte without one. */
+export function probedFirstSimOpts(probe: DiscoveryProbe | undefined, address: AztecAddress): Parameters<SimulateTxFn>[2] {
+	return probe
+		? {
+				simulatePublic: true,
+				skipFeeEnforcement: true,
+				skipTxValidation: true,
+				scopes: [address],
+				stubAccountAddresses: [address.toString()],
+			}
+		: { simulatePublic: true, skipFeeEnforcement: true, scopes: [address] }
+}
+
 /** Override gas limits on a pre-built tx request from a pending FeeOptions
  *  input. Used by FJ + FJWC + Embedded before simulation. Shared helper
  *  because all three need identical behavior.

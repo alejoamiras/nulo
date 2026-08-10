@@ -80,7 +80,9 @@ export class DiscoveryAwareEstimator {
 	 * first sim runs stubbed and doubles as discovery — one sim saved);
 	 * everything else keeps the classic standalone-discovery choreography.
 	 * Fold eligibility is deliberately narrow:
-	 * - `fpc` payment kind only (B1-gated; sponsored/fj folds are the B2 rung).
+	 * - `fpc` and `fj` payment kinds (both B1-gated at 0.00% stub delta).
+	 *   `fjwc` (claim-coupled setup phase) and `embedded` (dApp-budget
+	 *   semantics) keep the classic choreography.
 	 * - NO pre-attached `add_private_authwit` action of ANY content kind (the
 	 *   F-4 rule): a stubbed sim accepts every witness unconditionally, so it
 	 *   would mask a broken pre-supplied witness that the validated pipeline
@@ -95,7 +97,8 @@ export class DiscoveryAwareEstimator {
 		signal?: AbortSignal,
 	): Promise<DiscoveryEstimateResult> {
 		const hasPreAttachedAuthwit = actions.some((a) => a.kind === "add_private_authwit")
-		if (feeSettings.paymentMethod.kind === "fpc" && !hasPreAttachedAuthwit) {
+		const foldableKind = feeSettings.paymentMethod.kind === "fpc" || feeSettings.paymentMethod.kind === "fj"
+		if (foldableKind && !hasPreAttachedAuthwit) {
 			const probe = new CollectingDiscoveryProbe()
 			const op = {
 				...operation,
