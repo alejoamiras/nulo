@@ -465,9 +465,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// discovery ran UNSTUBBED — proven live on testnet against an
 			// authwit-requiring op (single-sim-estimates B1, Finding 0).
 			if (stubAccountAddresses?.length) {
-				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
-				await pxe.registerContractClass(StubSchnorrAccountContractArtifact)
-				const { id: stubClassId } = await getContractClassFromArtifact(StubSchnorrAccountContractArtifact)
+				const stubClassId = await this.ensureStubClassRegistered(pxe)
 				const contracts: Record<string, { instance: ContractInstanceWithAddress }> = {}
 				for (const addr of stubAccountAddresses) {
 					const address = await AztecAddress.schema.parseAsync(addr)
@@ -500,6 +498,29 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				senderForTags: simScopes[0],
 			})
 		})
+	}
+
+	/** Per-PXE memo of the stub-class registration: class hashing + the
+	 *  registerContractClass round-trip are WASM-heavy and sit on the fee
+	 *  estimation hot path — pay them once per PXE incarnation, not per sim.
+	 *  Keyed by the PXE instance so a chain-runtime teardown/recreate
+	 *  naturally re-registers against the fresh store. */
+	private readonly stubClassRegistrations = new WeakMap<object, Promise<Fr>>()
+
+	private ensureStubClassRegistered(pxe: PXE): Promise<Fr> {
+		let pending = this.stubClassRegistrations.get(pxe)
+		if (!pending) {
+			pending = (async () => {
+				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
+				await pxe.registerContractClass(StubSchnorrAccountContractArtifact)
+				const { id } = await getContractClassFromArtifact(StubSchnorrAccountContractArtifact)
+				return id
+			})()
+			// A failed registration must not poison the memo permanently.
+			pending.catch(() => this.stubClassRegistrations.delete(pxe))
+			this.stubClassRegistrations.set(pxe, pending)
+		}
+		return pending
 	}
 
 	public async executeUtility(network: NetworkInfo, call: FunctionCall, opts: ExecuteUtilityOpts): Promise<UtilityExecutionResult> {

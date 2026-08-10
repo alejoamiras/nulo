@@ -149,6 +149,22 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 		expect(simOpts.skipTxValidation).toBe(true)
 	})
 
+	test("stub-class registration is memoized per PXE — a second stubbed sim registers nothing", async () => {
+		const { service, registered, simulateCalls } = makeHarness()
+		const opts = {
+			simulatePublic: true,
+			skipTxValidation: true,
+			skipFeeEnforcement: true,
+			scopes: [accountHex as unknown as AztecAddress],
+		}
+
+		await service.simulateTx(network, wireTxRequest(), opts, [accountHex])
+		await service.simulateTx(network, wireTxRequest(), opts, [accountHex])
+
+		expect(simulateCalls).toHaveLength(2)
+		expect(registered).toHaveLength(1)
+	})
+
 	test("no stub addresses: no registration, no overrides, no skipKernels", async () => {
 		const { service, registered, simulateCalls } = makeHarness()
 		const txRequest = wireTxRequest()
