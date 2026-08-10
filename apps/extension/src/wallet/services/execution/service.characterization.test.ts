@@ -82,7 +82,7 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 		}
 		const executor = new DappSendExecutor({
 			planner: {} as never,
-			authwit: {} as never,
+			estimateWithDiscovery: {} as never,
 			txBuilder: {} as never,
 			coordinator: {
 				proveAndSend: vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
@@ -100,7 +100,7 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 				beginJournal: vi.fn(async () => "job-1"),
 				markJournal: vi.fn(async () => {}),
 			},
-			buildAndEstimate: vi.fn(async () => ({
+			buildAndEstimateValidated: vi.fn(async () => ({
 				txRequest: { txContext: { gasSettings } },
 				node: {},
 				pxe: {},

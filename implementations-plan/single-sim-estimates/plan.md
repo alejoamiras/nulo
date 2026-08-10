@@ -92,7 +92,7 @@ PR mapping (one `gh stack`): **PR 1** = C1 · **PR 2** = A1 + B1 (lessons/data o
 As r1, plus: preflight = file-level hard abort; runner scans formal marker.
 **Gate** — armed run 2/2 green; unarmed run aborts <30 s with remedial text; `lint`/`typecheck:all`/`test` exit 0.
 
-### Phase A1 — Inert decorator extraction (PR 2)
+### Phase A1 — Inert decorator extraction (PR 2) ✓
 
 Behavior-preserving: decorator + probe-bearing instances constructed but the probed path NOT yet enabled (probe wired, fold flags off — all sims validated, counts unchanged). Assertion-surface migration for the discovery pins done here deliberately.
 **Gate** — all count pins unchanged in value; **sim-OPTION pins on every unchanged route** (Transfer, `executeSendTransaction`, embedded, NO_FROM, all send-page strategies: `stubAccountAddresses` absent AND `skipTxValidation` not set — inertness proven at the options level, not counts alone); send-path-no-probe structural pin; `preDiscoveryActions` symmetry test; full unit suite exit 0.

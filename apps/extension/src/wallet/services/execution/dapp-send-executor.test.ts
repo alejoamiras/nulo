@@ -20,6 +20,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { OriginType, type LocalTxOrigin } from "@/wallet/services/transaction/spec"
 import { DappSendExecutor, type DappSendExecutorDeps } from "./dapp-send-executor"
+import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 
 const collectOffchainEffectsMock = vi.hoisted(() => vi.fn(() => [] as Array<{ data: unknown[]; contractAddress: unknown }>))
 vi.mock("@aztec/stdlib/tx", async (importOriginal) => ({
@@ -61,7 +62,12 @@ function addr(hex: string) {
 	return { toString: () => hex } as never
 }
 
-function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
+function makeHarness(
+	overrides: Partial<DappSendExecutorDeps> & {
+		authwit?: { discoverPrivateAuthwits: ReturnType<typeof vi.fn> }
+		buildAndEstimateValidated?: ReturnType<typeof vi.fn>
+	} = {},
+) {
 	const network = {
 		id: "net-1",
 		profileId: "p1",
@@ -92,6 +98,13 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 		await ctx.recordTransaction("0xhash")
 		return { txHash: { toString: () => "0xhash" }, offchainOutput: {} }
 	})
+	const authwit = overrides.authwit ?? { discoverPrivateAuthwits: vi.fn(async () => [] as unknown[]) }
+	const buildAndEstimateValidated = overrides.buildAndEstimateValidated ?? vi.fn(async () => built as never)
+	const estimateWithDiscovery = new DiscoveryAwareEstimator({
+		authwit: authwit as never,
+		buildAndEstimateValidated: buildAndEstimateValidated as never,
+		buildForDiscovery: (async () => built) as never,
+	})
 	const deps: DappSendExecutorDeps = {
 		planner: {
 			processAztecJsPayload: vi.fn(async () => ({
@@ -100,7 +113,7 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 				feeOptions: {},
 			})),
 		} as never,
-		authwit: { discoverPrivateAuthwits: vi.fn(async () => []) } as never,
+		estimateWithDiscovery,
 		txBuilder: {
 			buildStandard: vi.fn(async () => built),
 			buildNoFrom: vi.fn(async () => built),
@@ -122,13 +135,24 @@ function makeHarness(overrides: Partial<DappSendExecutorDeps> = {}) {
 		getAccountContract: vi.fn(async () => account as never),
 		getPendingForAccount: vi.fn(() => [] as { hash: string }[]),
 		getFpcInfo: vi.fn(async () => ({ id: "fpc-1", type: 2, address: "0xfpc", chainId: 7, isProtocol: true }) as never),
-		buildAndEstimate: vi.fn(async () => built as never),
+		buildAndEstimateValidated,
 		addTransaction: vi.fn(async () => ({}) as never),
 		recordPendingAuthwits: vi.fn(async () => {}),
 		logDebug: vi.fn(),
 		...overrides,
 	}
-	return { deps, built, node, pxe, account, releaseSlot, proveAndSend, executor: new DappSendExecutor(deps) }
+	return {
+		deps,
+		built,
+		node,
+		pxe,
+		account,
+		releaseSlot,
+		proveAndSend,
+		authwit,
+		buildAndEstimateValidated,
+		executor: new DappSendExecutor(deps),
+	}
 }
 
 function makeAztecOp(overrides: Record<string, unknown> = {}) {
@@ -189,7 +213,7 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 	})
 
 	test("failure: journal → failed with dapp_execute-normalized error, error rethrown", async () => {
-		const { executor, deps } = makeHarness({ buildAndEstimate: vi.fn(async () => Promise.reject(new Error("build broke"))) })
+		const { executor, deps } = makeHarness({ buildAndEstimateValidated: vi.fn(async () => Promise.reject(new Error("build broke"))) })
 		const op = {
 			kind: "send_transaction",
 			networkId: "net-1",
@@ -219,7 +243,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 
 	test("records a built public authwit ONCE at the post-send tail, tx-linked", async () => {
 		const { executor, deps, built } = makeHarness({
-			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
+			buildAndEstimateValidated: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
 		})
 		await executor.executeSendTransaction(grantOp, ORIGIN)
 		const rec = deps.recordPendingAuthwits as ReturnType<typeof vi.fn>
@@ -231,7 +255,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 
 	test("ESTIMATE records nothing (build is pure; no send → no recording)", async () => {
 		const { executor, deps, built } = makeHarness({
-			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
+			buildAndEstimateValidated: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
 		})
 		await executor.estimateOperationFee(grantOp, { paymentMethod: { kind: "fj" } } as never)
 		expect(deps.recordPendingAuthwits).not.toHaveBeenCalled()
@@ -239,7 +263,7 @@ describe("DappSendExecutor — public-authwit recording (Phase 5 trust-point)", 
 
 	test("SEND-FAILURE records nothing (the closure runs only after a successful send)", async () => {
 		const { executor, deps, built } = makeHarness({
-			buildAndEstimate: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
+			buildAndEstimateValidated: vi.fn(async () => ({ ...built, pendingPublicAuthwits: [grant] }) as never),
 			coordinator: {
 				proveAndSend: vi.fn(async () => {
 					throw new Error("send broke")
@@ -304,11 +328,11 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 			} as never,
 		})
 		await embedded.executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
-		expect(embedded.deps.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(embedded.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
 
 		const standard = makeHarness()
 		await standard.executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
-		expect(standard.deps.authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
+		expect(standard.authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
 	})
 
 	test("scopes = [account.address, ...additionalScopes]; NO_WAIT returns txHash, wait returns receipt", async () => {
@@ -414,7 +438,7 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 	test("send_transaction: discovered authwits appended to a CLONE — caller's actions untouched, no estimateId", async () => {
 		const extraAction = { kind: "call", method: "authwit_action" }
 		const { executor, deps } = makeHarness({
-			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) } as never,
+			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) },
 		})
 		const originalActions = [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }]
 		const op = {
@@ -427,7 +451,9 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 		const result = await executor.estimateOperationFee(op, { paymentMethod: { kind: "fj" } } as never)
 
 		expect(originalActions).toHaveLength(1)
-		const builtOp = ((deps.buildAndEstimate as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[])[0] as { actions: unknown[] }
+		const builtOp = ((deps.buildAndEstimateValidated as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[])[0] as {
+			actions: unknown[]
+		}
 		expect(builtOp.actions).toEqual([...originalActions, extraAction])
 		expect(result.maxFee).toBe("880")
 		expect("estimateId" in result && result.estimateId).toBeFalsy()
@@ -623,15 +649,15 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
 			pendingPublicAuthwits,
 		}
-		const { executor, deps } = makeHarness({
+		const { executor, deps, authwit } = makeHarness({
 			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
 		})
 
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-1")
 
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledWith("est-1", expect.objectContaining({ accountAddress: "0xacct" }))
-		expect(deps.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
-		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimateValidated).not.toHaveBeenCalled()
 		// The auth-registry row must exist on a reuse hit — the silent-break
 		// scenario: a missing auth-registry row after a reuse-hit grant.
 		expect(deps.addTransaction).toHaveBeenCalledTimes(1)
@@ -643,17 +669,17 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 	})
 
 	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline", async () => {
-		const { executor, deps } = makeHarness()
+		const { executor, deps, authwit } = makeHarness()
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-forged")
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
-		expect(deps.authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
-		expect(deps.buildAndEstimate).toHaveBeenCalledTimes(1)
+		expect(authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
+		expect(deps.buildAndEstimateValidated).toHaveBeenCalledTimes(1)
 	})
 
 	test("no estimateId: tryConsume never touched", async () => {
 		const { executor, deps } = makeHarness()
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
 		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
-		expect(deps.buildAndEstimate).toHaveBeenCalledTimes(1)
+		expect(deps.buildAndEstimateValidated).toHaveBeenCalledTimes(1)
 	})
 })

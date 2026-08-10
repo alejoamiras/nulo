@@ -44,7 +44,7 @@ import type { LocalTxOrigin, TransactionService } from "@/wallet/services/transa
 import type { AuthRegistryService } from "@/wallet/services/auth-registry/service"
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
-import type { AuthwitDiscoverer } from "./authwit-discoverer"
+import type { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import type { ExecutionCoordinator } from "./execution-coordinator"
 import type { ExecutionMutexRelease } from "./execution-mutex"
 import type { OperationEstimateReuse, OperationEstimateReuseEntry } from "./operation-estimate-reuse"
@@ -115,10 +115,14 @@ export interface DappSendExecutorLane {
 
 export interface DappSendExecutorDeps {
 	planner: OperationPlanner
-	authwit: AuthwitDiscoverer
 	txBuilder: TxRequestBuilder
 	coordinator: ExecutionCoordinator
 	lane: DappSendExecutorLane
+	/** Discover-then-estimate pipeline — the ONLY route to probed/folded
+	 *  strategy instances. Distinctly typed from the validated dep so
+	 *  probe-forbidden paths (executeSendTransaction, embedded, NO_FROM)
+	 *  cannot reach it by construction. */
+	estimateWithDiscovery: DiscoveryAwareEstimator
 	/** Estimate→confirm reuse for standard-mode aztec_sendTx (fj/fpc). */
 	operationEstimateReuse: OperationEstimateReuse
 	getActiveProfile(): Promise<{ id: string } | undefined>
@@ -129,7 +133,8 @@ export interface DappSendExecutorDeps {
 	getPendingForAccount(account: string): { hash: string }[]
 	/** Fresh decorated FPC row — identity snapshot for fpc-kind reuse entries. */
 	getFpcInfo(fpcId: string): Promise<FpcInfo>
-	buildAndEstimate(
+	/** The probe-free validated pipeline (the service's strategy map). */
+	buildAndEstimateValidated(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
@@ -258,25 +263,11 @@ export class DappSendExecutor {
 		// the consume side re-derives the same normalization point.
 		const preDiscoveryActions = [...actions]
 
-		// Discover auth witnesses via offchain effects (single-pass)
+		// Discover-then-estimate via the decorator (the single owner of that
+		// choreography for dApp sends; stage-boundary cancellation preserved
+		// inside it).
 		checkCancelled()
-		const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
-			{ ...operation, actions: [...actions] } as SendTransactionOperation,
-			async (op, method) => {
-				const { txRequest, node, pxe, account, network } = await this.deps.txBuilder.buildStandard(
-					op as SendTransactionOperation,
-					method,
-				)
-				return { txRequest, node, pxe, account, network }
-			},
-		)
-		if (authWitActions.length) {
-			actions.push(...authWitActions)
-		}
-
-		checkCancelled()
-		const op = { ...operation, actions: [...actions], ...(detectedFee ? { fee: detectedFee } : {}) } as SendTransactionOperation
-		const built = await this.deps.buildAndEstimate(op, feeSettings, undefined, signal)
+		const { built } = await this.deps.estimateWithDiscovery.estimate(operation, actions, detectedFee, feeSettings, undefined, signal)
 		const { txRequest } = built
 		checkCancelled()
 
@@ -426,7 +417,7 @@ export class DappSendExecutor {
 			checkCancelled()
 
 			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-				await this.deps.buildAndEstimate(op, op.feeSettings, parentTask)
+				await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
 
 			const { txHash } = await this.deps.coordinator.proveAndSend({
 				pxe,
@@ -570,32 +561,28 @@ export class DappSendExecutor {
 					txCalls = reused.txCalls
 					feePaymentMethod = reused.feePaymentMethod
 					pendingPublicAuthwits = [...reused.pendingPublicAuthwits]
-				} else {
-					// Skip auth witness discovery for embedded fee payments — the dApp handles its own
-					// fee calls (e.g., FeeJuice:claim_and_end_setup) which conflict with the discovery
-					// simulation's dummy fee method.
-					if (!fee.embeddedFeePayment) {
-						const authWitActions = await this.deps.authwit.discoverPrivateAuthwits(
-							{ ...op, actions: [...actions] },
-							async (o, method) => {
-								const { txRequest, node, pxe, account, network } = await this.deps.txBuilder.buildStandard(
-									o as SendTransactionOperation,
-									method,
-								)
-								return { txRequest, node, pxe, account, network }
-							},
-						)
-						if (authWitActions.length) {
-							this.deps.logDebug(
-								`[executeAztecSendTx] Discovered ${authWitActions.length} auth witness(es) via offchain effects`,
-							)
-							actions.push(...authWitActions)
-						}
-					}
-
+				} else if (fee.embeddedFeePayment) {
+					// Embedded fee payments skip discovery entirely — the dApp's own
+					// fee calls conflict with the discovery simulation's dummy fee
+					// method. Probe-free validated pipeline, as always.
 					checkCancelled()
 					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-						await this.deps.buildAndEstimate({ ...op, actions, fee }, op.feeSettings, parentTask))
+						await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask))
+				} else {
+					const { built, discoveredActions } = await this.deps.estimateWithDiscovery.estimate(
+						op,
+						actions,
+						fee,
+						op.feeSettings,
+						parentTask,
+					)
+					if (discoveredActions.length) {
+						this.deps.logDebug(
+							`[executeAztecSendTx] Discovered ${discoveredActions.length} auth witness(es) via offchain effects`,
+						)
+					}
+					checkCancelled()
+					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } = built)
 				}
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []

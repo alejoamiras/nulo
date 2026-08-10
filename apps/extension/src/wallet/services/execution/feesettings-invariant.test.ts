@@ -27,7 +27,7 @@ function makeExecutor(): DappSendExecutor {
 	}
 	return new DappSendExecutor({
 		planner: { processAztecJsPayload: unreachable } as never,
-		authwit: { discoverPrivateAuthwits: unreachable } as never,
+		estimateWithDiscovery: { estimate: unreachable } as never,
 		txBuilder: { buildStandard: unreachable, buildNoFrom: unreachable } as never,
 		coordinator: { proveAndSend: unreachable, simulateTxTask: unreachable } as never,
 		lane: {
@@ -48,7 +48,7 @@ function makeExecutor(): DappSendExecutor {
 		getAccountContract: unreachable as never,
 		getPendingForAccount: unreachable as never,
 		getFpcInfo: unreachable as never,
-		buildAndEstimate: unreachable as never,
+		buildAndEstimateValidated: unreachable as never,
 		addTransaction: unreachable as never,
 		recordPendingAuthwits: unreachable as never,
 		logDebug: () => {},
