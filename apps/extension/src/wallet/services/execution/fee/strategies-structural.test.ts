@@ -675,4 +675,111 @@ describe("FpcStrategy folded (probed) runs — discovery collapses into the firs
 		expect(ctx.op.actions[2]).toBe(DISCOVERED)
 		expect(ctx.op.actions).toHaveLength(3)
 	})
+
+	// INIT-WRAPPED (first-tx) variants: the stub still runs for DISCOVERY, but a
+	// validated sizing re-sim is FORCED regardless of effects (stub-constructor
+	// gas is untrustworthy — B1 excluded undeployed shapes). Deployed accounts
+	// (origin == account) keep the 1-sim win pinned above.
+	function initWrapped<T extends { txRequest: { origin?: unknown } }>(b: T): T {
+		;(b.txRequest as { origin: unknown }).origin = { toString: () => "0xmulticall-entrypoint" }
+		return b
+	}
+
+	test("fast path fold + INIT-WRAPPED, no effects: stubbed discovery + FORCED validated re-sim (2 sims)", async () => {
+		const fpc = makeSponsoredFpcLocal()
+		const builtA = initWrapped(makeBuilt())
+		const builtB = initWrapped(makeBuilt())
+		const buildStandard = vi.fn().mockResolvedValueOnce(builtA).mockResolvedValueOnce(builtB)
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn(async () => fpc) },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const probe = makeProbe()
+		const original = { kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action
+
+		await new FpcStrategy(deps).buildAndEstimate(foldedCtx(probe, [original]))
+
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual(stubbedOpts(builtA.account.address))
+		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual(validatedOpts(builtB.account.address))
+		expect(probe.extractEffects).toHaveBeenCalledTimes(1)
+	})
+
+	test("two-pass fold + INIT-WRAPPED: THREE sims (stub discovery, validated PREEXISTING sizing, validated EXTERNAL)", async () => {
+		const fpc = makePrivateFpc()
+		const builtA = initWrapped(makeBuilt())
+		const builtB = initWrapped(makeBuilt())
+		const builtC = initWrapped(makeBuilt())
+		const buildStandard = vi.fn().mockResolvedValueOnce(builtA).mockResolvedValueOnce(builtB).mockResolvedValueOnce(builtC)
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn(async () => fpc) },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const probe = makeProbe([DISCOVERED])
+		const original = { kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action
+
+		await new FpcStrategy(deps).buildAndEstimate(foldedCtx(probe, [original]))
+
+		expect(buildStandard).toHaveBeenCalledTimes(3)
+		// Build 1 = P1 stub; build 2 = init-wrap validated PREEXISTING sizing
+		// (carries the discovered witness); build 3 = P2 EXTERNAL.
+		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[2]?.[1]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect(simulateTxTask).toHaveBeenCalledTimes(3)
+		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual(stubbedOpts(builtA.account.address))
+		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual(validatedOpts(builtB.account.address))
+		expect((simulateTxTask.mock.calls[2] as unknown[])[2]).toEqual(validatedOpts(builtC.account.address))
+	})
+})
+
+describe("FeeJuiceStrategy folded + INIT-WRAPPED with discovery", () => {
+	const DISCOVERED_IW = { kind: "add_private_authwit", content: { kind: "message_hash", messageHash: "0xiw" } } as unknown as Action
+
+	test("stubbed discovery sim + validated rebuild+re-sim carrying the witness (2 sims, both PREEXISTING)", async () => {
+		const builtA = makeBuilt()
+		;(builtA.txRequest as { origin: unknown }).origin = { toString: () => "0xmulticall-entrypoint" }
+		const builtB = makeBuilt()
+		;(builtB.txRequest as { origin: unknown }).origin = { toString: () => "0xmulticall-entrypoint" }
+		const buildStandard = vi.fn().mockResolvedValueOnce(builtA).mockResolvedValueOnce(builtB)
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn() },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const probe = { extractEffects: vi.fn(async () => [DISCOVERED_IW]), collected: [DISCOVERED_IW] }
+		const ctx = makeCtx({ actions: [{ kind: "call", contract: "0xtoken", method: "transfer", args: [] } as unknown as Action] })
+		;(ctx as { probe?: unknown }).probe = probe
+
+		await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
+
+		expect(buildStandard).toHaveBeenCalledTimes(2)
+		expect(buildStandard.mock.calls[0]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(buildStandard.mock.calls[1]?.[1]).toBe(AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE)
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			skipTxValidation: true,
+			scopes: [builtA.account.address],
+			stubAccountAddresses: ["0xaccount"],
+		})
+		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			scopes: [builtB.account.address],
+		})
+		expect(ctx.op.actions).toEqual([{ kind: "call", contract: "0xtoken", method: "transfer", args: [] }, DISCOVERED_IW])
+	})
 })

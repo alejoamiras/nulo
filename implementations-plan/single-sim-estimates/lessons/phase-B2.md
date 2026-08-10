@@ -66,8 +66,11 @@ put a DISCOVERED delegated authwit through the product:
 - **Bug**: the init-wrap guard (added for codex round 1) lived in probedFirstSimOpts and
   downgraded the folded FIRST sim to validated for init-wrapped (first-tx) builds. That broke
   authwit DISCOVERY on a first tx (no stub ⇒ real verify throws before emitting the effect),
-  AND meant a PLAIN first-tx fpc/fj estimate took the stub-CONSTRUCTOR gas from a 1-sim fold
-  (wrong gas — B1 never measured undeployed accounts).
+  (no stub ⇒ the real verify throws before the effect is emitted). (CORRECTION, per codex
+  re-review: there was NO pre-existing plain-first-tx gas bug — the old guard took the
+  VALIDATED sim for init-wrapped, so plain first-tx already used real-constructor gas. The
+  forced validated re-sim is the necessary COMPENSATION for now always stubbing discovery,
+  not a repair of a prior underestimate.)
 - **Fix (44686f0)**: separate the two concerns the guard conflated. probedFirstSimOpts always
   STUBS when a probe is present (discovery works fine on undeployed accounts — the delegated
   inner hash is about the token call, not the account constructor, which is why classic
@@ -81,6 +84,16 @@ put a DISCOVERED delegated authwit through the product:
   PublicChecks standard contract, which the local native sandbox does not genesis-seed
   (publishing post-genesis is a documented collision; no runtime helper is exposed). Real
   testnet has it (B1 ran there). Gated behind NULO_E2E_STANDARD_CONTRACTS=1.
+- **Sim counts** (codex re-review): deployed no-effects = 1; deployed + effects = 2; init-wrapped
+  fast-path/fj = 2 (stub discovery + validated sizing); init-wrapped two-pass PrivateFPC = **3**
+  (stub discovery + validated PREEXISTING sizing + validated EXTERNAL). All pinned in
+  strategies-structural.test.ts. The added init-wrap re-sim now checks ctx.signal (cancellation
+  parity across all three strategies).
+- **Residual coverage gap (accepted)**: the exact first-tx-delegated-on-a-standard-contract-network
+  conjunction is only exercised by the env-gated e2e (NULO_E2E_STANDARD_CONTRACTS=1); locally
+  blocked by the missing PublicChecks. Mechanics verified sound by codex (ensureContractRegistered
+  installs the real instance before the override; init wrapper orders [constructor, entrypoint] so
+  the consumer's nested call reaches an initialized account).
 - codex verified the derivation was correct (consumer=token, nonce=0 deterministic) and
   correctly steered the diagnosis to "the proved request isn't the validated one" — which
   led to the init-wrap routing, not a hash bug.

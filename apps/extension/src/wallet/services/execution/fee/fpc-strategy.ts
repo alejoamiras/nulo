@@ -221,7 +221,9 @@ export class FpcStrategy implements FeeStrategy {
 					// Stub constructor gas can't seed Pass-2's envelope for a first-tx
 					// build. Re-derive Pass-1 gas from a VALIDATED sim of a rebuild
 					// that carries any discovered witnesses (else a delegated first-tx
-					// would fail the real-account authwit check here).
+					// would fail the real-account authwit check here). A cancel landing
+					// during the stubbed discovery must not start this second full sim.
+					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
 					built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
 					simulatedTx = await this.deps.simulateTxTask(
