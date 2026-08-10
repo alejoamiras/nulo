@@ -642,6 +642,58 @@ export async function mintPublicTokensForAccount(
 	}
 }
 
+/**
+ * Delegated-pull rig for authwit-DISCOVERY coverage: an upstream Token plus a
+ * Crowdfunding consumer whose `donate` pulls the donor's tokens via
+ * `transfer_in_private` (msg.sender = crowdfunding ≠ from = donor), so the
+ * token asserts a call authwit against the DONOR's account — the shape the
+ * wallet's estimate-time discovery must detect and sign. The donor gets a
+ * private balance minted so the pull can execute. Returns the two addresses
+ * (instances are fetched from the node by the test driver for dApp-side
+ * `registerContract`).
+ */
+export async function deployDelegatedPullRig(
+	aztecConfig: AztecTestConfig,
+	donorAddress: string,
+	donorMint = 1_000_000n,
+): Promise<{ pullTokenAddress: string; consumerAddress: string }> {
+	const { TokenContract: PullTokenContract } = await import("@aztec/noir-contracts.js/Token")
+	const { CrowdfundingContract } = await import("@aztec/noir-contracts.js/Crowdfunding")
+	const { wallet, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
+	try {
+		const feeOptions = await createSponsoredFeeOptions(wallet)
+		const minter = AztecAddress.fromStringUnsafe(aztecConfig.minterAddress)
+		const fee = { ...feeOptions, gasSettings: E2E_FEE_GAS }
+
+		const tokenDeploy = await PullTokenContract.deploy(wallet as never, minter, "PullToken", "PULL", 18).send({
+			from: minter,
+			fee,
+			wait: { timeout: 120 },
+		} as never)
+		const pullToken = (tokenDeploy as unknown as { contract: { address: AztecAddress } }).contract
+
+		const crowdDeploy = await CrowdfundingContract.deploy(
+			wallet as never,
+			pullToken.address,
+			minter,
+			// Deadline far in the future — u64 seconds.
+			2n ** 40n,
+		).send({ from: minter, fee, wait: { timeout: 120 } } as never)
+		const crowdfunding = (crowdDeploy as unknown as { contract: { address: AztecAddress } }).contract
+
+		const token = await PullTokenContract.at(pullToken.address, wallet as never)
+		await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(donorAddress), donorMint).send({
+			from: minter,
+			fee,
+			wait: { timeout: 120 },
+		} as never)
+
+		return { pullTokenAddress: pullToken.address.toString(), consumerAddress: crowdfunding.address.toString() }
+	} finally {
+		await cleanup()
+	}
+}
+
 /** Poll the node until a tx (by hash string, as returned to the dApp) is
  *  MINED successfully. Needed when a flow's NEXT step reads on-chain state
  *  the tx wrote (e.g. a public-authwit grant's `set_authorized` must be

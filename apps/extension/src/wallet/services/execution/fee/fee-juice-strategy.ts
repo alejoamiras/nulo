@@ -14,7 +14,7 @@ import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import type { Action } from "../spec"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee-strategy"
-import { finalizeGasLimits, probedFirstSimOpts, startEstimateTask, suggestGasLimits } from "./fee-strategy"
+import { finalizeGasLimits, isInitWrapped, probedFirstSimOpts, startEstimateTask, suggestGasLimits } from "./fee-strategy"
 
 export class FeeJuiceStrategy implements FeeStrategy {
 	public readonly kind = "fj" as const
@@ -30,8 +30,11 @@ export class FeeJuiceStrategy implements FeeStrategy {
 			let discovered: Action[] = []
 			if (ctx.probe) {
 				discovered = await ctx.probe.extractEffects(simulatedTx, { node: built.node, network: built.network })
-				if (discovered.length) {
-					ctx.op.actions.push(...discovered)
+				// Discovered effects OR an init-wrapped build force a validated
+				// rebuild+re-sim: effects so the witnesses are VERIFIED; init-wrap
+				// because the stub's constructor gas is untrustworthy (B1 exclusion).
+				if (discovered.length || isInitWrapped(built)) {
+					if (discovered.length) ctx.op.actions.push(...discovered)
 					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
 					built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
 					suggestGasLimits(built.txRequest, ctx.op.fee)

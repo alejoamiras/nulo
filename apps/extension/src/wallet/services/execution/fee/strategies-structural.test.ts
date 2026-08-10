@@ -416,7 +416,13 @@ describe("FeeJuiceStrategy folded (probed) runs", () => {
 		expect(ctx.op.actions).toEqual([original, DISCOVERED_FJ])
 	})
 
-	test("INITIALIZATION-WRAPPED build (origin ≠ account) is never stubbed, even under a probe", async () => {
+	test("INITIALIZATION-WRAPPED build (origin ≠ account): first sim STUBBED for discovery, then a forced VALIDATED sizing re-sim", async () => {
+		// origin ≠ account ⇒ the build wraps the account's own deploy. The stub
+		// still runs (discovery works even for an undeployed account — the
+		// delegated inner hash is about the token call, not the constructor),
+		// but the stub's constructor GAS is untrustworthy, so a validated
+		// sizing re-sim is FORCED even with no discovered effects (B1 excluded
+		// init-wrapped shapes from stub-gas parity).
 		const builtA = makeBuilt()
 		;(builtA.txRequest as { origin: unknown }).origin = { toString: () => "0xmulticall-entrypoint" }
 		const buildStandard = vi.fn(async () => builtA)
@@ -433,13 +439,20 @@ describe("FeeJuiceStrategy folded (probed) runs", () => {
 
 		await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
 
-		// Validated options — no stub, no skipTxValidation — despite the probe.
+		expect(simulateTxTask).toHaveBeenCalledTimes(2)
+		// Sim 1 STUBBED (discovery); sim 2 VALIDATED (trustworthy gas).
 		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			skipTxValidation: true,
+			scopes: [builtA.account.address],
+			stubAccountAddresses: ["0xaccount"],
+		})
+		expect((simulateTxTask.mock.calls[1] as unknown[])[2]).toEqual({
 			simulatePublic: true,
 			skipFeeEnforcement: true,
 			scopes: [builtA.account.address],
 		})
-		// The probe still gets the (validated) sim for effect extraction.
 		expect(probe.extractEffects).toHaveBeenCalledTimes(1)
 	})
 

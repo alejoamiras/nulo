@@ -83,6 +83,7 @@ import {
 	assertCustomGasLimitsWithinCap,
 	DEFAULT_FEE_MULTIPLIER,
 	finalizeGasLimits,
+	isInitWrapped,
 	probedFirstSimOpts,
 	startEstimateTask,
 	suggestGasLimits,
@@ -140,15 +141,16 @@ export class FpcStrategy implements FeeStrategy {
 			suggestGasLimits(built.txRequest, ctx.op.fee)
 			let simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, probedFirstSimOpts(ctx.probe, built), task)
 			// Folded discovery: the probed sim doubles as the discovery pass. A
-			// no-effects op is done in ONE sim (stub gas == validated gas — the
-			// measured B1 invariant); discovered effects force a validated
-			// rebuild+re-sim so the fresh witnesses are actually VERIFIED before
-			// any estimate leaves this method.
+			// no-effects op on a DEPLOYED account is done in ONE sim (stub gas ==
+			// validated gas — the measured B1 invariant). Discovered effects OR
+			// an init-wrapped build force a validated rebuild+re-sim: effects so
+			// the fresh witnesses are VERIFIED; init-wrap because the stub's
+			// constructor gas is untrustworthy there (B1 exclusion).
 			let discovered: Action[] = []
 			if (ctx.probe) {
 				discovered = await ctx.probe.extractEffects(simulatedTx, { node: built.node, network: built.network })
-				if (discovered.length) {
-					ctx.op.actions.push(...discovered)
+				if (discovered.length || isInitWrapped(built)) {
+					if (discovered.length) ctx.op.actions.push(...discovered)
 					if (ctx.signal?.aborted) throw new JobCancelledSentinel("")
 					built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.EXTERNAL, task)
 					suggestGasLimits(built.txRequest, ctx.op.fee)
@@ -204,17 +206,30 @@ export class FpcStrategy implements FeeStrategy {
 			let simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, probedFirstSimOpts(ctx.probe, built), task)
 			// Folded discovery: Pass 1 (stubbed under a probe) doubles as the
 			// discovery pass — its build shape equals the standalone discovery
-			// sim's (same PREEXISTING_FEE_JUICE build, same sim options), so the
-			// extracted effect set is identical by construction. Discovered
-			// actions land AFTER the originals — exactly where the standalone
-			// discovery splice used to put them — and Pass 2 (validated)
-			// verifies the freshly signed witnesses. Pass-1 gas feeding Pass 2's
-			// envelope is unchanged by the stub (B1: side-effect-priced).
+			// sim's, so the extracted effect set is identical by construction.
+			// Discovered actions land AFTER the originals and Pass 2 (always
+			// validated in two-pass) verifies the freshly signed witnesses. An
+			// init-wrapped build additionally cannot trust Pass-1 stub GAS to
+			// seed Pass-2's envelope, so re-derive it from a validated Pass-1.
 			let discovered: Action[] = []
 			if (ctx.probe) {
 				discovered = await ctx.probe.extractEffects(simulatedTx, { node: built.node, network: built.network })
 				if (discovered.length) {
 					ctx.op.actions.push(...discovered)
+				}
+				if (isInitWrapped(built)) {
+					// Stub constructor gas can't seed Pass-2's envelope for a first-tx
+					// build. Re-derive Pass-1 gas from a VALIDATED sim of a rebuild
+					// that carries any discovered witnesses (else a delegated first-tx
+					// would fail the real-account authwit check here).
+					built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
+					suggestGasLimits(built.txRequest, ctx.op.fee)
+					simulatedTx = await this.deps.simulateTxTask(
+						built.pxe,
+						built.txRequest,
+						{ simulatePublic: true, skipFeeEnforcement: true, scopes: [built.account.address] },
+						task,
+					)
 				}
 			}
 			// Fetch actual fees for FPC fee payload (with priority multiplier). Same

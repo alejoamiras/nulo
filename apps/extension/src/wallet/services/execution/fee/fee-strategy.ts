@@ -140,21 +140,19 @@ export interface FeeStrategy {
  *  (+`skipTxValidation` — the validator rejects the substituted class) under a
  *  probe, the shipped validated options byte-for-byte without one.
  *
- *  INITIALIZATION-WRAPPED requests are never stubbed (B1 structural
- *  exclusion): a first-tx build wraps the constructor via the multicall
- *  entrypoint, and overriding the deploying account's class would simulate a
- *  DIFFERENT constructor than the one the tx executes. Detection is
- *  structural and RPC-free — a wrapped request's `origin` is the multicall
- *  entrypoint, not the account. The probe still extracts from the validated
- *  sim (offchain effects are consumer-emitted); an op that NEEDS an authwit
- *  fails that sim loudly, exactly like the classic validated pipeline. */
+ *  Stubbing is safe for DISCOVERY even on an initialization-wrapped build:
+ *  the discovered authwit's inner hash is about the DELEGATED call (token /
+ *  consumer), not the deploying account's constructor, so the classic
+ *  standalone discovery has always stubbed undeployed accounts. What is NOT
+ *  trustworthy for an init-wrapped build is the stub's GAS (stub constructor
+ *  ≠ real constructor — the B1 exclusion) — so `isInitWrapped` forces a
+ *  validated sizing re-sim there regardless of discovered effects. */
 export function probedFirstSimOpts(
 	probe: DiscoveryProbe | undefined,
-	built: { txRequest: TxExecutionRequest; account: { address: AztecAddress } },
+	built: { account: { address: AztecAddress } },
 ): Parameters<SimulateTxFn>[2] {
 	const address = built.account.address
-	const stubSafe = built.txRequest.origin?.toString() === address.toString()
-	return probe && stubSafe
+	return probe
 		? {
 				simulatePublic: true,
 				skipFeeEnforcement: true,
@@ -163,6 +161,15 @@ export function probedFirstSimOpts(
 				stubAccountAddresses: [address.toString()],
 			}
 		: { simulatePublic: true, skipFeeEnforcement: true, scopes: [address] }
+}
+
+/** True when the build wraps the account's own deployment (first tx): the
+ *  request's `origin` is the multicall entrypoint, not the account. The
+ *  stubbed first sim can still DISCOVER, but its gas reflects the STUB
+ *  constructor — so a folded run must always take a validated sizing re-sim
+ *  here (B1 excluded init-wrapped shapes from stub-gas parity). RPC-free. */
+export function isInitWrapped(built: { txRequest: TxExecutionRequest; account: { address: AztecAddress } }): boolean {
+	return built.txRequest.origin?.toString() !== built.account.address.toString()
 }
 
 /** Override gas limits on a pre-built tx request from a pending FeeOptions
