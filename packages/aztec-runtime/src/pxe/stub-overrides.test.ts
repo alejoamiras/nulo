@@ -1,5 +1,11 @@
+// @vitest-environment node
 /**
  * Pin for the stub-account override mechanics of `PxeService.simulateTx`.
+ *
+ * Runs under the node environment: `getContractClassFromArtifact` (invoked by
+ * the stub path both in the service and this pin) exercises Barretenberg WASM
+ * heavily enough that the extension runner's jsdom environment corrupts the
+ * bb.js sync instance mid-suite (`std::bad_cast` on later tests).
  *
  * The override map must reach upstream PXE under the `contracts` key of a
  * `SimulationOverrides`, with each entry keeping the account's REAL instance
@@ -23,9 +29,13 @@ vi.mock("./note-schemas", () => ({
 
 import { StubSchnorrAccountContractArtifact } from "@aztec/accounts/schnorr/stub"
 import { jsonStringify } from "@aztec/foundation/json-rpc"
+import { Fr } from "@aztec/foundation/curves/bn254"
 import type { PXE } from "@aztec/pxe/client/bundle"
+import { FunctionSelector } from "@aztec/stdlib/abi"
+import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { getContractClassFromArtifact } from "@aztec/stdlib/contract"
-import { TxExecutionRequest } from "@aztec/stdlib/tx"
+import { GasSettings } from "@aztec/stdlib/gas"
+import { TxContext, TxExecutionRequest } from "@aztec/stdlib/tx"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ChainRuntime, type NetworkInfo, type PxeFactory } from "./chain-runtime"
 import { PxeService, type IProfileReader } from "./service"
@@ -40,6 +50,23 @@ const noopProfiles: IProfileReader = {
 const network: NetworkInfo = { profileId: "p1", chainId: 31337, rpcUrl: "http://localhost:8080" }
 
 const accountHex = "0x000000000000000000000000000000000000000000000000000000000000ab12"
+
+// Deterministic wire-form request — `TxExecutionRequest.random()` walks
+// Barretenberg WASM (AztecAddress.random → sqrt), which breaks under the
+// root vitest environment. Hand-built fields avoid every crypto path.
+function wireTxRequest() {
+	const req = new TxExecutionRequest(
+		AztecAddress.fromBigIntUnsafe(0xab12n),
+		FunctionSelector.fromField(new Fr(1)),
+		Fr.ZERO,
+		new TxContext(1, 2, GasSettings.empty()),
+		[],
+		[],
+		[],
+		Fr.ZERO,
+	)
+	return JSON.parse(jsonStringify(req))
+}
 
 // A minimal instance shape as upstream `getContractInstance` returns it. The
 // service must pass every field through untouched except the class id.
@@ -89,7 +116,7 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 
 	test("registers the stub class and swaps ONLY currentContractClassId on the real instance, under the contracts key", async () => {
 		const { service, registered, simulateCalls } = makeHarness()
-		const txRequest = JSON.parse(jsonStringify(await TxExecutionRequest.random()))
+		const txRequest = wireTxRequest()
 
 		await service.simulateTx(
 			network,
@@ -124,7 +151,7 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 
 	test("no stub addresses: no registration, no overrides, no skipKernels", async () => {
 		const { service, registered, simulateCalls } = makeHarness()
-		const txRequest = JSON.parse(jsonStringify(await TxExecutionRequest.random()))
+		const txRequest = wireTxRequest()
 
 		await service.simulateTx(network, txRequest, { simulatePublic: true, skipFeeEnforcement: true, scopes: [accountHex] })
 
@@ -135,7 +162,7 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 
 	test("unknown account instance fails loudly instead of simulating unstubbed", async () => {
 		const { service, simulateCalls } = makeHarness({ instanceMissing: true })
-		const txRequest = JSON.parse(jsonStringify(await TxExecutionRequest.random()))
+		const txRequest = wireTxRequest()
 
 		await expect(
 			service.simulateTx(network, txRequest, { simulatePublic: true, skipFeeEnforcement: true, scopes: [accountHex] }, [accountHex]),

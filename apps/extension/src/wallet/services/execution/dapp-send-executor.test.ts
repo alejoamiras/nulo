@@ -66,6 +66,7 @@ function makeHarness(
 	overrides: Partial<DappSendExecutorDeps> & {
 		authwit?: { discoverPrivateAuthwits: ReturnType<typeof vi.fn> }
 		buildAndEstimateValidated?: ReturnType<typeof vi.fn>
+		buildAndEstimateFolded?: ReturnType<typeof vi.fn>
 	} = {},
 ) {
 	const network = {
@@ -100,9 +101,11 @@ function makeHarness(
 	})
 	const authwit = overrides.authwit ?? { discoverPrivateAuthwits: vi.fn(async () => [] as unknown[]) }
 	const buildAndEstimateValidated = overrides.buildAndEstimateValidated ?? vi.fn(async () => built as never)
+	const buildAndEstimateFolded = overrides.buildAndEstimateFolded ?? vi.fn(async () => built as never)
 	const estimateWithDiscovery = new DiscoveryAwareEstimator({
 		authwit: authwit as never,
 		buildAndEstimateValidated: buildAndEstimateValidated as never,
+		buildAndEstimateFolded: buildAndEstimateFolded as never,
 		buildForDiscovery: (async () => built) as never,
 	})
 	const deps: DappSendExecutorDeps = {
@@ -151,6 +154,7 @@ function makeHarness(
 		proveAndSend,
 		authwit,
 		buildAndEstimateValidated,
+		buildAndEstimateFolded,
 		executor: new DappSendExecutor(deps),
 	}
 }

@@ -47,6 +47,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { FpcService } from "@/wallet/services/fpc/service"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
+import type { DiscoveryProbe } from "../discovery-aware-estimator"
 import type { Action, FeeOptions, FeeSettings } from "../spec"
 import type { BuiltStandardTx, TxRequestBuilder } from "../tx-request-builder"
 
@@ -71,14 +72,21 @@ export interface FeeEstimate extends BuiltStandardTx {
 
 /** Simulate callback — facade owns the TaskService wrapping so that
  *  strategies stay decoupled from task bookkeeping.
- *  `stubAccountAddresses` (unused by the shipped strategies) is follow-up
- *  plumbing for discovery-flavored sims: the runtime swaps those accounts
- *  for the stub artifact so unverifiable authwits surface as offchain
- *  effects instead of hard asserts. */
+ *  `stubAccountAddresses` swaps those accounts for the stub artifact so
+ *  unverifiable authwits surface as offchain effects instead of hard
+ *  asserts; a stubbed sim MUST also pass `skipTxValidation: true` (the
+ *  node's tx validator rejects the substituted class). Used only by
+ *  probed (folded) strategy runs. */
 export type SimulateTxFn = (
 	pxe: IPXE,
 	txRequest: TxExecutionRequest,
-	opts: { simulatePublic: boolean; skipFeeEnforcement: boolean; scopes: AztecAddress[]; stubAccountAddresses?: string[] },
+	opts: {
+		simulatePublic: boolean
+		skipFeeEnforcement: boolean
+		skipTxValidation?: boolean
+		scopes: AztecAddress[]
+		stubAccountAddresses?: string[]
+	},
 	parentTask?: WrappedTask,
 ) => Promise<TxSimulationResult>
 
@@ -103,6 +111,13 @@ export type FeeStrategyContext = {
 	 *  passes and bail with `JobCancelledSentinel` — a sim already in flight
 	 *  cannot be preempted, but the next pass must not start. */
 	signal?: AbortSignal
+	/** Discovery probe for FOLDED runs (dApp estimate paths only; set
+	 *  exclusively by the `DiscoveryAwareEstimator` routing). When present, a
+	 *  probe-aware strategy runs its first sim STUBBED (+ skipTxValidation)
+	 *  and feeds it to `probe.extractEffects` — discovery and sizing collapse
+	 *  into one sim. Absent on every non-dApp path (transfer, send,
+	 *  embedded), which therefore keep byte-identical sim options. */
+	probe?: DiscoveryProbe
 }
 
 /** Dependencies injected once at construction. */

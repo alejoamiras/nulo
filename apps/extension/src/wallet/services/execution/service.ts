@@ -58,7 +58,7 @@ import { TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { OperationEstimateReuse } from "./operation-estimate-reuse"
 import { TransferExecutor } from "./transfer-executor"
 import { DappSendExecutor } from "./dapp-send-executor"
-import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
+import { DiscoveryAwareEstimator, type DiscoveryProbe } from "./discovery-aware-estimator"
 import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
@@ -273,6 +273,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			authwit: this.authwit,
 			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
 				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
+			buildAndEstimateFolded: (op, feeSettings, probe, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal, probe),
 			buildForDiscovery: async (op, method) => {
 				const { txRequest, node, pxe, account, network } = await this.txBuilder.buildStandard(
 					op as SendTransactionOperation,
@@ -885,6 +887,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
+		probe?: DiscoveryProbe,
 	): Promise<FeeEstimate> {
 		// Clone the op + its actions array. fjwc / fpc branches mutate
 		// `op.actions` (unshift / splice) to prepend fee payloads; leaking
@@ -904,6 +907,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			gasPadding,
 			parentTask,
 			signal,
+			probe,
 		}
 		return strategy.buildAndEstimate(ctx)
 	}
