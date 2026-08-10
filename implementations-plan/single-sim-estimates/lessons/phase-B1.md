@@ -103,9 +103,11 @@ these absolute numbers).
 | Sponsored private transfer | da=1440 l2=527400 | **MINED** (~16s to inclusion; repeated 3× across runs) |
 | PrivateFPC private transfer (fee from the real 491-FJ credit) | da=2048 l2=555100 | **MINED** (~15s) |
 
-Fragmented-note PrivateFPC canary: DEFERRED — synthesizing fragmentation needs multiple L1
-deposits (no L1 key by design). The mined canary exercised the real credit-note subtract path
-(`recurse_subtract_balance_internal`) with the owner's actual note set.
+Fragmented-note PrivateFPC canary: **DONE (follow-up run, owner-provided Sepolia signer)** —
+three portal deposits claimed as separate notes (1.55 / 7.58 / 7.90 FJ) at freshly initialized
+idx1; the stub-estimated canary committed an 11.26 FJ envelope (> the 7.90 max note ⇒ the
+FPC's `recurse_subtract_balance_internal` HAD to span notes) and **MINED**; credit moved
+exactly by the envelope (17.03 → 5.78 FJ).
 
 ## Operational gotchas (recorded for the A2/B2 e2e work)
 
@@ -127,3 +129,27 @@ deposits (no L1 key by design). The mined canary exercised the real credit-note 
   owner's private fee-juice credit.
 
 Both checkpoints auto-adopt per the approved plan (rev 3.2, Ask 3: "<1% ⇒ adopt").
+
+## Fragmented-note canary — operational lessons (follow-up run)
+
+- **The faucet's swap-fuel route is DOWN in production**: the v4 quoter reverts
+  `UnexpectedRevertBytes(NotEnoughLiquidity)` on the AZLO/WETH hop at every size — the pool
+  is drained. Found live while attempting the fueled bridge; needs a re-seed (own arc). The
+  canary pivoted to DIRECT FeeJuicePortal deposits (fuel.ts primitives) using the signer's
+  leftover FJ-ERC20.
+- **A bare `PrivateFPC.mint` can never land**: mint PROVES the bridge claim by reading the
+  nullifier `FeeJuice.claim` emits — the two must run together (the package README's
+  cold-start shape). The symptom of the missing claim leg is a PERMANENT
+  "Nullifier read request at index 0 … unknown nullifier" that masquerades as message-sync
+  lag. Same-tx nullifier reads work: a sponsored `BatchCall([FeeJuice.claim, fpc.mint])`
+  banks the exact deposit as one note.
+- An account that has only ever RECEIVED is uninitialized — its first outgoing tx needs the
+  init wrap (sponsored self-paid deploy first, or the claim fails on the init-nullifier read).
+- Private-claim salts are the SOLE recovery input — persist BEFORE the L1 deposit. One 1.55 FJ
+  deposit was stranded by a crashed run pre-persistence (recovered: the claim later succeeded
+  from the persisted record on the rerun; net loss zero).
+- Estimating a PrivateFPC-paid tx for a small-credit account MUST bound the request envelope
+  (the plan's "Pass 1 is load-bearing" fact, felt live): under `forEstimation` limits pay_fee
+  subtracts ~23 FJ in-sim → "Balance too low" against any credit smaller than that.
+- Bun kills the process on unhandled background-sync rejections (drpc reorg-view blips) — a
+  long-running script needs a `process.on("unhandledRejection")` survivor.

@@ -117,14 +117,15 @@ Full table + gotchas: `lessons/phase-B1.md`.
 
 ### Phase A2 — PrivateFPC fold (PR 3; B1-gated AND Ask-4(a)-conditional) ✓
 
-**GATE DEVIATION (recorded for owner review, flagged by the codex post-impl audit):** the
-fragmented-note PrivateFPC inclusion canary listed in this phase's original gate could NOT be
-run — synthesizing note fragmentation requires multiple L1→L2 deposits and Ask 4(a) provided
-an Aztec account secret, not a Sepolia L1 key. The mined PrivateFPC canary DID exercise the
-real credit-note subtract path (`recurse_subtract_balance_internal`) against the owner's
-actual note set on stub-derived gas limits. A2 was marked ✓ on that basis; if the owner wants
-the fragmented-note case before merge, provide a Sepolia key and re-run B1's canary stage
-after two+ small fuel deposits.
+**GATE DEVIATION — DISCHARGED (2026-08-10).** Initially the fragmented-note PrivateFPC
+canary could not run (fragmentation needs multiple L1→L2 deposits; Ask 4(a) provided an
+Aztec key). The owner then pointed at the canonical clone's `.env` Sepolia signer (the
+plan-pinned L1 key). The canary ran FOR REAL: three small FeeJuicePortal deposits claimed as
+separate credit notes at a fresh account (direct portal route — the swap-fuel pool is
+drained, see `lessons/phase-B1.md`), then a stub-estimated PrivateFPC-paid transfer whose
+committed envelope (11.26 FJ, cap-bumped) exceeded the largest single note (7.90 FJ) —
+**recursion across notes FORCED — and the tx MINED**; the credit moved exactly by the
+envelope. The original A2 gate is now met in full.
 
 **Runs only if the Sepolia key was provisioned and the funded PrivateFPC measurement (incl. fragmented-note inclusion canary) passed the <1% rule; otherwise marked DEFERRED and PR 3 ships B2 alone.** P1 stubbed + probe; F-4 rule + first-sim-only + dedup; folded bail; adversarial fixtures (sponsored-typed non-canonical row + the standalone inner-hash class from Ask 1). dApp `fpc` 3→2 pins.
 **Gate** — pins + fixtures + discovery-equivalence; full unit; milestone e2e: `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`.
