@@ -262,3 +262,22 @@ arms, so it's deterministically red locally / green on CI).
 - **Diagnosing "deterministic local red, CI green" on a gated test**: FIRST grep the local dist
   for the fixture's stamp/strings (`grep -rl "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome`)
   before suspecting timing or hardware — absence proves an unarmed build in seconds.
+
+## Suite-wide mass failure + "Address already in use" at aztec-node boot
+
+If a full `e2e:agent` run fails DOZENS of unrelated files (timeouts, wrong-state asserts) and
+the setup log shows `[aztec-node] Error: Address already in use (os error 98)` right after
+"Starting local Aztec network", the run's node never came up healthy — everything downstream
+drowned against a half-dead or foreign node. The runner's CLAIMED ports (printed as
+`[e2e-setup] ports: …`) can all be free and this still happens: the local network binds extra
+sub-services on FIXED DEFAULTS (e.g. 8880/8590) that the port registry does not parameterize,
+so an ORPHANED sandbox from an old run (parented to init, invisible in `~/.agents/ports.md`)
+collides with every new run.
+
+Triage in order:
+1. `pgrep -af "aztec|anvil"` — look for `--local-network` / `anvil` processes with an old
+   start time (`ps -o pid,pgid,lstart -p <pid>`) and ppid 1.
+2. Reap by OWN pgid only (`kill -TERM -<pgid>`), never `pkill -f` — other agents' live runs
+   share this machine.
+3. Re-run. A green re-run confirms the collision; do NOT chase the individual test failures
+   from the poisoned run.
