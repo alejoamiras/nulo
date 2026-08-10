@@ -167,7 +167,16 @@ export class FpcStrategy implements FeeStrategy {
 				...originalActions,
 				...discovered,
 			)
-			await finalizeGasLimits(built.node, built.txRequest, simulatedTx, ctx.gasPadding, baseFees)
+			await finalizeGasLimits(
+				built.node,
+				built.txRequest,
+				simulatedTx,
+				ctx.gasPadding,
+				baseFees,
+				undefined,
+				undefined,
+				built.txsLimits,
+			)
 			task.complete()
 			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL }
 		} catch (error) {
@@ -238,7 +247,16 @@ export class FpcStrategy implements FeeStrategy {
 				...originalActions,
 				...discovered,
 			)
-			await finalizeGasLimits(built.node, built.txRequest, simulatedTx, ctx.gasPadding, baseFees)
+			await finalizeGasLimits(
+				built.node,
+				built.txRequest,
+				simulatedTx,
+				ctx.gasPadding,
+				baseFees,
+				undefined,
+				undefined,
+				built.txsLimits,
+			)
 			task.complete()
 			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL }
 		} catch (error) {

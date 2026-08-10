@@ -37,6 +37,7 @@
  * to `baseFees` BEFORE computing maxFee for the fee-payload actions.
  */
 
+import { MAX_TX_DA_GAS } from "@aztec/constants"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
@@ -184,7 +185,21 @@ export function suggestGasLimits(txRequest: TxExecutionRequest, options?: FeeOpt
  *  Embedded call this; FPC has a custom post-simulation path.
  *
  *  `feeMultiplier` — when unset, falls back to `DEFAULT_FEE_MULTIPLIER`.
- *  Embedded passes 1 explicitly to stay within the dApp's budget. */
+ *  Embedded passes 1 explicitly to stay within the dApp's budget.
+ *
+ *  `txsLimits` — the build-time-retained per-tx admission cap (further bounded
+ *  by the protocol's `MAX_TX_DA_GAS` on the DA axis; no protocol L2 per-tx
+ *  constant exists — L2 is node-advertised only). When present:
+ *  - measured usage already over the cap ⇒ THROW (the tx can never be
+ *    admitted; an uncapped estimate would fail later, at the node, with a
+ *    worse error);
+ *  - auto-derived limits (measured × padding) are clamped to the cap — the
+ *    padding is headroom, not a claim the tx needs that much;
+ *  - dApp `customLimits` over the cap ⇒ THROW, never silently capped (a
+ *    dApp-visible behavior contract; capping silently would commit different
+ *    bytes than the dApp signed off on).
+ *  Absent (defensive), behavior is unchanged. NO_FROM builds never reach this
+ *  function — their gasSettings are capped by construction in the builder. */
 export async function finalizeGasLimits(
 	node: AztecNode,
 	txRequest: TxExecutionRequest,
@@ -193,6 +208,7 @@ export async function finalizeGasLimits(
 	maxFeesPerGas?: GasFees,
 	customLimits?: FeeOptions,
 	feeMultiplier?: number,
+	txsLimits?: Gas,
 ): Promise<void> {
 	const multiplier = feeMultiplier ?? DEFAULT_FEE_MULTIPLIER
 	if (!maxFeesPerGas) {
@@ -216,13 +232,44 @@ export async function finalizeGasLimits(
 		}
 	}
 
-	const gasLimits = customLimits?.gasLimits
-		? new Gas(customLimits.gasLimits.daGas, customLimits.gasLimits.l2Gas)
-		: simulatedTx.gasUsed.totalGas.mul(gasPadding)
+	const cap = txsLimits ? new Gas(Math.min(txsLimits.daGas, MAX_TX_DA_GAS), txsLimits.l2Gas) : undefined
+	if (cap) {
+		const measured = simulatedTx.gasUsed.totalGas
+		if (measured.daGas > cap.daGas || measured.l2Gas > cap.l2Gas) {
+			throw new Error(
+				`Simulated gas (da=${measured.daGas}, l2=${measured.l2Gas}) exceeds the network per-tx admission limit ` +
+					`(da=${cap.daGas}, l2=${cap.l2Gas}) — this transaction cannot be included.`,
+			)
+		}
+	}
 
-	const teardownGasLimits = customLimits?.teardownGasLimits
-		? new Gas(customLimits.teardownGasLimits.daGas, customLimits.teardownGasLimits.l2Gas)
-		: simulatedTx.gasUsed.teardownGas.mul(gasPadding)
+	let gasLimits: Gas
+	if (customLimits?.gasLimits) {
+		gasLimits = new Gas(customLimits.gasLimits.daGas, customLimits.gasLimits.l2Gas)
+		if (cap && (gasLimits.daGas > cap.daGas || gasLimits.l2Gas > cap.l2Gas)) {
+			throw new Error(
+				`Requested gasLimits (da=${gasLimits.daGas}, l2=${gasLimits.l2Gas}) exceed the network per-tx admission ` +
+					`limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
+			)
+		}
+	} else {
+		const padded = simulatedTx.gasUsed.totalGas.mul(gasPadding)
+		gasLimits = cap ? new Gas(Math.min(padded.daGas, cap.daGas), Math.min(padded.l2Gas, cap.l2Gas)) : padded
+	}
+
+	let teardownGasLimits: Gas
+	if (customLimits?.teardownGasLimits) {
+		teardownGasLimits = new Gas(customLimits.teardownGasLimits.daGas, customLimits.teardownGasLimits.l2Gas)
+		if (cap && (teardownGasLimits.daGas > cap.daGas || teardownGasLimits.l2Gas > cap.l2Gas)) {
+			throw new Error(
+				`Requested teardownGasLimits (da=${teardownGasLimits.daGas}, l2=${teardownGasLimits.l2Gas}) exceed the ` +
+					`network per-tx admission limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
+			)
+		}
+	} else {
+		const padded = simulatedTx.gasUsed.teardownGas.mul(gasPadding)
+		teardownGasLimits = cap ? new Gas(Math.min(padded.daGas, cap.daGas), Math.min(padded.l2Gas, cap.l2Gas)) : padded
+	}
 
 	txRequest.txContext.gasSettings = new GasSettings(
 		gasLimits,

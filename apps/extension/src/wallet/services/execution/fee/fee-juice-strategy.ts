@@ -48,7 +48,16 @@ export class FeeJuiceStrategy implements FeeStrategy {
 					)
 				}
 			}
-			await finalizeGasLimits(built.node, built.txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, ctx.feeMultiplier)
+			await finalizeGasLimits(
+				built.node,
+				built.txRequest,
+				simulatedTx,
+				ctx.gasPadding,
+				undefined,
+				ctx.op.fee,
+				ctx.feeMultiplier,
+				built.txsLimits,
+			)
 			task.complete()
 			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE }
 		} catch (error) {

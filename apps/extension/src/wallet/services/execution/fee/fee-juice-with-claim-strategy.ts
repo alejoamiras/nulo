@@ -34,7 +34,7 @@ export class FeeJuiceWithClaimStrategy implements FeeStrategy {
 				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [account.address] },
 				task,
 			)
-			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, ctx.feeMultiplier)
+			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, ctx.feeMultiplier, built.txsLimits)
 			task.complete()
 			return { ...built, feePaymentMethod: AccountFeePaymentMethodOptions.FEE_JUICE_WITH_CLAIM }
 		} catch (error) {

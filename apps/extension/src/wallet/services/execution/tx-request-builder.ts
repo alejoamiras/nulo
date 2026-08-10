@@ -84,6 +84,11 @@ export interface BuiltStandardTx {
 	 *  during fee estimate, or a rejected approval — records nothing. NO_FROM builds
 	 *  carry an empty array (they emit no `add_public_authwit`). */
 	pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[]
+	/** Node-advertised per-tx gas admission limit, snapshotted from the SAME
+	 *  `getNodeInfo()` the build asserted chain identity against — the
+	 *  finalize-time clamp reads THIS, never a live refetch (zero extra RPCs,
+	 *  and no chance of clamping against a flipped endpoint). */
+	txsLimits: Gas
 }
 
 /** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
@@ -376,6 +381,7 @@ export class TxRequestBuilder {
 				nonce,
 				txCalls,
 				pendingPublicAuthwits,
+				txsLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
 			}
 		} catch (error) {
 			task.fail(error)
@@ -506,6 +512,9 @@ export class TxRequestBuilder {
 				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
 				txCalls,
 				pendingPublicAuthwits: [],
+				// NO_FROM gasSettings are ALREADY capped by construction — the
+				// `GasSettings.fallback` above uses these limits directly.
+				txsLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
 			}
 		} catch (error) {
 			task.fail(error)

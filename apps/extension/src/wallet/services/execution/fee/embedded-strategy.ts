@@ -43,7 +43,7 @@ export class EmbeddedStrategy implements FeeStrategy {
 				task,
 			)
 			// Use 1x multiplier so max_gas_cost stays within the dApp's embedded amount.
-			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, 1)
+			await finalizeGasLimits(node, txRequest, simulatedTx, ctx.gasPadding, undefined, ctx.op.fee, 1, built.txsLimits)
 			task.complete()
 			return { ...built, feePaymentMethod: embeddedMethod }
 		} catch (error) {
