@@ -56,3 +56,31 @@ ops validated 2, intent-authwit + fjwc + embedded unchanged classic.
   Sepolia signer; the fragmented-note canary ran for real (recursion across notes forced,
   tx mined — plan.md Phase A2 + lessons/phase-B1.md). Codex's final pass lifted its verdict
   to CONDITIONAL APPROVE (no runtime blocker) on this basis.
+
+## Post-merge-review: init-wrap fold bug (caught by the delegated-authwit e2e)
+
+Writing tx-sendTx-delegated-authwit.test.ts (folded discovery through the real extension)
+surfaced a genuine bug the 3900 unit tests + B1 + 3 codex rounds all missed, because none
+put a DISCOVERED delegated authwit through the product:
+
+- **Bug**: the init-wrap guard (added for codex round 1) lived in probedFirstSimOpts and
+  downgraded the folded FIRST sim to validated for init-wrapped (first-tx) builds. That broke
+  authwit DISCOVERY on a first tx (no stub ⇒ real verify throws before emitting the effect),
+  AND meant a PLAIN first-tx fpc/fj estimate took the stub-CONSTRUCTOR gas from a 1-sim fold
+  (wrong gas — B1 never measured undeployed accounts).
+- **Fix (44686f0)**: separate the two concerns the guard conflated. probedFirstSimOpts always
+  STUBS when a probe is present (discovery works fine on undeployed accounts — the delegated
+  inner hash is about the token call, not the account constructor, which is why classic
+  discovery always stubbed them). A new isInitWrapped(built) (origin ≠ account, RPC-free)
+  FORCES a validated sizing re-sim for init-wrapped builds regardless of effects — never trust
+  stub-constructor gas. Deployed accounts keep the 1-sim win.
+- **On-chain coverage of the fix**: tx-sendTx-default already sends an undeployed account's
+  FIRST tx through the fold, so it exercises the forced validated re-sim (green in the full
+  suite). The delegated-discovery-on-init-wrap path is testnet-only (B1 shape 3).
+- **Why the delegated e2e is env-gated skip locally**: Crowdfunding calls the canonical
+  PublicChecks standard contract, which the local native sandbox does not genesis-seed
+  (publishing post-genesis is a documented collision; no runtime helper is exposed). Real
+  testnet has it (B1 ran there). Gated behind NULO_E2E_STANDARD_CONTRACTS=1.
+- codex verified the derivation was correct (consumer=token, nonce=0 deterministic) and
+  correctly steered the diagnosis to "the proved request isn't the validated one" — which
+  led to the init-wrap routing, not a hash bug.
