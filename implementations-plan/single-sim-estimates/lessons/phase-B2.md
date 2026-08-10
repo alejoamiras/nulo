@@ -21,14 +21,16 @@
   SAME `getNodeInfo()` the build chain-asserted — finalize never refetches (zero new RPCs;
   no flipped-endpoint clamp basis).
 - `finalizeGasLimits` (+`txsLimits?` param): cap = min(node txsLimits, protocol
-  `MAX_TX_DA_GAS` on DA; no protocol L2 per-tx constant exists — node-advertised only).
+  `MAX_TX_DA_GAS` / `MAX_PROCESSABLE_L2_GAS`) — the L2 leg landed with the codex fixes
+  (b6065a3), mirroring upstream `get_gas_limits.ts`.
   Measured-over-cap ⇒ throw ("cannot be included"); auto-derived padded limits clamp to cap
   (padding is headroom, not need); dApp customLimits/teardown over cap ⇒ THROW, never
   silently capped (Ask 2); 0-teardown stays 0; absent cap (defensive) ⇒ historical behavior.
 - Per-path forwarding pins: fj / fjwc / embedded / fpc two-pass / fpc fast path each proven
   to forward their build's retained cap (tight-cap throw). The "send" transfer path rides the
-  same strategies; NO_FROM never reaches finalize — its `GasSettings.fallback` uses txsLimits
-  as the limits directly (capped by construction, noted in the builder).
+  same strategies. NO_FROM initially relied on capped-by-construction fallback settings, but
+  the executor's NO_FROM path DOES call finalize with dApp custom limits — it now forwards
+  the retained txsLimits too (codex M-NO_FROM, fixed in b6065a3).
 
 ## Gate result: PASS
 
@@ -50,7 +52,7 @@ ops validated 2, intent-authwit + fjwc + embedded unchanged classic.
   vanishingly rare case (an account's first-ever tx being a delegated authwit dApp op), and
   it is the only B1-compliant option without new measurement. Revisit only with a dedicated
   measurement of stub-vs-real constructor effect parity.
-- **Owner decision pending**: A2's gate deviation (fragmented-note canary unrunnable without
-  an L1 key) is recorded in plan.md; codex correctly notes only the owner can accept it.
-  Surfaced in the wrap-up — options: accept as-is, or provide a Sepolia key for the
-  fragmented-note re-run before merging PR 3.
+- **RESOLVED — gate deviation discharged**: the owner pointed at the canonical clone's
+  Sepolia signer; the fragmented-note canary ran for real (recursion across notes forced,
+  tx mined — plan.md Phase A2 + lessons/phase-B1.md). Codex's final pass lifted its verdict
+  to CONDITIONAL APPROVE (no runtime blocker) on this basis.

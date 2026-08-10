@@ -107,8 +107,9 @@ validated gas byte-for-byte on every runnable shape across 2 interleaved rounds 
 note-set change (structural reason: Aztec prices private execution by side effects, which the
 stub preserves). Both inclusion canaries (Sponsored; PrivateFPC paying from the owner's real
 491-FJ credit) MINED on stub-derived limits. Shape 4 (undeployed first-tx) fold-excluded by
-structure; fragmented-note canary deferred (needs L1 deposits — no key by design; real
-credit-note subtract path exercised by the mined canary). **Bonus finding (HIGH): the shipped
+structure; fragmented-note canary initially deferred, later DONE in the follow-up run
+(owner-provided Sepolia signer; recursion across notes forced and mined — see the Phase A2
+discharge record and lessons/phase-B1.md). **Bonus finding (HIGH): the shipped
 stub mechanism never engages** — `new SimulationOverrides({...contracts})` drops the map
 (aztec-runtime service.ts:463), proven live (delegated shape fails "Unknown auth witness"
 under the replica mechanism, succeeds with the upstream classId-swap mechanism). A2 must ship
