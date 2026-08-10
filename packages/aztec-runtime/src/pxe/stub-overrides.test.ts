@@ -121,7 +121,7 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 		await service.simulateTx(
 			network,
 			txRequest,
-			{ simulatePublic: true, skipTxValidation: true, skipFeeEnforcement: true, scopes: [accountHex] },
+			{ simulatePublic: true, skipTxValidation: true, skipFeeEnforcement: true, scopes: [accountHex as unknown as AztecAddress] },
 			[accountHex],
 		)
 
@@ -153,7 +153,11 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 		const { service, registered, simulateCalls } = makeHarness()
 		const txRequest = wireTxRequest()
 
-		await service.simulateTx(network, txRequest, { simulatePublic: true, skipFeeEnforcement: true, scopes: [accountHex] })
+		await service.simulateTx(network, txRequest, {
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			scopes: [accountHex as unknown as AztecAddress],
+		})
 
 		expect(registered).toEqual([])
 		expect(simulateCalls[0]!.opts.overrides).toBeUndefined()
@@ -165,7 +169,12 @@ describe("PxeService.simulateTx stub-account overrides", () => {
 		const txRequest = wireTxRequest()
 
 		await expect(
-			service.simulateTx(network, txRequest, { simulatePublic: true, skipFeeEnforcement: true, scopes: [accountHex] }, [accountHex]),
+			service.simulateTx(
+				network,
+				txRequest,
+				{ simulatePublic: true, skipFeeEnforcement: true, scopes: [accountHex as unknown as AztecAddress] },
+				[accountHex],
+			),
 		).rejects.toThrow(/no contract instance registered/)
 		expect(simulateCalls).toHaveLength(0)
 	})
