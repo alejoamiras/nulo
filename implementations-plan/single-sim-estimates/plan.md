@@ -134,9 +134,11 @@ after two+ small fuel deposits.
 Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild); clamp commit with per-path pins; fixture extension.
 **Gate** — updated pins (dApp Sponsored/fj 2→1 no-authwit; authwit-bearing ⇒ validated 2); full unit; same milestone e2e pair prover-ON.
 
-### Phase B3 — Full validation (PR 3)
+### Phase B3 — Full validation (PR 3) ✓
 
 **Gate** — `bun run audit:vue`; armed smoke; full `NULO_E2E_PROVERLESS=1 bun run e2e:agent` — all exit 0.
+**RESULT**: all three green at final HEAD (network suite 87/87 twice consecutively, solo runs;
+smoke 79/0 with the migration fixture armed; audit:vue exit 0). Detour + rules: `lessons/phase-B3.md`.
 
 ## Decision ledger
 
