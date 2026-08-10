@@ -558,11 +558,49 @@ describe("FpcStrategy folded (probed) runs — discovery collapses into the firs
 		expect(ctx.op.actions).toHaveLength(3)
 	})
 
-	// This 1-sim pin is ALSO the Ask-1 semantics fixture for the standalone
-	// inner-hash authwit class: a contract that asserts an intent-hash authwit
-	// emits NO offchain effect (Noir fact), so a folded no-effects estimate
-	// SUCCEEDS where the classic validated sizing sim failed at estimate time —
-	// the failure moves to prove time. Owner-accepted trade (plan Ask 1).
+	test("ADVERSARIAL (Ask 1, standalone inner-hash class): folded estimate SUCCEEDS where validated fails — failure moves to prove time", async () => {
+		// Models a contract that asserts an intent-hash authwit via
+		// `assert_inner_hash_valid_authwit`: it emits NO offchain effect (Noir
+		// fact 12), so discovery cannot see the need. A VALIDATED sim dies in
+		// the account's verify (authwit oracle throw); a STUBBED sim completes
+		// with zero effects. The folded pipeline therefore returns an estimate
+		// (and the tx later fails at PROVE time, pre-broadcast) — the
+		// owner-accepted Ask-1 trade. The classic probe-free run of the same op
+		// keeps failing at estimate time.
+		const innerHashSim = (opts: { stubAccountAddresses?: string[] }) => {
+			if (opts.stubAccountAddresses?.length) return Promise.resolve(sentinelSim())
+			return Promise.reject(new Error("Unknown auth witness for message hash 0xdeadbeef"))
+		}
+		const fpc = makeSponsoredFpcLocal()
+		const makeHarness = () => {
+			const builtA = makeBuilt()
+			const buildStandard = vi.fn(async () => builtA)
+			const simulateTxTask = vi.fn((_pxe: unknown, _req: unknown, opts: { stubAccountAddresses?: string[] }) => innerHashSim(opts))
+			const deps = {
+				txBuilder: { buildStandard },
+				simulateTxTask,
+				fpcService: { getFpcImpl: vi.fn(async () => fpc) },
+				tasks: { startNewTask: () => fakeTask },
+				logger: { log: () => {} },
+			} as unknown as FeeStrategyDeps
+			return { deps, simulateTxTask }
+		}
+		const original = { kind: "call", contract: "0xdapp", method: "consume_intent", args: [] } as unknown as Action
+
+		// Folded: succeeds in ONE stubbed sim (no effects → no validated rebuild).
+		const folded = makeHarness()
+		const probe = makeProbe()
+		const result = await new FpcStrategy(folded.deps).buildAndEstimate(foldedCtx(probe, [original]))
+		expect(result.feePaymentMethod).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		expect(folded.simulateTxTask).toHaveBeenCalledTimes(1)
+
+		// Classic (probe-free): the validated sim still fails at estimate time.
+		const classic = makeHarness()
+		const classicCtx = makeCtx({ actions: [original] })
+		classicCtx.feeSettings = { paymentMethod: { kind: "fpc", fpcId: "fpc-1" } } as never
+		await expect(new FpcStrategy(classic.deps).buildAndEstimate(classicCtx)).rejects.toThrow(/Unknown auth witness/)
+	})
+
 	test("SIM-COUNT PIN (fast path fold): no effects ⇒ ONE stubbed sim total — dApp Sponsored estimate 2→1", async () => {
 		const fpc = makeSponsoredFpcLocal()
 		const { deps, buildStandard, simulateTxTask, builtA } = foldedHarness(fpc)

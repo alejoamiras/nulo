@@ -35,3 +35,22 @@
 `bun run test` 3922 passed (+19 over A2) · lint clean · typecheck:all clean. Sim-count end
 state: dApp Sponsored 2→1 (no-authwit), dApp fj 2→1, dApp PrivateFPC 3→2, authwit-bearing
 ops validated 2, intent-authwit + fjwc + embedded unchanged classic.
+
+## Post-impl codex audit — resolutions (session 019fecae…, transcripts in the run's CODEX_DIR)
+
+- **Cleared after fixes (b6065a3)**: fpc custom-limit assert; NO_FROM clamp coverage; L2
+  protocol cap (`MAX_PROCESSABLE_L2_GAS`); the Ask-1 standalone inner-hash class now has a
+  REAL adversarial fixture (folded estimate succeeds / classic validated fails, contrast-pinned).
+- **Held against codex (position restated, not capitulated)**: for INITIALIZATION-WRAPPED
+  builds the fold now runs a validated (unstubbed) first sim — codex called the resulting
+  first-tx authwit-op estimate failure a regression vs "classic stubbed discovery". But
+  classic discovery stubbing the DEPLOYING account is precisely what B1's structural
+  exclusion forbids (same substituted-constructor concern), and shipped production fails this
+  case identically (the stub never engaged). Current behavior = shipped behavior for a
+  vanishingly rare case (an account's first-ever tx being a delegated authwit dApp op), and
+  it is the only B1-compliant option without new measurement. Revisit only with a dedicated
+  measurement of stub-vs-real constructor effect parity.
+- **Owner decision pending**: A2's gate deviation (fragmented-note canary unrunnable without
+  an L1 key) is recorded in plan.md; codex correctly notes only the owner can accept it.
+  Surfaced in the wrap-up — options: accept as-is, or provide a Sepolia key for the
+  fragmented-note re-run before merging PR 3.
