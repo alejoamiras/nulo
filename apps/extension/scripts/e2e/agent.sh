@@ -27,7 +27,7 @@ if [ "${NULO_E2E_PROVERLESS:-}" != "1" ]; then
   marked_files=$(grep -rls "@requires-proverless" "${marker_scan_targets[@]}" 2>/dev/null || true)
   if [ -n "$marked_files" ]; then
     echo "[e2e:agent] FATAL: this run includes proverless-gated test file(s) but NULO_E2E_PROVERLESS is not set:" >&2
-    echo "$marked_files" | sed 's/^/[e2e:agent]   /' >&2
+    while IFS= read -r marked; do echo "[e2e:agent]   $marked" >&2; done <<< "$marked_files"
     echo "[e2e:agent] Re-run as: NULO_E2E_PROVERLESS=1 bun run e2e:agent ${*:-}" >&2
     exit 2
   fi
