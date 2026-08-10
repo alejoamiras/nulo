@@ -263,21 +263,21 @@ arms, so it's deterministically red locally / green on CI).
   for the fixture's stamp/strings (`grep -rl "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome`)
   before suspecting timing or hardware — absence proves an unarmed build in seconds.
 
-## Suite-wide mass failure + "Address already in use" at aztec-node boot
+## Suite-wide mass failure across UNRELATED files (timeouts, retry x2 everywhere)
 
-If a full `e2e:agent` run fails DOZENS of unrelated files (timeouts, wrong-state asserts) and
-the setup log shows `[aztec-node] Error: Address already in use (os error 98)` right after
-"Starting local Aztec network", the run's node never came up healthy — everything downstream
-drowned against a half-dead or foreign node. The runner's CLAIMED ports (printed as
-`[e2e-setup] ports: …`) can all be free and this still happens: the local network binds extra
-sub-services on FIXED DEFAULTS (e.g. 8880/8590) that the port registry does not parameterize,
-so an ORPHANED sandbox from an old run (parented to init, invisible in `~/.agents/ports.md`)
-collides with every new run.
+If a full `e2e:agent` run fails DOZENS of unrelated files while a targeted run of the same
+files is green, suspect the RUN ENVIRONMENT before any code path:
 
-Triage in order:
-1. `pgrep -af "aztec|anvil"` — look for `--local-network` / `anvil` processes with an old
-   start time (`ps -o pid,pgid,lstart -p <pid>`) and ppid 1.
-2. Reap by OWN pgid only (`kill -TERM -<pgid>`), never `pkill -f` — other agents' live runs
-   share this machine.
-3. Re-run. A green re-run confirms the collision; do NOT chase the individual test failures
-   from the poisoned run.
+1. **Concurrent heavy load on the same host is the #1 cause.** A full vitest suite,
+   `audit:vue` (build + tests), or a proving run executing in PARALLEL with the e2e suite
+   starves the sandbox and the browser — 25s silent-call timeouts and 70s feed waits blow
+   across the board. Run the e2e suite ALONE; treat its wall-clock as reserved.
+2. **`[aztec-node] Error: Address already in use (os error 98)` printed once at node boot is
+   BENIGN** — it appears in green runs too (a sub-service retries on another port). Do NOT
+   chase it as the root cause of a red suite.
+3. Orphaned sandboxes from dead runs (ppid 1, old `lstart`, absent from `~/.agents/ports.md`)
+   are still worth reaping — by OWN pgid only (`kill -TERM -<pgid>`), never `pkill -f` —
+   but verify the claim: in the observed incident the orphans held unrelated ports and the
+   re-run reproduced the boot line anyway.
+4. A green isolated re-run of a few failed files confirms environment, not code. Re-run the
+   full suite solo before touching any test.
