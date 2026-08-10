@@ -117,6 +117,15 @@ Full table + gotchas: `lessons/phase-B1.md`.
 
 ### Phase A2 — PrivateFPC fold (PR 3; B1-gated AND Ask-4(a)-conditional) ✓
 
+**GATE DEVIATION (recorded for owner review, flagged by the codex post-impl audit):** the
+fragmented-note PrivateFPC inclusion canary listed in this phase's original gate could NOT be
+run — synthesizing note fragmentation requires multiple L1→L2 deposits and Ask 4(a) provided
+an Aztec account secret, not a Sepolia L1 key. The mined PrivateFPC canary DID exercise the
+real credit-note subtract path (`recurse_subtract_balance_internal`) against the owner's
+actual note set on stub-derived gas limits. A2 was marked ✓ on that basis; if the owner wants
+the fragmented-note case before merge, provide a Sepolia key and re-run B1's canary stage
+after two+ small fuel deposits.
+
 **Runs only if the Sepolia key was provisioned and the funded PrivateFPC measurement (incl. fragmented-note inclusion canary) passed the <1% rule; otherwise marked DEFERRED and PR 3 ships B2 alone.** P1 stubbed + probe; F-4 rule + first-sim-only + dedup; folded bail; adversarial fixtures (sponsored-typed non-canonical row + the standalone inner-hash class from Ask 1). dApp `fpc` 3→2 pins.
 **Gate** — pins + fixtures + discovery-equivalence; full unit; milestone e2e: `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`.
 

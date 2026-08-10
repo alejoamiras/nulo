@@ -28,6 +28,10 @@ const PRIORITY = new GasFees(7n, 8n)
 
 function sentinelTxRequest() {
 	return {
+		// A non-initialization-wrapped request: origin == the account address
+		// (the multicall-wrapped shape carries the entrypoint address instead,
+		// and must never be stubbed — pinned below).
+		origin: { toString: () => "0xaccount" },
 		txContext: {
 			gasSettings: new GasSettings(new Gas(11_000, 22_000), new Gas(3_300, 4_400), new GasFees(555n, 666n), PRIORITY),
 		},
@@ -412,6 +416,33 @@ describe("FeeJuiceStrategy folded (probed) runs", () => {
 		expect(ctx.op.actions).toEqual([original, DISCOVERED_FJ])
 	})
 
+	test("INITIALIZATION-WRAPPED build (origin ≠ account) is never stubbed, even under a probe", async () => {
+		const builtA = makeBuilt()
+		;(builtA.txRequest as { origin: unknown }).origin = { toString: () => "0xmulticall-entrypoint" }
+		const buildStandard = vi.fn(async () => builtA)
+		const simulateTxTask = vi.fn(async () => sentinelSim())
+		const deps = {
+			txBuilder: { buildStandard },
+			simulateTxTask,
+			fpcService: { getFpcImpl: vi.fn() },
+			tasks: { startNewTask: () => fakeTask },
+			logger: { log: () => {} },
+		} as unknown as FeeStrategyDeps
+		const probe = { extractEffects: vi.fn(async () => []), collected: [] }
+		const ctx = fjFoldedCtx(probe, [])
+
+		await new FeeJuiceStrategy(deps).buildAndEstimate(ctx)
+
+		// Validated options — no stub, no skipTxValidation — despite the probe.
+		expect((simulateTxTask.mock.calls[0] as unknown[])[2]).toEqual({
+			simulatePublic: true,
+			skipFeeEnforcement: true,
+			scopes: [builtA.account.address],
+		})
+		// The probe still gets the (validated) sim for effect extraction.
+		expect(probe.extractEffects).toHaveBeenCalledTimes(1)
+	})
+
 	test("probe-free fj run keeps ONE validated sim byte-for-byte (inertness)", async () => {
 		const { deps, simulateTxTask, built } = makeDeps()
 		await new FeeJuiceStrategy(deps).buildAndEstimate(makeCtx())
@@ -527,6 +558,11 @@ describe("FpcStrategy folded (probed) runs — discovery collapses into the firs
 		expect(ctx.op.actions).toHaveLength(3)
 	})
 
+	// This 1-sim pin is ALSO the Ask-1 semantics fixture for the standalone
+	// inner-hash authwit class: a contract that asserts an intent-hash authwit
+	// emits NO offchain effect (Noir fact), so a folded no-effects estimate
+	// SUCCEEDS where the classic validated sizing sim failed at estimate time —
+	// the failure moves to prove time. Owner-accepted trade (plan Ask 1).
 	test("SIM-COUNT PIN (fast path fold): no effects ⇒ ONE stubbed sim total — dApp Sponsored estimate 2→1", async () => {
 		const fpc = makeSponsoredFpcLocal()
 		const { deps, buildStandard, simulateTxTask, builtA } = foldedHarness(fpc)

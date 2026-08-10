@@ -37,7 +37,7 @@
  * to `baseFees` BEFORE computing maxFee for the fee-payload actions.
  */
 
-import { MAX_TX_DA_GAS } from "@aztec/constants"
+import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec/constants"
 import type { AztecAddress } from "@aztec/stdlib/aztec-address"
 import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
@@ -138,9 +138,23 @@ export interface FeeStrategy {
 
 /** First-sim options shared by every probed (folded) strategy: stubbed
  *  (+`skipTxValidation` — the validator rejects the substituted class) under a
- *  probe, the shipped validated options byte-for-byte without one. */
-export function probedFirstSimOpts(probe: DiscoveryProbe | undefined, address: AztecAddress): Parameters<SimulateTxFn>[2] {
-	return probe
+ *  probe, the shipped validated options byte-for-byte without one.
+ *
+ *  INITIALIZATION-WRAPPED requests are never stubbed (B1 structural
+ *  exclusion): a first-tx build wraps the constructor via the multicall
+ *  entrypoint, and overriding the deploying account's class would simulate a
+ *  DIFFERENT constructor than the one the tx executes. Detection is
+ *  structural and RPC-free — a wrapped request's `origin` is the multicall
+ *  entrypoint, not the account. The probe still extracts from the validated
+ *  sim (offchain effects are consumer-emitted); an op that NEEDS an authwit
+ *  fails that sim loudly, exactly like the classic validated pipeline. */
+export function probedFirstSimOpts(
+	probe: DiscoveryProbe | undefined,
+	built: { txRequest: TxExecutionRequest; account: { address: AztecAddress } },
+): Parameters<SimulateTxFn>[2] {
+	const address = built.account.address
+	const stubSafe = built.txRequest.origin?.toString() === address.toString()
+	return probe && stubSafe
 		? {
 				simulatePublic: true,
 				skipFeeEnforcement: true,
@@ -181,6 +195,38 @@ export function suggestGasLimits(txRequest: TxExecutionRequest, options?: FeeOpt
 	}
 }
 
+/** Effective per-tx admission cap: the node-advertised `txsLimits` further
+ *  bounded by the protocol maxima on BOTH axes (mirrors upstream
+ *  `get_gas_limits.ts` — a node advertising inflated limits must not widen
+ *  what the protocol can process). */
+export function admissionCap(txsLimits?: Gas): Gas | undefined {
+	return txsLimits ? new Gas(Math.min(txsLimits.daGas, MAX_TX_DA_GAS), Math.min(txsLimits.l2Gas, MAX_PROCESSABLE_L2_GAS)) : undefined
+}
+
+/** Assert-and-throw for dApp-supplied custom limits against the admission
+ *  cap, WITHOUT honoring them — for paths (FPC) whose finalize deliberately
+ *  ignores custom limits in the committed gasSettings but still simulates
+ *  under them via `suggestGasLimits`. Keeps the clamp contract uniform:
+ *  over-cap custom limits throw everywhere, never silently vanish. */
+export function assertCustomGasLimitsWithinCap(fee: FeeOptions | undefined, txsLimits?: Gas): void {
+	const cap = admissionCap(txsLimits)
+	if (!cap || !fee) {
+		return
+	}
+	if (fee.gasLimits && (fee.gasLimits.daGas > cap.daGas || fee.gasLimits.l2Gas > cap.l2Gas)) {
+		throw new Error(
+			`Requested gasLimits (da=${fee.gasLimits.daGas}, l2=${fee.gasLimits.l2Gas}) exceed the network per-tx admission ` +
+				`limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
+		)
+	}
+	if (fee.teardownGasLimits && (fee.teardownGasLimits.daGas > cap.daGas || fee.teardownGasLimits.l2Gas > cap.l2Gas)) {
+		throw new Error(
+			`Requested teardownGasLimits (da=${fee.teardownGasLimits.daGas}, l2=${fee.teardownGasLimits.l2Gas}) exceed the ` +
+				`network per-tx admission limit (da=${cap.daGas}, l2=${cap.l2Gas}).`,
+		)
+	}
+}
+
 /** Final gas-limit + maxFee calculation after a simulation. FJ / FJWC /
  *  Embedded call this; FPC has a custom post-simulation path.
  *
@@ -188,8 +234,7 @@ export function suggestGasLimits(txRequest: TxExecutionRequest, options?: FeeOpt
  *  Embedded passes 1 explicitly to stay within the dApp's budget.
  *
  *  `txsLimits` — the build-time-retained per-tx admission cap (further bounded
- *  by the protocol's `MAX_TX_DA_GAS` on the DA axis; no protocol L2 per-tx
- *  constant exists — L2 is node-advertised only). When present:
+ *  by the protocol's `MAX_TX_DA_GAS` / `MAX_PROCESSABLE_L2_GAS`). When present:
  *  - measured usage already over the cap ⇒ THROW (the tx can never be
  *    admitted; an uncapped estimate would fail later, at the node, with a
  *    worse error);
@@ -232,7 +277,7 @@ export async function finalizeGasLimits(
 		}
 	}
 
-	const cap = txsLimits ? new Gas(Math.min(txsLimits.daGas, MAX_TX_DA_GAS), txsLimits.l2Gas) : undefined
+	const cap = admissionCap(txsLimits)
 	if (cap) {
 		const measured = simulatedTx.gasUsed.totalGas
 		if (measured.daGas > cap.daGas || measured.l2Gas > cap.l2Gas) {

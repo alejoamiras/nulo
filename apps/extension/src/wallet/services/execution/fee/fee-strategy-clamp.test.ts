@@ -12,7 +12,7 @@
  * - zero teardown stays zero; absent txsLimits (defensive) ⇒ unchanged.
  */
 
-import { MAX_TX_DA_GAS } from "@aztec/constants"
+import { MAX_PROCESSABLE_L2_GAS, MAX_TX_DA_GAS } from "@aztec/constants"
 import { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import { Gas, GasFees, GasSettings } from "@aztec/stdlib/gas"
 import type { TxSimulationResult } from "@aztec/stdlib/tx"
@@ -119,6 +119,14 @@ describe("finalizeGasLimits admission clamp", () => {
 		expect(gs.gasLimits.daGas).toBe(MAX_TX_DA_GAS)
 	})
 
+	test("the L2 axis is additionally bounded by the protocol MAX_PROCESSABLE_L2_GAS", async () => {
+		const r = req()
+		const hugeNodeCap = new Gas(1_000_000, MAX_PROCESSABLE_L2_GAS * 10)
+		await finalizeGasLimits(node, r, sim([100, MAX_PROCESSABLE_L2_GAS - 1]), 100, undefined, undefined, undefined, hugeNodeCap)
+		const gs = (r as { txContext: { gasSettings: GasSettings } }).txContext.gasSettings
+		expect(gs.gasLimits.l2Gas).toBe(MAX_PROCESSABLE_L2_GAS)
+	})
+
 	test("absent txsLimits (defensive) keeps the historical uncapped behavior", async () => {
 		const r = req()
 		await finalizeGasLimits(node, r, sim([1_000, 1_000]), 2)
@@ -132,6 +140,7 @@ describe("per-path clamp forwarding — every strategy passes its build's retain
 	function built(txsLimits: Gas) {
 		return {
 			txRequest: {
+				origin: { toString: () => "0xaccount" },
 				txContext: { gasSettings: new GasSettings(new Gas(1, 1), new Gas(1, 1), new GasFees(5n, 5n), GasFees.empty()) },
 			},
 			node,
@@ -196,6 +205,19 @@ describe("per-path clamp forwarding — every strategy passes its build's retain
 			getFeePayload: () => [],
 		}
 		await expect(new FpcStrategy(deps(built(TIGHT), fpc)).buildAndEstimate(ctx("fpc"))).rejects.toThrow(/cannot be included/)
+	})
+
+	test("fpc paths ASSERT over-cap dApp custom limits instead of silently discarding them", async () => {
+		const fpc = {
+			infoData: { type: FpcType.PrivateFpc, isProtocol: true },
+			getTotalGas: () => new Gas(0, 0),
+			getTeardownGas: () => new Gas(0, 0),
+			getFeePayload: () => [],
+		}
+		const b = built(new Gas(1_000_000, 1_000_000))
+		await expect(
+			new FpcStrategy(deps(b, fpc)).buildAndEstimate(ctx("fpc", { gasLimits: { daGas: 2_000_000, l2Gas: 1 } })),
+		).rejects.toThrow(/Requested gasLimits/)
 	})
 
 	test("generous cap leaves every strategy's estimate untouched (fj probe)", async () => {

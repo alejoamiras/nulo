@@ -26,12 +26,7 @@ export class FeeJuiceStrategy implements FeeStrategy {
 		try {
 			let built = await this.deps.txBuilder.buildStandard(ctx.op, AccountFeePaymentMethodOptions.PREEXISTING_FEE_JUICE, task)
 			suggestGasLimits(built.txRequest, ctx.op.fee)
-			let simulatedTx = await this.deps.simulateTxTask(
-				built.pxe,
-				built.txRequest,
-				probedFirstSimOpts(ctx.probe, built.account.address),
-				task,
-			)
+			let simulatedTx = await this.deps.simulateTxTask(built.pxe, built.txRequest, probedFirstSimOpts(ctx.probe, built), task)
 			let discovered: Action[] = []
 			if (ctx.probe) {
 				discovered = await ctx.probe.extractEffects(simulatedTx, { node: built.node, network: built.network })
