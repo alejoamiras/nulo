@@ -13,6 +13,26 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
+# Proverless-marker guard: some network tests only function against a
+# proverless-armed build (their e2e gate is compiled OUT otherwise, and they
+# fail as an inscrutable multi-minute timeout instead of an error). Those
+# files carry a formal `@requires-proverless` marker line; running any of
+# them unarmed is refused HERE, before a single port or build cycle is spent.
+if [ "${NULO_E2E_PROVERLESS:-}" != "1" ]; then
+  if [ "$#" -gt 0 ]; then
+    marker_scan_targets=("$@")
+  else
+    marker_scan_targets=(tests/e2e/network)
+  fi
+  marked_files=$(grep -rls "@requires-proverless" "${marker_scan_targets[@]}" 2>/dev/null || true)
+  if [ -n "$marked_files" ]; then
+    echo "[e2e:agent] FATAL: this run includes proverless-gated test file(s) but NULO_E2E_PROVERLESS is not set:" >&2
+    echo "$marked_files" | sed 's/^/[e2e:agent]   /' >&2
+    echo "[e2e:agent] Re-run as: NULO_E2E_PROVERLESS=1 bun run e2e:agent ${*:-}" >&2
+    exit 2
+  fi
+fi
+
 PORTS_JSON=".e2e-state/ports.json"
 
 # DELIBERATELY NO signal trap here (review CONFIRMED x5): bash defers INT/TERM traps until the
