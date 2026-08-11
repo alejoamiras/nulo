@@ -240,6 +240,14 @@ export async function fetchPublicTokenTransferEvents(
 	// NOT on the fork we're about to scan → throw so the caller escalates to reconciliation.
 	if (args.verifyAncestorHash !== undefined) {
 		if (args.referenceBlock === undefined) throw new Error("verifyAncestorHash requires a referenceBlock anchor")
+		// Identity short-circuit: the anchor IS the reference block — same hash, same block, same
+		// fork by definition. The membership query must not run here: a block is NOT a member of
+		// its own archive snapshot (verified against live Alpha), so a caught-up scanner probing a
+		// non-advancing checkpoint got a spurious "reorg" → a full reconciliation on EVERY quiet
+		// poll tick until the chain moved.
+		if (args.verifyAncestorHash === args.referenceBlock) {
+			return { events: [], scannedThrough: null, hasMore: false, dropped: false }
+		}
 		const witness = await node.getBlockHashMembershipWitness(
 			BlockHash.fromString(args.referenceBlock),
 			BlockHash.fromString(args.verifyAncestorHash),
