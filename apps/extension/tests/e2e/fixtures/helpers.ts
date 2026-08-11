@@ -1156,11 +1156,18 @@ export async function captureBalanceBaseline(page: Page, account: string): Promi
 
 /** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
  *  captured baseline — proves a re-projection actually ran) and CORRECT (exact
- *  raw `publicBalance`). Drives at most `maxRefreshes` refreshes, each only
- *  after the previous projection observably finished (some row's `updatedAt`
- *  advanced past the last refresh) — re-projection is what advances PXE sync,
- *  but blind refresh spam starves the popup thread and queues PXE readers that
- *  delay any subsequent purge (ReadWriteGuard drains readers first). The row
+ *  raw `publicBalance`). Drives at most `maxRefreshes` refreshes. Retry cadence:
+ *  a refresh is re-kicked when the previous projection observably finished (some
+ *  row's `updatedAt` advanced past the last refresh) OR a bounded projection
+ *  envelope elapsed with no write — a FAILED projection writes nothing (the
+ *  token-balance pipeline persists no failure record; the gas pipeline got a
+ *  retry in the cold-start work, this one did not), so "still running" and
+ *  "failed silently" are indistinguishable from storage and waiting for a write
+ *  alone can starve the loop at one refresh (observed live: correct row, stale
+ *  updatedAt, 1 refresh in 90s). The envelope bounds only WHEN TO RE-KICK, never
+ *  the acceptance signal, which stays freshness + exact value. Bounded refreshes
+ *  (not spam) matter: blind spam starves the popup thread and queues PXE readers
+ *  that delay any subsequent purge (ReadWriteGuard drains readers first). The row
  *  read is exact and locale-independent — a body-text scan for "1,000" can
  *  false-positive on "$1,000.00" fiat or "11,000". Callers follow with a
  *  card-scoped DOM assertion (`waitForTokenCardAmount`) so projection→render
@@ -1188,13 +1195,17 @@ export async function waitForFreshBalanceRow(
 			return rows
 		}, account)
 
+	// Queue tick (1s) + a ≤12-row projection batch + margin. Bounds the re-kick
+	// cadence only — see the doc comment.
+	const REFRESH_ENVELOPE_MS = 15_000
 	let refreshes = 0
 	let lastRefreshAt = 0
 	let rows: BalanceRow[] = []
 	while (Date.now() < deadline) {
 		rows = await readRows()
 		if (rows.some((r) => (r.updatedAt ?? 0) > baselineUpdatedAt && r.publicBalance === expectedPublicRaw)) return
-		const attemptFinished = refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt)
+		const attemptFinished =
+			refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt) || Date.now() - lastRefreshAt >= REFRESH_ENVELOPE_MS
 		if (attemptFinished && refreshes < maxRefreshes) {
 			lastRefreshAt = Date.now()
 			refreshes++
