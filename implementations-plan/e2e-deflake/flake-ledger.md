@@ -80,8 +80,20 @@ the latent-risk section tracks further OPEN follow-ups — nothing is silently d
   hammering), i.e. the balance never converged across ~4 minutes. The wallet-side
   cause space (concurrent offscreen balance reads racing/wedging) is exactly what
   #355 ("offscreen single-flight, balance retry") targets — both reds predate
-  its merge. Status: watch; the test-side refresh-spam pattern remains suspect
-  (each spam click can restart/queue sync work and prolong convergence).
+  its merge. The refresh-spam/text-scan wait itself is FIXED (freshness-gated
+  row wait, Phase 2).
+- **OPEN — observed once, armed, under watch**: during the full-suite pre-push
+  gate (2026-08-11), the RECOVERED leg reached the convergence step with **zero
+  token-balance rows for the funded account** — and refreshes cannot create rows,
+  only re-project existing ones, so no wait could ever converge (the old text
+  scan would have parked silently on the same state; the new wait dumped it).
+  Suspected mechanism: a mid-restore SW kill landing where the profile finalizes
+  but token/balance slices are lost — i.e. a restore-atomicity product gap, not
+  a test-wait problem. NOT reproduced in 4 subsequent solo runs + 5 targeted
+  runs (all green). The timeout dump now includes a storage census (token rows /
+  all balance rows / account rows) that will discriminate slice-loss vs
+  row-keying on the next occurrence. If it fires during certification, it resets
+  the count and gets root-caused from the census.
 
 ### 4+5. `approveExecute` cold-popup — canary red (93556176574) + cancel-mid-prove red (92728645789)
 
