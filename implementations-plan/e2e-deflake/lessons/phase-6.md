@@ -43,5 +43,19 @@ OBSERVABLE from the still-open page: nav-to-general (post-finalize recovery) OR
 tombstone-prefix present / profile rows zero (rollback dispatched — the SW-side cascade
 then survives page close). Then close + reopen exactly as today. Both designed legs
 become deterministic; the manufactured browser-crash state leaves the gate and becomes
-the ledgered product ask. First consult attempt died on a codex capacity error
-(logged per AFK rules); retry in flight.
+the ledgered product ask.
+
+**Consult record (AFK protocol)**: TWO codex resume attempts died on "model at
+capacity" (2026-08-11 ~22:0xZ) — logged here per the standing AFK rules; proceeded on
+own judgment with option A (rationale: re-sequences only the kill; changes no
+assertions; removes a test-manufactured race; the dropped browser-crash state was never
+modeled, always flaked, and is reported to the owner as the product ask). Codex should
+re-review this decision in the post-impl audit when capacity returns.
+
+**Fix applied** (`71c8678`): post-kill fork wait (30s bound, fail-loud with a storage
+dump on an unknown third state). **Validation**: 3 consecutive confirmed greens solo
+with retries off (runs 2/3/4; run 1 also exited green) — run WITH another agent's
+bb-prover load on the box, closer to the CI-load condition than the earlier idle runs.
+Local full-suite load-repro skipped deliberately: another agent's live sandbox makes a
+concurrent full run mass-fail-prone in both directions (run-solo memory); the
+certification shards themselves are the loaded-context empirical test.
