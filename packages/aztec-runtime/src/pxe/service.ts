@@ -34,7 +34,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ReadWriteGuard } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
-import { ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
+import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { listChainStoreDirs, removeChainStoreDir, removeProfileStoreDirs } from "./opfs-store"
 import { ArtifactRegistry } from "./artifact-registry"
@@ -843,8 +843,25 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			}
 			throw new Error(`${label}: chain runtime kept rebinding/vanishing after ${PxeService.MAX_RUNTIME_BIND_ATTEMPTS} attempts`)
 		} catch (err) {
-			this.logError(`[READ] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
+			this.logOpFailure("READ", label, start, err)
 			throw err
+		}
+	}
+
+	/**
+	 * A `PXE_STORE_KEY_MISSING` rejection is a designed protocol step, not an
+	 * incident: keys live in offscreen memory only, so the FIRST profile-scoped
+	 * op after an offscreen boot misses and the SW client derives +
+	 * re-provisions + retries once. Logging it at error painted three red lines
+	 * on every cold start for a condition that self-heals in ~1s; a retry that
+	 * ALSO fails still surfaces at the caller. Everything else stays error.
+	 */
+	private logOpFailure(kind: "READ" | "WRITE", label: string, start: number, err: unknown): void {
+		const message = err instanceof Error ? err.message : String(err)
+		if (message.includes(PXE_STORE_KEY_MISSING)) {
+			this.logDebug(`[${kind}] ${label} pre-provision miss after ${Date.now() - start}ms (client re-provisions + retries)`)
+		} else {
+			this.logError(`[${kind}] ${label} failed after ${Date.now() - start}ms`, message)
 		}
 	}
 
@@ -874,7 +891,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				})
 			})
 		} catch (err) {
-			this.logError(`[WRITE] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
+			this.logOpFailure("WRITE", label, start, err)
 			throw err
 		}
 	}
