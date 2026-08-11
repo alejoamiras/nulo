@@ -22,4 +22,4 @@ test("reset profile wipes state and routes to register", async ({ registeredExte
 	await page.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 10_000 })
 
 	expect(registeredExtensionPerTest.pageErrors).toEqual([])
-}, 45_000)
+}, 30_000)

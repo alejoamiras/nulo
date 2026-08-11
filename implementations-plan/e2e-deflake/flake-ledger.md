@@ -139,8 +139,9 @@ a ledger entry below.
 - `security-reset.test.ts:15`: 10s post-reset route wait racing the awaited purge —
   same structural race as ledger entry 6; fixed in the Fix 5 sweep.
 - `approveExecute` `feeMethod: "fj"|"fpc"` can never match the runtime
-  `send-fee-method-{public|private|sponsored}` testids (unexercised) — fixed in the
-  Fix 3 sweep.
+  `send-fee-method-{public|private|sponsored}` testids (unexercised) — OPEN follow-up
+  (dropped from this arc per codex: unrelated scope, `"fpc"` has no clean subtitle
+  mapping; needs a deliberate API change with exercised tests).
 - `isInteractionCancelled` window: `execute-confirm-btn` stays enabled while
   `approve()` silently no-ops (`index.vue:341`); `DappCancelledOverlay` carries no
   testid. No current test races a cancel against approve. OPEN follow-up.
@@ -156,12 +157,13 @@ a ledger entry below.
 
 ## Cross-cutting observations
 
-- Every failure is a **wait on a UI signal that is downstream of un-modeled async
-  work** (remote RPC latency envelope, awaited purge cascade, fee-estimation
-  settle, service-storm tail) — none is a wrong assertion, none scattered
-  randomly across files. Genuine flake scatters; these cluster on 6 specific
-  waits. (Also rules out the unarmed-dist trap: reds are single-file, not the
-  deterministic same-5 signature.)
+- **14 of the 15 red jobs** carry puppeteer wait-timeouts (15 timeout occurrences —
+  job 93556897384 has two); the 15th is the foundry-502 infra failure. Every
+  timeout is a **wait on a UI signal downstream of un-modeled async work**
+  (nav race, awaited purge cascade, fee-estimation settle, RPC-gated route) —
+  none is a wrong assertion, none scattered randomly across files. Genuine flake
+  scatters; these cluster on 6 specific waits. (Also rules out the unarmed-dist
+  trap: reds are single-file, not the deterministic same-5 signature.)
 - Shard topology concentrates risk: shard 1 = integrity + opfs (both drive the
   reset flow), shard 3 = sw-restart + cancel-mid-prove.
 - `NULO_E2E_RETRY=0` on network shards (no vitest retry) — every network red is

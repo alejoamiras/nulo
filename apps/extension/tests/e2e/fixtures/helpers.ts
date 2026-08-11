@@ -1045,19 +1045,51 @@ export async function changePassword(page: Page, oldPwd: string, newPwd: string)
  *  caller asserts the redirect; this helper does not. */
 export async function resetProfile(page: Page): Promise<void> {
 	const RESET_HASH = "#/popup/settings/security/reset"
-	const ATTEMPTS = 3
+	// One re-navigation covers the single characterized race (a competing push
+	// already in flight when the hash was set supersedes our navigation). A SECOND
+	// revert would mean the app is repeatedly redirecting away from reset — a
+	// product-level condition this helper must surface, never normalize.
+	const ATTEMPTS = 2
+	// The dwell must be monotonic: the route+checkbox condition has to hold
+	// CONTINUOUSLY for the window, tracked in-page — a plain waitForFunction
+	// resolves on its first truthy poll and proves nothing about stability.
+	const DWELL_MS = 1_500
+
+	// Poll-based hash trajectory (vue-router hash nav is pushState-based — no
+	// hashchange/popstate fires), dumped into every failure for race forensics.
+	await page.evaluate(() => {
+		const w = window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }>; __nuloResetNavTraceTimer?: number }
+		if (!w.__nuloResetNavTrace) {
+			w.__nuloResetNavTrace = [{ t: Date.now(), hash: window.location.hash }]
+			w.__nuloResetNavTraceTimer = window.setInterval(() => {
+				const trace = w.__nuloResetNavTrace as Array<{ t: number; hash: string }>
+				if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
+			}, 100)
+		}
+	})
+
 	let lastDiag = ""
 	let settled = false
 	for (let attempt = 0; attempt < ATTEMPTS && !settled; attempt++) {
 		await navigateByHash(page, RESET_HASH)
 		try {
 			await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
-			// Mounted — now require the route to STAY committed across a settle window
-			// (a superseding push lands within router-commit time, well under this).
+			await page.evaluate(() => {
+				;(window as unknown as { __resetStableSince: number | null }).__resetStableSince = null
+			})
 			await page.waitForFunction(
-				(h: string) => window.location.hash === h && !!document.querySelector('[data-testid="reset-checkbox-permanent"]'),
-				{ timeout: 2_000, polling: 200 },
-				RESET_HASH,
+				({ h, dwellMs }: { h: string; dwellMs: number }) => {
+					const w = window as unknown as { __resetStableSince: number | null }
+					const ok = window.location.hash === h && !!document.querySelector('[data-testid="reset-checkbox-permanent"]')
+					if (!ok) {
+						w.__resetStableSince = null
+						return false
+					}
+					if (w.__resetStableSince == null) w.__resetStableSince = Date.now()
+					return Date.now() - w.__resetStableSince >= dwellMs
+				},
+				{ timeout: 8_000, polling: 150 },
+				{ h: RESET_HASH, dwellMs: DWELL_MS },
 			)
 			settled = true
 		} catch {
@@ -1067,6 +1099,7 @@ export async function resetProfile(page: Page): Promise<void> {
 						hash: window.location.hash,
 						pageRootMounted: !!document.querySelector("[data-profile-name]"),
 						checkboxInDom: !!document.querySelector('[data-testid="reset-checkbox-permanent"]'),
+						navTrace: (window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }> }).__nuloResetNavTrace,
 						testidsOnPage: [...document.querySelectorAll("[data-testid]")]
 							.slice(0, 12)
 							.map((el) => el.getAttribute("data-testid")),
@@ -1076,8 +1109,16 @@ export async function resetProfile(page: Page): Promise<void> {
 			)
 		}
 	}
+	await page
+		.evaluate(() => {
+			const w = window as unknown as { __nuloResetNavTraceTimer?: number }
+			if (w.__nuloResetNavTraceTimer) window.clearInterval(w.__nuloResetNavTraceTimer)
+		})
+		.catch(() => {})
 	if (!settled) {
-		throw new Error(`resetProfile: reset route never committed-and-stuck after ${ATTEMPTS} navigations; last parked state: ${lastDiag}`)
+		throw new Error(
+			`resetProfile: reset route never held for ${DWELL_MS}ms across ${ATTEMPTS} navigations; last parked state: ${lastDiag}`,
+		)
 	}
 	const profileName = await getActiveProfileName(page)
 
@@ -1139,7 +1180,19 @@ export async function waitForProfilePurged(
 		if (!Object.values(last).some(Boolean)) return
 		await new Promise((r) => setTimeout(r, 500))
 	}
-	throw new Error(`waitForProfilePurged: purge incomplete after ${timeoutMs}ms for profile ${profileId}: ${JSON.stringify(last)}`)
+	// The "Couldn't delete profile" rejection toast auto-dismisses in ~2s, so it
+	// cannot be sampled at timeout; the persisting tombstone+row combination IS the
+	// rejected-or-wedged signature. Session presence distinguishes "delete never
+	// started (still logged in, nothing changed)" from "mid-purge wedge".
+	const sessionPresent = await page
+		.evaluate(async () => {
+			const r = await chrome.storage.session.get("nulo:core:session")
+			return !!r["nulo:core:session"]
+		})
+		.catch(() => "unreadable")
+	throw new Error(
+		`waitForProfilePurged: purge incomplete after ${timeoutMs}ms for profile ${profileId}: ${JSON.stringify(last)}; sessionPresent=${sessionPresent}`,
+	)
 }
 
 /** Drive the seed-phrase reveal flow on `/popup/settings/security/export/seed`.

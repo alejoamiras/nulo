@@ -14,11 +14,13 @@ Eliminate the flakes by root-cause fixes. Banned as "fixes": raising timeouts, w
 
 ## Architecture & Implementation
 
-The blast surface is almost entirely the e2e layer (`apps/extension/tests/e2e/**`), plus (a) small product-side observability additions ONLY where no deterministic signal exists today, and (b) one CI workflow hardening. No storage-shape changes, no gate-config changes.
+The blast surface is the e2e layer (`apps/extension/tests/e2e/**`) plus one CI workflow hardening — **no product-source files, period** (round-2 codex: the earlier "small product-side observability additions" allowance contradicted the freeze; struck). No storage-shape changes, no gate-config changes.
 
-### Fix 1 — smoke `backup-roundtrip.test.ts:132` (6 reds) — ROOT-CAUSED, classified OPEN (owner decision)
+### Fix 1 — smoke `backup-roundtrip.test.ts:132` (6 reds) — control-flow CONFIRMED, trigger UNINSTRUMENTED; classified OPEN (owner decision)
 
-**Root cause (confirmed by reading the product, not just the timing)**: the post-import
+**Root-cause status (precise, per round-2 codex)**: the control-flow dependency is
+source-confirmed; that RPC latency is the actual timeout trigger remains an inference
+until the Phase-5 diagnostics instrument it. The post-import
 route-to-`/popup/general` is gated on `appStore.isLogined`, which
 `bootstrapActiveProfile` flips ONLY AFTER the **RPC-bound** `await appStore.syncTransactions()`
 completes (`useProfileBootstrap.ts:78-87`). On the smoke build the seeded network is the
@@ -133,8 +135,9 @@ Expected-value-only polling masks the very regression the test exists to catch.
 - Re-trigger the refresh ONLY on an OBSERVABLE finished/failed attempt (a completed queue
   tick that left `updatedAt` unchanged) — NOT on an invented "settled-but-stale" state that
   storage cannot currently distinguish (codex). If no such observable-retry signal exists
-  cleanly, bound the loop to ≤N refreshes within the existing total budget and state N
-  explicitly (fable C3) — no unbounded respawn of the spam.
+  cleanly, the loop is bounded to **≤5 refreshes** within the existing total budget
+  (N chosen: 5 — matches the queue's 1s tick × the documented convergence envelope with
+  margin; round-2 codex demanded a concrete N).
 - Signal source verified: `updatedAt` bumped by `BalanceJobQueue.syncBatch`
   (`balance-job-queue.ts:156-162`); raw-storage poll pattern established
   (`in-flight-send-guard.test.ts:36-49`). Kills the body-text false-positive class
@@ -174,8 +177,9 @@ its replacement fail loudly)**:
   regression fails at setup with a named cause instead of mid-L1-deploy (fable C1, codex).
 - THEN delete the "Install Foundry" step + the dead `FOUNDRY_DIR` export
   (`setup-aztec/action.yml:47`).
-- Consider bumping the aztec-CLI cache key/schema once to force a single cold install that
-  exercises the fresh path under the new preflight (codex).
+- Bump the aztec-CLI cache key/schema once (NON-optional, round-2 codex) so one cold
+  install certifies the fresh path under the new preflight — otherwise the deletion ships
+  with the fresh-install path untested.
 - grep-verify no other `~/.foundry`/`FOUNDRY_DIR` consumer at merge time.
 - fix the stale `.github/README.md:45` "triggers on the next sync" claim (`labeled` fires
   immediately).
@@ -339,15 +343,21 @@ Layers: lint/typecheck + smoke e2e.
 **Phase 6 — Certification** — written run-counting rules (codex + fable C4).
 Pre-push: `bun run test` + full armed `bun run test:e2e` SOLO + full `NULO_E2E_RETRY=0 bun run e2e:agent`
 SOLO all green locally.
-Then PR into dev labeled `e2e:smoke` + `e2e:network`. **A qualifying green "run" requires
-ALL of**: (i) `quality-status` + `smoke-e2e-status` + `network-e2e-status` all green; (ii)
-GitHub `run_attempt == 1` on every job (no re-run button); (iii) zero vitest retries in the
-logs (grep the job logs — smoke hardcodes 2 retries, so a green that USED a retry does NOT
-qualify); (iv) no job skipped that should have run; (v) distinct trigger events, each a
-DISTINCT tree SHA (fresh whitespace push), waited to completion before the next push
-(concurrency cancels predecessors — a cancelled/superseded run is void, not counted). Record
-a 3-row run-ID / SHA / job-conclusion matrix. **Any red or any tree-content change resets the
-count to zero.** 2-of-3 green with the third root-caused = checkpoint, not done.
+Then PR into dev labeled `e2e:smoke` + `e2e:network`. **Freeze the tree first** — the three
+certification triggers are **EMPTY commits** (`git commit --allow-empty`): distinct commit
+SHAs, identical tree content (round-2 codex killed the contradictory "whitespace push +
+tree-change resets" pair). **A qualifying green "run" requires ALL of**: (i)
+`quality-status` + `smoke-e2e-status` + `network-e2e-status` all green; (ii) GitHub
+`run_attempt == 1` on every job (no re-run button); (iii) zero vitest retries in the logs
+(smoke hardcodes 2 retries — a green that USED a retry does NOT qualify); (iv) **zero
+runtime exit-86 agent retries** — inspect runtime `##[warning]` annotations via
+`gh api .../jobs/<id>/logs`, never the source-echoing `gh run view --log` (a green that
+needed the infra re-boot is not a certified green); (v) no job skipped that should have
+run; (vi) each trigger waited to completion before the next empty commit (concurrency
+cancels predecessors — a cancelled/superseded run is void, not counted). Record a 3-row
+run-ID / commit-SHA / per-job-conclusion matrix. **Any red resets the count; any
+SUBSTANTIVE tree change (a fix) resets the count.** 2-of-3 green with the third
+root-caused = checkpoint, not done.
 Layers: everything.
 
 ## Decision ledger
@@ -390,7 +400,10 @@ not silently assumed.
 - **Round 1 — fable (Plan agent)**: conditional approve (C1–C4) → see
   [audit-fable.md](audit-fable.md). C1 (preflight) → Fix 6; C2 (Fix 1 exception) → surfaced
   Ask; C3 (Fix 4 render assert + bound) → Fix 4; C4 (certification rules) → Phase 6.
-- **Round 2 — final fresh codex pass on this revision**: PENDING (next step).
+- **Round 2 — final fresh codex pass**: reject (fake settle window; 45s disguised raise;
+  Phase-6 contradiction) → all findings fixed same-session (see audit-codex.md § Round 2);
+  Fix 1/3 OPEN/conditional posture endorsed.
+- **Round 3 — re-verdict on the round-2 fixes (resumed session)**: PENDING.
 
 ## Seeds
 

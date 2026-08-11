@@ -68,7 +68,34 @@ balance wait that weakens coverage).
   mapping. Split out or change the API explicitly to `public|private|sponsored` with
   exercised tests.
 
-## What looks right (per codex)
+## Round 2 — final fresh-context pass (session `019ff257-b6da-7743-92cf-38afc84a54cc`)
+
+**Verdict: reject** (Fix 2's settle window was fake; the 45s security-reset budget was a
+disguised raise; Phase 6 contradictory/incomplete).
+
+- **Critical — Fix 2**: the 2s "stick-check" was a plain `waitForFunction` — resolves on
+  the FIRST truthy poll; `timeout` is a ceiling, not a dwell. → Rebuilt as a monotonic
+  in-page dwell (`__resetStableSince` tracking, condition must hold continuously for
+  1500ms; any deviation resets). FIXED.
+- **High — race characterization**: 3 attempts could normalize a recurring product
+  redirect. → Reduced to 2 attempts (one characterized race allowed; recurrence fails),
+  added a poll-based nav-trajectory recorder dumped into every failure. FIXED.
+- **High — security-reset 45s**: purge + route are not additive worst cases. → Restored
+  30s; if validation shows it can't hold, it goes to the owner as an explicit exception.
+  FIXED.
+- **High — Phase 6**: whitespace-push vs tree-freeze contradiction → EMPTY commits
+  (distinct SHAs, identical tree); greens that used the runtime exit-86 agent retry are
+  disqualified (runtime annotations via `gh api` logs, source-echo trap avoided). FIXED.
+- **Med — missing purge diagnostics** → session-presence added to the timeout dump
+  (rejection toast is un-sampleable at timeout — documented instead). FIXED.
+- **Med — Fix 1 wording** ("fully root-caused" overclaimed) → re-labeled control-flow
+  confirmed / trigger uninstrumented. FIXED.
+- **Med — trail cleanups**: Fix 4 N=5 chosen; product-freeze contradiction struck from the
+  Architecture preamble; ledger census corrected (14-of-15 + infra); feeMethod re-labeled
+  OPEN follow-up; foundry cache-bump made non-optional. FIXED.
+- **Med — Fixes 1/3 OPEN/conditional posture**: endorsed as correct.
+
+## What looks right (per codex round 1)
 
 - Purge-first sequencing + preserving OPFS/IndexedDB negative controls.
 - Reading the live native `disabled` contract rather than duplicating Vue logic.
