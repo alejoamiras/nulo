@@ -58,6 +58,7 @@ import { TransferEstimateReuse } from "./transfer-estimate-reuse"
 import { OperationEstimateReuse } from "./operation-estimate-reuse"
 import { TransferExecutor } from "./transfer-executor"
 import { DappSendExecutor } from "./dapp-send-executor"
+import { DiscoveryAwareEstimator } from "./discovery-aware-estimator"
 import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
@@ -268,11 +269,23 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.authwit,
 			this.logger,
 		)
+		const estimateWithDiscovery = new DiscoveryAwareEstimator({
+			authwit: this.authwit,
+			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
+			buildForDiscovery: async (op, method) => {
+				const { txRequest, node, pxe, account, network } = await this.txBuilder.buildStandard(
+					op as SendTransactionOperation,
+					method,
+				)
+				return { txRequest, node, pxe, account, network }
+			},
+		})
 		this.dappSendExecutor = new DappSendExecutor({
 			planner: this.planner,
-			authwit: this.authwit,
 			txBuilder: this.txBuilder,
 			coordinator: this.coordinator,
+			estimateWithDiscovery,
 			operationEstimateReuse: this.operationEstimateReuse,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
 			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
@@ -292,7 +305,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
-			buildAndEstimate: (op, feeSettings, parentTask, signal) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
+			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
 			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
 			logDebug: (msg) => this.logDebug(msg),
