@@ -167,6 +167,51 @@ test.skipIf(!hasConfig)(
 				console.warn(`[sw-restart-restore] marker=${midRestore}; killing anyway (post-import restart leg)`)
 			}
 			await stopServiceWorker(ctx2)
+			// The ROLLED-BACK outcome is dispatched by THIS page's catch: the SW kill
+			// rejects its in-flight restore RPC, the catch calls deleteProfile, and that
+			// call wakes the restarted SW. Closing the page immediately RACES that
+			// dispatch — when close wins, NEITHER designed outcome materializes:
+			// profile+account rows survive un-finalized with token/balance slices
+			// missing (observed live, census {tokenRows:0, accountRows:2}), the
+			// reopened popup masquerades as RECOVERED, and no balance can ever
+			// converge. A real SW restart leaves the page open (this test's scenario);
+			// close-before-dispatch models a browser CRASH, whose silent partial
+			// restore is a PRODUCT gap tracked in the deflake ledger, not this test's
+			// subject. Hold the page until the post-kill fork is OBSERVABLE, then
+			// close — the SW-side deletion cascade, once dispatched, survives page
+			// close. chrome.storage is page-direct (not SW-routed), so these reads
+			// work with the SW down.
+			const postKillFork = await page2
+				.waitForFunction(
+					async () => {
+						if (window.location.hash.includes("general")) return "finalized"
+						const all = await chrome.storage.local.get()
+						const keys = Object.keys(all)
+						if (keys.some((k) => k.startsWith("nulo:core:profile-tombstones@"))) return "rollback-dispatched"
+						if (!keys.some((k) => k.startsWith("nulo:core:profiles@"))) return "rollback-row-deleted"
+						return false
+					},
+					{ timeout: 30_000, polling: 200 },
+				)
+				.then((h) => h.jsonValue())
+				.catch(() => "fork-timeout")
+			console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
+			if (postKillFork === "fork-timeout") {
+				const dump = await page2
+					.evaluate(async () => {
+						const all = await chrome.storage.local.get()
+						return {
+							hash: window.location.hash,
+							coreKeys: Object.keys(all)
+								.filter((k) => k.startsWith("nulo:core:"))
+								.slice(0, 30),
+						}
+					})
+					.catch((e) => ({ evalFailed: String(e) }))
+				throw new Error(
+					`[sw-restart-restore] neither recovery nor rollback became observable within 30s of the SW kill — unknown third state: ${JSON.stringify(dump)}`,
+				)
+			}
 			await page2.close()
 
 			// ── 3. The user's natural recovery: reopen + unlock ─────────────
