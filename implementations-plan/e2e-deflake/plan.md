@@ -301,7 +301,7 @@ retries.
 **Phase 0 — Evidence (DONE)**: ledger from attempt-level CI mining; recon; dual audit.
 Gate: ledger + recon.md + audit-codex.md + audit-fable.md exist. ✓
 
-**Phase 1 — Reset-flow fixes (Fixes 2 + 5)** — reproduced + root-caused already.
+**Phase 1 — Reset-flow fixes (Fixes 2 + 5)** ✓ GREEN (2026-08-11 — see `lessons/phase-1.md`: 3× consecutive solo greens post-fix vs 2/2 pre-fix reds; security-reset 7.4s inside the restored 30s).
 Steps: settle-stable `resetProfile` nav (Fix 2); purge-first combined predicate (Fix 5) in
 integrity + opfs + the `security-reset.test.ts` sweep. Keep diagnostics.
 Gate: `bun run lint` + `bun run typecheck` exit 0; `NULO_E2E_RETRY=0 bun run e2e:agent tests/e2e/network/backup-restore-integrity.test.ts tests/e2e/network/opfs-storage.test.ts`
