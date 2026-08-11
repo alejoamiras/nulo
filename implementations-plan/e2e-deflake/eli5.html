@@ -1,0 +1,218 @@
+<title>e2e-deflake — what was fixed, what's proven, what needs you</title>
+<style>
+  :root {
+    --paper: #FAFAF7;
+    --ink: #1A1D21;
+    --muted: #5F6A66;
+    --line: #DDE2DD;
+    --accent: #0E7C66;
+    --accent-soft: #E4F0EC;
+    --amber: #B26A00;
+    --amber-soft: #FBF1DE;
+    --red: #B3372E;
+    --red-soft: #F7E7E4;
+    --card: #FFFFFF;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #15181A;
+      --ink: #E8EAE6;
+      --muted: #9AA6A0;
+      --line: #2C3234;
+      --accent: #4FB39A;
+      --accent-soft: #1C2B27;
+      --amber: #D99C4A;
+      --amber-soft: #2B2418;
+      --red: #D07A6E;
+      --red-soft: #2E1F1D;
+      --card: #1C2022;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #15181A;
+    --ink: #E8EAE6;
+    --muted: #9AA6A0;
+    --line: #2C3234;
+    --accent: #4FB39A;
+    --accent-soft: #1C2B27;
+    --amber: #D99C4A;
+    --amber-soft: #2B2418;
+    --red: #D07A6E;
+    --red-soft: #2E1F1D;
+    --card: #1C2022;
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 68ch; margin: 0 auto; display: flex; flex-direction: column; gap: 2.75rem; }
+  h1 { font-size: 1.75rem; line-height: 1.25; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
+  p { margin: 0 0 0.9rem; }
+  p:last-child { margin-bottom: 0; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 0.5rem;
+  }
+  header .sub { color: var(--muted); margin-top: 0.75rem; }
+  .cards { display: flex; flex-direction: column; gap: 1rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1.1rem 1.25rem;
+  }
+  .card h3 { margin: 0 0 0.4rem; font-size: 1rem; display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+  .chip {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    padding: 0.12rem 0.55rem;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .chip.fixed { background: var(--accent-soft); color: var(--accent); }
+  .chip.open { background: var(--amber-soft); color: var(--amber); }
+  .chip.infra { background: var(--red-soft); color: var(--red); }
+  .card p { color: var(--muted); font-size: 0.95rem; }
+  .card .proof { font-size: 0.85rem; color: var(--ink); background: none; border-top: 1px dashed var(--line); margin-top: 0.75rem; padding-top: 0.6rem; }
+  .proof b { font-weight: 600; }
+  .decisions {
+    background: var(--amber-soft);
+    border: 1px solid var(--amber);
+    border-radius: 6px;
+    padding: 1.25rem 1.4rem;
+  }
+  .decisions h2 { color: var(--amber); }
+  .decisions ol { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.75rem; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  .tablewrap { overflow-x: auto; }
+  th, td { text-align: left; padding: 0.45rem 0.9rem 0.45rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  code, pre { font-family: var(--mono); font-size: 0.85em; }
+  code { background: var(--accent-soft); padding: 0.08em 0.35em; border-radius: 3px; }
+  pre {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    line-height: 1.5;
+  }
+  .quiet { color: var(--muted); font-size: 0.85rem; }
+  ul { margin: 0 0 0.9rem; padding-left: 1.2rem; }
+  li { margin-bottom: 0.35rem; }
+  a { color: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main>
+  <header>
+    <span class="eyebrow">nulo · e2e-deflake · 2026-08-11</span>
+    <h1>The CI flakes: what was actually breaking, what's fixed and proven, and the one decision left for you</h1>
+    <p class="sub">Plain-language companion to the plan at <code>implementations-plan/e2e-deflake/plan.md</code>. Everything below was done autonomously under your /goal directive, with every design choice audited by two independent reviewers (three review rounds; final verdict: conditional approve, all conditions applied).</p>
+  </header>
+
+  <section>
+    <span class="eyebrow">What happened</span>
+    <h2>Six different tests were failing CI runs at random; none of them were actually random</h2>
+    <p>I pulled the job logs for every red CI run from the last ten days — including the "first attempt failed, re-run went green" ones that never show up as failures. Fifteen red jobs. Fourteen were tests timing out on a wait; one was a download hiccup in CI setup. Every single timeout traced to a wait that was watching the <em>wrong thing</em> — polling a screen element that only appears after some background work the test never accounted for. None of them was a wrong assertion, and none was fixed by waiting longer.</p>
+    <p>Two big surprises along the way: the "infra boot retry" theory from the goal brief turned out to be a mirage (a known log-reading trap — the retry never actually fired), and the most active flake <b>reproduced on our own idle machine on the first try</b>, which let me instrument it and catch the real mechanism red-handed instead of guessing from CI logs.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">The ledger</span>
+    <h2>Each flake, its real cause, and its status</h2>
+    <div class="cards">
+      <div class="card">
+        <h3>Profile-reset screen never appearing <span class="chip fixed">FIXED + PROVEN</span></h3>
+        <p>4 CI reds, and the one that reproduced locally. The test navigates to the reset screen and waits 5 seconds for a checkbox — but the app was quietly yanking the user back to the home screen mid-navigation (a navigation race, not slowness: the test's "did we arrive?" check passed before the router finished, and a competing redirect then won). The helper now requires the reset screen to arrive <em>and stay put</em>, re-navigates once if the race hits, and dumps a full route history if anything still goes wrong.</p>
+        <p class="proof"><b>Proof:</b> failed 2 of 2 runs before the fix, passed 3 of 3 consecutive solo runs after — with retries turned off.</p>
+      </div>
+      <div class="card">
+        <h3>Post-reset cleanup waits racing the delete <span class="chip fixed">FIXED + PROVEN</span></h3>
+        <p>Deleting a profile does a full, awaited purge that can legitimately take a while — but three tests were waiting on the <em>screen redirect</em> with a budget sized for a quick hop. They now watch the purge's own completion record in storage (prove the profile existed, then require its row, its deletion marker, and all its data gone), and only then expect the redirect — which is instant at that point.</p>
+        <p class="proof"><b>Proof:</b> same 3-of-3 consecutive green runs; the fourth call site (a smoke test) passes in 7 seconds inside its original budget.</p>
+      </div>
+      <div class="card">
+        <h3>Balance checks that could lie <span class="chip fixed">FIXED + PROVEN</span></h3>
+        <p>Two tests hammered "refresh balances" up to 40 times and scanned the whole page for the text "1,000" — which can false-match "$1,000.00", and worse, an imported backup <em>already contains</em> "1,000", so the check could pass without proving the wallet actually re-synced. The new wait requires a balance record that is both <em>fresh</em> (written after the reopen) and <em>exactly correct</em>, then confirms the screen shows it. Bonus: the review process itself caught a bug in my first version of this fix (a retry that could stall forever) before it ever reached CI.</p>
+        <p class="proof"><b>Proof:</b> 3-of-3 consecutive green runs of both affected tests, retries off.</p>
+      </div>
+      <div class="card">
+        <h3>Approve-transaction popup clicked too early <span class="chip fixed">FIXED + PROVEN</span></h3>
+        <p>Two tests clicked the Confirm button with a generic 10-second wait, but Confirm only becomes clickable after fee setup finishes — which on a cold CI machine takes longer than 10 seconds. The helper now waits on the button's own "ready" state (the exact signal the app maintains), with budgets taken from the identical wait elsewhere in the suite, and records timing evidence on every run.</p>
+        <p class="proof"><b>Proof:</b> 3-of-3 consecutive green runs including the real-proving canary; 12 timing samples confirm the ready-signal fires in under half a second on a warm machine — the budget covers CI's measured cold-start penalty.</p>
+      </div>
+      <div class="card">
+        <h3>CI downloading a tool it never uses <span class="chip infra">REMOVED + GUARDED</span></h3>
+        <p>Every CI run downloaded a blockchain toolkit (Foundry) from an unpinned "latest" URL — eight times per PR — and one bad gateway response killed a whole job. It turns out nothing ever used that download: the Aztec installer already ships its own pinned copy with retries. The step is deleted, and a new guard asserts the real toolchain is present so any future regression fails loudly at setup with a named cause.</p>
+        <p class="proof"><b>Proof:</b> workflow linter green; the certification runs exercise the full pipeline against the change.</p>
+      </div>
+      <div class="card">
+        <h3>Backup-restore smoke test (the 90-second wait) <span class="chip open">OPEN — YOUR CALL</span></h3>
+        <p>6 CI reds, at least a month old. Root cause found and confirmed in the code: after restoring a backup, the app won't show the home screen until it finishes a sync against the <em>public testnet</em> — so when that public server has a bad evening, the test times out no matter how healthy CI is. Every real fix touches app code, which the audits froze for this arc; simply raising the wait is banned by your directive and wouldn't survive a long outage anyway. It got full diagnostics (the next red will explain itself), and the decision is yours — see below.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="decisions">
+    <span class="eyebrow" style="color: var(--amber)">Needs you</span>
+    <h2>Decisions waiting on you</h2>
+    <ol>
+      <li><b>The backup-restore smoke flake</b> — pick one: <b>(a)</b> a one-line build flag pointing the test build's default network at a dead local port, so the sync fails fast instead of hanging (my recommendation — same never-ships pattern as the two existing test flags, but it is app code); <b>(b)</b> change the app to show the home screen before that network sync finishes (bigger, arguably better UX for real users on bad networks); <b>(c)</b> accept a longer wait as an explicit exception to your no-timeout-raises rule (weakest — a long outage still beats it).</li>
+      <li><b>Merge the PR</b> once the 3-consecutive-green certification finishes (protocol below — it runs without you, but the merge is yours).</li>
+      <li><b>Follow-ups to schedule or decline</b> (all tracked as OPEN in the ledger, none blocking): the wallet has no observable "balance refresh failed" signal (bit us once already); the cancelled-transaction overlay has no test id; a fee-method naming mismatch in one test helper; the remaining body-text balance checks in tests that have never flaked.</li>
+    </ol>
+  </section>
+
+  <section>
+    <span class="eyebrow">Certification</span>
+    <h2>How "actually fixed" gets proven</h2>
+    <p>One PR into <code>dev</code>, labeled so CI runs <em>everything</em> (both e2e suites plus quality). Then three empty commits, one at a time, each requiring: all three status checks green, first attempt only, zero hidden test retries, zero infra re-boots (checked in the raw logs), no skipped jobs. Any red resets the count to zero. Two-of-three with the third explained counts as a checkpoint, never as done.</p>
+    <div class="tablewrap">
+    <table>
+      <tr><th>Local gate</th><th>Result</th></tr>
+      <tr><td>Unit suite</td><td>3,946 tests green</td></tr>
+      <tr><td>Full smoke suite (solo, CI-faithful build)</td><td>23 of 23 files green</td></tr>
+      <tr><td>Targeted network gates (per fix)</td><td>3× consecutive green each, retries off</td></tr>
+      <tr><td>Full network suite (solo, retries off)</td><td>running at publish time — result lands in the PR</td></tr>
+    </table>
+    </div>
+  </section>
+
+  <section>
+    <span class="eyebrow">Context</span>
+    <h2>Why this tier, and how it was reviewed</h2>
+    <p>Blueprint tier <b>mid</b>, as your directive prescribed (single surface, moderate blast radius, novel debugging). The plan went through a dual audit (codex + an independent top-tier reviewer), a full revision, and a final fresh-context codex pass — which rejected my first implementation of one fix for a subtle bug (a stability check that wasn't actually checking stability) before approving the corrected version. The decision trail, all verdicts, and the evidence ledger live next to the plan.</p>
+  </section>
+
+  <section>
+    <span class="eyebrow">Seeds</span>
+    <h2>Implementation seeds</h2>
+    <p class="quiet">This arc already runs under your /goal of 2026-08-11 (the active, recommended driver — it survives resume and blocks stopping until certification holds). Use exactly one seed per session; setting one replaces the other.</p>
+    <pre><code># Recommended: already active — resume the session in the worktree
+agent-worktree resume e2e-deflake
+# (the /goal condition re-attaches; certification continues where it left off)
+
+# Alternative /loop (only if starting a FRESH session without the goal):
+/loop 15m Drive implementations-plan/e2e-deflake forward per plan.md Phase 6:
+verify certification runs (gh pr checks), push the next empty commit only after
+the previous run completes, record the run matrix in the lessons dir, never
+re-run-button a red, never weaken a gate. Stop when 3 consecutive qualifying
+greens are recorded and the final report is posted.</code></pre>
+  </section>
+
+  <p class="quiet">Full detail: <code>plan.md</code> · evidence: <code>flake-ledger.md</code> · audits: <code>audit-codex.md</code>, <code>audit-fable.md</code> · per-phase logs: <code>lessons/</code> — all under <code>implementations-plan/e2e-deflake/</code> on branch <code>worktree-e2e-deflake</code>.</p>
+</main>

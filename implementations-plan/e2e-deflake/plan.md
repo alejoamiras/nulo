@@ -4,7 +4,7 @@
 - **Worktree**: `e2e-deflake` (branch `worktree-e2e-deflake`, based on dev @ `13b57a6`, includes #355)
 - **Evidence base**: [flake-ledger.md](flake-ledger.md) — 15 red CI jobs mined at attempt level, 6 distinct failing waits, all re-run-cleared
 - **Approval**: pre-authorized by the owner's /goal directive (2026-08-11), which prescribes scope, tier, constraints, and the success criterion. Deviations from that scope require re-approval; audits below gate correctness, not authorization.
-- **eli5_mode**: artifact
+- **eli5_mode**: artifact — published at https://claude.ai/code/artifact/24d2ac79-5ca8-458c-99ee-af2f8ff534af (source: `implementations-plan/e2e-deflake/eli5.html`; redeploy the same path to update)
 
 ## Goal + hard constraints (from the /goal directive)
 
