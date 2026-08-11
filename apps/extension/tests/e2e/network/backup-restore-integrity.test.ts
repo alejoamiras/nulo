@@ -38,6 +38,7 @@ import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import {
+	captureSoleProfileId,
 	getAccountAddress,
 	navigateByHash,
 	refreshBalances,
@@ -45,6 +46,7 @@ import {
 	resetProfile,
 	switchToLocalNetwork,
 	waitForBalance,
+	waitForProfilePurged,
 } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
@@ -196,31 +198,20 @@ test.skipIf(!hasConfig)(
 			await waitForBalance(page2, "1,000", 30_000)
 
 			// ── 6. Delete → re-add round-trip (finding D) ──────────────────────
-			// The reset UI fires deleteProfile WITHOUT awaiting (optimistic nav);
-			// the coordinator AWAITS the full purge + tombstone-clear internally.
-			// Poll until every account-owned root is empty AND the tombstone is
-			// cleared — proves the awaited cascade ran to completion. A
-			// fire-and-forget regression would leave orphaned rows or a stuck
-			// tombstone here forever (poll times out → test fails).
+			// The reset UI AWAITS the coordinator's full purge before navigating
+			// (reset.vue handleReset awaits deleteProfile), so observe the purge
+			// itself FIRST — profile row (proven to exist pre-submit) + exact
+			// tombstone + owned roots all cleared — and only then assert the
+			// redirect, which is prompt once the awaited delete resolved. The old
+			// shape waited on the route while the purge ran, racing an awaited
+			// cascade with a wait budgeted for a navigation.
+			const deletedProfileId = await captureSoleProfileId(page2)
 			await resetProfile(page2)
-			await page2.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 30_000 })
-			const readPurgeState = () =>
-				page2.evaluate(async () => {
-					const all = await chrome.storage.local.get()
-					const has = (p: string) => Object.keys(all).some((k) => k.startsWith(p))
-					return {
-						txs: has("nulo:core:txs@"),
-						accounts: has("nulo:core:accounts@"),
-						tokens: has("nulo:core:tokens@"),
-						tombstones: has("nulo:core:profile-tombstones@"),
-					}
-				})
-			let purge = await readPurgeState()
-			for (let i = 0; i < 120 && (purge.txs || purge.accounts || purge.tokens || purge.tombstones); i++) {
-				await new Promise((r) => setTimeout(r, 500))
-				purge = await readPurgeState()
-			}
-			expect(purge).toEqual({ txs: false, accounts: false, tokens: false, tombstones: false })
+			await waitForProfilePurged(page2, deletedProfileId, {
+				ownedRoots: ["nulo:core:txs", "nulo:core:accounts", "nulo:core:tokens"],
+				timeoutMs: 75_000,
+			})
+			await page2.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 15_000 })
 			await page2.close()
 
 			// Re-add a fresh profile; the deleted funded-account tx must not reappear.

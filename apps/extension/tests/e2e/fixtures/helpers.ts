@@ -1031,12 +1031,54 @@ export async function changePassword(page: Page, oldPwd: string, newPwd: string)
  *  profile's name into the confirm input, and submit. Profile name is read
  *  from `data-profile-name` on the page root because it's auto-generated.
  *
+ *  Navigation is SETTLE-STABLE, not one-shot: setting `location.hash` updates the
+ *  URL before vue-router commits, so a hash-equality wait passes while a competing
+ *  `router.push("/popup/general")` (SW-reconnect `loadProfile` re-run, post-unlock
+ *  bootstrap churn) can still supersede the in-flight navigation and revert the
+ *  route — the checkbox then never mounts. Observed live: the 5s checkbox wait
+ *  parked with the app fully back on general. The awaited signal here is "the
+ *  reset route COMMITTED (checkbox mounted) and STUCK"; a reverted hash triggers
+ *  a re-navigate, not a longer clock.
+ *
  *  After submit the router redirects to either `/popup/auth` (if other
  *  profiles remain) or `/popup/register` (if it was the last profile). The
  *  caller asserts the redirect; this helper does not. */
 export async function resetProfile(page: Page): Promise<void> {
-	await navigateByHash(page, "#/popup/settings/security/reset")
-	await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+	const RESET_HASH = "#/popup/settings/security/reset"
+	const ATTEMPTS = 3
+	let lastDiag = ""
+	let settled = false
+	for (let attempt = 0; attempt < ATTEMPTS && !settled; attempt++) {
+		await navigateByHash(page, RESET_HASH)
+		try {
+			await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+			// Mounted — now require the route to STAY committed across a settle window
+			// (a superseding push lands within router-commit time, well under this).
+			await page.waitForFunction(
+				(h: string) => window.location.hash === h && !!document.querySelector('[data-testid="reset-checkbox-permanent"]'),
+				{ timeout: 2_000, polling: 200 },
+				RESET_HASH,
+			)
+			settled = true
+		} catch {
+			lastDiag = JSON.stringify(
+				await page
+					.evaluate(() => ({
+						hash: window.location.hash,
+						pageRootMounted: !!document.querySelector("[data-profile-name]"),
+						checkboxInDom: !!document.querySelector('[data-testid="reset-checkbox-permanent"]'),
+						testidsOnPage: [...document.querySelectorAll("[data-testid]")]
+							.slice(0, 12)
+							.map((el) => el.getAttribute("data-testid")),
+						readyState: document.readyState,
+					}))
+					.catch((e) => ({ evalFailed: String(e) })),
+			)
+		}
+	}
+	if (!settled) {
+		throw new Error(`resetProfile: reset route never committed-and-stuck after ${ATTEMPTS} navigations; last parked state: ${lastDiag}`)
+	}
 	const profileName = await getActiveProfileName(page)
 
 	await clickByTestId(page, "reset-checkbox-permanent")
@@ -1044,6 +1086,60 @@ export async function resetProfile(page: Page): Promise<void> {
 	await clickByTestId(page, "reset-checkbox-sure")
 	await replaceInputValue(page, '[data-testid="reset-confirm-input"]', profileName)
 	await clickByTestId(page, "reset-submit-btn")
+}
+
+/** Capture the sole profile's id from raw storage and PROVE its row exists — the
+ *  pre-condition that makes a later "row absent" read mean DELETED rather than
+ *  never-created. Expects exactly one profile row (the shape of every reset-flow
+ *  e2e); throws otherwise so a multi-profile drift can't silently weaken the
+ *  purge assertion. */
+export async function captureSoleProfileId(page: Page): Promise<string> {
+	const ids = await page.evaluate(async () => {
+		const all = await chrome.storage.local.get(null)
+		return Object.keys(all)
+			.filter((k) => k.startsWith("nulo:core:profiles@"))
+			.map((k) => k.slice("nulo:core:profiles@".length))
+	})
+	if (ids.length !== 1) throw new Error(`captureSoleProfileId: expected exactly 1 profile row, found ${ids.length}`)
+	return ids[0]
+}
+
+/** Wait until profile deletion COMPLETED for `profileId`: its row gone, its exact
+ *  tombstone (`nulo:core:profile-tombstones@<id>`) gone, and every given owned
+ *  root emptied. The tombstone is written BEFORE the row delete and cleared only
+ *  after the coordinator's full awaited purge resolves, so this combined
+ *  predicate — anchored on a row proven to exist beforehand — is the same
+ *  completion fact the reset page's awaited `deleteProfile` observes. Tombstone
+ *  absence ALONE would also be true before deletion ever started, which is why
+ *  callers must capture the id via `captureSoleProfileId` first. On timeout the
+ *  remaining keys are dumped: a persisting tombstone+row means a rejected or
+ *  wedged purge; owned-root leftovers mean a partial cascade. */
+export async function waitForProfilePurged(
+	page: Page,
+	profileId: string,
+	opts: { ownedRoots?: string[]; timeoutMs?: number } = {},
+): Promise<void> {
+	const { ownedRoots = [], timeoutMs = 75_000 } = opts
+	const deadline = Date.now() + timeoutMs
+	let last: Record<string, boolean> = {}
+	while (Date.now() < deadline) {
+		last = await page.evaluate(
+			async ({ id, roots }: { id: string; roots: string[] }) => {
+				const all = await chrome.storage.local.get(null)
+				const keys = Object.keys(all)
+				const state: Record<string, boolean> = {
+					profileRow: keys.includes(`nulo:core:profiles@${id}`),
+					tombstone: keys.includes(`nulo:core:profile-tombstones@${id}`),
+				}
+				for (const r of roots) state[r] = keys.some((k) => k.startsWith(`${r}@`))
+				return state
+			},
+			{ id: profileId, roots: ownedRoots },
+		)
+		if (!Object.values(last).some(Boolean)) return
+		await new Promise((r) => setTimeout(r, 500))
+	}
+	throw new Error(`waitForProfilePurged: purge incomplete after ${timeoutMs}ms for profile ${profileId}: ${JSON.stringify(last)}`)
 }
 
 /** Drive the seed-phrase reveal flow on `/popup/settings/security/export/seed`.
