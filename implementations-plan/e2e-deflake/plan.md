@@ -327,7 +327,7 @@ green SOLO ≥3× (canary prover-ON per its own arming); instrumentation evidenc
 lessons entry.
 Layers: lint/typecheck + targeted network e2e incl. prover-ON canary.
 
-**Phase 4 — CI foundry hardening (Fix 6)** — preflight THEN delete.
+**Phase 4 — CI foundry hardening (Fix 6)** ✓ GREEN (2026-08-11 — `lessons/phase-4.md`; empirical certification lands with Phase 6's labeled runs).
 Gate: `bun run lint:actions` exit 0; workflow diff reviewed against least-privilege; grep
 confirms no other `~/.foundry`/`FOUNDRY_DIR` consumer; lessons entry.
 Layers: workflow lint (empirically validated in Phase 6's network runs).
