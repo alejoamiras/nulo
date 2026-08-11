@@ -121,6 +121,19 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 				},
 				{ timeout: 10_000 },
 			)
+			// Route-trajectory recorder, armed BEFORE submit: vue-router's hash nav is
+			// pushState-based (no hashchange/popstate fires), so transitions must be
+			// POLLED. On a timeout below, the trace turns a silent 90s park into a
+			// diagnosable record (which leg stalled: restore, activation, or routing).
+			await page2.evaluate(() => {
+				const w = window as unknown as { __nuloImportNavTrace?: Array<{ t: number; hash: string }> }
+				w.__nuloImportNavTrace = [{ t: Date.now(), hash: window.location.hash }]
+				window.setInterval(() => {
+					const trace = w.__nuloImportNavTrace as Array<{ t: number; hash: string }>
+					if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
+				}, 200)
+			})
+			const submittedAt = Date.now()
 			await clickByTestId(page2, "import-full-backup-submit-btn")
 
 			// REALISTIC settle: the MV3 worker can restart mid-import (P0-proven), so a
@@ -128,14 +141,41 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 			// state is an ACTIONABLE screen, either `/popup/general` (session survived)
 			// or `/popup/auth` (strict mode + worker restart dropped the master → unlock
 			// to finish). What must NEVER happen is a silent dead-end on "Finishing…".
-			// Wait for whichever actionable screen the recovery lands on.
-			await page2.waitForFunction(
-				() => {
-					const h = window.location.hash
-					return h.includes("/popup/general") || h.includes("/popup/auth")
-				},
-				{ timeout: 90_000, polling: 250 },
-			)
+			//
+			// KNOWN OPEN FLAKE (ledger entry 1, owner decision pending): this route is
+			// gated on isLogined, which the bootstrap flips only AFTER the RPC-bound
+			// syncTransactions — when the seeded public-testnet RPC degrades from CI,
+			// this wait times out through no fault of the runner. The bound is NOT
+			// raised here (banned pending the owner's call between an env fast-fail
+			// RPC, a product route-decouple, or a budget exception); the diagnostics
+			// below make every future red self-explaining instead of a silent park.
+			try {
+				await page2.waitForFunction(
+					() => {
+						const h = window.location.hash
+						return h.includes("/popup/general") || h.includes("/popup/auth")
+					},
+					{ timeout: 90_000, polling: 250 },
+				)
+			} catch (err) {
+				const diag = await page2
+					.evaluate(async () => {
+						const all = await chrome.storage.local.get(null)
+						const keys = Object.keys(all)
+						return {
+							hash: window.location.hash,
+							navTrace: (window as unknown as { __nuloImportNavTrace?: Array<{ t: number; hash: string }> })
+								.__nuloImportNavTrace,
+							profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")).length,
+							activeAccountPointer: !!all["nulo:ui:activeAccount"],
+							bodySnippet: (document.body.innerText ?? "").slice(0, 120),
+						}
+					})
+					.catch((e) => ({ evalFailed: String(e) }))
+				throw new Error(
+					`post-import route wait timed out ${Date.now() - submittedAt}ms after submit; parked state: ${JSON.stringify(diag)}; original: ${(err as Error).message}`,
+				)
+			}
 			// If the recovery routed to auth (locked), unlock to finish — this is the
 			// documented strict-mode recovery, not a failure.
 			if (await page2.evaluate(() => window.location.hash.includes("/popup/auth"))) await ensureUnlocked(page2)
