@@ -340,7 +340,7 @@ Gate: `bun run lint` + `bun run typecheck` exit 0; armed `bun run test:e2e` SOLO
 env, or OPEN — owner with evidence).
 Layers: lint/typecheck + smoke e2e.
 
-**Phase 6 — Certification** — written run-counting rules (codex + fable C4).
+**Phase 6 — Certification** ✓ **COMPLETE 2026-08-11** — 3 consecutive fully-green qualified runs on PR #356 (matrix + audits in `lessons/phase-6.md`; the pre-count red was root-caused to a test-manufactured race + a real product restore-atomicity gap, fixed via the post-kill fork wait `71c8678`). Rules as written below (codex + fable C4).
 Pre-push: `bun run test` + full armed `bun run test:e2e` SOLO + full `NULO_E2E_RETRY=0 bun run e2e:agent`
 SOLO all green locally.
 Then PR into dev labeled `e2e:smoke` + `e2e:network`. **Freeze the tree first** — the three

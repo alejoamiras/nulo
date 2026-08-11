@@ -4,7 +4,17 @@
 
 | # | Trigger | Head SHA | quality | smoke | network | Verdict |
 |---|---|---|---|---|---|---|
-| — | PR open + labels (2026-08-11 ~21:30Z) | `67cc674` | ✅ pass | ✅ pass | ❌ **shard 3/5 red** | RED — count stays 0 |
+| — | PR open + labels (2026-08-11 ~21:30Z) | `67cc674` | ✅ pass | ✅ pass | ❌ **shard 3/5 red** | RED — count stays 0 (root-caused below; fork-wait fix `71c8678`) |
+| 1 | push `918209f` (fork-wait fix + docs) | `918209f` | ✅ 31540810020 a1 | ✅ 31540810035 a1 | ✅ 31540809995 a1 | **QUALIFIED** (0 vitest retries, 0 runtime exit-86, all 9 test jobs audited) |
+| 2 | empty commit `b64c609` | `b64c609` | ✅ 31541591717 a1 | ✅ 31541591707 a1 | ✅ 31541591716 a1 | **QUALIFIED** (same audit, clean) |
+| 3 | empty commit `7ac07f8` | `7ac07f8` | ✅ 31542422480 a1 | ✅ 31542422566 a1 | ✅ 31542422577 a1 | **QUALIFIED** (same audit, clean) |
+
+**CERTIFICATION COMPLETE (2026-08-11 ~23:0xZ): 3 consecutive fully-green runs, zero
+re-runs, zero hidden retries, identical tree across runs 1–3 (runs 2–3 empty commits).**
+The formerly-flaking files all ran in every network round: shard 1 (integrity + opfs),
+shard 3 (sw-restart + cancel-mid-prove), canary (frozen-account, prover-ON), smoke
+(backup-roundtrip — note: its OPEN RPC-dependency risk did not fire in these three
+windows; the classification stands regardless, see plan Fix 1).
 
 ## Run-1 red: root-caused (census diagnostics fired exactly as designed)
 

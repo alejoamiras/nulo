@@ -173,7 +173,7 @@
     <ol>
       <li><b>The backup-restore smoke flake</b> — pick one: <b>(a)</b> a one-line build flag pointing the test build's default network at a dead local port, so the sync fails fast instead of hanging (my recommendation — same never-ships pattern as the two existing test flags, but it is app code); <b>(b)</b> change the app to show the home screen before that network sync finishes (bigger, arguably better UX for real users on bad networks); <b>(c)</b> accept a longer wait as an explicit exception to your no-timeout-raises rule (weakest — a long outage still beats it).</li>
       <li><b>Merge the PR</b> once the 3-consecutive-green certification finishes (protocol below — it runs without you, but the merge is yours).</li>
-      <li><b>Follow-ups to schedule or decline</b> (all tracked as OPEN in the ledger, none blocking): the wallet has no observable "balance refresh failed" signal (bit us once already); the cancelled-transaction overlay has no test id; a fee-method naming mismatch in one test helper; the remaining body-text balance checks in tests that have never flaked.</li>
+      <li><b>Follow-ups to schedule or decline</b> (all tracked as OPEN in the ledger, none blocking): a restore interrupted by a browser crash can leave a silently partial wallet — no boot-time integrity check exists (found during certification; worth a product fix); the wallet has no observable "balance refresh failed" signal (bit us once already); the cancelled-transaction overlay has no test id; a fee-method naming mismatch in one test helper; the remaining body-text balance checks in tests that have never flaked.</li>
     </ol>
   </section>
 
@@ -187,9 +187,11 @@
       <tr><td>Unit suite</td><td>3,946 tests green</td></tr>
       <tr><td>Full smoke suite (solo, CI-faithful build)</td><td>23 of 23 files green</td></tr>
       <tr><td>Targeted network gates (per fix)</td><td>3× consecutive green each, retries off</td></tr>
-      <tr><td>Full network suite (solo, retries off)</td><td>running at publish time — result lands in the PR</td></tr>
+      <tr><td>Full network suite (solo, retries off)</td><td>64 of 65 green; the 1 red exposed a real product gap (below) — fixed, then certified</td></tr>
+      <tr><td><b>CI certification (PR #356)</b></td><td><b>✅ COMPLETE — 3 consecutive fully-green runs, first attempt everywhere, zero hidden retries, frozen tree</b></td></tr>
     </table>
     </div>
+    <p class="quiet" style="margin-top:0.75rem">Bonus find during certification: the pre-count red exposed a genuine product gap — a wallet restore interrupted at exactly the wrong moment (browser crash) can leave a profile with its accounts but without its tokens, silently. The test's own kill sequence was accidentally manufacturing that state; the test now models its real scenario deterministically, and the product gap is decision&nbsp;3's first follow-up bullet.</p>
   </section>
 
   <section>
