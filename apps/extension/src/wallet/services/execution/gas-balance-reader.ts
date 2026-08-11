@@ -27,13 +27,26 @@ import type { GasBalances } from "./spec"
 
 export const GAS_BALANCE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
+/** Pause before the one-shot re-read of a THROWN leg. Sized to the cold-start
+ *  offscreen boot window (observed ~200ms) with margin — long enough for the
+ *  transport to come up, short enough that the first paint isn't hostage. */
+export const GAS_BALANCE_FAILED_LEG_RETRY_DELAY_MS = 1_500
+
 export interface GasBalanceReaderDeps {
 	getChainId(networkId: string): Promise<number>
 	getViewDeps(networkId: string, accountAddress: string): Promise<BatchedViewSimulationDeps>
 	getFpcs(chainId: number): Promise<FpcInfo[]>
 	logDebug(msg: string, ...rest: unknown[]): void
 	logError(msg: string, ...rest: unknown[]): void
+	/** Test seam; production omits it and gets the 1.5s default. */
+	failedLegRetryDelayMs?: number
 }
+
+/** A leg's outcome. `failed` is true only when the read THREW (transient
+ *  transport/RPC failure) — a structural null (missing return slot, no
+ *  PrivateFPC registered) is a definitive answer, not a failure, and must
+ *  not trigger retries or already-stale caching. */
+type LegOutcome = { value: string | null; failed: boolean }
 
 export class GasBalanceReader {
 	private cache = new Map<string, { result: GasBalances; fetchedAt: number }>()
@@ -154,38 +167,31 @@ export class GasBalanceReader {
 		// Concurrency is the win over the old shape, which serialized the
 		// private read behind the public round-trip.
 		this.deps.logDebug(`getGasBalances: networkId=${networkId}, accountAddress=${accountAddress}`)
-		const publicPromise = (async (): Promise<string | null> => {
-			try {
-				const result = await batchedViewSimulation(
-					[{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] }],
-					deps,
-				)
-				// A missing return slot or a thrown leg is UNKNOWN, never a
-				// fabricated zero — consumers fail closed / render an em dash.
-				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
-			} catch (err) {
-				this.deps.logDebug(`getGasBalances: Failed to get public FeeJuice balance:`, getErrorMessage(err))
-				this.deps.logError("Failed to get public FeeJuice balance", getErrorMessage(err))
-				return null
-			}
-		})()
-		const privatePromise = (async (): Promise<string | null> => {
-			try {
-				const fpcs = await this.deps.getFpcs(chainId)
-				const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
-				if (!bridgedFpc) return null
-				const result = await batchedViewSimulation(
-					[{ kind: "call", contract: bridgedFpc.address, method: "balance_of", args: [accountAddress] }],
-					deps,
-				)
-				return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
-			} catch (err) {
-				this.deps.logDebug(`getGasBalances: Failed to get private FeeJuice balance:`, getErrorMessage(err))
-				this.deps.logError("Failed to get private FeeJuice balance", getErrorMessage(err))
-				return null
-			}
-		})()
-		const [publicFeeJuice, privateFeeJuice] = await Promise.all([publicPromise, privatePromise])
+		const readPublic = async (): Promise<string | null> => {
+			const result = await batchedViewSimulation(
+				[{ kind: "call", contract: feeJuiceAddress, method: "balance_of_public", args: [accountAddress] }],
+				deps,
+			)
+			// A missing return slot or a thrown leg is UNKNOWN, never a
+			// fabricated zero — consumers fail closed / render an em dash.
+			return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
+		}
+		const readPrivate = async (): Promise<string | null> => {
+			const fpcs = await this.deps.getFpcs(chainId)
+			const bridgedFpc = fpcs.find((f) => f.type === FpcType.PrivateFpc)
+			if (!bridgedFpc) return null
+			const result = await batchedViewSimulation(
+				[{ kind: "call", contract: bridgedFpc.address, method: "balance_of", args: [accountAddress] }],
+				deps,
+			)
+			return result.encoded[0]?.[0] ? result.encoded[0][0].toBigInt().toString() : null
+		}
+		const [publicLeg, privateLeg] = await Promise.all([
+			this.legWithRetry("public", readPublic),
+			this.legWithRetry("private", readPrivate),
+		])
+		const { value: publicFeeJuice } = publicLeg
+		const { value: privateFeeJuice } = privateLeg
 		this.deps.logDebug(`getGasBalances: publicFeeJuice=${publicFeeJuice}, privateFeeJuice=${privateFeeJuice}`)
 
 		const result = { publicFeeJuice, privateFeeJuice }
@@ -194,10 +200,31 @@ export class GasBalanceReader {
 		// never write it back — a stale-marked write-back would still be
 		// peekable under the new profile.
 		if (this.evictGeneration !== evictGenAtStart) return result
-		// A stale-marking invalidation that landed mid-compute outranks this
-		// snapshot: cache it already-stale so peek can serve it dimmed but the
-		// next get recomputes.
-		this.cache.set(cacheKey, { result, fetchedAt: this.epoch === epochAtStart ? Date.now() : 0 })
+		// Cache already-stale (fetchedAt: 0) when a stale-marking invalidation
+		// landed mid-compute (it outranks this snapshot) OR when a leg FAILED —
+		// a degraded snapshot must cost the next `get()` a recompute, not serve
+		// its unknown for the full TTL (the cold-start "—" used to persist for
+		// 5 minutes over a race the transport recovered from in under a second).
+		const degraded = publicLeg.failed || privateLeg.failed
+		this.cache.set(cacheKey, { result, fetchedAt: this.epoch === epochAtStart && !degraded ? Date.now() : 0 })
 		return result
+	}
+
+	/** Run a leg; on a THROW, wait out the boot window and re-read once.
+	 *  First failure logs at debug (the retry usually recovers it); only a
+	 *  failed retry earns the error-level log the old single-shot always paid. */
+	private async legWithRetry(label: "public" | "private", read: () => Promise<string | null>): Promise<LegOutcome> {
+		try {
+			return { value: await read(), failed: false }
+		} catch (err) {
+			this.deps.logDebug(`getGasBalances: ${label} FeeJuice leg failed, retrying once:`, getErrorMessage(err))
+		}
+		await new Promise((r) => setTimeout(r, this.deps.failedLegRetryDelayMs ?? GAS_BALANCE_FAILED_LEG_RETRY_DELAY_MS))
+		try {
+			return { value: await read(), failed: false }
+		} catch (err) {
+			this.deps.logError(`Failed to get ${label} FeeJuice balance`, getErrorMessage(err))
+			return { value: null, failed: true }
+		}
 	}
 }

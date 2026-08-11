@@ -26,6 +26,7 @@ function makeDeps(overrides: Partial<GasBalanceReaderDeps> = {}): GasBalanceRead
 		getFpcs: async () => [],
 		logDebug: () => {},
 		logError: () => {},
+		failedLegRetryDelayMs: 0,
 		...overrides,
 	}
 }
@@ -182,6 +183,59 @@ describe("GasBalanceReader cache contract", () => {
 		)
 		const result = await reader.get("net-1", "0xacc")
 		expect(result).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
+	})
+})
+
+describe("GasBalanceReader failed-leg retry + degraded caching (cold-start recovery)", () => {
+	test("a leg that throws once recovers on the in-compute retry — value present, cached FRESH", async () => {
+		// The cold-start shape: the offscreen transport rejects the first read,
+		// then is up milliseconds later. The retry converts the would-be "—"
+		// into a correct first paint.
+		let publicCalls = 0
+		bvsMock.mockReset().mockImplementation(() => {
+			publicCalls += 1
+			if (publicCalls === 1) throw new Error("Offscreen document closed before fully loading")
+			return encodedResult(100n)
+		})
+		const logError = vi.fn()
+		const reader = new GasBalanceReader(makeDeps({ logError }))
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
+		expect(publicCalls).toBe(2)
+		// A recovered retry is not error-worthy — the old single-shot always
+		// paid an error log for a race that healed itself.
+		expect(logError).not.toHaveBeenCalled()
+		// Recovered snapshot is a normal fresh entry: next get serves the cache.
+		await reader.get("net-1", "0xacc")
+		expect(publicCalls).toBe(2)
+	})
+
+	test("a leg that fails BOTH attempts caches already-stale — next get recomputes instead of serving '—' for the TTL", async () => {
+		let fail = true
+		bvsMock.mockReset().mockImplementation(() => {
+			if (fail) throw new Error("node down")
+			return encodedResult(100n)
+		})
+		const logError = vi.fn()
+		const reader = new GasBalanceReader(makeDeps({ logError }))
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: null, privateFeeJuice: null })
+		expect(logError).toHaveBeenCalledTimes(1)
+		// Degraded snapshot is peekable (dimmed last-known) but already stale.
+		expect(reader.peek("net-1", "0xacc")).toEqual({ balances: { publicFeeJuice: null, privateFeeJuice: null }, stale: true })
+		// The transport recovers — the very next get recomputes and repairs.
+		fail = false
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
+		expect(reader.peek("net-1", "0xacc")).toEqual({ balances: { publicFeeJuice: "100", privateFeeJuice: null }, stale: false })
+	})
+
+	test("a structural null (no PrivateFPC registered) is NOT degraded: no retry, cached fresh", async () => {
+		bvsMock.mockReset().mockResolvedValue(encodedResult(100n))
+		const reader = new GasBalanceReader(makeDeps())
+		expect(await reader.get("net-1", "0xacc")).toEqual({ publicFeeJuice: "100", privateFeeJuice: null })
+		// One public read only — the private leg answered definitively (no FPC)
+		// without a read, and definitive nulls must not trigger the retry.
+		expect(bvsMock.mock.calls.length).toBe(1)
+		await reader.get("net-1", "0xacc")
+		expect(bvsMock.mock.calls.length).toBe(1)
 	})
 })
 
