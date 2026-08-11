@@ -38,7 +38,12 @@ export const DEFAULT_TOKEN_SEEDS: readonly DefaultTokenSeed[] = [
 		contract: "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6",
 		// Live-captured 2026-07-21 (node + aztecscan agree); original == current.
 		expectedClassId: "0x0225da0f4227a139c3d6562b6554750adcdec45fd62d9b16af11da21033ef2cf",
-		expectedSymbol: "cUSD",
+		// Live-captured 2026-08-11 via seed-preflight-metadata.ts (standards
+		// layout): symbol "cUSDC", name "Clean USDC", decimals 6. The original
+		// "cUSD" pin was product intent captured with the WRONG storage layout
+		// (upstream sample Token, not aztec-standards), so the seeder correctly
+		// hard-skipped this token on every unlock since the pin landed.
+		expectedSymbol: "cUSDC",
 	},
 	{
 		chainId: CHAIN_IDS.MAINNET,
