@@ -156,6 +156,7 @@
         "@aztec/bb.js": "5.0.1",
         "@aztec/foundation": "5.0.1",
         "@aztec/noir-acvm_js": "5.0.1",
+        "@aztec/noir-contracts.js": "5.0.1",
         "@aztec/noir-noirc_abi": "5.0.1",
         "@aztec/stdlib": "5.0.1",
         "@aztec/wallet-sdk": "5.0.1",
