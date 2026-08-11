@@ -91,21 +91,25 @@ const onOffscreenReady = (message: unknown) => {
 }
 const onOffscreenTimeout = () => {
 	chrome.runtime.onMessage.removeListener(onOffscreenReady)
-	// Fence first: the close below makes a still-pending `createDocument`
-	// reject with the same "closed before fully loading" Chrome error the
-	// loading-race retry catches — a post-timeout retry would create an
-	// untracked document (and, unguarded, once produced a false-success pass).
-	readyGateTimedOut = true
+	// Fence FIRST (before the close): bumping the sequence invalidates the
+	// current pass, so when the close below makes its still-pending
+	// `createDocument` reject with "closed before fully loading", the retry
+	// branch sees a stale pass id and propagates instead of re-creating an
+	// untracked document (unguarded, that once produced a false-success pass).
+	passSeq += 1
 	// Kill the half-initialized offscreen so it doesn't become a ghost.
 	closeOffscreen().catch(() => {})
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
 }
 
-/** True from the moment a pass's 10s ready-gate fires until the next pass
- *  starts. Consulted by `createOffscreen`'s close-and-retry so a timeout-
- *  induced create rejection propagates instead of re-creating. */
-let readyGateTimedOut = false
+/** Monotonic create-pass fence. Each ensure pass captures `++passSeq`; the
+ *  timeout handler bumps it to invalidate the running pass. `createOffscreen`
+ *  retries ONLY while its pass id is still current — a mutable boolean here
+ *  was insufficient: a NEW pass would reset it, re-arming the timed-out
+ *  pass's zombie continuation, whose close-and-retry could then tear down
+ *  the new pass's loading document (the cross-caller kill, resurrected). */
+let passSeq = 0
 
 /**
  * Check if the existing offscreen document is responsive.
@@ -183,7 +187,7 @@ async function closeOffscreen() {
  *   taskbar/dock as a Nulo entry; the `chrome.runtime` message channel
  *   works identically to Chromium's offscreen.
  */
-async function createOffscreen() {
+async function createOffscreen(passId: number) {
 	if (hasOffscreenApi()) {
 		const create = () =>
 			chrome.offscreen.createDocument({
@@ -198,13 +202,18 @@ async function createOffscreen() {
 			// ("single offscreen document": getContexts saw none but create says
 			// one exists) and the loading race ("closed before fully loading":
 			// the document was torn down mid-load, e.g. by browser cleanup —
-			// the close is a no-op then, the retry is what matters). NEVER after
-			// the ready-gate timed out: the timeout's own close produces the
-			// loading-race message, and retrying then would spawn a document the
-			// already-rejected pass no longer tracks.
+			// the close is a no-op then, the retry is what matters). ONLY while
+			// this pass is still current: the ready-gate timeout bumps `passSeq`
+			// and then closes the document, so a timeout-induced rejection (or a
+			// zombie continuation surviving into a successor pass) must
+			// propagate — its close-and-retry would tear down a document this
+			// pass no longer tracks.
 			const msg = String(err)
-			if (!readyGateTimedOut && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
+			if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
 				await closeOffscreen()
+				// The close suspends: re-check the fence so a timeout landing in
+				// the close window can't be followed by an untracked create.
+				if (passId !== passSeq) throw err
 				await create()
 			} else {
 				throw err
@@ -299,10 +308,10 @@ async function doEnsureOffscreenRunning() {
 			rejectOffscreenPromise = reject
 		})
 		offscreenPromise = ready
-		readyGateTimedOut = false
+		const passId = ++passSeq
 		offscreenTimeout = setTimeout(onOffscreenTimeout, READY_TIMEOUT_MS)
 		chrome.runtime.onMessage.addListener(onOffscreenReady)
-		const creating = createOffscreen()
+		const creating = createOffscreen(passId)
 		// Race-loser guard: when the gate times out first, `creating` may reject
 		// AFTER this pass already rejected — that late rejection must not surface
 		// as an unhandled rejection in the SW.

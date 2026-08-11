@@ -153,4 +153,44 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 			vi.useRealTimers()
 		}
 	})
+
+	test("a timed-out pass's ZOMBIE create rejection cannot retry into a successor pass (pass-scoped fence)", async () => {
+		vi.useFakeTimers()
+		try {
+			// Pass A: create hangs; its eventual rejection is delivered only AFTER
+			// pass B is underway. A mutable "timed out" boolean would be reset by
+			// B, re-arming A's retry — whose closeOffscreen would tear down B's
+			// document (the cross-caller kill through a time shift).
+			let rejectCreateA!: (e: unknown) => void
+			createDocument.mockImplementationOnce(
+				() =>
+					new Promise((_, rej) => {
+						rejectCreateA = rej
+					}),
+			)
+			const pA = ensureOffscreenRunning().catch((e) => String(e))
+			await vi.advanceTimersByTimeAsync(10_000)
+			expect(await pA).toBe("Offscreen is not responding")
+			expect(closeDocument).toHaveBeenCalledTimes(1) // the gate's kill
+
+			// Pass B under way: created, awaiting READY.
+			createDocument.mockImplementationOnce(async () => {})
+			const pB = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(createDocument).toHaveBeenCalledTimes(2)
+
+			// A's zombie continuation lands NOW, with the loading-race message.
+			rejectCreateA(new Error("Offscreen document closed before fully loading."))
+			await vi.advanceTimersByTimeAsync(0)
+
+			// Fenced: no third create, and B's document was NOT closed.
+			expect(createDocument).toHaveBeenCalledTimes(2)
+			expect(closeDocument).toHaveBeenCalledTimes(1)
+
+			deliver(OFFSCREEN_READY_MESSAGE)
+			await pB
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 })
