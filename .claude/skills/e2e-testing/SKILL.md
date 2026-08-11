@@ -236,3 +236,29 @@ held by LIVE processes. `ps -eo pid,rss,etimes,cmd | grep -E 'aztec|anvil'` find
 - **Best fix (infra, separate PR): move `AZTEC_DATA_DIR` off tmpfs onto real disk** (`~/.cache/…`
   or the gitignored `.e2e-state/…`). Then a leaked run wastes cheap disk you reap later instead of
   RAM that breaks the machine.
+
+## Build-time-armed tests: silent-unarmed-run trap (bitten twice — 2026-08)
+
+Several e2e fixtures are compiled INTO the wallet bundle at BUILD time via `VITE_NULO_E2E_*` flags
+(proverless incoming-poll gate, migration-fixture sentinels). A test that needs one of these,
+run against an UNARMED dist, does not error — the hook is tree-shaken out, `?.` no-ops, and the
+test polls into a multi-minute timeout that looks exactly like a product bug or machine flake.
+Both suffered instances: `backup-migration.test.ts` (env set at runtime but dist built unarmed)
+and `account-switch-isolation.test.ts` (bare `bun run e2e:agent <file>` builds unarmed; CI always
+arms, so it's deterministically red locally / green on CI).
+
+### Rules
+
+- **A runtime env var can never arm a build-time flag.** Arming is `VITE_…=1` at `bun run build`
+  time; the runtime twin only tells the TEST the dist is supposed to be armed.
+- **Every build-armed test file carries a formal marker** (`@requires-proverless` today) that
+  `scripts/e2e/agent.sh` scans BEFORE spending ports/build — unarmed runs are refused with the
+  exact remedial command. Add a marker (+ scan clause) when introducing a new build-armed fixture.
+- **Every build-armed test file also carries a `beforeAll` dist preflight** (grep the loaded
+  extension's `assets/*.js` for the compile-time stamp; hard-abort with the remedial command) —
+  the belt for direct-vitest invocations that bypass agent.sh. Idioms:
+  `backup-migration.test.ts` (arming-contract test), `account-switch-isolation.test.ts`
+  (beforeAll stamp scan).
+- **Diagnosing "deterministic local red, CI green" on a gated test**: FIRST grep the local dist
+  for the fixture's stamp/strings (`grep -rl "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome`)
+  before suspecting timing or hardware — absence proves an unarmed build in seconds.
