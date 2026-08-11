@@ -118,4 +118,39 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 		expect(createDocument).not.toHaveBeenCalled()
 		expect(closeDocument).not.toHaveBeenCalled()
 	})
+
+	test("createDocument hanging past the 10s gate: all joiners reject, NO post-timeout retry, next pass recovers", async () => {
+		vi.useFakeTimers()
+		try {
+			// A hung create must not outlive the ready-gate: the pass rejects at
+			// 10s, and the timeout-induced close must not trigger the loading-race
+			// retry (which would spawn an untracked document — or, pre-fix, turn
+			// into a false SUCCESS via `await null` after the gate was cleared).
+			createDocument.mockImplementationOnce(() => new Promise(() => {}))
+			const outcomes: string[] = []
+			const track = (p: Promise<void>) =>
+				p.then(
+					() => outcomes.push("resolved"),
+					(e) => outcomes.push(String(e)),
+				)
+			const p1 = track(ensureOffscreenRunning())
+			const p2 = track(ensureOffscreenRunning())
+			await vi.advanceTimersByTimeAsync(10_000)
+			await Promise.all([p1, p2])
+
+			expect(outcomes).toEqual(["Offscreen is not responding", "Offscreen is not responding"])
+			expect(createDocument).toHaveBeenCalledTimes(1) // no timeout-induced retry
+			expect(closeDocument).toHaveBeenCalledTimes(1) // the gate's own kill
+
+			// The single-flight cleared: a fresh pass creates again and succeeds.
+			createDocument.mockImplementation(async () => {})
+			const p3 = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			deliver(OFFSCREEN_READY_MESSAGE)
+			await p3
+			expect(createDocument).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 })

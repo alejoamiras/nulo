@@ -91,11 +91,21 @@ const onOffscreenReady = (message: unknown) => {
 }
 const onOffscreenTimeout = () => {
 	chrome.runtime.onMessage.removeListener(onOffscreenReady)
+	// Fence first: the close below makes a still-pending `createDocument`
+	// reject with the same "closed before fully loading" Chrome error the
+	// loading-race retry catches — a post-timeout retry would create an
+	// untracked document (and, unguarded, once produced a false-success pass).
+	readyGateTimedOut = true
 	// Kill the half-initialized offscreen so it doesn't become a ghost.
 	closeOffscreen().catch(() => {})
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
 }
+
+/** True from the moment a pass's 10s ready-gate fires until the next pass
+ *  starts. Consulted by `createOffscreen`'s close-and-retry so a timeout-
+ *  induced create rejection propagates instead of re-creating. */
+let readyGateTimedOut = false
 
 /**
  * Check if the existing offscreen document is responsive.
@@ -188,9 +198,12 @@ async function createOffscreen() {
 			// ("single offscreen document": getContexts saw none but create says
 			// one exists) and the loading race ("closed before fully loading":
 			// the document was torn down mid-load, e.g. by browser cleanup —
-			// the close is a no-op then, the retry is what matters).
+			// the close is a no-op then, the retry is what matters). NEVER after
+			// the ready-gate timed out: the timeout's own close produces the
+			// loading-race message, and retrying then would spawn a document the
+			// already-rejected pass no longer tracks.
 			const msg = String(err)
-			if (msg.includes("single offscreen document") || msg.includes("closed before fully loading")) {
+			if (!readyGateTimedOut && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
 				await closeOffscreen()
 				await create()
 			} else {
@@ -278,20 +291,35 @@ async function doEnsureOffscreenRunning() {
 	}
 
 	if (!offscreenPromise) {
-		offscreenPromise = new Promise((resolve, reject) => {
+		// Capture the gate LOCALLY: the ready/timeout handlers null the module
+		// variable when they settle it, and awaiting the variable after that
+		// awaits `null` — an instant false success for every joiner.
+		const ready = new Promise<void>((resolve, reject) => {
 			resolveOffscreenPromise = resolve
 			rejectOffscreenPromise = reject
 		})
+		offscreenPromise = ready
+		readyGateTimedOut = false
 		offscreenTimeout = setTimeout(onOffscreenTimeout, READY_TIMEOUT_MS)
 		chrome.runtime.onMessage.addListener(onOffscreenReady)
+		const creating = createOffscreen()
+		// Race-loser guard: when the gate times out first, `creating` may reject
+		// AFTER this pass already rejected — that late rejection must not surface
+		// as an unhandled rejection in the SW.
+		creating.catch(() => {})
 		try {
-			await createOffscreen()
+			// Race so a `createDocument` that HANGS cannot outlive the gate: the
+			// 10s timeout rejects `ready`, the pass rejects, and the single-flight
+			// clears — awaiting only the create would wedge every future caller.
+			await Promise.race([creating, ready])
 		} catch (err) {
 			clearTimeout(offscreenTimeout)
 			chrome.runtime.onMessage.removeListener(onOffscreenReady)
 			offscreenPromise = null
 			throw err
 		}
+		await ready
+		return
 	}
 
 	await offscreenPromise

@@ -9,8 +9,11 @@
  * - `expectedClassId`: live-captured from the node. The load-bearing pin —
  *   the artifact and every FnImpl derive from the class, so a hostile RPC
  *   cannot swap in a different contract implementation.
- * - `expectedSymbol`: product intent (what the wallet is SUPPOSED to list);
- *   chain metadata disagreeing means we should not silently seed it.
+ * - `expectedSymbol`: the CHAIN's symbol, live-captured with
+ *   `scripts/seed-preflight-metadata.ts` (standards Token storage layout —
+ *   the upstream sample Token's layout decodes garbage; that mismatch shipped
+ *   a wrong "cUSD" pin that hard-skipped the token on every unlock). Chain
+ *   metadata disagreeing with the pin means we should not silently seed it.
  * - decimals cannot be captured without a live simulation, so it is
  *   bounds-checked (0..18) at seed time and recorded in the seed marker for
  *   manual QA confirmation, not equality-pinned.
