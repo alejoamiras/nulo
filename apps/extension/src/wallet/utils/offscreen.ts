@@ -91,11 +91,25 @@ const onOffscreenReady = (message: unknown) => {
 }
 const onOffscreenTimeout = () => {
 	chrome.runtime.onMessage.removeListener(onOffscreenReady)
+	// Fence FIRST (before the close): bumping the sequence invalidates the
+	// current pass, so when the close below makes its still-pending
+	// `createDocument` reject with "closed before fully loading", the retry
+	// branch sees a stale pass id and propagates instead of re-creating an
+	// untracked document (unguarded, that once produced a false-success pass).
+	passSeq += 1
 	// Kill the half-initialized offscreen so it doesn't become a ghost.
 	closeOffscreen().catch(() => {})
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
 }
+
+/** Monotonic create-pass fence. Each ensure pass captures `++passSeq`; the
+ *  timeout handler bumps it to invalidate the running pass. `createOffscreen`
+ *  retries ONLY while its pass id is still current — a mutable boolean here
+ *  was insufficient: a NEW pass would reset it, re-arming the timed-out
+ *  pass's zombie continuation, whose close-and-retry could then tear down
+ *  the new pass's loading document (the cross-caller kill, resurrected). */
+let passSeq = 0
 
 /**
  * Check if the existing offscreen document is responsive.
@@ -173,23 +187,34 @@ async function closeOffscreen() {
  *   taskbar/dock as a Nulo entry; the `chrome.runtime` message channel
  *   works identically to Chromium's offscreen.
  */
-async function createOffscreen() {
+async function createOffscreen(passId: number) {
 	if (hasOffscreenApi()) {
-		try {
-			await chrome.offscreen.createDocument({
+		const create = () =>
+			chrome.offscreen.createDocument({
 				url: path,
 				reasons: ["WORKERS"],
 				justification: "Offscreen document is used for running PXE in it",
 			})
+		try {
+			await create()
 		} catch (err) {
-			if (String(err).includes("single offscreen document")) {
-				// Ghost offscreen — close it and retry once
+			// Two transient shapes get one close-and-retry: the ghost bug
+			// ("single offscreen document": getContexts saw none but create says
+			// one exists) and the loading race ("closed before fully loading":
+			// the document was torn down mid-load, e.g. by browser cleanup —
+			// the close is a no-op then, the retry is what matters). ONLY while
+			// this pass is still current: the ready-gate timeout bumps `passSeq`
+			// and then closes the document, so a timeout-induced rejection (or a
+			// zombie continuation surviving into a successor pass) must
+			// propagate — its close-and-retry would tear down a document this
+			// pass no longer tracks.
+			const msg = String(err)
+			if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
 				await closeOffscreen()
-				await chrome.offscreen.createDocument({
-					url: path,
-					reasons: ["WORKERS"],
-					justification: "Offscreen document is used for running PXE in it",
-				})
+				// The close suspends: re-check the fence so a timeout landing in
+				// the close window can't be followed by an untracked create.
+				if (passId !== passSeq) throw err
+				await create()
 			} else {
 				throw err
 			}
@@ -244,7 +269,27 @@ async function isOffscreenAlreadyRunning(): Promise<boolean> {
 	return firefoxOffscreenWindowId !== null
 }
 
-export async function ensureOffscreenRunning() {
+/**
+ * Single-flight gate for the WHOLE ensure sequence (probe → zombie close →
+ * create → ready-await). Without it, concurrent cold-start callers race: a
+ * second caller's `getContexts` sees the document the first caller is still
+ * CREATING, its health ping gets no pong (the loading document hasn't
+ * installed its listener yet), and its "zombie" close tears down the loading
+ * document — surfacing on the creator as Chrome's "Offscreen document closed
+ * before fully loading". Joiners must share one pass, not re-probe.
+ */
+let ensureInFlight: Promise<void> | null = null
+
+export function ensureOffscreenRunning(): Promise<void> {
+	if (!ensureInFlight) {
+		ensureInFlight = doEnsureOffscreenRunning().finally(() => {
+			ensureInFlight = null
+		})
+	}
+	return ensureInFlight
+}
+
+async function doEnsureOffscreenRunning() {
 	if (await isOffscreenAlreadyRunning()) {
 		// Offscreen exists — verify it's actually responsive
 		if (await isOffscreenHealthy()) {
@@ -255,20 +300,42 @@ export async function ensureOffscreenRunning() {
 	}
 
 	if (!offscreenPromise) {
-		offscreenPromise = new Promise((resolve, reject) => {
+		// Capture the gate LOCALLY: the ready/timeout handlers null the module
+		// variable when they settle it, and awaiting the variable after that
+		// awaits `null` — an instant false success for every joiner.
+		const ready = new Promise<void>((resolve, reject) => {
 			resolveOffscreenPromise = resolve
 			rejectOffscreenPromise = reject
 		})
+		offscreenPromise = ready
+		const passId = ++passSeq
 		offscreenTimeout = setTimeout(onOffscreenTimeout, READY_TIMEOUT_MS)
 		chrome.runtime.onMessage.addListener(onOffscreenReady)
+		const creating = createOffscreen(passId)
+		// Race-loser guard: when the gate times out first, `creating` may reject
+		// AFTER this pass already rejected — that late rejection must not surface
+		// as an unhandled rejection in the SW.
+		creating.catch(() => {})
 		try {
-			await createOffscreen()
+			// Race so a `createDocument` that HANGS cannot outlive the gate: the
+			// 10s timeout rejects `ready`, the pass rejects, and the single-flight
+			// clears — awaiting only the create would wedge every future caller.
+			await Promise.race([creating, ready])
 		} catch (err) {
 			clearTimeout(offscreenTimeout)
 			chrome.runtime.onMessage.removeListener(onOffscreenReady)
 			offscreenPromise = null
 			throw err
 		}
+		// DELIBERATELY not `await creating` here. A ghost document can emit
+		// READY during its close-and-retry teardown, so `ready` can win while
+		// `creating` is still replacing the document — an accepted benign race
+		// (rare² timing; requests transiently fail; the next pass's probe+ping
+		// adopts or replaces the live document). Awaiting `creating` would
+		// close that window but reintroduces a wedge: the gate timer is already
+		// cleared, so a hung post-READY create would block every caller forever.
+		await ready
+		return
 	}
 
 	await offscreenPromise

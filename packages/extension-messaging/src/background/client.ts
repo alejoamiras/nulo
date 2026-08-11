@@ -4,7 +4,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike } from "../core/base-client"
-import { RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
+import { CLIENT_DISCONNECTED_MESSAGE, RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
 import { MessageType, type EventMessage, type ResponseMessage } from "../messages"
 
 /** Default upper bound on any RPC request. Individual calls can override.
@@ -151,7 +151,7 @@ export abstract class ServiceClient<
 	}
 
 	protected makeDisconnectError(): unknown {
-		return new Error("Client disconnected")
+		return new Error(CLIENT_DISCONNECTED_MESSAGE)
 	}
 
 	// ── Convenience RPCs ────────────────────────────────────────────────

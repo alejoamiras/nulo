@@ -2,7 +2,7 @@ import type { ILogger } from "@nulo/wallet-core/logger"
 import { getRandomHex } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike, type TerminalRecord } from "../core/base-client"
-import { RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
+import { CLIENT_DISCONNECTED_MESSAGE, RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
 import { MessageType } from "../messages"
 import type { EventMessage, ResponseMessage } from "./messages"
 import { type RequestTelemetry, type TelemetrySink, LoggingTelemetrySink } from "./telemetry"
@@ -130,7 +130,7 @@ export abstract class ServiceClient<
 	}
 
 	protected makeDisconnectError(): unknown {
-		return new Error("Client disconnected")
+		return new Error(CLIENT_DISCONNECTED_MESSAGE)
 	}
 
 	protected onTerminal(record: TerminalRecord): void {

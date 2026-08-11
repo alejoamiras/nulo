@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest"
 import {
 	AccountAddressInconsistencyError,
 	CapabilityNotGrantedError,
+	CLIENT_DISCONNECTED_MESSAGE,
+	isClientDisconnectRejection,
 	JobCancelledError,
 	remoteErrorFromResponseContent,
 	UserRejectedError,
@@ -97,5 +99,18 @@ describe("remoteErrorFromResponseContent", () => {
 
 	test("neither payload nor message → Error('Unknown error')", () => {
 		expect(remoteErrorFromResponseContent({}).message).toBe("Unknown error")
+	})
+})
+
+describe("isClientDisconnectRejection", () => {
+	test("matches the exact teardown rejection both transports emit", () => {
+		expect(isClientDisconnectRejection(new Error(CLIENT_DISCONNECTED_MESSAGE))).toBe(true)
+	})
+
+	test("does not match other errors, non-Errors, or message-shaped strings", () => {
+		expect(isClientDisconnectRejection(new Error("port disconnected"))).toBe(false)
+		expect(isClientDisconnectRejection(CLIENT_DISCONNECTED_MESSAGE)).toBe(false)
+		expect(isClientDisconnectRejection(undefined)).toBe(false)
+		expect(isClientDisconnectRejection({ message: CLIENT_DISCONNECTED_MESSAGE })).toBe(false)
 	})
 })

@@ -75,6 +75,26 @@ export class RpcDisconnectedError extends WalletError {
 	}
 }
 
+/**
+ * The exact message both transports use when rejecting every in-flight
+ * request on channel teardown (`makeDisconnectError` in the Port and
+ * offscreen clients). Deliberately a plain `Error`, not a `WalletError` —
+ * part of the string-shaped disconnect contract; the constant keeps the
+ * constructors and `isClientDisconnectRejection` from drifting apart.
+ */
+export const CLIENT_DISCONNECTED_MESSAGE = "Client disconnected"
+
+/**
+ * True for the expected teardown rejection a client emits for each in-flight
+ * request when its channel drops (SW restart, page close). The Port transport
+ * reconnects immediately after, so for a global rejection handler these are
+ * transient churn to log quietly, not actionable errors — a SW restart under
+ * an open page used to spam one error-level line per pending request.
+ */
+export function isClientDisconnectRejection(reason: unknown): boolean {
+	return reason instanceof Error && reason.message === CLIENT_DISCONNECTED_MESSAGE
+}
+
 /** User explicitly rejected a prompt (approval, passkey, etc). */
 export class UserRejectedError extends WalletError {
 	public static readonly CODE = "USER_REJECTED"

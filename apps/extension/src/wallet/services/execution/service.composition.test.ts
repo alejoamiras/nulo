@@ -333,20 +333,24 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 })
 
 describe("ExecutionService composition — profile-switch gas-cache invalidation (D12)", () => {
-	test("active-profile change invalidates cached gas balances: the next read recomputes", async () => {
+	test("active-profile change EVICTS cached gas balances: peek goes cold, the next read recomputes", async () => {
 		const h = await makeHarness()
-		// Prime the reader's TTL cache (the compute path degrades to null
-		// balances against these shallow fakes — irrelevant here; the WIRING is
-		// under test, observed via getNetwork calls per compute).
+		// Prime the reader's cache (the compute path degrades to null balances
+		// against these shallow fakes, so the snapshot lands already-stale but
+		// PEEKABLE — the WIRING is under test, discriminated via peek: a mere
+		// stale-marking keeps the last-known peekable, only the profile-switch
+		// EVICTION clears it).
 		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
 		const afterPrime = h.getNetwork.mock.calls.length
-		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
-		expect(h.getNetwork.mock.calls.length).toBe(afterPrime) // TTL hit — no recompute
+		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).not.toBeNull()
 
 		h.profileChanged.invoke(undefined)
 
+		// Evicted outright — the new profile must not see the old profile's
+		// figures even dimmed. (Stale-marked entries would still peek here.)
+		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).toBeNull()
 		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
-		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(afterPrime) // invalidated → recompute
+		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(afterPrime) // cold → recompute
 	}, 15_000)
 
 	test("a compute in flight across the profile switch neither caches nor peeks — the new profile starts cold", async () => {

@@ -8,6 +8,7 @@
 import { consoleMethods, LogLevel } from "@/wallet/logger"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { getErrorData } from "@nulo/wallet-core/utils"
+import { isClientDisconnectRejection } from "@nulo/extension-messaging/errors"
 
 // Forward console.{log,warn,error,...} to the unified log pipe.
 const logger = new LoggerServiceClient("onboarding")
@@ -19,7 +20,11 @@ for (const [method, level] of consoleMethods) {
 }
 
 self.onunhandledrejection = (e: PromiseRejectionEvent) => {
-	logger.log("ui", LogLevel.Error, getErrorData(e.reason))
+	// A SW restart rejects every in-flight request with the disconnect error
+	// while the clients auto-reconnect — expected churn, kept at debug so a
+	// restart under an open tab doesn't spam one error line per request.
+	const level = isClientDisconnectRejection(e.reason) ? LogLevel.Debug : LogLevel.Error
+	logger.log("ui", level, getErrorData(e.reason))
 }
 
 import { createPinia } from "pinia"
