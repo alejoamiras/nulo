@@ -245,7 +245,13 @@ run against an UNARMED dist, does not error — the hook is tree-shaken out, `?.
 test polls into a multi-minute timeout that looks exactly like a product bug or machine flake.
 Both suffered instances: `backup-migration.test.ts` (env set at runtime but dist built unarmed)
 and `account-switch-isolation.test.ts` (bare `bun run e2e:agent <file>` builds unarmed; CI always
-arms, so it's deterministically red locally / green on CI).
+arms, so it's deterministically red locally / green on CI). Third instance (2026-08-15): a
+mid-session PRODUCTION build (`bun run build:chrome` to package the extension for manual install)
+silently OVERWROTE the armed dist — the next `test:e2e` run failed its 5 migration tests with
+90s waits, twice, and read as branch breakage. The same 5 deterministic failures across runs is
+the un-armed signature (load flake scatters; disarming repeats exactly). **After ANY other build
+in the session, re-arm before smoke**: `VITE_NULO_E2E_MIGRATION_FIXTURE=1
+VITE_NULO_E2E_DEFAULT_NET=testnet bun run build:chrome` (CI parity, `_smoke-e2e.yml`).
 
 ### Rules
 
