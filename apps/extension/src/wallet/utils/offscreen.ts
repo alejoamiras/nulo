@@ -175,21 +175,24 @@ async function closeOffscreen() {
  */
 async function createOffscreen() {
 	if (hasOffscreenApi()) {
-		try {
-			await chrome.offscreen.createDocument({
+		const create = () =>
+			chrome.offscreen.createDocument({
 				url: path,
 				reasons: ["WORKERS"],
 				justification: "Offscreen document is used for running PXE in it",
 			})
+		try {
+			await create()
 		} catch (err) {
-			if (String(err).includes("single offscreen document")) {
-				// Ghost offscreen — close it and retry once
+			// Two transient shapes get one close-and-retry: the ghost bug
+			// ("single offscreen document": getContexts saw none but create says
+			// one exists) and the loading race ("closed before fully loading":
+			// the document was torn down mid-load, e.g. by browser cleanup —
+			// the close is a no-op then, the retry is what matters).
+			const msg = String(err)
+			if (msg.includes("single offscreen document") || msg.includes("closed before fully loading")) {
 				await closeOffscreen()
-				await chrome.offscreen.createDocument({
-					url: path,
-					reasons: ["WORKERS"],
-					justification: "Offscreen document is used for running PXE in it",
-				})
+				await create()
 			} else {
 				throw err
 			}
@@ -244,7 +247,27 @@ async function isOffscreenAlreadyRunning(): Promise<boolean> {
 	return firefoxOffscreenWindowId !== null
 }
 
-export async function ensureOffscreenRunning() {
+/**
+ * Single-flight gate for the WHOLE ensure sequence (probe → zombie close →
+ * create → ready-await). Without it, concurrent cold-start callers race: a
+ * second caller's `getContexts` sees the document the first caller is still
+ * CREATING, its health ping gets no pong (the loading document hasn't
+ * installed its listener yet), and its "zombie" close tears down the loading
+ * document — surfacing on the creator as Chrome's "Offscreen document closed
+ * before fully loading". Joiners must share one pass, not re-probe.
+ */
+let ensureInFlight: Promise<void> | null = null
+
+export function ensureOffscreenRunning(): Promise<void> {
+	if (!ensureInFlight) {
+		ensureInFlight = doEnsureOffscreenRunning().finally(() => {
+			ensureInFlight = null
+		})
+	}
+	return ensureInFlight
+}
+
+async function doEnsureOffscreenRunning() {
 	if (await isOffscreenAlreadyRunning()) {
 		// Offscreen exists — verify it's actually responsive
 		if (await isOffscreenHealthy()) {
