@@ -332,7 +332,7 @@ Gate: `bun run lint:actions` exit 0; workflow diff reviewed against least-privil
 confirms no other `~/.foundry`/`FOUNDRY_DIR` consumer; lessons entry.
 Layers: workflow lint (empirically validated in Phase 6's network runs).
 
-**Phase 5 — Smoke roundtrip (Fix 1)** — diagnostics + env-fast-fail investigation.
+**Phase 5 — Smoke roundtrip (Fix 1)** ✓ GREEN as-scoped (2026-08-11 — `lessons/phase-5.md`: diagnostics landed, full smoke suite 23-passed/1-skip solo; the flake itself stays OPEN — owner decision, since every causal fix requires product source, frozen this arc).
 Steps: land trajectory + phase-timing diagnostics; investigate the fast-fail-RPC env fix;
 if it lands, apply it; else classify OPEN — owner and record the exception ask.
 Gate: `bun run lint` + `bun run typecheck` exit 0; armed `bun run test:e2e` SOLO green
