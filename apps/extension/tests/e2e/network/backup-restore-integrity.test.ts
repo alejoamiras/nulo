@@ -38,15 +38,16 @@ import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	captureSoleProfileId,
 	getAccountAddress,
 	navigateByHash,
-	refreshBalances,
 	reopenAndRecoverAfterImport,
 	resetProfile,
 	switchToLocalNetwork,
-	waitForBalance,
+	waitForFreshBalanceRow,
 	waitForProfilePurged,
+	waitForTokenCardAmount,
 } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
@@ -168,34 +169,41 @@ test.skipIf(!hasConfig)(
 			expect(balanceAccounts).not.toContain(FOREIGN_ACCOUNT)
 
 			// ── 5. On-chain functionality ───────────────────────────────────
+			// The imported backup already CARRIES the funded balance rows with a
+			// nonzero updatedAt, so a value-only wait would pass with zero
+			// post-import sync. Gate on FRESHNESS (updatedAt past the imported
+			// baseline) + the exact raw value, then prove projection→render with a
+			// card-scoped display assert. Same total envelope the old 40× spam +
+			// text-scan spent (~150s); ≤5 refreshes, each only after the previous
+			// projection observably finished.
 			await switchToLocalNetwork(page2)
 			expect(await getAccountAddress(page2)).toBe(funded)
-			for (let i = 0; i < 40; i++) {
-				await refreshBalances(page2)
-				const bodyText = await page2.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) break
-				await page2
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page2, "1,000", 30_000)
+			const importedBaseline = await captureBalanceBaseline(page2, funded)
+			await waitForFreshBalanceRow(page2, {
+				account: funded,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: importedBaseline,
+				timeoutMs: 150_000,
+			})
+			await waitForTokenCardAmount(page2, "1,000")
 
 			// ── 5b. Realistic-recovery leg ──────────────────────────────────
 			// Model the strict-mode + MV3-worker-restart path: the in-memory master
 			// is dropped and re-derived on unlock, which re-provisions the encrypted
 			// per-chain PXE store key and re-opens the OPFS store. Prove the store
-			// re-opened (never wiped — refuse-and-preserve) by re-syncing the SAME
-			// on-chain balance after the reopen+unlock.
+			// re-opened (never wiped — refuse-and-preserve) by a FRESH post-reopen
+			// re-projection of the SAME on-chain balance (baseline recaptured after
+			// the reopen so step 5's projection can't satisfy this leg).
 			await reopenAndRecoverAfterImport(page2)
 			expect(await getAccountAddress(page2)).toBe(funded)
-			for (let i = 0; i < 20; i++) {
-				await refreshBalances(page2)
-				if ((await page2.evaluate(() => document.body.innerText)).includes("1,000")) break
-				await page2
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page2, "1,000", 30_000)
+			const reopenBaseline = await captureBalanceBaseline(page2, funded)
+			await waitForFreshBalanceRow(page2, {
+				account: funded,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: reopenBaseline,
+				timeoutMs: 90_000,
+			})
+			await waitForTokenCardAmount(page2, "1,000")
 
 			// ── 6. Delete → re-add round-trip (finding D) ──────────────────────
 			// The reset UI AWAITS the coordinator's full purge before navigating

@@ -9,10 +9,12 @@ source echoes — see the e2e-testing skill's forensics section).
 
 ## Census
 
-15 red jobs across 13 runs. Every one is a puppeteer `TimeoutError` on a wait —
-zero assertion failures, zero crashes. Re-runs cleared all of them (except where a
-second re-run was needed). No red is currently OPEN/unexplained; every one maps to
-a ledger entry below.
+15 red jobs across 13 runs: **14 carry puppeteer `TimeoutError`s on specific waits**
+(15 timeout occurrences — one job failed two files) and **one is an infra failure**
+(the foundry 502, entry 7). Zero assertion failures, zero crashes. Re-runs cleared
+all of them (one run needed a second re-run). Every red maps to a ledger entry;
+entry 1 (smoke roundtrip) is classified **OPEN — owner decision** (see plan Fix 1),
+the latent-risk section tracks further OPEN follow-ups — nothing is silently dropped.
 
 | # | Test file | Suite/shard | Reds | Failing wait | Timeout | Re-run cleared? |
 |---|---|---|---|---|---|---|

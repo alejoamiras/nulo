@@ -95,6 +95,23 @@ disguised raise; Phase 6 contradictory/incomplete).
   OPEN follow-up; foundry cache-bump made non-optional. FIXED.
 - **Med — Fixes 1/3 OPEN/conditional posture**: endorsed as correct.
 
+## Round 3 — re-verdict on the round-2 fixes (same session, resumed)
+
+**Verdict: conditional approve** (conditions: monotonic clock for the dwell; reconcile the
+remaining stale decision-trail text before certification — both applied same-session).
+
+- Resolved — Fix 2: sampled-continuity dwell + single recovery navigation + trajectory
+  recording; "three consecutive no-retry greens after a 2/2 repro are proportionate
+  evidence that the targeted race is fixed without normalizing recurring redirects."
+- Med (applied) — `Date.now()` → `performance.now()` for the dwell marker.
+- Resolved — Fix 5: pre-existence proof + exact row/tombstone + owned-root clearance;
+  restored 30s budget with 7.4s empirical result — "no timeout exception is being
+  smuggled in."
+- Resolved — Phase 6: "a coherent, game-resistant protocol."
+- Med (applied) — four stale trail statements reconciled (Trade-offs product wording,
+  cache-bump non-optionality, Fix 1 phrasing, ledger census intro).
+- **"No further implementation-level blocker remains."**
+
 ## What looks right (per codex round 1)
 
 - Purge-first sequencing + preserving OPFS/IndexedDB negative controls.

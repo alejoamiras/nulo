@@ -221,7 +221,7 @@ contract + leakage review.)
 
 ## Trade-offs & alternatives (competing outline for the audits)
 
-**Chosen: fixture/helper-first, minimal product touches.** Signals are taken from contracts that already exist (native `disabled`, storage rows, tombstones); product code changes only to expose state, and only where nothing observable exists. Cheap, low-risk, reviewable per-fix; keeps the certification loop fast.
+**Chosen: fixture/helper-first, ZERO product touches.** Signals are taken from contracts that already exist (native `disabled`, storage rows, tombstones); recon proved nothing observable is missing for any red wait, so no product code changes at all in this arc (absolute freeze — round-2/3 codex). Cheap, low-risk, reviewable per-fix; keeps the certification loop fast.
 
 **Competing outline — product-emitted readiness everywhere**: give the wallet a first-class e2e observability contract (`data-sync-state` on balance views, `data-ready` on approval windows, a `nulo:e2e:journal` of service settlements), then rewrite the e2e helpers to consume only that contract. Strictly better signals and future tests get them for free — but it's a cross-package product change (design-system + popup + windows), triples the review surface, risks shipping test-scaffolding semantics into prod DOM, and the certification protocol would be gating on brand-new product code rather than on deflaked tests. Rejected for this arc; noted as the follow-up direction if the fixture-first signals prove insufficient (revisit trigger: any OPEN ledger entry whose root cause is "no observable signal exists").
 
@@ -379,10 +379,11 @@ preflight, certification needs written rules, Fact 1/2 corrections, freeze produ
 - Fix 4 correctness bug FIXED (baseline-`updatedAt` freshness + exact value + retained DOM
   assert + bounded retries). (Codex High, fable C3.)
 - Fix 5 → combined predicate with pre-existence proof. (Codex Med, fable.)
-- Fix 6 → preflight assert BEFORE deletion + cache-bump consideration. (Codex High, fable C1.)
+- Fix 6 → preflight assert BEFORE deletion + a NON-optional one-time cache bump certifying the fresh-install path. (Codex High, fable C1.)
 - Fix 3 → instrument-first; budget only if a causal bounded-settle is confirmed, else
   OPEN-exception; file-map corrected. (Codex High.)
-- Fix 1 → RPC-dependency root cause confirmed; NOT unilaterally raised; env-fast-fail
+- Fix 1 → control-flow dependency source-confirmed (RPC-latency trigger stays
+  uninstrumented until Phase-5 diagnostics); NOT unilaterally raised; env-fast-fail
   investigated, else OPEN — owner. (Both High; the honest resolution of the timeout-ban
   tension.)
 - Phases reordered (Fix 4 before Fix 2 de-spam); `NULO_E2E_RETRY=0` everywhere; certification
@@ -403,7 +404,13 @@ not silently assumed.
 - **Round 2 — final fresh codex pass**: reject (fake settle window; 45s disguised raise;
   Phase-6 contradiction) → all findings fixed same-session (see audit-codex.md § Round 2);
   Fix 1/3 OPEN/conditional posture endorsed.
-- **Round 3 — re-verdict on the round-2 fixes (resumed session)**: PENDING.
+- **Round 3 — re-verdict (resumed codex session)**: **conditional approve** — conditions:
+  monotonic clock for the dwell (`performance.now()` — APPLIED) + reconcile four stale
+  decision-trail statements (APPLIED: Trade-offs zero-product wording, cache-bump
+  non-optional, Fix 1 root-cause phrasing, ledger census intro). Fixes 2/5 + Phase 6
+  explicitly marked Resolved; "no further implementation-level blocker remains."
+  → **Gate satisfied: plan approved for implementation** (with Fix 1 and conditionally
+  Fix 3 carrying owner-exception Asks in the final report).
 
 ## Seeds
 

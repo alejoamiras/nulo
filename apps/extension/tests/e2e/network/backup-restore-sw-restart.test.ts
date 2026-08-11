@@ -41,12 +41,13 @@ import {
 	type ExtensionContext,
 } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	ensureUnlocked,
 	getAccountAddress,
 	navigateByHash,
-	refreshBalances,
 	switchToLocalNetwork,
-	waitForBalance,
+	waitForFreshBalanceRow,
+	waitForTokenCardAmount,
 } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import {
@@ -297,16 +298,23 @@ test.skipIf(!hasConfig)(
 			}
 
 			// ── 4. Both legs converge: the imported account syncs its REAL balance ──
+			// FRESHNESS-gated: the imported/re-imported backup already carries the
+			// funded rows with nonzero updatedAt, so a value-only wait could pass
+			// without any post-recovery sync. Baseline is captured here (post-recovery,
+			// pre-refresh) so only a projection that ran AFTER this point satisfies the
+			// wait; the exact raw row value + a card-scoped display assert replace the
+			// body-text scan (false-positive prone) and the 40× refresh spam (starves
+			// the popup thread, queues PXE readers). Same ~240s total envelope.
 			await switchToLocalNetwork(page3)
 			expect(await getAccountAddress(page3)).toBe(funded)
-			for (let i = 0; i < 40; i++) {
-				await refreshBalances(page3)
-				if ((await page3.evaluate(() => document.body.innerText)).includes("1,000")) break
-				await page3
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page3, "1,000", 120_000)
+			const recoveryBaseline = await captureBalanceBaseline(page3, funded)
+			await waitForFreshBalanceRow(page3, {
+				account: funded,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: recoveryBaseline,
+				timeoutMs: 210_000,
+			})
+			await waitForTokenCardAmount(page3, "1,000")
 		} finally {
 			await ctx2.browser.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })

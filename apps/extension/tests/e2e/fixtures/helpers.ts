@@ -1085,8 +1085,10 @@ export async function resetProfile(page: Page): Promise<void> {
 						w.__resetStableSince = null
 						return false
 					}
-					if (w.__resetStableSince == null) w.__resetStableSince = Date.now()
-					return Date.now() - w.__resetStableSince >= dwellMs
+					// performance.now() — the dwell must be monotonic; a wall-clock
+					// adjustment could silently shorten or stretch it.
+					if (w.__resetStableSince == null) w.__resetStableSince = performance.now()
+					return performance.now() - w.__resetStableSince >= dwellMs
 				},
 				{ timeout: 8_000, polling: 150 },
 				{ h: RESET_HASH, dwellMs: DWELL_MS },
@@ -1127,6 +1129,98 @@ export async function resetProfile(page: Page): Promise<void> {
 	await clickByTestId(page, "reset-checkbox-sure")
 	await replaceInputValue(page, '[data-testid="reset-confirm-input"]', profileName)
 	await clickByTestId(page, "reset-submit-btn")
+}
+
+/** Highest `updatedAt` across the account's balance rows (0 if none). Captured
+ *  BEFORE a refresh so `waitForFreshBalanceRow` can require a projection that
+ *  happened AFTER it — an imported backup already carries the expected value
+ *  with a nonzero `updatedAt`, so a value-only poll could pass with zero
+ *  post-import/post-reopen sync, silently un-proving the re-sync the tests
+ *  exist to prove. */
+export async function captureBalanceBaseline(page: Page, account: string): Promise<number> {
+	return await page.evaluate(async (acct: string) => {
+		const all = await chrome.storage.local.get(null)
+		let max = 0
+		for (const [k, v] of Object.entries(all)) {
+			if (!k.startsWith("nulo:core:token-balances@")) continue
+			try {
+				const row = JSON.parse(v as string) as { account?: string; updatedAt?: number }
+				if (row.account === acct && typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
+			} catch {
+				// Hostile-input discipline: a malformed row is ignored, never fatal.
+			}
+		}
+		return max
+	}, account)
+}
+
+/** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
+ *  captured baseline — proves a re-projection actually ran) and CORRECT (exact
+ *  raw `publicBalance`). Drives at most `maxRefreshes` refreshes, each only
+ *  after the previous projection observably finished (some row's `updatedAt`
+ *  advanced past the last refresh) — re-projection is what advances PXE sync,
+ *  but blind refresh spam starves the popup thread and queues PXE readers that
+ *  delay any subsequent purge (ReadWriteGuard drains readers first). The row
+ *  read is exact and locale-independent — a body-text scan for "1,000" can
+ *  false-positive on "$1,000.00" fiat or "11,000". Callers follow with a
+ *  card-scoped DOM assertion (`waitForTokenCardAmount`) so projection→render
+ *  stays proven. */
+export async function waitForFreshBalanceRow(
+	page: Page,
+	opts: { account: string; expectedPublicRaw: string; baselineUpdatedAt: number; maxRefreshes?: number; timeoutMs?: number },
+): Promise<void> {
+	const { account, expectedPublicRaw, baselineUpdatedAt, maxRefreshes = 5, timeoutMs = 120_000 } = opts
+	const deadline = Date.now() + timeoutMs
+	type BalanceRow = { account?: string; publicBalance?: string; privateBalance?: string; updatedAt?: number }
+	const readRows = (): Promise<BalanceRow[]> =>
+		page.evaluate(async (acct: string) => {
+			const all = await chrome.storage.local.get(null)
+			const rows: Array<{ account?: string; publicBalance?: string; privateBalance?: string; updatedAt?: number }> = []
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:token-balances@")) continue
+				try {
+					const row = JSON.parse(v as string) as { account?: string }
+					if (row.account === acct) rows.push(row)
+				} catch {
+					// Malformed row: skip.
+				}
+			}
+			return rows
+		}, account)
+
+	let refreshes = 0
+	let lastRefreshAt = 0
+	let rows: BalanceRow[] = []
+	while (Date.now() < deadline) {
+		rows = await readRows()
+		if (rows.some((r) => (r.updatedAt ?? 0) > baselineUpdatedAt && r.publicBalance === expectedPublicRaw)) return
+		const attemptFinished = refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt)
+		if (attemptFinished && refreshes < maxRefreshes) {
+			lastRefreshAt = Date.now()
+			refreshes++
+			await refreshBalances(page)
+		}
+		await new Promise((r) => setTimeout(r, 1_000))
+	}
+	throw new Error(
+		`waitForFreshBalanceRow: no row for ${account} with publicBalance=${expectedPublicRaw} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}`,
+	)
+}
+
+/** Card-scoped display assertion: some tokens-card shows `displayAmount`,
+ *  with the card's fiat node excluded so "$1,000.00" can't satisfy a "1,000"
+ *  token-amount check. */
+export async function waitForTokenCardAmount(page: Page, displayAmount: string, timeout = 30_000): Promise<void> {
+	await page.waitForFunction(
+		(amt: string) =>
+			[...document.querySelectorAll('[data-testid="tokens-card"]')].some((card) => {
+				const clone = card.cloneNode(true) as HTMLElement
+				for (const fiat of clone.querySelectorAll('[data-testid="token-fiat"]')) fiat.remove()
+				return (clone.textContent ?? "").includes(amt)
+			}),
+		{ timeout, polling: 500 },
+		displayAmount,
+	)
 }
 
 /** Capture the sole profile's id from raw storage and PROVE its row exists — the
