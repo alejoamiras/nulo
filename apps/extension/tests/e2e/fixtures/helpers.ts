@@ -1213,8 +1213,30 @@ export async function waitForFreshBalanceRow(
 		}
 		await new Promise((r) => setTimeout(r, 1_000))
 	}
+	// Census across roots, account-agnostic: distinguishes "the account's rows are
+	// keyed differently" from "the token/balance slices are simply absent" — the
+	// latter points at restore-slice loss, a product condition, not a wait problem.
+	const census = await page
+		.evaluate(async () => {
+			const all = await chrome.storage.local.get(null)
+			const keys = Object.keys(all)
+			const grab = (p: string) => keys.filter((k) => k.startsWith(p))
+			return {
+				tokenRows: grab("nulo:core:tokens@").length,
+				balanceRows: grab("nulo:core:token-balances@").map((k) => {
+					try {
+						const r = JSON.parse(all[k] as string) as { account?: string; updatedAt?: number }
+						return { account: `${r.account?.slice(0, 10)}…`, updatedAt: r.updatedAt }
+					} catch {
+						return { account: "unparseable", updatedAt: -1 }
+					}
+				}),
+				accountRows: grab("nulo:core:accounts@").length,
+			}
+		})
+		.catch((e) => ({ censusFailed: String(e) }))
 	throw new Error(
-		`waitForFreshBalanceRow: no row for ${account} with publicBalance=${expectedPublicRaw} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}`,
+		`waitForFreshBalanceRow: no row for ${account} with publicBalance=${expectedPublicRaw} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}; census: ${JSON.stringify(census)}`,
 	)
 }
 
