@@ -153,6 +153,11 @@ the latent-risk section tracks further OPEN follow-ups — nothing is silently d
   `receive-unregistered`, fixture loops in `extension.ts`). OPEN follow-up sweep.
 - `TokenCard.vue` `isUpdating` has no DOM representation (dead branch) — no
   refresh-in-flight observability for tests or users. OPEN product follow-up.
+- The token-balance projection pipeline persists NO failure record: a failed
+  projection is indistinguishable from a still-running one via storage (bit us
+  live in Phase 2 — a write-gated retry starved after one silent failure; the
+  gas pipeline got retry/degraded-cache in #355, this one did not). OPEN product
+  follow-up (same family as the `isUpdating` gap).
 - The exit-86 retry wrapper does not cover setup-step failures (foundry/puppeteer/
   accelerator installs) — Fix 6 removes the worst offender rather than widening the
   retry. OPEN design question if setup flakes recur.

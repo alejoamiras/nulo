@@ -310,7 +310,7 @@ reproduced twice pre-fix now passes ≥3× consecutively SOLO. Lessons `phase-2.
 `phase-1.md`.
 Layers: lint/typecheck + targeted network e2e + smoke.
 
-**Phase 2 — Balance-settle signal (Fix 4)** — depends-on for Phase 1's de-spam hygiene.
+**Phase 2 — Balance-settle signal (Fix 4)** ✓ GREEN (2026-08-11 — `lessons/phase-2b.md`: 3× consecutive solo greens post cadence-fix; the gate's own diagnostics caught + fixed a write-gated-retry starvation bug first).
 Steps: freshness+value+render predicate (baseline `updatedAt` → `>baseline` AND exact value
 → token-scoped DOM assert; bounded ≤N refreshes). Instrument first to confirm the settle
 signal fires post-reopen.
