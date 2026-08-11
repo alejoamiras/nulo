@@ -675,7 +675,7 @@ export class DappSendExecutor {
 			async ({ checkCancelled, markJournal }) => {
 				await markJournal({ stage: "simulating" })
 
-				const { txRequest, node, pxe, account, network, txCalls } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
+				const { txRequest, node, pxe, account, network, txCalls, txsLimits } = await this.deps.txBuilder.buildNoFrom(op, parentTask)
 				this.deps.logDebug(
 					`executeNoFromSendTx: buildNoFromTxRequest completed, txCalls=${txCalls.length}, account=${account.address.toString()}`,
 				)
@@ -755,7 +755,7 @@ export class DappSendExecutor {
 					{ simulatePublic: true, skipFeeEnforcement: true, scopes: scopesWithAccount },
 					parentTask,
 				)
-				await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1)
+				await finalizeGasLimits(node, txRequest, simulatedTx, 1, undefined, feeOpts, 1, txsLimits)
 
 				// Prove with account in scope
 				const { txHash, offchainOutput } = await this.deps.coordinator.proveAndSend({

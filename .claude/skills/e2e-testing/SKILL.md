@@ -262,3 +262,22 @@ arms, so it's deterministically red locally / green on CI).
 - **Diagnosing "deterministic local red, CI green" on a gated test**: FIRST grep the local dist
   for the fixture's stamp/strings (`grep -rl "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome`)
   before suspecting timing or hardware — absence proves an unarmed build in seconds.
+
+## Suite-wide mass failure across UNRELATED files (timeouts, retry x2 everywhere)
+
+If a full `e2e:agent` run fails DOZENS of unrelated files while a targeted run of the same
+files is green, suspect the RUN ENVIRONMENT before any code path:
+
+1. **Concurrent heavy load on the same host is the #1 cause.** A full vitest suite,
+   `audit:vue` (build + tests), or a proving run executing in PARALLEL with the e2e suite
+   starves the sandbox and the browser — 25s silent-call timeouts and 70s feed waits blow
+   across the board. Run the e2e suite ALONE; treat its wall-clock as reserved.
+2. **`[aztec-node] Error: Address already in use (os error 98)` printed once at node boot is
+   BENIGN** — it appears in green runs too (a sub-service retries on another port). Do NOT
+   chase it as the root cause of a red suite.
+3. Orphaned sandboxes from dead runs (ppid 1, old `lstart`, absent from `~/.agents/ports.md`)
+   are still worth reaping — by OWN pgid only (`kill -TERM -<pgid>`), never `pkill -f` —
+   but verify the claim: in the observed incident the orphans held unrelated ports and the
+   re-run reproduced the boot line anyway.
+4. A green isolated re-run of a few failed files confirms environment, not code. Re-run the
+   full suite solo before touching any test.

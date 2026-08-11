@@ -66,6 +66,7 @@ function makeHarness(
 	overrides: Partial<DappSendExecutorDeps> & {
 		authwit?: { discoverPrivateAuthwits: ReturnType<typeof vi.fn> }
 		buildAndEstimateValidated?: ReturnType<typeof vi.fn>
+		buildAndEstimateFolded?: ReturnType<typeof vi.fn>
 	} = {},
 ) {
 	const network = {
@@ -100,9 +101,11 @@ function makeHarness(
 	})
 	const authwit = overrides.authwit ?? { discoverPrivateAuthwits: vi.fn(async () => [] as unknown[]) }
 	const buildAndEstimateValidated = overrides.buildAndEstimateValidated ?? vi.fn(async () => built as never)
+	const buildAndEstimateFolded = overrides.buildAndEstimateFolded ?? vi.fn(async () => built as never)
 	const estimateWithDiscovery = new DiscoveryAwareEstimator({
 		authwit: authwit as never,
 		buildAndEstimateValidated: buildAndEstimateValidated as never,
+		buildAndEstimateFolded: buildAndEstimateFolded as never,
 		buildForDiscovery: (async () => built) as never,
 	})
 	const deps: DappSendExecutorDeps = {
@@ -151,6 +154,7 @@ function makeHarness(
 		proveAndSend,
 		authwit,
 		buildAndEstimateValidated,
+		buildAndEstimateFolded,
 		executor: new DappSendExecutor(deps),
 	}
 }
@@ -332,7 +336,10 @@ describe("DappSendExecutor.executeAztecSendTx (standard path)", () => {
 
 		const standard = makeHarness()
 		await standard.executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
-		expect(standard.authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
+		// fj folds: discovery happens INSIDE the probed pipeline (one stubbed
+		// sim), never as a standalone discoverer call.
+		expect(standard.authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(standard.buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 	})
 
 	test("scopes = [account.address, ...additionalScopes]; NO_WAIT returns txHash, wait returns receipt", async () => {
@@ -435,11 +442,8 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 		)
 	})
 
-	test("send_transaction: discovered authwits appended to a CLONE — caller's actions untouched, no estimateId", async () => {
-		const extraAction = { kind: "call", method: "authwit_action" }
-		const { executor, deps } = makeHarness({
-			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) },
-		})
+	test("send_transaction (fj, FOLDED): probed pipeline gets a CLONE — caller's actions untouched, no estimateId", async () => {
+		const { executor, buildAndEstimateFolded } = makeHarness()
 		const originalActions = [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }]
 		const op = {
 			kind: "send_transaction",
@@ -449,6 +453,30 @@ describe("DappSendExecutor.estimateOperationFee", () => {
 			actions: originalActions,
 		} as never
 		const result = await executor.estimateOperationFee(op, { paymentMethod: { kind: "fj" } } as never)
+
+		expect(originalActions).toHaveLength(1)
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
+		const foldedOp = (buildAndEstimateFolded.mock.calls[0] as unknown[])[0] as { actions: unknown[] }
+		expect(foldedOp.actions).toEqual(originalActions)
+		expect(foldedOp.actions).not.toBe(originalActions)
+		expect(result.maxFee).toBe("880")
+		expect("estimateId" in result && result.estimateId).toBeFalsy()
+	})
+
+	test("send_transaction (fjwc, CLASSIC): discovered authwits appended to the validated build's clone", async () => {
+		const extraAction = { kind: "call", method: "authwit_action" }
+		const { executor, deps } = makeHarness({
+			authwit: { discoverPrivateAuthwits: vi.fn(async () => [extraAction]) },
+		})
+		const originalActions = [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }]
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fjwc" } },
+			actions: originalActions,
+		} as never
+		const result = await executor.estimateOperationFee(op, { paymentMethod: { kind: "fjwc" } } as never)
 
 		expect(originalActions).toHaveLength(1)
 		const builtOp = ((deps.buildAndEstimateValidated as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[])[0] as {
@@ -668,18 +696,18 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		expect(txArgs[5]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
 	})
 
-	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline", async () => {
-		const { executor, deps, authwit } = makeHarness()
+	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline (fj ⇒ folded)", async () => {
+		const { executor, deps, authwit, buildAndEstimateFolded } = makeHarness()
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN, undefined, undefined, undefined, "est-forged")
 		expect(deps.operationEstimateReuse.tryConsume).toHaveBeenCalledTimes(1)
-		expect(authwit.discoverPrivateAuthwits).toHaveBeenCalledTimes(1)
-		expect(deps.buildAndEstimateValidated).toHaveBeenCalledTimes(1)
+		expect(authwit.discoverPrivateAuthwits).not.toHaveBeenCalled()
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 	})
 
-	test("no estimateId: tryConsume never touched", async () => {
-		const { executor, deps } = makeHarness()
+	test("no estimateId: tryConsume never touched (fj ⇒ folded pipeline)", async () => {
+		const { executor, deps, buildAndEstimateFolded } = makeHarness()
 		await executor.executeAztecSendTx(makeAztecOp(), ORIGIN)
 		expect(deps.operationEstimateReuse.tryConsume).not.toHaveBeenCalled()
-		expect(deps.buildAndEstimateValidated).toHaveBeenCalledTimes(1)
+		expect(buildAndEstimateFolded).toHaveBeenCalledTimes(1)
 	})
 })

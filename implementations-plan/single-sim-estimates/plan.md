@@ -107,27 +107,40 @@ validated gas byte-for-byte on every runnable shape across 2 interleaved rounds 
 note-set change (structural reason: Aztec prices private execution by side effects, which the
 stub preserves). Both inclusion canaries (Sponsored; PrivateFPC paying from the owner's real
 491-FJ credit) MINED on stub-derived limits. Shape 4 (undeployed first-tx) fold-excluded by
-structure; fragmented-note canary deferred (needs L1 deposits — no key by design; real
-credit-note subtract path exercised by the mined canary). **Bonus finding (HIGH): the shipped
+structure; fragmented-note canary initially deferred, later DONE in the follow-up run
+(owner-provided Sepolia signer; recursion across notes forced and mined — see the Phase A2
+discharge record and lessons/phase-B1.md). **Bonus finding (HIGH): the shipped
 stub mechanism never engages** — `new SimulationOverrides({...contracts})` drops the map
 (aztec-runtime service.ts:463), proven live (delegated shape fails "Unknown auth witness"
 under the replica mechanism, succeeds with the upstream classId-swap mechanism). A2 must ship
 the corrected override build — it is simultaneously a production bug fix for discovery.
 Full table + gotchas: `lessons/phase-B1.md`.
 
-### Phase A2 — PrivateFPC fold (PR 3; B1-gated AND Ask-4(a)-conditional)
+### Phase A2 — PrivateFPC fold (PR 3; B1-gated AND Ask-4(a)-conditional) ✓
+
+**GATE DEVIATION — DISCHARGED (2026-08-10).** Initially the fragmented-note PrivateFPC
+canary could not run (fragmentation needs multiple L1→L2 deposits; Ask 4(a) provided an
+Aztec key). The owner then pointed at the canonical clone's `.env` Sepolia signer (the
+plan-pinned L1 key). The canary ran FOR REAL: three small FeeJuicePortal deposits claimed as
+separate credit notes at a fresh account (direct portal route — the swap-fuel pool is
+drained, see `lessons/phase-B1.md`), then a stub-estimated PrivateFPC-paid transfer whose
+committed envelope (11.26 FJ, cap-bumped) exceeded the largest single note (7.90 FJ) —
+**recursion across notes FORCED — and the tx MINED**; the credit moved exactly by the
+envelope. The original A2 gate is now met in full.
 
 **Runs only if the Sepolia key was provisioned and the funded PrivateFPC measurement (incl. fragmented-note inclusion canary) passed the <1% rule; otherwise marked DEFERRED and PR 3 ships B2 alone.** P1 stubbed + probe; F-4 rule + first-sim-only + dedup; folded bail; adversarial fixtures (sponsored-typed non-canonical row + the standalone inner-hash class from Ask 1). dApp `fpc` 3→2 pins.
 **Gate** — pins + fixtures + discovery-equivalence; full unit; milestone e2e: `NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/tx-sendTx-sponsoredFpc.test.ts`.
 
-### Phase B2 — Sponsored + fj 1-sim folds + clamp (PR 3; B1-gated)
+### Phase B2 — Sponsored + fj 1-sim folds + clamp (PR 3; B1-gated) ✓
 
 Fast-path and fj probed folds (no-effects 1-sim; effects ⇒ validated rebuild); clamp commit with per-path pins; fixture extension.
 **Gate** — updated pins (dApp Sponsored/fj 2→1 no-authwit; authwit-bearing ⇒ validated 2); full unit; same milestone e2e pair prover-ON.
 
-### Phase B3 — Full validation (PR 3)
+### Phase B3 — Full validation (PR 3) ✓
 
 **Gate** — `bun run audit:vue`; armed smoke; full `NULO_E2E_PROVERLESS=1 bun run e2e:agent` — all exit 0.
+**RESULT**: all three green at final HEAD (network suite 87/87 twice consecutively, solo runs;
+smoke 79/0 with the migration fixture armed; audit:vue exit 0). Detour + rules: `lessons/phase-B3.md`.
 
 ## Decision ledger
 

@@ -6,7 +6,7 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
 	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
-	getContractInstanceFromInstantiationParams,
+	getContractClassFromArtifact,
 	type CompleteAddress,
 	type PartialAddress,
 } from "@aztec/stdlib/contract"
@@ -451,16 +451,31 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// `loadContractArtifact(SimulatedSchnorrAccountJson)`). ECDSA
 			// support comes for free when Nulo grows it (sibling import:
 			// `@aztec/accounts/ecdsa/stub`).
+			//
+			// Override mechanics mirror upstream `EmbeddedWallet.buildAccountOverrides`:
+			// the stub CLASS is registered with the PXE (function artifacts are
+			// resolved from the class store by `currentContractClassId`, so an
+			// unregistered class makes every lookup come back empty), and each
+			// entry keeps the account's REAL instance with only the class id
+			// swapped — an instance derived from the stub artifact with a random
+			// salt would carry an address preimage inconsistent with the map key.
+			// The historical shape here (`new SimulationOverrides({...contracts})`,
+			// spreading entries at the TOP level) parked the map outside the
+			// `contracts` key, so the override never reached the simulator and
+			// discovery ran UNSTUBBED — proven live on testnet against an
+			// authwit-requiring op (single-sim-estimates B1, Finding 0).
 			if (stubAccountAddresses?.length) {
-				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
-				const contracts: Record<string, { instance: ContractInstanceWithAddress; artifact: ContractArtifact }> = {}
+				const stubClassId = await this.ensureStubClassRegistered(pxe)
+				const contracts: Record<string, { instance: ContractInstanceWithAddress }> = {}
 				for (const addr of stubAccountAddresses) {
-					const instance = await getContractInstanceFromInstantiationParams(StubSchnorrAccountContractArtifact, {
-						salt: Fr.random(),
-					})
-					contracts[addr] = { instance, artifact: StubSchnorrAccountContractArtifact }
+					const address = await AztecAddress.schema.parseAsync(addr)
+					const instance = await pxe.getContractInstance(address)
+					if (!instance) {
+						throw new Error(`stubAccountAddresses: no contract instance registered for ${addr}`)
+					}
+					contracts[addr] = { instance: { ...instance, currentContractClassId: stubClassId } }
 				}
-				overrides = new SimulationOverrides({ ...(overrides?.contracts ?? {}), ...contracts })
+				overrides = new SimulationOverrides({ contracts: { ...(overrides?.contracts ?? {}), ...contracts } })
 			}
 
 			// When we pass `overrides`, upstream PXE enforces
@@ -483,6 +498,29 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				senderForTags: simScopes[0],
 			})
 		})
+	}
+
+	/** Per-PXE memo of the stub-class registration: class hashing + the
+	 *  registerContractClass round-trip are WASM-heavy and sit on the fee
+	 *  estimation hot path — pay them once per PXE incarnation, not per sim.
+	 *  Keyed by the PXE instance so a chain-runtime teardown/recreate
+	 *  naturally re-registers against the fresh store. */
+	private readonly stubClassRegistrations = new WeakMap<object, Promise<Fr>>()
+
+	private ensureStubClassRegistered(pxe: PXE): Promise<Fr> {
+		let pending = this.stubClassRegistrations.get(pxe)
+		if (!pending) {
+			pending = (async () => {
+				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
+				await pxe.registerContractClass(StubSchnorrAccountContractArtifact)
+				const { id } = await getContractClassFromArtifact(StubSchnorrAccountContractArtifact)
+				return id
+			})()
+			// A failed registration must not poison the memo permanently.
+			pending.catch(() => this.stubClassRegistrations.delete(pxe))
+			this.stubClassRegistrations.set(pxe, pending)
+		}
+		return pending
 	}
 
 	public async executeUtility(network: NetworkInfo, call: FunctionCall, opts: ExecuteUtilityOpts): Promise<UtilityExecutionResult> {

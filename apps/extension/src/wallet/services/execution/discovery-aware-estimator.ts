@@ -5,13 +5,14 @@
  * use the probe-free validated pipeline and can never reach this class (the
  * split, distinctly-typed deps are the fence — audited constraint).
  *
- * CURRENT SHAPE — INERT EXTRACTION: this replicates the previous inline
- * choreography byte-for-byte (standalone stubbed app-only discovery sim →
- * splice discovered actions → validated strategy pipeline). The folded
- * single-sim modes land behind the testnet measurement gates; until then the
- * probe below is CONSTRUCTED but no strategy consumes it, and every sizing
- * sim stays validated. The structural pins prove inertness at the
- * sim-OPTIONS level, not just call counts.
+ * TWO PIPELINES, routed per-op in `estimate`:
+ * - CLASSIC (standalone stubbed discovery sim → splice discovered actions →
+ *   validated strategy pipeline) — the pre-fold choreography, kept verbatim
+ *   for every op the fold rules exclude.
+ * - FOLDED (strategy's first sim runs stubbed with a `CollectingDiscoveryProbe`
+ *   and doubles as discovery) — B1-gated at 0.00% stub-vs-validated gas delta
+ *   on live testnet; discovered effects force a validated rebuild so fresh
+ *   witnesses are verified before any estimate leaves the pipeline.
  *
  * `DiscoveryProbe` is deliberately CHAIN-BOUND (this exact one-argument
  * "pure extractor" was proven impossible twice — message hashing needs live
@@ -24,6 +25,7 @@
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import type { WrappedTask } from "@/wallet/services/task/service"
 import type { AuthwitDiscoverer } from "./authwit-discoverer"
+import { CollectingDiscoveryProbe } from "./discovery-probe"
 import type { FeeEstimate } from "./fee/fee-strategy"
 import type { Action, AddPrivateAuthwitAction, FeeOptions, FeeSettings, Operation, SendTransactionOperation } from "./spec"
 
@@ -40,6 +42,16 @@ export interface DiscoveryAwareEstimatorDeps {
 	buildAndEstimateValidated(
 		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
 		feeSettings: FeeSettings,
+		parentTask?: WrappedTask,
+		signal?: AbortSignal,
+	): Promise<FeeEstimate>
+	/** The FOLDED pipeline — same strategy dispatch with `ctx.probe` set, so a
+	 *  probe-aware strategy runs its first sim stubbed and discovery collapses
+	 *  into it. Reached only through the fold routing below. */
+	buildAndEstimateFolded(
+		inputOp: { networkId: string; accountAddress: string; actions: Action[]; fee?: FeeOptions },
+		feeSettings: FeeSettings,
+		probe: DiscoveryProbe,
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<FeeEstimate>
@@ -63,6 +75,18 @@ export class DiscoveryAwareEstimator {
 	 * post-planner set; the caller keeps its own pre-discovery snapshot (the
 	 * reuse-fingerprint normalization point) — this method never mutates the
 	 * caller's array.
+	 *
+	 * Routing: fold-eligible ops take the FOLDED pipeline (the strategy's
+	 * first sim runs stubbed and doubles as discovery — one sim saved);
+	 * everything else keeps the classic standalone-discovery choreography.
+	 * Fold eligibility is deliberately narrow:
+	 * - `fpc` and `fj` payment kinds (both B1-gated at 0.00% stub delta).
+	 *   `fjwc` (claim-coupled setup phase) and `embedded` (dApp-budget
+	 *   semantics) keep the classic choreography.
+	 * - NO pre-attached `add_private_authwit` action of ANY content kind (the
+	 *   F-4 rule): a stubbed sim accepts every witness unconditionally, so it
+	 *   would mask a broken pre-supplied witness that the validated pipeline
+	 *   fails loudly on — intent-authwit-carrying ops NEVER take a fold.
 	 */
 	public async estimate(
 		operation: Operation,
@@ -72,6 +96,19 @@ export class DiscoveryAwareEstimator {
 		parentTask?: WrappedTask,
 		signal?: AbortSignal,
 	): Promise<DiscoveryEstimateResult> {
+		const hasPreAttachedAuthwit = actions.some((a) => a.kind === "add_private_authwit")
+		const foldableKind = feeSettings.paymentMethod.kind === "fpc" || feeSettings.paymentMethod.kind === "fj"
+		if (foldableKind && !hasPreAttachedAuthwit) {
+			const probe = new CollectingDiscoveryProbe()
+			const op = {
+				...operation,
+				actions: [...actions],
+				...(detectedFee ? { fee: detectedFee } : {}),
+			} as SendTransactionOperation
+			const built = await this.deps.buildAndEstimateFolded(op, feeSettings, probe, parentTask, signal)
+			return { built, discoveredActions: [...probe.collected] }
+		}
+
 		const discoveredActions = await this.deps.authwit.discoverPrivateAuthwits(
 			{ ...operation, actions: [...actions] } as SendTransactionOperation,
 			this.deps.buildForDiscovery,
