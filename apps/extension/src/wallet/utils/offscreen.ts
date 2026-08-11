@@ -327,6 +327,13 @@ async function doEnsureOffscreenRunning() {
 			offscreenPromise = null
 			throw err
 		}
+		// DELIBERATELY not `await creating` here. A ghost document can emit
+		// READY during its close-and-retry teardown, so `ready` can win while
+		// `creating` is still replacing the document — an accepted benign race
+		// (rare² timing; requests transiently fail; the next pass's probe+ping
+		// adopts or replaces the live document). Awaiting `creating` would
+		// close that window but reintroduces a wedge: the gate timer is already
+		// cleared, so a hung post-READY create would block every caller forever.
 		await ready
 		return
 	}
