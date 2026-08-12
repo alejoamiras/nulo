@@ -178,14 +178,15 @@ test.skipIf(!hasConfig)(
 			// projection observably finished.
 			await switchToLocalNetwork(page2)
 			expect(await getAccountAddress(page2)).toBe(funded)
-			const importedBaseline = await captureBalanceBaseline(page2, funded)
+			const importedBaseline = await captureBalanceBaseline(page2, funded, aztecConfig!.tokenAddress)
 			await waitForFreshBalanceRow(page2, {
 				account: funded,
+				tokenContract: aztecConfig!.tokenAddress,
 				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
 				baselineUpdatedAt: importedBaseline,
 				timeoutMs: 150_000,
 			})
-			await waitForTokenCardAmount(page2, "1,000")
+			await waitForTokenCardAmount(page2, "1,000", "TST")
 
 			// ── 5b. Realistic-recovery leg ──────────────────────────────────
 			// Model the strict-mode + MV3-worker-restart path: the in-memory master
@@ -196,14 +197,15 @@ test.skipIf(!hasConfig)(
 			// the reopen so step 5's projection can't satisfy this leg).
 			await reopenAndRecoverAfterImport(page2)
 			expect(await getAccountAddress(page2)).toBe(funded)
-			const reopenBaseline = await captureBalanceBaseline(page2, funded)
+			const reopenBaseline = await captureBalanceBaseline(page2, funded, aztecConfig!.tokenAddress)
 			await waitForFreshBalanceRow(page2, {
 				account: funded,
+				tokenContract: aztecConfig!.tokenAddress,
 				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
 				baselineUpdatedAt: reopenBaseline,
 				timeoutMs: 90_000,
 			})
-			await waitForTokenCardAmount(page2, "1,000")
+			await waitForTokenCardAmount(page2, "1,000", "TST")
 
 			// ── 6. Delete → re-add round-trip (finding D) ──────────────────────
 			// The reset UI AWAITS the coordinator's full purge before navigating

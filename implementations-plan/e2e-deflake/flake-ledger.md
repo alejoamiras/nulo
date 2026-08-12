@@ -148,6 +148,22 @@ the latent-risk section tracks further OPEN follow-ups — nothing is silently d
   (the exact trap the e2e-testing skill documents). No shard in the evidence
   window actually paid a boot retry.
 
+## Post-certification observation: canary prove-duration variance (OPEN — new class)
+
+The post-certification docs-only push (`d914c4e`, tree code-identical to the 3 certified
+rounds) hit a canary-job red (run 31547622613, 2026-08-11 ~23:54Z): `transfers` blew its
+300s prove-wait AND `frozen-account-canary`'s grant returned status "error". The failure
+artifact is decisive: the accelerator-server log ends with **"Proving succeeded" ONE
+second after vitest teardown** — the real-BB prove pipeline worked; the shared runner was
+~2–4× slower than typical for the 8-circuit ChonkProve chain. Classification: prover-ON
+duration variance on shared runners — a DIFFERENT class from the six ledgered wait-bugs
+(the canary passed 4× the same day on identical code). Handling: sanctioned genuine-flake
+re-run for the merge head (certification runs 1–3 are complete and untouched); if this
+class recurs, the fix discussion is prove-budget alignment with the documented 600s
+transfers envelope vs runner sizing — an owner decision, not a unilateral bump. Noted
+diagnostics gap: the canary's `expect(status).toBe("ok")` assertion prints no error
+payload — worth dumping `resultJson` on mismatch in a follow-up.
+
 ## Latent risks surfaced during recon (no CI red yet — tracked, not silently dropped)
 
 - `security-reset.test.ts:15`: 10s post-reset route wait racing the awaited purge —

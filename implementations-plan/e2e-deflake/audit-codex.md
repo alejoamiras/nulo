@@ -112,6 +112,34 @@ remaining stale decision-trail text before certification — both applied same-s
   cache-bump non-optionality, Fix 1 phrasing, ledger census intro).
 - **"No further implementation-level blocker remains."**
 
+## Round 4 — post-implementation audit (fresh session `019ff5cf-3f83-7730-95f2-8d40552b3be2`, 2026-08-12)
+
+**Verdict: conditional approve** (conditions applied same-session, pre-merge):
+
+- **High — fork classifier incomplete/racy (the 71c8678 fix shipped without codex's
+  verdict)**: `/popup/auth` is a designed completion route (needs-unlock); a designed
+  post-finalize-start failure RETAINS the profile without a tombstone (matches no fork
+  signal); the 30s bound collided with completeImport's own 30s backstop. → APPLIED:
+  fork accepts `general|auth`; a 45s hold; an unobserved fork now WARNS with the dump +
+  original wait error and PROCEEDS into the reopen path, whose on-chain assertions
+  decide validity.
+- **High — balance proof not token-specific**: baseline/acceptance ranged over every
+  row of the account; a same-raw-value row of another token could satisfy it; the card
+  assert accepted any card + substrings ("11,000"). → APPLIED: (account, token) join via
+  the sandbox token contract, re-resolved per poll; symbol-scoped card + digit-boundary
+  exact match.
+- **Med — approvable default widened suite-wide without evidence**: → APPLIED: default
+  restored to the prior 10s tolerance (now on the correct signal); the two
+  characterized cold callers keep their explicit 120s; telemetry accumulates per-caller
+  evidence.
+- **Low — preflight strength**: → APPLIED: `--version` execution check added on both
+  tools.
+- Explicitly endorsed: monotonic dwell; re-kick envelope not weakening acceptance;
+  census parsing; telemetry hygiene (no secrets, never ships); CI action least-privilege.
+  Noted honestly: holding the page open drops simultaneous page+SW crash coverage (the
+  product gap now has no executable guard — owner follow-up), and the three green runs
+  certify THIS tree, not elimination of the OPEN smoke flake.
+
 ## What looks right (per codex round 1)
 
 - Purge-first sequencing + preserving OPFS/IndexedDB negative controls.

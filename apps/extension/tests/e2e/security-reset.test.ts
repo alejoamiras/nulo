@@ -8,8 +8,12 @@ import { captureSoleProfileId, resetProfile, waitForProfilePurged } from "./fixt
 //
 // The reset UI AWAITS the full purge before navigating (reset.vue handleReset),
 // so the purge's own completion signal is observed first and the redirect —
-// prompt once the awaited delete resolved — after. The file budget covers
-// nav-settle + purge + redirect sequentially.
+// prompt once the awaited delete resolved — after. The test budget must cover
+// the PER-TEST fixture (browser launch + registration, inside the timeout)
+// plus the worst-case diagnostic paths of the inner waits — a tighter ceiling
+// converts every crafted fail-loud error into a generic vitest timeout.
+// Happy path measures ~7s; the ceiling is headroom for the diagnostics, not a
+// wait budget.
 test("reset profile wipes state and routes to register", async ({ registeredExtensionPerTest }) => {
 	const page = await openPopup(registeredExtensionPerTest)
 	await waitForHash(page, "#/popup/general")
@@ -22,4 +26,4 @@ test("reset profile wipes state and routes to register", async ({ registeredExte
 	await page.waitForFunction(() => window.location.hash.includes("/popup/register"), { timeout: 10_000 })
 
 	expect(registeredExtensionPerTest.pageErrors).toEqual([])
-}, 30_000)
+}, 60_000)

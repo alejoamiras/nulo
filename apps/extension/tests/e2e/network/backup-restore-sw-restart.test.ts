@@ -181,22 +181,35 @@ test.skipIf(!hasConfig)(
 			// close — the SW-side deletion cascade, once dispatched, survives page
 			// close. chrome.storage is page-direct (not SW-routed), so these reads
 			// work with the SW down.
+			// Fork outcomes (audit-corrected): `general` AND `auth` are both designed
+			// completion routes of the in-page recovery (`needs-unlock` routes to auth);
+			// tombstone-present / zero-profile-rows mark a dispatched rollback. A fork
+			// that stays unobserved is NOT a test failure by itself — the import flow
+			// has a designed failure state that RETAINS the profile without a tombstone
+			// (post-finalize-start errors), and its validity is decided by the reopen
+			// path's on-chain assertions below, not pre-judged here. The hold's job is
+			// only to give the page's rollback/recovery a chance to dispatch before the
+			// close (the race that manufactured the phantom partial-restore state).
+			let forkErr = ""
 			const postKillFork = await page2
 				.waitForFunction(
 					async () => {
-						if (window.location.hash.includes("general")) return "finalized"
+						const h = window.location.hash
+						if (h.includes("general") || h.includes("auth")) return "actionable-route"
 						const all = await chrome.storage.local.get()
 						const keys = Object.keys(all)
 						if (keys.some((k) => k.startsWith("nulo:core:profile-tombstones@"))) return "rollback-dispatched"
 						if (!keys.some((k) => k.startsWith("nulo:core:profiles@"))) return "rollback-row-deleted"
 						return false
 					},
-					{ timeout: 30_000, polling: 200 },
+					{ timeout: 45_000, polling: 200 },
 				)
 				.then((h) => h.jsonValue())
-				.catch(() => "fork-timeout")
-			console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
-			if (postKillFork === "fork-timeout") {
+				.catch((e) => {
+					forkErr = e instanceof Error ? e.message : String(e)
+					return "fork-unobserved"
+				})
+			if (postKillFork === "fork-unobserved") {
 				const dump = await page2
 					.evaluate(async () => {
 						const all = await chrome.storage.local.get()
@@ -208,9 +221,11 @@ test.skipIf(!hasConfig)(
 						}
 					})
 					.catch((e) => ({ evalFailed: String(e) }))
-				throw new Error(
-					`[sw-restart-restore] neither recovery nor rollback became observable within 30s of the SW kill — unknown third state: ${JSON.stringify(dump)}`,
+				console.warn(
+					`[sw-restart-restore] post-kill fork unobserved in 45s (designed retain-without-rollback state, or slow recovery); proceeding to reopen — the on-chain assertions decide. state: ${JSON.stringify(dump)}; waitErr: ${forkErr}`,
 				)
+			} else {
+				console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
 			}
 			await page2.close()
 
@@ -352,14 +367,15 @@ test.skipIf(!hasConfig)(
 			// the popup thread, queues PXE readers). Same ~240s total envelope.
 			await switchToLocalNetwork(page3)
 			expect(await getAccountAddress(page3)).toBe(funded)
-			const recoveryBaseline = await captureBalanceBaseline(page3, funded)
+			const recoveryBaseline = await captureBalanceBaseline(page3, funded, aztecConfig!.tokenAddress)
 			await waitForFreshBalanceRow(page3, {
 				account: funded,
+				tokenContract: aztecConfig!.tokenAddress,
 				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
 				baselineUpdatedAt: recoveryBaseline,
 				timeoutMs: 210_000,
 			})
-			await waitForTokenCardAmount(page3, "1,000")
+			await waitForTokenCardAmount(page3, "1,000", "TST")
 		} finally {
 			await ctx2.browser.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })

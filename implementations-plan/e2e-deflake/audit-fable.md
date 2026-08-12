@@ -1,4 +1,39 @@
-# audit-fable.md — fable (Plan-agent) audit, round 1 (2026-08-11)
+# audit-fable.md — fable audits
+
+## Round 2 — post-implementation review (fresh context, max effort, 2026-08-12)
+
+Attacked every new wait against the product code it observes. Verdict: no false-PASS
+holes in the final tree; findings (ALL APPLIED same-session):
+
+- **Med — `resetProfile`'s `navigateByHash` sat OUTSIDE the try**: the characterized
+  race can land between the hash-set and the equality poll → uncaught throw, no retry,
+  no nav-trace dump, leaked trace interval. → Moved inside the try; recorder re-armed
+  per call (fixes the frozen-trace nit too).
+- **Med — `waitForFreshBalanceRow` refresh starvation**: no ambient re-sync exists and
+  failed batches are dropped, so `maxRefreshes=5` burns out ~60s in, leaving a 90–150s
+  dead tail → false-FAIL (a flake REINTRODUCTION with good diagnostics). → Default now
+  spans the budget at envelope pacing (`ceil(timeoutMs / 15s)`).
+- Confirmed the two codex-round-4 fixes (fork `general|auth` + proceed-on-unobserved;
+  token-bound freshness + boundary-matched symbol-scoped card assert) — independently
+  attacked the proceed-downgrade for false-PASS: a phantom partial restore still fails
+  at the convergence step (the (account,token) join finds no rows); a retained profile
+  that fully re-syncs is designed recovery. Both landed.
+- **Low — `security-reset` 30s ceiling** converts diagnostic paths into generic vitest
+  timeouts (per-test fixture launch+registration counts INSIDE the budget; worst-case
+  inner waits alone exceed 30s). → 60s ceiling (headroom for diagnostics, not a wait).
+- **Low — `register-token` sweep miss**: bare `clickByTestId(execute-confirm-btn)`
+  bypassed the standardized approvable gate/diagnostics. → routed through
+  `approveExecute`.
+- **Nit — telemetry cwd anchor**: `.e2e-state` via `process.cwd()` can land outside
+  gitignore/artifact globs on direct vitest invocations. → NOT changed (all blessed
+  entry points set cwd; noted for a future tidy).
+- Attacked-and-sound: `waitForProfilePurged` ("airtight" — verified 3-phase tombstone
+  lifecycle leaves no all-absent in-flight state), hostile-storage parsing, the
+  approvable predicate's two signals, the setup-aztec preflight (cache semantics can't
+  poison; composite `bash -e` makes the asserts real), SKILL.md factual consistency,
+  every helper call-site contract.
+
+# Round 1 — plan audit (Plan-agent, 2026-08-11)
 
 Reviewer: independent top-tier Claude subagent (Plan role, model fable), fresh context,
 full packet (adversarial/security + assumption-attack + implementation-critique + recon

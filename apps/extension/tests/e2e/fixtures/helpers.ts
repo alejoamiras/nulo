@@ -1057,22 +1057,27 @@ export async function resetProfile(page: Page): Promise<void> {
 
 	// Poll-based hash trajectory (vue-router hash nav is pushState-based — no
 	// hashchange/popstate fires), dumped into every failure for race forensics.
+	// Re-armed per call (a prior call's timer is cleared) so a second
+	// resetProfile on the same page never reports a frozen call-1 trace.
 	await page.evaluate(() => {
 		const w = window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }>; __nuloResetNavTraceTimer?: number }
-		if (!w.__nuloResetNavTrace) {
-			w.__nuloResetNavTrace = [{ t: Date.now(), hash: window.location.hash }]
-			w.__nuloResetNavTraceTimer = window.setInterval(() => {
-				const trace = w.__nuloResetNavTrace as Array<{ t: number; hash: string }>
-				if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
-			}, 100)
-		}
+		if (w.__nuloResetNavTraceTimer) window.clearInterval(w.__nuloResetNavTraceTimer)
+		w.__nuloResetNavTrace = [{ t: Date.now(), hash: window.location.hash }]
+		w.__nuloResetNavTraceTimer = window.setInterval(() => {
+			const trace = w.__nuloResetNavTrace as Array<{ t: number; hash: string }>
+			if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
+		}, 100)
 	})
 
 	let lastDiag = ""
 	let settled = false
 	for (let attempt = 0; attempt < ATTEMPTS && !settled; attempt++) {
-		await navigateByHash(page, RESET_HASH)
 		try {
+			// INSIDE the try: the competing-push race can also land between
+			// navigateByHash's hash-set and its equality poll — that throw must
+			// count as a failed attempt (retry + diagnostics), never escape the
+			// envelope uncaught with the trace interval still running.
+			await navigateByHash(page, RESET_HASH)
 			await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
 			await page.evaluate(() => {
 				;(window as unknown as { __resetStableSince: number | null }).__resetStableSince = null
@@ -1137,21 +1142,37 @@ export async function resetProfile(page: Page): Promise<void> {
  *  with a nonzero `updatedAt`, so a value-only poll could pass with zero
  *  post-import/post-reopen sync, silently un-proving the re-sync the tests
  *  exist to prove. */
-export async function captureBalanceBaseline(page: Page, account: string): Promise<number> {
-	return await page.evaluate(async (acct: string) => {
-		const all = await chrome.storage.local.get(null)
-		let max = 0
-		for (const [k, v] of Object.entries(all)) {
-			if (!k.startsWith("nulo:core:token-balances@")) continue
-			try {
-				const row = JSON.parse(v as string) as { account?: string; updatedAt?: number }
-				if (row.account === acct && typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
-			} catch {
-				// Hostile-input discipline: a malformed row is ignored, never fatal.
+export async function captureBalanceBaseline(page: Page, account: string, tokenContract: string): Promise<number> {
+	return await page.evaluate(
+		async ({ acct, contract }: { acct: string; contract: string }) => {
+			const all = await chrome.storage.local.get(null)
+			// Bind to the exact (account, token) rows: another token's row with the same
+			// raw value must never satisfy the later freshness/value acceptance.
+			const tokenIds = new Set<number>()
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:tokens@")) continue
+				try {
+					const row = JSON.parse(v as string) as { id?: number; contract?: string }
+					if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+				} catch {
+					// Hostile-input discipline: a malformed row is ignored, never fatal.
+				}
 			}
-		}
-		return max
-	}, account)
+			let max = 0
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:token-balances@")) continue
+				try {
+					const row = JSON.parse(v as string) as { account?: string; token?: number; updatedAt?: number }
+					if (row.account !== acct || typeof row.token !== "number" || !tokenIds.has(row.token)) continue
+					if (typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
+				} catch {
+					// Malformed row: skip.
+				}
+			}
+			return max
+		},
+		{ acct: account, contract: tokenContract },
+	)
 }
 
 /** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
@@ -1174,30 +1195,68 @@ export async function captureBalanceBaseline(page: Page, account: string): Promi
  *  stays proven. */
 export async function waitForFreshBalanceRow(
 	page: Page,
-	opts: { account: string; expectedPublicRaw: string; baselineUpdatedAt: number; maxRefreshes?: number; timeoutMs?: number },
+	opts: {
+		account: string
+		tokenContract: string
+		expectedPublicRaw: string
+		baselineUpdatedAt: number
+		maxRefreshes?: number
+		timeoutMs?: number
+	},
 ): Promise<void> {
-	const { account, expectedPublicRaw, baselineUpdatedAt, maxRefreshes = 5, timeoutMs = 120_000 } = opts
-	const deadline = Date.now() + timeoutMs
-	type BalanceRow = { account?: string; publicBalance?: string; privateBalance?: string; updatedAt?: number }
-	const readRows = (): Promise<BalanceRow[]> =>
-		page.evaluate(async (acct: string) => {
-			const all = await chrome.storage.local.get(null)
-			const rows: Array<{ account?: string; publicBalance?: string; privateBalance?: string; updatedAt?: number }> = []
-			for (const [k, v] of Object.entries(all)) {
-				if (!k.startsWith("nulo:core:token-balances@")) continue
-				try {
-					const row = JSON.parse(v as string) as { account?: string }
-					if (row.account === acct) rows.push(row)
-				} catch {
-					// Malformed row: skip.
-				}
-			}
-			return rows
-		}, account)
-
-	// Queue tick (1s) + a ≤12-row projection batch + margin. Bounds the re-kick
-	// cadence only — see the doc comment.
+	// Default the refresh budget to SPAN the whole timeout at envelope pacing:
+	// there is no ambient periodic re-sync (projections fire only on explicit
+	// refresh / token events / tx updates) and a failed batch is dropped, never
+	// re-enqueued — a fixed small cap starves, leaving a dead tail in which no
+	// projection can be triggered and the wait false-FAILs (post-impl review).
+	// Pacing (one refresh per finished-attempt-or-envelope) is what prevents
+	// spam; the cap just needs to not run out before the budget does.
+	// Queue tick (1s) + a ≤12-row projection batch + margin — bounds the re-kick
+	// cadence only, never the acceptance signal.
 	const REFRESH_ENVELOPE_MS = 15_000
+	const { account, tokenContract, expectedPublicRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
+	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / REFRESH_ENVELOPE_MS)
+	const deadline = Date.now() + timeoutMs
+	type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
+	// The (account, token) join re-resolves EVERY poll: after a restore the token
+	// row itself can land later than the first read, and binding to the exact
+	// token is what stops another token's identical raw value from satisfying
+	// the acceptance (audit condition).
+	const readRows = (): Promise<BalanceRow[]> =>
+		page.evaluate(
+			async ({ acct, contract }: { acct: string; contract: string }) => {
+				const all = await chrome.storage.local.get(null)
+				const tokenIds = new Set<number>()
+				for (const [k, v] of Object.entries(all)) {
+					if (!k.startsWith("nulo:core:tokens@")) continue
+					try {
+						const row = JSON.parse(v as string) as { id?: number; contract?: string }
+						if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+					} catch {
+						// Malformed row: skip.
+					}
+				}
+				const rows: Array<{
+					account?: string
+					token?: number
+					publicBalance?: string
+					privateBalance?: string
+					updatedAt?: number
+				}> = []
+				for (const [k, v] of Object.entries(all)) {
+					if (!k.startsWith("nulo:core:token-balances@")) continue
+					try {
+						const row = JSON.parse(v as string) as { account?: string; token?: number }
+						if (row.account === acct && typeof row.token === "number" && tokenIds.has(row.token)) rows.push(row)
+					} catch {
+						// Malformed row: skip.
+					}
+				}
+				return rows
+			},
+			{ acct: account, contract: tokenContract },
+		)
+
 	let refreshes = 0
 	let lastRefreshAt = 0
 	let rows: BalanceRow[] = []
@@ -1236,23 +1295,28 @@ export async function waitForFreshBalanceRow(
 		})
 		.catch((e) => ({ censusFailed: String(e) }))
 	throw new Error(
-		`waitForFreshBalanceRow: no row for ${account} with publicBalance=${expectedPublicRaw} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}; census: ${JSON.stringify(census)}`,
+		`waitForFreshBalanceRow: no (${account}, ${tokenContract}) row with publicBalance=${expectedPublicRaw} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}; census: ${JSON.stringify(census)}`,
 	)
 }
 
-/** Card-scoped display assertion: some tokens-card shows `displayAmount`,
- *  with the card's fiat node excluded so "$1,000.00" can't satisfy a "1,000"
- *  token-amount check. */
-export async function waitForTokenCardAmount(page: Page, displayAmount: string, timeout = 30_000): Promise<void> {
+/** Card-scoped display assertion: the tokens-card for `symbol` shows exactly
+ *  `displayAmount` — the card is selected by its `data-symbol` attribute, the
+ *  fiat node is excluded (so "$1,000.00" can't satisfy a "1,000" check), and
+ *  the amount must sit on digit boundaries (so "11,000" or "1,000.5" can't
+ *  satisfy "1,000" as a substring — audit condition). */
+export async function waitForTokenCardAmount(page: Page, displayAmount: string, symbol: string, timeout = 30_000): Promise<void> {
 	await page.waitForFunction(
-		(amt: string) =>
-			[...document.querySelectorAll('[data-testid="tokens-card"]')].some((card) => {
+		({ amt, sym }: { amt: string; sym: string }) => {
+			const boundary = new RegExp(`(^|[^\\d,.])${amt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\d,.])`)
+			return [...document.querySelectorAll('[data-testid="tokens-card"]')].some((card) => {
+				if (!card.querySelector(`[data-testid="token-symbol"][data-symbol="${sym}"]`)) return false
 				const clone = card.cloneNode(true) as HTMLElement
 				for (const fiat of clone.querySelectorAll('[data-testid="token-fiat"]')) fiat.remove()
-				return (clone.textContent ?? "").includes(amt)
-			}),
+				return boundary.test(clone.textContent ?? "")
+			})
+		},
 		{ timeout, polling: 500 },
-		displayAmount,
+		{ amt: displayAmount, sym: symbol },
 	)
 }
 

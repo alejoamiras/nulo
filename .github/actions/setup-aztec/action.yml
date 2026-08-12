@@ -75,6 +75,11 @@ runs:
             ls -la "$BIN" || true
             exit 1
           fi
+          # Executable-bit alone can't catch a truncated/corrupt cached binary.
+          if ! "$BIN/$tool" --version; then
+            echo "::error::internal-bin/$tool exists but failed to run — corrupt binary or partial cache restore."
+            exit 1
+          fi
         done
         echo "Bundled toolchain OK: $BIN/{forge,anvil}"
 
