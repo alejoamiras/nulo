@@ -34,3 +34,38 @@ fence-release remains; all fenced IDs are skipped before persistence; the incarn
 correctly exercises max+1 landing on a fence; no allocation or write bypass found." Non-blocking
 comment nit fixed same-session. **Iteration loop complete: 3 rounds, verdicts iterate → iterate
 → approve.**
+
+## Dual-lens review (Anthropic, post-iteration, pre-codex-final)
+
+`/code-review max --fix` ran as two independent lenses over `ea30c6f..HEAD`; fixes landed as ONE
+separate commit (`fix(review): dual-lens findings …`) per the blueprint provenance rule.
+
+| Lens | Finding | Disposition |
+|---|---|---|
+| correctness High | Foreign-profile/unknown-token row could take a bogus `syncFailure` write and abort the batch via the emit path's token lookup | **FOLDED** — `isRowEmittable` callback guard in the queue (service wires `tokens.has(tokenId)`); skip-not-record; healthy rows in the batch still process. Pin added. |
+| correctness Medium | A FAILED first sync (updatedAt 0 + syncFailure) rendered the infinite loading spinner — exactly the failed-vs-still-running ambiguity the record exists to close | **FOLDED** — loading block yields to the failed caption (`isInitialSync && !syncFailed`). Old pin consciously flipped. |
+| correctness Lows | connectivity regex gaps (`ERR_CONNECTION`, `network error`); fake probe composing inline instead of `walletChainId`; two comment drifts | **FOLDED** |
+| quality M1 | `settled` flag guaranteed single-record only temporally, not structurally | **FOLDED** — flag removed; `goIds` filter makes the guarantee structural. |
+| quality M2 | `importChainSync` deps carried injectable `now`/`sleep` used only by tests | **FOLDED** — deps slimmed; `realSleep` shared from importPreflight. |
+| quality Lows | `maxSliceBytes` misnamed (counts UTF-16 code units → `maxSliceCodeUnits`); preflight options over-wide; contract records not spreading like sender records (safe: normalizer reconstructs children) | **FOLDED** |
+| quality L3 | Extract `classifyNodeStatus` from `probeNodeStatus` | **NOTED, not applied** — 3 commented lines, already service-test-covered; extraction adds indirection without coverage. |
+| quality L8 | Share chain-id composition into aztec-runtime | **NOTED, not applied** — the formula IS the documented port contract (`node-factory-port.ts`); sharing would invert layer direction for a two-line formula. |
+
+Post-fold gates: 4021 extension units + 135 aztec-runtime tests green, lint + typecheck clean.
+Lesson: a raw `bun test` inside `packages/aztec-runtime` bypasses the package's vitest script and
+reds on unresolved vitest aliases (`@wonderland-token-artifact`) — always run the package's own
+`test` script.
+
+## Post-impl audit (resumed, net diff ea30c6f..HEAD + dual-lens summary)
+
+**Verdict: conditional approve** — no Critical/High; three Mediums (all source-verified true) + two Lows:
+
+| # | Finding | Disposition |
+|---|---|---|
+| M1 | `Array.isArray` gate on the import tail silently skipped a present-but-non-array account-state slice — hostile `{}`/`null` never reached the normalizer's violation record and auto-routed past Continue | **FOLDED** — gate is `!== undefined`; malformed slices enter the chain-sync and land as "not an array" violations. Composable-level pin added. |
+| M2 | Queue emits ran after awaited `repo.set` with no ownership re-check — a token deleted DURING the await made the service emit throw into the batch catch, falsely failing healthy siblings; success path had no ownership check at all | **FOLDED** — `isRowEmittable` re-checked after BOTH awaited writes before emitting; success path also skips the write + fails the task for un-owned rows. Mid-set-deletion pin with healthy sibling added. |
+| M3 | The dual-lens commit NARROWED the connectivity matcher (bare `timeout`→`timeout after`, `refused`→`connection refused`) — "RPC timeout" defeated per-network fail-fast | **FOLDED** — bare forms restored, comment pins why. Three matcher pins added. A lens fix can itself regress an approved invariant: diff the fix, not just the finding. |
+| L1 | `updatedAt=0 + syncFailure + isUpdating` rendered a failed caption with no in-flight indicator | **FOLDED** — `syncFailed` gated on `!isUpdating`; initial retry shows the loader. Pin added. |
+| L2 | Slice-size local + message still said "bytes" | **FOLDED** — code units throughout. |
+
+Fold committed as `29865c5`; gates green (4025 units + lint + typecheck). **Fold verification (resumed): APPROVE** — "No new hazards found. All five folds satisfy the conditions." Post-impl audit complete: conditional approve → fold → approve.
