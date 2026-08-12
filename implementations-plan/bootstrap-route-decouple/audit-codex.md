@@ -171,3 +171,26 @@ addressed.
 ## Round 3 — resumed re-verdict
 
 *(pending)*
+
+## Round 3 — resumed re-verdict (same session)
+
+**Verdict: reject** (one blocking: enforce the service deadline before EVERY sender/contract
+offscreen launch, not only before each outer network item; pin the slow-success case).
+Findings + dispositions:
+- **H (per-launch deadline)**: ADOPTED verbatim — absolute deadline at entry, checked before
+  every `registerSender`/`registerContract` launch (one network can hold 96 registrations,
+  `account-state/service.ts:236,250`); `deadlineMs` clamped 0…30_000; slow-success-crossing-
+  deadline service test pinned in Phase 2.
+- **L (arithmetic)**: ADOPTED — table ≤~60s (storage ≤15s + shared 45s tail); marker window ≤45s.
+- **L (Shape B reframe)**: ADOPTED — rejected design = SW-ONLY/cancellation; the additive
+  `deadlineMs` argument is acknowledged as adopted.
+- **L (RPC surface + wording)**: ADOPTED — file map covers `network/{service,spec,client}.ts`;
+  Phase 2 repeats the `getNodeInfo → getL1ContractAddresses → blackhole` sequence assertion.
+Resolved-correctly (round-2 folds verified): bounded probe; typed-error transport +
+non-throwing rehydration; Phase-1 negative control; stateful e2e causal design; single 90s
+smoke deadline; shared normalizer + aggregate caps; corrupt-marker fail-closed + edge tests;
+skip-record collector/settled-append; Phase-5 docs delivery.
+
+## Round 4 — resumed re-verdict on the round-3 folds
+
+*(pending)*

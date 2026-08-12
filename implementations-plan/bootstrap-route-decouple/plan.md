@@ -132,15 +132,21 @@ the page moved on). Every number below derives from this model.
    AbortSignal plumbing (round-2 codex concurs).
 3. **Registration budget**: the (normalized) registration leg is raced page-side at `remaining`
    (< the 60s popup→SW ceiling so OUR semantics fire first) AND receives `deadlineMs: remaining`
-   as an additive, zod-validated third parameter — the service checks the deadline before
-   LAUNCHING each item and returns skip records for the rest once expired. A **settled flag**
-   guards BOTH `restoreStatus`/routing AND the `restoreErrorLog` append path
-   (`recordRestoreErrors` APPENDS — a losing-side late result must not append; unit-pinned).
+   (zod-validated, **clamped to 0…30_000**) as an additive third parameter. The service
+   computes ONE absolute deadline at entry and **checks it immediately before EVERY
+   `registerSender` and `registerContract` launch — not merely per network item** (round-3
+   codex: one allowed network can hold 96 registrations across the two inner loops,
+   `account-state/service.ts:236,250`; a slow-but-successful first call must not let the rest
+   launch). Once expired: bounded top-level skip records, nothing further launched. Pinned by a
+   service test where the first registration succeeds AFTER crossing the deadline and the
+   second is proven never called. A **settled flag** guards BOTH `restoreStatus`/routing AND
+   the `restoreErrorLog` append path (`recordRestoreErrors` APPENDS — a losing-side late result
+   must not append; unit-pinned).
 4. **Service-local fail-fast** (fable refinement): after a connectivity-class failure on a
    network, its remaining items are skipped with bounded records. Residual abandoned work after
-   all bounds: at most the in-flight item's 90s offscreen call — a small constant. Full
-   registration-wide cancellation plumbing stays REJECTED for this arc → ledger follow-up +
-   Ask 5.
+   all bounds: at most ONE in-flight 90s offscreen call (per-launch deadline checks make this
+   exact). Full registration-wide cancellation plumbing stays REJECTED for this arc → ledger
+   follow-up + Ask 5.
 5. **Skip-with-record — audit-corrected shape** (codex C1 = fable H1): synthesized skips are a
    bounded explicit variant `{ networkId, restoreError: <constant string>, senders: [],
    contracts: [] }` — attacker items are NEVER spread into the log. `collectRestoreErrors`'s
@@ -158,7 +164,7 @@ the page moved on). Every number below derives from this model.
 | Healthy RPC | unchanged + one fast bounded probe | unchanged (~seconds) |
 | RPC refused at import | storage restore + preflight ≈6s (ms/attempt + backoff waits) + skip | **≤ ~25s** |
 | RPC hanging at import | storage restore + preflight 21s (aborted at the fetch boundary per attempt) + skip | **≤ ~40s** |
-| RPC dies between preflight and registrations | + registration remainder ≤30s (service stops launching at the deadline) | **≤ ~66s** |
+| RPC dies between preflight and registrations | + registration remainder ≤30s (service stops launching at the deadline) | **≤ ~60s** (storage ≤15s + shared 45s tail) |
 
 "Storage restore 5–15s" is an estimate for ordinary backups (caps bound the pathological case);
 Phase 1 measures the real smoke path. The smoke test's UNCHANGED 90s wait observes: route
@@ -203,8 +209,9 @@ dot. The sibling `isMinting` description dead-branch is NOTED (ledger follow-up)
 - **Guarantee — explicitly NARROWED (codex C2, option b; owner Ask 4)**: the marker covers the
   STORAGE-SLICE window [restore-start → finalize-entry]. The post-finalize chain-registration
   leg is bounded + user-visible (Continue gate) but NOT crash-durable — a popup killed inside
-  that ≤51s window loses only the skip-record display, never storage slices. The
-  crash-durable alternative (completeRestore machinery) is the rejected durable-deferral arc.
+  that ≤45s window (the shared tail deadline) loses only the skip-record display, never storage
+  slices. The crash-durable alternative (completeRestore machinery) is the rejected
+  durable-deferral arc.
 - **Detection**: at `openSessionVerified` ENTRY (single locked chokepoint — safe under
   entry-clearing; runs BEFORE the account-integrity delegate, fixing precedence by ordering).
   Marker present + valid generation match ⇒ typed **`RestoreTornError`**; session withheld.
@@ -258,7 +265,7 @@ auto-route | errors: Continue + View Errors → click → route.
 | `packages/aztec-runtime` node-factory port + adapter + `core/testing/fake-node-factory.ts` | NEW `probeChainId(rpcUrl, timeoutMs)` (bounded, non-retrying, abort-at-boundary) — lockstep update |
 | `packages/extension-messaging/src/errors.ts` (+ round-trip test) | `RestoreTornError` registered WalletError subclass + reconstruction switch |
 | `apps/extension/src/wallet/services/profile/session-manager.ts` | rehydration lookup returns `undefined` on marker (silent session close, no init abort) |
-| `apps/extension/src/wallet/services/network/service.ts` | NEW `probeNodeStatus(networkId, timeoutMs)` RPC (existing `getNodeStatus`/`_getChainId` untouched) |
+| `apps/extension/src/wallet/services/network/{service,spec,client}.ts` | NEW `probeNodeStatus(networkId, timeoutMs)` RPC — Methods type, zod schemas, client validation + registration (the full RPC surface, round-3 codex); existing `getNodeStatus`/`_getChainId` untouched |
 | `apps/extension/tests/e2e/helpers/import-drivers.ts` | synthetic account-state slice via the existing `extraData` hook; REAL derived account address (integrity-coordinator-safe); stub-server helper |
 | `apps/extension/tests/e2e/network/backup-restore-sw-restart.test.ts` | outcome matrix consciously updated for the marker (fable M3) |
 | `wallet/services/token-balance/spec.ts` / `balance-job-queue.ts` + tests + `storage-codecs.test.ts` | bundled item 1 |
@@ -278,9 +285,12 @@ trivially unit-testable. Accepted cost: budget-expiry abandons in-flight SW/offs
 bounded to a small constant by caps + preflight-gating + service-local fail-fast; the skip log
 may overstate ("skipped" items can complete late) — settled-flag guards the log itself.
 
-**Shape B — SW-side budget in `AccountStateService.restore`** — rejected: signature/semantics
-change on the audited surface, and WITHOUT a cancellation primitive it abandons the same work
-merely SW-side (codex round 1 concurs: "would not fix this").
+**Shape B — SW-ONLY orchestration (service owns classification, probing, AND the whole budget
+policy; no page-side race)** — rejected: couples the service to UX timing policy wholesale, and
+WITHOUT a cancellation primitive it abandons the same work merely SW-side (codex round 1
+concurs: "would not fix this"). Note the chosen shape DOES adopt one additive service argument
+(`deadlineMs`, round 2) — the rejection is of the SW-only/cancellation design, not of any
+service-side involvement (round-3 codex reframe).
 
 **Shape B+ — codex's hybrid (deadline propagated to the node-fetch boundary with real
 `AbortSignal` cancellation)** — rejected FOR THIS ARC as a registration-wide mechanism:
@@ -406,12 +416,14 @@ Layers: lint/typecheck + manual e2e evidence.
 Slice validation/caps + fail-fast + malformed-item fix (SW); `importPreflight.ts` (unit:
 backoff sequence, per-attempt race, Active-only classification, InvalidChain failure records,
 semaphore, deadline remainder); `useFullBackupImport` tail (deadline, race, skip synthesis,
-settled guard incl. error-log append pin); `collectRestoreErrors` top-level check + guards
-(unit: skips flip `isRestoreHasErrors`, Continue wins, malformed items don't throw); Continue/
-View-Errors testids (both shells); **lock-race tests** (lock during preflight / registration /
-Continue — codex M13); new `import-dead-rpc.test.ts` (refused; blackhole; stateful preflight-
-passes-then-blackhole — asserts account-state engagement pre-submit, per-test retry 0); smoke
-`backup-roundtrip.test.ts` causal branch (90s byte-identical).
+settled guard incl. error-log append pin; per-launch deadline test — first registration
+succeeds after crossing the deadline, second proven never called); `collectRestoreErrors`
+top-level check + guards (unit: skips flip `isRestoreHasErrors`, Continue wins, malformed items
+don't throw); Continue/View-Errors testids (both shells); **lock-race tests** (lock during
+preflight / registration / Continue — codex M13); new `import-dead-rpc.test.ts` (refused;
+blackhole; stateful — the stub ANSWERS `getNodeInfo`, OBSERVES `getL1ContractAddresses`, then
+blackholes, with the method sequence asserted; per-test retry 0); smoke
+`backup-roundtrip.test.ts` causal branch sharing the single `submittedAt + 90_000` deadline.
 **Gate**: `bun run test` + `bun run lint` + `bun run typecheck` exit 0; armed FULL
 `bun run test:e2e` SOLO green attempt-1. Layers: unit + smoke e2e.
 
