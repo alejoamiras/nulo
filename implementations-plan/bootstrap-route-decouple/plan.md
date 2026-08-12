@@ -401,7 +401,11 @@ fetch-boundary-aborted preflight probe (local, one new port method) and the addi
 "Green" = the exact command exits 0 on attempt 1 with zero vitest retries. Network-touching
 gates run SOLO.
 
-**Phase 1 — BLOCKING empirical verification (no product change)**
+**Phase 1 — BLOCKING empirical verification (no product change) ✓ GREEN (2026-08-12 —
+`lessons/phase-1.md`: 4/4 probes conclusive; attribution CONFIRMED — real backup carries 6+9
+contract registrations, blackhole import dies at 60.8s as "Import failed", refused at 7.0s on
+the no-auto-route errors screen, negative control routes in 0.5s; stub observed
+`aztec_getNodeInfo ×2 → aztec_getL1ContractAddresses`)**
 (a) Run the smoke export flow locally; decrypt + inspect the REAL exported backup; record the
 account-state slice content (senders/contracts per network). **Empty child arrays inside a
 non-empty item count as FALSIFICATION** (zero registrable work ⇒ this leg cannot be the stall).
