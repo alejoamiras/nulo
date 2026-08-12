@@ -3,7 +3,10 @@
 - **Tier**: `/blueprint mid` (prescribed by the owner's /goal directive; rubric concurs — 1 HIGH dimension: security sensitivity of the restore pipeline)
 - **Worktree**: `bootstrap-route-decouple` (branch `worktree-bootstrap-route-decouple`, based on dev @ `d5eda02`, includes #356)
 - **Continues**: [implementations-plan/e2e-deflake/](../e2e-deflake/plan.md) — Fix 1 was classified OPEN (owner decision); this arc is the owner's product fix
-- **Approval**: Phase-0 UX discussion completed with the owner 2026-08-12 (this session); design decisions recorded below verbatim. Plan approval gate pending.
+- **Approval**: **APPROVED by the owner 2026-08-12** (this session) with **Asks 1–6 ratified as
+  recommended** (env-override swap; two stored shapes; torn-unlock refusal on auth; narrowed
+  marker guarantee; cancellation deferred to ledger; the stated caps). Phase-0 UX decisions
+  recorded below verbatim.
 - **Audit state**: fable round 1 **conditional approve** (conditions folded — [audit-fable.md](audit-fable.md)); codex round 1 **reject** (all three blocking findings addressed in this revision — dispositions in [audit-codex.md](audit-codex.md)); final fresh codex pass pending.
 - **eli5_mode**: artifact — published at https://claude.ai/code/artifact/476020d5-63c1-42c2-ba98-6a7e6ef6e3ff (source: `implementations-plan/bootstrap-route-decouple/eli5.html`; redeploy the same path to update)
 
@@ -513,4 +516,8 @@ decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
 
 ## Seeds
 
-*(drafted with the ELI5; finalized post-approval)*
+Finalized post-approval (scope unchanged by the approval — Asks 1–6 ratified as recommended).
+This arc runs under the owner's /goal directive of 2026-08-12 (route-decouple arc), which is the
+active seed; the canonical `/goal` + `/loop` blocks for a fresh session live in the ELI5
+Artifact (https://claude.ai/code/artifact/476020d5-63c1-42c2-ba98-6a7e6ef6e3ff) and must run
+inside the `bootstrap-route-decouple` worktree (`agent-worktree resume bootstrap-route-decouple`).
