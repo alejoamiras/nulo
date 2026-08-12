@@ -129,8 +129,8 @@
     <div class="audit-row">
       <span class="chip">tier: mid</span>
       <span class="chip ok">fable: conditional approve — folded</span>
-      <span class="chip warn">codex r1: reject — all findings folded</span>
-      <span class="chip">codex final pass: in flight</span>
+      <span class="chip ok">codex: 3× reject → conditional approve — all folded</span>
+      <span class="chip warn">awaiting: your approval</span>
     </div>
   </header>
 
@@ -155,7 +155,7 @@
     <h2>The six phases</h2>
     <div class="phase">
       <h3><span class="n">01</span>Prove the diagnosis (blocking)</h3>
-      <p>Export a real backup the same way the test does, look inside it, and reproduce the freeze against a controlled fake network. If the suspected step turns out not to be the culprit, everything stops for a rethink.</p>
+      <p>Export a real backup the same way the test does, look inside it, and reproduce the freeze against a controlled fake network — including a control run (same backup with the suspect part removed must import cleanly). If the suspected step turns out not to be the culprit, everything stops for a rethink.</p>
       <p class="proof"><strong>Proves itself by:</strong> a written evidence log with measured timings, plus clean lint + typecheck.</p>
     </div>
     <div class="phase">

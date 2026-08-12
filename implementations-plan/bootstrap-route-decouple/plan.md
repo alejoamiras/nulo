@@ -280,10 +280,12 @@ gates, the 90s smoke bound, driver 300s/240s budgets.
 ## Competing outline (the implementation-shape fork within the approved UX)
 
 **Shape A — page-side orchestration (+ SW-side input hardening) — CHOSEN.** Bounds live where
-the UX lives; the security-audited restore RPC signature is unchanged; `withTimeout` exists;
-trivially unit-testable. Accepted cost: budget-expiry abandons in-flight SW/offscreen work —
-bounded to a small constant by caps + preflight-gating + service-local fail-fast; the skip log
-may overstate ("skipped" items can complete late) — settled-flag guards the log itself.
+the UX lives; the restore RPC gains exactly ONE additive, clamped `deadlineMs` argument (the
+audited trust-gate/rollback semantics are untouched); `withTimeout` exists; trivially
+unit-testable. Accepted cost: budget-expiry abandons in-flight SW/offscreen work — bounded to
+at most one in-flight call by caps + preflight-gating + per-launch deadline checks +
+service-local fail-fast; the skip log may overstate ("skipped" items can complete late) —
+settled-flag guards the log itself.
 
 **Shape B — SW-ONLY orchestration (service owns classification, probing, AND the whole budget
 policy; no page-side race)** — rejected: couples the service to UX timing policy wholesale, and
@@ -501,7 +503,13 @@ decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
   + edge-case test list; Phase-5/6 docs delivery path; stale test comment). It explicitly
   verified every round-1 fold as correct ("Resolved correctly" list in
   [audit-codex.md](audit-codex.md)).
-- **Round 3 — resumed re-verdict on the round-2 folds**: *(pending)*
+- **Round 3 — resumed re-verdict**: **reject** (one blocking: per-launch deadline enforcement
+  before every sender/contract launch + the slow-success pin; 3 Lows) — all folded.
+- **Round 4 — resumed re-verdict**: **conditional approve** (condition: rewrite the stale
+  "restore RPC signature is unchanged" line in the Competing outline — APPLIED). **Gate
+  satisfied: plan approved for implementation by both audit legs** (fable conditional approve
+  with conditions folded; codex conditional approve with condition folded), pending the OWNER's
+  approval + Asks 1–6.
 
 ## Seeds
 

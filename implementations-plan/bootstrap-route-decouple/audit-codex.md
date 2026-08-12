@@ -194,3 +194,10 @@ skip-record collector/settled-append; Phase-5 docs delivery.
 ## Round 4 — resumed re-verdict on the round-3 folds
 
 *(pending)*
+
+## Round 4 — resumed re-verdict (same session)
+
+**Verdict: conditional approve** (condition: rewrite plan.md's stale "restore RPC signature is
+unchanged" in the Competing outline — the chosen design adds `deadlineMs`). **APPLIED** same
+session (Shape A pros now name the one additive clamped argument and the untouched trust-gate/
+rollback semantics). No further implementation-level blocker remains — audit loop complete.
