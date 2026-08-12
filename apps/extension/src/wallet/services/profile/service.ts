@@ -209,7 +209,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// close) — throwing here would abort service init (F-13 discipline).
 			const marker = await this.restorePending.get(id)
 			if (marker.kind === "corrupt") return undefined
-			if (marker.kind === "valid" && marker.marker.pxeGeneration === profile.pxeGeneration) return undefined
+			if (marker.kind === "valid") {
+				if (marker.marker.pxeGeneration === profile.pxeGeneration) return undefined
+				// Stale leftover from a prior incarnation: purge here too (the
+				// interactive path already does) — best-effort, never blocking.
+				await this.restorePending.delete(id).catch(() => {})
+			}
 			return profile
 		})
 
@@ -909,7 +914,6 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const epoch = this.deletionState.beginDeletion(id)
 			await this.tombstones.write({ profileId: id, ...snapshot, epoch })
 			await this.repo.delete(id)
-			await this.restorePending.delete(id)
 			// Close the session BEFORE the emit (a subscriber reacting to the emit
 			// must not observe a still-open session for a deleted profile).
 			if (this.sessionManager.isActive(id)) {
@@ -925,6 +929,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// same-id re-import skip its first boot verification.
 			await this.integrityBlocked.clear(id)
 			await this.integrityStamps.clear(id)
+			// The restore-pending marker clears LAST among the fallible cleanups —
+			// session close + pending-secret zeroization above must never be
+			// skipped by a rejecting storage remove. A failure here leaves the
+			// tombstone in place, so the crash-resume path re-clears it.
+			await this.restorePending.delete(id)
 			this.emit("onProfileDeleted", this.getProfileInfo(profile))
 			return { profile, epoch, snapshot }
 		})

@@ -151,7 +151,15 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 			// runner. The leg is now preflight-gated + deadline-bounded in-product, so
 			// every branch below lands well inside the SAME 90s deadline (UNCHANGED —
 			// the Continue click below consumes the remainder, never a fresh budget).
+			// ONE absolute deadline for the whole post-submit settle: both waits
+			// below consume the REMAINDER of `submittedAt + 90_000` — never a fresh
+			// budget (a fresh post-click wait would silently raise the bound).
 			const routeDeadlineAt = submittedAt + 90_000
+			const routeRemainder = () => {
+				const remainder = routeDeadlineAt - Date.now()
+				if (remainder <= 0) throw new Error(`post-import 90s deadline exhausted (${Date.now() - submittedAt}ms since submit)`)
+				return remainder
+			}
 			try {
 				await page2.waitForFunction(
 					() => {
@@ -159,7 +167,7 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 						if (h.includes("/popup/general") || h.includes("/popup/auth")) return true
 						return !!document.querySelector('[data-testid="import-full-backup-continue-btn"]')
 					},
-					{ timeout: 90_000, polling: 250 },
+					{ timeout: routeRemainder(), polling: 250 },
 				)
 				// Errors-screen branch: acknowledge the recorded skips (what a real
 				// user does) and continue INTO the wallet on the remaining deadline.
@@ -173,7 +181,7 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 							const h = window.location.hash
 							return h.includes("/popup/general") || h.includes("/popup/auth")
 						},
-						{ timeout: Math.max(1_000, routeDeadlineAt - Date.now()), polling: 250 },
+						{ timeout: routeRemainder(), polling: 250 },
 					)
 				}
 			} catch (err) {

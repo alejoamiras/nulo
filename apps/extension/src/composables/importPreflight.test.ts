@@ -94,10 +94,11 @@ describe("preflightNetworkConnectivity", () => {
 			}),
 		)
 		expect(verdicts.get("n1")).toBe("unreachable")
-		// Attempt 1: budget 5000 (race 6000 → t=6000, wait 2000 → t=8000).
-		// Attempt 2: budget 5000 (race 6000 → t=14000, wait 4000 → t=18000).
-		// Attempt 3: the 3000ms deadline remainder caps the budget.
-		expect(budgets).toEqual([5_000, 5_000, 3_000])
+		// Exact-deadline races (no page-side grace): attempt 1 burns 5000
+		// (t=5000, wait 2000 → 7000); attempt 2 burns 5000 (t=12000, wait 4000
+		// → 16000); attempt 3 gets min(5000, 21000-16000) = 5000 → t=21000,
+		// exactly the deadline.
+		expect(budgets).toEqual([5_000, 5_000, 5_000])
 	})
 
 	test("a throwing probe counts as an attempt and retries", async () => {

@@ -265,6 +265,13 @@ describe("collectRestoreErrors — account-state top-level records (skip/violati
 		expect(item.senders).toHaveLength(1)
 	})
 
+	it("collapses non-object result entries ([null]/[undefined]) into ONE constant record, never throws", () => {
+		const result = collectRestoreErrors("account-state", [null, undefined, 42] as unknown as unknown[])
+		expect(result).toEqual([
+			{ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" },
+		])
+	})
+
 	it("guards malformed child arrays instead of throwing (post-finalize path)", () => {
 		const result = collectRestoreErrors("account-state", [
 			{ networkId: "n1", senders: null, contracts: undefined, restoreError: "malformed account-state item" },

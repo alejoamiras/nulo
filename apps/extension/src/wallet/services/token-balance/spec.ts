@@ -38,7 +38,15 @@ export const TokenBalanceRawSchema: z.ZodType<TokenBalanceRaw> = z.object({
 	publicBalance: z.string().optional(),
 	privateBalance: z.string().optional(),
 	updatedAt: z.number(),
-	syncFailure: z.object({ at: z.number(), message: z.string() }).optional(),
+	syncFailure: z
+		.object({
+			at: z.number(),
+			// Imported/restored rows are untrusted: bound the persisted text at
+			// the schema so a hostile backup can't smuggle megabyte messages
+			// (truncate, never reject — rejection would hide the whole row).
+			message: z.string().transform((m) => (m.length <= 200 ? m : `${m.slice(0, 199)}…`)),
+		})
+		.optional(),
 })
 
 export type TokenBalanceInfo = {

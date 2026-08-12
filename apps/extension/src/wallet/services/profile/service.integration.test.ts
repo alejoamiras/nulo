@@ -1646,6 +1646,39 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect((await pending.get(out.id)).kind).toBe("absent")
 		}, 30_000)
 
+		test("deleteProfile survives a rejecting marker removal: session closed + pending secret gone FIRST", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+
+			// Make ONLY the restore-pending removal reject (the fallible tail).
+			const storage = api.storage.local as never as { remove: (k: string | string[]) => Promise<void> }
+			const originalRemove = storage.remove.bind(storage)
+			storage.remove = async (k: string | string[]) => {
+				if (typeof k === "string" && k.startsWith(`${RESTORE_PENDING_ROOT}@`)) throw new Error("storage remove rejected")
+				return originalRemove(k)
+			}
+
+			await expect(service.deleteProfile(out.id)).rejects.toThrow("storage remove rejected")
+			// The ordering contract: the session was closed BEFORE the fallible
+			// marker cleanup — no deleted-profile session lingers.
+			expect(await service.getActiveProfile()).toBeUndefined()
+			storage.remove = originalRemove
+		}, 30_000)
+
+		test("silent rehydration purges a generation-MISMATCHED marker and keeps the session", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			await pending.write({ profileId: out.id, pxeGeneration: "prior-incarnation", at: 1 })
+
+			const { service: restarted } = await makeServiceFromExistingApi(api)
+			expect((await restarted.getActiveProfile())?.id).toBe(out.id)
+			expect((await pending.get(out.id)).kind).toBe("absent")
+		}, 30_000)
+
 		test("silent rehydration of a marker-bearing profile closes the session WITHOUT aborting service init", async () => {
 			const { api, service } = await makeService()
 			const out = await restoreOnly(service)

@@ -215,8 +215,13 @@ describe("AccountStateService.restore (bounded)", () => {
 
 	// A network with a resolvable primary endpoint — `networkInfoFrom` needs it
 	// before any register call can even be built.
+	// Must pass the restore boundary's NetworkSchema filter (an invalid row
+	// behaves as an absent network), so every schema-required field is real.
 	const NET = {
-		...makeNetwork("net-a", 1),
+		id: "net-a",
+		profileId: "p1",
+		chainId: 1,
+		name: "Net net-a",
 		endpoints: [{ id: "primary", rpcUrl: "http://localhost:9" }],
 		primaryEndpointId: "primary",
 	} as Network

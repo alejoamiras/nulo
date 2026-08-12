@@ -300,6 +300,53 @@ describe("BalanceJobQueue", () => {
 		expect(onBalanceUpdated).not.toHaveBeenCalled()
 	})
 
+	test("deletion fence: a delete interleaving between the re-read and the write cannot resurrect the row (TOCTOU pin)", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const invalidated = new Set<number>()
+		// The projector resolves, then the SERVICE "deletes" the row exactly in
+		// the window before the queue's write: fence added + row removed.
+		const { projector } = makeProjector(() => {
+			invalidated.add(1)
+			void repo.delete(1)
+			return [{ kind: "ok" as const, id: 1, privateBalance: "9", publicBalance: "0" }]
+		})
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			onBalanceUpdated,
+			isBalanceInvalidated: (id) => invalidated.has(id),
+		})
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect(await repo.get(1)).toBeUndefined() // never resurrected
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+	})
+
+	test("deletion fence guards the FAILURE write too", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const invalidated = new Set<number>()
+		const { projector } = makeProjector(() => {
+			invalidated.add(1)
+			return [{ kind: "error" as const, id: 1, error: "sim failed" }]
+		})
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			onBalanceUpdated,
+			isBalanceInvalidated: (id) => invalidated.has(id),
+		})
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect((await repo.get(1))?.syncFailure).toBeUndefined()
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+	})
+
 	test("a hostile-length failure message is bounded before persisting", async () => {
 		const ticker = new FakeBackgroundTicker()
 		const repo = makeRepo([raw(1)])

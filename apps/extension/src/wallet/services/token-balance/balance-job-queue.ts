@@ -48,6 +48,11 @@ export type BalanceJobQueueCallbacks = {
 	/** Called when a balance is projected but its storage record has
 	 *  been deleted mid-sync (mirrors service.ts:395-401). */
 	onOrphanDetected?: (balance: TokenBalanceRaw) => void
+	/** Deletion fence (TOCTOU guard): checked SYNCHRONOUSLY immediately before
+	 *  every storage write — a delete that began after the queue's re-read adds
+	 *  the id here BEFORE its awaited `repo.delete`, so single-threaded dispatch
+	 *  order makes write-after-delete resurrection impossible. */
+	isBalanceInvalidated?: (id: number) => boolean
 }
 
 export class BalanceJobQueue {
@@ -133,6 +138,8 @@ export class BalanceJobQueue {
 			...current,
 			syncFailure: { at, message: boundedFailureMessage(message) },
 		}
+		// Fence check with NO await between it and the write dispatch.
+		if (this.callbacks.isBalanceInvalidated?.(id)) return
 		await this.repo.set(updated)
 		this.callbacks.onBalanceUpdated(updated)
 	}
@@ -186,6 +193,12 @@ export class BalanceJobQueue {
 					// A successful projection clears the failure record
 					// (JSON-serialization drops the undefined key).
 					syncFailure: undefined,
+				}
+				// Fence check with NO await between it and the write dispatch
+				// (a delete interleaving since the re-read must win).
+				if (this.callbacks.isBalanceInvalidated?.(result.id)) {
+					this.tasks.failTask(taskId, "Balance record deleted mid-sync")
+					continue
 				}
 				await this.repo.set(updated)
 				this.tasks.completeTask(taskId)

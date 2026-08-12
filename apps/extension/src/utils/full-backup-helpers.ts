@@ -76,7 +76,14 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 	if (!Array.isArray(data) || !data.length || !serviceName) return null
 	if (serviceName === "account-state") {
 		const out: Array<AccountStateRestoreItem & { restoreError?: unknown }> = []
+		let malformedItems = 0
 		for (const item of data as Array<AccountStateRestoreItem & { restoreError?: unknown }>) {
+			// A non-object result entry (hostile/degenerate restore output) must
+			// not throw post-finalize — collapse into ONE constant record below.
+			if (typeof item !== "object" || item === null) {
+				malformedItems++
+				continue
+			}
 			// Presence-guard the child arrays: the result shape is built from an
 			// attacker-controlled slice, and this collector runs post-finalize
 			// where a throw would strand the import on a false "Import failed".
@@ -93,6 +100,9 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 				senders: failedSenders,
 				...(item.restoreError !== undefined ? { restoreError: item.restoreError } : {}),
 			})
+		}
+		if (malformedItems > 0) {
+			out.push({ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" })
 		}
 		return out.length ? out : null
 	}

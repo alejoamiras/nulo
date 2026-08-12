@@ -31,9 +31,6 @@ export const IMPORT_PREFLIGHT_BUDGET_MS = 21_000
 /** The registration leg's cap within the shared budget (< the 60s popup→SW
  *  request ceiling, so THIS timeout — not a transport error — decides). */
 export const IMPORT_REGISTRATION_BUDGET_MS = 30_000
-/** Page-side grace over the SW-enforced registration deadline. */
-const REGISTRATION_RACE_GRACE_MS = 2_000
-
 export interface ImportChainSyncDeps {
 	/** The backup's raw account-state slice (attacker-controlled). */
 	slice: unknown
@@ -106,7 +103,9 @@ export async function runImportChainSync(deps: ImportChainSyncDeps): Promise<voi
 			.restore(items, remaining)
 			.then((result) => ({ kind: "result" as const, result }))
 			.catch(() => ({ kind: "failed" as const })),
-		sleep(remaining + REGISTRATION_RACE_GRACE_MS).then(() => ({ kind: "timeout" as const })),
+		// Raced at the EXACT remainder — the deadline is absolute (the service
+		// enforces its own copy per launch, so nothing useful runs past it).
+		sleep(remaining).then(() => ({ kind: "timeout" as const })),
 	])
 	if (settled) return
 	settled = true

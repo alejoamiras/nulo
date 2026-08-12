@@ -58,6 +58,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	private profile?: ProfileInfo = undefined
 
+	/** Deletion fence for the job queue's re-read→write window: ids are added
+	 *  BEFORE the awaited `repo.delete` and checked SYNCHRONOUSLY right before
+	 *  every queue write, so a delete interleaving between the queue's re-read
+	 *  and its `repo.set` cannot resurrect the row. An id leaves the fence only
+	 *  if a NEW row legitimately reuses it (`createTokenBalance`). */
+	private readonly invalidatedBalanceIds = new Set<number>()
+
 	public constructor(
 		logger: ILogger,
 		browserApi: BrowserApi,
@@ -94,6 +101,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				onBalanceUpdated: (balance) => {
 					this.emit("onTokenBalanceUpdated", this.getTokenBalanceInfo(balance))
 				},
+				isBalanceInvalidated: (id) => this.invalidatedBalanceIds.has(id),
 			},
 			this.logger,
 		)
@@ -191,6 +199,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			publicBalance: "0",
 			updatedAt: 0,
 		}
+		// A freshly-allocated id may reuse a previously-deleted one — release it
+		// from the deletion fence so the new row's syncs can write.
+		this.invalidatedBalanceIds.delete(tb.id)
 		await this.repo.set(tb)
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
@@ -249,6 +260,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	private readonly onTokenDeleted = async (token: TokenInfo) => {
 		this.tokens.delete(token.id)
 		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
 			this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
 		}
@@ -261,6 +273,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const set = new Set(tokenIds)
 		for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
 			if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
 		}
 		for (const id of set) this.tokens.delete(id)

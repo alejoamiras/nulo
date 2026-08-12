@@ -6,7 +6,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { NetworkService } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
-import { networkInfoFrom, NodeStatus } from "@/wallet/services/network/spec"
+import { networkInfoFrom, NetworkSchema, NodeStatus } from "@/wallet/services/network/spec"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import {
@@ -238,20 +238,26 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		networks: Network[],
 		deadlineMs?: number,
 	): Promise<Restored<BackupAccountState>[]> {
-		await this.ensureInitialized()
-
+		// The absolute deadline starts at ENTRY — init wait time counts against
+		// it, never extends it (the caller's clock started at dispatch).
 		const clamped =
 			typeof deadlineMs === "number" && Number.isFinite(deadlineMs) ? Math.min(Math.max(deadlineMs, 0), 30_000) : undefined
 		const deadlineAt = clamped !== undefined ? Date.now() + clamped : undefined
+		await this.ensureInitialized()
 		const expired = () => deadlineAt !== undefined && Date.now() >= deadlineAt
 
 		const { items, violations } = normalizeAccountStateSlice(backupAccountState)
 		const result: Restored<BackupAccountState>[] = [...violations]
 
+		// The networks argument crosses the same trust boundary as the slice:
+		// require an array, cap the scan, keep only schema-valid rows — an
+		// invalid entry behaves as an absent network ("Network not found").
+		const safeNetworks = (Array.isArray(networks) ? networks : []).slice(0, 64).filter((n) => NetworkSchema.safeParse(n).success)
+
 		for (const item of items) {
 			const senders: Restored<BackupSender>[] = []
 			const contracts: Restored<BackupContract>[] = []
-			const network = networks.find((n) => n.id === item.networkId)
+			const network = safeNetworks.find((n) => n.id === item.networkId)
 			let unreachable = false
 			let skippedByDeadline = 0
 

@@ -17,8 +17,8 @@ export type PreflightVerdict = "go" | "unreachable" | "wrong-network"
 export const PREFLIGHT_ATTEMPT_TIMEOUT_MS = 5_000
 export const PREFLIGHT_BACKOFF_WAITS_MS = [2_000, 4_000] as const
 export const PREFLIGHT_CONCURRENCY = 3
-/** Page-side grace over the SW-enforced probe budget before the race gives up. */
-const PAGE_RACE_GRACE_MS = 1_000
+/** Below this remainder an attempt is pointless — classify unreachable. */
+const MIN_ATTEMPT_MS = 100
 
 export interface PreflightOptions {
 	networkIds: string[]
@@ -42,15 +42,16 @@ async function probeOneNetwork(
 	const attempts = opts.backoffWaitsMs.length + 1
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		const remaining = opts.deadlineAt - opts.now()
-		if (remaining <= 0) return "unreachable"
-		const budget = Math.max(100, Math.min(opts.attemptTimeoutMs, remaining))
+		// The deadline is ABSOLUTE: never force a minimum attempt past it.
+		if (remaining < MIN_ATTEMPT_MS) return "unreachable"
+		const budget = Math.min(opts.attemptTimeoutMs, remaining)
 
 		const outcome = await Promise.race([
 			opts
 				.probe(networkId, budget)
 				.then((status) => ({ kind: "status" as const, status }))
 				.catch(() => ({ kind: "failed" as const })),
-			opts.sleep(budget + PAGE_RACE_GRACE_MS).then(() => ({ kind: "timeout" as const })),
+			opts.sleep(budget).then(() => ({ kind: "timeout" as const })),
 		])
 
 		if (outcome.kind === "status") {
