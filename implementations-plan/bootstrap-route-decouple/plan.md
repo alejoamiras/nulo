@@ -445,7 +445,9 @@ clear-on-success); five-listener sweep; TokenCard dot + failed state; conscious 
 **Gate**: `bun run test` + `bun run --cwd apps/extension test:components` + `bun run lint` +
 `bun run typecheck` exit 0. Layers: unit + component.
 
-**Phase 4 — Restore-pending marker + torn-restore refusal**
+**Phase 4 — Restore-pending marker + torn-restore refusal ✓ GREEN (2026-08-12 —
+`lessons/phase-4.md`: units 4019 incl. 10 crash-boundary/restart pins; smoke 25 files green;
+network pair 2/2 attempt-1 retry:0)**
 Marker (both branches, marker-before-row, compensation, generation binding, entry-clear,
 delete/crash-resume clears, lazy purge); `openSessionVerified` + rehydration checks; typed
 error; auth.vue message; composition-harness crash-boundary tests; auth component test;

@@ -32,4 +32,11 @@ Units 4014 green (incl. 8 new profile-integration crash-boundary pins: marker-pr
 restore, torn unlock refusal, finalize-throw recovery preserved, no-op finalize clean, corrupt
 fail-closed, generation-mismatch purge, delete clears, rehydration-close without init failure);
 repository 5/5; errors round-trip; auth component 2/2; lint + typecheck exit 0.
-Smoke suite + targeted network pair: *(recorded below when runs complete)*
+Smoke suite: 25 files / 82 tests green, zero retries — run as FOUR FOREGROUND CHUNKS after
+three consecutive background-task SIGTERM kills ("Polite quit request" seconds after vitest
+launch; an 8-min sleep probe survived, so the reaper targets long vitest runs specifically —
+chunked foreground + setsid-detached runs are the workaround, logged for the ledger of tricks).
+Targeted network pair (`backup-restore-integrity` + `backup-restore-sw-restart`) via a
+setsid-detached `e2e:agent` run, NULO_E2E_RETRY=0, SOLO: **2 files / 4 tests green attempt-1**
+(196s; stack booted from the ports registry, teardown clean). NOTE: the pair ran on the
+pre-codex-fold tree; Phase 5's full pre-push gates re-validate the folded tree end-to-end.
