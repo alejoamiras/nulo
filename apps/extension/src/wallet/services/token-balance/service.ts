@@ -190,18 +190,26 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 	}
 
+	/** Allocate an id that was never fenced this worker lifetime. Reusing a
+	 *  fenced id would either let a deleted row's in-flight projection write
+	 *  onto the new incarnation (ABA) or permanently suppress the new row's
+	 *  syncs — so allocation skips PAST fenced ids instead of releasing them.
+	 *  A worker restart forgets the fence safely: no old projection survives it. */
+	private async allocateUnfencedId(): Promise<number> {
+		let id = await this.repo.allocateId()
+		while (this.invalidatedBalanceIds.has(id)) id++
+		return id
+	}
+
 	private async createTokenBalance(token: Token, account: Account) {
 		const tb: TokenBalanceRaw = {
-			id: await this.repo.allocateId(),
+			id: await this.allocateUnfencedId(),
 			token: token.id,
 			account: account.address,
 			privateBalance: "0",
 			publicBalance: "0",
 			updatedAt: 0,
 		}
-		// A freshly-allocated id may reuse a previously-deleted one — release it
-		// from the deletion fence so the new row's syncs can write.
-		this.invalidatedBalanceIds.delete(tb.id)
 		await this.repo.set(tb)
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
@@ -341,7 +349,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const result: Restored<TokenBalanceRaw>[] = []
 		for (const tb of tokenBalances) {
 			try {
-				const id = await this.repo.allocateId()
+				const id = await this.allocateUnfencedId()
 				// Parse the exact persisted shape: an unvalidated restore row that fails
 				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
 				// on read AND to a later getValues() cleanup). Parse here so a malformed

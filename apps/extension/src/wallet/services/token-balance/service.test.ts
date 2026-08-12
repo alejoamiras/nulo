@@ -138,6 +138,23 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 		await services.start()
 	})
 
+	test("fenced-id incarnation guard: allocation SKIPS ids fenced this lifetime, so a reused id can neither eat a stale write nor stay suppressed", async () => {
+		// Simulate: row 5 (the allocator's NEXT id — max existing is 4) was
+		// deleted this lifetime and fenced while its old projection is still in
+		// flight. A same-lifetime restore must skip PAST it (codex iteration r2
+		// — the ABA/suppression hole).
+		await seedRepo.set(balance(4, 1))
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private fence
+		;(service as any).invalidatedBalanceIds.add(5)
+
+		const [restored] = await service.restore([balance(999, 1)])
+		expect(restored.restoreError).toBeUndefined()
+		expect(restored.id).toBe(6) // allocator's 5 was fenced → skipped
+		// The new row's own projections are NOT suppressed by the fence.
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private fence
+		expect(((service as any).invalidatedBalanceIds as Set<number>).has(restored.id)).toBe(false)
+	})
+
 	test("records a schema-invalid row as restoreError and never writes it", async () => {
 		// account must be a string; a hostile backup row with a non-string account
 		// would pass EntityStorage's write but be codec-hidden on read (invisible to
