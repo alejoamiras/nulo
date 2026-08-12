@@ -133,6 +133,7 @@ declare global {
   const reactive: typeof import('vue').reactive
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
   const readonly: typeof import('vue').readonly
+  const realSleep: typeof import('../composables/importPreflight').realSleep
   const receivedLabel: typeof import('../utils/received-display').receivedLabel
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
@@ -349,8 +350,6 @@ declare module 'vue' {
     readonly MAINNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_ROLLUP_VERSION']>
     readonly MAX_CONTACT_IMPORT_BYTES: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_BYTES']>
     readonly MAX_CONTACT_IMPORT_ROWS: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_ROWS']>
-    readonly PREFLIGHT_ATTEMPT_TIMEOUT_MS: UnwrapRef<typeof import('../composables/importPreflight')['PREFLIGHT_ATTEMPT_TIMEOUT_MS']>
-    readonly PREFLIGHT_BACKOFF_WAITS_MS: UnwrapRef<typeof import('../composables/importPreflight')['PREFLIGHT_BACKOFF_WAITS_MS']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
@@ -459,6 +458,7 @@ declare module 'vue' {
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
+    readonly realSleep: UnwrapRef<typeof import('../composables/importPreflight')['realSleep']>
     readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
