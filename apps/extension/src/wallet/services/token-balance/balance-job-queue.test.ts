@@ -240,9 +240,13 @@ describe("BalanceJobQueue", () => {
 		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
 	})
 
-	test("projector error surfaces as task failure; no storage write", async () => {
+	test("projector error persists a syncFailure record — balances/updatedAt untouched, listeners notified", async () => {
+		// The pre-existing pin here was "no storage write on error", which made a
+		// FAILED projection indistinguishable from a still-running one once the
+		// in-memory task record died with the SW. Consciously replaced: failures
+		// now write ONLY the failure record onto the live row.
 		const ticker = new FakeBackgroundTicker()
-		const original = raw(1, { privateBalance: "0" })
+		const original = raw(1, { privateBalance: "0", updatedAt: 77 })
 		const repo = makeRepo([original])
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
@@ -253,8 +257,61 @@ describe("BalanceJobQueue", () => {
 		await queue.tick()
 
 		expect(tasks.failTask).toHaveBeenCalledWith(expect.any(String), "sim failed")
+		const row = await repo.get(1)
+		expect(row?.privateBalance).toBe("0") // unchanged
+		expect(row?.updatedAt).toBe(77) // unchanged — the value is NOT fresher
+		expect(row?.syncFailure?.message).toBe("sim failed")
+		expect(row?.syncFailure?.at).toEqual(expect.any(Number))
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
+		expect(onBalanceUpdated).toHaveBeenCalledWith(
+			expect.objectContaining({ syncFailure: expect.objectContaining({ message: "sim failed" }) }),
+		)
+	})
+
+	test("the next SUCCESSFUL projection clears the syncFailure record", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const original = raw(1, { privateBalance: "0", updatedAt: 77 })
+		const repo = makeRepo([{ ...original, syncFailure: { at: 1, message: "old failure" } }])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([{ kind: "ok", id: 1, privateBalance: "9", publicBalance: "0" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		const row = await repo.get(1)
+		expect(row?.privateBalance).toBe("9")
+		expect(row?.syncFailure).toBeUndefined()
+	})
+
+	test("a deleted row gets NO failure write (failures must not resurrect rows)", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([]) // row already deleted
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect(await repo.get(1)).toBeUndefined()
 		expect(onBalanceUpdated).not.toHaveBeenCalled()
-		expect((await repo.get(1))?.privateBalance).toBe("0") // unchanged
+	})
+
+	test("a hostile-length failure message is bounded before persisting", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([{ kind: "error", id: 1, error: "x".repeat(5000) }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect((await repo.get(1))?.syncFailure?.message.length).toBeLessThanOrEqual(200)
 	})
 
 	test("orphan balance (deleted mid-sync) fails task instead of writing", async () => {

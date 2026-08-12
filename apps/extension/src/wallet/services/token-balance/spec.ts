@@ -8,6 +8,18 @@ export const TOKEN_BALANCE_SERVICE_NAME = "token-balance"
  *  renaming detaches every existing row; the backup-migration registry pins it. */
 export const TOKEN_BALANCE_STORAGE_ROOT = "nulo:core:token-balances"
 
+/** Persisted record of the row's LAST FAILED projection. Cleared by the next
+ *  successful one. Without it, a failed refresh is indistinguishable from a
+ *  still-running one via storage (the only other signal is an in-memory,
+ *  60-min-TTL TaskService record that dies with the SW) — the gap that
+ *  starved a write-gated retry in the e2e-deflake arc. `message` is bounded
+ *  at the write site; balances and `updatedAt` stay untouched on failure so
+ *  the last-known value keeps rendering (gas-pipeline SWR precedent). */
+export type TokenBalanceSyncFailure = {
+	at: number
+	message: string
+}
+
 export type TokenBalanceRaw = {
 	id: number
 	token: number
@@ -15,6 +27,7 @@ export type TokenBalanceRaw = {
 	publicBalance?: string
 	privateBalance?: string
 	updatedAt: number
+	syncFailure?: TokenBalanceSyncFailure
 }
 
 /** Storage codec row schema — mirrors `TokenBalanceRaw` exactly. */
@@ -25,6 +38,7 @@ export const TokenBalanceRawSchema: z.ZodType<TokenBalanceRaw> = z.object({
 	publicBalance: z.string().optional(),
 	privateBalance: z.string().optional(),
 	updatedAt: z.number(),
+	syncFailure: z.object({ at: z.number(), message: z.string() }).optional(),
 })
 
 export type TokenBalanceInfo = {
@@ -34,6 +48,7 @@ export type TokenBalanceInfo = {
 	publicBalance?: string
 	privateBalance?: string
 	updatedAt: number
+	syncFailure?: TokenBalanceSyncFailure
 }
 
 export type Methods = {

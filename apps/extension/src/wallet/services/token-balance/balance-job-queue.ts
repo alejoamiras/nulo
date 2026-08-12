@@ -35,6 +35,12 @@ import type { TokenBalanceRaw } from "./spec"
 
 const TICK_INTERVAL_MS = 1000
 const BATCH_SIZE = 12
+/** Failure messages persist onto the row — bound them (hostile RPC text). */
+const MAX_FAILURE_MESSAGE_LENGTH = 200
+
+function boundedFailureMessage(message: string): string {
+	return message.length <= MAX_FAILURE_MESSAGE_LENGTH ? message : `${message.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
+}
 
 export type BalanceJobQueueCallbacks = {
 	/** Called after a successful projection writes a balance to storage. */
@@ -117,6 +123,20 @@ export class BalanceJobQueue {
 		this.logger?.log(this.logSource, LogLevel.Debug, `Token balances synced in ${end - start}ms`)
 	}
 
+	/** Persist a failure record onto the LIVE row (re-read, never the batch's
+	 *  possibly-stale copy — a deleted row must stay deleted) and emit the
+	 *  updated row so every listener re-renders the failed state. */
+	private async writeSyncFailure(id: number, message: string, at: number): Promise<void> {
+		const current = await this.repo.get(id)
+		if (!current) return
+		const updated: TokenBalanceRaw = {
+			...current,
+			syncFailure: { at, message: boundedFailureMessage(message) },
+		}
+		await this.repo.set(updated)
+		this.callbacks.onBalanceUpdated(updated)
+	}
+
 	private async syncBatch(batch: TokenBalanceRaw[]): Promise<void> {
 		// Start each balance's task record. Handles both the
 		// already-registered case (from `enqueue`) and the defensive
@@ -141,6 +161,11 @@ export class BalanceJobQueue {
 
 				if (result.kind === "error") {
 					this.tasks.failTask(taskId, result.error)
+					// Persist the failure onto the row (balances + updatedAt
+					// untouched — the last-known value keeps rendering). Without
+					// this write, "failed" and "still running" are identical in
+					// storage once the in-memory task record dies with the SW.
+					await this.writeSyncFailure(result.id, result.error, now)
 					continue
 				}
 
@@ -158,6 +183,9 @@ export class BalanceJobQueue {
 					privateBalance: result.privateBalance,
 					publicBalance: result.publicBalance,
 					updatedAt: now,
+					// A successful projection clears the failure record
+					// (JSON-serialization drops the undefined key).
+					syncFailure: undefined,
 				}
 				await this.repo.set(updated)
 				this.tasks.completeTask(taskId)
@@ -174,6 +202,7 @@ export class BalanceJobQueue {
 				const task = this.tasks.getTaskSync(taskId)
 				if (!task.finishedAt) {
 					this.tasks.failTask(taskId, errorMessage)
+					await this.writeSyncFailure(tb.id, errorMessage, Date.now())
 				}
 			}
 		} finally {

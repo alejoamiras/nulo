@@ -79,7 +79,10 @@ describe("TokenCard", () => {
 		expect(w.text()).toContain("0")
 	})
 
-	test("isUpdating after first sync keeps the real amount visible (no loader)", () => {
+	test("isUpdating after first sync keeps the real amount visible + shows the refreshing dot", () => {
+		// The old pin here asserted isUpdating produced NO visual change (the
+		// dead-branch era). Consciously replaced: a refresh in flight now shows a
+		// pulsing dot beside the still-visible amount.
 		mockQuotes = {}
 		const w = factory({
 			updatedAt: 1700_000_000_000,
@@ -88,8 +91,53 @@ describe("TokenCard", () => {
 			isUpdating: true,
 		})
 		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(true)
 		// Total = 5 TST (decimals 18) — formatter renders as "5"
 		expect(w.text()).toContain("5")
+	})
+
+	test("no refreshing dot when idle or during the initial sync", () => {
+		mockQuotes = {}
+		const idle = factory({ updatedAt: 1700_000_000_000, publicBalance: "0", privateBalance: "0" })
+		expect(idle.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		const initial = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", isUpdating: true })
+		expect(initial.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		expect(initial.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
+	})
+
+	test("a persisted syncFailure dims the last-known amount and says why", () => {
+		mockQuotes = {}
+		const w = factory({
+			updatedAt: 1700_000_000_000,
+			publicBalance: "5000000000000000000",
+			privateBalance: "0",
+			syncFailure: { at: 1700_000_000_001, message: "sim failed" },
+		})
+		const failed = w.find('[data-testid="token-balance-failed"]')
+		expect(failed.exists()).toBe(true)
+		expect(failed.text()).toContain("Couldn't refresh")
+		// The last-known amount stays visible (dimmed, never blanked).
+		expect(w.text()).toContain("5")
+	})
+
+	test("the failed caption yields to the refreshing dot while a retry is in flight", () => {
+		mockQuotes = {}
+		const w = factory({
+			updatedAt: 1700_000_000_000,
+			publicBalance: "5000000000000000000",
+			privateBalance: "0",
+			isUpdating: true,
+			syncFailure: { at: 1700_000_000_001, message: "sim failed" },
+		})
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(true)
+	})
+
+	test("no failure caption during the initial sync (the loading block owns that state)", () => {
+		mockQuotes = {}
+		const w = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", syncFailure: { at: 1, message: "x" } })
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
 	})
 
 	test("B1: a priced token renders the holding's fiat line", async () => {

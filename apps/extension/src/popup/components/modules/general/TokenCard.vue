@@ -64,11 +64,19 @@ const description = computed(() => {
 	if (props.tokenBalance?.isMinting) return "Minting more tokens..."
 	if (catchingUpUnresolved.value) return "Catching up…"
 	if (isInitialSync.value) return "Loading balance…"
-	if (props.tokenBalance?.isUpdating) return "Refreshing balance..."
 	if (props.newToken) return "Minting in progress..."
 
 	return token.value?.name || "unknown"
 })
+
+// A refresh in flight AFTER the first sync keeps the amount visible and shows
+// a pulsing dot beside it (the GasBalanceCard vocabulary) — the loading block
+// is reserved for the never-synced state.
+const isRefreshing = computed(() => !!props.tokenBalance?.isUpdating && !isInitialSync.value)
+// The row's last projection FAILED (persisted `syncFailure`, cleared by the
+// next success): dim the last-known amount + say so. Suppressed while a retry
+// is in flight — the dot is the honest state then.
+const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !isInitialSync.value)
 
 const isHovered = ref(false)
 
@@ -112,10 +120,16 @@ const handleRefreshBalance = async () => {
 			<span :class="$style.loading_text">{{ description }}</span>
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
-			<span :class="$style.amount">{{ totalBalance || 0 }}</span>
+			<Flex align="center" gap="6">
+				<span v-if="isRefreshing" :class="$style.pulse_dot" data-testid="token-balance-refreshing" />
+				<span :class="[$style.amount, syncFailed && $style.amount_stale]">{{ totalBalance || 0 }}</span>
+			</Flex>
 			<span :class="$style.detail">
 				<span :class="$style.split_dot" /> {{ privateFormatted }}&ensp;<span :class="[$style.split_dot, $style.split_dot_pub]" />
 				{{ publicFormatted }}
+			</span>
+			<span v-if="syncFailed && !isRefreshing" :class="$style.failed_text" data-testid="token-balance-failed">
+				Couldn't refresh
 			</span>
 		</Flex>
 	</RouterLink>
@@ -241,6 +255,18 @@ const handleRefreshBalance = async () => {
 	font-family: var(--font-mono);
 	font-size: 10px;
 	color: var(--nulo-secondary);
+}
+
+/* Last projection failed: keep the last-known amount visible, dimmed (the
+   GasBalanceCard stale vocabulary), with the reason underneath. */
+.amount_stale {
+	opacity: 0.55;
+}
+
+.failed_text {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	color: var(--red);
 }
 
 /* Escalated loading affordance (balance ALSO unresolved): a shimmer where the amount would be. */

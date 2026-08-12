@@ -211,6 +211,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			publicBalance: tb.publicBalance,
 			privateBalance: tb.privateBalance,
 			updatedAt: tb.updatedAt,
+			syncFailure: tb.syncFailure,
 		}
 	}
 
