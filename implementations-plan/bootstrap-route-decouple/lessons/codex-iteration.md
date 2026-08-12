@@ -18,6 +18,19 @@
 Round-1 "looks right" confirmations covered every prior audit condition (probe abort, caps,
 per-launch deadline, marker bracket, settled race, zeroization, testids, e2e stubs).
 
-## Round 2
+## Round 2 (resumed, on the fold commit)
 
-*(pending — resumed session on the folds)*
+**Verdict: iterate** — seven folds verified sound; ONE High remained: the fence's boolean
+lifetime broke across id reuse (release-on-reuse let a deleted row's in-flight projection write
+onto the new incarnation — ABA; and the un-released restore path permanently suppressed the
+restored row's syncs). **FOLDED**: `allocateUnfencedId()` skips past fenced ids in BOTH
+allocation sites; the release is gone; a worker restart forgets the fence safely. Incarnation
+pin added (max=4, fence 5 → restore allocates 6, writable).
+
+## Round 3 (resumed, on the r2 fold)
+
+**Verdict: APPROVE** — "Both creation and restore exclusively use allocateUnfencedId; no
+fence-release remains; all fenced IDs are skipped before persistence; the incarnation pin
+correctly exercises max+1 landing on a fence; no allocation or write bypass found." Non-blocking
+comment nit fixed same-session. **Iteration loop complete: 3 rounds, verdicts iterate → iterate
+→ approve.**

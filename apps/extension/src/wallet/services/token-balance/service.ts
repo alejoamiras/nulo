@@ -61,8 +61,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	/** Deletion fence for the job queue's re-read→write window: ids are added
 	 *  BEFORE the awaited `repo.delete` and checked SYNCHRONOUSLY right before
 	 *  every queue write, so a delete interleaving between the queue's re-read
-	 *  and its `repo.set` cannot resurrect the row. An id leaves the fence only
-	 *  if a NEW row legitimately reuses it (`createTokenBalance`). */
+	 *  and its `repo.set` cannot resurrect the row. Fenced ids are NEVER
+	 *  reallocated within this worker lifetime (`allocateUnfencedId` skips
+	 *  past them); a worker restart forgets the fence safely — no old
+	 *  projection survives it. */
 	private readonly invalidatedBalanceIds = new Set<number>()
 
 	public constructor(
