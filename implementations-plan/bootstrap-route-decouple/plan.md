@@ -438,7 +438,8 @@ blackholes, with the method sequence asserted; per-test retry 0); smoke
 **Gate**: `bun run test` + `bun run lint` + `bun run typecheck` exit 0; armed FULL
 `bun run test:e2e` SOLO green attempt-1. Layers: unit + smoke e2e.
 
-**Phase 3 — Token-balance failure record + TokenCard states**
+**Phase 3 — Token-balance failure record + TokenCard states ✓ GREEN (2026-08-12 — full units
+3998, components 412, lint/typecheck exit 0; pins consciously replaced)**
 Spec field (bounded message) + job-queue failure writes (live-row re-read, full-info emits,
 clear-on-success); five-listener sweep; TokenCard dot + failed state; conscious pin updates.
 **Gate**: `bun run test` + `bun run --cwd apps/extension test:components` + `bun run lint` +
