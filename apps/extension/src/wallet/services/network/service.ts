@@ -161,6 +161,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		"deleteEndpoint",
 		"setPrimaryEndpoint",
 		"getNodeStatus",
+		"probeNodeStatus",
 	)
 	public static name = NETWORK_SERVICE_NAME
 
@@ -551,6 +552,25 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		try {
 			const probedChainId = await this._getChainId(primary.rpcUrl)
 			if (probedChainId !== network.chainId) return NodeStatus.InvalidChain
+			return NodeStatus.Active
+		} catch {
+			return NodeStatus.Inactive
+		}
+	}
+
+	public async probeNodeStatus(networkId: string, timeoutMs: number): Promise<NodeStatus> {
+		validateParams(NetworkMethodSchemas.probeNodeStatus.params, [networkId, timeoutMs], "probeNodeStatus")
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
+		const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId)
+		if (!primary) return NodeStatus.Inactive
+		try {
+			const probed = await this.nodeFactory.probeChainId(primary.rpcUrl, timeoutMs)
+			// Local-network chain ids are conventionally 0 — mirror `_getChainId`'s
+			// carve-outs so a local endpoint can't misreport as InvalidChain.
+			const effective = network.kind === "local" || sameLocalNetworkUrl(primary.rpcUrl, LOCAL_NETWORK_RPC_URL) ? 0 : probed
+			if (effective !== network.chainId) return NodeStatus.InvalidChain
 			return NodeStatus.Active
 		} catch {
 			return NodeStatus.Inactive

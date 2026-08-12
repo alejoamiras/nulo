@@ -75,16 +75,28 @@ interface GenericRestoreItem {
 export function collectRestoreErrors(serviceName: string, data: unknown): unknown[] | null {
 	if (!Array.isArray(data) || !data.length || !serviceName) return null
 	if (serviceName === "account-state") {
-		const out: AccountStateRestoreItem[] = []
-		for (const item of data as AccountStateRestoreItem[]) {
-			const failedContracts = item.contracts.filter((c) => c.restoreError)
-			const failedSenders = item.senders.filter((s) => s.restoreError)
-			if (!failedContracts.length && !failedSenders.length) continue
-			out.push({ networkId: item.networkId, contracts: failedContracts, senders: failedSenders })
+		const out: Array<AccountStateRestoreItem & { restoreError?: unknown }> = []
+		for (const item of data as Array<AccountStateRestoreItem & { restoreError?: unknown }>) {
+			// Presence-guard the child arrays: the result shape is built from an
+			// attacker-controlled slice, and this collector runs post-finalize
+			// where a throw would strand the import on a false "Import failed".
+			const failedContracts = (Array.isArray(item.contracts) ? item.contracts : []).filter((c) => c?.restoreError)
+			const failedSenders = (Array.isArray(item.senders) ? item.senders : []).filter((s) => s?.restoreError)
+			// ITEM-LEVEL errors (whole-network skips, deadline notes, normalizer
+			// violations) count too — a top-level restoreError with clean child
+			// arrays used to vanish here, letting a skipped registration
+			// auto-route past the Continue gate.
+			if (!failedContracts.length && !failedSenders.length && !item.restoreError) continue
+			out.push({
+				networkId: item.networkId,
+				contracts: failedContracts,
+				senders: failedSenders,
+				...(item.restoreError !== undefined ? { restoreError: item.restoreError } : {}),
+			})
 		}
 		return out.length ? out : null
 	}
-	const filtered = (data as GenericRestoreItem[]).filter((item) => item.restoreError)
+	const filtered = (data as GenericRestoreItem[]).filter((item) => item?.restoreError)
 	return filtered.length ? filtered : null
 }
 

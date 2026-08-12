@@ -240,6 +240,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta"
 					size="large"
+					data-testid="import-full-backup-continue-btn"
 					@click="importedProfile && completeImport(importedProfile as { id: string })"
 				>
 					Continue
@@ -248,6 +249,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta_outline"
 					size="large"
+					data-testid="import-full-backup-view-errors-btn"
 					@click="showRestoreErrorLog"
 				>
 					View errors

@@ -22,7 +22,7 @@
 
 import { type AztecNode, createAztecNodeClient } from "@aztec/stdlib/interfaces/client"
 import type { NodeFactory } from "../ports/node-factory-port"
-import { makeFetchWithTimeout } from "../utils/fetch"
+import { makeFetchWithTimeout, makeSingleAttemptFetch } from "../utils/fetch"
 
 /**
  * F-011: stand-alone allowlist check used by the adapter (and exportable for
@@ -53,5 +53,17 @@ export class AztecNodeFactoryAdapter implements NodeFactory {
 			throw new Error(`AztecNodeFactoryAdapter refused to construct node client — ${check.reason}`)
 		}
 		return createAztecNodeClient(rpcUrl, {}, makeFetchWithTimeout())
+	}
+
+	public async probeChainId(rpcUrl: string, timeoutMs: number): Promise<number> {
+		const check = isAllowedRpcUrl(rpcUrl)
+		if (!check.ok) {
+			throw new Error(`AztecNodeFactoryAdapter refused to probe — ${check.reason}`)
+		}
+		// Single attempt, no retry chain: the probe's whole point is that its
+		// socket dies WITH its budget (see NodeFactory.probeChainId).
+		const node = createAztecNodeClient(rpcUrl, {}, makeSingleAttemptFetch(timeoutMs))
+		const info = await node.getNodeInfo()
+		return (info.l1ChainId ^ info.rollupVersion) >>> 0
 	}
 }

@@ -240,3 +240,36 @@ describe("resolveRestoredActiveNetworkId (item 1b — preserve active-network ac
 		expect(resolveRestoredActiveNetworkId("does-not-exist", news, olds)).toBeUndefined()
 	})
 })
+
+describe("collectRestoreErrors — account-state top-level records (skip/violation shapes)", () => {
+	it("collects an item-level restoreError even when every child is clean", () => {
+		const result = collectRestoreErrors("account-state", [
+			{ networkId: "n1", senders: [], contracts: [], restoreError: "Skipped — couldn't reach the network" },
+			{ networkId: "n2", senders: [{ address: "ok" }], contracts: [] },
+		])
+		expect(result).toEqual([{ networkId: "n1", contracts: [], senders: [], restoreError: "Skipped — couldn't reach the network" }])
+	})
+
+	it("carries the item-level error ALONGSIDE failed children", () => {
+		const result = collectRestoreErrors("account-state", [
+			{
+				networkId: "n1",
+				senders: [{ address: "s", restoreError: "boom" }],
+				contracts: [],
+				restoreError: "Skipped — ran out of time reaching the network (3 registration(s) not attempted)",
+			},
+		])
+		expect(result).toHaveLength(1)
+		const item = result?.[0] as { restoreError?: string; senders: unknown[] }
+		expect(item.restoreError).toContain("ran out of time")
+		expect(item.senders).toHaveLength(1)
+	})
+
+	it("guards malformed child arrays instead of throwing (post-finalize path)", () => {
+		const result = collectRestoreErrors("account-state", [
+			{ networkId: "n1", senders: null, contracts: undefined, restoreError: "malformed account-state item" },
+			{ networkId: "n2", senders: [null, { address: "s", restoreError: "x" }], contracts: [undefined] },
+		] as unknown as unknown[])
+		expect(result).toHaveLength(2)
+	})
+})
