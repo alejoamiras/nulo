@@ -39,3 +39,31 @@ Phase 4's targeted pair never tripped it, but the full `e2e:agent` sweep include
 proverless-gated files (`account-switch-isolation`) and the #351 fail-fast guard aborts the
 whole run unless `NULO_E2E_PROVERLESS=1` is set. The guard did its job — loud abort at
 launch instead of a silent skip 30 minutes in.
+
+## CI incident during the PR gate (2026-08-12 20:51–21:05 UTC) — not our code
+
+All 8 network jobs failed twice with three surface signatures (noirup script saved as a 503
+HTML page; `curl (56)` on the accelerator tarball; aztec node crashing at boot with
+`ERR_MODULE_NOT_FOUND: @napi-rs/snappy-wasm32-wasi`). Root cause chain: `snappy@7.4.0`
+published 13:36 UTC → CI's FRESH aztec-5.0.1 toolchain install (cache miss; local runs use the
+pre-existing repo-pinned `~/.aztec` and never see this) resolves it un-pinned → during a
+registry/CDN blip the cold native tarball (`@napi-rs/snappy-linux-x64-gnu@7.4.0`) 503'd → npm
+skips optional deps SILENTLY (fail-soft) → snappy's loader falls back to the WASI package,
+which is never installed for linux → node dead at boot, health check eats 90s, exit 86.
+
+Diagnosis discipline that worked: read the FIRST error under the noise ("Address already in
+use" was secondary), correlate publish timestamps (`registry.npmjs.org/<pkg> | .time`) against
+the failure window, then probe the exact tarball before rerunning. Zero test failures in any
+attempt — rerun-not-neutralize per the gates rule.
+
+**Correction after attempt 4** (three reruns kept failing): the outage was only the trigger
+window — the breakage is DETERMINISTIC. A bare local `npm install snappy@7.4.0` reproduced the
+exact CI error with the native package present: 7.4.0's loader unconditionally reaches the
+`@napi-rs/snappy-wasm32-wasi` fallback, which npm never installs on linux. Every fresh
+toolchain install was dead on arrival regardless of network health; reruns could never go
+green. Fix: a load-check-gated pin step in `.github/actions/setup-aztec` that replaces snappy
+with 7.3.3 by direct tarball extraction (npm-free; no-op on healthy caches; fail-loud
+re-check), dry-run against a simulated broken tree before pushing. Lessons: (1) when reruns
+fail with the SAME signature twice, stop assuming "transient" and reproduce locally; (2) the
+CI sandbox toolchain has NO min-age gate (unlike the repo's bunfig 7-day gate) — un-pinned
+transitives of `aztec-up` walk straight in on publish day. (Route to `aztec-update` skill.)
