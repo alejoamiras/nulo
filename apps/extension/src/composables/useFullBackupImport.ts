@@ -35,6 +35,7 @@ import {
 } from "@/utils/full-backup-helpers"
 import { BACKUP_SCHEMA_VERSION_FIELD, COMPAT_EPOCH_FIELD, isSupportedCompatEpoch } from "@/wallet/services/backup/backup-migration-registry"
 import { maxBackupSchemaVersion, migrateBackupData } from "@/wallet/services/backup/backup-migrator"
+import { runImportChainSync } from "./importChainSync"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
@@ -665,19 +666,35 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// finalizeRestore — NOT in the loop above. Its `registerContract` needs the
 			// per-profile PXE store key, which the client's PXE_STORE_KEY_MISSING
 			// retry-once provisions via `getProfileSecret` — and that only yields the
-			// master once the session is OPEN (finalizeRestore opens it). Under 5.0.1 the
-			// exported account-state includes the account's OWN contract, so running this
-			// pre-finalize (as it used to) hit PXE_STORE_KEY_MISSING and stranded the
-			// import on "completed with errors". app.vue's activation handler only
-			// auto-seeds networks/accounts — never account-state contract registrations —
-			// so there is no import-race with running this after the emit. Recorded into
-			// restoreErrorLog BEFORE the isRestoreHasErrors gate below so a genuine
-			// registration failure still surfaces (and still blocks auto-completion).
+			// master once the session is OPEN (finalizeRestore opens it). app.vue's
+			// activation handler only auto-seeds networks/accounts — never account-state
+			// contract registrations — so there is no import-race with running this after
+			// the emit. Recorded into restoreErrorLog BEFORE the isRestoreHasErrors gate
+			// below so a genuine registration failure still surfaces (and still blocks
+			// auto-completion).
+			//
+			// BOUNDED: this is the one import leg that dials the network (the PXE boot
+			// for a restored network fetches L1 addresses from its rpcUrl — a URL the
+			// BACKUP controls). Unbounded, a degraded endpoint parked the import for the
+			// popup→SW transport's full 60s and surfaced as a false "Import failed". The
+			// tail now runs on one shared wall-clock budget: connectivity preflight (exponential
+			// backoff) → deadline-carrying registration call → constant-copy skip
+			// records for whatever couldn't run, all through the SAME errors screen.
+			// Present-but-malformed slices (a hostile `{}`/`null`) MUST still enter the
+			// chain-sync: the normalizer converts them into a violation record that
+			// lands on the errors screen. Gating on Array.isArray here would let a
+			// malformed slice auto-route past the Continue gate unrecorded.
 			const accountStateSlice = data[ACCOUNT_STATE_SERVICE_NAME]
-			if (Array.isArray(accountStateSlice)) {
+			if (accountStateSlice !== undefined) {
 				const accountStateService = new AccountStateServiceClient()
 				try {
-					recordRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, await accountStateService.restore(accountStateSlice, createdNetworks))
+					await runImportChainSync({
+						slice: accountStateSlice,
+						createdNetworkIds: createdNetworks.map((n) => n.id),
+						restore: (items, deadlineMs) => accountStateService.restore(items, createdNetworks, deadlineMs),
+						probe: (networkId, timeoutMs) => networkService.probeNodeStatus(networkId, timeoutMs),
+						record: (records) => recordRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, records),
+					})
 				} finally {
 					accountStateService.disconnect()
 				}

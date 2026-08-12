@@ -17,7 +17,7 @@ import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 
 /** Utils */
 import { AccountServiceClient } from "@/wallet/services/account/client"
-import { InvalidPasswordError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { InvalidPasswordError, RestoreTornError, UserRejectedError } from "@nulo/extension-messaging/errors"
 import { getLastActiveProfileId, setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { initTransactionService, managers, refreshBalances } from "@/utils/core"
 import { sleep } from "@/wallet/utils"
@@ -37,6 +37,10 @@ if (appStore.isLogined) {
 const passwordInput = ref(null)
 const password = ref("")
 const isWrongPassword = ref(false)
+// The profile's backup import never finished (typed RestoreTornError from the
+// unlock chokepoint): unlock is withheld — explain, and point at the existing
+// delete + re-import path on this screen. Cleared on profile switch.
+const isTornImport = ref(false)
 const isPasswordType = ref(true)
 const isAwaitingResponse = ref(false)
 
@@ -87,6 +91,10 @@ const handleUnlockWallet = async () => {
 			const isInvalid =
 				error instanceof InvalidPasswordError || (error instanceof Error && error.message === InvalidPasswordError.LEGACY_MESSAGE)
 			if (isInvalid) isWrongPassword.value = true
+			if (error instanceof RestoreTornError) {
+				isTornImport.value = true
+				return
+			}
 			// Path A user cancel surfaces here; silent return matches the
 			// existing profile/new.vue behavior (no error toast on Escape /
 			// "user closed").
@@ -126,6 +134,12 @@ onMounted(async () => {
 		if (profile) appStore.profile = profile
 	}
 })
+watch(
+	() => appStore.profile?.id,
+	() => {
+		isTornImport.value = false
+	},
+)
 watch(
 	() => appStore.isLogined,
 	async () => {
@@ -195,6 +209,12 @@ watch(
 						</span>
 					</Transition>
 				</template>
+
+				<Transition name="fade">
+					<span v-if="isTornImport" :class="$style.error_text" role="alert" data-testid="auth-restore-torn">
+						This profile's import didn't finish — delete it below and re-import your backup.
+					</span>
+				</Transition>
 
 				<Button
 					type="submit"

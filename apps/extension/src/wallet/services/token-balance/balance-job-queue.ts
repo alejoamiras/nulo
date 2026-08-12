@@ -31,7 +31,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { BalanceUpdateContent, type TaskService } from "@/wallet/services/task/service"
 import type { BalanceProjector } from "./balance-projector"
 import type { BalanceRepository } from "./balance-repository"
-import type { TokenBalanceRaw } from "./spec"
+import { boundSyncFailureMessage, type TokenBalanceRaw } from "./spec"
 
 const TICK_INTERVAL_MS = 1000
 const BATCH_SIZE = 12
@@ -42,6 +42,17 @@ export type BalanceJobQueueCallbacks = {
 	/** Called when a balance is projected but its storage record has
 	 *  been deleted mid-sync (mirrors service.ts:395-401). */
 	onOrphanDetected?: (balance: TokenBalanceRaw) => void
+	/** Deletion fence (TOCTOU guard): checked SYNCHRONOUSLY immediately before
+	 *  every storage write — a delete that began after the queue's re-read adds
+	 *  the id here BEFORE its awaited `repo.delete`, so single-threaded dispatch
+	 *  order makes write-after-delete resurrection impossible. */
+	isBalanceInvalidated?: (id: number) => boolean
+	/** Ownership guard for failure writes: balances carry no profileId, so a
+	 *  shared-address row from ANOTHER profile can reach this queue (the
+	 *  projector already errors such rows as "Unknown token"). Writing a
+	 *  failure record onto a foreign profile's row — or emitting it through a
+	 *  token lookup that throws — must be skipped, not attempted. */
+	isRowEmittable?: (tokenId: number) => boolean
 }
 
 export class BalanceJobQueue {
@@ -117,6 +128,30 @@ export class BalanceJobQueue {
 		this.logger?.log(this.logSource, LogLevel.Debug, `Token balances synced in ${end - start}ms`)
 	}
 
+	/** Persist a failure record onto the LIVE row (re-read, never the batch's
+	 *  possibly-stale copy — a deleted row must stay deleted) and emit the
+	 *  updated row so every listener re-renders the failed state. */
+	private async writeSyncFailure(id: number, message: string, at: number): Promise<void> {
+		const current = await this.repo.get(id)
+		if (!current) return
+		// Foreign-profile rows (unknown token in the active map) get NO failure
+		// record: the row isn't ours to annotate, and emitting it would throw
+		// through the service's token lookup and abort the whole batch.
+		if (this.callbacks.isRowEmittable?.(current.token) === false) return
+		const updated: TokenBalanceRaw = {
+			...current,
+			syncFailure: { at, message: boundSyncFailureMessage(message) },
+		}
+		// Fence check with NO await between it and the write dispatch.
+		if (this.callbacks.isBalanceInvalidated?.(id)) return
+		await this.repo.set(updated)
+		// Re-check AFTER the awaited write: a token deleted during the await must
+		// not be emitted — the service's token lookup would throw and the outer
+		// batch catch would falsely fail every remaining healthy row.
+		if (this.callbacks.isRowEmittable?.(current.token) === false) return
+		this.callbacks.onBalanceUpdated(updated)
+	}
+
 	private async syncBatch(batch: TokenBalanceRaw[]): Promise<void> {
 		// Start each balance's task record. Handles both the
 		// already-registered case (from `enqueue`) and the defensive
@@ -141,6 +176,11 @@ export class BalanceJobQueue {
 
 				if (result.kind === "error") {
 					this.tasks.failTask(taskId, result.error)
+					// Persist the failure onto the row (balances + updatedAt
+					// untouched — the last-known value keeps rendering). Without
+					// this write, "failed" and "still running" are identical in
+					// storage once the in-memory task record dies with the SW.
+					await this.writeSyncFailure(result.id, result.error, now)
 					continue
 				}
 
@@ -158,9 +198,27 @@ export class BalanceJobQueue {
 					privateBalance: result.privateBalance,
 					publicBalance: result.publicBalance,
 					updatedAt: now,
+					// A successful projection clears the failure record
+					// (JSON-serialization drops the undefined key).
+					syncFailure: undefined,
+				}
+				// Fence check with NO await between it and the write dispatch
+				// (a delete interleaving since the re-read must win).
+				if (this.callbacks.isBalanceInvalidated?.(result.id)) {
+					this.tasks.failTask(taskId, "Balance record deleted mid-sync")
+					continue
+				}
+				// A row that is no longer ours (token deleted mid-batch) gets no
+				// write: its projection ran under a context that no longer holds.
+				if (this.callbacks.isRowEmittable?.(current.token) === false) {
+					this.tasks.failTask(taskId, "Token no longer active")
+					continue
 				}
 				await this.repo.set(updated)
 				this.tasks.completeTask(taskId)
+				// Re-check AFTER the awaited write — same batch-abort hazard as the
+				// failure path's emit.
+				if (this.callbacks.isRowEmittable?.(current.token) === false) continue
 				this.callbacks.onBalanceUpdated(updated)
 			}
 		} catch (err) {
@@ -174,6 +232,7 @@ export class BalanceJobQueue {
 				const task = this.tasks.getTaskSync(taskId)
 				if (!task.finishedAt) {
 					this.tasks.failTask(taskId, errorMessage)
+					await this.writeSyncFailure(tb.id, errorMessage, Date.now())
 				}
 			}
 		} finally {

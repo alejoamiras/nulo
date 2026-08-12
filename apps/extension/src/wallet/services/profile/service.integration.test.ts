@@ -21,7 +21,12 @@ import { LoggerStore } from "@/wallet/logger"
 import { ServiceCollection } from "@/wallet/base"
 import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { AccountAddressInconsistencyError, InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import {
+	AccountAddressInconsistencyError,
+	InvalidPasswordError,
+	ProfileIdConflictError,
+	RestoreTornError,
+} from "@nulo/extension-messaging/errors"
 import { AccountIntegrityBlockedRepository } from "../account-integrity/blocked-repository"
 import {
 	asBase64CredentialId,
@@ -35,6 +40,7 @@ import {
 import { PasskeyService } from "@/wallet/services/passkey/service"
 import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
+import { RESTORE_PENDING_ROOT, RestorePendingRepository } from "./restore-pending-repository"
 import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME } from "./session-manager"
 
 /** Fake `IConfig` with `sessionTtl` + `strictSecurityMode`. Default is
@@ -1552,4 +1558,146 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		const reunlocked = await service.unlockProfile(profile.id, "newpass12")
 		expect(reunlocked.id).toBe(profile.id)
 	}, 30_000)
+
+	/**
+	 * Torn-restore detection: the restore-pending marker (written before the
+	 * profile row, cleared at finalizeRestore ENTRY) turns a mid-restore death
+	 * into a typed unlock refusal instead of a silent bootstrap re-seed.
+	 */
+	describe("restore-pending marker (torn-restore gate)", () => {
+		const RESTORE_MASTER_KEY_2 = Buffer.from(new Uint8Array(32).fill(13)).toString("base64")
+
+		async function restoreOnly(service: ProfileService) {
+			const out = await service.restore(
+				{ id: "ignored", name: "Torn", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY_2) },
+				"pass1234",
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+			return out
+		}
+
+		test("restore() leaves the marker present alongside the row (marker-before-row bracket)", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			const lookup = await pending.get(out.id)
+			expect(lookup.kind).toBe("valid")
+			expect((await service.getProfiles()).find((p) => p.id === out.id)).toBeDefined()
+		}, 30_000)
+
+		test("unlocking a marker-bearing profile throws RestoreTornError; session withheld", async () => {
+			const { service } = await makeService()
+			const out = await restoreOnly(service)
+			// No finalize — this is the popup-died-mid-restore shape.
+			await expect(service.unlockProfile(out.id, "pass1234")).rejects.toBeInstanceOf(RestoreTornError)
+			expect(await service.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+
+		test("finalizeRestore ENTRY clears the marker even when the session open FAILS (wrong password) — the unlock-later recovery survives", async () => {
+			const { service } = await makeService()
+			const out = await restoreOnly(service)
+			await expect(service.finalizeRestore(out.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
+			// The finalize call itself proved the slice phase completed → the
+			// marker is gone and a normal unlock now WORKS.
+			const active = await service.unlockProfile(out.id, "pass1234")
+			expect(active.id).toBe(out.id)
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+		}, 30_000)
+
+		test("happy finalize clears the marker; a second finalize (no-op path) stays clean", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			expect((await pending.get(out.id)).kind).toBe("absent")
+			await service.finalizeRestore(out.id, "pass1234")
+			expect((await pending.get(out.id)).kind).toBe("absent")
+		}, 30_000)
+
+		test("a CORRUPT marker fails closed at unlock (tombstone precedent)", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			await service.lockActiveProfile()
+			await (api.storage.local as never as { set: (o: Record<string, string>) => Promise<void> }).set({
+				[`${RESTORE_PENDING_ROOT}@${out.id}`]: "{not json",
+			})
+			await expect(service.unlockProfile(out.id, "pass1234")).rejects.toBeInstanceOf(RestoreTornError)
+		}, 30_000)
+
+		test("a generation-MISMATCHED marker is a stale leftover: purged, unlock proceeds", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			await service.lockActiveProfile()
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			await pending.write({ profileId: out.id, pxeGeneration: "some-older-incarnation", at: 1 })
+			const active = await service.unlockProfile(out.id, "pass1234")
+			expect(active.id).toBe(out.id)
+			expect((await pending.get(out.id)).kind).toBe("absent")
+		}, 30_000)
+
+		test("deleteProfile clears the marker (torn profiles stay deletable — the documented recovery)", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.deleteProfile(out.id)
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			expect((await pending.get(out.id)).kind).toBe("absent")
+		}, 30_000)
+
+		test("deleteProfile survives a rejecting marker removal: session closed + pending secret gone FIRST", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			expect((await service.getActiveProfile())?.id).toBe(out.id)
+
+			// Make ONLY the restore-pending removal reject (the fallible tail).
+			const storage = api.storage.local as never as { remove: (k: string | string[]) => Promise<void> }
+			const originalRemove = storage.remove.bind(storage)
+			storage.remove = async (k: string | string[]) => {
+				if (typeof k === "string" && k.startsWith(`${RESTORE_PENDING_ROOT}@`)) throw new Error("storage remove rejected")
+				return originalRemove(k)
+			}
+
+			await expect(service.deleteProfile(out.id)).rejects.toThrow("storage remove rejected")
+			// The ordering contract: the session was closed BEFORE the fallible
+			// marker cleanup — no deleted-profile session lingers.
+			expect(await service.getActiveProfile()).toBeUndefined()
+			storage.remove = originalRemove
+		}, 30_000)
+
+		test("silent rehydration purges a generation-MISMATCHED marker and keeps the session", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			await pending.write({ profileId: out.id, pxeGeneration: "prior-incarnation", at: 1 })
+
+			const { service: restarted } = await makeServiceFromExistingApi(api)
+			expect((await restarted.getActiveProfile())?.id).toBe(out.id)
+			expect((await pending.get(out.id)).kind).toBe("absent")
+		}, 30_000)
+
+		test("silent rehydration of a marker-bearing profile closes the session WITHOUT aborting service init", async () => {
+			const { api, service } = await makeService()
+			const out = await restoreOnly(service)
+			await service.finalizeRestore(out.id, "pass1234")
+			// Re-arm the marker for THIS incarnation (as if a same-id re-import
+			// died mid-restore while a persisted session existed).
+			const profile = (await service.getProfiles()).find((p) => p.id === out.id)
+			expect(profile).toBeDefined()
+			const pending = new RestorePendingRepository(api.storage.local as never)
+			const raw = await (api.storage.local as never as { get: (k: string) => Promise<Record<string, unknown>> }).get(
+				`nulo:core:profiles@${out.id}`,
+			)
+			const gen = (JSON.parse(String(raw[`nulo:core:profiles@${out.id}`])) as { pxeGeneration: string }).pxeGeneration
+			await pending.write({ profileId: out.id, pxeGeneration: gen, at: Date.now() })
+
+			// SW restart: a fresh service over the same storage must come up
+			// cleanly (no init throw) with the session silently closed.
+			const { service: restarted } = await makeServiceFromExistingApi(api)
+			expect(await restarted.getActiveProfile()).toBeUndefined()
+		}, 30_000)
+	})
 })

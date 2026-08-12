@@ -25,6 +25,7 @@ import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "./service"
+import { NodeStatus } from "./spec"
 import type { Network, NetworkEndpoint } from "./spec"
 
 type NodeInfo = {
@@ -982,7 +983,6 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 
 		// Fire the private cascade handler directly (the EventHandler wiring is
 		// stubbed in the harness; we assert the handler's behavior in isolation).
-		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		await service.purgeForProfile("p1")
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
@@ -1011,10 +1011,46 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 		}
 		local.store.set("nulo:core:networks@n-p2", JSON.stringify(p2Network))
 
-		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		await service.purgeForProfile("p1")
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
 		expect(pxeStub).not.toHaveBeenCalledWith("p2", 7)
+	})
+})
+
+describe("NetworkService.probeNodeStatus (bounded probe)", () => {
+	test("Active when the probe answers the row's chainId", async () => {
+		const { service } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		expect(await service.probeNodeStatus(network.id, 5_000)).toBe(NodeStatus.Active)
+	})
+
+	test("InvalidChain when the endpoint answers for a different chain", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		factory.setOverrides("https://rpc.example.com", {
+			getNodeInfo: vi.fn().mockResolvedValue(nodeInfoForChain(9)) as unknown as AztecNode["getNodeInfo"],
+		})
+		expect(await service.probeNodeStatus(network.id, 5_000)).toBe(NodeStatus.InvalidChain)
+	})
+
+	test("Inactive when the probe throws (refused / timed out)", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		factory.setOverrides("https://rpc.example.com", {
+			getNodeInfo: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("Request to https://rpc.example.com timed out after 5000ms"),
+				) as unknown as AztecNode["getNodeInfo"],
+		})
+		expect(await service.probeNodeStatus(network.id, 5_000)).toBe(NodeStatus.Inactive)
+	})
+
+	test("rejects an out-of-range timeout at the schema boundary", async () => {
+		const { service } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		await expect(service.probeNodeStatus(network.id, 999_999)).rejects.toThrow()
+		await expect(service.probeNodeStatus(network.id, 1)).rejects.toThrow()
 	})
 })

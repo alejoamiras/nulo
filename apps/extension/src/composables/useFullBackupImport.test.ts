@@ -24,6 +24,7 @@ import { setActivePinia } from "pinia"
 import { createTestingPinia } from "@pinia/testing"
 import { ref } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { NodeStatus } from "@/wallet/services/network/spec"
 import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, EncryptionKey } from "@nulo/wallet-crypto"
 import { UserRejectedError } from "@nulo/extension-messaging/errors"
 
@@ -38,6 +39,7 @@ const profileClient = {
 const networkClient = {
 	restore: vi.fn(),
 	setActiveForProfile: vi.fn(),
+	probeNodeStatus: vi.fn(),
 	disconnect: vi.fn(),
 }
 const accountClient = {
@@ -48,6 +50,11 @@ const tokenClient = {
 	restore: vi.fn(),
 	disconnect: vi.fn(),
 }
+/** Registrable child for account-state fixtures: since the bounded
+ *  chain-registration tail landed, zero-work items dial nothing and never
+ *  reach the restore call — remap observability needs at least one child. */
+const AS_SENDER = { address: `0x${"ab".repeat(32)}` }
+
 function passthroughClient() {
 	return { restore: vi.fn(async (): Promise<unknown[]> => []), disconnect: vi.fn() }
 }
@@ -134,7 +141,11 @@ vi.mock("@/wallet/services/auth-registry/spec", () => ({
 vi.mock("@/wallet/services/config/spec", () => ({ CONFIG_SERVICE_NAME: "config" }))
 vi.mock("@/wallet/services/contact/spec", () => ({ CONTACT_SERVICE_NAME: "contact", CONTACT_STORAGE_ROOT: "nulo:core:contacts" }))
 vi.mock("@/wallet/services/fpc/spec", () => ({ FPC_SERVICE_NAME: "fpc", FPC_STORAGE_ROOT: "nulo:core:fpcs" }))
-vi.mock("@/wallet/services/network/spec", () => ({ NETWORK_SERVICE_NAME: "network", NETWORK_STORAGE_ROOT: "nulo:core:networks" }))
+vi.mock("@/wallet/services/network/spec", () => ({
+	NETWORK_SERVICE_NAME: "network",
+	NETWORK_STORAGE_ROOT: "nulo:core:networks",
+	NodeStatus: { Active: 0, Inactive: 1, InvalidChain: 2 },
+}))
 vi.mock("@/wallet/services/token-balance/spec", () => ({
 	TOKEN_BALANCE_SERVICE_NAME: "token-balance",
 	TOKEN_BALANCE_STORAGE_ROOT: "nulo:core:token-balances",
@@ -230,6 +241,7 @@ beforeEach(() => {
 	profileClient.disconnect.mockReset()
 	networkClient.restore.mockReset()
 	networkClient.setActiveForProfile.mockReset().mockResolvedValue("new-net-1")
+	networkClient.probeNodeStatus.mockReset().mockResolvedValue(NodeStatus.Active)
 	networkClient.disconnect.mockReset()
 	accountClient.restore.mockReset()
 	accountClient.disconnect.mockReset()
@@ -374,7 +386,7 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		const backup = await buildBackup({
 			data: {
 				network: [{ id: "N1", name: "A", chainId: 1 }],
-				"account-state": [{ networkId: "N1", contracts: [], senders: [] }],
+				"account-state": [{ networkId: "N1", contracts: [], senders: [AS_SENDER] }],
 			},
 		})
 		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
@@ -396,6 +408,32 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		)
 		expect(accountStateClient.disconnect).toHaveBeenCalled()
 		expect(c.isRestoreHasErrors.value).toBe(false)
+	})
+
+	it("a present-but-malformed account-state slice records a violation and blocks auto-completion", async () => {
+		// Hostile `{}` where the array belongs: gating the chain-sync tail on
+		// Array.isArray would skip the normalizer's violation record and let the
+		// import auto-route past the Continue gate unrecorded.
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [{ id: "N1", name: "A", chainId: 1 }],
+				"account-state": { evil: true } as never,
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		expect(accountStateClient.restore).not.toHaveBeenCalled() // nothing registrable
+		expect(c.isRestoreHasErrors.value).toBe(true)
+		const records = c.restoreErrorLog.value["account-state"] as Array<{ restoreError?: unknown }>
+		expect(records?.some((r) => typeof r.restoreError === "string" && r.restoreError.includes("not an array"))).toBe(true)
 	})
 
 	it("does NOT auto-call completeImport when partial errors exist (Continue button shows)", async () => {
@@ -684,8 +722,8 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 					{ id: "N2", name: "B", chainId: 2 },
 				],
 				"account-state": [
-					{ networkId: "N1", contracts: [], senders: [] },
-					{ networkId: "N2", contracts: [], senders: [] },
+					{ networkId: "N1", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "N2", contracts: [], senders: [AS_SENDER] },
 				],
 			},
 		})
@@ -703,9 +741,10 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 
 		expect(accountStateClient.restore).toHaveBeenCalledWith(
 			[
-				{ networkId: "M1", contracts: [], senders: [] },
-				{ networkId: "M2", contracts: [], senders: [] },
+				{ networkId: "M1", contracts: [], senders: [AS_SENDER] },
+				{ networkId: "M2", contracts: [], senders: [AS_SENDER] },
 			],
+			expect.anything(),
 			expect.anything(),
 		)
 	})
@@ -720,8 +759,8 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 					{ id: "NB", name: "Same", chainId: 7 },
 				],
 				"account-state": [
-					{ networkId: "NA", contracts: [], senders: [] },
-					{ networkId: "NB", contracts: [], senders: [] },
+					{ networkId: "NA", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "NB", contracts: [], senders: [AS_SENDER] },
 				],
 			},
 		})
@@ -741,9 +780,10 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 		// NOT grafted to MB. A field-match would have paired MB with NA here.
 		expect(accountStateClient.restore).toHaveBeenCalledWith(
 			[
-				{ networkId: "NA", contracts: [], senders: [] },
-				{ networkId: "MB", contracts: [], senders: [] },
+				{ networkId: "NA", contracts: [], senders: [AS_SENDER] },
+				{ networkId: "MB", contracts: [], senders: [AS_SENDER] },
 			],
+			expect.anything(),
 			expect.anything(),
 		)
 	})
@@ -760,10 +800,10 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 					{ id: "N4", name: "D", chainId: 4 },
 				],
 				"account-state": [
-					{ networkId: "N1", contracts: [], senders: [] },
-					{ networkId: "N2", contracts: [], senders: [] },
-					{ networkId: "N3", contracts: [], senders: [] },
-					{ networkId: "N4", contracts: [], senders: [] },
+					{ networkId: "N1", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "N2", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "N3", contracts: [], senders: [AS_SENDER] },
+					{ networkId: "N4", contracts: [], senders: [AS_SENDER] },
 				],
 			},
 		})
@@ -783,11 +823,12 @@ describe("useFullBackupImport — network index-pairing (P2)", () => {
 
 		expect(accountStateClient.restore).toHaveBeenCalledWith(
 			[
-				{ networkId: "M1", contracts: [], senders: [] }, // N1 → M1
-				{ networkId: "N2", contracts: [], senders: [] }, // N2 failed → not remapped
-				{ networkId: "N3", contracts: [], senders: [] }, // N3 unchanged
-				{ networkId: "M4", contracts: [], senders: [] }, // N4 → M4
+				{ networkId: "M1", contracts: [], senders: [AS_SENDER] }, // N1 → M1
+				{ networkId: "N2", contracts: [], senders: [AS_SENDER] }, // N2 failed → not remapped
+				{ networkId: "N3", contracts: [], senders: [AS_SENDER] }, // N3 unchanged
+				{ networkId: "M4", contracts: [], senders: [AS_SENDER] }, // N4 → M4
 			],
+			expect.anything(),
 			expect.anything(),
 		)
 	})

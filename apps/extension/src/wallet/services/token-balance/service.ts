@@ -58,6 +58,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	private profile?: ProfileInfo = undefined
 
+	/** Deletion fence for the job queue's re-read→write window: ids are added
+	 *  BEFORE the awaited `repo.delete` and checked SYNCHRONOUSLY right before
+	 *  every queue write, so a delete interleaving between the queue's re-read
+	 *  and its `repo.set` cannot resurrect the row. Fenced ids are NEVER
+	 *  reallocated within this worker lifetime (`allocateUnfencedId` skips
+	 *  past them); a worker restart forgets the fence safely — no old
+	 *  projection survives it. */
+	private readonly invalidatedBalanceIds = new Set<number>()
+
 	public constructor(
 		logger: ILogger,
 		browserApi: BrowserApi,
@@ -94,6 +103,8 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				onBalanceUpdated: (balance) => {
 					this.emit("onTokenBalanceUpdated", this.getTokenBalanceInfo(balance))
 				},
+				isBalanceInvalidated: (id) => this.invalidatedBalanceIds.has(id),
+				isRowEmittable: (tokenId) => this.tokens.has(tokenId),
 			},
 			this.logger,
 		)
@@ -182,9 +193,20 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 	}
 
+	/** Allocate an id that was never fenced this worker lifetime. Reusing a
+	 *  fenced id would either let a deleted row's in-flight projection write
+	 *  onto the new incarnation (ABA) or permanently suppress the new row's
+	 *  syncs — so allocation skips PAST fenced ids instead of releasing them.
+	 *  A worker restart forgets the fence safely: no old projection survives it. */
+	private async allocateUnfencedId(): Promise<number> {
+		let id = await this.repo.allocateId()
+		while (this.invalidatedBalanceIds.has(id)) id++
+		return id
+	}
+
 	private async createTokenBalance(token: Token, account: Account) {
 		const tb: TokenBalanceRaw = {
-			id: await this.repo.allocateId(),
+			id: await this.allocateUnfencedId(),
 			token: token.id,
 			account: account.address,
 			privateBalance: "0",
@@ -211,6 +233,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			publicBalance: tb.publicBalance,
 			privateBalance: tb.privateBalance,
 			updatedAt: tb.updatedAt,
+			syncFailure: tb.syncFailure,
 		}
 	}
 
@@ -248,6 +271,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	private readonly onTokenDeleted = async (token: TokenInfo) => {
 		this.tokens.delete(token.id)
 		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
 			this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
 		}
@@ -260,6 +284,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const set = new Set(tokenIds)
 		for (const tb of (await this.repo.getAll()).filter((x) => set.has(x.token))) {
 			if (this.tokens.has(tb.token)) this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb))
+			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
 		}
 		for (const id of set) this.tokens.delete(id)
@@ -327,7 +352,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		const result: Restored<TokenBalanceRaw>[] = []
 		for (const tb of tokenBalances) {
 			try {
-				const id = await this.repo.allocateId()
+				const id = await this.allocateUnfencedId()
 				// Parse the exact persisted shape: an unvalidated restore row that fails
 				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
 				// on read AND to a later getValues() cleanup). Parse here so a malformed

@@ -258,6 +258,12 @@ export const NetworkMethodSchemas = {
 		params: z.tuple([z.string().min(1)]),
 		result: NodeStatusSchema,
 	},
+	probeNodeStatus: {
+		// timeoutMs bounds ONE non-retrying attempt; clamped well under the
+		// popup→SW request ceiling so the probe can never outlive its caller.
+		params: z.tuple([z.string().min(1), z.number().int().min(100).max(30_000)]),
+		result: NodeStatusSchema,
+	},
 } as const
 
 export type Methods = {
@@ -322,6 +328,12 @@ export type Methods = {
 	setPrimaryEndpoint(networkId: string, endpointId: string): Network
 	/** Probes the network's primary endpoint and returns Active/Inactive/InvalidChain. */
 	getNodeStatus(networkId: string): NodeStatus
+	/**
+	 * Like `getNodeStatus`, but with a caller-owned budget: ONE non-retrying
+	 * probe whose socket aborts at `timeoutMs` (no retry chain, no work left
+	 * running past the budget). Timeout/refusal ⇒ `Inactive`.
+	 */
+	probeNodeStatus(networkId: string, timeoutMs: number): NodeStatus
 }
 
 export type Events = {

@@ -172,12 +172,15 @@ test.skipIf(!hasConfig)(
 			// call wakes the restarted SW. Closing the page immediately RACES that
 			// dispatch — when close wins, NEITHER designed outcome materializes:
 			// profile+account rows survive un-finalized with token/balance slices
-			// missing (observed live, census {tokenRows:0, accountRows:2}), the
-			// reopened popup masquerades as RECOVERED, and no balance can ever
-			// converge. A real SW restart leaves the page open (this test's scenario);
-			// close-before-dispatch models a browser CRASH, whose silent partial
-			// restore is a PRODUCT gap tracked in the deflake ledger, not this test's
-			// subject. Hold the page until the post-kill fork is OBSERVABLE, then
+			// missing (observed live, census {tokenRows:0, accountRows:2}). That state
+			// used to masquerade as RECOVERED (a normal unlock succeeded into torn
+			// data); the restore-pending marker now survives the crash and the reopen's
+			// unlock is REFUSED with a typed RestoreTornError — so if this race ever
+			// re-manufactures the state, the timeout leg's dump names it
+			// (`nulo:core:restore-pending@` in localKeys + the torn message in
+			// lastUnlockErr) instead of a phantom recovery. A real SW restart leaves
+			// the page open (this test's scenario); close-before-dispatch models a
+			// browser CRASH — its detection now ships in-product. Hold the page until the post-kill fork is OBSERVABLE, then
 			// close — the SW-side deletion cascade, once dispatched, survives page
 			// close. chrome.storage is page-direct (not SW-routed), so these reads
 			// work with the SW down.

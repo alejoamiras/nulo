@@ -308,6 +308,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="completeImport(importedProfile)"
+						data-testid="import-full-backup-continue-btn"
 						variant="cta"
 					>
 						Continue
@@ -315,6 +316,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="showRestoreErrorLog"
+						data-testid="import-full-backup-view-errors-btn"
 						variant="cta_outline"
 					>
 						View Errors

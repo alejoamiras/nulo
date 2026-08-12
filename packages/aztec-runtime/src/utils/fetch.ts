@@ -77,6 +77,16 @@ function fetchOnce(timeoutMs: number): JsonRpcFetch {
 }
 
 /**
+ * Single-attempt variant: the AbortController timeout WITHOUT the retry
+ * wrapper. For connectivity probes that must settle within a caller-owned
+ * budget — the retry chain would multiply the budget by the attempt count
+ * and keep sockets alive after the caller has moved on.
+ */
+export function makeSingleAttemptFetch(timeoutMs: number): JsonRpcFetch {
+	return fetchOnce(timeoutMs)
+}
+
+/**
  * Create a JSON-RPC fetch function with per-request timeout AND retry logic.
  *
  * Matches the SDK's `makeFetch([1, 2, 3], false)` behavior:

@@ -138,25 +138,52 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 
 			// REALISTIC settle: the MV3 worker can restart mid-import (P0-proven), so a
 			// straight assertion of `/popup/general` is wrong — the honest post-import
-			// state is an ACTIONABLE screen, either `/popup/general` (session survived)
-			// or `/popup/auth` (strict mode + worker restart dropped the master → unlock
-			// to finish). What must NEVER happen is a silent dead-end on "Finishing…".
+			// state is an ACTIONABLE screen: `/popup/general` (session survived),
+			// `/popup/auth` (strict mode + worker restart dropped the master → unlock
+			// to finish), or the finished-with-errors screen (the app's BOUNDED
+			// chain-registration leg skipped unreachable networks — Continue proceeds;
+			// the wallet requires a reachable RPC to re-register chain state, and says
+			// so instead of hanging). What must NEVER happen is a silent dead-end.
 			//
-			// KNOWN OPEN FLAKE (ledger entry 1, owner decision pending): this route is
-			// gated on isLogined, which the bootstrap flips only AFTER the RPC-bound
-			// syncTransactions — when the seeded public-testnet RPC degrades from CI,
-			// this wait times out through no fault of the runner. The bound is NOT
-			// raised here (banned pending the owner's call between an env fast-fail
-			// RPC, a product route-decouple, or a budget exception); the diagnostics
-			// below make every future red self-explaining instead of a silent park.
+			// LEDGER ENTRY 1 (e2e-deflake) FIX: the import's account-state leg used to
+			// await unbounded PXE registrations against the backup-carried public-RPC
+			// URL — a degraded endpoint parked this wait through no fault of the
+			// runner. The leg is now preflight-gated + deadline-bounded in-product, so
+			// every branch below lands well inside the SAME 90s deadline (UNCHANGED —
+			// the Continue click below consumes the remainder, never a fresh budget).
+			// ONE absolute deadline for the whole post-submit settle: both waits
+			// below consume the REMAINDER of `submittedAt + 90_000` — never a fresh
+			// budget (a fresh post-click wait would silently raise the bound).
+			const routeDeadlineAt = submittedAt + 90_000
+			const routeRemainder = () => {
+				const remainder = routeDeadlineAt - Date.now()
+				if (remainder <= 0) throw new Error(`post-import 90s deadline exhausted (${Date.now() - submittedAt}ms since submit)`)
+				return remainder
+			}
 			try {
 				await page2.waitForFunction(
 					() => {
 						const h = window.location.hash
-						return h.includes("/popup/general") || h.includes("/popup/auth")
+						if (h.includes("/popup/general") || h.includes("/popup/auth")) return true
+						return !!document.querySelector('[data-testid="import-full-backup-continue-btn"]')
 					},
-					{ timeout: 90_000, polling: 250 },
+					{ timeout: routeRemainder(), polling: 250 },
 				)
+				// Errors-screen branch: acknowledge the recorded skips (what a real
+				// user does) and continue INTO the wallet on the remaining deadline.
+				const continueVisible = await page2.evaluate(
+					() => !!document.querySelector('[data-testid="import-full-backup-continue-btn"]'),
+				)
+				if (continueVisible) {
+					await clickByTestId(page2, "import-full-backup-continue-btn")
+					await page2.waitForFunction(
+						() => {
+							const h = window.location.hash
+							return h.includes("/popup/general") || h.includes("/popup/auth")
+						},
+						{ timeout: routeRemainder(), polling: 250 },
+					)
+				}
 			} catch (err) {
 				const diag = await page2
 					.evaluate(async () => {

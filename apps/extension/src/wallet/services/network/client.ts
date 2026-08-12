@@ -126,4 +126,10 @@ export class NetworkServiceClient extends ServiceClient<Methods, Events> impleme
 		const result = await this.request("getNodeStatus", networkId)
 		return validateResult(NetworkMethodSchemas.getNodeStatus.result, result, "getNodeStatus")
 	}
+
+	public async probeNodeStatus(networkId: string, timeoutMs: number): Promise<NodeStatus> {
+		validateParams(NetworkMethodSchemas.probeNodeStatus.params, [networkId, timeoutMs], "probeNodeStatus")
+		const result = await this.request("probeNodeStatus", networkId, timeoutMs)
+		return validateResult(NetworkMethodSchemas.probeNodeStatus.result, result, "probeNodeStatus")
+	}
 }
