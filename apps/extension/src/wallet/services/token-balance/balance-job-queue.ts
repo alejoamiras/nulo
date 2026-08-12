@@ -145,6 +145,10 @@ export class BalanceJobQueue {
 		// Fence check with NO await between it and the write dispatch.
 		if (this.callbacks.isBalanceInvalidated?.(id)) return
 		await this.repo.set(updated)
+		// Re-check AFTER the awaited write: a token deleted during the await must
+		// not be emitted — the service's token lookup would throw and the outer
+		// batch catch would falsely fail every remaining healthy row.
+		if (this.callbacks.isRowEmittable?.(current.token) === false) return
 		this.callbacks.onBalanceUpdated(updated)
 	}
 
@@ -204,8 +208,17 @@ export class BalanceJobQueue {
 					this.tasks.failTask(taskId, "Balance record deleted mid-sync")
 					continue
 				}
+				// A row that is no longer ours (token deleted mid-batch) gets no
+				// write: its projection ran under a context that no longer holds.
+				if (this.callbacks.isRowEmittable?.(current.token) === false) {
+					this.tasks.failTask(taskId, "Token no longer active")
+					continue
+				}
 				await this.repo.set(updated)
 				this.tasks.completeTask(taskId)
+				// Re-check AFTER the awaited write — same batch-abort hazard as the
+				// failure path's emit.
+				if (this.callbacks.isRowEmittable?.(current.token) === false) continue
 				this.callbacks.onBalanceUpdated(updated)
 			}
 		} catch (err) {

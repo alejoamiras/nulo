@@ -680,8 +680,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// tail now runs on one shared wall-clock budget: connectivity preflight (exponential
 			// backoff) → deadline-carrying registration call → constant-copy skip
 			// records for whatever couldn't run, all through the SAME errors screen.
+			// Present-but-malformed slices (a hostile `{}`/`null`) MUST still enter the
+			// chain-sync: the normalizer converts them into a violation record that
+			// lands on the errors screen. Gating on Array.isArray here would let a
+			// malformed slice auto-route past the Continue gate unrecorded.
 			const accountStateSlice = data[ACCOUNT_STATE_SERVICE_NAME]
-			if (Array.isArray(accountStateSlice)) {
+			if (accountStateSlice !== undefined) {
 				const accountStateService = new AccountStateServiceClient()
 				try {
 					await runImportChainSync({

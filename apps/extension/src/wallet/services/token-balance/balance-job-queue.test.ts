@@ -347,6 +347,41 @@ describe("BalanceJobQueue", () => {
 		expect(onBalanceUpdated).not.toHaveBeenCalled()
 	})
 
+	test("a token deleted DURING the awaited success write is not emitted; healthy siblings survive", async () => {
+		// The emit runs after an awaited repo.set — a deletion landing inside that
+		// await used to throw through the service's token lookup into the batch
+		// catch, falsely stamping syncFailure on every remaining healthy row.
+		const ticker = new FakeBackgroundTicker()
+		const emittable = new Set([1, 2])
+		const base = makeRepo([raw(1, { token: 1 }), raw(2, { token: 2 })])
+		const repo = {
+			...base,
+			set: async (b: TokenBalanceRaw) => {
+				await base.set(b)
+				if (b.token === 1) emittable.delete(1)
+			},
+		} as BalanceRepository
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([
+			{ kind: "ok", id: 1, privateBalance: "1", publicBalance: "0" },
+			{ kind: "ok", id: 2, privateBalance: "9", publicBalance: "0" },
+		])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			onBalanceUpdated,
+			isRowEmittable: (tokenId) => emittable.has(tokenId),
+		})
+
+		queue.enqueue(raw(1, { token: 1 }))
+		queue.enqueue(raw(2, { token: 2 }))
+		await queue.tick()
+
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1) // row 2 only
+		expect(onBalanceUpdated.mock.calls[0][0].id).toBe(2)
+		expect((await repo.get(2))?.privateBalance).toBe("9")
+		expect((await repo.get(2))?.syncFailure).toBeUndefined() // no batch-wide false failure
+	})
+
 	test("a foreign-profile row (unknown token) gets NO failure record and cannot abort the batch", async () => {
 		// Balances carry no profileId: a shared-address row from another profile
 		// reaches the queue and the projector errors it as "Unknown token". The

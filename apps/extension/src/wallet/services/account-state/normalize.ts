@@ -85,14 +85,14 @@ export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState
 	}
 	if (raw.length === 0) return { items: [], violations: [] }
 
-	let sliceBytes: number
+	let sliceCodeUnits: number
 	try {
-		sliceBytes = JSON.stringify(raw).length
+		sliceCodeUnits = JSON.stringify(raw).length
 	} catch {
 		return { items: [], violations: [violation("(slice)", "malformed account-state slice (not serializable)")] }
 	}
-	if (sliceBytes > ACCOUNT_STATE_CAPS.maxSliceCodeUnits) {
-		return { items: [], violations: [violation("(slice)", `account-state slice too large (${sliceBytes} bytes)`)] }
+	if (sliceCodeUnits > ACCOUNT_STATE_CAPS.maxSliceCodeUnits) {
+		return { items: [], violations: [violation("(slice)", `account-state slice too large (${sliceCodeUnits} code units)`)] }
 	}
 
 	const violations: AccountStateViolationRecord[] = []
@@ -170,7 +170,10 @@ export function registrableNetworkIds(normalized: NormalizedAccountState): strin
  *  the trigger for per-network fail-fast. Conservative on purpose: payload
  *  validation errors must never classify as connectivity. */
 export function isConnectivityErrorMessage(message: string): boolean {
-	return /timed out|timeout after|Error fetching from host|Failed to fetch|fetch failed|ECONNREFUSED|connection refused|ERR_CONNECTION|network error/i.test(
+	// Bare `timeout`/`refused` stay deliberately broad — narrowing them (e.g. to
+	// `timeout after`) lets messages like "RPC timeout" defeat the per-network
+	// fail-fast, and the deadline alone would then eat the whole budget.
+	return /timed out|timeout|Error fetching from host|Failed to fetch|fetch failed|ECONNREFUSED|refused|ERR_CONNECTION|network error/i.test(
 		message,
 	)
 }

@@ -133,6 +133,16 @@ describe("TokenCard", () => {
 		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(true)
 	})
 
+	test("an initial-sync RETRY in flight shows the loader again, not a stale failed caption", () => {
+		// updatedAt 0 + syncFailure + isUpdating: the retry's honest state is the
+		// loading block — a failed caption with no in-flight indicator would read
+		// as terminal while work is running.
+		mockQuotes = {}
+		const w = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", isUpdating: true, syncFailure: { at: 1, message: "x" } })
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
+	})
+
 	test("a FAILED first sync shows the failure, never an infinite loading spinner", () => {
 		// A never-synced row (updatedAt 0) whose first projection failed used to
 		// spin forever — the exact failed-vs-still-running ambiguity the

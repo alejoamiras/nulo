@@ -410,6 +410,32 @@ describe("useFullBackupImport — restoreBackup happy path", () => {
 		expect(c.isRestoreHasErrors.value).toBe(false)
 	})
 
+	it("a present-but-malformed account-state slice records a violation and blocks auto-completion", async () => {
+		// Hostile `{}` where the array belongs: gating the chain-sync tail on
+		// Array.isArray would skip the normalizer's violation record and let the
+		// import auto-route past the Continue gate unrecorded.
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				network: [{ id: "N1", name: "A", chainId: 1 }],
+				"account-state": { evil: true } as never,
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([])
+
+		await c.restoreBackup()
+
+		expect(accountStateClient.restore).not.toHaveBeenCalled() // nothing registrable
+		expect(c.isRestoreHasErrors.value).toBe(true)
+		const records = c.restoreErrorLog.value["account-state"] as Array<{ restoreError?: unknown }>
+		expect(records?.some((r) => typeof r.restoreError === "string" && r.restoreError.includes("not an array"))).toBe(true)
+	})
+
 	it("does NOT auto-call completeImport when partial errors exist (Continue button shows)", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)

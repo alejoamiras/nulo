@@ -111,6 +111,12 @@ describe("isConnectivityErrorMessage", () => {
 		expect(isConnectivityErrorMessage("Invalid artifact: missing function abi")).toBe(false)
 		expect(isConnectivityErrorMessage("Network not found")).toBe(false)
 	})
+
+	test("bare `timeout`/`refused` forms stay matched (narrowing them defeats fail-fast)", () => {
+		expect(isConnectivityErrorMessage("RPC timeout")).toBe(true)
+		expect(isConnectivityErrorMessage("connection refused by peer")).toBe(true)
+		expect(isConnectivityErrorMessage("refused")).toBe(true)
+	})
 })
 
 describe("truncateErrorMessage / skippedNetworkRecord", () => {

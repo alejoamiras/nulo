@@ -74,11 +74,12 @@ const description = computed(() => {
 // is reserved for the never-synced state.
 const isRefreshing = computed(() => !!props.tokenBalance?.isUpdating && !isInitialSync.value)
 // The row's last projection FAILED (persisted `syncFailure`, cleared by the
-// next success): dim the last-known amount + say so. Suppressed while a retry
-// is in flight — the dot is the honest state then. Deliberately NOT gated on
+// next success): dim the last-known amount + say so. Gated on !isUpdating so a
+// retry in flight shows its honest in-flight state instead (the dot after the
+// first sync, the loading block during it). Deliberately NOT gated on
 // isInitialSync: a never-synced row whose FIRST projection failed must show
 // the failure, not an infinite "Loading balance…" spinner.
-const syncFailed = computed(() => !!props.tokenBalance?.syncFailure)
+const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.tokenBalance?.isUpdating)
 
 const isHovered = ref(false)
 
