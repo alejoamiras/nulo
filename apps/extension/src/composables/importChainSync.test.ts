@@ -88,7 +88,7 @@ describe("runImportChainSync", () => {
 		expect(harness.restoreCalls).toHaveLength(1)
 		expect(harness.restoreCalls[0].deadlineMs).toBeLessThanOrEqual(IMPORT_REGISTRATION_BUDGET_MS)
 		expect(harness.restoreCalls[0].deadlineMs).toBeGreaterThan(0)
-		expect(harness.records).toEqual([[...result].map((r) => r)])
+		expect(harness.records).toEqual([result])
 	})
 
 	test("unreachable network: skip record with the constant copy, restore NOT called", async () => {

@@ -75,8 +75,10 @@ const description = computed(() => {
 const isRefreshing = computed(() => !!props.tokenBalance?.isUpdating && !isInitialSync.value)
 // The row's last projection FAILED (persisted `syncFailure`, cleared by the
 // next success): dim the last-known amount + say so. Suppressed while a retry
-// is in flight — the dot is the honest state then.
-const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !isInitialSync.value)
+// is in flight — the dot is the honest state then. Deliberately NOT gated on
+// isInitialSync: a never-synced row whose FIRST projection failed must show
+// the failure, not an infinite "Loading balance…" spinner.
+const syncFailed = computed(() => !!props.tokenBalance?.syncFailure)
 
 const isHovered = ref(false)
 
@@ -109,7 +111,7 @@ const handleRefreshBalance = async () => {
 		</Flex>
 
 		<Flex
-			v-if="isInitialSync"
+			v-if="isInitialSync && !syncFailed"
 			align="center"
 			gap="6"
 			data-testid="token-balance-loading"

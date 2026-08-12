@@ -6,9 +6,10 @@
  * shape lands in `record(...)` (→ `restoreErrorLog` → the Continue-gated
  * errors screen); nothing here throws.
  *
- * A SETTLED flag guards the record path: whichever side of the registration
- * race loses can no longer append (`recordRestoreErrors` APPENDS — a late
- * loser would add contradictory entries). The SW keeps enforcing its own
+ * The single-record guarantee is STRUCTURAL: `record` is called exactly once,
+ * after the race, on the winner's outcome — neither race arm touches the sink
+ * (`recordRestoreErrors` APPENDS, so a late loser reaching it would add
+ * contradictory entries; keep it that way). The SW keeps enforcing its own
  * copy of the deadline per registration launch, so the abandoned side stops
  * launching work too.
  */
@@ -22,7 +23,7 @@ import {
 	registrableNetworkIds,
 	skippedNetworkRecord,
 } from "@/wallet/services/account-state/normalize"
-import { preflightNetworkConnectivity } from "./importPreflight"
+import { preflightNetworkConnectivity, realSleep } from "./importPreflight"
 
 /** The whole tail (preflight + registrations) shares this wall-clock budget. */
 export const IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS = 45_000
@@ -42,15 +43,11 @@ export interface ImportChainSyncDeps {
 	probe: (networkId: string, timeoutMs: number) => Promise<NodeStatus>
 	/** `recordRestoreErrors(ACCOUNT_STATE_SERVICE_NAME, ...)`-shaped sink. */
 	record: (records: unknown[]) => void
-	now?: () => number
-	sleep?: (ms: number) => Promise<void>
 }
 
-const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
-
 export async function runImportChainSync(deps: ImportChainSyncDeps): Promise<void> {
-	const now = deps.now ?? Date.now
-	const sleep = deps.sleep ?? realSleep
+	const now = Date.now
+	const sleep = realSleep
 	const deadlineAt = now() + IMPORT_CHAIN_SYNC_TOTAL_BUDGET_MS
 
 	const normalized = normalizeAccountStateSlice(deps.slice)
@@ -70,8 +67,6 @@ export async function runImportChainSync(deps: ImportChainSyncDeps): Promise<voi
 				networkIds: toProbe,
 				probe: deps.probe,
 				deadlineAt: Math.min(now() + IMPORT_PREFLIGHT_BUDGET_MS, deadlineAt),
-				now,
-				sleep,
 			})
 		: new Map<string, "go" | "unreachable" | "wrong-network">()
 
@@ -87,17 +82,16 @@ export async function runImportChainSync(deps: ImportChainSyncDeps): Promise<voi
 	// (no-ops that keep the result shape complete).
 	const skippedIds = new Set([...verdicts.entries()].filter(([, v]) => v !== "go").map(([id]) => id))
 	const items = normalized.items.filter((i) => !skippedIds.has(i.networkId))
-	const registrableRemaining = items.some((i) => i.senders.length > 0 || i.contracts.length > 0)
-	if (!items.length || !registrableRemaining) return
+	// One predicate owner: `registrable` already names the networks with work.
+	const goIds = registrable.filter((id) => !skippedIds.has(id))
+	if (!goIds.length) return
 
 	const remaining = Math.max(0, Math.min(IMPORT_REGISTRATION_BUDGET_MS, deadlineAt - now()))
-	const goIds = items.filter((i) => i.senders.length > 0 || i.contracts.length > 0).map((i) => i.networkId)
 	if (remaining === 0) {
 		deps.record(goIds.map((id) => skippedNetworkRecord(id, ACCOUNT_STATE_SKIP_DEADLINE)))
 		return
 	}
 
-	let settled = false
 	const outcome = await Promise.race([
 		deps
 			.restore(items, remaining)
@@ -107,8 +101,6 @@ export async function runImportChainSync(deps: ImportChainSyncDeps): Promise<voi
 		// enforces its own copy per launch, so nothing useful runs past it).
 		sleep(remaining).then(() => ({ kind: "timeout" as const })),
 	])
-	if (settled) return
-	settled = true
 
 	if (outcome.kind === "result" && Array.isArray(outcome.result)) {
 		deps.record(outcome.result)

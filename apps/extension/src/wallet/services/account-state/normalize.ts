@@ -16,7 +16,8 @@ export const ACCOUNT_STATE_CAPS = {
 	maxInputItems: 16,
 	maxSendersPerNetwork: 64,
 	maxContractsPerNetwork: 32,
-	maxSliceBytes: 32 * 1024 * 1024,
+	// UTF-16 code units of the serialized slice (not bytes — a cheap, still-hard bound).
+	maxSliceCodeUnits: 32 * 1024 * 1024,
 	maxErrorMessageLength: 200,
 } as const
 
@@ -90,7 +91,7 @@ export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState
 	} catch {
 		return { items: [], violations: [violation("(slice)", "malformed account-state slice (not serializable)")] }
 	}
-	if (sliceBytes > ACCOUNT_STATE_CAPS.maxSliceBytes) {
+	if (sliceBytes > ACCOUNT_STATE_CAPS.maxSliceCodeUnits) {
 		return { items: [], violations: [violation("(slice)", `account-state slice too large (${sliceBytes} bytes)`)] }
 	}
 
@@ -131,7 +132,7 @@ export function normalizeAccountStateSlice(raw: unknown): NormalizedAccountState
 		byNetwork.set(networkId, merged)
 	}
 	if (malformedItems > 0) violations.push(violation("(slice)", `${malformedItems} malformed account-state item(s) dropped`))
-	if (malformedChildren > 0) violations.push(violation("(slice)", `${malformedChildren} malformed sender/contract entrie(s) dropped`))
+	if (malformedChildren > 0) violations.push(violation("(slice)", `${malformedChildren} malformed sender/contract entries dropped`))
 
 	const items: NormalizedAccountStateItem[] = []
 	for (const item of byNetwork.values()) {
@@ -169,7 +170,7 @@ export function registrableNetworkIds(normalized: NormalizedAccountState): strin
  *  the trigger for per-network fail-fast. Conservative on purpose: payload
  *  validation errors must never classify as connectivity. */
 export function isConnectivityErrorMessage(message: string): boolean {
-	return /timed out|timeout|Error fetching from host|Failed to fetch|fetch failed|ECONNREFUSED|refused|ERR_CONNECTION|network error/i.test(
+	return /timed out|timeout after|Error fetching from host|Failed to fetch|fetch failed|ECONNREFUSED|connection refused|ERR_CONNECTION|network error/i.test(
 		message,
 	)
 }

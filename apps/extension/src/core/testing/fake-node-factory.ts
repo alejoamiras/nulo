@@ -17,6 +17,7 @@
 
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
+import { walletChainId } from "@/utils/chain-ids"
 
 export type FakeNodeOverrides = Partial<AztecNode>
 
@@ -43,7 +44,7 @@ export class FakeNodeFactory implements NodeFactory {
 	public async probeChainId(rpcUrl: string, _timeoutMs: number): Promise<number> {
 		const node = this.createNode(rpcUrl)
 		const info = await node.getNodeInfo()
-		return (info.l1ChainId ^ info.rollupVersion) >>> 0
+		return walletChainId(info.l1ChainId, info.rollupVersion)
 	}
 
 	public createNode(rpcUrl: string): AztecNode {

@@ -133,11 +133,14 @@ describe("TokenCard", () => {
 		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(true)
 	})
 
-	test("no failure caption during the initial sync (the loading block owns that state)", () => {
+	test("a FAILED first sync shows the failure, never an infinite loading spinner", () => {
+		// A never-synced row (updatedAt 0) whose first projection failed used to
+		// spin forever — the exact failed-vs-still-running ambiguity the
+		// persisted record exists to close. The failed state wins the block.
 		mockQuotes = {}
 		const w = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", syncFailure: { at: 1, message: "x" } })
-		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
-		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
+		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(true)
 	})
 
 	test("B1: a priced token renders the holding's fiat line", async () => {

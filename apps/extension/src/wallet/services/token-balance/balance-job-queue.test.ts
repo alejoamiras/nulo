@@ -347,6 +347,34 @@ describe("BalanceJobQueue", () => {
 		expect(onBalanceUpdated).not.toHaveBeenCalled()
 	})
 
+	test("a foreign-profile row (unknown token) gets NO failure record and cannot abort the batch", async () => {
+		// Balances carry no profileId: a shared-address row from another profile
+		// reaches the queue and the projector errors it as "Unknown token". The
+		// failure write must skip it (the row isn't ours) AND the batch's healthy
+		// rows must still process — the emit path would otherwise throw through
+		// the service's token lookup and stamp bogus failures batch-wide.
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1, { token: 1 }), raw(2, { token: 2 })])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([
+			{ kind: "error", id: 1, error: "Unknown token #1" },
+			{ kind: "ok", id: 2, privateBalance: "9", publicBalance: "0" },
+		])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			onBalanceUpdated,
+			isRowEmittable: (tokenId) => tokenId !== 1,
+		})
+
+		queue.enqueue(raw(1, { token: 1 }))
+		queue.enqueue(raw(2, { token: 2 }))
+		await queue.tick()
+
+		expect((await repo.get(1))?.syncFailure).toBeUndefined() // foreign row untouched
+		expect((await repo.get(2))?.privateBalance).toBe("9") // healthy row still processed
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
+	})
+
 	test("a hostile-length failure message is bounded before persisting", async () => {
 		const ticker = new FakeBackgroundTicker()
 		const repo = makeRepo([raw(1)])

@@ -1,7 +1,7 @@
 /**
  * Bounded connectivity preflight for the import flow's chain-registration
- * leg. Pure orchestration — the probe, clock, and sleeper are injected so
- * every timing path is unit-testable without real timers or a live SW.
+ * leg. Pure orchestration over an injected probe; tests drive timing with
+ * vitest fake timers (which patch both the deadline clock and the sleeper).
  *
  * Per network: up to `1 + backoffWaitsMs.length` probe attempts (exponential
  * backoff between them), each bounded BOTH by the SW-side probe budget
@@ -14,9 +14,9 @@ import { NodeStatus } from "@/wallet/services/network/spec"
 
 export type PreflightVerdict = "go" | "unreachable" | "wrong-network"
 
-export const PREFLIGHT_ATTEMPT_TIMEOUT_MS = 5_000
-export const PREFLIGHT_BACKOFF_WAITS_MS = [2_000, 4_000] as const
-export const PREFLIGHT_CONCURRENCY = 3
+const PREFLIGHT_ATTEMPT_TIMEOUT_MS = 5_000
+const PREFLIGHT_BACKOFF_WAITS_MS = [2_000, 4_000] as const
+const PREFLIGHT_CONCURRENCY = 3
 /** Below this remainder an attempt is pointless — classify unreachable. */
 const MIN_ATTEMPT_MS = 100
 
@@ -26,32 +26,24 @@ export interface PreflightOptions {
 	probe: (networkId: string, timeoutMs: number) => Promise<NodeStatus>
 	/** Absolute wall-clock deadline for the WHOLE preflight. */
 	deadlineAt: number
-	attemptTimeoutMs?: number
-	backoffWaitsMs?: readonly number[]
-	concurrency?: number
-	now?: () => number
-	sleep?: (ms: number) => Promise<void>
 }
 
-const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+export const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-async function probeOneNetwork(
-	networkId: string,
-	opts: Required<Pick<PreflightOptions, "probe" | "deadlineAt" | "attemptTimeoutMs" | "backoffWaitsMs" | "now" | "sleep">>,
-): Promise<PreflightVerdict> {
-	const attempts = opts.backoffWaitsMs.length + 1
+async function probeOneNetwork(networkId: string, opts: Pick<PreflightOptions, "probe" | "deadlineAt">): Promise<PreflightVerdict> {
+	const attempts = PREFLIGHT_BACKOFF_WAITS_MS.length + 1
 	for (let attempt = 0; attempt < attempts; attempt++) {
-		const remaining = opts.deadlineAt - opts.now()
+		const remaining = opts.deadlineAt - Date.now()
 		// The deadline is ABSOLUTE: never force a minimum attempt past it.
 		if (remaining < MIN_ATTEMPT_MS) return "unreachable"
-		const budget = Math.min(opts.attemptTimeoutMs, remaining)
+		const budget = Math.min(PREFLIGHT_ATTEMPT_TIMEOUT_MS, remaining)
 
 		const outcome = await Promise.race([
 			opts
 				.probe(networkId, budget)
 				.then((status) => ({ kind: "status" as const, status }))
 				.catch(() => ({ kind: "failed" as const })),
-			opts.sleep(budget).then(() => ({ kind: "timeout" as const })),
+			realSleep(budget).then(() => ({ kind: "timeout" as const })),
 		])
 
 		if (outcome.kind === "status") {
@@ -64,28 +56,20 @@ async function probeOneNetwork(
 			// Inactive: refused/timeout/unreachable — retry with backoff below.
 		}
 
-		const wait = opts.backoffWaitsMs[attempt]
-		if (wait !== undefined && opts.deadlineAt - opts.now() > wait) {
-			await opts.sleep(wait)
+		const wait = PREFLIGHT_BACKOFF_WAITS_MS[attempt]
+		if (wait !== undefined && opts.deadlineAt - Date.now() > wait) {
+			await realSleep(wait)
 		}
 	}
 	return "unreachable"
 }
 
 export async function preflightNetworkConnectivity(options: PreflightOptions): Promise<Map<string, PreflightVerdict>> {
-	const opts = {
-		probe: options.probe,
-		deadlineAt: options.deadlineAt,
-		attemptTimeoutMs: options.attemptTimeoutMs ?? PREFLIGHT_ATTEMPT_TIMEOUT_MS,
-		backoffWaitsMs: options.backoffWaitsMs ?? PREFLIGHT_BACKOFF_WAITS_MS,
-		now: options.now ?? Date.now,
-		sleep: options.sleep ?? realSleep,
-	}
-	const concurrency = options.concurrency ?? PREFLIGHT_CONCURRENCY
+	const opts = { probe: options.probe, deadlineAt: options.deadlineAt }
 	const verdicts = new Map<string, PreflightVerdict>()
 	const queue = [...new Set(options.networkIds)]
 
-	const workers = Array.from({ length: Math.max(1, Math.min(concurrency, queue.length)) }, async () => {
+	const workers = Array.from({ length: Math.max(1, Math.min(PREFLIGHT_CONCURRENCY, queue.length)) }, async () => {
 		for (;;) {
 			const networkId = queue.shift()
 			if (networkId === undefined) return

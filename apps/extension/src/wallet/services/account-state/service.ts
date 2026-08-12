@@ -287,12 +287,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 
 			for (const contract of item.contracts) {
 				if (unreachable) {
-					contracts.push({
-						address: contract.address,
-						instance: contract.instance,
-						artifact: contract.artifact,
-						restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE,
-					})
+					contracts.push({ ...contract, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
 					continue
 				}
 				// Network-first error precedence (pre-existing contract): a missing
@@ -302,12 +297,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 					if (!network) throw new Error("Network not found")
 					addressNum = AztecAddress.fromStringUnsafe(contract.address).toBigInt()
 				} catch (err) {
-					contracts.push({
-						address: contract.address,
-						instance: contract.instance,
-						artifact: contract.artifact,
-						restoreError: truncateErrorMessage(toRestoreError(err)),
-					})
+					contracts.push({ ...contract, restoreError: truncateErrorMessage(toRestoreError(err)) })
 					continue
 				}
 				if (addressNum >= 0 && addressNum <= 6) {
@@ -327,12 +317,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 					})
 					contracts.push(contract)
 				} catch (err) {
-					contracts.push({
-						address: contract.address,
-						instance: contract.instance,
-						artifact: contract.artifact,
-						restoreError: classify(err),
-					})
+					contracts.push({ ...contract, restoreError: classify(err) })
 				}
 			}
 

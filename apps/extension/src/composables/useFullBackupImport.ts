@@ -676,9 +676,8 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// BOUNDED: this is the one import leg that dials the network (the PXE boot
 			// for a restored network fetches L1 addresses from its rpcUrl — a URL the
 			// BACKUP controls). Unbounded, a degraded endpoint parked the import for the
-			// popup→SW transport's full 60s and surfaced as a false "Import failed" (or
-			// stranded CI's smoke roundtrip — e2e-deflake ledger entry 1). The tail now
-			// runs on one shared wall-clock budget: connectivity preflight (exponential
+			// popup→SW transport's full 60s and surfaced as a false "Import failed". The
+			// tail now runs on one shared wall-clock budget: connectivity preflight (exponential
 			// backoff) → deadline-carrying registration call → constant-copy skip
 			// records for whatever couldn't run, all through the SAME errors screen.
 			const accountStateSlice = data[ACCOUNT_STATE_SERVICE_NAME]

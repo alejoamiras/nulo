@@ -84,7 +84,7 @@ describe("normalizeAccountStateSlice", () => {
 	})
 
 	test("oversized slice collapses to one violation", () => {
-		const big = [{ networkId: "n1", senders: [{ address: `0x${"a".repeat(ACCOUNT_STATE_CAPS.maxSliceBytes)}` }], contracts: [] }]
+		const big = [{ networkId: "n1", senders: [{ address: `0x${"a".repeat(ACCOUNT_STATE_CAPS.maxSliceCodeUnits)}` }], contracts: [] }]
 		const { items, violations } = normalizeAccountStateSlice(big)
 		expect(items).toEqual([])
 		expect(violations).toHaveLength(1)

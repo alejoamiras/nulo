@@ -827,7 +827,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (pendingMarker.marker.pxeGeneration === profile.pxeGeneration) {
 				throw new RestoreTornError(undefined, { profileId: profile.id })
 			}
-			await this.restorePending.delete(profile.id)
+			// Known-stale leftover: best-effort purge — a rejecting remove must
+			// not fail an otherwise-valid unlock (rehydration-path symmetry).
+			await this.restorePending.delete(profile.id).catch(() => {})
 		}
 		try {
 			if (this.integrityDelegate) {

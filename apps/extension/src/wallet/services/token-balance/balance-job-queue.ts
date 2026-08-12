@@ -31,16 +31,10 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { BalanceUpdateContent, type TaskService } from "@/wallet/services/task/service"
 import type { BalanceProjector } from "./balance-projector"
 import type { BalanceRepository } from "./balance-repository"
-import type { TokenBalanceRaw } from "./spec"
+import { boundSyncFailureMessage, type TokenBalanceRaw } from "./spec"
 
 const TICK_INTERVAL_MS = 1000
 const BATCH_SIZE = 12
-/** Failure messages persist onto the row — bound them (hostile RPC text). */
-const MAX_FAILURE_MESSAGE_LENGTH = 200
-
-function boundedFailureMessage(message: string): string {
-	return message.length <= MAX_FAILURE_MESSAGE_LENGTH ? message : `${message.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
-}
 
 export type BalanceJobQueueCallbacks = {
 	/** Called after a successful projection writes a balance to storage. */
@@ -53,6 +47,12 @@ export type BalanceJobQueueCallbacks = {
 	 *  the id here BEFORE its awaited `repo.delete`, so single-threaded dispatch
 	 *  order makes write-after-delete resurrection impossible. */
 	isBalanceInvalidated?: (id: number) => boolean
+	/** Ownership guard for failure writes: balances carry no profileId, so a
+	 *  shared-address row from ANOTHER profile can reach this queue (the
+	 *  projector already errors such rows as "Unknown token"). Writing a
+	 *  failure record onto a foreign profile's row — or emitting it through a
+	 *  token lookup that throws — must be skipped, not attempted. */
+	isRowEmittable?: (tokenId: number) => boolean
 }
 
 export class BalanceJobQueue {
@@ -134,9 +134,13 @@ export class BalanceJobQueue {
 	private async writeSyncFailure(id: number, message: string, at: number): Promise<void> {
 		const current = await this.repo.get(id)
 		if (!current) return
+		// Foreign-profile rows (unknown token in the active map) get NO failure
+		// record: the row isn't ours to annotate, and emitting it would throw
+		// through the service's token lookup and abort the whole batch.
+		if (this.callbacks.isRowEmittable?.(current.token) === false) return
 		const updated: TokenBalanceRaw = {
 			...current,
-			syncFailure: { at, message: boundedFailureMessage(message) },
+			syncFailure: { at, message: boundSyncFailureMessage(message) },
 		}
 		// Fence check with NO await between it and the write dispatch.
 		if (this.callbacks.isBalanceInvalidated?.(id)) return

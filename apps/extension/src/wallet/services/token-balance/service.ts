@@ -104,6 +104,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 					this.emit("onTokenBalanceUpdated", this.getTokenBalanceInfo(balance))
 				},
 				isBalanceInvalidated: (id) => this.invalidatedBalanceIds.has(id),
+				isRowEmittable: (tokenId) => this.tokens.has(tokenId),
 			},
 			this.logger,
 		)

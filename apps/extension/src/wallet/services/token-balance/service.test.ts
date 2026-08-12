@@ -141,8 +141,8 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 	test("fenced-id incarnation guard: allocation SKIPS ids fenced this lifetime, so a reused id can neither eat a stale write nor stay suppressed", async () => {
 		// Simulate: row 5 (the allocator's NEXT id — max existing is 4) was
 		// deleted this lifetime and fenced while its old projection is still in
-		// flight. A same-lifetime restore must skip PAST it (codex iteration r2
-		// — the ABA/suppression hole).
+		// flight. A same-lifetime restore must skip PAST it (the ABA/suppression
+		// hole: a reused id could eat a stale write or stay suppressed forever).
 		await seedRepo.set(balance(4, 1))
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private fence
 		;(service as any).invalidatedBalanceIds.add(5)
