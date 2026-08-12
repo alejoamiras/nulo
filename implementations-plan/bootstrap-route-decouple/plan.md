@@ -97,41 +97,50 @@ Continue button visible (click it, then wait for the route). The 90s bound is un
 
 ### The fix (Shape A page-side orchestration + SW-side input hardening; § Competing outline)
 
-One absolute deadline (`importChainSyncDeadline`, wall-clock captured at the start of the
-chain-sync tail) is shared by the preflight and the registration race — later steps receive
-only the remainder (codex M8).
+**Deadline arithmetic (round-2 codex — one implementable model, no contradictory budgets):**
+`deadlineAt = tailStart + 45_000` is captured once, page-side, when the chain-sync tail begins.
+The preflight consumes at most `min(21_000, deadlineAt - now)`; the registration leg then gets
+`remaining = min(30_000, deadlineAt - now)` as BOTH its page-side race budget AND a
+`deadlineMs` argument the service enforces ("do not LAUNCH more work past the deadline" —
+service-side, so a stateful multi-network backup cannot traverse caps × 90s sequentially after
+the page moved on). Every number below derives from this model.
 
-1. **Slice validation + caps at the SW trust boundary** (codex H6): `AccountStateService.restore`
-   gains an entry-point zod validation + normalization of the (attacker-controlled) slice:
-   null-safe item guards, deduplicated networkIds, caps (defaults, owner-tunable — Ask 6:
-   ≤8 networks, ≤64 senders + ≤64 contracts per item, strings bounded), constant-size log
-   summaries. Invalid/over-cap content → per-entry bounded failure records, never a throw
-   mid-restore. (Also fixes the latent malformed-item record at `account-state/service.ts:227-235`
+1. **Slice normalization at ONE pure boundary** (codex H6 + round-2 M3): a shared pure
+   normalizer (unit-tested; used by BOTH the page preflight and `AccountStateService.restore`'s
+   entry): null-safe item guards; **merge items by networkId first** (duplicate items cannot
+   bypass caps); caps are AGGREGATE per network (defaults, owner-tunable — Ask 6: ≤8 networks,
+   ≤16 input items, ≤64 senders + ≤32 contracts per network, total serialized slice ≤32 MiB —
+   contract artifacts are legitimately MB-scale); the `networks` argument validated; excess/
+   invalid content collapses into ONE fixed-size summary record, never one record per attacker
+   entry. (Also fixes the latent malformed-item record at `account-state/service.ts:227-235`
    whose error today vanishes in the collector.)
-2. **Preflight** (`preflightNetworkConnectivity`, new composable-layer helper, injectable
-   probe/clock for unit tests): for each restored network with account-state items (deduped;
-   probed under a small semaphore, ≤3 concurrent — codex H6/fable L10), probe
-   `NetworkServiceClient.getNodeStatus(networkId)` raced with the auto-imported `withTimeout`
-   (`stores/balances.store.ts:123-137`) at **5s per attempt**, up to **3 attempts**,
-   **exponential backoff waits [2s, 4s]** (owner-specified backoff).
-   Classification (codex H5, overrides the draft): **GO only on `Active`**; `Inactive`/timeout
-   = unreachable → skip-with-record; **`InvalidChain` = per-network "wrong network" failure**
-   through the same Continue gate (`getNodeStatus` never throws — refused endpoints classify
-   `Inactive` in ~ms, so a refused preflight costs ≈6s, not 21s). Zero probes when the slice is
-   empty.
-3. **Registration budget**: the (validated) registration leg is raced with `withTimeout` at the
-   deadline remainder (≤ **30s**, always < the 60s popup→SW ceiling so OUR semantics fire
-   first). A **settled flag** guards BOTH `restoreStatus`/routing AND the `restoreErrorLog`
-   append path (`recordRestoreErrors` APPENDS — a losing-side late result must not append;
-   unit-pinned, fable condition).
-4. **Service-local fail-fast** (fable refinement, adopted vs codex H4's full cancellation): 
-   inside `AccountStateService.restore`, after a connectivity-class failure on a network, the
-   remaining items FOR THAT NETWORK are skipped with bounded records (signature unchanged).
-   Together with preflight-gating (unreachable networks are never dialed at all) and the caps,
-   abandoned SW/offscreen work on budget expiry is a small constant (≤ caps × the transports'
-   self-terminating envelopes — offscreen 90s/call, node 60s×4), not unbounded. Full
-   deadline/cancellation plumbing through SW/offscreen/node boundaries is REJECTED for this arc
-   (it recreates the infra scale the owner declined) → ledger follow-up + Ask 5.
+2. **Preflight with a REAL fetch-boundary abort** (round-2 codex H1 — replaces the draft's
+   uncancelled `withTimeout` race): a new bounded probe primitive — `probeChainId(rpcUrl,
+   timeoutMs)` added to the node-factory port + adapter + `FakeNodeFactory` in lockstep (a NEW
+   method; `createNode`'s signature untouched) — performs a SINGLE non-retrying `getNodeInfo`
+   attempt whose AbortController fires at `timeoutMs` (the `fetchOnce` layer,
+   `aztec-runtime/src/utils/fetch.ts:34-77`, without the `retry(makeBackoff)` wrapper). Exposed
+   via a new `NetworkService.probeNodeStatus(networkId, timeoutMs)` RPC. The page-side
+   `preflightNetworkConnectivity` helper keeps the owner's shape: **5s per attempt × 3 attempts,
+   exponential backoff waits [2s, 4s]**, semaphore ≤3, deduped networks, **probing only networks
+   with ≥1 registrable sender/contract after normalization (empty child arrays ⇒ zero probes)**.
+   Abandoned-probe amplification is GONE (the SW aborts the socket at the boundary); refused
+   endpoints reject in ~ms per attempt (total ≈6s incl. backoff); hanging costs exactly 21s.
+   Classification: **GO only on `Active`**; `Inactive`/timeout/abort = unreachable →
+   skip-with-record; **`InvalidChain` = per-network "wrong network" failure** through the same
+   Continue gate. This is LOCAL preflight cancellation — not the rejected registration-wide
+   AbortSignal plumbing (round-2 codex concurs).
+3. **Registration budget**: the (normalized) registration leg is raced page-side at `remaining`
+   (< the 60s popup→SW ceiling so OUR semantics fire first) AND receives `deadlineMs: remaining`
+   as an additive, zod-validated third parameter — the service checks the deadline before
+   LAUNCHING each item and returns skip records for the rest once expired. A **settled flag**
+   guards BOTH `restoreStatus`/routing AND the `restoreErrorLog` append path
+   (`recordRestoreErrors` APPENDS — a losing-side late result must not append; unit-pinned).
+4. **Service-local fail-fast** (fable refinement): after a connectivity-class failure on a
+   network, its remaining items are skipped with bounded records. Residual abandoned work after
+   all bounds: at most the in-flight item's 90s offscreen call — a small constant. Full
+   registration-wide cancellation plumbing stays REJECTED for this arc → ledger follow-up +
+   Ask 5.
 5. **Skip-with-record — audit-corrected shape** (codex C1 = fable H1): synthesized skips are a
    bounded explicit variant `{ networkId, restoreError: <constant string>, senders: [],
    contracts: [] }` — attacker items are NEVER spread into the log. `collectRestoreErrors`'s
@@ -146,10 +155,10 @@ only the remainder (codex M8).
 
 | Scenario | Path | Modeled time to an actionable screen |
 |---|---|---|
-| Healthy RPC | unchanged + one fast probe | unchanged (~seconds) |
-| RPC refused at import | storage restore + preflight ≈6s + skip | **≤ ~25s** |
-| RPC hanging at import | storage restore + preflight ≤21s + skip | **≤ ~40s** |
-| RPC dies between preflight and registrations | + registration remainder ≤30s | **≤ ~66s** |
+| Healthy RPC | unchanged + one fast bounded probe | unchanged (~seconds) |
+| RPC refused at import | storage restore + preflight ≈6s (ms/attempt + backoff waits) + skip | **≤ ~25s** |
+| RPC hanging at import | storage restore + preflight 21s (aborted at the fetch boundary per attempt) + skip | **≤ ~40s** |
+| RPC dies between preflight and registrations | + registration remainder ≤30s (service stops launching at the deadline) | **≤ ~66s** |
 
 "Storage restore 5–15s" is an estimate for ordinary backups (caps bound the pathological case);
 Phase 1 measures the real smoke path. The smoke test's UNCHANGED 90s wait observes: route
@@ -197,19 +206,33 @@ dot. The sibling `isMinting` description dead-branch is NOTED (ledger follow-up)
   that ≤51s window loses only the skip-record display, never storage slices. The
   crash-durable alternative (completeRestore machinery) is the rejected durable-deferral arc.
 - **Detection**: at `openSessionVerified` ENTRY (single locked chokepoint — safe under
-  entry-clearing; runs BEFORE the account-integrity delegate, fixing precedence by ordering)
-  plus the `SessionManager.restore` rehydration callback (defense-in-depth — codex H7).
-  Marker present + generation match ⇒ typed **`RestoreTornError`**; session withheld;
-  fail-closed (the marker read alone decides — no record write required).
+  entry-clearing; runs BEFORE the account-integrity delegate, fixing precedence by ordering).
+  Marker present + valid generation match ⇒ typed **`RestoreTornError`**; session withheld.
+  **Fail-closed on corruption** (round-2 codex M4): a raw marker key that EXISTS for a live
+  profile but cannot be decoded blocks (tombstone precedent — existence decides,
+  `tombstone-repository.ts:27`); only a generation MISMATCH against a live profile is purged.
+- **The typed error is a registered `WalletError` subclass** (round-2 codex H2):
+  `RestoreTornError` lives in `packages/extension-messaging/src/errors.ts` with a
+  reconstruction-switch entry + round-trip test — otherwise it flattens to a plain `Error`
+  across the RPC boundary and `auth.vue`'s `instanceof` can never match. A REAL transport test
+  (service → client reconstruction), not only a mocked component test.
+- **Rehydration path returns, never throws** (round-2 codex H2): `SessionManager.restore`'s
+  profile lookup does not catch throws (`session-manager.ts:341`) — a throwing callback would
+  abort `ProfileService` init. The marker check there makes the lookup return `undefined` so
+  the persisted session is silently CLOSED; the user lands on auth and the interactive unlock
+  produces the typed error + message.
 - **Surface (audit-corrected — the barrier was UNREACHABLE)**: auth.vue catches the typed error
   and renders an inline explanation ("This profile's import didn't finish — delete it and
   re-import your backup") with the EXISTING Delete-profile affordance on that screen. The
   barrier component, blocked-record repository, and second storage root from the draft are
   **dropped** (codex H7 proved the withheld user lands on auth, which the barrier exempts).
-- Tests: composition-harness service tests pinning every crash boundary (marker-before-row,
-  compensation, both branches, entry-clear, delete/crash-resume clears, generation mismatch
-  purge); auth-screen component test; torn fixture e2e-level check folded into the
-  `backup-restore-sw-restart.test.ts` outcome matrix (consciously updated — fable M3).
+- Tests (round-2 codex M4's explicit list): composition-harness crash-boundary pins —
+  marker-before-row, compensation, BOTH branches, entry-clear, double-finalize no-op,
+  finalize on a non-restored profile, wrong-id finalize, invalid-password/pending-secret
+  failure AFTER entry-clear (unlock recovery preserved), corrupt marker fail-closed,
+  generation-mismatch guarded purge, rehydration-close without init failure, delete/crash-
+  resume clears; transport round-trip test; auth-screen component test; torn fixture folded
+  into the `backup-restore-sw-restart.test.ts` outcome matrix (consciously updated — fable M3).
 
 ### Data & control flow (critical path after the fix)
 
@@ -230,8 +253,12 @@ auto-route | errors: Continue + View Errors → click → route.
 | `apps/extension/src/popup/pages/import.vue` + `onboarding/pages/import.vue` | Continue/View-Errors testids |
 | `apps/extension/src/popup/pages/auth.vue` | typed `RestoreTornError` inline message |
 | `apps/extension/src/wallet/services/profile/service.ts` | marker write (both branches, marker-before-row) + entry-clear + delete/crash-resume clears + `openSessionVerified`/rehydration checks + typed error |
-| `apps/extension/tests/e2e/backup-roundtrip.test.ts` | post-submit causal branch (90s bound byte-identical) |
-| `apps/extension/tests/e2e/import-dead-rpc.test.ts` (NEW) | refused + blackhole + stateful (preflight-passes-then-blackhole) variants; 127.0.0.1 bind, socket-tracked finally-close, per-test retry 0 |
+| `apps/extension/tests/e2e/backup-roundtrip.test.ts` | post-submit causal branch sharing ONE `submittedAt + 90_000` deadline (Continue click consumes the remainder — a fresh post-click wait would silently raise the bound; round-2 codex M2) + the stale "RPC-bound syncTransactions" comment corrected |
+| `apps/extension/tests/e2e/import-dead-rpc.test.ts` (NEW) | refused + blackhole + stateful variants; the stateful stub must ANSWER `getNodeInfo` (preflight passes), then OBSERVE `getL1ContractAddresses`, then blackhole — the asserted method sequence proves the registration race engaged; 127.0.0.1 bind, socket-tracked finally-close, per-test retry 0 |
+| `packages/aztec-runtime` node-factory port + adapter + `core/testing/fake-node-factory.ts` | NEW `probeChainId(rpcUrl, timeoutMs)` (bounded, non-retrying, abort-at-boundary) — lockstep update |
+| `packages/extension-messaging/src/errors.ts` (+ round-trip test) | `RestoreTornError` registered WalletError subclass + reconstruction switch |
+| `apps/extension/src/wallet/services/profile/session-manager.ts` | rehydration lookup returns `undefined` on marker (silent session close, no init abort) |
+| `apps/extension/src/wallet/services/network/service.ts` | NEW `probeNodeStatus(networkId, timeoutMs)` RPC (existing `getNodeStatus`/`_getChainId` untouched) |
 | `apps/extension/tests/e2e/helpers/import-drivers.ts` | synthetic account-state slice via the existing `extraData` hook; REAL derived account address (integrity-coordinator-safe); stub-server helper |
 | `apps/extension/tests/e2e/network/backup-restore-sw-restart.test.ts` | outcome matrix consciously updated for the marker (fable M3) |
 | `wallet/services/token-balance/spec.ts` / `balance-job-queue.ts` + tests + `storage-codecs.test.ts` | bundled item 1 |
@@ -256,9 +283,13 @@ change on the audited surface, and WITHOUT a cancellation primitive it abandons 
 merely SW-side (codex round 1 concurs: "would not fix this").
 
 **Shape B+ — codex's hybrid (deadline propagated to the node-fetch boundary with real
-`AbortSignal` cancellation)** — rejected FOR THIS ARC: cross-boundary plumbing
-(popup→SW→offscreen→node client) at the infra scale the owner declined twice; the bounded-
-abandonment residual (small constant) does not justify it now. → ledger follow-up + Ask 5.
+`AbortSignal` cancellation)** — rejected FOR THIS ARC as a registration-wide mechanism:
+cross-boundary plumbing (popup→SW→offscreen→node client) at the infra scale the owner declined
+twice; the bounded-abandonment residual (one in-flight 90s call) does not justify it now.
+→ ledger follow-up + Ask 5. **Two hybrid-lite elements WERE adopted from it in round 2**: the
+fetch-boundary-aborted preflight probe (local, one new port method) and the additive
+`deadlineMs` parameter on the registration RPC (service stops launching work at the deadline)
+— the small, honest subset that kills the amplification without the plumbing.
 
 ## Security & Adversarial Considerations
 
@@ -345,8 +376,10 @@ abandonment residual (small constant) does not justify it now. → ledger follow
    post-finalize registration leg is bounded + visible but NOT crash-durable. Confirm.
 5. **Cancellation plumbing** (AbortSignal through SW/offscreen/node) deferred to a ledger
    follow-up. Confirm.
-6. **Attacker-input caps**: ≤8 networks, ≤64 senders + ≤64 contracts per item, ~200-char
-   bounded messages. Confirm or adjust.
+6. **Attacker-input caps** (round-2-refined; aggregate per network after merge-by-networkId):
+   ≤8 networks, ≤16 input items, ≤64 senders + ≤32 contracts per network, total serialized
+   slice ≤32 MiB (artifacts are legitimately MB-scale), ~200-char bounded messages. Confirm or
+   adjust.
 
 ## Phases + validation gates
 
@@ -355,13 +388,19 @@ gates run SOLO.
 
 **Phase 1 — BLOCKING empirical verification (no product change)**
 (a) Run the smoke export flow locally; decrypt + inspect the REAL exported backup; record the
-account-state slice content (senders/contracts per network). (b) Reproduce the stall: the real
-backup imported against a controlled endpoint (refused + blackhole + stateful stub), recording
-which shape manifests at what wall-clock. (c) If the account-state leg is NOT the stall (e.g.
-the slice is empty), **STOP — reassess root cause with codex before any implementation**.
-Extend `buildSyntheticBackup`'s account-state support (test-side) as needed.
-**Gate**: `lessons/phase-1.md` with slice-content evidence + measured timings + the verdict;
-`bun run lint` + `bun run typecheck` exit 0. Layers: lint/typecheck + manual e2e evidence.
+account-state slice content (senders/contracts per network). **Empty child arrays inside a
+non-empty item count as FALSIFICATION** (zero registrable work ⇒ this leg cannot be the stall).
+(b) Reproduce the stall: the real backup, its embedded endpoint doctored to the controlled stub
+(refused + blackhole + stateful) **with the checksum recomputed over the doctored body**
+(validation precedes restore, `useFullBackupImport.ts:238`) — document the doctoring; the stub
+LOGS every observed JSON-RPC method. (c) **Negative control**: the same backup with the
+account-state slice removed must import CLEANLY against the same dead endpoint — required
+result: "full slice stalls, no-account-state control completes". (d) If falsified at any step,
+**STOP — reassess root cause with codex before any implementation**. Extend
+`buildSyntheticBackup`'s account-state support (test-side) as needed.
+**Gate**: `lessons/phase-1.md` with slice-content evidence + stub method logs + paired-control
+result + measured timings + the verdict; `bun run lint` + `bun run typecheck` exit 0.
+Layers: lint/typecheck + manual e2e evidence.
 
 **Phase 2 — The fix + tests**
 Slice validation/caps + fail-fast + malformed-item fix (SW); `importPreflight.ts` (unit:
@@ -399,16 +438,20 @@ labeled `e2e:smoke` + `e2e:network`; content commits first, then certification p
 Phase 6 (tree frozen; 3 EMPTY-commit triggers; qualifying green = all three statuses green,
 run_attempt==1 everywhere, zero vitest retries in logs, zero runtime exit-86 annotations, no
 skipped-required jobs, completion before next trigger; any red or substantive tree change
-resets). 3-row matrix in `lessons/phase-5.md`; docs-only matrix commit post-cert; squash-merge
-(title ≤93 chars).
-**Gate**: certification matrix recorded; PR merged with required checks green. Layers: all.
+resets). **The post-cert docs-only commit (before merge — the deflake precedent) carries: the
+3-row matrix in `lessons/phase-5.md`, the e2e-deflake `flake-ledger.md` update (entry 1 →
+FIXED + the new TODO/OPEN entries: durable re-registration; RPC-editing-mid-import; `isMinting`
+dead branch; cancellation plumbing), and the e2e-testing skill lessons** (round-2 codex L1 —
+they need a delivery path INSIDE the PR). Squash-merge (title ≤93 chars).
+**Gate**: certification matrix recorded; ledger diff reviewed (no silent drops); PR merged with
+required checks green. Layers: all.
 
-**Phase 6 — Ledger + docs close-out**
-e2e-deflake `flake-ledger.md` entry 1 → FIXED (mechanism + cert pointer); new TODO/OPEN entries
-(durable re-registration; RPC-editing-mid-import; `isMinting` dead branch; cancellation
-plumbing); e2e-testing skill lessons; `implementations-plan/index.md` both arcs; final owner
-report (shipped, UX decisions as approved, codex consults + verdicts, remaining OPEN items).
-**Gate**: ledger diff reviewed (no silent drops); `bun run lint` exit 0. Layers: docs.
+**Phase 6 — Close-out (post-merge)**
+`implementations-plan/index.md` status flips for both arcs (rides the PR where possible; a
+trailing docs PR only if something was missed); final owner report in chat (shipped, UX
+decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
+`agent-worktree done bootstrap-route-decouple`.
+**Gate**: report delivered; index current. Layers: docs.
 
 ## Decision ledger
 
@@ -436,7 +479,17 @@ report (shipped, UX decisions as approved, codex consults + verdicts, remaining 
 - **Round 1 — codex (gpt-5.6-sol xhigh, fresh)**: **reject** → [audit-codex.md](audit-codex.md);
   all three blocking findings addressed in this revision (C1 skip-shape, C2 marker scope,
   C3 marker atomicity + H4-H7/M8-M13/L14 dispositions logged).
-- **Round 2 — final fresh-context codex pass**: *(pending — consolidated plan + decision trail)*
+- **Round 2 — final fresh-context codex pass (gpt-5.6-sol xhigh)**: **reject** — zero
+  Criticals; two Highs (uncancelled preflight amplification + contradictory budget semantics;
+  `RestoreTornError` lacking an RPC/rehydration contract), 4 Mediums, 2 Lows — ALL folded in
+  this revision (fetch-boundary-aborted probe + explicit deadline arithmetic + service
+  `deadlineMs`; registered WalletError subclass + rehydration-returns-undefined; Phase-1
+  negative control + checksum-doctoring protocol; stub method-sequence assertion + smoke
+  remainder-deadline; shared pure normalizer with aggregate caps; marker corruption fail-closed
+  + edge-case test list; Phase-5/6 docs delivery path; stale test comment). It explicitly
+  verified every round-1 fold as correct ("Resolved correctly" list in
+  [audit-codex.md](audit-codex.md)).
+- **Round 3 — resumed re-verdict on the round-2 folds**: *(pending)*
 
 ## Seeds
 

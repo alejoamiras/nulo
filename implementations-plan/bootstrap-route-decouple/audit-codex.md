@@ -108,3 +108,66 @@ plumbing deferred; cap values; integrity-vs-torn precedence — resolved by orde
 ## Round 2 — final fresh-context pass
 
 *(pending — runs on the consolidated plan + this decision trail)*
+
+## Round 2 — final fresh-context pass (2026-08-12, gpt-5.6-sol xhigh, fresh)
+
+Session: 019ff6a0-a7d2-7613-8c18-656d3d83c282. Saw the consolidated plan + both round-1 audit
+records + recon.
+
+**Verdict: reject** (blocking: uncancelled preflight amplification and contradictory budget
+semantics; RestoreTornError lacks a viable RPC and rehydration contract).
+
+### Findings + dispositions
+
+**H1 — preflight is UI-bounded but amplifies uncancelled SW work; budget claims contradictory**
+(withTimeout doesn't cancel; each probe retains the 60s×4 envelope → up to 24 abandoned probes;
+refused path can eat the full 21s because a 5s wrapper races the retry backoff; a stateful
+8-network backup can traverse ~12min of sequential 90s offscreen calls post-abandonment; the
+21s/30s/45s/51s numbers weren't one implementable model): **ADOPTED in full** — new
+`probeChainId(rpcUrl, timeoutMs)` port+adapter+fake method (single non-retrying attempt,
+AbortController fires at the boundary — codex-endorsed LOCAL cancellation, not the rejected
+plumbing) exposed as `NetworkService.probeNodeStatus`; explicit deadline arithmetic
+(`deadlineAt = tailStart + 45s`; preflight ≤ min(21s, remainder); registration =
+min(30s, remainder)); additive zod-validated `deadlineMs` param on the registration RPC so the
+SERVICE stops launching items at the deadline; probes only networks with ≥1 registrable
+sender/contract post-normalization (empty child arrays ⇒ zero probes).
+
+**H2 — RestoreTornError flattens across the RPC boundary; rehydration throw aborts service
+init**: **ADOPTED in full** — registered `WalletError` subclass in
+`packages/extension-messaging/src/errors.ts` + reconstruction switch + round-trip transport
+test; the `SessionManager.restore` lookup returns `undefined` on a marker (silent session
+close) instead of throwing (`session-manager.ts:341` doesn't catch).
+
+**M1 — Phase 1 isolation gaps**: **ADOPTED** — checksum-recompute doctoring documented;
+negative control (same backup minus account-state must complete against the same dead
+endpoint); stub logs observed JSON-RPC methods; empty-child-arrays = falsification.
+
+**M2 — e2e causal/timeout assertions**: **ADOPTED** — stateful stub must answer `getNodeInfo`,
+observe `getL1ContractAddresses`, then blackhole (method-sequence assertion); the smoke
+Continue branch consumes the REMAINDER of one `submittedAt + 90_000` deadline (a fresh
+post-click wait would silently raise the bound).
+
+**M3 — cap normalization underspecified**: **ADOPTED** — ONE pure shared normalizer
+(merge-by-networkId first; aggregate per-network caps; item-count + total-bytes caps; networks
+argument validated; fixed-size excess summary).
+
+**M4 — marker corruption + entry-clear edges**: **ADOPTED** — undecodable-but-present marker
+fails CLOSED (tombstone existence precedent); explicit test list (double-finalize, non-restored
+finalize, wrong-id finalize, post-entry-clear unlock failures, corrupt marker,
+generation-mismatch purge, rehydration-close without init failure).
+
+**L1 — Phase 6 docs had no delivery path post-merge**: **ADOPTED** — ledger + skill updates
+ride the pre-merge post-cert docs-only commit (deflake precedent).
+
+**L2 — stale "RPC-bound syncTransactions" comment in the smoke test**: **ADOPTED** — corrected
+with the wait change.
+
+**Resolved-correctly list** (round-1 folds verified by the fresh pass): skip variant reaches
+the Continue gate; marker mechanics internally coherent; integrity-delegate precedence by
+ordering; Active-only GO + InvalidChain failure; stateful e2e design sound once
+method-sequenced; gates + certification faithful; token-balance event-consumer concern
+addressed.
+
+## Round 3 — resumed re-verdict
+
+*(pending)*
