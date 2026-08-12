@@ -5,7 +5,12 @@ import type { IConfig } from "@/wallet/config"
 import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { AccountAddressInconsistencyError, InvalidPasswordError, ProfileIdConflictError } from "@nulo/extension-messaging/errors"
+import {
+	AccountAddressInconsistencyError,
+	InvalidPasswordError,
+	ProfileIdConflictError,
+	RestoreTornError,
+} from "@nulo/extension-messaging/errors"
 import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -33,6 +38,7 @@ import {
 	type Methods,
 	type RestoreSecret,
 } from "./spec"
+import { RestorePendingRepository } from "./restore-pending-repository"
 import { TombstoneRepository } from "./tombstone-repository"
 import { ProfileDeletionState, type ExecutionFence } from "./profile-deletion-state"
 import type { ProfileDeletionDelegate } from "../profile-deletion/types"
@@ -120,6 +126,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	private readonly integrityBlocked: AccountIntegrityBlockedRepository
 	/** Deletion-time cleanup of the coordinator's per-profile verified stamps. */
 	private readonly integrityStamps: AccountIntegrityVerifiedStampRepository
+	/** Restore-in-progress markers (torn-import detection at the unlock gate). */
+	private readonly restorePending: RestorePendingRepository
 
 	/**
 	 * @param browserApi Optional. Tests pass `FakeBrowserApi` so the
@@ -135,6 +143,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		this.integrityStamps = new AccountIntegrityVerifiedStampRepository(
 			(browserApi?.storage.local ?? chrome.storage.local) as StorageArea,
 		)
+		this.restorePending = new RestorePendingRepository((browserApi?.storage.local ?? chrome.storage.local) as StorageArea)
 		this.secretBox = new PasswordSecretBox()
 		this.sessionManager = new SessionManager(
 			config,
@@ -191,7 +200,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// tombstone gate is preserved: a tombstoned profile (SW died mid-delete:
 		// row present, id reserved) must NOT have its session restored — it's being
 		// erased, so no downstream unlock/export/secret path can observe it.
-		await this.sessionManager.restore((id) => (this.deletionState.isReserved(id) ? Promise.resolve(undefined) : this.repo.get(id)))
+		await this.sessionManager.restore(async (id) => {
+			if (this.deletionState.isReserved(id)) return undefined
+			const profile = await this.repo.get(id)
+			if (!profile) return undefined
+			// Torn-restore gate on the SILENT path too: rehydrating a marked
+			// profile would bypass the unlock chokepoint. Return undefined (silent
+			// close) — throwing here would abort service init (F-13 discipline).
+			const marker = await this.restorePending.get(id)
+			if (marker.kind === "corrupt") return undefined
+			if (marker.kind === "valid" && marker.marker.pxeGeneration === profile.pxeGeneration) return undefined
+			return profile
+		})
 
 		// Integrity gate on the silent restore: a profile the integrity coordinator flagged must
 		// not rehydrate its session after a SW restart. The durable blocking record is the signal
@@ -787,6 +807,23 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// verify/open below runs, leaving `isReserved` false on both sides. The monotonic epoch does
 		// not reset on release, so comparing it after the open detects a delete that fully completed.
 		const deletionEpoch = this.deletionState.capture(profile.id)
+		// Torn-restore gate FIRST (cheap read; precedence over the integrity
+		// delegate by ordering): a restore-pending marker still present for THIS
+		// incarnation means the import never finalized — the slices may be torn,
+		// and opening would let the bootstrap silently re-seed the gaps. A marker
+		// that EXISTS but cannot be decoded blocks too (tombstone fail-closed
+		// precedent); only a generation MISMATCH (stale leftover from a prior
+		// incarnation) is purged and ignored.
+		const pendingMarker = await this.restorePending.get(profile.id)
+		if (pendingMarker.kind === "corrupt") {
+			throw new RestoreTornError(undefined, { profileId: profile.id })
+		}
+		if (pendingMarker.kind === "valid") {
+			if (pendingMarker.marker.pxeGeneration === profile.pxeGeneration) {
+				throw new RestoreTornError(undefined, { profileId: profile.id })
+			}
+			await this.restorePending.delete(profile.id)
+		}
 		try {
 			if (this.integrityDelegate) {
 				await this.integrityDelegate.verifyBeforeSessionOpen(profile.id, secret)
@@ -872,6 +909,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const epoch = this.deletionState.beginDeletion(id)
 			await this.tombstones.write({ profileId: id, ...snapshot, epoch })
 			await this.repo.delete(id)
+			await this.restorePending.delete(id)
 			// Close the session BEFORE the emit (a subscriber reacting to the emit
 			// must not observe a still-open session for a deleted profile).
 			if (this.sessionManager.isActive(id)) {
@@ -925,6 +963,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				await this.runExclusive(async () => {
 					if (await this.repo.get(t.profileId)) await this.repo.delete(t.profileId)
 					if (this.sessionManager.isActive(t.profileId)) await this.sessionManager.close()
+					await this.restorePending.delete(t.profileId)
 					// Idempotent, same as the live `deleteProfile` phase-1 block: a deletion that
 					// crashed before these clears must still drop the integrity records so a deleted
 					// profile can't leave an orphan block/stamp behind.
@@ -1350,7 +1389,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 								secret: sealed.encrypted.secret,
 							}
 
-							await this.repo.set(id, newProfile)
+							// Marker BEFORE row (fail-closed): a crash between the two writes
+							// leaves an orphan marker with no row — lazily purged — never a
+							// row without its restore-in-progress marker.
+							await this.restorePending.write({ profileId: id, pxeGeneration: newProfile.pxeGeneration, at: Date.now() })
+							try {
+								await this.repo.set(id, newProfile)
+							} catch (rowErr) {
+								// Compensate: the row never landed, so the marker must not
+								// brand a future same-id profile.
+								await this.restorePending.delete(id).catch(() => {})
+								throw rowErr
+							}
 
 							this.emit("onProfileAdded", this.getProfileInfo(newProfile))
 
@@ -1425,7 +1475,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 							pxeGeneration: mintPxeGeneration(),
 							credentialId: recovery.credentialId,
 						}
-						await this.repo.set(id, newProfile)
+						// Marker BEFORE row + compensation — same bracket as the password
+						// branch (a torn passkey import must not escape detection).
+						await this.restorePending.write({ profileId: id, pxeGeneration: newProfile.pxeGeneration, at: Date.now() })
+						try {
+							await this.repo.set(id, newProfile)
+						} catch (rowErr) {
+							await this.restorePending.delete(id).catch(() => {})
+							throw rowErr
+						}
 
 						this.emit("onProfileAdded", this.getProfileInfo(newProfile))
 
@@ -1488,6 +1546,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
 			}
+
+			// Clear the restore-in-progress marker at ENTRY: being called at all
+			// proves the storage-slice phase completed (the import flow only
+			// finalizes after every slice restore). Clearing on entry — not on
+			// session-open success — keeps finalize-throw survivors (wrong
+			// password, lost passkey pending-secret) on their documented
+			// unlock-later recovery instead of branding them torn.
+			await this.restorePending.delete(id)
 
 			// If the session is already active for this profile, treat as
 			// no-op. Defensive against double-finalize.

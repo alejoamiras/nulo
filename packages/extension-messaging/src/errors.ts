@@ -227,6 +227,25 @@ export class AccountAddressInconsistencyError extends WalletError {
 }
 
 /**
+ * A profile's backup restore never finished its storage-slice phase: the
+ * durable restore-pending marker (written before the profile row, cleared at
+ * `finalizeRestore` entry) is still present — the popup/SW died mid-restore
+ * and the profile's slices may be incomplete. Opening a session would let the
+ * bootstrap silently re-seed missing data (e.g. mint a fresh default account),
+ * so unlock is refused; consumers `instanceof` this to explain and point at
+ * delete + re-import. NEVER surfaced verbatim to dApps.
+ */
+export class RestoreTornError extends WalletError {
+	public static readonly CODE = "RESTORE_TORN"
+
+	public constructor(message = "This profile's import didn't finish", details?: unknown) {
+		super(RestoreTornError.CODE, message, details)
+		this.name = "RestoreTornError"
+		Object.setPrototypeOf(this, RestoreTornError.prototype)
+	}
+}
+
+/**
  * Raised by `createPasskeyProfile` / `importPasskey` when the profile id
  * the caller pre-reserved was claimed by another writer between the
  * unlocked WebAuthn ceremony and the locked persistence step. Callers
@@ -267,6 +286,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
 	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
 	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
+	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
 
 /**
@@ -299,6 +319,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new InvalidPasswordError(known.message, known.details)
 		case AccountAddressInconsistencyError.CODE:
 			return new AccountAddressInconsistencyError(known.message, known.details)
+		case RestoreTornError.CODE:
+			return new RestoreTornError(known.message, known.details)
 		case ProfileIdConflictError.CODE:
 			return new ProfileIdConflictError(known.message, known.details)
 		default:
