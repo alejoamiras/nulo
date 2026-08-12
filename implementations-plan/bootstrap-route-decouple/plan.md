@@ -421,7 +421,9 @@ result: "full slice stalls, no-account-state control completes". (d) If falsifie
 result + measured timings + the verdict; `bun run lint` + `bun run typecheck` exit 0.
 Layers: lint/typecheck + manual e2e evidence.
 
-**Phase 2 — The fix + tests**
+**Phase 2 — The fix + tests ✓ GREEN (2026-08-12, commit `145c1e7` — `lessons/phase-2.md`:
+units 3991 green; dead-rpc e2e 3/3 attempt-1 retry:0; roundtrip 1/1; FULL armed smoke suite
+24 passed/1 skip, 82 tests, zero retries)**
 Slice validation/caps + fail-fast + malformed-item fix (SW); `importPreflight.ts` (unit:
 backoff sequence, per-attempt race, Active-only classification, InvalidChain failure records,
 semaphore, deadline remainder); `useFullBackupImport` tail (deadline, race, skip synthesis,
