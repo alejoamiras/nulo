@@ -188,6 +188,51 @@ Related product gap (tracked separately): restore writes networks with Local LAS
 seeds defaults only when ZERO network rows exist — a kill mid-network-writes leaves the profile
 without "Local" permanently.
 
+## Deflake-arc lessons (2026-08-11, `implementations-plan/e2e-deflake/`)
+
+- **`navigateByHash`'s hash-equality wait proves nothing about router commitment.**
+  Setting `location.hash` updates the URL synchronously; a competing in-flight
+  `router.push` then supersedes the navigation and the hash REVERTS — the destination
+  page never mounts and any following selector wait parks. Reproduced solo/idle
+  (load-independent logic race). Fix pattern: settle-STABLE navigation — destination
+  selector mounted AND hash held continuously across a monotonic dwell; one
+  re-navigation for the characterized race; a second revert fails loudly (recurring
+  redirects are a product signal, never normalized). See `resetProfile`.
+- **A plain `waitForFunction` is NEVER a stability check** — it resolves on its first
+  truthy poll; `timeout` is a ceiling, not a dwell. A real dwell tracks continuity
+  in page state (`performance.now()` marker nulled on any deviation) and returns true
+  only after N continuous ms. (Round-2 codex catch — the fake version shipped first.)
+- **Write-gated retries starve on silent failures.** The token-balance projection
+  pipeline persists NO failure record (unlike the gas pipeline post-#355), so
+  "attempt still running" and "attempt failed" are indistinguishable from storage.
+  A retry that waits for the previous attempt's WRITE before re-kicking locks up
+  after one silent failure — bound the re-kick cadence with a documented envelope;
+  keep the ACCEPTANCE signal causal (freshness + exact value).
+- **Freshness-gate imported-state assertions.** An imported backup already carries
+  the expected balances with nonzero `updatedAt` — a value-only poll can pass with
+  ZERO post-import sync. Capture the baseline `updatedAt` first; require
+  `> baseline` AND the exact raw value AND a card-scoped render assert.
+- **Purge completion = row (proven present pre-submit) + exact tombstone + owned
+  roots all gone.** `reset.vue` AWAITS the full purge before navigating — route
+  waits sized for a hop race the cascade. Tombstone absence ALONE is also true
+  before deletion starts. See `captureSoleProfileId` + `waitForProfilePurged`.
+- **Execute popup: "op rows rendered" ≠ "approvable".** `waitForExecuteContent`
+  is strictly weaker than the confirm button's native `disabled` (init + metadata +
+  fee-selection gates). Wait on the LIVE disabled attribute + `pointerEvents`
+  (`waitForExecuteApprovable`) — never re-derive the Vue boolean logic. Timings are
+  appended to `.e2e-state/exec-approvable-timings.log` (1–402ms warm; CI cold-shard
+  multiplier is the budget rationale).
+- **Preserve FULL gate-run logs (tee to a file), never bare `tail`.** A clipped
+  failure block cost a diagnosis once; the very next preserved red was root-caused
+  from its dump in minutes.
+- **CI setup no longer installs foundry-toolchain** — the aztec pin's `internal-bin`
+  (own pinned+retried foundry) is the only consumed toolchain, now preflight-asserted
+  in `setup-aztec` (fails loudly if an installer regression drops it).
+- **The smoke `backup-roundtrip` post-import route wait is OPEN (owner)**: the route
+  is gated on `isLogined`, flipped only after the RPC-bound `syncTransactions`
+  against the seeded public testnet — an RPC-dependency, not a timeout problem.
+  Diagnostics (route trace + parked-state dump) are armed; do NOT raise the bound.
+
 ## PR-workflow silence — check mergeability first
 
 If a push to a PR branch triggers NO workflows at all (not even Quality; only Cloudflare checks

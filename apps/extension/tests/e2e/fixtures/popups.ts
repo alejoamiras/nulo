@@ -6,6 +6,8 @@
  * and lets us match popup targets by ID instead of by substring (which races
  * on Linux Xvfb where windows can stack).
  */
+import { appendFileSync, mkdirSync } from "node:fs"
+import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
 import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
 
@@ -239,13 +241,85 @@ export async function rejectCapabilities(page: Page): Promise<void> {
 }
 
 /**
+ * Wait for the execute popup to be APPROVABLE: the confirm button's native
+ * `disabled` aggregates ALL its gates (`windows/execute/index.vue` — payload
+ * init, register_token metadata, fee selection), so reading the live attribute
+ * is drift-proof; the pointer-events clause additionally covers the CSS-only
+ * `loading` state the design Button never reflects into `disabled`. Deliberately
+ * does NOT wait for fee ESTIMATES to settle — they don't gate the button and
+ * `approve()` treats them as optional.
+ *
+ * `waitForExecuteContent` (op rows rendered) is a strictly weaker signal: the
+ * fee-selection settle happens after rows render, and on a cold shard that gap
+ * alone historically blew the generic 10s click wait (flake-ledger entries 4/5).
+ * Budget rationale: the DEFAULT stays 10s — the suite's prior latency tolerance,
+ * now on the correct signal (post-impl audit: don't widen every caller without
+ * per-caller evidence). The two historically-cold callers pass 120s explicitly —
+ * the budget the sibling Send flow uses for the same FeeSettingsCard gate. The
+ * telemetry below accumulates the evidence for any future per-caller change.
+ *
+ * Every wait appends `content_ready→approvable` timing to
+ * `.e2e-state/exec-approvable-timings.log` (worktree-local; uploaded with the CI
+ * failure artifact) — passing runs produce evidence too, since vitest swallows
+ * console output for passing tests.
+ */
+export async function waitForExecuteApprovable(page: Page, timeout = 10_000): Promise<void> {
+	const t0 = Date.now()
+	try {
+		await page.waitForFunction(
+			() => {
+				const btn = document.querySelector('[data-testid="execute-confirm-btn"]') as HTMLButtonElement | null
+				return !!btn && !btn.disabled && getComputedStyle(btn).pointerEvents !== "none"
+			},
+			{ timeout, polling: 200 },
+		)
+	} catch (err) {
+		const diag = await page
+			.evaluate(() => {
+				const btn = document.querySelector('[data-testid="execute-confirm-btn"]') as HTMLButtonElement | null
+				return {
+					btnInDom: !!btn,
+					btnDisabled: btn?.disabled ?? null,
+					btnPointerEvents: btn ? getComputedStyle(btn).pointerEvents : null,
+					errorText: document.querySelector('[data-testid="error-text"]')?.textContent?.slice(0, 200) ?? null,
+					feeMethod: document.querySelector('[data-testid="send-fee-method-trigger"]')?.getAttribute("data-fee-method") ?? null,
+					opCount: document.querySelectorAll('[data-testid="execute-op-item"]').length,
+				}
+			})
+			.catch((e) => ({ evalFailed: String(e) }))
+		recordApprovableTiming(`TIMEOUT after=${timeout}ms diag=${JSON.stringify(diag)}`)
+		throw new Error(
+			`waitForExecuteApprovable: not approvable after ${timeout}ms: ${JSON.stringify(diag)}; original: ${(err as Error).message}`,
+		)
+	}
+	recordApprovableTiming(`ok elapsed_ms=${Date.now() - t0}`)
+}
+
+function recordApprovableTiming(line: string): void {
+	try {
+		const dir = join(process.cwd(), ".e2e-state")
+		mkdirSync(dir, { recursive: true })
+		appendFileSync(join(dir, "exec-approvable-timings.log"), `${new Date().toISOString()} ${line}\n`)
+	} catch {
+		// Telemetry only — never fail a test over it.
+	}
+}
+
+/**
  * Approve a /windows/execute popup, optionally overriding the fee method.
  *
  * FeeSettingsCard is shared with the wallet's own send flow; its testids stay
  * `send-fee-method-trigger` / `send-fee-method-{kind}`. Two-step override:
  * first click trigger, then click the chosen method.
+ *
+ * `approvableTimeoutMs` — cold-path callers (the FIRST execute popups of a fresh
+ * browser/account) pass 120s, matching the sendTransfer precedent for the same
+ * gate; everyone else keeps the suite's prior 10s tolerance.
  */
-export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored" | "fj" | "fpc" } = {}): Promise<void> {
+export async function approveExecute(
+	page: Page,
+	opts: { feeMethod?: "sponsored" | "fj" | "fpc"; approvableTimeoutMs?: number } = {},
+): Promise<void> {
 	if (opts.feeMethod) {
 		// FeeSettingsCard mounts after FPC auto-discovery completes — that's an async
 		// service round-trip that can take several seconds on cold start. Wait for the
@@ -260,6 +334,12 @@ export async function approveExecute(page: Page, opts: { feeMethod?: "sponsored"
 			;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
 		}, opts.feeMethod)
 	}
+	// Gate on the real approvable signal BEFORE the click — clickByTestId's
+	// generic 10s assumed the button was already (about to be) enabled, which is
+	// exactly what a cold shard breaks. The final click stays delegated to
+	// clickByTestId for its target-detach swallow (the popup self-closes on the
+	// click that resolves the interaction).
+	await waitForExecuteApprovable(page, opts.approvableTimeoutMs ?? 10_000)
 	await clickByTestId(page, "execute-confirm-btn")
 }
 

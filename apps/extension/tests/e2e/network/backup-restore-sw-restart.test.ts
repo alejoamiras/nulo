@@ -41,12 +41,13 @@ import {
 	type ExtensionContext,
 } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	ensureUnlocked,
 	getAccountAddress,
 	navigateByHash,
-	refreshBalances,
 	switchToLocalNetwork,
-	waitForBalance,
+	waitForFreshBalanceRow,
+	waitForTokenCardAmount,
 } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import {
@@ -166,6 +167,66 @@ test.skipIf(!hasConfig)(
 				console.warn(`[sw-restart-restore] marker=${midRestore}; killing anyway (post-import restart leg)`)
 			}
 			await stopServiceWorker(ctx2)
+			// The ROLLED-BACK outcome is dispatched by THIS page's catch: the SW kill
+			// rejects its in-flight restore RPC, the catch calls deleteProfile, and that
+			// call wakes the restarted SW. Closing the page immediately RACES that
+			// dispatch — when close wins, NEITHER designed outcome materializes:
+			// profile+account rows survive un-finalized with token/balance slices
+			// missing (observed live, census {tokenRows:0, accountRows:2}), the
+			// reopened popup masquerades as RECOVERED, and no balance can ever
+			// converge. A real SW restart leaves the page open (this test's scenario);
+			// close-before-dispatch models a browser CRASH, whose silent partial
+			// restore is a PRODUCT gap tracked in the deflake ledger, not this test's
+			// subject. Hold the page until the post-kill fork is OBSERVABLE, then
+			// close — the SW-side deletion cascade, once dispatched, survives page
+			// close. chrome.storage is page-direct (not SW-routed), so these reads
+			// work with the SW down.
+			// Fork outcomes (audit-corrected): `general` AND `auth` are both designed
+			// completion routes of the in-page recovery (`needs-unlock` routes to auth);
+			// tombstone-present / zero-profile-rows mark a dispatched rollback. A fork
+			// that stays unobserved is NOT a test failure by itself — the import flow
+			// has a designed failure state that RETAINS the profile without a tombstone
+			// (post-finalize-start errors), and its validity is decided by the reopen
+			// path's on-chain assertions below, not pre-judged here. The hold's job is
+			// only to give the page's rollback/recovery a chance to dispatch before the
+			// close (the race that manufactured the phantom partial-restore state).
+			let forkErr = ""
+			const postKillFork = await page2
+				.waitForFunction(
+					async () => {
+						const h = window.location.hash
+						if (h.includes("general") || h.includes("auth")) return "actionable-route"
+						const all = await chrome.storage.local.get()
+						const keys = Object.keys(all)
+						if (keys.some((k) => k.startsWith("nulo:core:profile-tombstones@"))) return "rollback-dispatched"
+						if (!keys.some((k) => k.startsWith("nulo:core:profiles@"))) return "rollback-row-deleted"
+						return false
+					},
+					{ timeout: 45_000, polling: 200 },
+				)
+				.then((h) => h.jsonValue())
+				.catch((e) => {
+					forkErr = e instanceof Error ? e.message : String(e)
+					return "fork-unobserved"
+				})
+			if (postKillFork === "fork-unobserved") {
+				const dump = await page2
+					.evaluate(async () => {
+						const all = await chrome.storage.local.get()
+						return {
+							hash: window.location.hash,
+							coreKeys: Object.keys(all)
+								.filter((k) => k.startsWith("nulo:core:"))
+								.slice(0, 30),
+						}
+					})
+					.catch((e) => ({ evalFailed: String(e) }))
+				console.warn(
+					`[sw-restart-restore] post-kill fork unobserved in 45s (designed retain-without-rollback state, or slow recovery); proceeding to reopen — the on-chain assertions decide. state: ${JSON.stringify(dump)}; waitErr: ${forkErr}`,
+				)
+			} else {
+				console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
+			}
 			await page2.close()
 
 			// ── 3. The user's natural recovery: reopen + unlock ─────────────
@@ -297,16 +358,24 @@ test.skipIf(!hasConfig)(
 			}
 
 			// ── 4. Both legs converge: the imported account syncs its REAL balance ──
+			// FRESHNESS-gated: the imported/re-imported backup already carries the
+			// funded rows with nonzero updatedAt, so a value-only wait could pass
+			// without any post-recovery sync. Baseline is captured here (post-recovery,
+			// pre-refresh) so only a projection that ran AFTER this point satisfies the
+			// wait; the exact raw row value + a card-scoped display assert replace the
+			// body-text scan (false-positive prone) and the 40× refresh spam (starves
+			// the popup thread, queues PXE readers). Same ~240s total envelope.
 			await switchToLocalNetwork(page3)
 			expect(await getAccountAddress(page3)).toBe(funded)
-			for (let i = 0; i < 40; i++) {
-				await refreshBalances(page3)
-				if ((await page3.evaluate(() => document.body.innerText)).includes("1,000")) break
-				await page3
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page3, "1,000", 120_000)
+			const recoveryBaseline = await captureBalanceBaseline(page3, funded, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page3, {
+				account: funded,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: recoveryBaseline,
+				timeoutMs: 210_000,
+			})
+			await waitForTokenCardAmount(page3, "1,000", "TST")
 		} finally {
 			await ctx2.browser.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })

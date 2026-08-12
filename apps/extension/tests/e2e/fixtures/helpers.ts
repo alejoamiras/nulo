@@ -1031,12 +1031,102 @@ export async function changePassword(page: Page, oldPwd: string, newPwd: string)
  *  profile's name into the confirm input, and submit. Profile name is read
  *  from `data-profile-name` on the page root because it's auto-generated.
  *
+ *  Navigation is SETTLE-STABLE, not one-shot: setting `location.hash` updates the
+ *  URL before vue-router commits, so a hash-equality wait passes while a competing
+ *  `router.push("/popup/general")` (SW-reconnect `loadProfile` re-run, post-unlock
+ *  bootstrap churn) can still supersede the in-flight navigation and revert the
+ *  route — the checkbox then never mounts. Observed live: the 5s checkbox wait
+ *  parked with the app fully back on general. The awaited signal here is "the
+ *  reset route COMMITTED (checkbox mounted) and STUCK"; a reverted hash triggers
+ *  a re-navigate, not a longer clock.
+ *
  *  After submit the router redirects to either `/popup/auth` (if other
  *  profiles remain) or `/popup/register` (if it was the last profile). The
  *  caller asserts the redirect; this helper does not. */
 export async function resetProfile(page: Page): Promise<void> {
-	await navigateByHash(page, "#/popup/settings/security/reset")
-	await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+	const RESET_HASH = "#/popup/settings/security/reset"
+	// One re-navigation covers the single characterized race (a competing push
+	// already in flight when the hash was set supersedes our navigation). A SECOND
+	// revert would mean the app is repeatedly redirecting away from reset — a
+	// product-level condition this helper must surface, never normalize.
+	const ATTEMPTS = 2
+	// The dwell must be monotonic: the route+checkbox condition has to hold
+	// CONTINUOUSLY for the window, tracked in-page — a plain waitForFunction
+	// resolves on its first truthy poll and proves nothing about stability.
+	const DWELL_MS = 1_500
+
+	// Poll-based hash trajectory (vue-router hash nav is pushState-based — no
+	// hashchange/popstate fires), dumped into every failure for race forensics.
+	// Re-armed per call (a prior call's timer is cleared) so a second
+	// resetProfile on the same page never reports a frozen call-1 trace.
+	await page.evaluate(() => {
+		const w = window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }>; __nuloResetNavTraceTimer?: number }
+		if (w.__nuloResetNavTraceTimer) window.clearInterval(w.__nuloResetNavTraceTimer)
+		w.__nuloResetNavTrace = [{ t: Date.now(), hash: window.location.hash }]
+		w.__nuloResetNavTraceTimer = window.setInterval(() => {
+			const trace = w.__nuloResetNavTrace as Array<{ t: number; hash: string }>
+			if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
+		}, 100)
+	})
+
+	let lastDiag = ""
+	let settled = false
+	for (let attempt = 0; attempt < ATTEMPTS && !settled; attempt++) {
+		try {
+			// INSIDE the try: the competing-push race can also land between
+			// navigateByHash's hash-set and its equality poll — that throw must
+			// count as a failed attempt (retry + diagnostics), never escape the
+			// envelope uncaught with the trace interval still running.
+			await navigateByHash(page, RESET_HASH)
+			await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+			await page.evaluate(() => {
+				;(window as unknown as { __resetStableSince: number | null }).__resetStableSince = null
+			})
+			await page.waitForFunction(
+				({ h, dwellMs }: { h: string; dwellMs: number }) => {
+					const w = window as unknown as { __resetStableSince: number | null }
+					const ok = window.location.hash === h && !!document.querySelector('[data-testid="reset-checkbox-permanent"]')
+					if (!ok) {
+						w.__resetStableSince = null
+						return false
+					}
+					// performance.now() — the dwell must be monotonic; a wall-clock
+					// adjustment could silently shorten or stretch it.
+					if (w.__resetStableSince == null) w.__resetStableSince = performance.now()
+					return performance.now() - w.__resetStableSince >= dwellMs
+				},
+				{ timeout: 8_000, polling: 150 },
+				{ h: RESET_HASH, dwellMs: DWELL_MS },
+			)
+			settled = true
+		} catch {
+			lastDiag = JSON.stringify(
+				await page
+					.evaluate(() => ({
+						hash: window.location.hash,
+						pageRootMounted: !!document.querySelector("[data-profile-name]"),
+						checkboxInDom: !!document.querySelector('[data-testid="reset-checkbox-permanent"]'),
+						navTrace: (window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }> }).__nuloResetNavTrace,
+						testidsOnPage: [...document.querySelectorAll("[data-testid]")]
+							.slice(0, 12)
+							.map((el) => el.getAttribute("data-testid")),
+						readyState: document.readyState,
+					}))
+					.catch((e) => ({ evalFailed: String(e) })),
+			)
+		}
+	}
+	await page
+		.evaluate(() => {
+			const w = window as unknown as { __nuloResetNavTraceTimer?: number }
+			if (w.__nuloResetNavTraceTimer) window.clearInterval(w.__nuloResetNavTraceTimer)
+		})
+		.catch(() => {})
+	if (!settled) {
+		throw new Error(
+			`resetProfile: reset route never held for ${DWELL_MS}ms across ${ATTEMPTS} navigations; last parked state: ${lastDiag}`,
+		)
+	}
 	const profileName = await getActiveProfileName(page)
 
 	await clickByTestId(page, "reset-checkbox-permanent")
@@ -1044,6 +1134,256 @@ export async function resetProfile(page: Page): Promise<void> {
 	await clickByTestId(page, "reset-checkbox-sure")
 	await replaceInputValue(page, '[data-testid="reset-confirm-input"]', profileName)
 	await clickByTestId(page, "reset-submit-btn")
+}
+
+/** Highest `updatedAt` across the account's balance rows (0 if none). Captured
+ *  BEFORE a refresh so `waitForFreshBalanceRow` can require a projection that
+ *  happened AFTER it — an imported backup already carries the expected value
+ *  with a nonzero `updatedAt`, so a value-only poll could pass with zero
+ *  post-import/post-reopen sync, silently un-proving the re-sync the tests
+ *  exist to prove. */
+export async function captureBalanceBaseline(page: Page, account: string, tokenContract: string): Promise<number> {
+	return await page.evaluate(
+		async ({ acct, contract }: { acct: string; contract: string }) => {
+			const all = await chrome.storage.local.get(null)
+			// Bind to the exact (account, token) rows: another token's row with the same
+			// raw value must never satisfy the later freshness/value acceptance.
+			const tokenIds = new Set<number>()
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:tokens@")) continue
+				try {
+					const row = JSON.parse(v as string) as { id?: number; contract?: string }
+					if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+				} catch {
+					// Hostile-input discipline: a malformed row is ignored, never fatal.
+				}
+			}
+			let max = 0
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:token-balances@")) continue
+				try {
+					const row = JSON.parse(v as string) as { account?: string; token?: number; updatedAt?: number }
+					if (row.account !== acct || typeof row.token !== "number" || !tokenIds.has(row.token)) continue
+					if (typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
+				} catch {
+					// Malformed row: skip.
+				}
+			}
+			return max
+		},
+		{ acct: account, contract: tokenContract },
+	)
+}
+
+/** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
+ *  captured baseline — proves a re-projection actually ran) and CORRECT (exact
+ *  raw `publicBalance`). Drives at most `maxRefreshes` refreshes. Retry cadence:
+ *  a refresh is re-kicked when the previous projection observably finished (some
+ *  row's `updatedAt` advanced past the last refresh) OR a bounded projection
+ *  envelope elapsed with no write — a FAILED projection writes nothing (the
+ *  token-balance pipeline persists no failure record; the gas pipeline got a
+ *  retry in the cold-start work, this one did not), so "still running" and
+ *  "failed silently" are indistinguishable from storage and waiting for a write
+ *  alone can starve the loop at one refresh (observed live: correct row, stale
+ *  updatedAt, 1 refresh in 90s). The envelope bounds only WHEN TO RE-KICK, never
+ *  the acceptance signal, which stays freshness + exact value. Bounded refreshes
+ *  (not spam) matter: blind spam starves the popup thread and queues PXE readers
+ *  that delay any subsequent purge (ReadWriteGuard drains readers first). The row
+ *  read is exact and locale-independent — a body-text scan for "1,000" can
+ *  false-positive on "$1,000.00" fiat or "11,000". Callers follow with a
+ *  card-scoped DOM assertion (`waitForTokenCardAmount`) so projection→render
+ *  stays proven. */
+export async function waitForFreshBalanceRow(
+	page: Page,
+	opts: {
+		account: string
+		tokenContract: string
+		expectedPublicRaw: string
+		baselineUpdatedAt: number
+		maxRefreshes?: number
+		timeoutMs?: number
+	},
+): Promise<void> {
+	// Default the refresh budget to SPAN the whole timeout at envelope pacing:
+	// there is no ambient periodic re-sync (projections fire only on explicit
+	// refresh / token events / tx updates) and a failed batch is dropped, never
+	// re-enqueued — a fixed small cap starves, leaving a dead tail in which no
+	// projection can be triggered and the wait false-FAILs (post-impl review).
+	// Pacing (one refresh per finished-attempt-or-envelope) is what prevents
+	// spam; the cap just needs to not run out before the budget does.
+	// Queue tick (1s) + a ≤12-row projection batch + margin — bounds the re-kick
+	// cadence only, never the acceptance signal.
+	const REFRESH_ENVELOPE_MS = 15_000
+	const { account, tokenContract, expectedPublicRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
+	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / REFRESH_ENVELOPE_MS)
+	const deadline = Date.now() + timeoutMs
+	type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
+	// The (account, token) join re-resolves EVERY poll: after a restore the token
+	// row itself can land later than the first read, and binding to the exact
+	// token is what stops another token's identical raw value from satisfying
+	// the acceptance (audit condition).
+	const readRows = (): Promise<BalanceRow[]> =>
+		page.evaluate(
+			async ({ acct, contract }: { acct: string; contract: string }) => {
+				const all = await chrome.storage.local.get(null)
+				const tokenIds = new Set<number>()
+				for (const [k, v] of Object.entries(all)) {
+					if (!k.startsWith("nulo:core:tokens@")) continue
+					try {
+						const row = JSON.parse(v as string) as { id?: number; contract?: string }
+						if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+					} catch {
+						// Malformed row: skip.
+					}
+				}
+				const rows: Array<{
+					account?: string
+					token?: number
+					publicBalance?: string
+					privateBalance?: string
+					updatedAt?: number
+				}> = []
+				for (const [k, v] of Object.entries(all)) {
+					if (!k.startsWith("nulo:core:token-balances@")) continue
+					try {
+						const row = JSON.parse(v as string) as { account?: string; token?: number }
+						if (row.account === acct && typeof row.token === "number" && tokenIds.has(row.token)) rows.push(row)
+					} catch {
+						// Malformed row: skip.
+					}
+				}
+				return rows
+			},
+			{ acct: account, contract: tokenContract },
+		)
+
+	let refreshes = 0
+	let lastRefreshAt = 0
+	let rows: BalanceRow[] = []
+	while (Date.now() < deadline) {
+		rows = await readRows()
+		if (rows.some((r) => (r.updatedAt ?? 0) > baselineUpdatedAt && r.publicBalance === expectedPublicRaw)) return
+		const attemptFinished =
+			refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt) || Date.now() - lastRefreshAt >= REFRESH_ENVELOPE_MS
+		if (attemptFinished && refreshes < maxRefreshes) {
+			lastRefreshAt = Date.now()
+			refreshes++
+			await refreshBalances(page)
+		}
+		await new Promise((r) => setTimeout(r, 1_000))
+	}
+	// Census across roots, account-agnostic: distinguishes "the account's rows are
+	// keyed differently" from "the token/balance slices are simply absent" — the
+	// latter points at restore-slice loss, a product condition, not a wait problem.
+	const census = await page
+		.evaluate(async () => {
+			const all = await chrome.storage.local.get(null)
+			const keys = Object.keys(all)
+			const grab = (p: string) => keys.filter((k) => k.startsWith(p))
+			return {
+				tokenRows: grab("nulo:core:tokens@").length,
+				balanceRows: grab("nulo:core:token-balances@").map((k) => {
+					try {
+						const r = JSON.parse(all[k] as string) as { account?: string; updatedAt?: number }
+						return { account: `${r.account?.slice(0, 10)}…`, updatedAt: r.updatedAt }
+					} catch {
+						return { account: "unparseable", updatedAt: -1 }
+					}
+				}),
+				accountRows: grab("nulo:core:accounts@").length,
+			}
+		})
+		.catch((e) => ({ censusFailed: String(e) }))
+	throw new Error(
+		`waitForFreshBalanceRow: no (${account}, ${tokenContract}) row with publicBalance=${expectedPublicRaw} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}; census: ${JSON.stringify(census)}`,
+	)
+}
+
+/** Card-scoped display assertion: the tokens-card for `symbol` shows exactly
+ *  `displayAmount` — the card is selected by its `data-symbol` attribute, the
+ *  fiat node is excluded (so "$1,000.00" can't satisfy a "1,000" check), and
+ *  the amount must sit on digit boundaries (so "11,000" or "1,000.5" can't
+ *  satisfy "1,000" as a substring — audit condition). */
+export async function waitForTokenCardAmount(page: Page, displayAmount: string, symbol: string, timeout = 30_000): Promise<void> {
+	await page.waitForFunction(
+		({ amt, sym }: { amt: string; sym: string }) => {
+			const boundary = new RegExp(`(^|[^\\d,.])${amt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\d,.])`)
+			return [...document.querySelectorAll('[data-testid="tokens-card"]')].some((card) => {
+				if (!card.querySelector(`[data-testid="token-symbol"][data-symbol="${sym}"]`)) return false
+				const clone = card.cloneNode(true) as HTMLElement
+				for (const fiat of clone.querySelectorAll('[data-testid="token-fiat"]')) fiat.remove()
+				return boundary.test(clone.textContent ?? "")
+			})
+		},
+		{ timeout, polling: 500 },
+		{ amt: displayAmount, sym: symbol },
+	)
+}
+
+/** Capture the sole profile's id from raw storage and PROVE its row exists — the
+ *  pre-condition that makes a later "row absent" read mean DELETED rather than
+ *  never-created. Expects exactly one profile row (the shape of every reset-flow
+ *  e2e); throws otherwise so a multi-profile drift can't silently weaken the
+ *  purge assertion. */
+export async function captureSoleProfileId(page: Page): Promise<string> {
+	const ids = await page.evaluate(async () => {
+		const all = await chrome.storage.local.get(null)
+		return Object.keys(all)
+			.filter((k) => k.startsWith("nulo:core:profiles@"))
+			.map((k) => k.slice("nulo:core:profiles@".length))
+	})
+	if (ids.length !== 1) throw new Error(`captureSoleProfileId: expected exactly 1 profile row, found ${ids.length}`)
+	return ids[0]
+}
+
+/** Wait until profile deletion COMPLETED for `profileId`: its row gone, its exact
+ *  tombstone (`nulo:core:profile-tombstones@<id>`) gone, and every given owned
+ *  root emptied. The tombstone is written BEFORE the row delete and cleared only
+ *  after the coordinator's full awaited purge resolves, so this combined
+ *  predicate — anchored on a row proven to exist beforehand — is the same
+ *  completion fact the reset page's awaited `deleteProfile` observes. Tombstone
+ *  absence ALONE would also be true before deletion ever started, which is why
+ *  callers must capture the id via `captureSoleProfileId` first. On timeout the
+ *  remaining keys are dumped: a persisting tombstone+row means a rejected or
+ *  wedged purge; owned-root leftovers mean a partial cascade. */
+export async function waitForProfilePurged(
+	page: Page,
+	profileId: string,
+	opts: { ownedRoots?: string[]; timeoutMs?: number } = {},
+): Promise<void> {
+	const { ownedRoots = [], timeoutMs = 75_000 } = opts
+	const deadline = Date.now() + timeoutMs
+	let last: Record<string, boolean> = {}
+	while (Date.now() < deadline) {
+		last = await page.evaluate(
+			async ({ id, roots }: { id: string; roots: string[] }) => {
+				const all = await chrome.storage.local.get(null)
+				const keys = Object.keys(all)
+				const state: Record<string, boolean> = {
+					profileRow: keys.includes(`nulo:core:profiles@${id}`),
+					tombstone: keys.includes(`nulo:core:profile-tombstones@${id}`),
+				}
+				for (const r of roots) state[r] = keys.some((k) => k.startsWith(`${r}@`))
+				return state
+			},
+			{ id: profileId, roots: ownedRoots },
+		)
+		if (!Object.values(last).some(Boolean)) return
+		await new Promise((r) => setTimeout(r, 500))
+	}
+	// The "Couldn't delete profile" rejection toast auto-dismisses in ~2s, so it
+	// cannot be sampled at timeout; the persisting tombstone+row combination IS the
+	// rejected-or-wedged signature. Session presence distinguishes "delete never
+	// started (still logged in, nothing changed)" from "mid-purge wedge".
+	const sessionPresent = await page
+		.evaluate(async () => {
+			const r = await chrome.storage.session.get("nulo:core:session")
+			return !!r["nulo:core:session"]
+		})
+		.catch(() => "unreadable")
+	throw new Error(
+		`waitForProfilePurged: purge incomplete after ${timeoutMs}ms for profile ${profileId}: ${JSON.stringify(last)}; sessionPresent=${sessionPresent}`,
+	)
 }
 
 /** Drive the seed-phrase reveal flow on `/popup/settings/security/export/seed`.

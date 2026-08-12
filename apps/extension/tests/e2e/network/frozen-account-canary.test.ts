@@ -159,7 +159,7 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-grantPublicAuthwit")
 		const grantPopup = await grantPopupP
 		await waitForExecuteContent(grantPopup)
-		await approveExecute(grantPopup)
+		await approveExecute(grantPopup, { approvableTimeoutMs: 120_000 })
 		const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 300_000)
 		expect(grantResult.status).toBe("ok")
 		const grantTxHash = txHashOf(grantResult.resultJson)
@@ -183,7 +183,7 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-consumeAuthwit")
 		const consumePopup = await consumePopupP
 		await waitForExecuteContent(consumePopup)
-		await approveExecute(consumePopup)
+		await approveExecute(consumePopup, { approvableTimeoutMs: 120_000 })
 		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 300_000)
 		expect(consumeResult.status).toBe("ok")
 		const consumeTxHash = txHashOf(consumeResult.resultJson)
@@ -283,7 +283,7 @@ test.skipIf(!hasConfig)(
 		})
 		const finalPopup = await Promise.race([finalPopupP, errorSentinel])
 		await waitForExecuteContent(finalPopup)
-		await approveExecute(finalPopup)
+		await approveExecute(finalPopup, { approvableTimeoutMs: 120_000 })
 		const finalResult = await waitForPgResult(page, "sendTx", seqFinal, 300_000)
 		expect(finalResult.status).toBe("ok")
 		const finalTxHash = txHashOf(finalResult.resultJson)

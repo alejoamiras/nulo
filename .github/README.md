@@ -42,7 +42,7 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 - Push a commit on a feature branch → no CI runs; local pre-commit hook handles biome + commitlint.
 - Open a PR to `dev` → `pr-quick` runs. `pr-smoke-e2e` and `pr-network-e2e` run only if their paths-filter trips OR their respective label is on the PR.
 - Open a PR to `main` → `pr-quick`, `pr-smoke-e2e`, `pr-network-e2e` all run unconditionally.
-- Add `e2e:smoke` or `e2e:network` to an open PR → that workflow triggers on the next sync (remove the label to re-evaluate).
+- Add `e2e:smoke` or `e2e:network` to an open PR → that workflow fires a fresh run immediately (`labeled` is a subscribed event type; no push needed). Removing the label re-evaluates the gate (`unlabeled`).
 - Click "Run workflow" on `release.yml` → manual release (must supply `version` + `channel`).
 
 ## Labels
