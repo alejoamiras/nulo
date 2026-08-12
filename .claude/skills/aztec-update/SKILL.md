@@ -119,6 +119,18 @@ Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, n
 - `FeeJuice.claim_and_end_setup` is ONLY valid as the fee payload (setup phase — where `FeeJuicePaymentMethodWithClaim` places it). An app-phase claim under a sponsored fee must use plain `claim`, or it asserts on EVERY attempt — which looks exactly like a slow L1→L2 message sync if the retry loop swallows errors. Print the caught error on the retry cadence, and when a claim "never syncs", independently check the message witness (`node_getL1ToL2MessageMembershipWitness` with the key from the portal's deposit event) before blaming the network.
 - Blanket `biome check --write` on test trees converts `vi.fn(function () {…})` mocks to arrows and breaks `new`-constructed service-client mocks (~95 failures) — format only the files you touched.
 
+- **CI's aztec toolchain install has NO min-age gate — un-pinned transitives walk in on publish
+  day.** The repo's `bunfig.toml` 7-day gate covers OUR deps only; `.github/actions/setup-aztec`
+  runs the upstream installer, whose npm resolve is live. 2026-08-12: `snappy@7.4.0` (broken Node
+  entry chain — unconditionally reaches the never-installed-on-linux `@napi-rs/snappy-wasm32-wasi`
+  fallback) killed every fresh CI sandbox boot the day it published, while local runs stayed green
+  on pre-publish `~/.aztec` trees. The action now carries a load-check-gated pin step (replaces
+  snappy with 7.3.3 by direct tarball extraction, no-op when the installed one loads, fail-loud
+  re-check) — **remove that step when bumping to an @aztec line whose install resolves a fixed
+  snappy** (check: fresh-install in a scratch HOME, then `node -e "require('snappy')"` against the
+  version dir). Same class can recur through any un-pinned transitive: diagnose via publish-time
+  correlation + bare local `npm install` repro before rerunning CI.
+
 - **Standards/token package swaps: noir struct paths are NOT stable across dep graphs.** The same
   `AztecAddress` param can arrive as `aztec::protocol_types::…::AztecAddress` from one compile and
   `authorization_contract::aztec::protocol_types::…::AztecAddress` (crate-prefixed by the artifact's

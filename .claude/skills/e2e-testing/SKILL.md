@@ -297,6 +297,10 @@ silently OVERWROTE the armed dist — the next `test:e2e` run failed its 5 migra
 the un-armed signature (load flake scatters; disarming repeats exactly). **After ANY other build
 in the session, re-arm before smoke**: `VITE_NULO_E2E_MIGRATION_FIXTURE=1
 VITE_NULO_E2E_DEFAULT_NET=testnet bun run build:chrome` (CI parity, `_smoke-e2e.yml`).
+Fourth instance (2026-08-12): `bun run audit:vue` ends with a plain `build` — running it as a
+pre-push gate silently un-arms the dist, so the armed-smoke gate that follows it reds on the
+same 90s-import signature. Gate ordering matters: audit:vue first, THEN the armed build, THEN
+armed smoke.
 
 ### Rules
 
@@ -332,3 +336,17 @@ files is green, suspect the RUN ENVIRONMENT before any code path:
    re-run reproduced the boot line anyway.
 4. A green isolated re-run of a few failed files confirms environment, not code. Re-run the
    full suite solo before touching any test.
+
+### CI variant: every shard dead at sandbox BOOT with the same module/setup error
+
+When the whole CI network matrix (all shards + heavies + canary) fails identically at
+`e2e-setup` while local solo runs are green, suspect the FRESH toolchain install, not the
+tests (2026-08-12: `snappy@7.4.0` published that day broke every fresh `aztec-up` install with
+`ERR_MODULE_NOT_FOUND: @napi-rs/snappy-wasm32-wasi`; local runs never saw it because the
+pre-existing `~/.aztec` predated the publish). Protocol: (1) read the FIRST error in the
+`[aztec-node]` boot log — the `Address already in use (os error 98)` line above it is benign
+noise (see rule 2); (2) correlate `registry.npmjs.org/<pkg>` publish times against the failure
+window; (3) reproduce with a bare `npm install <pkg>@<ver>` + load-check OUTSIDE CI before
+burning reruns — if it reproduces, reruns can NEVER go green and the fix is a toolchain pin
+(see the `aztec-update` skill), not patience. Two same-signature rerun failures = stop
+assuming "transient".
