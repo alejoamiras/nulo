@@ -256,3 +256,20 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
 - Retry census (post-A1, pre-certification): two full ARMED smoke runs with retries +
   RetryErrorReporter — ZERO retry-passes suite-wide. The smoke suite enters certification
   retry-clean.
+- `backup-restore-sw-restart` (mid-restore-kill test, bootstrap-route-decouple arc) red
+  ONCE on #365's content run (shard 3, run 31734785738, 2026-08-13): the designed-retry
+  re-import's `waitForHash` 300s lapsed after the log's slow-runner marker fired
+  ("post-kill fork unobserved in 45s"). Same head's parallel import tests green (smoke
+  import-paths + backup-migration; network backup-restore-integrity + migration-roundtrip
+  in other shards) → route path sound; single-occurrence slow-runner flake, PR diff
+  (docs+tests) doesn't touch the path. Green on all 3 certification triggers immediately
+  after. OPEN watch — if it recurs, the 300s wait needs a causal progress signal, not a
+  bigger bound.
+
+## deflake-round-2 certification (2026-08-13, PR #365)
+
+3 consecutive qualifying greens on the frozen tree (e2e-deflake Phase 6 rules): heads
+`ba33d81b` → `b164b56e` → `c6ce1264`, each all-three-suites green at run_attempt=1, zero
+vitest-retry markers in runtime logs (network shards run NULO_E2E_RETRY=0 by gate design;
+smoke's retry:2 unconsumed), zero exit-86/infra-reboot warnings, all 8 network agent jobs
+ran green, each campaign run completed before the next trigger. A1–A5 + B6–B7 closed.
