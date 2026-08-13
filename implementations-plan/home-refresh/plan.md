@@ -60,7 +60,8 @@ Spec source: five owner-review rounds, final render published as the "Nulo Home 
 - Tests: `TokenCard.test.ts` — add `Icon` + `Tooltip` stubs; rewrite lines 135–194 per recon (subtitle name fallback ×2 new cases, icon `data-name` assertions, dot presence/absence on `backfilling`, tooltip copy pinned to "Catching up on incoming transfers" via the stub's content slot); `TokensView.test.ts` — extend the harness with `blocksBehind` values: above threshold → prop true, below → false, `caught-up` → false, non-safe-integer/negative/fractional → false; `BalanceView.test.ts` — ADD breakdown lock/globe case (net-new coverage); design package — Tooltip focus-trigger test.
 - **Validation gate** — commands: `bun run typecheck:all && bun run test && bun run --cwd packages/design test && bun run lint`; pass: all exit 0, new cases green (design run mandatory — Tooltip changed). Layers: typecheck · lint · unit/component.
 
-### Phase 3 — Density + decimals
+### Phase 3 ✓ — Density + decimals
+*(gate green 2026-08-13: typecheck:all + test (4040) + lint 0 errors — see lessons/phase-3.md; note: formatter had moved to shared `formatGasBalance`, resolved with an explicit per-surface precision arg)*
 - `GasBalanceCard.vue` `maxDecimals: 4→2`; `general.vue` gap 24→16; `TransactionCardLayout.vue` `.wrapper` padding 8px→6px 0; `BalanceView.vue` hero margins (32/16→22/10, gas 16→12, actions 16→12).
 - Tests: `GasBalanceCard.test.ts` ADD fractional fixtures (`42.1234…` → `"42.12"`, exact-2-decimals boundary stays) — the only signal for this change, per recon gap #4. No padding assertions exist anywhere (convention: never pin pixel values).
 - **Validation gate** — commands: `bun run typecheck:all && bun run test && bun run lint`; pass: all exit 0, fractional cases green. Layers: typecheck · lint · unit/component.

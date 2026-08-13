@@ -383,8 +383,8 @@ onBeforeUnmount(() => {
 	align-items: center;
 	text-align: center;
 
-	margin-top: 32px;
-	margin-bottom: 16px;
+	margin-top: 22px;
+	margin-bottom: 10px;
 }
 
 .balance_amount {
@@ -464,7 +464,7 @@ onBeforeUnmount(() => {
 
 .actions {
 	width: 100%;
-	margin-top: 16px;
+	margin-top: 12px;
 }
 
 .hover_red {

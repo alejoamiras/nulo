@@ -149,6 +149,28 @@ describe("GasBalanceCard fiat (D2)", () => {
 	})
 })
 
+describe("GasBalanceCard — 2-decimal display (home card)", () => {
+	// The ONLY signal for the 4→2 change: every other fixture in this file is whole-FJ, where the
+	// truncation width is invisible. Truncates (rounds down), so shown ≤ actual.
+	test("a fractional balance truncates to 2 decimals", async () => {
+		mockQuotes = {}
+		// 42.1239 FJ → "42.12" (truncated, NOT rounded to 42.13)
+		mockBalances = { publicFeeJuice: (421239n * 10n ** 14n).toString(), privateFeeJuice: (98765n * 10n ** 13n).toString() }
+		const w = await mountCard()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42.12 FJ")
+		// 0.98765 FJ → "0.98"
+		expect(w.find('[data-testid="gas-balance-private"]').text()).toBe("0.98 FJ")
+	})
+
+	test("an exactly-2-decimal balance renders unchanged (boundary)", async () => {
+		mockQuotes = {}
+		mockBalances = { publicFeeJuice: (4212n * 10n ** 16n).toString(), privateFeeJuice: "0" }
+		const w = await mountCard()
+		expect(w.find('[data-testid="gas-balance-public"]').text()).toBe("42.12 FJ")
+		expect(w.find('[data-testid="gas-balance-private"]').text()).toBe("0 FJ")
+	})
+})
+
 describe("GasBalanceCard — stale-while-revalidate", () => {
 	function deferredBalances() {
 		let resolve!: (v: Balances) => void
