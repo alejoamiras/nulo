@@ -9,6 +9,7 @@ import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vu
 
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 
 /** Services */
 import { type ProfileInfo, ProfileServiceClient } from "@/wallet/services/profile/client"
@@ -110,8 +111,14 @@ const approve = async () => {
 		await interactionService.resolveInteraction(requestId.value, { approved: true })
 		closeWindow(true)
 	} catch (error) {
-		console.error(getErrorData(error))
-		setError("Something went wrong")
+		if (error instanceof JobCancelledError) {
+			// A raced approve refused service-side (the dApp cancelled first):
+			// the refusal IS the cancelled state — overlay, not an error banner.
+			isInteractionCancelled.value = true
+		} else {
+			console.error(getErrorData(error))
+			setError("Something went wrong")
+		}
 	} finally {
 		isLoading.value = false
 	}

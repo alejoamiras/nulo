@@ -44,6 +44,8 @@ export * from "./spec"
  * popup crash, MV3 suspension races). Longer than the longest realistic
  * prove+approve flow so legitimate users aren't surprised.
  */
+const CANCELLED_BEFORE_APPROVAL = "Request was cancelled before approval"
+
 const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 
 export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
@@ -108,7 +110,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// starts. (Approve claimed first deletes the record; a later cancel then
 		// finds nothing — approval proceeds exactly once.)
 		if (interaction.cancelledAt !== undefined) {
-			throw new JobCancelledError("Request was cancelled before approval")
+			throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 		}
 		this.storage.delete(id)
 		// Detach before handing off to executeAndResolve: the approval popup
@@ -131,7 +133,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// Same first-claim-wins refusal as approveInteraction — capability and
 		// discovery approvals must not outrun a processed cancel either.
 		if (interactionRequest.cancelledAt !== undefined) {
-			throw new JobCancelledError("Request was cancelled before approval")
+			throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 		}
 		this.storage.delete(id)
 		// Detach before settling: popup may close in the same event-loop turn
@@ -221,7 +223,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				this.logInfo(
 					`execute: queued record ${hooks.queuedJournalId} is ${queuedRec.progress?.stage}; short-circuiting before popup`,
 				)
-				throw new JobCancelledError("Request was cancelled before approval")
+				throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 			}
 		}
 

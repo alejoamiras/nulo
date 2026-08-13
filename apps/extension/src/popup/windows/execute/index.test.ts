@@ -296,7 +296,7 @@ const STUBS = {
 	DappCancelledOverlay: {
 		props: ["message"],
 		emits: ["dismiss"],
-		template: `<div data-testid="cancelled-overlay" :data-message="message" @click="$emit('dismiss')" />`,
+		template: `<div data-testid="dapp-cancelled-overlay" :data-message="message" @click="$emit('dismiss')" />`,
 	},
 }
 
@@ -307,10 +307,21 @@ const factory = () => mount(Execute, { global: { stubs: STUBS } })
 
 type ExecVm = {
 	reject: () => Promise<void>
+	approve: () => Promise<void>
 	closeWindow: (interactionCompleted?: boolean) => void
 	isWrongProfile: boolean
 	initComplete: boolean
+	operations: unknown[]
 }
+
+/** One executable operation: fee settled, so neither the fee gate nor the
+ *  empty-operations gate trips — the state both cancellation pins need. */
+const makeExecutableOp = () => ({
+	kind: "send_transaction",
+	feeSettings: { paymentMethod: { kind: "sponsored_fpc" } },
+	network: { chainId: 1, name: "TestNet" },
+	account: { address: "0x1", chainId: 1, name: "TestAccount" },
+})
 
 /** Drive init to completion: resolve the profile fetch, then the payload load. */
 const completeInit = async (profile: { id: string } = { id: "p1" }) => {
@@ -468,7 +479,7 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		expect(networkServiceCtorMock).not.toHaveBeenCalled()
 		// init's catch also set the generic error, but the wrong-profile overlay
 		// wins the template precedence chain.
-		const overlay = w.find('[data-testid="cancelled-overlay"]')
+		const overlay = w.find('[data-testid="dapp-cancelled-overlay"]')
 		expect(overlay.exists()).toBe(true)
 		expect(overlay.attributes("data-message")).toContain("different profile")
 		// The request must still be rejectable on close.
@@ -483,7 +494,7 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		expect(rejectViaInteractionServiceMock).not.toHaveBeenCalled()
 		callLog.length = 0
 		// OK on the overlay → closeWindow() with NO arg → listener stays attached.
-		await w.find('[data-testid="cancelled-overlay"]').trigger("click")
+		await w.find('[data-testid="dapp-cancelled-overlay"]').trigger("click")
 		expect(windowsRemoveMock).toHaveBeenCalledTimes(1)
 		expect(beforeunloadRemoves()).toBe(0)
 		// The real window would now unload; the still-attached handler delivers
@@ -501,26 +512,19 @@ describe("execute window — dApp cancellation state", () => {
 		// what discriminates the cancelled path end to end.
 		w = factory()
 		await completeInit()
-		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(false)
+		expect(w!.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(false)
 
 		isCancelledMock.value = true
 		await flushPromises()
-		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w!.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(true)
 		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 
 	test("cancellation flips a genuinely ENABLED Confirm to disabled (the binding's own term)", async () => {
 		w = factory()
 		await completeInit()
-		const vm = w.vm as unknown as ExecVm & { operations: unknown[]; initComplete: boolean }
-		vm.operations = [
-			{
-				kind: "send_transaction",
-				feeSettings: { paymentMethod: { kind: "sponsored_fpc" } },
-				network: { chainId: 1, name: "TestNet" },
-				account: { address: "0x1", chainId: 1, name: "TestAccount" },
-			},
-		]
+		const vm = w.vm as unknown as ExecVm
+		vm.operations = [makeExecutableOp()]
 		vm.initComplete = true
 		await flushPromises()
 		const confirm = () => w!.find('[data-testid="execute-confirm-btn"]')
@@ -535,26 +539,17 @@ describe("execute window — dApp cancellation state", () => {
 		// The dApp cancelled while the click was in flight and the broadcast
 		// never reached this popup: the typed service refusal alone must land
 		// the window in the cancelled UI — overlay up, no error banner.
-		approveInteractionMock.mockRejectedValueOnce(new JobCancelledError("Request was cancelled before approval"))
+		approveInteractionMock.mockRejectedValueOnce(new JobCancelledError())
 		w = factory()
 		await completeInit()
-		// Reach the approvable state directly: one executable operation (fee
-		// settled, so neither the fee gate nor the empty-operations gate trips).
-		const vm = w.vm as unknown as ExecVm & { approve: () => Promise<void>; operations: unknown[]; initComplete: boolean }
-		vm.operations = [
-			{
-				kind: "send_transaction",
-				feeSettings: { paymentMethod: { kind: "sponsored_fpc" } },
-				network: { chainId: 1, name: "TestNet" },
-				account: { address: "0x1", chainId: 1, name: "TestAccount" },
-			},
-		]
+		const vm = w.vm as unknown as ExecVm
+		vm.operations = [makeExecutableOp()]
 		vm.initComplete = true
 		await flushPromises()
 
 		await vm.approve()
 		await flushPromises()
-		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w!.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(true)
 		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 })

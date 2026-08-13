@@ -90,7 +90,11 @@ export function useDappInteractionPayload<TPayload>(
 
 			// Replay a cancel that fired before this popup subscribed — the
 			// broadcast alone is lost to late mounts; the record's flag is not.
-			if (await interactionService.isInteractionCancelled(id)) {
+			// Best-effort: a failed replay read must not fail an otherwise-good
+			// load (the live broadcast still covers the common path).
+			const cancelled = await interactionService.isInteractionCancelled(id).catch(() => false)
+			if (disposed) throw new Error("Composable disposed before payload landed")
+			if (cancelled) {
 				isCancelled.value = true
 			}
 

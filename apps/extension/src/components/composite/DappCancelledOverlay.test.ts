@@ -41,11 +41,10 @@ describe("composite/DappCancelledOverlay", () => {
 		// exactly once (not the broader event surface).
 		expect(w.emitted("dismiss")).toHaveLength(1)
 	})
-})
 
-test("exposes stable testids for the overlay root and the OK button", () => {
-	const w = factory()
-	expect(w.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(true)
-	const ok = w.find('[data-testid="dapp-cancelled-ok-btn"]')
-	expect(ok.exists()).toBe(true)
+	test("exposes stable testids for the overlay root and the OK button", () => {
+		const w = factory()
+		expect(w.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(true)
+		expect(w.find('[data-testid="dapp-cancelled-ok-btn"]').exists()).toBe(true)
+	})
 })

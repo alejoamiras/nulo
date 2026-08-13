@@ -822,9 +822,9 @@ export type FeeMethodSubtitle = "sponsored" | "public" | "private"
 
 /** Select a fee payment method in the shared FeeSettingsCard dropdown (the
  *  send flow AND the dApp execute/authwit popups embed the same card).
- *  `mountTimeoutMs`: the card mounts after FPC auto-discovery — an async
- *  service round-trip that can take seconds on cold paths; execute-popup
- *  callers pass 30s, the send flow keeps the tight default. */
+ *  `mountTimeoutMs` exists because the card mounts only after FPC
+ *  auto-discovery — an async service round-trip that can take seconds on a
+ *  cold path. */
 export async function selectFeeMethod(
 	page: Page,
 	methodSubtitle: FeeMethodSubtitle,
