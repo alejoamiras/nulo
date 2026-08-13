@@ -1,89 +1,111 @@
-# Phase 3 — `Runtime.terminateExecution` does not kill the service worker
+# Phase 3 — the kill that never killed
 
 ## The task
 
 Un-skip the four SW-lifecycle tests in `apps/extension/tests/e2e/sw-resilience.test.ts`.
-Their skip notes said they were "intrinsically flaky on hosted CI (Chrome internal
-timing)" and should be un-skipped "when the helper waits on something deterministic" —
-which deflake-round-2's causal liveness gates appeared to satisfy.
+Their skip notes blamed "intrinsically flaky on hosted CI (Chrome internal timing)" and
+said to un-skip "when the helper waits on something deterministic", which round 2's causal
+liveness gates appeared to satisfy.
 
-## What three solo runs showed (retry=0, same build, same machine)
+## Step 1 — un-skip and run: deterministic, not flaky
 
-Identical in all three:
+Three solo runs, `--retry=0`, identical every time: tests 1, 3 and 4 passed; test 2
+("strict mode default ON … expect lock screen on respawn") failed at
+`waitForHash(page2, "#/popup/auth", 15_000)`. A months-old skip note asserting flakiness
+was refuted by three runs.
 
-| # | test | result |
-|---|---|---|
-| 1 | lock → kill SW → unlock → general | pass (12.6s / 12.7s / 12.6s) |
-| 2 | strict mode default ON: unlock → kill SW → expect lock screen | **fail** (15s wait for `#/popup/auth`) |
-| 3 | strict mode OFF: … → kill SW → silent restore | pass (4.8s / 5.3s / 5.3s) |
-| 4 | liveness lands within HEARTBEAT_INTERVAL_MS of respawn | pass (10.0s / 9.8s / 9.8s) |
+## Step 2 — measure the primitive
 
-Deterministic, not flaky. And the ONE failing test is the only one whose assertion
-requires a cold restart to have happened.
-
-## Direct measurement of the primitive
-
-A throwaway probe terminated the worker and observed the target, the heartbeat and the
-session:
+`stopServiceWorker` used CDP `Runtime.terminateExecution`. A probe measured what it does:
 
 ```
-[probe] pre-kill target url=chrome-extension://<id>/service-worker-loader.js liveness=1786663269669
 [probe] service_worker target NEVER disappeared within 10s
-[probe] post-kill hash=#/popup liveness=1786663279669 (delta=10000) session=present
+[probe] post-kill hash=#/popup liveness delta=10000 session=present
 ```
 
-Three facts, each decisive:
+The target survives, the session record survives, the wallet stays unlocked, and
+`nulo:liveness` advances by exactly `HEARTBEAT_INTERVAL_MS` — so the "fresh heartbeat"
+every post-kill gate waits for is the surviving worker's own tick.
 
-1. **The target never disappears.** `Runtime.terminateExecution` aborts the currently
-   running script; it does not terminate this worker.
-2. **The liveness delta is exactly `HEARTBEAT_INTERVAL_MS` (10 000 ms).** The "fresh
-   heartbeat" that every post-kill gate waits for is the SURVIVING worker's next
-   ordinary tick — not evidence that a replacement booted.
-3. **The session record survives and the wallet stays unlocked**, which is why test 2
-   (strict mode must land on `/popup/auth` after a real restart) fails: there was no
-   restart to lock it.
+That explained all four results at once: test 1 locks explicitly, test 3 expects the
+unlocked outcome, test 4 only needs liveness to advance within 10s — all satisfied with
+nothing restarted. Test 2 was the sole test whose assertion required a real restart, and
+therefore the sole failure.
 
-That also explains why the other three pass. Test 1 locks explicitly, so auth appears
-whether or not the worker died. Test 3 expects the unlocked outcome, which is exactly
-what "nothing restarted" produces. Test 4 asserts only that liveness advances within
-10s — which the heartbeat does unprompted.
+## Step 3 — the real primitive (codex review)
 
-## Disposition: stay skipped, with the real reason recorded
+Chrome documents `worker().close()` for testing service-worker termination with Puppeteer;
+for a service-worker target puppeteer implements it as `Target.closeTarget` + detach.
+Measured side by side:
 
-The goal said to un-skip after a local retry=0 proof, and to re-skip only with a ledgered
-mechanism. The proof failed, and worse than a red: **un-skipping as-is would add three
-tests that cannot fail for the reason they claim to test.** Passing tests that assert
-nothing are more expensive than skipped ones, because they buy false confidence.
+| primitive | target id | session record | liveness delta |
+|---|---|---|---|
+| `Runtime.terminateExecution` | unchanged | present | exactly 10 000 ms (heartbeat) |
+| `worker().close()` | **changes** | **gone** | 2 404 ms (cold-boot write) |
 
-So the four stay skipped, and their skip notes now carry the measurement instead of the
-"intrinsically flaky" guess, plus the path to un-skipping: use the primitive
-`migration.test.ts` already proves — close the browser and relaunch on the same
-persistent `userDataDir`, which IS the crash these tests describe. That requires giving
-this file a per-test profile dir rather than the shared file-scoped browser, which is a
-real rewrite of all four and out of this arc's named scope.
+The same review killed my proposed alternative — relaunching the browser, as
+`migration.test.ts` does — because Chrome clears `storage.session` on browser restart,
+which would destroy test 3's bearer-survival premise. Worth recording: my replacement was
+wrong for a reason I had not considered, and the correct one was already documented.
 
-## Correction to deflake-round-2's claim (live inaccuracy, now fixed)
+`stopServiceWorker` now waits for the ORIGINAL target id to disappear. Without that
+assertion the tests silently go back to passing against a worker that never died.
 
-Round 2 hardened two post-kill gates from truthy to strictly-newer-than-pre-kill and
-described the result as proof that "the replacement worker booted". Given the above, that
-framing is wrong: a strictly-newer heartbeat arrives from the surviving worker within
-10s. The gates are still an improvement — a truthy check passes instantly against a stale
-value, while strictly-newer at least proves the worker is live and writing now — but they
-do not prove a respawn.
+## Step 4 — what the real kill exposed
 
-Comments corrected in `sw-restart-network.test.ts` and
-`network/frozen-account-canary.test.ts`. **Neither test's assertion is invalidated:**
-network/endpoint persistence and frozen-account re-derivation both hold across a
-terminate + fresh popup. Only the restart framing was overstated.
+**Test 2 passes for the first time.** Under strict mode the bearer-less session is
+`silentClose`d on cold boot, so the popup lands on `/popup/auth` — exactly the contract
+the test was written to pin, finally exercised.
+
+**Test-order coupling, previously invisible.** Tests 3 and 4 opened with
+`waitForHash(general)` and had been inheriting an unlocked wallet — because nothing had
+ever locked it. With a genuine kill, test 2 correctly leaves the wallet locked and they
+failed at their first wait. They now establish that precondition themselves.
+
+**Test 4's stopwatch measured nothing.** It started after `openPopup`, which already waits
+for the background to connect — i.e. for the very write being timed. It now starts at the
+kill, so the elapsed is an upper bound on respawn-to-liveness and can actually catch the
+`setInterval`-only regression it exists for.
+
+## Step 5 — test 3's setup never happened either
+
+With the real kill, test 3 still failed. Its premise is "strict mode OFF", which it
+establishes by posting to ConfigService over `chrome.runtime.sendMessage`. But wallet
+services listen on PORTS: the SW's only `onMessage` listener (`src/wallet/index.ts`)
+returns `false` and handles one unrelated message. A probe confirmed it — the call resolves
+with no reply, and `nulo:config` (written by `ConfigStore.set` via `ValueStorage`) is never
+created. Strict mode stays ON, so the silent restore the test asserts cannot occur.
+
+It "passed" for years only because the old kill left the worker running, so nothing needed
+restoring.
+
+**Disposition:** tests 1, 2 and 4 ship un-skipped (3/3 solo green at retry=0). Test 3 stays
+skipped with the measured mechanism and the concrete fix: drive the real Settings → Security
+toggle (`strict-security-toggle`, which its own comment already calls the equivalent),
+including its confirmation dialog, and assert the flag changed before depending on it.
+
+## Still using the primitive that does not kill
+
+`sw-restart-network.test.ts` is converted here. Two network tests are NOT, and are ledgered:
+`network/frozen-account-canary.test.ts` (stage 5) and
+`network/backup-restore-sw-restart.test.ts` — the latter's entire premise is a mid-restore
+crash that, on the old primitive, never happens. Converting them changes what they exercise
+and needs its own network evidence run, so it is a follow-up rather than a silent edit here.
 
 ## Lessons
 
-1. **A test that passes tells you nothing until you know WHY it passes.** Three of these
-   four were green for a reason unrelated to their subject, and no amount of re-running
-   would have revealed it. The failing one was the informative one.
-2. **Verify the primitive, not just the wait built on it.** Round 2 and round 3 both
-   hardened waits layered on `terminateExecution` without checking whether it does what
-   its name says. One 20-line probe answered it.
-3. **"Deterministic failure" is a different diagnosis from "flake", and cheap to
-   distinguish** — three identical solo runs. The skip note had asserted flakiness for
-   months without that check.
+1. **A passing test is a claim, not evidence, until you know why it passes.** Three of these
+   four were green for reasons unrelated to their subject. Re-running them, at any count,
+   could never have revealed that — only measuring the primitive did.
+2. **Verify the tool does what its name says.** Two arcs hardened waits layered on
+   `terminateExecution` without checking whether it terminates. One 20-line probe answered
+   it, and a second probe answered the config toggle the same way.
+3. **Fixing a no-op setup step surfaces every assumption that leaned on it.** The real kill
+   immediately exposed test-order coupling and a second dead setup path. Expect a queue of
+   discoveries, not one fix.
+4. **"Deterministic failure" and "flake" are cheap to distinguish** — three identical solo
+   runs — and the skip note had asserted the wrong one for months.
+5. **Check the storage key before concluding from a storage read.** My first config probe
+   read `nulo:core:config`; the real key is `nulo:config`, so its "undefined before and
+   after" proved nothing. Same error class as the `ValueStorage` JSON-string assumption in
+   phase 2, twice in one arc.

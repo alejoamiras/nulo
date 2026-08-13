@@ -10,27 +10,38 @@ import { lockWallet } from "./fixtures/helpers"
 
 async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 5_000,
+		timeout: 15_000,
 	})
-	const swSession = await swTarget.createCDPSession()
-	try {
-		await swSession.send("Runtime.terminateExecution")
-	} catch {
-		// Session dies along with the SW; swallow disconnect noise.
+	// biome-ignore lint/suspicious/noExplicitAny: target identity is internal, and identity is the whole point here
+	const idOf = (t: any): string => t._targetId ?? t.targetId ?? "<unknown>"
+	const doomedId = idOf(swTarget)
+
+	const worker = await swTarget.worker()
+	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
+	await worker.close()
+
+	const deadline = Date.now() + 15_000
+	for (;;) {
+		const stillThere = ext.browser
+			.targets()
+			.some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId) && idOf(t) === doomedId)
+		if (!stillThere) return
+		if (Date.now() > deadline) {
+			throw new Error(`stopServiceWorker: service-worker target ${doomedId} was still alive 15s after close()`)
+		}
+		await new Promise((r) => setTimeout(r, 100))
 	}
 }
 
-/** Readiness after the terminate: session storage retains the pre-kill
- *  heartbeat, so a truthy check passes instantly against a stale value and the
- *  next UI wait races whatever the worker is doing. Requiring a STRICTLY NEWER
- *  timestamp at least proves the worker is live and writing now.
+/** Readiness after the restart: session storage retains the pre-kill heartbeat,
+ *  so a truthy check passes instantly against a stale value and the next UI wait
+ *  races the booting worker. Requiring a STRICTLY NEWER timestamp is what makes
+ *  this causal.
  *
- *  It does NOT prove a respawn happened: measurement (deflake-round-3,
- *  `lessons/phase-3.md`) shows `Runtime.terminateExecution` leaves this worker
- *  running, and a fresh timestamp arrives from its ordinary heartbeat within
- *  HEARTBEAT_INTERVAL_MS. What this test actually asserts — that the active
- *  network and primary endpoint survive a terminate + fresh popup — holds
- *  either way; the restart framing is the part that was overstated. */
+ *  It is only meaningful because `stopServiceWorker` above waits for the old
+ *  target to be GONE. Against a kill that leaves the worker running, a fresh
+ *  timestamp arrives from its ordinary heartbeat within HEARTBEAT_INTERVAL_MS
+ *  and proves nothing (deflake-round-3 `lessons/phase-3.md`). */
 async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
 		async (priorTs: number) => {

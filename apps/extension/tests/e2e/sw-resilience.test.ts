@@ -171,7 +171,20 @@ test("strict mode default ON: unlock → kill SW → expect lock screen on respa
  * still gets covered by the manual smoke checklist).
  */
 // SKIP: same SW-respawn timing flake as the first test in this file.
-test("strict mode OFF (opt-out): unlock → toggle off → relock+unlock → kill SW → silent restore", async ({ registeredExtension }) => {
+// SKIP — measured, not suspected: this test's setup never happens. It flips
+// strictSecurityMode by posting to ConfigService over `chrome.runtime.sendMessage`
+// (below), but wallet services listen on PORTS; the SW's only onMessage listener
+// (`src/wallet/index.ts`) returns false and handles one unrelated message. A probe
+// confirmed the round trip resolves with no reply and `nulo:config` is never
+// written, so strict mode stays ON and the "silent restore" this test asserts
+// cannot occur. It passed historically only because the old kill left the worker
+// running, so nothing had to be restored.
+//
+// To un-skip: drive the real Settings → Security toggle
+// (`strict-security-toggle`, which this comment already calls the equivalent),
+// including its confirmation dialog, and assert the flag actually changed before
+// relying on it.
+test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock → kill SW → silent restore", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	// These tests share one browser, and the strict-mode test above now leaves the
 	// wallet genuinely LOCKED — which it always should have, but could not while
