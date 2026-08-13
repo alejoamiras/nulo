@@ -16,8 +16,11 @@
 **Facts (verified in recon.md, file:line there):**
 1. vitest's default reporter swallows first-attempt errors on retry-pass — CI logs carry only
    `(retry x1)`; the two A1 flakes' first-attempt reasons are unrecoverable from CI.
-2. `setTheme` and `navigateByHash` waits use Puppeteer default `'raf'` polling; the repo already
-   documents rAF throttling in unfocused tabs and hardens `waitForHash` with `polling: 200`.
+2. ~~rAF polling hypothesis~~ REFUTED (local repro + codex): `patchPagePolling` injects
+   `polling: 200` into every waitForFunction on popup pages. The REAL theme-cycle cause
+   (repro-confirmed, recon §A1-EMPIRICAL): `setTheme`'s one-shot `offsetParent` sample racing
+   DropdownRoot's close `<Transition>` — trigger click skipped, option gone, 10s click-wait
+   timeout.
 3. appearance Test B gates on a fixed 150ms sleep racing a multi-hop RPC/broadcast chain, and
    reads a CSS-module-mangled className; the stable `data-toggle-active` signal + a hardened
    gated-wait idiom (`togglePrivacySetting`) already exist.
@@ -30,9 +33,11 @@
 7. Neither observed setup-step incident (snappy, noirup-503) would have been saved by a
    step-level retry (deterministic / sustained-outage-with-inner-retry).
 
-**Inferences (to confirm empirically before fixing):**
-- A1-B fast-fail = the 150ms sleep losing the race under CI load; A1-A slow-fail = rAF-starved
-  2s waits in an unfocused page. Phase A1 reproduces BEFORE fixing (goal requirement).
+**Inferences (remaining):**
+- A1-A (theme cycle) is REPRODUCED and mechanism-confirmed. A1-B (animations fast-fail) remains
+  a CI-only observation: the working inference is the 150ms sleep losing the click→flip race;
+  the evidence vehicle is the measured latency distribution under load (p99 vs 150ms), since
+  30 local runs never hit the lottery window.
 
 **Asks resolved in-plan (no silent Asks):** the A3 sweep includes two same-class sites beyond
 the goal's four (`backup-migration-roundtrip`, `send-amount-clamp`) — same class, surfaced here
