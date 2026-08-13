@@ -26,7 +26,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
 import { ensureUnlocked, getAccountAddress, revealSecretKey } from "../fixtures/helpers"
-import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
+import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
 

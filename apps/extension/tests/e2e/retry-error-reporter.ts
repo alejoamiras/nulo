@@ -19,7 +19,7 @@ export default class RetryErrorReporter implements Reporter {
 		console.error(`\n[retry-error] PASSED ON RETRY: ${testCase.fullName} (${location})`)
 		result.errors.forEach((err, i) => {
 			const stack = err.stack ?? err.message ?? String(err)
-			console.error(`[retry-error] attempt ${i + 1} error:\n${stack}`)
+			console.error(`[retry-error] retained error ${i + 1}:\n${stack}`)
 		})
 	}
 }

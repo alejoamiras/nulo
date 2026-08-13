@@ -52,16 +52,21 @@ test("fails first, passes on retry", () => {
 		// cwd = the extension package so the child resolves vitest + the reporter
 		// through the real dependency tree; the fixture lives under --root.
 		const pkgDir = resolve(__dirname, "../..")
-		const child = spawnSync(
-			"bunx",
-			["vitest", "run", "--root", dir, "--retry", "1", "--reporter", "default", "--reporter", "./tests/e2e/retry-error-reporter.ts"],
-			{ cwd: pkgDir, encoding: "utf8", timeout: 120_000 },
-		)
+		// The INSTALLED vitest binary + absolute reporter path: bunx could fall
+		// back to registry resolution on a runner where the local bin is absent,
+		// which would test a different vitest than the suite runs.
+		const vitestBin = resolve(pkgDir, "../../node_modules/.bin/vitest")
+		const reporterAbs = join(__dirname, "retry-error-reporter.ts")
+		const child = spawnSync(vitestBin, ["run", "--root", dir, "--retry", "1", "--reporter", "default", "--reporter", reporterAbs], {
+			cwd: pkgDir,
+			encoding: "utf8",
+			timeout: 120_000,
+		})
 		const combined = `${child.stdout ?? ""}\n${child.stderr ?? ""}`
 		// The synthetic test PASSES on retry, so the child must exit 0 — a nonzero
 		// exit means the fixture or reporter itself broke.
 		expect(child.status, `child vitest exit ${child.status}; output:\n${combined.slice(0, 3_000)}`).toBe(0)
-		expect(combined).toContain("PASSED ON RETRY")
+		expect(combined.split("PASSED ON RETRY").length - 1, "reporter must fire exactly once").toBe(1)
 		expect(combined).toContain("SYNTHETIC_FIRST_ATTEMPT_FAILURE")
 	} finally {
 		rmSync(dir, { recursive: true, force: true })

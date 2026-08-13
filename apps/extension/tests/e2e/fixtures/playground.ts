@@ -106,8 +106,11 @@ export async function waitForPgResult(page: Page, method: string, fromSeq: numbe
 	return parsed
 }
 
-/** Cap on any single dumped payload: big enough for every legitimate error
- *  message, small enough that a hostile/degenerate payload can't flood CI logs. */
+/** PER-FIELD cap on each dumped payload (the result/error field and the
+ *  pg-error-text line are bounded separately, so a full assertPgOk message
+ *  tops out around twice this plus fixed framing): big enough for every
+ *  legitimate error message, small enough that a hostile/degenerate payload
+ *  can't flood CI logs. */
 const PG_DUMP_MAX_CHARS = 2_000
 
 /** Bounded stringify of the branch-CORRECT payload field: `errorJson` when the
