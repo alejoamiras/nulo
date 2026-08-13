@@ -82,22 +82,29 @@ be exercised without touching dev):
   SHA-B's mergeability is unaffected (checks associate per-SHA).
 Raw timelines + verdicts → `lessons/phase-1.md` + ledger. P2/P3 refuted → the STOP row.
 
-**Phase 1c — design selection (pre-committed; duplicate-success is OFF the table
-regardless of outcome — final pass Critical 2: even a measured all-must-pass world leaves
-gate integrity resting on undocumented, changeable duplicate-selection semantics):**
-| Measurement outcome | Ship |
-|---|---|
-| Block is transient (clears when survivor completes) | 1a only + document "the check view settles when the survivor lands"; NO aggregator semantics change |
-| Steady-state block (any resolution semantics) | **source elimination v2 — no run may ever conclude a cancelled-duplicate FAILURE**: smoke+network concurrency becomes `cancel-in-progress: ${{ github.event.action == 'synchronize' }}` — a PUSH still cancels obsolete-SHA in-flight runs (their aggregators never fire against a head anyone merges: the new SHA's runs own the gate), but LABEL-event runs no longer cancel in-flight same-SHA runs; same-SHA duplicates either COMPLETE genuinely (identical code, honest verdicts; ~2× suite cost on the rare label burst) or are replaced while still QUEUED (GitHub keeps one pending per group) — and a queue-replaced run never starts jobs, so it produces NO failure check-runs. No API probing, no mirror, no dependence on duplicate-selection semantics. Phase 1b must empirically CONFIRM the two load-bearing properties: (i) queue-replaced runs leave no job-level failure check-runs; (ii) a push-cancelled old-SHA run's FAILURE aggregator cannot block the new SHA (per-SHA check association). If either fails → the STOP row |
-| Mixed / inconclusive / a load-bearing property refuted | STOP — no aggregator change ships; findings + options go back to the owner (replan). No mirror/probe design returns without a future-event finality answer (final pass round-3 Critical: re-listing proves "newest NOW", never "newest FOREVER") |
+**Phase 1c — OUTCOME (measured 2026-08-13, PR #367): the "transient" row.** The duplicate
+FAILURE check-run does NOT durably block — `mergeStateStatus` went BLOCKED → CLEAN the
+moment the survivor's SUCCESS landed, with the duplicate's FAILURE still present on the
+SHA. Round-2's `completed_at` data shows why the premise was wrong in the first place: a
+cancelled run's aggregator finishes in ~3-5s while the run it duplicates is still
+executing, so the FAILURE is ALWAYS the earlier check-run and can never win
+latest-per-name. Full evidence + the ordering table: `lessons/phase-1.md`.
 
-**No script, no API, no new token scope.** Both live outcomes are pure workflow-trigger
-edits (`types:` on pr-quick; the `cancel-in-progress` expression on smoke+network). The
-aggregator shell loops, the check-run `name:`s, `if: always()`, and all `permissions:`
-blocks stay EXACTLY as they are — the arc never touches how a gate decides pass/fail, only
-which duplicate runs exist. (`aggregate-status.ts`, `actions: read`, and supersession
-probing are dropped with the mirror design; `actionlint.yml`/`release.yml` aggregators
-stay as-is — unexposed, ledgered optional follow-up.)
+**Therefore: 1a ships, and nothing else.** No `cancel-in-progress` expression, no
+aggregate-status script, no `actions: read`, no change to how any gate concludes. P2
+(queue-replacement) and P3 (per-SHA association) existed only to de-risk the
+`cancel-in-progress` variant; P2 is moot and P3 is answered by #360's history (its
+push-cancelled head `6ffa7b306f` carried three FAILURE aggregators and the PR merged
+anyway on a later head). The pre-committed table is honoured exactly: measurement selected
+the row that ships the least.
+
+**Deviation from the goal's literal criterion (surfaced, not silent):** success criterion
+(1) asked for aggregators to conclude neutral/cancelled "so a labeled-PR open can no
+longer leave a losing FAILURE check-run". The measurement falsifies the premise — such a
+check-run loses nothing, because it never wins resolution. The intent (labeled-PR opens
+must not block merges) holds today without any gate-semantics change. What the duplicates
+DO cost is runner minutes and a confusing transient red, which is what 1a removes for the
+one workflow that never needed label triggers at all.
 
 ### Item 2 — fixed-wait class (PR-2 smoke-surface, PR-3 network-surface)
 
