@@ -6,7 +6,7 @@
  */
 
 import { expect } from "vitest"
-import { test, openPopup, waitForHash, clickByTestId } from "./fixtures/extension"
+import { withTimeoutMessage, test, openPopup, waitForHash, clickByTestId } from "./fixtures/extension"
 import { navigateToSettings } from "./fixtures/helpers"
 
 test("fresh wallet state matrix: truthful $0.00, zero fiat artifacts", async ({ registeredExtension }) => {
@@ -43,14 +43,13 @@ test("settings carries the 'Show fiat values' kill-switch and it toggles", async
 	expect(await readActive()).toBe("true") // default ON
 
 	await clickByTestId(page, "fiat-values-toggle")
-	await page
-		.waitForFunction(
+	await withTimeoutMessage(
+		page.waitForFunction(
 			() => document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active") === "false",
 			{ timeout: 2_000, polling: 50 },
-		)
-		.catch(() => {
-			throw new Error("fiat-values-toggle never flipped to off after the click")
-		})
+		),
+		"fiat-values-toggle never flipped to off after the click",
+	)
 	expect(await readActive()).toBe("false")
 
 	expect(registeredExtension.pageErrors).toEqual([])

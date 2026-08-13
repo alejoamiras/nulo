@@ -81,19 +81,30 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
 	// for slow CI runners on cold-boot Barretenberg wasm + service-graph init.
-	// Own the scratch page instead of adopting `pages[0]`. Chrome owns its
-	// startup page and may replace it while we are mid-navigation — most
-	// reliably on a relaunch against an existing userDataDir (migration.test.ts's
-	// `relaunch`), where the restored page's frame can detach between
-	// `browser.pages()` and the `goto` below and surface as "Attempted to use
-	// detached Frame". A page we created ourselves cannot be swapped underneath
-	// us. The original startup page is left alone so the browser always keeps at
-	// least one page open.
-	const blankPage = await browser.newPage()
-	patchPagePolling(blankPage)
-	await blankPage.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
-		waitUntil: "domcontentloaded",
-	})
+	// Own the scratch page instead of adopting `pages[0]`, and retry the
+	// create+navigate pair on a detach. The armed smoke gate caught
+	// "Attempted to use detached Frame" thrown from this `goto` during
+	// migration.test.ts's relaunch; `openPopup` documents the same
+	// newPage()→goto() sequence producing a half-initialized frame under suite
+	// load, and the remedy there is the same — discard the page and re-create.
+	// Owning the page is what makes that possible: `pages()[0]` is Chrome's and
+	// closing it would be rude. The startup page is left alone so the browser
+	// always keeps at least one page open.
+	let blankPage: Page | undefined
+	for (let attempt = 1; ; attempt++) {
+		const candidate = await browser.newPage()
+		try {
+			patchPagePolling(candidate)
+			await candidate.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
+				waitUntil: "domcontentloaded",
+			})
+			blankPage = candidate
+			break
+		} catch (err) {
+			await candidate.close().catch(() => {})
+			if (attempt >= 2 || !isFrameDetachError(err)) throw err
+		}
+	}
 	if (waitForLiveness) {
 		await blankPage.waitForFunction(
 			async () => {
@@ -1002,6 +1013,21 @@ export function patchPagePolling(page: Page): void {
  * fresh page resolves them. Symptom string varies across puppeteer-core
  * versions and timing; match on any of the known phrases.
  */
+/** Await a puppeteer wait and, on TIMEOUT ONLY, replace it with a diagnostic
+ *  that names what never happened. Every other failure — frame detach, CDP
+ *  disconnect, page crash — keeps its own identity and message, because
+ *  relabelling those as "the state never settled" is exactly how a real fault
+ *  gets buried under a plausible-looking flake. The original is preserved as
+ *  `cause`. Pass a function when the diagnostic has to read live page state. */
+export async function withTimeoutMessage<T>(wait: Promise<T>, message: string | (() => string | Promise<string>)): Promise<T> {
+	try {
+		return await wait
+	} catch (err) {
+		if (!(err instanceof TimeoutError)) throw err
+		throw new Error(typeof message === "function" ? await message() : message, { cause: err })
+	}
+}
+
 function isFrameDetachError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err)
 	// "Attempted to use detached Frame/Page" is puppeteer's OTHER detach wording
@@ -1037,6 +1063,18 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 
 async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
+	try {
+		return await setUpPopupPage(ctx, page)
+	} catch (err) {
+		// The retry in `openPopup` re-creates the page, so this one must not be
+		// left behind: a live target keeps its listeners and its extension
+		// connections, which the next attempt then races.
+		await page.close().catch(() => {})
+		throw err
+	}
+}
+
+async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> {
 	patchPagePolling(page)
 	await page.setViewport({ width: 360, height: 600 })
 	// Bring the new page to the front so the tab is "focused" — defense in

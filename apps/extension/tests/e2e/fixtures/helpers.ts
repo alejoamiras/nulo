@@ -1,4 +1,4 @@
-import type { Page } from "puppeteer"
+import { TimeoutError, type Page } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
 import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
 
@@ -82,15 +82,15 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 	// believing the wallet was unlocked. The two states this helper can act on
 	// are mutually exclusive and each has its own mounted marker, so waiting
 	// for "either marker present" cannot resolve against a half-rendered app.
-	await page
-		.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 200 })
-		.catch(() => {
-			throw new Error("ensureUnlocked: background never connected — the global loader was still up after 15s")
-		})
-
+	// ONE deadline, unchanged from the selector wait this replaces: 5s. The
+	// bridge-ready check costs nothing on top of it because `openPopup` already
+	// gates on the loader being gone before it hands a page back — it is in the
+	// predicate so a caller that got its page some other way cannot read a
+	// half-connected shell.
 	const state = await page
 		.waitForFunction(
 			() => {
+				if (document.querySelector('[data-testid="global-loader"]')) return null
 				if (document.querySelector('[data-testid="auth-password-input"]')) return "locked"
 				if (document.querySelector('[data-testid="header-lock"]')) return "unlocked"
 				return null
@@ -98,11 +98,21 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 			{ timeout: 5_000, polling: 200 },
 		)
 		.then((handle) => handle.jsonValue())
-		.catch(async () => {
-			const hash = await page.evaluate(() => window.location.hash)
+		.catch(async (err) => {
+			// Only a timeout means "state never settled". Anything else (frame
+			// detach, CDP disconnect, page crash) must keep its own identity.
+			if (!(err instanceof TimeoutError)) throw err
+			const diag = await page
+				.evaluate(() => ({
+					hash: window.location.hash,
+					loader: !!document.querySelector('[data-testid="global-loader"]'),
+				}))
+				.catch(() => ({ hash: "<unreadable>", loader: false }))
 			throw new Error(
-				`ensureUnlocked: app settled into neither the locked nor the unlocked shell within 5s (hash: ${hash}). ` +
-					"This helper only understands the main popup — a caller on onboarding/register reaches here.",
+				`ensureUnlocked: neither the locked nor the unlocked shell was ready within 5s ` +
+					`(hash: ${diag.hash}, global-loader up: ${diag.loader}). Password profiles on the main popup only — ` +
+					"a passkey profile renders no password field and reaches this same timeout.",
+				{ cause: err },
 			)
 		})
 
@@ -113,9 +123,15 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 
 	await page
 		.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
-		.catch(async () => {
-			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]'))
-			throw new Error(`ensureUnlocked: submitted the password but the route never left /popup/auth (wrong-password shown: ${wrong})`)
+		.catch(async (err) => {
+			if (!(err instanceof TimeoutError)) throw err
+			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]')).catch(() => false)
+			throw new Error(
+				`ensureUnlocked: submitted the password but the route never left /popup/auth (wrong-password shown: ${wrong})`,
+				{
+					cause: err,
+				},
+			)
 		})
 }
 
