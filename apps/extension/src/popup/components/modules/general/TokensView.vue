@@ -83,6 +83,12 @@ function onTaskCreated(task) {
 	let idx
 	switch (task.content.kind) {
 		case ContentKind.BalanceUpdate:
+			if (task.content.account !== appStore.account?.address) return
+
+			// Keep the snapshot current — `fetchTokenBalances` derives `isUpdating` from `tasks` on
+			// every scope change, so a missing/stale entry would strand or lose the section dot.
+			if (!tasks.value.some((t) => t.id === task.id)) tasks.value.push(task)
+
 			idx = tokenBalances.value.findIndex((tb) => tb.id === task.content.tbId)
 			if (idx !== -1) {
 				tokenBalances.value[idx].isUpdating = true
@@ -110,6 +116,11 @@ function onTaskUpdated(task) {
 	switch (task.content.kind) {
 		case ContentKind.BalanceUpdate:
 			if (!task.finishedAt) return
+
+			// Terminal → drop from the snapshot; a lingering unfinished-looking entry would resurrect
+			// `isUpdating: true` on the next scope-change refetch (stranded section dot).
+			idx = tasks.value.findIndex((t) => t.id === task.id)
+			if (idx !== -1) tasks.value.splice(idx, 1)
 
 			idx = tokenBalances.value.findIndex((tb) => tb.id === task.content.tbId)
 			if (idx !== -1) {
@@ -139,6 +150,9 @@ function onTaskDeleted(task) {
 	let idx
 	switch (task.content.kind) {
 		case ContentKind.BalanceUpdate:
+			idx = tasks.value.findIndex((t) => t.id === task.id)
+			if (idx !== -1) tasks.value.splice(idx, 1)
+
 			idx = tokenBalances.value.findIndex((tb) => tb.id === task.content.tbId)
 			if (idx !== -1) {
 				tokenBalances.value[idx].isUpdating = false
@@ -309,20 +323,45 @@ async function fetchTokenBalances() {
 // Watch account AND the active network id — a network switch changes both the token list and the
 // per-(networkId, contract) sync scope. Bump `scopeGen` + reset the indicator map SYNCHRONOUSLY here
 // (before any await) so any in-flight snapshot from the prior scope is invalidated, then reseed.
+/** Resnapshot the task list for the ACTIVE scope. Runs on mount, scope changes, and TaskService
+ *  reconnects — the live events alone can't repair a snapshot that went stale while disconnected,
+ *  and `fetchTokenBalances` derives `isUpdating` from this list on every refetch. Scope-guarded so
+ *  a late resolve from a superseded scope can't clobber the fresh one. */
+async function fetchTasks() {
+	const scopeAtStart = scopeGen
+	const all = await taskService.getTasks()
+	if (scopeGen !== scopeAtStart) return
+	tasks.value = all.filter(
+		(t) =>
+			(t.content.kind === ContentKind.BalanceUpdate || t.content.kind === ContentKind.TokenMint) &&
+			t.content.account === appStore.account?.address,
+	)
+}
+
+// A reconnect (SW restart) may have dropped terminal task events — resnapshot AND reapply the
+// per-row flags so a completion missed offline can't leave a row (and the section dot) stuck.
+taskService.onConnected.add(onTaskReconnected)
+async function onTaskReconnected() {
+	const scopeAtStart = scopeGen
+	await fetchTasks()
+	if (scopeGen !== scopeAtStart) return
+	for (const tb of tokenBalances.value) {
+		tb.isUpdating = tasks.value.some((t) => t.content.kind === ContentKind.BalanceUpdate && t.content.tbId === tb.id && !t.finishedAt)
+	}
+}
+
 watch(
 	() => [appStore.account?.address, appStore.network?.id],
 	async () => {
 		scopeGen++
 		syncByContract.value = new Map()
+		// Tasks first: fetchTokenBalances derives isUpdating from the snapshot.
+		await fetchTasks()
 		await fetchTokenBalances()
 	},
 )
 onMounted(async () => {
-	tasks.value = (await taskService.getTasks()).filter(
-		(t) =>
-			(t.content.kind === ContentKind.BalanceUpdate || t.content.kind === ContentKind.TokenMint) &&
-			t.content.account === appStore.account.address,
-	)
+	await fetchTasks()
 	// Seed in-flight + recently-terminal token-import journal records so
 	// the row is visible even if the user opened the popup after submission.
 	await fetchTokenImports()
