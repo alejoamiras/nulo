@@ -1185,22 +1185,20 @@ export async function captureBalanceBaseline(page: Page, account: string, tokenC
  *  captured baseline — proves a re-projection actually ran) and CORRECT (exact
  *  raw `publicBalance`, plus exact raw `privateBalance` when the caller proves
  *  a private leg — note discovery is what several sweeps assert). Drives at
- *  most `maxRefreshes` refreshes. Retry cadence:
- *  a refresh is re-kicked when the previous projection observably finished (some
- *  row's `updatedAt` advanced past the last refresh) OR a bounded projection
- *  envelope elapsed with no write — a FAILED projection writes nothing (the
- *  token-balance pipeline persists no failure record; the gas pipeline got a
- *  retry in the cold-start work, this one did not), so "still running" and
- *  "failed silently" are indistinguishable from storage and waiting for a write
- *  alone can starve the loop at one refresh (observed live: correct row, stale
- *  updatedAt, 1 refresh in 90s). The envelope bounds only WHEN TO RE-KICK, never
- *  the acceptance signal, which stays freshness + exact value. Bounded refreshes
- *  (not spam) matter: blind spam starves the popup thread and queues PXE readers
- *  that delay any subsequent purge (ReadWriteGuard drains readers first). The row
- *  read is exact and locale-independent — a body-text scan for "1,000" can
- *  false-positive on "$1,000.00" fiat or "11,000". Callers follow with a
- *  card-scoped DOM assertion (`waitForTokenCardAmount`) so projection→render
- *  stays proven. */
+ *  most `maxRefreshes` refreshes. Retry cadence: a refresh is re-kicked when
+ *  the previous projection observably finished (some row's `updatedAt`
+ *  advanced past the last refresh) OR the projection envelope elapsed with no
+ *  write (a failed projection persists `syncFailure` but leaves `updatedAt`
+ *  untouched, so a silent stall and a failure look alike here) — AND at least
+ *  the spacing floor has passed since the last kick, so a projection that
+ *  completes fast with stale values cannot burn the cap and leave a dead tail.
+ *  Both bounds pace only WHEN TO RE-KICK, never the acceptance signal, which
+ *  stays freshness + exact value. Bounded refreshes (not spam) matter: blind
+ *  spam starves the popup thread and queues PXE readers that delay any
+ *  subsequent purge (ReadWriteGuard drains readers first). The row read is
+ *  exact and locale-independent — a body-text scan for "1,000" can
+ *  false-positive on "$1,000.00" fiat or "11,000". Value-display call sites
+ *  pair this with a card-scoped DOM assertion (`waitForTokenCardAmount`). */
 export async function waitForFreshBalanceRow(
 	page: Page,
 	opts: {
@@ -1213,15 +1211,12 @@ export async function waitForFreshBalanceRow(
 		timeoutMs?: number
 	},
 ): Promise<void> {
-	// Default the refresh budget to SPAN the whole timeout at envelope pacing:
-	// there is no ambient periodic re-sync (projections fire only on explicit
+	// No ambient periodic re-sync exists (projections fire only on explicit
 	// refresh / token events / tx updates) and a failed batch is dropped, never
-	// re-enqueued — a fixed small cap starves, leaving a dead tail in which no
-	// projection can be triggered and the wait false-FAILs (post-impl review).
-	// Pacing (one refresh per finished-attempt-or-envelope) is what prevents
-	// spam; the cap just needs to not run out before the budget does.
-	// Queue tick (1s) + a ≤12-row projection batch + margin — bounds the re-kick
-	// cadence only, never the acceptance signal.
+	// re-enqueued — so the refresh budget must span the whole timeout. The
+	// envelope (queue tick + a ≤12-row batch + margin) re-kicks through silent
+	// stalls; both it and the spacing floor bound the re-kick cadence only,
+	// never the acceptance signal.
 	const REFRESH_ENVELOPE_MS = 15_000
 	// Floor between re-kicks: a projection that completes FAST with stale/wrong
 	// values must not burn the refresh cap in seconds and leave a dead tail —

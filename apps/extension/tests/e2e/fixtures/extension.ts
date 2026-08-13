@@ -656,14 +656,12 @@ export const test = base.extend<{
 
 			await importToken(page, aztecConfig.tokenAddress)
 
-			// Poll: refresh balances until the minted amount is visible in the extension.
 			// The extension's PXE syncs blocks independently and may take 30-60s on
-			// a fresh node. Each refresh triggers a simulateTx which advances the
-			// Fail-HARD: a fixture that quietly degrades ("tests may fail") just
-			// moves the failure downstream into whichever consumer reads the
-			// balance first, with worse evidence. The freshness-gated row wait
-			// throws with a storage census on timeout. Same budget as the old
-			// loop; token-scoped, so fiat/superstring text cannot satisfy it.
+			// a fresh node; each refresh advances the sync. Fail-HARD: a fixture
+			// that quietly degrades just moves the failure downstream into
+			// whichever consumer reads the balance first, with worse evidence —
+			// the freshness-gated row wait throws with a storage census instead.
+			// Budget: 60s. Token-scoped, so fiat/superstring text cannot satisfy it.
 			{
 				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
 				await waitForFreshBalanceRow(page, {
@@ -747,12 +745,8 @@ export const test = base.extend<{
 
 			await importToken(page, aztecConfig.tokenAddress)
 
-			// Poll for token balance. Tightened from 30 × 5s = 150s to
-			// Fail-HARD: a fixture that quietly degrades ("tests may fail") just
-			// moves the failure downstream into whichever consumer reads the
-			// balance first, with worse evidence. The freshness-gated row wait
-			// throws with a storage census on timeout. Same budget as the old
-			// loop; token-scoped, so fiat/superstring text cannot satisfy it.
+			// Fail-HARD freshness-gated row wait — see tokenReadyExtension's note.
+			// Budget: 90s.
 			{
 				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
 				await waitForFreshBalanceRow(page, {

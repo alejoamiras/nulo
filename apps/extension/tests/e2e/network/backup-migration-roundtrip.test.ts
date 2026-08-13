@@ -130,7 +130,7 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 
 			// The wallet syncs the REAL on-chain balance through its own PXE
 			// (token rows + account-state contract registrations came from the
-			// backup). Mirror the tokenReadyExtension refresh cadence.
+			// backup).
 			// FRESHNESS-gated: the imported backup carries rows with nonzero
 			// updatedAt, so a value-only wait could pass with zero post-import
 			// sync (the backup-restore reference pattern).

@@ -101,9 +101,9 @@ test.skipIf(!hasConfig)(
 		//    Poll refresh (each refresh advances the extension PXE's sync).
 		await navigateByHash(page, "#/popup/general")
 		await page.waitForSelector('[data-testid="tokens-card"]', { visible: true, timeout: 30_000 })
-		// Token-scoped freshness + EXACT raw private delta (0 → 25) — the old
-		// body-text "1,025" scan could false-positive on fiat and proved only a
-		// rendered total, not the discovered note.
+		// Token-scoped freshness + EXACT raw private delta (0 → 25) — a
+		// body-text total scan can false-positive on fiat and proves a rendered
+		// sum, not the discovered note.
 		const discoveryBaseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, aztecConfig.tokenAddress)
 		await waitForFreshBalanceRow(page, {
 			account: tokenReadyExtension.accountAddress,
