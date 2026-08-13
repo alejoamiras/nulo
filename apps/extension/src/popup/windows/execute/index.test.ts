@@ -21,6 +21,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { flushPromises, mount } from "@vue/test-utils"
 import { reactive, ref, type Ref } from "vue"
 
@@ -132,6 +133,7 @@ vi.mock("@/composables/useFeeEstimationMap", () => ({
 		cancel: vi.fn(),
 		cancelAll: vi.fn(),
 		handoffAll: vi.fn(() => ({})),
+		rearm: vi.fn(),
 		dispose: vi.fn(),
 	})),
 }))
@@ -493,19 +495,44 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 })
 
 describe("execute window — dApp cancellation state", () => {
-	test("a cancel mid-approve disables Confirm and renders the cancelled overlay", async () => {
-		// The minimal harness keeps Confirm disabled via its other conditions
-		// (fee selection, metadata) — this pin proves the CANCELLED state's own
-		// contributions: the overlay renders and the disabled binding includes
-		// the flag (the service-level linearization pin guarantees a raced
-		// programmatic click can't start execution regardless).
+	test("the cancelled state renders the overlay (no error banner)", async () => {
+		// The minimal harness keeps Confirm disabled via its other gates, so
+		// this pin owns only the overlay half; the raced-approve pin below is
+		// what discriminates the cancelled path end to end.
 		w = factory()
 		await completeInit()
 		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(false)
 
 		isCancelledMock.value = true
 		await flushPromises()
-		expect(w!.find('[data-testid="execute-confirm-btn"]').attributes("disabled")).toBeDefined()
 		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
+	})
+
+	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
+		// The dApp cancelled while the click was in flight and the broadcast
+		// never reached this popup: the typed service refusal alone must land
+		// the window in the cancelled UI — overlay up, no error banner.
+		approveInteractionMock.mockRejectedValueOnce(new JobCancelledError("Request was cancelled before approval"))
+		w = factory()
+		await completeInit()
+		// Reach the approvable state directly: one executable operation (fee
+		// settled, so neither the fee gate nor the empty-operations gate trips).
+		const vm = w.vm as unknown as ExecVm & { approve: () => Promise<void>; operations: unknown[]; initComplete: boolean }
+		vm.operations = [
+			{
+				kind: "send_transaction",
+				feeSettings: { paymentMethod: { kind: "sponsored_fpc" } },
+				network: { chainId: 1, name: "TestNet" },
+				account: { address: "0x1", chainId: 1, name: "TestAccount" },
+			},
+		]
+		vm.initComplete = true
+		await flushPromises()
+
+		await vm.approve()
+		await flushPromises()
+		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 })

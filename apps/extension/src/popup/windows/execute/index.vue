@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Vendor */
 import { onMounted, onUnmounted } from "vue"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 
 /** Components */
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
@@ -403,7 +404,15 @@ const approve = async () => {
 		// The execution path never took ownership — re-arm so a later
 		// reject/unmount can still cancel + evict the handed-off estimates.
 		rearmFeeEstimates()
-		setError("Processing error.", getErrorMessage(error))
+		if (error instanceof JobCancelledError) {
+			// A raced approve refused service-side (the dApp cancelled first):
+			// the refusal IS the cancelled state — render the overlay, never an
+			// error banner. Covers the case where the cancel broadcast itself
+			// was lost to this popup.
+			isInteractionCancelled.value = true
+		} else {
+			setError("Processing error.", getErrorMessage(error))
+		}
 	} finally {
 		isLoading.value = false
 	}

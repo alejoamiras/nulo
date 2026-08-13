@@ -128,6 +128,11 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		if (!interactionRequest) {
 			throw new Error("Invalid id")
 		}
+		// Same first-claim-wins refusal as approveInteraction — capability and
+		// discovery approvals must not outrun a processed cancel either.
+		if (interactionRequest.cancelledAt !== undefined) {
+			throw new JobCancelledError("Request was cancelled before approval")
+		}
 		this.storage.delete(id)
 		// Detach before settling: popup may close in the same event-loop turn
 		// as the resolveInteraction RPC, and the onRemoved event could race

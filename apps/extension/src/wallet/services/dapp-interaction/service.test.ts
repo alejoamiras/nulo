@@ -180,6 +180,14 @@ describe("DappInteractionService cancellation linearization (first service claim
 		expect(cancelled).toEqual([])
 	})
 
+	test("resolveInteraction refuses a cancelled record too (capability/discovery parity)", async () => {
+		const { svc, internals } = makeService({})
+		seed(internals, "i-4")
+		svc.cancelInteraction("i-4")
+		await expect(svc.resolveInteraction("i-4", { approved: true })).rejects.toBeInstanceOf(JobCancelledError)
+		expect(internals.storage.has("i-4")).toBe(true)
+	})
+
 	test("the cancelled flag is DURABLE before the broadcast — a late subscriber replays it", async () => {
 		const { svc, internals } = makeService({})
 		seed(internals, "i-3")
