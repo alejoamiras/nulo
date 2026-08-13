@@ -373,7 +373,7 @@ assuming "transient".
 - **An exactness upgrade finds producer dirt the fuzzy assert absorbed** (block-forcing mints
   accumulating raw dust the display rounding hid) — audit every producer feeding an assert
   you tighten, especially fixtures with no current consumer (no run can red on them).
-- **Labeled PR opens leave duplicate check-runs — noisy, not blocking.** Opening a labeled
+- **Duplicate check-runs from labeled PR opens do not explain the observed blocks.** Opening a labeled
   PR fires opened+labeled events; the concurrency-cancelled duplicates leave FAILURE
   aggregator check-runs beside the survivors' successes on the same SHA. A measured probe
   (deflake-round-3 `lessons/phase-1.md`) shows the PR going CLEAN once the survivors land,

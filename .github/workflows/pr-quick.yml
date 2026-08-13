@@ -11,8 +11,9 @@ on:
     # NO `labeled`/`unlabeled`: nothing in this workflow reads labels, so for a
     # SHA this workflow has already covered a label event only re-does that work
     # — cancelling the in-flight run (whose `quality-status` then concludes
-    # FAILURE via `always()` + the cancelled-is-failure branch, leaving an
-    # earlier losing check-run) or re-running everything from scratch. It can
+    # FAILURE via `always()` + the cancelled-is-failure branch, leaving a
+    # duplicate FAILURE check-run behind) or re-running everything from
+    # scratch. It can
     # incidentally recover a head with no run of its own, which is why the gap
     # below matters. The label-gated suites keep both types: their gates read
     # labels.
