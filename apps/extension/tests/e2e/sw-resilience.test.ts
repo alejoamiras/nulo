@@ -2,19 +2,44 @@ import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
-import { lockWallet } from "./fixtures/helpers"
+import { ensureUnlocked, lockWallet } from "./fixtures/helpers"
 
-/** Stop the SW via CDP — closest approximation of MV3's idle-suspend
- *  recycle. Used by both strict-mode tests below. */
+/** Terminate the SW and WAIT for it to be gone, approximating MV3's
+ *  idle-suspend recycle.
+ *
+ *  `worker().close()` is Chrome's documented way to test service-worker
+ *  termination with Puppeteer; for a service-worker target puppeteer implements
+ *  it as `Target.closeTarget` + detach. The obvious-looking alternative,
+ *  `Runtime.terminateExecution`, does NOT end this worker — measured: the target
+ *  survives, the session record survives, the wallet stays unlocked, and
+ *  `nulo:liveness` merely advances by one HEARTBEAT_INTERVAL_MS, which is enough
+ *  to satisfy a post-kill liveness gate without any respawn having occurred
+ *  (deflake-round-3 `lessons/phase-3.md`).
+ *
+ *  Returning only once the ORIGINAL target id is gone is what makes the tests
+ *  below mean anything: without it they pass against a worker that never died. */
 async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 5_000,
+		timeout: 15_000,
 	})
-	const swSession = await swTarget.createCDPSession()
-	try {
-		await swSession.send("Runtime.terminateExecution")
-	} catch {
-		// Session dies along with the SW; swallow disconnect noise.
+	// biome-ignore lint/suspicious/noExplicitAny: target identity is internal, and identity is the whole point here
+	const idOf = (t: any): string => t._targetId ?? t.targetId ?? "<unknown>"
+	const doomedId = idOf(swTarget)
+
+	const worker = await swTarget.worker()
+	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
+	await worker.close()
+
+	const deadline = Date.now() + 15_000
+	for (;;) {
+		const stillThere = ext.browser
+			.targets()
+			.some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId) && idOf(t) === doomedId)
+		if (!stillThere) return
+		if (Date.now() > deadline) {
+			throw new Error(`stopServiceWorker: service-worker target ${doomedId} was still alive 15s after close()`)
+		}
+		await new Promise((r) => setTimeout(r, 100))
 	}
 }
 
@@ -71,7 +96,7 @@ async function readLiveness(page: Page): Promise<number> {
 // faithful primitive: close the browser and relaunch on the same persistent
 // `userDataDir`, which IS the crash these tests describe. That means giving
 // this file a per-test profile dir instead of the shared file-scoped browser.
-test.skip("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
+test("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 
@@ -113,7 +138,7 @@ test.skip("extension survives SW stop+respawn: lock → kill SW → unlock → g
  * comes from strict mode, not from explicit user action.
  */
 // SKIP: same SW-respawn timing flake as the first test in this file.
-test.skip("strict mode default ON: unlock → kill SW → expect lock screen on respawn", async ({ registeredExtension }) => {
+test("strict mode default ON: unlock → kill SW → expect lock screen on respawn", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 	// Note: deliberately NO lockWallet() call. Strict mode is the lock.
@@ -146,8 +171,13 @@ test.skip("strict mode default ON: unlock → kill SW → expect lock screen on 
  * still gets covered by the manual smoke checklist).
  */
 // SKIP: same SW-respawn timing flake as the first test in this file.
-test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock → kill SW → silent restore", async ({ registeredExtension }) => {
+test("strict mode OFF (opt-out): unlock → toggle off → relock+unlock → kill SW → silent restore", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
+	// These tests share one browser, and the strict-mode test above now leaves the
+	// wallet genuinely LOCKED — which it always should have, but could not while
+	// the "kill" left the worker running. Establish the precondition instead of
+	// inheriting it.
+	await ensureUnlocked(page)
 	await waitForHash(page, "#/popup/general")
 
 	// Drive the config flag from the SW console — equivalent to flipping
@@ -203,17 +233,15 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
  * value and miss the regression. Fresh-timestamp comparison is the
  * correctness fix.
  */
-// SKIP: same root cause as above — with the worker surviving the terminate,
-// this test's "fresh liveness within HEARTBEAT_INTERVAL_MS" is satisfied by the
-// heartbeat itself, so it would pass whether or not the respawn-time regression
-// it pins ever came back. It needs the real kill primitive before it means
-// anything. (Its historical "Navigating frame was detached" flake is separately
-// mitigated now: `openPopup` retries that class, and the matching wording was
-// added to `isFrameDetachError`.)
-test.skip("regression: liveness signal lands within HEARTBEAT_INTERVAL_MS of SW respawn", async ({ registeredExtension }) => {
+test("regression: liveness signal lands within HEARTBEAT_INTERVAL_MS of SW respawn", async ({ registeredExtension }) => {
 	const HEARTBEAT_INTERVAL_MS = 10_000
 
 	const page = await openPopup(registeredExtension)
+	// These tests share one browser, and the strict-mode test above now leaves the
+	// wallet genuinely LOCKED — which it always should have, but could not while
+	// the "kill" left the worker running. Establish the precondition instead of
+	// inheriting it.
+	await ensureUnlocked(page)
 	await waitForHash(page, "#/popup/general")
 
 	// Snapshot the liveness timestamp BEFORE killing the SW. The new
@@ -230,8 +258,13 @@ test.skip("regression: liveness signal lands within HEARTBEAT_INTERVAL_MS of SW 
 
 	await stopServiceWorker(registeredExtension)
 
-	const page2 = await openPopup(registeredExtension)
+	// Clock starts at the KILL, not after `openPopup` — which already waits for
+	// the background to be connected, i.e. for the very write being timed. Timing
+	// from there measured nothing and would not have caught the regression this
+	// test exists for. Including the popup-open cost makes this an upper bound on
+	// respawn-to-liveness, which is what the assertion needs.
 	const start = Date.now()
+	const page2 = await openPopup(registeredExtension)
 	await page2.waitForFunction(
 		async (priorTs: number) => {
 			try {
