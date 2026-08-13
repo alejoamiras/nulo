@@ -1,0 +1,130 @@
+<title>Home Refresh Blueprint</title>
+<style>
+:root{
+  --bg:#faf8f4;--ink:#26221c;--muted:#6b655c;--faint:#a49c8f;--line:#e4dfd5;
+  --card:#f2eee6;--accent:#8a4a0f;--good:#0f7a54;--warn:#8a6d00;
+}
+:root:not([data-theme="light"]){}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12100e;--ink:#ece7dd;--muted:#a39b8e;--faint:#6d665b;--line:#2e2a24;
+    --card:#1b1815;--accent:#e0a06a;--good:#4cc296;--warn:#d4b44a;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12100e;--ink:#ece7dd;--muted:#a39b8e;--faint:#6d665b;--line:#2e2a24;
+  --card:#1b1815;--accent:#e0a06a;--good:#4cc296;--warn:#d4b44a;
+}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:760px;margin:0 auto;padding:48px 20px 80px}
+h1{font-size:1.7rem;font-weight:650;letter-spacing:-.01em;margin-bottom:.4rem;text-wrap:balance}
+h2{font-size:1.15rem;font-weight:650;margin:2.6rem 0 .9rem;text-wrap:balance}
+h3{font-size:1rem;font-weight:600;margin:0 0 .3rem}
+p{max-width:68ch}
+.sub{color:var(--muted)}
+.meta{font-size:.85rem;color:var(--faint);margin-bottom:2rem}
+.phase{border-left:3px solid var(--line);background:var(--card);padding:.9rem 1.1rem;margin:.9rem 0}
+.phase p{font-size:.95rem;margin:0}
+.gate{font-size:.85rem;color:var(--muted);margin-top:.45rem}
+.gate b{color:var(--good);font-weight:600}
+ul{padding-left:1.2rem;max-width:68ch}
+li{margin:.45rem 0}
+.approval{background:var(--card);border-left:3px solid var(--accent);padding:1rem 1.2rem;margin:1.4rem 0}
+.approval ul{margin-top:.5rem}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em}
+pre{background:var(--card);border:1px solid var(--line);padding:.9rem 1rem;overflow-x:auto;
+  white-space:pre-wrap;word-break:break-word;line-height:1.5}
+.seeds{margin-top:2.6rem;padding-top:1.6rem;border-top:1px solid var(--line)}
+.recommended{border-left-color:var(--accent)}
+.recommended h3::after{content:" · recommended";color:var(--accent);font-weight:600;font-size:.85em}
+.warning{color:var(--warn);font-weight:600;margin:.9rem 0;font-size:.95rem}
+.muted{color:var(--faint);font-size:.85rem}
+strong{font-weight:650}
+</style>
+<div class="wrap">
+  <h1>Home Refresh Blueprint</h1>
+  <p class="sub">The implementation plan for the home-screen refresh you locked over five design rounds — the dot that only appears when the wallet is genuinely behind, the lock/globe private–public split, the tighter rows, the two-decimal fee juice, the "dRPC" endpoint name, the new header with one-click address copy, and the cursor fix. This page is the approval view; the full technical plan lives in the repo at <code>implementations-plan/home-refresh/plan.md</code>.</p>
+  <p class="meta">Blueprint tier: light · Worktree: home-refresh · 2026-08-13</p>
+
+  <h2>Why the "light" tier</h2>
+  <p>The sizing rubric scored zero high-risk dimensions: nothing novel (every piece reuses an existing pattern in the codebase), small blast radius (one screen plus one shared card layout), fully reversible, no data migrations, no third-party coupling, no security-sensitive surface. Light means one plan, one independent audit (a second AI model reviewed the plan critically), and a single pull request.</p>
+  <p>That audit earned its keep: the first draft was <strong>rejected</strong> with four real findings — the "how far behind" number was being measured from the wrong marker (a quiet token would have false-alarmed after any network hiccup, the exact thing you asked to avoid), the dot couldn't turn off mid-catch-up, the block-time guess was indefensible, and one test suite was missing from the checklists. All four fixes are in the revised plan; the auditor re-reviewed it and gave a <strong>conditional approve</strong> — its four conditions (a restart-proof progress marker, stricter input checking, keyboard access for the tooltip, proof the full address reaches the clipboard) are all folded in as extra tests and small design changes.</p>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <h3>Phase 1 — The plumbing</h3>
+    <p>First, measure how fast this network actually produces blocks (nobody has written it down), and set the "really behind" threshold from that measurement. Then teach the background scanner to report how far behind it truly is — measured from what it has <em>covered</em>, not from where it last saw a transfer, so quiet tokens can't false-alarm. Also: name the default endpoints "dRPC" in settings, retire the odd "+" copy cursor. No visible UI change yet.</p>
+    <p class="gate"><b>Proves itself by:</b> the full unit-test suite (extension AND design package), typecheck, and lint — including new tests for the quiet-token case, the threshold turning on <em>and off</em> mid-catch-up, and the seeded "dRPC" label.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 2 — The token list</h3>
+    <p>The visible refresh: the pulsing dot (with its tooltip) replaces the "Catching up…" text and only appears past the ~15-minutes-behind threshold; lock/globe icons replace the squares; unpriced tokens show their name instead of "PRIVATE / PUBLIC"; rows tighten.</p>
+    <p class="gate"><b>Proves itself by:</b> the rewritten TokenCard/TokensView/BalanceView component tests — threshold above/below cases, icon assertions, subtitle fallback — plus typecheck and lint.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 3 — Density and decimals</h3>
+    <p>Fee juice drops to two decimals, sections sit closer together, and activity cards get slightly tighter — everywhere they appear, so the whole app keeps one rhythm.</p>
+    <p class="gate"><b>Proves itself by:</b> new fee-juice tests with fractional amounts (the only signal for this change — today's tests all use whole numbers), plus the standard suite.</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 4 — The header</h3>
+    <p>The account chip splits: avatar + name open the account switcher, the address copies itself with a toast, a copy icon appears on hover. Built from the avatar and copy components the app already has.</p>
+    <p class="gate"><b>Proves itself by:</b> typecheck, lint, and the unit suite staying green (the header's real proof is Phase 5's browser tests, per the repo's own convention).</p>
+  </div>
+  <div class="phase">
+    <h3>Phase 5 — Browser tests, end to end</h3>
+    <p>New browser-level coverage: clicking the address shows "Address is copied", the avatar and name open the switcher, the endpoint row reads "dRPC". Then the full gates: build, smoke suite, and the complete network suite (run alone, per house rule).</p>
+    <p class="gate"><b>Proves itself by:</b> <code>audit:vue</code> + smoke e2e + network e2e, all green.</p>
+  </div>
+
+  <h2>Human context</h2>
+  <p>One design decision made this plan simpler than it looks: the existing browser tests find the account switcher by an internal label (<code>account-selector</code>). Instead of updating every test, the new header keeps that label on the <em>name</em> button — so all existing switching tests pass untouched, and only genuinely new behavior (copying, the avatar) gets new tests. Your top priority — tests updated correctly — shaped the whole plan: every phase's checklist names the exact test files it rewrites or adds.</p>
+  <p>One quiet caveat: nobody has written down how long this network's blocks take, so "15 minutes behind" is set as a tunable constant with the reasoning documented next to it — easy to adjust if the network's pace changes.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>Avatar initials.</strong> The app's existing avatar component shows <em>two</em> letters ("PA" for Primary Account); the mock showed one ("P"). Reusing it unchanged is recommended (consistent, zero new code) — say "single letter" if you want the mock exactly.</li>
+    <li><strong>Density everywhere.</strong> The tighter activity cards live in a shared layout, so the Activity page and token pages tighten too — recommended (one rhythm), but it's a wider ripple than "home screen" implies.</li>
+    <li><strong>The threshold number.</strong> "15 minutes behind" is your policy; the block count that means will come from Phase 1's measurement of the live networks. Recommended: accept the measured number (documented, easily tuned later).</li>
+  </ul>
+  <p class="sub">Small defaults decided for you (veto if wrong): a failed copy shows "Couldn't copy address"; the "dRPC" name stays editable like any endpoint label; the dot's tooltip also works from the keyboard.</p>
+
+  <div class="approval">
+    <h2 style="margin-top:0">Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: the eight locked spec items, nothing else.</li>
+      <li>Confirm tier: light (rubric above).</li>
+      <li>Confirm validation: unit/component tests every phase; smoke + full network e2e at the end (as you chose).</li>
+      <li>Confirm delivery: one PR into <code>dev</code>.</li>
+      <li>Answer the three open questions (or accept the recommendations).</li>
+      <li>No post-release hardening pass scheduled (cosmetic surface) — confirm.</li>
+      <li>Approve · conditionally approve (with conditions) · reject (with reasons).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p class="sub">Two ways to run the autonomous implementation session. Both must run inside the <code>home-refresh</code> worktree (<code>agent-worktree resume home-refresh</code>).</p>
+    <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+    <div class="phase recommended">
+      <h3>/goal</h3>
+      <pre><code>/goal All five phases marked ✓ in implementations-plan/home-refresh/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/home-refresh/lessons/phase-N.md in the transcript; /code-review max --fix complete with findings applied and committed separately; the codex post-impl fix loop converged (a resumed codex pass reported no new material findings, quoted in the transcript); a PR into dev exists titled "feat(home): threshold-gated sync dot, lock/globe split, denser rows, header address copy" (gh pr view output in the transcript); bun run audit:vue, bun run test:e2e, and bun run e2e:agent all report exit 0 in the transcript.</code></pre>
+    </div>
+
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/home-refresh forward. Never idle waiting for my input. Each firing:
+1. Reality check: read implementations-plan/home-refresh/plan.md and lessons/ (authoritative state — not the chat); run git status and git log --oneline -5. If a PR exists, gh pr view --json statusCheckRollup (no --watch). Without a PR but with CI configured, gh run list --branch $(git branch --show-current) --limit 1 --json status,databaseId.
+2. Waiting on CI is fine — confirm it's progressing (gh run watch &lt;run-id&gt; up to 10 minutes; stuck past that → inspect logs, log as blocked in lessons). Use the wait productively: review the diff, prep the next phase, strengthen tests.
+3. No task in hand? Pick the next pending step from plan.md and start it. After each meaningful edit run bun run lint and the touched packages' tests. Then commit → push.
+4. Stuck, or facing a decision you'd normally bring to me? Call /codex xhigh with full context and reach a defensible decision, then act. Log every consult + verdict in lessons/phase-N.md. Hard limits: never merge to dev/main, never publish or deploy, never expand scope beyond plan.md.
+5. Same step failed 5 times? Stop retrying; reassess with codex, then continue down the agreed path.
+6. Phase green? "Green" means THE PHASE'S VALIDATION GATE as written in plan.md passes. Run the full gate, paste the result, mark ✓ in plan.md, file the lessons entry, print LESSONS_FILE=implementations-plan/home-refresh/lessons/phase-N.md, advance.
+7. All phases ✓? Run plan.md's Post-implementation section: /code-review max --fix → commit fixes separately → codex post-impl audit → fix loop until no new material findings → gh pr create into dev per plan.md → wrap-up report. Surface and stop.
+Keep the ASCII checklist visible each firing (plan.md is the source of truth).</code></pre>
+  </section>
+
+  <p class="muted">Full plan: <code>implementations-plan/home-refresh/plan.md</code> · Recon: <code>recon.md</code> · Audit transcript: <code>audit-codex.md</code> (in the repo worktree).</p>
+</div>
