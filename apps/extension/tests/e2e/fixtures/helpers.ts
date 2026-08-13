@@ -927,14 +927,33 @@ export async function setInputAndBlur(page: Page, selector: string, value: strin
 // ── Settings: appearance + privacy ───────────────────────────────────────
 
 /** Click a theme button (system / light / dark) and wait for `html[theme=…]`
- *  to reflect the choice. The theme buttons are inside a Dropdown popup —
- *  open it by clicking the trigger first if the button isn't yet visible. */
+ *  to reflect the choice. The theme buttons are inside a Dropdown popup whose
+ *  leave `<Transition>` keeps the options VISIBLE while the dropdown's state
+ *  is already closed — a visibility sample taken mid-close (right after a
+ *  previous selection closed the menu) reads "open", skips the trigger click,
+ *  and then waits on an option that is about to disappear (reproduced under
+ *  CPU load as the appearance retry-flake). Gate on the dropdown's OWN state
+ *  (`data-dropdown-open`, synchronous with `isOpen`) instead. */
 export async function setTheme(page: Page, mode: "system" | "light" | "dark"): Promise<void> {
-	const visible = await page.evaluate((m: string) => {
-		const btn = document.querySelector(`[data-testid="theme-${m}-btn"]`) as HTMLElement | null
-		return btn ? btn.offsetParent !== null : false
-	}, mode)
-	if (!visible) await clickByTestId(page, "theme-trigger")
+	const readOpen = () =>
+		page.evaluate(
+			() =>
+				document
+					.querySelector('[data-testid="theme-trigger"]')
+					?.closest("[data-dropdown-open]")
+					?.getAttribute("data-dropdown-open") === "true",
+		)
+	if (!(await readOpen())) {
+		await clickByTestId(page, "theme-trigger")
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="theme-trigger"]')
+					?.closest("[data-dropdown-open]")
+					?.getAttribute("data-dropdown-open") === "true",
+			{ timeout: 5_000 },
+		)
+	}
 	await clickByTestId(page, `theme-${mode}-btn`)
 	if (mode === "system") {
 		// system mode resolves to either "dark" or "light" via prefers-color-scheme
