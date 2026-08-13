@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -42,7 +42,7 @@ test.skipIf(!hasConfig)(
 		await approveCapabilities(popup, { accounts: [firstAccount] })
 
 		const result = await waitForPgResult(page, "requestCapabilities", fromSeq, 30_000)
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "cap-request-accounts.test:result")
 
 		// Playground should now show the account in pg-account-list
 		const accounts = await page.evaluate(() =>

@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, waitForPopup } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -80,7 +80,7 @@ test.skipIf(!hasConfig)(
 		// clickByTestId waits on the same disabled bit but loses all of that.
 		await approveExecute(execPopup)
 		const result = await waitForPgResult(page, "registerToken", seqRegister, 30_000)
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "register-token.test:result")
 
 		expect(dappConnectedExtensionWithAccountsCap.consoleErrors).toEqual([])
 		expect(dappConnectedExtensionWithAccountsCap.pageErrors).toEqual([])

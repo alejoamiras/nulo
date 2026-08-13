@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config"
+import RetryErrorReporter from "./tests/e2e/retry-error-reporter"
 import { srcDir } from "./vite.shared"
 
 export default defineConfig({
@@ -39,5 +40,7 @@ export default defineConfig({
 		// against the documented "~17 sequential files Chrome cascade" path.
 		// The second retry is doing real work, not masking.
 		retry: 2,
+		// Default output plus the retained first-attempt errors of retried passes.
+		reporters: ["default", new RetryErrorReporter()],
 	},
 })

@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { navigateToSettings, switchAccountByAddress } from "../fixtures/helpers"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -84,7 +84,7 @@ test.skipIf(!hasConfig)(
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
 			const res = await waitForPgResult(page, "grantPublicAuthwit", seq, 360_000)
-			expect(res.status).toBe("ok")
+			await assertPgOk(page, res, "authwit-lifecycle.test:res")
 			await waitForTxMined(aztecConfig!, String(res.resultJson).replace(/^"(.*)"$/, "$1"))
 		}
 		// Consume as caller B: transfer_public_to_public(A, B, 1, nonce). sendTx now honors
