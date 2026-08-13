@@ -729,7 +729,11 @@ export const test = base.extend<{
 				await waitForL1ToL2Message(
 					node,
 					claim.messageHash.toString(),
-					() => mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, 1n, minterAddress, feeOptions),
+					() =>
+						// Self-mint to the TEST wallet's account: each forced block must
+						// not add to the extension account, whose balance is asserted
+						// EXACTLY by the fail-hard row wait below.
+						mintPublicTokens(wallet, aztecConfig.tokenAddress, minterAddress, 1n, minterAddress, feeOptions),
 					90_000,
 				)
 

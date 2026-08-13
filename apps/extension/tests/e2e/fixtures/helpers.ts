@@ -1223,8 +1223,13 @@ export async function waitForFreshBalanceRow(
 	// Queue tick (1s) + a ≤12-row projection batch + margin — bounds the re-kick
 	// cadence only, never the acceptance signal.
 	const REFRESH_ENVELOPE_MS = 15_000
+	// Floor between re-kicks: a projection that completes FAST with stale/wrong
+	// values must not burn the refresh cap in seconds and leave a dead tail —
+	// the cap is derived from this floor so kicks can span the whole deadline
+	// (the old per-site loops re-kicked at ~1.5-2s for up to 60 iterations).
+	const MIN_REFRESH_SPACING_MS = 2_000
 	const { account, tokenContract, expectedPublicRaw, expectedPrivateRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
-	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / REFRESH_ENVELOPE_MS)
+	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / MIN_REFRESH_SPACING_MS)
 	const deadline = Date.now() + timeoutMs
 	type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
 	// The (account, token) join re-resolves EVERY poll: after a restore the token
@@ -1282,7 +1287,8 @@ export async function waitForFreshBalanceRow(
 			return
 		const attemptFinished =
 			refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt) || Date.now() - lastRefreshAt >= REFRESH_ENVELOPE_MS
-		if (attemptFinished && refreshes < maxRefreshes) {
+		const spaced = refreshes === 0 || Date.now() - lastRefreshAt >= MIN_REFRESH_SPACING_MS
+		if (attemptFinished && spaced && refreshes < maxRefreshes) {
 			lastRefreshAt = Date.now()
 			refreshes++
 			await refreshBalances(page)
