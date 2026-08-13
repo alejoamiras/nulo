@@ -45,6 +45,42 @@ const makeService = (): DappInteractionLike & {
 }
 
 describe("useDappInteractionPayload", () => {
+	it("a FAILED replay read cannot fail an otherwise-good load", async () => {
+		const service = makeService()
+		service.__isInteractionCancelled.mockRejectedValue(new Error("port dropped"))
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useDappInteractionPayload({
+				interactionService: service,
+				getRequestId: () => "req-1",
+				dappOf: () => undefined,
+			}),
+		)!
+		await expect(result.load()).resolves.toBeDefined()
+		expect(result.isCancelled.value).toBe(false)
+		scope.stop()
+	})
+
+	it("disposal during the replay read is surfaced, not silently absorbed", async () => {
+		const service = makeService()
+		let resolveReplay: ((v: boolean) => void) | undefined
+		service.__isInteractionCancelled.mockImplementation(() => new Promise<boolean>((r) => (resolveReplay = r)))
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useDappInteractionPayload({
+				interactionService: service,
+				getRequestId: () => "req-1",
+				dappOf: () => undefined,
+			}),
+		)!
+		const loadP = result.load()
+		await Promise.resolve()
+		result.dispose()
+		resolveReplay?.(true)
+		await expect(loadP).rejects.toThrow(/disposed/)
+		scope.stop()
+	})
+
 	it("replays a cancel that fired before the popup subscribed (durable flag, not just the event)", async () => {
 		const service = makeService()
 		service.__isInteractionCancelled.mockResolvedValue(true)

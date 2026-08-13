@@ -65,3 +65,18 @@ the binding term now reds a test. r3: **APPROVE**. Lessons: a pin that passes wi
 guarded term REMOVED pins nothing — always red-team the pin against the deletion of what
 it claims to protect; and an exercise on a fixture that can't satisfy the preconditions
 is a race, not coverage.
+
+## PR-5 fold verify (post-impl conditions) — rounds 1–2
+
+r1 **iterate** (1 Blocking): the canary's new pre-kill liveness snapshot ran on the
+PLAYGROUND page — `chrome.storage.session` is undefined there, the catch returned 0, and
+the stale heartbeat satisfied `> 0` instantly, silently degrading the causal gate back to
+truthy. (The retry=0 rerun passed anyway, i.e. the pass proved nothing about the gate.)
+Codex confirmed the other four sites correct, the pins discriminating, and the
+cold-boot-truthy classification sound. Fold: snapshot via a short-lived extension popup +
+`expect(preKillLiveness).toBeGreaterThan(0)` so a future page-type regression fails loudly
+instead of degrading. Lesson: a causal gate with a catch-to-default arm can silently
+regress to the very non-causal check it replaced — assert the snapshot's validity, not
+just its use.
+r2: **APPROVE** ("no remaining blocker to PR-5 certification") after the extension-popup
+snapshot + nonzero assert landed and the canary re-passed solo retry=0 (2 tests, 140s).

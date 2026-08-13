@@ -152,7 +152,14 @@ OPEN follow-ups — nothing is silently dropped.
   (the exact trap the e2e-testing skill documents). No shard in the evidence
   window actually paid a boot retry.
 
-## Post-certification observation: canary prove-duration variance (OPEN — new class)
+## Post-certification observation: canary prove-duration variance (OPEN — new class, INSTRUMENTED)
+
+> **Watch update (deflake-round-2, 2026-08-14):** the class recurred ONCE during the
+> bootstrap-route-decouple certification (trigger-3 red: canary grant `status:"error"` fast
+> + transfers 300s confirm timeout; run 31648924385) — matching this section's signature.
+> Instrumentation landed in #360: every pg-result mismatch now dumps bounded
+> `errorJson` + `pg-error-text`, so the NEXT occurrence carries its payload. Per the
+> deflake-round-2 plan: no fix until a recurrence arrives WITH payload evidence.
 
 The post-certification docs-only push (`d914c4e`, tree code-identical to the 3 certified
 rounds) hit a canary-job red (run 31547622613, 2026-08-11 ~23:54Z): `transfers` blew its
@@ -172,17 +179,23 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
 
 - `security-reset.test.ts:15`: 10s post-reset route wait racing the awaited purge —
   same structural race as ledger entry 6; fixed in the Fix 5 sweep.
-- `approveExecute` `feeMethod: "fj"|"fpc"` can never match the runtime
-  `send-fee-method-{public|private|sponsored}` testids (unexercised) — OPEN follow-up
-  (dropped from this arc per codex: unrelated scope, `"fpc"` has no clean subtitle
-  mapping; needs a deliberate API change with exercised tests).
-- `isInteractionCancelled` window: `execute-confirm-btn` stays enabled while
-  `approve()` silently no-ops (`index.vue:341`); `DappCancelledOverlay` carries no
-  testid. No current test races a cancel against approve. OPEN follow-up.
-- Body-text balance scans (`includes("1,000")`) can false-positive against fiat
-  (`$1,000.00`) or larger numbers (`11,000`) — killed at the red call sites by Fix 4;
-  remains at non-red sites (`transfers`, `account-switch-isolation`,
-  `receive-unregistered`, fixture loops in `extension.ts`). OPEN follow-up sweep.
+- `approveExecute` dead `feeMethod` keys — **RESOLVED** (deflake-round-2 PR 4/5): both
+  popup helpers route through one typed `selectFeeMethod` (`sponsored|public|private`);
+  the dead keys are compile errors now; public/private exercised by fee-methods' funded
+  submits through the shared path.
+- `isInteractionCancelled` window — **RESOLVED product-side** (deflake-round-2 PR 4/5):
+  cancellation is durable on the interaction record, approve/resolve refuse cancelled
+  records with typed `JobCancelledError` (first service claim wins, both orderings pinned),
+  all three windows classify the refusal into the cancelled UI, the confirm button disables,
+  and the overlay carries testids. REMAINING follow-up (protocol expansion): no production
+  caller of `cancelInteraction` exists — the wallet-sdk/dispatcher never wires a
+  cancellation token, so a dApp-driven cancel e2e needs the token plumbed end-to-end AND the
+  canceller must settle the pending dApp promise (today nothing does until window dismissal
+  or the 10-min reaper).
+- Body-text balance scans — **RESOLVED** (deflake-round-2 PR 3/5, #362): every remaining
+  site swept to token-scoped freshness/value asserts (incl. two extra same-class sites and
+  the three fixture warm-up loops, now fail-hard); `waitForBalance` retired;
+  `waitForFreshBalanceRow` proves private raws too.
 - `TokenCard.vue` `isUpdating` has no DOM representation (dead branch) — RESOLVED by #357
   (`token-balance-refreshing` dot + failed/stale captions). `isMinting` remains a dead
   branch with no DOM representation — OPEN product follow-up.
@@ -195,18 +208,20 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
   user cannot correct a dead backup-carried rpcUrl during the import); cancellation plumbing
   for the bounded chain-sync tail (deadline enforcement exists, user-initiated cancel does
   not). All three are product follow-ups, not flakes.
-- `appearance.test.ts` carries a retry-masked smoke flake (two inner `(retry x1)` passes in
-  the 2026-08-13 certification campaign: "animations toggle persists across navigation",
-  "cycle theme system → light → dark"; both single-retry, load-correlated). Invisible in
-  normal CI (smoke hardcodes 2 retries) — surfaced only by the certification's zero-retry
-  criterion. OPEN follow-up: root-cause before the next certification campaign, or it taxes
-  every empty-commit sequence.
-- The exit-86 retry wrapper does not cover setup-step failures (foundry/puppeteer/
-  accelerator installs) — Fix 6 removes the worst offender rather than widening the
-  retry. OPEN design question if setup flakes recur.
-
-## Cross-cutting observations
-
+- `appearance.test.ts` retry-masked smoke flake — **FIXED** (deflake-round-2 PR 2/5, #361):
+  reproduced under CPU load (retry=0), root cause = `setTheme`'s one-shot visibility sample
+  racing DropdownRoot's close `<Transition>`; fixed with the `data-dropdown-open` state signal
+  + gated `data-toggle-active` waits (the 150ms sleep removed). Post-fix 45/45 load runs; the
+  certification campaign on PR 5/5 is the standing proof. First-attempt errors of retried
+  passes are now VISIBLE in CI (`RetryErrorReporter`, #360), so this class can no longer hide.
+- The exit-86 retry wrapper does not cover setup-step failures — **DECIDED: no widening**
+  (deflake-round-2 B7, codex-consulted). The evidence says step-level retries would not have
+  saved either observed setup incident: snappy@7.4.0 was DETERMINISTIC (a retry re-installs
+  the same broken resolution; the fix was the load-check-gated pin in setup-aztec) and the
+  noirup 503s already failed through an inner 3× retry during a sustained outage. Fail-loud
+  + targeted, load-check-gated pins beat blanket retries: they surface the cause at setup
+  with evidence instead of paying 2× setup time to mask it. Revisit ONLY if a setup failure
+  class appears that is (a) transient at the seconds scale and (b) not already inner-retried.
 - **14 of the 15 red jobs** carry puppeteer wait-timeouts (15 timeout occurrences —
   job 93556897384 has two); the 15th is the foundry-502 infra failure. Every
   timeout is a **wait on a UI signal downstream of un-modeled async work**
@@ -222,3 +237,39 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
   whenever the slow leg engages).
 - #355 (`fix/cold-start-resilience`, merged 2026-08-11 17:51) may reduce entry 3;
   it demonstrably does NOT fix entry 2 (two reds on that very branch today).
+
+## deflake-round-2 additions (2026-08-14)
+
+- Deferred polish (codex-approved inline shapes; take when touching the helpers anyway):
+  fold the baseline capture into `waitForFreshBalanceRow` + a shared `MINT_AMOUNT` fixture
+  const; an `assertPgError` mirror for expected-error pg sites (the ok-side dump landed
+  class-wide in #360; error-side mirrors stayed bare by scope choice).
+- Labeled-PR duplicate-run cancellation leaves FAILURE aggregator check-runs on the head
+  SHA that can WIN GitHub's latest-per-name required-check resolution → mergeStateStatus
+  BLOCKED with every visible gate green (bit #360/#362/#364 in this arc; remedy = empty
+  commit → fresh head). Durable fix candidate: aggregator status jobs should conclude
+  CANCELLED/neutral when their run is cancelled instead of failure. OPEN CI follow-up.
+- `ensureUnlocked`'s first wait (`helpers.ts:82`, 5s auth-selector) lost once under CI load
+  in the frozen-account-canary's post-SW-restart leg (run 31730802901, 2026-08-13; rerun
+  green; helper untouched by this arc). Same tight-fixed-wait class as entry 2's
+  resetProfile 5s — candidate for a causal-signal treatment if it recurs. OPEN watch.
+- Retry census (post-A1, pre-certification): two full ARMED smoke runs with retries +
+  RetryErrorReporter — ZERO retry-passes suite-wide. The smoke suite enters certification
+  retry-clean.
+- `backup-restore-sw-restart` (mid-restore-kill test, bootstrap-route-decouple arc) red
+  ONCE on #365's content run (shard 3, run 31734785738, 2026-08-13): the designed-retry
+  re-import's `waitForHash` 300s lapsed after the log's slow-runner marker fired
+  ("post-kill fork unobserved in 45s"). Same head's parallel import tests green (smoke
+  import-paths + backup-migration; network backup-restore-integrity + migration-roundtrip
+  in other shards) → route path sound; single-occurrence slow-runner flake, PR diff
+  (docs+tests) doesn't touch the path. Green on all 3 certification triggers immediately
+  after. OPEN watch — if it recurs, the 300s wait needs a causal progress signal, not a
+  bigger bound.
+
+## deflake-round-2 certification (2026-08-13, PR #365)
+
+3 consecutive qualifying greens on the frozen tree (e2e-deflake Phase 6 rules): heads
+`ba33d81b` → `b164b56e` → `c6ce1264`, each all-three-suites green at run_attempt=1, zero
+vitest-retry markers in runtime logs (network shards run NULO_E2E_RETRY=0 by gate design;
+smoke's retry:2 unconsumed), zero exit-86/infra-reboot warnings, all 8 network agent jobs
+ran green, each campaign run completed before the next trigger. A1–A5 + B6–B7 closed.
