@@ -19,3 +19,9 @@ conditions folded).
 Codex confirmations: all 26 converted asserts are direct awaited hard failures (none inside
 try/catch or Promise.race); page-closure on the pg-error-text read is covered by the catch;
 no gate or bound weakened.
+
+## PR-1 rounds 2–3
+
+r2 **iterate**: the temp detached-run wrapper had ridden into the fold commit via `git add -A`
+(its own header says never-commit). Untracked + git-ignored (`e3bae69`); lesson: `git add -A`
+is banned while a temp wrapper exists — add by explicit path. r3: **APPROVE** ("PR-1 is ready").
