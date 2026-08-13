@@ -74,7 +74,8 @@ Spec source: five owner-review rounds, final render published as the "Nulo Home 
 - Keyboard rules per CLAUDE.md: three real `<button>`s in DOM order, no positive tabindex.
 - **Validation gate** — commands: `bun run typecheck:all && bun run test && bun run lint`; pass: all exit 0 AND the copy-helper + narrow Header tests run green within `bun run test`. Layers: typecheck · lint · unit/component.
 
-### Phase 5 — E2E updates + full gates
+### Phase 5 ✓ — E2E updates + full gates
+*(gate green 2026-08-13: audit:vue + test:all + armed smoke 86/0 + solo proverless network 87/0 + manual visual pass recorded — see lessons/phase-5.md)*
 - `tests/e2e/accounts.test.ts` (smoke): ADD as **separate tests** (each closes any open overlay before the next — the audit's popup-state caution): (1) click `account-address-copy` → `waitForToast(page, "Address is copied")`; (2) click `account-avatar-btn` → `accounts-popup` visible → close; (3) click `account-selector` (name) → `accounts-popup` visible → close.
 - `tests/e2e/endpoints.test.ts` (smoke): ADD — seeded endpoint row title reads "dRPC" (not the raw URL).
 - No changes to `helpers.ts` / `in-flight-send-guard` / `connect-dapp` (testid preserved — verify by running them, not by assumption).
