@@ -66,22 +66,6 @@ vi.mock("@/wallet/services/token/client", () => ({
 	}),
 }))
 
-vi.mock("@/wallet/services/task/client", () => ({
-	TaskServiceClient: vi.fn(function () {
-		return {
-			disconnect: vi.fn(),
-			getTasks: vi.fn().mockResolvedValue([]),
-			onTaskCreated: { add: vi.fn(), remove: vi.fn() },
-			onTaskUpdated: { add: vi.fn(), remove: vi.fn() },
-			onTaskDeleted: { add: vi.fn(), remove: vi.fn() },
-		}
-	}),
-}))
-
-vi.mock("@/wallet/services/task/spec", () => ({
-	ContentKind: { Step: 0, BalanceUpdate: 1, TokenMint: 2, ExecuteOperation: 3, Transfer: 4, RevokeAuthwits: 5 },
-}))
-
 // Controllable fiat kill-switch for the S-A state-matrix cases.
 let mockShowFiat = true
 vi.mock("@/wallet/services/config/client", () => ({

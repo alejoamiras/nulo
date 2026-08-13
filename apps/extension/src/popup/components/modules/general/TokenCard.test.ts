@@ -86,10 +86,10 @@ describe("TokenCard", () => {
 		expect(w.text()).toContain("0")
 	})
 
-	test("isUpdating after first sync keeps the real amount visible + shows the refreshing dot", () => {
-		// The old pin here asserted isUpdating produced NO visual change (the
-		// dead-branch era). Consciously replaced: a refresh in flight now shows a
-		// pulsing dot beside the still-visible amount.
+	test("isUpdating after first sync is SILENT per row — amount visible, no indicator of any kind", () => {
+		// The per-row refreshing dot was retired (batch refreshes animated every row at once);
+		// TokensView's section-header dot is the one activity signal. The row's contract during a
+		// routine refresh: show the last-known amount, change nothing else.
 		mockQuotes = {}
 		const w = factory({
 			updatedAt: 1700_000_000_000,
@@ -98,15 +98,14 @@ describe("TokenCard", () => {
 			isUpdating: true,
 		})
 		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
-		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(true)
+		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
 		// Total = 5 TST (decimals 18) — formatter renders as "5"
 		expect(w.text()).toContain("5")
 	})
 
-	test("no refreshing dot when idle or during the initial sync", () => {
+	test("initial sync still shows the loading block (the never-synced state keeps speaking)", () => {
 		mockQuotes = {}
-		const idle = factory({ updatedAt: 1700_000_000_000, publicBalance: "0", privateBalance: "0" })
-		expect(idle.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
 		const initial = factory({ updatedAt: 0, publicBalance: "0", privateBalance: "0", isUpdating: true })
 		expect(initial.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
 		expect(initial.find('[data-testid="token-balance-loading"]').exists()).toBe(true)
@@ -127,7 +126,9 @@ describe("TokenCard", () => {
 		expect(w.text()).toContain("5")
 	})
 
-	test("the failed caption yields to the refreshing dot while a retry is in flight", () => {
+	test("the failed caption yields while a retry is in flight (silent row, amount stays)", () => {
+		// syncFailed gates on !isUpdating, so a retry clears the caption; with the per-row dot
+		// retired, the retry itself is silent — the amount just stays visible.
 		mockQuotes = {}
 		const w = factory({
 			updatedAt: 1700_000_000_000,
@@ -137,7 +138,8 @@ describe("TokenCard", () => {
 			syncFailure: { at: 1700_000_000_001, message: "sim failed" },
 		})
 		expect(w.find('[data-testid="token-balance-failed"]').exists()).toBe(false)
-		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(true)
+		expect(w.find('[data-testid="token-balance-refreshing"]').exists()).toBe(false)
+		expect(w.text()).toContain("5")
 	})
 
 	test("an initial-sync RETRY in flight shows the loader again, not a stale failed caption", () => {

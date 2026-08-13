@@ -39,6 +39,7 @@ const H = vi.hoisted(() => {
 		taskCreated: makeEvent(),
 		taskUpdated: makeEvent(),
 		taskDeleted: makeEvent(),
+		taskConnected: makeEvent(),
 		journalAdded: makeEvent(),
 		journalUpdated: makeEvent(),
 		journalDeleted: makeEvent(),
@@ -54,6 +55,7 @@ vi.mock("@/wallet/services/task/client", () => ({
 			onTaskCreated: H.taskCreated,
 			onTaskUpdated: H.taskUpdated,
 			onTaskDeleted: H.taskDeleted,
+			onConnected: H.taskConnected,
 			getTasks: H.getTasks,
 		}
 	}),
@@ -188,6 +190,81 @@ describe("TokensView — §3 sync-state guards", () => {
 			await nextTick()
 			expect(cardBackfilling(wrapper), `blocksBehind=${blocksBehind}`).toBe(false)
 		}
+	})
+
+	const balanceTask = (id: string, tbId: number, finishedAt: number | null = null) => ({
+		id,
+		content: { kind: H.ContentKind.BalanceUpdate, tbId, account: "0xacct" },
+		finishedAt,
+	})
+	const sectionDot = (wrapper: ReturnType<typeof mount>) => wrapper.find('[data-testid="tokens-refreshing"]').exists()
+
+	test("a BalanceUpdate task in flight shows the SECTION refresh dot; completion clears it", async () => {
+		// The one activity signal for routine refreshes (per-row indication is silent by design).
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(sectionDot(wrapper)).toBe(false)
+
+		H.taskCreated.emit(balanceTask("t1", 1))
+		await nextTick()
+		expect(sectionDot(wrapper)).toBe(true)
+
+		H.taskUpdated.emit(balanceTask("t1", 1, 123))
+		await nextTick()
+		expect(sectionDot(wrapper)).toBe(false)
+	})
+
+	test("a completed refresh can't strand the dot across an A→B→A scope round-trip (stale-snapshot regression)", async () => {
+		// The mount-time task snapshot must be MAINTAINED: fetchTokenBalances re-derives isUpdating
+		// from it on every scope change, so a finished task lingering in the snapshot would
+		// resurrect isUpdating and strand the section dot ON (post-impl audit, Medium).
+		H.getTasks.mockResolvedValue([balanceTask("t1", 1)])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(sectionDot(wrapper)).toBe(true) // in flight at mount
+
+		H.taskUpdated.emit(balanceTask("t1", 1, 123))
+		await nextTick()
+		expect(sectionDot(wrapper)).toBe(false)
+
+		H.getTasks.mockResolvedValue([])
+		H.store.current.network = { id: "net-2", chainId: 2 }
+		await flushPromises()
+		H.store.current.network = { id: "net-1", chainId: 1 }
+		await flushPromises()
+		expect(sectionDot(wrapper)).toBe(false) // NOT resurrected by the round-trip refetch
+	})
+
+	test("two concurrent refreshes: the dot survives the first completion, clears on the last", async () => {
+		H.getTokenBalances.mockResolvedValue([balanceRow(), { ...balanceRow("0xtokenB"), id: 2 }])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+
+		H.taskCreated.emit(balanceTask("t1", 1))
+		H.taskCreated.emit(balanceTask("t2", 2))
+		await nextTick()
+		expect(sectionDot(wrapper)).toBe(true)
+
+		H.taskUpdated.emit(balanceTask("t1", 1, 123))
+		await nextTick()
+		expect(sectionDot(wrapper)).toBe(true) // t2 still running — the batch contract
+
+		H.taskUpdated.emit(balanceTask("t2", 2, 124))
+		await nextTick()
+		expect(sectionDot(wrapper)).toBe(false)
+	})
+
+	test("a reconnect resnapshot clears a completion missed while disconnected", async () => {
+		H.getTasks.mockResolvedValue([balanceTask("t1", 1)])
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(sectionDot(wrapper)).toBe(true)
+
+		// The completion event was dropped (SW restart); the reconnect resnapshot is the repair path.
+		H.getTasks.mockResolvedValue([])
+		H.taskConnected.emit()
+		await flushPromises()
+		expect(sectionDot(wrapper)).toBe(false)
 	})
 
 	test("caught-up never shows the dot regardless of reported lag", async () => {

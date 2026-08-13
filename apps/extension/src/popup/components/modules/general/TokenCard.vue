@@ -69,14 +69,13 @@ const description = computed(() => {
 	return token.value?.name || "unknown"
 })
 
-// A refresh in flight AFTER the first sync keeps the amount visible and shows
-// a pulsing dot beside it (the GasBalanceCard vocabulary) — the loading block
-// is reserved for the never-synced state.
-const isRefreshing = computed(() => !!props.tokenBalance?.isUpdating && !isInitialSync.value)
+// Routine refreshes are deliberately SILENT per row — batch refreshes would animate every row at
+// once; TokensView's section-header dot is the ONE activity signal. Only exceptions speak here:
+// the failed dim below + the first-load skeleton.
 // The row's last projection FAILED (persisted `syncFailure`, cleared by the
 // next success): dim the last-known amount + say so. Gated on !isUpdating so a
-// retry in flight shows its honest in-flight state instead (the dot after the
-// first sync, the loading block during it). Deliberately NOT gated on
+// retry in flight shows its honest in-flight state instead (the loading block
+// during an initial sync; silence after). Deliberately NOT gated on
 // isInitialSync: a never-synced row whose FIRST projection failed must show
 // the failure, not an infinite "Loading balance…" spinner.
 const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.tokenBalance?.isUpdating)
@@ -136,10 +135,7 @@ const handleRefreshBalance = async () => {
 			<span :class="$style.loading_text">{{ description }}</span>
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
-			<Flex align="center" gap="6">
-				<span v-if="isRefreshing" :class="$style.pulse_dot" data-testid="token-balance-refreshing" />
-				<span :class="[$style.amount, syncFailed && $style.amount_stale]">{{ totalBalance || 0 }}</span>
-			</Flex>
+			<span :class="[$style.amount, syncFailed && $style.amount_stale]">{{ totalBalance || 0 }}</span>
 			<span :class="$style.detail">
 				<span :class="$style.icon_private"><Icon name="lock" size="9" /></span>
 				{{ privateFormatted }}
@@ -148,7 +144,7 @@ const handleRefreshBalance = async () => {
 					{{ publicFormatted }}
 				</span>
 			</span>
-			<span v-if="syncFailed && !isRefreshing" :class="$style.failed_text" data-testid="token-balance-failed">
+			<span v-if="syncFailed" :class="$style.failed_text" data-testid="token-balance-failed">
 				Couldn't refresh
 			</span>
 		</Flex>

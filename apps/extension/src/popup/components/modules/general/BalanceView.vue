@@ -8,8 +8,6 @@ import { Dropdown } from "@/components/ui/Dropdown"
 import { DateTime } from "luxon"
 
 /** Services */
-import { ContentKind } from "@/wallet/services/task/spec"
-import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -155,8 +153,6 @@ const handleCopy = (value, label) => {
 const handleRefreshBalance = () => {
 	tokenBalanceService.refreshTokenBalance(tokenBalanceToDisplay.value?.id)
 }
-const isRefreshingBalance = ref(false)
-
 const handleTokenBalanceClick = async () => {
 	let balance = totalTokenBalance.value?.value
 	if (totalTokenBalance.value?.slashed || showFullBalance.value) {
@@ -166,51 +162,6 @@ const handleTokenBalanceClick = async () => {
 	}
 
 	handleCopy(balance, "Balance")
-}
-
-const taskService = new TaskServiceClient()
-taskService.onTaskCreated.add(onTaskCreated)
-taskService.onTaskUpdated.add(onTaskUpdated)
-taskService.onTaskDeleted.add(onTaskDeleted)
-function onTaskCreated(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = true
-
-			break
-
-		default:
-			break
-	}
-}
-function onTaskUpdated(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (!task.finishedAt) return
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = false
-
-			break
-
-		default:
-			break
-	}
-}
-function onTaskDeleted(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = false
-
-			break
-
-		default:
-			break
-	}
 }
 
 const tokenBalanceService = new TokenBalanceServiceClient()
@@ -252,13 +203,6 @@ function onTokenDeleted(token) {
 
 async function fetchTokenBalances() {
 	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
-	isRefreshingBalance.value = (await taskService.getTasks()).some(
-		(t) =>
-			!t.finishedAt &&
-			t.content.kind === ContentKind.BalanceUpdate &&
-			t.content.account === appStore.account.address &&
-			t.content.tbId === tokenBalanceToDisplay.value?.id,
-	)
 }
 
 async function loadBalanceDisplayOption(profileId, networkId) {
@@ -316,7 +260,6 @@ onMounted(async () => {
 	await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
 })
 onBeforeUnmount(() => {
-	taskService.disconnect()
 	tokenBalanceService.disconnect()
 	tokenService.disconnect()
 	prices.dispose()
@@ -333,7 +276,7 @@ onBeforeUnmount(() => {
 				v-if="tokenToDisplay || showFiatValues"
 				@click="handleTokenBalanceClick"
 				data-testid="balance-amount"
-				:class="[$style.balance_amount, isRefreshingBalance && $style.refreshing]"
+				:class="$style.balance_amount"
 			>
 				<template v-if="tokenToDisplay">
 					{{ totalTokenBalance.value }}
@@ -406,16 +349,6 @@ onBeforeUnmount(() => {
 .balance_symbol {
 	font-size: 24px;
 	color: var(--txt-tertiary);
-}
-
-@keyframes blink {
-	0% { opacity: 1; }
-	50% { opacity: 0.3; }
-	100% { opacity: 1; }
-}
-
-.refreshing {
-	animation: blink 2s linear infinite;
 }
 
 .fiat_line {
