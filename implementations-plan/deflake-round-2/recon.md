@@ -2,6 +2,10 @@
 
 ## A1 — appearance.test.ts retry-masked flake
 
+> **SUPERSEDED IN PART**: the rAF/polling theory in "Terrain" below was REFUTED by the
+> empirical repro (§ "A1 — EMPIRICAL REPRO" at the end of this file) — `patchPagePolling`
+> already injects `polling: 200` page-wide. Kept for the audit trail.
+
 **CI forensics (primary evidence, from the certification campaign's saved logs):** vitest's
 default reporter SWALLOWS the first-attempt error on an eventual retry-pass — the log carries
 only `(retry x1)`. Durations discriminate: "animations toggle persists" totaled 6.3s over two
