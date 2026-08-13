@@ -105,13 +105,13 @@ strong{font-weight:650}
   </div>
 
   <section class="seeds">
-    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <h2>Implementation seeds (final — approved 2026-08-13)</h2>
     <p class="sub">Two ways to run the autonomous implementation session. Both must run inside the <code>home-refresh</code> worktree (<code>agent-worktree resume home-refresh</code>).</p>
     <p class="warning">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
 
     <div class="phase recommended">
       <h3>/goal</h3>
-      <pre><code>/goal All five phases marked ✓ in implementations-plan/home-refresh/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/home-refresh/lessons/phase-N.md in the transcript; /code-review max --fix complete with findings applied and committed separately; the codex post-impl fix loop converged (a resumed codex pass reported no new material findings, quoted in the transcript); a PR into dev exists titled "feat(home): threshold-gated sync dot, lock/globe split, denser rows, header address copy" (gh pr view output in the transcript); bun run audit:vue, bun run test:e2e, and bun run e2e:agent all report exit 0 in the transcript.</code></pre>
+      <pre><code>/goal All five phases marked ✓ in implementations-plan/home-refresh/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/home-refresh/lessons/phase-N.md in the transcript; the Phase-5 manual visual pass (home, Activity page, token detail — density, dot glow + tooltip via hover AND keyboard focus, hover-reveal copy icon, reduced motion) recorded in lessons/phase-5.md and stated in the transcript; /code-review max --fix complete with findings applied and committed separately; the codex post-impl fix loop converged (a resumed codex pass reported no new material findings, quoted in the transcript); a PR into dev exists titled "feat(home): threshold-gated sync dot, lock/globe split, denser rows, header address copy" (gh pr view output in the transcript); bun run audit:vue, bun run test:all, bun run test:e2e, and bun run e2e:agent all report exit 0 in the transcript.</code></pre>
     </div>
 
     <h3>Alternative: /loop 15m</h3>

@@ -148,16 +148,20 @@ Codex plan audit (light tier), transcript in `audit-codex.md`.
 
 **Round 2 verdict: conditional approve** (conditions: persist + reconciliation-correct the coverage watermark with restart tests; enforce safe-integer lag validation; test keyboard Tooltip focus; prove Header passes the full active address). **All four conditions folded into the plan** (persisted `lastCoveredBlock` + restart/mid-reconciliation regression tests in Phase 1; `Number.isSafeInteger` gate + Tooltip focus trigger + design-package focus test in Phase 2; narrow Header integration test in Phase 4). Cadence-measurement caveat adopted (raw tips + timestamps recorded, conservative rounding). The audit loop is converged: conditions are incorporated, no unaddressed findings remain.
 
+## Approval
+
+**Approved by the owner 2026-08-13** (explicit "approved"). All three Asks accepted as recommended: (1) `AccountAvatar` reused as-is (two-character initials); (2) density change applies app-wide via the shared layout — owner: "the case where we don't gets an inconsistent app"; (3) threshold sized by the Phase-1 measurement. Decided defaults stand unvetoed. Codex verdict: conditional approve, all conditions folded (see Audit log).
+
 ## Seeds
 
-*(DRAFT until the approval gate; finalized post-approval. Implementation session must run inside the `home-refresh` worktree — `agent-worktree resume home-refresh`.)*
+*(FINAL — synced to the approved scope. Implementation session must run inside the `home-refresh` worktree — `agent-worktree resume home-refresh`.)*
 
 ELI5 artifact: https://claude.ai/code/artifact/b3bb2678-b9ed-49e8-a5a0-e44786f7f136 — source `implementations-plan/home-refresh/eli5.html` (republish that path to update the same URL).
 
 **Recommended — `/goal`** (completion is transcript-observable):
 
 ```
-/goal All five phases marked ✓ in implementations-plan/home-refresh/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/home-refresh/lessons/phase-N.md in the transcript; /code-review max --fix complete with findings applied and committed separately; the codex post-impl fix loop converged (a resumed codex pass reported no new material findings, quoted in the transcript); a PR into dev exists titled "feat(home): threshold-gated sync dot, lock/globe split, denser rows, header address copy" (gh pr view output in the transcript); bun run audit:vue, bun run test:e2e, and bun run e2e:agent all report exit 0 in the transcript.
+/goal All five phases marked ✓ in implementations-plan/home-refresh/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate (as defined in plan.md) reported passing in the transcript; for each phase the agent has printed LESSONS_FILE=implementations-plan/home-refresh/lessons/phase-N.md in the transcript; the Phase-5 manual visual pass (home, Activity page, token detail — density, dot glow + tooltip via hover AND keyboard focus, hover-reveal copy icon, reduced motion) recorded in lessons/phase-5.md and stated in the transcript; /code-review max --fix complete with findings applied and committed separately; the codex post-impl fix loop converged (a resumed codex pass reported no new material findings, quoted in the transcript); a PR into dev exists titled "feat(home): threshold-gated sync dot, lock/globe split, denser rows, header address copy" (gh pr view output in the transcript); bun run audit:vue, bun run test:all, bun run test:e2e, and bun run e2e:agent all report exit 0 in the transcript.
 ```
 
 **Fallback — `/loop 15m`**:
