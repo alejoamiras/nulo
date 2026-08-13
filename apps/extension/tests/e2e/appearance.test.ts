@@ -54,6 +54,11 @@ test("animations toggle persists across navigation", async ({ registeredExtensio
 	// timed out at 5s. about.vue exists, has no auto-redirect, and is
 	// already exercised by `navigation.test.ts`.)
 	await navigateByHash(page, "#/popup/settings/about")
+	// The hash wait proves nothing about RENDERING — until the appearance
+	// component actually unmounts, the later waitForSelector could satisfy
+	// itself on the same mounted toggle and the "persisted" read would prove
+	// nothing. Gate on the toggle leaving the DOM first.
+	await page.waitForFunction(() => !document.querySelector('[data-testid="animations-toggle"]'), { timeout: 5_000, polling: 100 })
 	await navigateByHash(page, "#/popup/settings/appearance")
 	await page.waitForSelector('[data-testid="animations-toggle"]', { visible: true, timeout: 5_000 })
 
