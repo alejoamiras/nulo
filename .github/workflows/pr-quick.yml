@@ -7,7 +7,26 @@ on:
     # `ready_for_review` so a draft marked ready WITHOUT a new push still re-runs
     # CI — otherwise the required `… / Status` checks never report on the PR and
     # hang "Expected" forever → mergeStateStatus=BLOCKED.
-    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+    #
+    # NO `labeled`/`unlabeled`: nothing in this workflow reads labels, so for a
+    # SHA this workflow has already covered a label event only re-does that work
+    # — cancelling the in-flight run (whose `quality-status` then concludes
+    # FAILURE via `always()` + the cancelled-is-failure branch, leaving a
+    # duplicate FAILURE check-run behind) or re-running everything from
+    # scratch. It can
+    # incidentally recover a head with no run of its own, which is why the gap
+    # below matters. The label-gated suites keep both types: their gates read
+    # labels.
+    #
+    # Gap: a PR RETARGETED to dev/main fires `edited`, not listed here, so a head
+    # that never got a run can sit at required `quality-status: Expected`
+    # forever. `edited` is not the fix — it also fires on every title/body edit,
+    # so unrelated edits would re-run the full suite and cancel in-flight runs,
+    # manufacturing exactly the duplicate churn this line removes. Recover with
+    # `gh workflow run pr-quick.yml --ref <branch>`, where <branch> still
+    # resolves to the PR's current head, then confirm `quality-status` reported
+    # on that exact SHA.
+    types: [opened, reopened, synchronize, ready_for_review]
 
 concurrency:
   group: pr-quick-${{ github.workflow }}-${{ github.head_ref || github.ref }}
