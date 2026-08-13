@@ -78,3 +78,5 @@ cold-boot-truthy classification sound. Fold: snapshot via a short-lived extensio
 instead of degrading. Lesson: a causal gate with a catch-to-default arm can silently
 regress to the very non-causal check it replaced — assert the snapshot's validity, not
 just its use.
+r2: **APPROVE** ("no remaining blocker to PR-5 certification") after the extension-popup
+snapshot + nonzero assert landed and the canary re-passed solo retry=0 (2 tests, 140s).
