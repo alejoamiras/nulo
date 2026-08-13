@@ -36,12 +36,13 @@ import { join } from "node:path"
 import { beforeAll, expect, inject } from "vitest"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	createSecondAccount,
 	getAccountAddress,
 	refreshBalances,
 	sendTransfer,
 	switchAccountByAddress,
-	waitForBalance,
+	waitForFreshBalanceRow,
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { holdIncomingPoll, readIncomingPollStatus, releaseIncomingPoll, waitForIncomingPollPhase } from "../fixtures/incoming-poll-gate"
@@ -322,7 +323,16 @@ test.skipIf(!hasConfig)(
 		//    needed (SponsoredFPC pays). The unique amount `7` keys the settled
 		//    `tx-card`.
 		const SETTLED_AMOUNT = "7"
-		await waitForBalance(page, "1,000", 60_000)
+		{
+			const baseline = await captureBalanceBaseline(page, accountA, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page, {
+				account: accountA,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: baseline,
+				timeoutMs: 60_000,
+			})
+		}
 		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA })
 		await waitForTxConfirmation(page, { amount: SETTLED_AMOUNT, fromType: "public", toType: "public" })
 		console.log(`✓ A has a settled extension tx (amount ${SETTLED_AMOUNT})`)

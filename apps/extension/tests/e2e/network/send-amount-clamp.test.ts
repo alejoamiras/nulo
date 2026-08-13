@@ -12,7 +12,7 @@
  */
 import { inject, expect } from "vitest"
 import { test, openPopup, waitForHash } from "../fixtures/extension"
-import { setActiveSendType } from "../fixtures/helpers"
+import { captureBalanceBaseline, setActiveSendType, waitForFreshBalanceRow } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -29,7 +29,16 @@ test.skipIf(!hasConfig)(
 		// the freshly-mounted popup. The fixture's polling loop ran on its own
 		// page (now closed); the test's new page must re-fetch balances on boot.
 		await page.waitForSelector('[data-testid="token-symbol"]', { visible: true, timeout: 30_000 })
-		await page.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 90_000 })
+		{
+			const baseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page, {
+				account: tokenReadyExtension.accountAddress,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: baseline,
+				timeoutMs: 90_000,
+			})
+		}
 
 		// Open SendPopup, then flip from-type to "public" — the fixture mints
 		// only public tokens via `mintPublicTokens`, but send.vue defaults

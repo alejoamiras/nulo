@@ -1,6 +1,13 @@
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances, createAccount } from "./helpers"
+import {
+	captureBalanceBaseline,
+	createAccount,
+	getAccountAddress,
+	importToken,
+	switchToLocalNetwork,
+	waitForFreshBalanceRow,
+} from "./helpers"
 import { snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
 import { TEST_PASSWORD } from "./constants"
@@ -649,29 +656,22 @@ export const test = base.extend<{
 
 			await importToken(page, aztecConfig.tokenAddress)
 
-			// Poll: refresh balances until the minted amount is visible in the extension.
 			// The extension's PXE syncs blocks independently and may take 30-60s on
-			// a fresh node. Each refresh triggers a simulateTx which advances the
-			// sync. Tightened from 30×5s=150s to 40×1.5s=60s — the extra retries
-			// keep the same observability while halving total budget on the slow
-			// path; on the happy path balance appears in 2-4 retries either way.
-			const maxRetries = 40
-			for (let i = 0; i < maxRetries; i++) {
-				await refreshBalances(page)
-				const bodyText = await page.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) {
-					console.log(`[tokenReady] Balance visible after ${i + 1} refresh(es) (~${((i + 1) * 1.5).toFixed(1)}s)`)
-					break
-				}
-				if (i % 10 === 9) {
-					console.log(`[tokenReady] Still waiting for balance... (${i + 1}/${maxRetries} retries)`)
-				}
-				if (i === maxRetries - 1) {
-					console.warn("[tokenReady] Balance not visible after all retries (~60s) — tests may fail")
-				}
-				await page
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
-					.catch(() => {})
+			// a fresh node; each refresh advances the sync. Fail-HARD: a fixture
+			// that quietly degrades just moves the failure downstream into
+			// whichever consumer reads the balance first, with worse evidence —
+			// the freshness-gated row wait throws with a storage census instead.
+			// Budget: 60s. Token-scoped, so fiat/superstring text cannot satisfy it.
+			{
+				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
+				await waitForFreshBalanceRow(page, {
+					account: accountAddress,
+					tokenContract: aztecConfig.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baseline,
+					timeoutMs: 60_000,
+				})
+				console.log(`[tokenReady] balance row fresh + exact`)
 			}
 
 			await page.close()
@@ -727,7 +727,11 @@ export const test = base.extend<{
 				await waitForL1ToL2Message(
 					node,
 					claim.messageHash.toString(),
-					() => mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, 1n, minterAddress, feeOptions),
+					() =>
+						// Self-mint to the TEST wallet's account: each forced block must
+						// not add to the extension account, whose balance is asserted
+						// EXACTLY by the fail-hard row wait below.
+						mintPublicTokens(wallet, aztecConfig.tokenAddress, minterAddress, 1n, minterAddress, feeOptions),
 					90_000,
 				)
 
@@ -741,24 +745,18 @@ export const test = base.extend<{
 
 			await importToken(page, aztecConfig.tokenAddress)
 
-			// Poll for token balance. Tightened from 30 × 5s = 150s to
-			// 60 × 1.5s = 90s — matches the tokenReadyExtension cadence
-			// in PR #70 (extension.ts:329-344). Faster happy-path detection
-			// with a slightly shorter total budget.
-			const maxRetries = 60
-			for (let i = 0; i < maxRetries; i++) {
-				await refreshBalances(page)
-				const bodyText = await page.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) {
-					console.log(`[feeJuiceReady] Balance visible after ${i + 1} refresh(es)`)
-					break
-				}
-				if (i === maxRetries - 1) {
-					console.warn("[feeJuiceReady] Balance not visible after all retries")
-				}
-				await page
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
-					.catch(() => {})
+			// Fail-HARD freshness-gated row wait — see tokenReadyExtension's note.
+			// Budget: 90s.
+			{
+				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
+				await waitForFreshBalanceRow(page, {
+					account: accountAddress,
+					tokenContract: aztecConfig.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baseline,
+					timeoutMs: 90_000,
+				})
+				console.log(`[feeJuiceReady] balance row fresh + exact`)
 			}
 
 			await page.close()
@@ -888,24 +886,17 @@ export const test = base.extend<{
 			// matching feeJuiceReadyExtension's :356-371 pattern. The send flow
 			// needs a token registered before send-from-type is selectable.
 			await importToken(page, aztecConfig.tokenAddress)
-			// Tightened from 30 × 5s = 150s to 60 × 1.5s = 90s — matches the
-			// tokenReadyExtension cadence in PR #70 (extension.ts:329-344). Same
-			// total budget shape (or shorter), but happy-path detection is ~3×
-			// faster.
-			const maxRetries = 60
-			for (let i = 0; i < maxRetries; i++) {
-				await refreshBalances(page)
-				const bodyText = await page.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) {
-					console.log(`[feeJuiceImported] token balance visible after ${i + 1} refresh(es)`)
-					break
-				}
-				if (i === maxRetries - 1) {
-					console.warn("[feeJuiceImported] token balance not visible after all retries")
-				}
-				await page
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
-					.catch(() => {})
+			// Fail-HARD freshness-gated row wait — see tokenReadyExtension's note.
+			{
+				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
+				await waitForFreshBalanceRow(page, {
+					account: accountAddress,
+					tokenContract: aztecConfig.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baseline,
+					timeoutMs: 90_000,
+				})
+				console.log(`[feeJuiceImported] token balance row fresh + exact`)
 			}
 
 			await page.close()
