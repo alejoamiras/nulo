@@ -13,8 +13,12 @@ source echoes — see the e2e-testing skill's forensics section).
 (15 timeout occurrences — one job failed two files) and **one is an infra failure**
 (the foundry 502, entry 7). Zero assertion failures, zero crashes. Re-runs cleared
 all of them (one run needed a second re-run). Every red maps to a ledger entry;
-entry 1 (smoke roundtrip) is classified **OPEN — owner decision** (see plan Fix 1),
-the latent-risk section tracks further OPEN follow-ups — nothing is silently dropped.
+entry 1 (smoke roundtrip) is **FIXED** (2026-08-13 — product root fix in
+`implementations-plan/bootstrap-route-decouple/`: the import's account-state restore leg
+now runs on a bounded 45s preflight+registration budget with skip-to-Continue records,
+merged #357, torn-leg test fold #359, certified per Phase 6 on PR #358 — see that arc's
+`lessons/certification.md` for the 3-run matrix). The latent-risk section tracks further
+OPEN follow-ups — nothing is silently dropped.
 
 | # | Test file | Suite/shard | Reds | Failing wait | Timeout | Re-run cleared? |
 |---|---|---|---|---|---|---|
@@ -179,13 +183,24 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
   (`$1,000.00`) or larger numbers (`11,000`) — killed at the red call sites by Fix 4;
   remains at non-red sites (`transfers`, `account-switch-isolation`,
   `receive-unregistered`, fixture loops in `extension.ts`). OPEN follow-up sweep.
-- `TokenCard.vue` `isUpdating` has no DOM representation (dead branch) — no
-  refresh-in-flight observability for tests or users. OPEN product follow-up.
-- The token-balance projection pipeline persists NO failure record: a failed
-  projection is indistinguishable from a still-running one via storage (bit us
-  live in Phase 2 — a write-gated retry starved after one silent failure; the
-  gas pipeline got retry/degraded-cache in #355, this one did not). OPEN product
-  follow-up (same family as the `isUpdating` gap).
+- `TokenCard.vue` `isUpdating` has no DOM representation (dead branch) — RESOLVED by #357
+  (`token-balance-refreshing` dot + failed/stale captions). `isMinting` remains a dead
+  branch with no DOM representation — OPEN product follow-up.
+- The token-balance projection pipeline persists NO failure record — RESOLVED by #357
+  (persisted per-row `syncFailure`, cleared on success; deletion fence + ownership guard
+  keep the writes safe).
+- Import-tail follow-ups deferred by design in `bootstrap-route-decouple` (owner-ratified):
+  durable BACKGROUND re-registration of skipped networks (today the skip records land on the
+  Continue-gated errors screen and re-registration is manual); RPC-editing-mid-import (the
+  user cannot correct a dead backup-carried rpcUrl during the import); cancellation plumbing
+  for the bounded chain-sync tail (deadline enforcement exists, user-initiated cancel does
+  not). All three are product follow-ups, not flakes.
+- `appearance.test.ts` carries a retry-masked smoke flake (two inner `(retry x1)` passes in
+  the 2026-08-13 certification campaign: "animations toggle persists across navigation",
+  "cycle theme system → light → dark"; both single-retry, load-correlated). Invisible in
+  normal CI (smoke hardcodes 2 retries) — surfaced only by the certification's zero-retry
+  criterion. OPEN follow-up: root-cause before the next certification campaign, or it taxes
+  every empty-commit sequence.
 - The exit-86 retry wrapper does not cover setup-step failures (foundry/puppeteer/
   accelerator installs) — Fix 6 removes the worst offender rather than widening the
   retry. OPEN design question if setup flakes recur.

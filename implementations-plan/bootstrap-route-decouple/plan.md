@@ -457,7 +457,7 @@ error; auth.vue message; composition-harness crash-boundary tests; auth componen
 tests/e2e/network/backup-restore-sw-restart.test.ts` SOLO green (fable gate condition).
 Layers: unit + composition + smoke + targeted network e2e.
 
-**Phase 5 — Full local gates + PR + certification + merge**
+**Phase 5 — Full local gates + PR + certification + merge** ✓ GREEN (2026-08-13 — local gates all green [audit:vue, armed smoke 4 chunks, full network suite 65 files solo attempt-1 zero-retry]; product PR #357 squash-merged with all three gates green; certification ran on the follow-up docs PR #358 per the same Phase-6 rules [sequencing deviation recorded in lessons/certification.md: merge-then-certify, forced by the goal's ordering] — 3 consecutive qualifying greens after 3 root-caused resets [canary variance; appearance inner-retry ×2] + the torn-leg test fold #359)
 Pre-push per the deflake protocol (codex M11 — NOT weakened): `bun run audit:vue` clean; full
 armed `bun run test:e2e` SOLO; **full `NULO_E2E_RETRY=0 bun run e2e:agent` SOLO**. PR → dev
 labeled `e2e:smoke` + `e2e:network`; content commits first, then certification per e2e-deflake
@@ -472,7 +472,7 @@ they need a delivery path INSIDE the PR). Squash-merge (title ≤93 chars).
 **Gate**: certification matrix recorded; ledger diff reviewed (no silent drops); PR merged with
 required checks green. Layers: all.
 
-**Phase 6 — Close-out (post-merge)**
+**Phase 6 — Close-out (post-merge)** ✓ (2026-08-13 — index flipped, ledger updated [entry 1 FIXED, 2 latent risks resolved, TODO entries added], skill lessons routed, final report in chat)
 `implementations-plan/index.md` status flips for both arcs (rides the PR where possible; a
 trailing docs PR only if something was missed); final owner report in chat (shipped, UX
 decisions as approved, codex consults + verdicts, remaining OPEN items); suggest
