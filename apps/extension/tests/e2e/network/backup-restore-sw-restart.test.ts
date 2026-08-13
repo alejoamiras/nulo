@@ -170,6 +170,7 @@ test.skipIf(!hasConfig)(
 			if (midRestore !== "mid") {
 				console.warn(`[sw-restart-restore] marker=${midRestore}; killing anyway (post-import restart leg)`)
 			}
+			const killAt = Date.now()
 			await stopServiceWorker(ctx2)
 			// The ROLLED-BACK outcome is dispatched by THIS page's catch: the SW kill
 			// rejects its in-flight restore RPC, the catch calls deleteProfile, and that
@@ -234,6 +235,7 @@ test.skipIf(!hasConfig)(
 			} else {
 				console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
 			}
+			const closedSinceKillMs = Date.now() - killAt
 			await page2.close()
 
 			// ── 3. The user's natural recovery: reopen + unlock ─────────────
@@ -361,15 +363,50 @@ test.skipIf(!hasConfig)(
 
 			if (leg === "torn") {
 				// Provenance: the torn refusal is only the DESIGNED outcome when the
-				// restore-pending marker actually survives in storage — the refusal
-				// without its marker would be a product bug, not a recovery path.
-				const markerPresent = await page3.evaluate(async () => {
-					const all = await chrome.storage.local.get()
-					return Object.keys(all).some((k) => k.startsWith("nulo:core:restore-pending@"))
+				// surviving marker BELONGS to the surviving profile row — same profile
+				// id AND same pxeGeneration. A corrupt/stale/wrong-generation marker
+				// also renders the fail-closed torn UI, but that is a different bug,
+				// not this recovery path. The session must also actually be withheld.
+				const tornState = await page3.evaluate(async () => {
+					const local = await chrome.storage.local.get()
+					const session = await chrome.storage.session.get()
+					const parse = (v: unknown) => {
+						try {
+							return JSON.parse(v as string) as { id?: string; profileId?: string; pxeGeneration?: string }
+						} catch {
+							return null
+						}
+					}
+					const markerRaw = Object.entries(local).find(([k]) => k.startsWith("nulo:core:restore-pending@"))?.[1]
+					const profileRaw = Object.entries(local).find(([k]) => k.startsWith("nulo:core:profiles@"))?.[1]
+					return {
+						marker: markerRaw !== undefined ? parse(markerRaw) : null,
+						profile: profileRaw !== undefined ? parse(profileRaw) : null,
+						sessionWithheld: !Object.keys(session).some((k) => k.startsWith("nulo:core:session")),
+					}
 				})
-				if (!markerPresent) {
+				const provenanceOk =
+					!!tornState.marker &&
+					!!tornState.profile &&
+					tornState.marker.profileId === tornState.profile.id &&
+					tornState.marker.pxeGeneration === tornState.profile.pxeGeneration &&
+					tornState.sessionWithheld
+				if (!provenanceOk) {
 					throw new Error(
-						`[sw-restart-restore] torn refusal rendered without a restore-pending marker; state: ${JSON.stringify(await collectParkedState())}`,
+						`[sw-restart-restore] torn refusal without matching marker↔profile provenance (or with a live session); tornState: ${JSON.stringify(tornState)}; parked: ${JSON.stringify(await collectParkedState())}`,
+					)
+				}
+				// Masking guard: torn is the close-RACED-the-dispatch model only while
+				// the close landed BEFORE the popup→SW transport timeout (60s) — the
+				// in-flight restore RPC cannot reject (and so cannot dispatch the
+				// rollback) until that timeout fires, which is also why the 45s fork
+				// window elapsing proves nothing about the dispatcher. Past 60s a live
+				// dispatcher WOULD have fired with the page still open, so a torn
+				// end-state would instead indicate a broken/stalled rollback dispatch —
+				// fail loudly (this bites only if someone widens the fork hold).
+				if (closedSinceKillMs >= 60_000) {
+					throw new Error(
+						`[sw-restart-restore] torn end-state but the import page stayed open ${closedSinceKillMs}ms after the kill (>= the 60s transport timeout) — a live rollback dispatcher would have fired; suspect a broken dispatch, not the designed crash race`,
 					)
 				}
 				console.warn(
