@@ -151,6 +151,8 @@ Codex plan audit (light tier), transcript in `audit-codex.md`.
 
 **Rejected (with reason)**: a Header COMPONENT test (L4 convention exempts it; the audit's substance — exact-address + failure-path coverage — lands in the extracted helper's unit test + smoke e2e instead). Speculative per-network threshold map (only if measurements diverge; no-over-engineering).
 
+**Post-implementation audit (fresh codex session): approve → converged.** Round 1 approve with two Low test-hardening findings (schema round-trip of the persisted watermark; always-fresh-snapshot assertion) — both applied; resumed re-review: "No new material findings … converged." Full log: `lessons/post-impl.md`. `/code-review max --fix` produced one real fix (theme-safe dot glow), committed separately.
+
 **Round 2 verdict: conditional approve** (conditions: persist + reconciliation-correct the coverage watermark with restart tests; enforce safe-integer lag validation; test keyboard Tooltip focus; prove Header passes the full active address). **All four conditions folded into the plan** (persisted `lastCoveredBlock` + restart/mid-reconciliation regression tests in Phase 1; `Number.isSafeInteger` gate + Tooltip focus trigger + design-package focus test in Phase 2; narrow Header integration test in Phase 4). Cadence-measurement caveat adopted (raw tips + timestamps recorded, conservative rounding). The audit loop is converged: conditions are incorporated, no unaddressed findings remain.
 
 ## Approval
