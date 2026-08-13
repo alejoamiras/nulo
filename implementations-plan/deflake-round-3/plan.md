@@ -36,10 +36,13 @@ sweeps); armed-build discipline; ledger discipline; no silent scope growth.
 
 ## Success criteria (v2)
 
-1. Labeled-PR opens can no longer leave a losing FAILURE aggregator check-run, achieved
-   by preventing those duplicate runs from producing check-runs at all (never by changing
-   what a gate concludes); the P2/P3 load-bearing properties empirically confirmed;
-   actionlint green; verified live on this arc's own PR opens.
+1. MEASURED, then disposed: the duplicate FAILURE check-run does not by itself block a
+   merge (P1, PR #367), so no gate-semantics change ships. What ships is the removal of
+   duplicate quality runs that never had work to do — verified live on #367
+   (`quality-status`: one check-run; smoke/network: the usual duplicate pair) — plus a
+   written correction of the round-2 mechanism and the still-unexplained residue. P2 is
+   moot; P3 is confirmed from #360's history. Smoke and network keep their duplicates,
+   which the measurement shows to be noisy rather than blocking. actionlint green.
 2. Fixed-wait inventory classified + ledgered (incl. Class-B poll intervals enumerated and
    excluded); `ensureUnlocked` causal via the auth submit-gating fix; `importFullBackup`
    instrumented with real stage transitions, per-stage envelopes measured in both modes,

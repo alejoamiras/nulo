@@ -373,7 +373,13 @@ assuming "transient".
 - **An exactness upgrade finds producer dirt the fuzzy assert absorbed** (block-forcing mints
   accumulating raw dust the display rounding hid) — audit every producer feeding an assert
   you tighten, especially fixtures with no current consumer (no run can red on them).
-- **Sequential-landing PR stacks + labeled PRs**: opening a labeled PR fires opened+labeled
-  events whose cancelled duplicates leave FAILURE aggregator check-runs that can WIN GitHub's
-  latest-per-name required-check resolution → BLOCKED with all gates green. Diagnose via the
-  head's check-runs (success+failure pairs per status name); remedy = empty commit.
+- **Labeled PR opens leave duplicate check-runs — noisy, not blocking.** Opening a labeled
+  PR fires opened+labeled events; the concurrency-cancelled duplicates leave FAILURE
+  aggregator check-runs beside the survivors' successes on the same SHA. A measured probe
+  (deflake-round-3 `lessons/phase-1.md`) shows the PR going CLEAN once the survivors land,
+  with those FAILUREs still present — a cancelled run's aggregator always finishes first,
+  so it is always the OLDER check-run and loses. **Do not reflex-push an empty commit.**
+  If you see BLOCKED with every gate terminal-green, CAPTURE FIRST — full
+  `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 minutes, and the
+  base branch's protection config — because two arcs have now destroyed that state by
+  remedying immediately, and the round-2 blocks remain unexplained.
