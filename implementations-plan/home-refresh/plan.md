@@ -66,7 +66,8 @@ Spec source: five owner-review rounds, final render published as the "Nulo Home 
 - Tests: `GasBalanceCard.test.ts` ADD fractional fixtures (`42.1234…` → `"42.12"`, exact-2-decimals boundary stays) — the only signal for this change, per recon gap #4. No padding assertions exist anywhere (convention: never pin pixel values).
 - **Validation gate** — commands: `bun run typecheck:all && bun run test && bun run lint`; pass: all exit 0, fractional cases green. Layers: typecheck · lint · unit/component.
 
-### Phase 4 — Header split
+### Phase 4 ✓ — Header split
+*(gate green 2026-08-13: typecheck:all + test (4046) + lint 0 errors — see lessons/phase-4.md)*
 - `Header.vue`: `AccountAvatar` in a button (`data-testid="account-avatar-btn"`, opens accounts popup) + name button (**`data-testid="account-selector"`**, opens accounts popup) + address button (`data-testid="account-address-copy"`, hover/focus-reveal copy icon absolutely positioned so nothing shifts, hover underline, Enter/Space parity, all `cursor: pointer`).
 - **Copy handler is an extracted, unit-tested helper** (colocated `.ts`, per the pure-helper convention): sanitizes via the `ScopeAddress` pattern (control-char strip), **awaits `clipboard.writeText`**, shows the success toast ONLY after the promise resolves, and on rejection shows a warning toast ("Couldn't copy address"). Its test pins: exact address string written; success toast after resolve; failure path. No new manifest permissions — `navigator.clipboard.writeText` in the popup needs none.
 - **One narrow Header integration test** (allowed under the "optional for complex pieces" carve-out; codex round-2 condition — the helper test alone can't prove Header supplies the FULL active address): mount Header with a testing store, click `account-address-copy`, assert the stubbed `clipboard.writeText` received `appStore.account.address` verbatim (full string, not the truncated display text). Nothing else — no Header test-suite ceremony.
