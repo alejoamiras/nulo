@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { waitForDappExecuteWorked } from "../fixtures/journal"
 import { mintPublicTokensForAccount, type AztecTestConfig } from "../fixtures/aztec"
@@ -90,7 +90,7 @@ test.skipIf(!hasConfig)(
 		// submit) — that's the local assertion-logic check; the real-prove timing
 		// is exercised in CI.
 		const result = await waitForPgResult(page, "sendTx", seqTx, 300_000)
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "tx-sendTx-default:result")
 		expect(typeof (result.resultJson as { txHash?: string } | undefined)?.txHash).toBe("string")
 	},
 )

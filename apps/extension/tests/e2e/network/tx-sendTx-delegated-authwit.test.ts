@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveCapabilities, approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { waitForDappExecuteWorked } from "../fixtures/journal"
 import { deployDelegatedPullRig, type AztecTestConfig } from "../fixtures/aztec"
@@ -140,11 +140,7 @@ test.skipIf(!hasConfig || !hasStandardContracts)(
 		// discovered witness (a missing/wrong witness fails at prove time, before
 		// submit). Same submit-level assertion as tx-sendTx-default.
 		const result = await waitForPgResult(page, "sendTx", seqTx, 300_000)
-		if (result.status !== "ok") {
-			const dappError = await page.evaluate(() => document.querySelector('[data-testid="pg-error-text"]')?.textContent ?? "")
-			throw new Error(`sendTx result=${result.status}; resultJson=${JSON.stringify(result.resultJson)}; lastError="${dappError}"`)
-		}
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "tx-sendTx-delegated-authwit:result")
 		expect(typeof (result.resultJson as { txHash?: string } | undefined)?.txHash).toBe("string")
 	},
 )

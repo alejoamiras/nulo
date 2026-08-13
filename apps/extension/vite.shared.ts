@@ -17,6 +17,8 @@ import packageJson from "./package.json"
 
 /** Resolve a file inside an npm package, bypassing its `exports` field.
  *  Walks up from this config dir to find the package in any node_modules. */
+import RetryErrorReporter from "./tests/e2e/retry-error-reporter"
+
 export function resolvePackageFile(pkg: string, file: string): string {
 	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
 	let dir = fileURLToPath(new URL(".", import.meta.url))
@@ -62,4 +64,15 @@ export const artifactAliases: Record<string, string> = {
 export const noirAliases: Record<string, string> = {
 	"@aztec/noir-acvm_js": fileURLToPath(new URL("../../node_modules/@aztec/noir-acvm_js/nodejs/acvm_js.js", import.meta.url)),
 	"@aztec/noir-noirc_abi": fileURLToPath(new URL("../../node_modules/@aztec/noir-noirc_abi/nodejs/noirc_abi_wasm.js", import.meta.url)),
+}
+
+/**
+ * Reporter set for every e2e config. Explicit `reporters` SUPPRESSES vitest's
+ * auto-added `github-actions` annotation reporter (it is only appended when the
+ * resolved list is empty), so it must be re-added by hand on CI or PR
+ * annotations silently disappear. RetryErrorReporter surfaces the retained
+ * first-attempt errors of retried passes.
+ */
+export function e2eReporters(): ("default" | "github-actions" | RetryErrorReporter)[] {
+	return ["default", ...(process.env.GITHUB_ACTIONS ? (["github-actions"] as const) : []), new RetryErrorReporter()]
 }

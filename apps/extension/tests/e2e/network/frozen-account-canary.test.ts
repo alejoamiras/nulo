@@ -26,7 +26,7 @@ import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
 import { ensureUnlocked, getAccountAddress, revealSecretKey } from "../fixtures/helpers"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
 
@@ -66,7 +66,7 @@ function txHashOf(resultJson: unknown): string {
 			? resultJson.replace(/^"(.*)"$/, "$1")
 			: (resultJson as { txHash?: unknown } | null | undefined)?.txHash
 	if (typeof candidate !== "string" || !candidate.startsWith("0x")) {
-		throw new Error(`cannot extract tx hash from result: ${JSON.stringify(resultJson)}`)
+		throw new Error(`cannot extract tx hash from result: ${(JSON.stringify(resultJson) ?? "undefined").slice(0, 2_000)}`)
 	}
 	return candidate
 }
@@ -161,7 +161,7 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(grantPopup)
 		await approveExecute(grantPopup, { approvableTimeoutMs: 120_000 })
 		const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 300_000)
-		expect(grantResult.status).toBe("ok")
+		await assertPgOk(page, grantResult, "frozen-account-canary:grantResult")
 		const grantTxHash = txHashOf(grantResult.resultJson)
 		step(`grant submitted (${grantTxHash.slice(0, 12)}…); waiting for the node to mine it`)
 		await waitForTxMined(aztecConfig!, grantTxHash, 300_000)
@@ -185,7 +185,7 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(consumePopup)
 		await approveExecute(consumePopup, { approvableTimeoutMs: 120_000 })
 		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 300_000)
-		expect(consumeResult.status).toBe("ok")
+		await assertPgOk(page, consumeResult, "frozen-account-canary:consumeResult")
 		const consumeTxHash = txHashOf(consumeResult.resultJson)
 		await waitForTxMined(aztecConfig!, consumeTxHash, 300_000)
 		expect(await node.getNullifierMembershipWitness("latest", derivedB.initNullifier)).toBeDefined()
@@ -242,7 +242,7 @@ test.skipIf(!hasConfig)(
 		const seqCaps = await snapshotResultSeq(page)
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capsResult = await waitForPgResult(page, "requestCapabilities", seqCaps, 60_000)
-		expect(capsResult.status).toBe("ok")
+		await assertPgOk(page, capsResult, "frozen-account-canary:capsResult")
 		// The reconnected session must expose both granted accounts before the acting-account
 		// switch — an empty select would silently no-op the value assignment.
 		await page.waitForFunction(() => document.querySelectorAll('[data-testid="pg-select-account"] option').length >= 2, {
@@ -275,7 +275,7 @@ test.skipIf(!hasConfig)(
 			waitForPgResult(page, "sendTx", seqFinal, 175_000).then(
 				(r) => {
 					if (r.status === "error") {
-						reject(new Error(`post-restart sendTx errored dApp-side: ${JSON.stringify(r.errorJson)}`))
+						reject(new Error(`post-restart sendTx errored dApp-side: ${formatPgMismatch(r)}`))
 					}
 				},
 				() => {},
@@ -285,7 +285,7 @@ test.skipIf(!hasConfig)(
 		await waitForExecuteContent(finalPopup)
 		await approveExecute(finalPopup, { approvableTimeoutMs: 120_000 })
 		const finalResult = await waitForPgResult(page, "sendTx", seqFinal, 300_000)
-		expect(finalResult.status).toBe("ok")
+		await assertPgOk(page, finalResult, "frozen-account-canary:finalResult")
 		const finalTxHash = txHashOf(finalResult.resultJson)
 		await waitForTxMined(aztecConfig!, finalTxHash, 300_000)
 		step("post-restart tx mined — re-derived frozen account fully operational")

@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -35,7 +35,7 @@ test.skipIf(!hasConfig)(
 		await approveCapabilities(popup, { toggleOff: ["simulation"] })
 
 		const result = await waitForPgResult(page, "requestCapabilities", fromSeq, 30_000)
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "cap-request-partial:result")
 		// resultJson is the WalletCapabilities response — granted should only contain contracts
 		const granted = (result.resultJson as { granted?: Array<{ type: string }> })?.granted ?? []
 		const grantedTypes = granted.map((g) => g.type)

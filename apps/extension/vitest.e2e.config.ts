@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config"
-import { srcDir } from "./vite.shared"
+import { e2eReporters, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	resolve: {
@@ -39,5 +39,6 @@ export default defineConfig({
 		// against the documented "~17 sequential files Chrome cascade" path.
 		// The second retry is doing real work, not masking.
 		retry: 2,
+		reporters: e2eReporters(),
 	},
 })
