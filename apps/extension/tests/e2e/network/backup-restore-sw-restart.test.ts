@@ -17,14 +17,17 @@
  * a kill landing PRE-finalize triggers the import composable's designed rollback
  * (the orphan profile is deleted so a retry starts clean) and registrations
  * haven't happened yet — the wallet legitimately resets to register. The test
- * therefore accepts two outcomes, asserting whichever occurred was performed
- * correctly: full recovery, or a COMPLETED rollback (profile row + deletion
- * tombstone both purged, provenance-gated on the marker having seen the row)
- * followed by the product's designed retry (re-import, no kill). Both legs
+ * therefore accepts three DESIGNED outcomes, asserting whichever occurred was
+ * performed correctly: full recovery; a COMPLETED rollback (profile row +
+ * deletion tombstone both purged, provenance-gated on the marker having seen
+ * the row) followed by the product's designed retry (re-import, no kill); or a
+ * TORN refusal — the kill landed inside the restore-pending window AND the
+ * page closed before the rollback dispatch (browser-crash model), so the
+ * reopened wallet refuses unlock with the torn explanation and the user's
+ * designed recovery is the deliberate delete flow + re-import. All legs
  * converge on the same funded-address + on-chain-balance assertions, so the
- * load-bearing checks run on EVERY pass. What the test rejects is the third
- * state it once flaked on: a silent park where the wallet is neither recovered
- * nor reset.
+ * load-bearing checks run on EVERY pass. What the test rejects is the state it
+ * once flaked on: a silent park where the wallet is none of the three.
  */
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -45,6 +48,7 @@ import {
 	ensureUnlocked,
 	getAccountAddress,
 	navigateByHash,
+	resetProfile,
 	switchToLocalNetwork,
 	waitForFreshBalanceRow,
 	waitForTokenCardAmount,
@@ -166,6 +170,7 @@ test.skipIf(!hasConfig)(
 			if (midRestore !== "mid") {
 				console.warn(`[sw-restart-restore] marker=${midRestore}; killing anyway (post-import restart leg)`)
 			}
+			const killAt = Date.now()
 			await stopServiceWorker(ctx2)
 			// The ROLLED-BACK outcome is dispatched by THIS page's catch: the SW kill
 			// rejects its in-flight restore RPC, the catch calls deleteProfile, and that
@@ -230,11 +235,15 @@ test.skipIf(!hasConfig)(
 			} else {
 				console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
 			}
+			const closedSinceKillMs = Date.now() - killAt
 			await page2.close()
 
 			// ── 3. The user's natural recovery: reopen + unlock ─────────────
-			// Two DESIGNED outcomes exist, decided by where the kill lands relative to
-			// finalizeRestore (verified against useFullBackupImport):
+			// Three DESIGNED outcomes exist, decided by where the kill lands relative
+			// to finalizeRestore and whether the page's rollback dispatch won the
+			// close race (verified against useFullBackupImport + the restore-pending
+			// marker): recovered, rolled back, or TORN (marker survived, unlock
+			// refused, delete + re-import advertised on the auth screen).
 			//  - RECOVERED: kill landed post-finalize (session opened, registrations
 			//    applied) — reopen routes to auth, unlock re-derives the master and
 			//    boots the chain runtime, and the wallet lands on general.
@@ -289,7 +298,7 @@ test.skipIf(!hasConfig)(
 					.then((state) => ({ ...state, lastUnlockErr }))
 					.catch((evalErr) => ({ evalFailed: String(evalErr), lastUnlockErr }))
 
-			let leg: "recovered" | "rolled-back" | "timeout" = "timeout"
+			let leg: "recovered" | "rolled-back" | "torn" | "timeout" = "timeout"
 			const deadline = Date.now() + 240_000
 			while (Date.now() < deadline) {
 				const hash = await page3.evaluate(() => window.location.hash)
@@ -298,6 +307,13 @@ test.skipIf(!hasConfig)(
 					break
 				}
 				if (hash.includes("/popup/auth")) {
+					// Torn refusal is terminal-designed: the auth screen names the state
+					// (`auth-restore-torn`) and no unlock can succeed — stop attempting.
+					const torn = await page3.$('[data-testid="auth-restore-torn"]')
+					if (torn) {
+						leg = "torn"
+						break
+					}
 					// Fall through to the sleep below after an attempt — a transient
 					// auth/non-auth oscillation must not spin the loop hot. The last
 					// unlock error rides into the timeout diagnostics.
@@ -345,13 +361,82 @@ test.skipIf(!hasConfig)(
 				)
 			}
 
-			if (leg === "rolled-back") {
+			if (leg === "torn") {
+				// Provenance: the torn refusal is only the DESIGNED outcome when the
+				// surviving marker BELONGS to the surviving profile row — same profile
+				// id AND same pxeGeneration. A corrupt/stale/wrong-generation marker
+				// also renders the fail-closed torn UI, but that is a different bug,
+				// not this recovery path. The session must also actually be withheld.
+				const tornState = await page3.evaluate(async () => {
+					const local = await chrome.storage.local.get()
+					const session = await chrome.storage.session.get()
+					const parse = (v: unknown) => {
+						try {
+							return JSON.parse(v as string) as { id?: string; profileId?: string; pxeGeneration?: string }
+						} catch {
+							return null
+						}
+					}
+					const markerRaw = Object.entries(local).find(([k]) => k.startsWith("nulo:core:restore-pending@"))?.[1]
+					const profileRaw = Object.entries(local).find(([k]) => k.startsWith("nulo:core:profiles@"))?.[1]
+					return {
+						marker: markerRaw !== undefined ? parse(markerRaw) : null,
+						profile: profileRaw !== undefined ? parse(profileRaw) : null,
+						sessionWithheld: !Object.keys(session).some((k) => k.startsWith("nulo:core:session")),
+					}
+				})
+				const provenanceOk =
+					!!tornState.marker &&
+					!!tornState.profile &&
+					tornState.marker.profileId === tornState.profile.id &&
+					tornState.marker.pxeGeneration === tornState.profile.pxeGeneration &&
+					tornState.sessionWithheld
+				if (!provenanceOk) {
+					throw new Error(
+						`[sw-restart-restore] torn refusal without matching marker↔profile provenance (or with a live session); tornState: ${JSON.stringify(tornState)}; parked: ${JSON.stringify(await collectParkedState())}`,
+					)
+				}
+				// Masking guard: torn is the close-RACED-the-dispatch model only while
+				// the close landed BEFORE the popup→SW transport timeout (60s) — the
+				// in-flight restore RPC cannot reject (and so cannot dispatch the
+				// rollback) until that timeout fires, which is also why the 45s fork
+				// window elapsing proves nothing about the dispatcher. Past 60s a live
+				// dispatcher WOULD have fired with the page still open, so a torn
+				// end-state would instead indicate a broken/stalled rollback dispatch —
+				// fail loudly (this bites only if someone widens the fork hold).
+				if (closedSinceKillMs >= 60_000) {
+					throw new Error(
+						`[sw-restart-restore] torn end-state but the import page stayed open ${closedSinceKillMs}ms after the kill (>= the 60s transport timeout) — a live rollback dispatcher would have fired; suspect a broken dispatch, not the designed crash race`,
+					)
+				}
+				console.warn(
+					"[sw-restart-restore] marker-window kill + close-before-dispatch → torn refusal (designed); exercising the advertised recovery (delete profile + re-import)",
+				)
+				// The auth screen's advertised path: the reset route is reachable
+				// without a session (`isAuthRequired: false`) — same deliberate
+				// delete flow the forgot-password popup routes to.
+				await resetProfile(page3)
+				// Deletion completed = profile row, deletion tombstone AND the
+				// restore-pending marker all gone (deleteProfile clears the marker
+				// last among its fallible cleanups).
+				await page3.waitForFunction(
+					async () => {
+						const keys = Object.keys(await chrome.storage.local.get())
+						return (
+							!keys.some((k) => k.startsWith("nulo:core:profiles@")) &&
+							!keys.some((k) => k.startsWith("nulo:core:profile-tombstones@")) &&
+							!keys.some((k) => k.startsWith("nulo:core:restore-pending@"))
+						)
+					},
+					{ timeout: 60_000, polling: 200 },
+				)
+			}
+
+			if (leg === "rolled-back" || leg === "torn") {
 				// Complete the product's own retry journey so the load-bearing on-chain
 				// assertions below run on EVERY path — a required gate must not stay
 				// green while the registration checks are skipped run after run.
-				console.warn(
-					"[sw-restart-restore] pre-finalize kill → clean rollback confirmed (profile + tombstone purged); exercising the designed retry (re-import, no kill)",
-				)
+				console.warn(`[sw-restart-restore] ${leg} leg confirmed clean; exercising the designed retry (re-import, no kill)`)
 				await page3.close()
 				page3 = await gotoPopupImport(ctx2)
 				// Lands on general (the shell's successHash); the convergence wait then
