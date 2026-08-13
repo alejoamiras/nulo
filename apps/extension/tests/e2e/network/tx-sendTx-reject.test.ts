@@ -3,6 +3,7 @@ import { clickByTestId, test } from "../fixtures/extension"
 import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, waitForExecuteContent, approveCapabilities, rejectExecute } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
+import { getSelectedFeeMethod, selectFeeMethod } from "../fixtures/helpers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -53,6 +54,14 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-sendTx-default")
 		const execPopup = await execPopupP
 		await waitForExecuteContent(execPopup)
+		// Exercise the shared fee-method selector's public + private branches in
+		// the EXECUTE popup (sponsored is exercised by the submitting tests) —
+		// selection commits are asserted via the trigger's data-fee-method; the
+		// reject below keeps this fee-path exercise submit-free.
+		await selectFeeMethod(execPopup, "public", { mountTimeoutMs: 30_000 })
+		expect(await getSelectedFeeMethod(execPopup)).toBe("public")
+		await selectFeeMethod(execPopup, "private")
+		expect(await getSelectedFeeMethod(execPopup)).toBe("private")
 		await rejectExecute(execPopup)
 
 		const result = await waitForPgResult(page, "sendTx", seqTx, 30_000)

@@ -10,6 +10,7 @@ import { appendFileSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { Page, Target } from "puppeteer"
 import { clickByTestId, clickSelector, patchPagePolling, type ExtensionContext } from "./extension"
+import { selectFeeMethod, type FeeMethodSubtitle } from "./helpers"
 
 export type PopupKind = "discover" | "verify" | "capabilities" | "execute" | "json"
 
@@ -318,21 +319,10 @@ function recordApprovableTiming(line: string): void {
  */
 export async function approveExecute(
 	page: Page,
-	opts: { feeMethod?: "sponsored" | "fj" | "fpc"; approvableTimeoutMs?: number } = {},
+	opts: { feeMethod?: FeeMethodSubtitle; approvableTimeoutMs?: number } = {},
 ): Promise<void> {
 	if (opts.feeMethod) {
-		// FeeSettingsCard mounts after FPC auto-discovery completes — that's an async
-		// service round-trip that can take several seconds on cold start. Wait for the
-		// trigger to be visible before clicking it; otherwise the click is a no-op
-		// against a not-yet-mounted DOM and the per-method option never renders.
-		await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
-		await page.evaluate(() => {
-			;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
-		})
-		await page.waitForSelector(`[data-testid="send-fee-method-${opts.feeMethod}"]`, { visible: true, timeout: 30_000 })
-		await page.evaluate((kind: string) => {
-			;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
-		}, opts.feeMethod)
+		await selectFeeMethod(page, opts.feeMethod, { mountTimeoutMs: 30_000 })
 	}
 	// Gate on the real approvable signal BEFORE the click — clickByTestId's
 	// generic 10s assumed the button was already (about to be) enabled, which is
@@ -351,16 +341,9 @@ export async function approveExecute(
 export async function pickFeeAndSubmitAuthwitPopup(
 	page: Page,
 	submitTestId: string,
-	feeMethod: "sponsored" | "fj" | "fpc" = "sponsored",
+	feeMethod: FeeMethodSubtitle = "sponsored",
 ): Promise<void> {
-	await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: 30_000 })
-	await page.evaluate(() => {
-		;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
-	})
-	await page.waitForSelector(`[data-testid="send-fee-method-${feeMethod}"]`, { visible: true, timeout: 30_000 })
-	await page.evaluate((kind: string) => {
-		;(document.querySelector(`[data-testid="send-fee-method-${kind}"]`) as HTMLElement)?.click()
-	}, feeMethod)
+	await selectFeeMethod(page, feeMethod, { mountTimeoutMs: 30_000 })
 	await page.waitForFunction(
 		(id: string) => {
 			const b = document.querySelector(`[data-testid="${id}"]`) as HTMLButtonElement | null

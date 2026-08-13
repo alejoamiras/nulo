@@ -816,10 +816,22 @@ export async function waitForTxConfirmation(
 
 // ── Fee Method ────────────────────────────────────────────────────────
 
-/** Select a fee payment method in the SendPopup's FeeSettingsCard dropdown.
- *  Uses data-testid on dropdown items: send-fee-method-{subtitle}
- *  @param methodSubtitle - "public" | "private" | "sponsored" | "token" */
-export async function selectFeeMethod(page: Page, methodSubtitle: string): Promise<void> {
+/** The three selectable fee methods (`send-fee-method-{subtitle}` testids);
+ *  the fourth rendered entry ("coming soon") is disabled by design. */
+export type FeeMethodSubtitle = "sponsored" | "public" | "private"
+
+/** Select a fee payment method in the shared FeeSettingsCard dropdown (the
+ *  send flow AND the dApp execute/authwit popups embed the same card).
+ *  `mountTimeoutMs`: the card mounts after FPC auto-discovery — an async
+ *  service round-trip that can take seconds on cold paths; execute-popup
+ *  callers pass 30s, the send flow keeps the tight default. */
+export async function selectFeeMethod(
+	page: Page,
+	methodSubtitle: FeeMethodSubtitle,
+	opts: { mountTimeoutMs?: number } = {},
+): Promise<void> {
+	const mountTimeoutMs = opts.mountTimeoutMs ?? 2_000
+	await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: mountTimeoutMs })
 	// Open the fee method dropdown (items teleport to #dropdown)
 	await page.evaluate(() => {
 		;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
@@ -827,7 +839,7 @@ export async function selectFeeMethod(page: Page, methodSubtitle: string): Promi
 
 	// Wait for the target item to teleport into the dropdown layer.
 	const testid = `send-fee-method-${methodSubtitle}`
-	await page.waitForSelector(`[data-testid="${testid}"]`, { visible: true, timeout: 2_000 })
+	await page.waitForSelector(`[data-testid="${testid}"]`, { visible: true, timeout: mountTimeoutMs })
 
 	// Click the method by data-testid on the teleported DropdownItem
 	await page.evaluate((id: string) => {
