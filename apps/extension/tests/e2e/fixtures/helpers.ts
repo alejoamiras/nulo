@@ -931,9 +931,8 @@ export async function setInputAndBlur(page: Page, selector: string, value: strin
  *  leave `<Transition>` keeps the options VISIBLE while the dropdown's state
  *  is already closed — a visibility sample taken mid-close (right after a
  *  previous selection closed the menu) reads "open", skips the trigger click,
- *  and then waits on an option that is about to disappear (reproduced under
- *  CPU load as the appearance retry-flake). Gate on the dropdown's OWN state
- *  (`data-dropdown-open`, synchronous with `isOpen`) instead. */
+ *  and then waits on an option that is about to disappear. Gate on the
+ *  dropdown's OWN state (`data-dropdown-open`, synchronous with `isOpen`). */
 export async function setTheme(page: Page, mode: "system" | "light" | "dark"): Promise<void> {
 	const readOpen = () =>
 		page.evaluate(
