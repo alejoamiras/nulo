@@ -20,10 +20,17 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	}
 }
 
-/** Post-restart readiness: session storage RETAINS the dead worker's
- *  heartbeat, so the gate requires a timestamp STRICTLY NEWER than the
- *  pre-kill snapshot — truthy alone passes before the replacement worker
- *  boots (sw-resilience.test.ts's causal pattern). */
+/** Readiness after the terminate: session storage retains the pre-kill
+ *  heartbeat, so a truthy check passes instantly against a stale value and the
+ *  next UI wait races whatever the worker is doing. Requiring a STRICTLY NEWER
+ *  timestamp at least proves the worker is live and writing now.
+ *
+ *  It does NOT prove a respawn happened: measurement (deflake-round-3,
+ *  `lessons/phase-3.md`) shows `Runtime.terminateExecution` leaves this worker
+ *  running, and a fresh timestamp arrives from its ordinary heartbeat within
+ *  HEARTBEAT_INTERVAL_MS. What this test actually asserts — that the active
+ *  network and primary endpoint survive a terminate + fresh popup — holds
+ *  either way; the restart framing is the part that was overstated. */
 async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
 		async (priorTs: number) => {

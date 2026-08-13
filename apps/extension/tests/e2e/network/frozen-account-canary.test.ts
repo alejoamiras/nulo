@@ -193,12 +193,16 @@ test.skipIf(!hasConfig)(
 
 		// ── Stage 5: SW restart → recovery re-derives and still operates ──
 		step("terminating the service worker")
-		// Snapshot liveness BEFORE the kill: session storage RETAINS the dead
-		// worker's heartbeat, so a truthy check passes before the replacement
-		// worker exists and the very next UI wait races its boot
-		// (sw-resilience.test.ts's causal pattern). The snapshot MUST run in an
-		// extension page — chrome.storage is undefined on the playground page,
-		// where the catch's 0 would let the stale heartbeat satisfy the gate.
+		// Snapshot liveness BEFORE the kill: session storage retains the pre-kill
+		// heartbeat, so a truthy check passes instantly against a stale value and
+		// the next UI wait races the worker. Strictly-newer at least proves the
+		// worker is live and writing now — it does NOT prove a respawn, since the
+		// terminate leaves this worker running and its heartbeat supplies a fresh
+		// timestamp on its own (deflake-round-3 `lessons/phase-3.md`). The stage's
+		// real assertion — that the frozen account still re-derives and operates —
+		// is unaffected. The snapshot MUST run in an extension page: chrome.storage
+		// is undefined on the playground page, where the catch's 0 would let the
+		// stale heartbeat satisfy the gate.
 		const snapshotPopup = await openPopup(ctx)
 		const preKillLiveness = await snapshotPopup.evaluate(async () => {
 			try {

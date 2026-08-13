@@ -49,20 +49,28 @@ async function readLiveness(page: Page): Promise<number> {
 	})
 }
 
-// Stopping and restarting the SW via CDP is the closest e2e approximation
-// of Chrome's MV3 lifecycle recycle (idle SW gets killed; next event respawns
-// it cold). chrome.storage.session survives the kill, so a FRESH heartbeat
-// (strictly newer than pre-kill) must appear before the popup can boot. This test
-// catches storage migration regressions, broken SW initialization, and any
-// hard-to-reach race in the cold-start boot path. (chrome.runtime.reload()
-// fully unloads the extension long enough that puppeteer-launched Chrome
-// returns ERR_BLOCKED_BY_CLIENT for an unbounded window — too brittle.)
-// SKIP: SW-respawn lifecycle tests are intrinsically flaky on hosted CI
-// (Chrome internal timing). User-visible lock/unlock + strict-mode behavior
-// is covered by tests/e2e/security.test.ts and registration.test.ts. The
-// three SW-respawn tests in this file are excellent locally for development
-// and stay skipped on CI until the respawn waiter is hardened to a stable
-// signal. Un-skip when the helper waits on something deterministic.
+// These tests intend to exercise Chrome's MV3 lifecycle recycle: the idle
+// worker is killed and the next event respawns it cold, which is where storage
+// migrations, service init and cold-boot races actually break.
+//
+// SKIP — and the reason is NOT flakiness. `Runtime.terminateExecution` does not
+// kill this worker. Measured directly (deflake-round-3, `lessons/phase-3.md`):
+// after the terminate the `service_worker` target never disappears, the session
+// record survives, the wallet stays unlocked, and `nulo:liveness` advances by
+// exactly HEARTBEAT_INTERVAL_MS — i.e. the "fresh heartbeat" a post-kill gate
+// waits for is the SURVIVING worker's next tick, not evidence of a respawn.
+//
+// Consequently three of the four tests below pass without any restart having
+// happened (one locks explicitly, one expects the unlocked outcome, one only
+// asserts that liveness advances within the heartbeat interval), and the fourth
+// — the only one whose assertion REQUIRES a cold restart — fails deterministically
+// (3/3 solo runs at retry=0). Un-skipping them as they stand would add three
+// tests that cannot fail for the reason they claim to test.
+//
+// To un-skip, the kill has to be real. `migration.test.ts` already proves the
+// faithful primitive: close the browser and relaunch on the same persistent
+// `userDataDir`, which IS the crash these tests describe. That means giving
+// this file a per-test profile dir instead of the shared file-scoped browser.
 test.skip("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
@@ -195,11 +203,13 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
  * value and miss the regression. Fresh-timestamp comparison is the
  * correctness fix.
  */
-// SKIP: pre-existing smoke flake — Puppeteer "Navigating frame was detached"
-// race on the SW respawn + immediate popup re-navigation path. The three
-// SW-lifecycle tests above assert the user-visible behavior; the inner
-// heartbeat-timing assertion adds little marginal coverage at this flake cost.
-// Un-skip once the navigation-after-respawn helper waits on a stable signal.
+// SKIP: same root cause as above — with the worker surviving the terminate,
+// this test's "fresh liveness within HEARTBEAT_INTERVAL_MS" is satisfied by the
+// heartbeat itself, so it would pass whether or not the respawn-time regression
+// it pins ever came back. It needs the real kill primitive before it means
+// anything. (Its historical "Navigating frame was detached" flake is separately
+// mitigated now: `openPopup` retries that class, and the matching wording was
+// added to `isFrameDetachError`.)
 test.skip("regression: liveness signal lands within HEARTBEAT_INTERVAL_MS of SW respawn", async ({ registeredExtension }) => {
 	const HEARTBEAT_INTERVAL_MS = 10_000
 
