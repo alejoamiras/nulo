@@ -196,8 +196,11 @@ test.skipIf(!hasConfig)(
 		// Snapshot liveness BEFORE the kill: session storage RETAINS the dead
 		// worker's heartbeat, so a truthy check passes before the replacement
 		// worker exists and the very next UI wait races its boot
-		// (sw-resilience.test.ts's causal pattern).
-		const preKillLiveness = await page.evaluate(async () => {
+		// (sw-resilience.test.ts's causal pattern). The snapshot MUST run in an
+		// extension page — chrome.storage is undefined on the playground page,
+		// where the catch's 0 would let the stale heartbeat satisfy the gate.
+		const snapshotPopup = await openPopup(ctx)
+		const preKillLiveness = await snapshotPopup.evaluate(async () => {
 			try {
 				const r = await chrome.storage.session.get("nulo:liveness")
 				return Number(r["nulo:liveness"] ?? 0)
@@ -205,6 +208,11 @@ test.skipIf(!hasConfig)(
 				return 0
 			}
 		})
+		await snapshotPopup.close()
+		// The SW has heartbeat through four stages by now — a zero snapshot means
+		// the read itself broke (wrong page type), which would silently degrade
+		// the strictly-newer gate back to truthy.
+		expect(preKillLiveness).toBeGreaterThan(0)
 		await stopServiceWorker(ctx)
 
 		const recoveryPopup = await openPopup(ctx)
