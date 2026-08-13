@@ -33,7 +33,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 // shared runner, which timed out the first `bootService()` when the import was
 // dynamic. vi.mock("./repository") is hoisted above this, so the mock still applies.
 import { IncomingTransferService } from "./service"
-import { noteRecordId } from "./spec"
+import { PublicScanCursorSchema, noteRecordId } from "./spec"
 import type { IncomingNoteRecord, IncomingPublicEventRecord, IncomingTransferRecord, IncomingTrustRecord, IncomingTrustState } from "./spec"
 import { TaskStatus } from "@/wallet/services/task/spec"
 import type { PublicEventReader } from "./public-event-indexer"
@@ -3717,6 +3717,24 @@ describe("IncomingTransferService — public-scan sync state (§3 Catching up)",
 			["backfilling", 51],
 			["backfilling", 6],
 		])
+		// The always-fresh-snapshot invariant (audit round 1): no emit, but the stored snapshot — and
+		// with it every reseed (mount / port reconnect) — still advanced to the newest lag.
+		expect(await getSnap(service)).toEqual({ state: "backfilling", blocksBehind: 4 })
+	})
+
+	test("PublicScanCursorSchema round-trips lastCoveredBlock + reconciling (the persisted watermark survives parse)", () => {
+		// The repository parses every cursor read through this schema (repository.ts) — a schema that
+		// dropped `lastCoveredBlock` would silently strip the restart watermark while the in-memory
+		// seeding in the tests above stayed green (post-impl audit, Low #1).
+		const cursor = {
+			cursor: { blockNumber: 90, txIndexWithinBlock: 1, logIndexWithinTx: 2 },
+			lastSyncedBlockHash: "0xanchor",
+			lastScanFinalized: 50,
+			lastCoveredBlock: 100,
+			startBlock: 0,
+			reconciling: { lowerBound: 60, upperBound: 90, upperBoundHash: "0xfork", progress: null, seen: [] },
+		}
+		expect(PublicScanCursorSchema.parse(cursor)).toEqual(cursor)
 	})
 
 	test("threshold crossing UP mid-episode re-emits (the dot can appear late)", async () => {
