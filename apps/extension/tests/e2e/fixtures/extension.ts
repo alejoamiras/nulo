@@ -81,8 +81,15 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
 	// for slow CI runners on cold-boot Barretenberg wasm + service-graph init.
-	const pages = await browser.pages()
-	const blankPage = pages[0]
+	// Own the scratch page instead of adopting `pages[0]`. Chrome owns its
+	// startup page and may replace it while we are mid-navigation — most
+	// reliably on a relaunch against an existing userDataDir (migration.test.ts's
+	// `relaunch`), where the restored page's frame can detach between
+	// `browser.pages()` and the `goto` below and surface as "Attempted to use
+	// detached Frame". A page we created ourselves cannot be swapped underneath
+	// us. The original startup page is left alone so the browser always keeps at
+	// least one page open.
+	const blankPage = await browser.newPage()
 	patchPagePolling(blankPage)
 	await blankPage.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
 		waitUntil: "domcontentloaded",
@@ -112,7 +119,7 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
 	})
 
-	await blankPage.goto("about:blank")
+	await blankPage.close()
 
 	return { browser, extensionId, consoleErrors: [], pageErrors: [] }
 }
@@ -997,7 +1004,12 @@ export function patchPagePolling(page: Page): void {
  */
 function isFrameDetachError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err)
-	return /Navigating frame was detached|frame got detached|Session closed|Target closed|Connection closed/i.test(msg)
+	// "Attempted to use detached Frame/Page" is puppeteer's OTHER detach wording
+	// (thrown by the handle decorators rather than the navigation path). Without
+	// it the retry above cannot see the very failure it exists to absorb.
+	return /Navigating frame was detached|frame got detached|Attempted to use detached (Frame|Page)|Session closed|Target closed|Connection closed/i.test(
+		msg,
+	)
 }
 
 /** Open the extension popup in a new page with error collection. */
