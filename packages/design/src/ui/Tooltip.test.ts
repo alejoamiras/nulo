@@ -54,6 +54,37 @@ describe("Tooltip", () => {
 		expect(tooltipRoot.textContent).not.toContain("Tip body")
 	})
 
+	test("keyboard focus on a focusable trigger child shows the tooltip (focusin bubbles)", async () => {
+		const w = mountTooltip()
+		await w.trigger("focusin")
+		await flushPromises()
+		expect(tooltipRoot.textContent).toContain("Tip body")
+	})
+
+	test("focus bypasses the hover delay — deliberate focus shows immediately", async () => {
+		const w = mountTooltip({ delay: 350 })
+		await w.trigger("focusin")
+		await flushPromises()
+		expect(tooltipRoot.textContent).toContain("Tip body")
+	})
+
+	test("focusout hides the tooltip again", async () => {
+		const w = mountTooltip()
+		await w.trigger("focusin")
+		await flushPromises()
+		expect(tooltipRoot.textContent).toContain("Tip body")
+		await w.trigger("focusout")
+		await flushPromises()
+		expect(tooltipRoot.textContent).not.toContain("Tip body")
+	})
+
+	test("disabled tooltip does NOT show on focusin", async () => {
+		const w = mountTooltip({ disabled: true })
+		await w.trigger("focusin")
+		await flushPromises()
+		expect(tooltipRoot.textContent).not.toContain("Tip body")
+	})
+
 	test("disabled tooltip does NOT show on mouseenter", async () => {
 		const w = mountTooltip({ disabled: true })
 		await w.trigger("mouseenter")

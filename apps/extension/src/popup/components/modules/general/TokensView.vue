@@ -9,7 +9,7 @@ import { ContentKind } from "@/wallet/services/task/spec"
 import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { OperationJournalServiceClient } from "@/wallet/services/operation-journal/client"
-import { IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
+import { BACKFILL_INDICATOR_THRESHOLD_BLOCKS, IncomingTransferServiceClient } from "@/wallet/services/incoming-transfer/client"
 
 import { stringCompare } from "@/utils/string"
 
@@ -241,13 +241,22 @@ const lastLiveAt = new Map()
 let scopeGen = 0
 incomingTransferService.onIncomingSyncStateChanged.add(onSyncStateChanged)
 // A SW restart / port reconnect can drop a transition event → resnapshot on reconnect (same pattern as
-// fetchTokenImports above); the transition-only event alone would never re-fire the missed state.
+// fetchTokenImports above); the event alone would never re-fire the missed state.
 incomingTransferService.onConnected.add(seedSyncStates)
-function onSyncStateChanged({ networkId, contract, state }) {
+function onSyncStateChanged({ networkId, contract, state, blocksBehind }) {
 	// The scan runs per (networkId, contract); ignore events for any network other than the one on screen.
 	if (networkId !== appStore.network?.id) return
 	lastLiveAt.set(contract, ++liveClock)
-	syncByContract.value.set(contract, state)
+	syncByContract.value.set(contract, { state, blocksBehind })
+}
+
+// §3 threshold gate: the dot renders only when the scan is GENUINELY behind — never on routine
+// tip-following or RPC blips. The lag is node-reported and advisory: hostile values (non-integer,
+// negative, non-finite) degrade to "no dot" rather than poisoning the comparison.
+function isBackfilling(contract) {
+	const snap = syncByContract.value.get(contract)
+	if (snap?.state !== "backfilling") return false
+	return Number.isSafeInteger(snap.blocksBehind) && snap.blocksBehind >= BACKFILL_INDICATOR_THRESHOLD_BLOCKS
 }
 // Fetch + apply ONE contract's snapshot, dropping it if it's stale by the time it resolves: the scope
 // (account/network) changed since we requested, or a newer live event for this contract landed since.
@@ -385,7 +394,7 @@ onBeforeUnmount(() => {
 					v-for="tb in sortedTokenBalances"
 					@onRefreshBalance="refreshBalance(tb)"
 					:tokenBalance="tb"
-					:backfilling="syncByContract.get(tb.token.contract) === 'backfilling'"
+					:backfilling="isBackfilling(tb.token.contract)"
 				/>
 			</template>
 			<template v-if="!newTokens.length && !sortedTokenBalances.length && !visibleTokenImports.length">

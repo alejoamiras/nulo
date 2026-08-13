@@ -351,11 +351,13 @@ onBeforeUnmount(() => {
 
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
 				<span :class="$style.breakdown_item">
-					<span :class="$style.breakdown_dot" /> PRIVATE: <span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
+					<span :class="$style.breakdown_private"><Icon name="lock" size="10" /></span> PRIVATE:
+					<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
 				</span>
 				<span :class="$style.breakdown_divider">|</span>
 				<span :class="$style.breakdown_item">
-					<span :class="[$style.breakdown_dot, $style.public_dot]" /> PUBLIC: <span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
+					<span :class="$style.breakdown_public"><Icon name="globe" size="10" /></span> PUBLIC:
+					<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
 				</span>
 			</Flex>
 		</section>
@@ -445,14 +447,15 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.breakdown_dot {
-	width: 6px;
-	height: 6px;
-	background: var(--nulo-accent);
+/* Same private/public vocabulary as TokenCard's split: bone lock = private, grey globe = public. */
+.breakdown_private {
+	display: inline-flex;
+	color: var(--nulo-accent);
 }
 
-.public_dot {
-	background: var(--nulo-outline);
+.breakdown_public {
+	display: inline-flex;
+	color: var(--nulo-secondary);
 }
 
 .breakdown_divider {

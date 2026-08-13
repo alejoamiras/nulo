@@ -100,15 +100,28 @@ const handleRefreshBalance = async () => {
 		@pointerleave="isHovered = false"
 	>
 		<Flex direction="column" gap="2">
-			<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
-				{{ token.symbol }}
-			</span>
-			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
-			<span v-else :class="$style.type_label">PRIVATE / PUBLIC</span>
-			<Flex v-if="catchingUp" align="center" gap="4" :class="$style.catching_up" data-testid="token-catching-up">
-				<span :class="$style.pulse_dot" />
-				<span :class="$style.catching_up_text">Catching up…</span>
+			<Flex align="center" gap="6">
+				<!-- §3 catching-up: an ambient dot, not a caption — it renders only when the scan is
+				     genuinely behind (TokensView's threshold gate) and explains itself via tooltip.
+				     Focusable so the tooltip is keyboard-reachable. -->
+				<Tooltip v-if="catchingUp" side="top" position="start">
+					<span
+						:class="$style.pulse_dot_wrap"
+						data-testid="token-catching-up"
+						tabindex="0"
+						role="img"
+						aria-label="Catching up on incoming transfers"
+					>
+						<span :class="$style.pulse_dot" />
+					</span>
+					<template #content>Catching up on incoming transfers</template>
+				</Tooltip>
+				<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
+					{{ token.symbol }}
+				</span>
 			</Flex>
+			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
+			<span v-else :class="$style.fiat">{{ token?.name || "unknown" }}</span>
 		</Flex>
 
 		<Flex
@@ -128,8 +141,12 @@ const handleRefreshBalance = async () => {
 				<span :class="[$style.amount, syncFailed && $style.amount_stale]">{{ totalBalance || 0 }}</span>
 			</Flex>
 			<span :class="$style.detail">
-				<span :class="$style.split_dot" /> {{ privateFormatted }}&ensp;<span :class="[$style.split_dot, $style.split_dot_pub]" />
-				{{ publicFormatted }}
+				<span :class="$style.icon_private"><Icon name="lock" size="9" /></span>
+				{{ privateFormatted }}
+				<span :class="$style.pub_group">
+					<span :class="$style.icon_public"><Icon name="globe" size="9" /></span>
+					{{ publicFormatted }}
+				</span>
 			</span>
 			<span v-if="syncFailed && !isRefreshing" :class="$style.failed_text" data-testid="token-balance-failed">
 				Couldn't refresh
@@ -152,7 +169,7 @@ const handleRefreshBalance = async () => {
 	align-items: center;
 	justify-content: space-between;
 
-	padding: 16px 0;
+	padding: 8px 0;
 	cursor: pointer;
 	text-decoration: none;
 
@@ -199,23 +216,30 @@ const handleRefreshBalance = async () => {
 .detail {
 	font-family: var(--font-mono);
 	font-size: 10px;
-	color: var(--nulo-outline);
+	color: var(--nulo-secondary);
 
 	display: inline-flex;
 	align-items: center;
 	gap: 3px;
 }
 
-/* Same private/public dot vocabulary as BalanceView's header breakdown. */
-.split_dot {
-	display: inline-block;
-	width: 5px;
-	height: 5px;
-	background: var(--nulo-accent);
+/* Same private/public vocabulary as BalanceView's breakdown: bone lock = private,
+   grey globe = public. Icons inherit via currentColor. */
+.icon_private {
+	display: inline-flex;
+	color: var(--nulo-accent);
 }
 
-.split_dot_pub {
-	background: var(--nulo-outline);
+.icon_public {
+	display: inline-flex;
+	color: var(--nulo-secondary);
+}
+
+.pub_group {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	margin-left: 6px;
 }
 
 .loading_block {
@@ -228,11 +252,6 @@ const handleRefreshBalance = async () => {
 	color: var(--nulo-outline);
 }
 
-/* §3 "Catching up…" — a status line under the symbol/fiat while incoming history hydrates. */
-.catching_up {
-	margin-top: 2px;
-}
-
 .pulse_dot {
 	width: 5px;
 	height: 5px;
@@ -240,6 +259,24 @@ const handleRefreshBalance = async () => {
 	background: var(--nulo-accent);
 
 	animation: token_pulse 2s linear infinite;
+}
+
+/* §3 catching-up dot: sits LEFT of the symbol, glows softly (it must be findable without a
+   caption), explains itself via the wrapping Tooltip — hover or keyboard focus. */
+.pulse_dot_wrap {
+	display: inline-flex;
+	align-items: center;
+	cursor: help;
+	outline: none;
+}
+
+.pulse_dot_wrap .pulse_dot {
+	box-shadow: 0 0 4px 1px rgba(248, 241, 231, 0.35);
+}
+
+.pulse_dot_wrap:focus-visible {
+	outline: 1px solid var(--nulo-accent);
+	outline-offset: 2px;
 }
 
 @keyframes token_pulse {
@@ -252,12 +289,6 @@ const handleRefreshBalance = async () => {
 	100% {
 		opacity: 1;
 	}
-}
-
-.catching_up_text {
-	font-family: var(--font-mono);
-	font-size: 10px;
-	color: var(--nulo-secondary);
 }
 
 /* Last projection failed: keep the last-known amount visible, dimmed (the
