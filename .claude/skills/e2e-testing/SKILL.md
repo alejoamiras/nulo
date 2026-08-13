@@ -377,8 +377,10 @@ assuming "transient".
   PR fires opened+labeled events; the concurrency-cancelled duplicates leave FAILURE
   aggregator check-runs beside the survivors' successes on the same SHA. A measured probe
   (deflake-round-3 `lessons/phase-1.md`) shows the PR going CLEAN once the survivors land,
-  with those FAILUREs still present — a cancelled run's aggregator always finishes first,
-  so it is always the OLDER check-run and loses. **Do not reflex-push an empty commit.**
+  with those FAILUREs still present, so a duplicate FAILURE alone is not what blocks a
+  merge. Round 2's blocks were observed with all gates green and remain UNEXPLAINED, so
+  treat this as "the known mechanism does not hold", not "duplicates can never matter".
+  **Do not reflex-push an empty commit.**
   If you see BLOCKED with every gate terminal-green, CAPTURE FIRST — full
   `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 minutes, and the
   base branch's protection config — because two arcs have now destroyed that state by

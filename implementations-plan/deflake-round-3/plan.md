@@ -85,13 +85,15 @@ be exercised without touching dev):
   SHA-B's mergeability is unaffected (checks associate per-SHA).
 Raw timelines + verdicts → `lessons/phase-1.md` + ledger. P2/P3 refuted → the STOP row.
 
-**Phase 1c — OUTCOME (measured 2026-08-13, PR #367): the "transient" row.** The duplicate
-FAILURE check-run does NOT durably block — `mergeStateStatus` went BLOCKED → CLEAN the
-moment the survivor's SUCCESS landed, with the duplicate's FAILURE still present on the
-SHA. Round-2's `completed_at` data shows why the premise was wrong in the first place: a
-cancelled run's aggregator finishes in ~3-5s while the run it duplicates is still
-executing, so the FAILURE is ALWAYS the earlier check-run and can never win
-latest-per-name. Full evidence + the ordering table: `lessons/phase-1.md`.
+**Phase 1c — OUTCOME (measured 2026-08-13, PR #367): the "transient" row.** On #367,
+`mergeStateStatus` went BLOCKED → CLEAN once the survivors' SUCCESSes landed, with the
+duplicates' FAILUREs still present on the SHA. That supports one narrow conclusion: an
+older duplicate FAILURE does not by itself keep a PR unmergeable. Round-2's `completed_at`
+data adds that on every blocked head the duplicate's FAILURE was the OLDER check-run, which
+is evidence AGAINST the proposed "duplicate wins latest-per-name" mechanism — not proof of
+universal scheduler ordering. Round 2's blocks remain unexplained (its remedies post-date
+the last survivor success by 41s-4m), and `lessons/phase-1.md` keeps that residue explicit
+rather than resolving it by assertion.
 
 **Therefore: 1a ships, and nothing else.** No `cancel-in-progress` expression, no
 aggregate-status script, no `actions: read`, no change to how any gate concludes. P2
@@ -103,11 +105,12 @@ the row that ships the least.
 
 **Deviation from the goal's literal criterion (surfaced, not silent):** success criterion
 (1) asked for aggregators to conclude neutral/cancelled "so a labeled-PR open can no
-longer leave a losing FAILURE check-run". The measurement falsifies the premise — such a
-check-run loses nothing, because it never wins resolution. The intent (labeled-PR opens
-must not block merges) holds today without any gate-semantics change. What the duplicates
-DO cost is runner minutes and a confusing transient red, which is what 1a removes for the
-one workflow that never needed label triggers at all.
+longer leave a losing FAILURE check-run". The measurement does not support the premise
+that such a check-run costs a merge: #367 stayed mergeable with one present. No
+gate-semantics change is therefore justified, and every candidate design was rejected in
+audit as a potential wrong-ALLOW path. What the duplicates demonstrably DO cost is runner
+minutes and a confusing transient red, which 1a removes for the one workflow that never
+needed label triggers at all.
 
 ### Item 2 — fixed-wait class (PR-2 smoke-surface, PR-3 network-surface)
 

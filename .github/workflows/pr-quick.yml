@@ -8,20 +8,23 @@ on:
     # CI — otherwise the required `… / Status` checks never report on the PR and
     # hang "Expected" forever → mergeStateStatus=BLOCKED.
     #
-    # NO `labeled`/`unlabeled`: nothing in this workflow reads labels, so a label
-    # event can only produce a duplicate run of work already done for this SHA.
-    # If one lands mid-run the concurrency group cancels the in-flight run, whose
-    # `quality-status` job still concludes FAILURE (`always()` + the
-    # cancelled-is-failure branch in the aggregate step) and leaves an earlier,
-    # losing check-run behind; if it lands after, it re-runs the whole workflow
-    # for nothing. The label-gated suites keep both types because their gates
-    # genuinely read labels.
+    # NO `labeled`/`unlabeled`: nothing in this workflow reads labels, so for a
+    # SHA this workflow has already covered a label event only re-does that work
+    # — cancelling the in-flight run (whose `quality-status` then concludes
+    # FAILURE via `always()` + the cancelled-is-failure branch, leaving an
+    # earlier losing check-run) or re-running everything from scratch. It can
+    # incidentally recover a head with no run of its own, which is why the gap
+    # below matters. The label-gated suites keep both types: their gates read
+    # labels.
     #
-    # Gap this leaves: a PR RETARGETED to dev/main fires `edited`, which is not
-    # listed here, so `quality-status` can sit at "Expected" forever. `edited`
-    # cannot be filtered at the trigger level, and on a title edit the aggregator
-    # would run over skipped needs and post a green check that tested nothing —
-    # so recover with `gh workflow run pr-quick.yml --ref <branch>` instead.
+    # Gap: a PR RETARGETED to dev/main fires `edited`, not listed here, so a head
+    # that never got a run can sit at required `quality-status: Expected`
+    # forever. `edited` is not the fix — it also fires on every title/body edit,
+    # so unrelated edits would re-run the full suite and cancel in-flight runs,
+    # manufacturing exactly the duplicate churn this line removes. Recover with
+    # `gh workflow run pr-quick.yml --ref <branch>`, where <branch> still
+    # resolves to the PR's current head, then confirm `quality-status` reported
+    # on that exact SHA.
     types: [opened, reopened, synchronize, ready_for_review]
 
 concurrency:
