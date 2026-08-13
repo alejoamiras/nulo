@@ -509,6 +509,28 @@ describe("execute window — dApp cancellation state", () => {
 		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 
+	test("cancellation flips a genuinely ENABLED Confirm to disabled (the binding's own term)", async () => {
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm & { operations: unknown[]; initComplete: boolean }
+		vm.operations = [
+			{
+				kind: "send_transaction",
+				feeSettings: { paymentMethod: { kind: "sponsored_fpc" } },
+				network: { chainId: 1, name: "TestNet" },
+				account: { address: "0x1", chainId: 1, name: "TestAccount" },
+			},
+		]
+		vm.initComplete = true
+		await flushPromises()
+		const confirm = () => w!.find('[data-testid="execute-confirm-btn"]')
+		expect(confirm().attributes("disabled")).toBeUndefined()
+
+		isCancelledMock.value = true
+		await flushPromises()
+		expect(confirm().attributes("disabled")).toBeDefined()
+	})
+
 	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
 		// The dApp cancelled while the click was in flight and the broadcast
 		// never reached this popup: the typed service refusal alone must land
