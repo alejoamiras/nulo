@@ -44,6 +44,8 @@ export * from "./spec"
  * popup crash, MV3 suspension races). Longer than the longest realistic
  * prove+approve flow so legitimate users aren't surprised.
  */
+const CANCELLED_BEFORE_APPROVAL = "Request was cancelled before approval"
+
 const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 
 export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
@@ -52,6 +54,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		"approveInteraction",
 		"resolveInteraction",
 		"rejectInteraction",
+		"isInteractionCancelled",
 	)
 	public static name = DAPP_INTERACTION_SERVICE_NAME
 
@@ -101,6 +104,14 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		if (!interaction) {
 			throw new Error("Invalid id")
 		}
+		// First service claim wins — service acceptance is the commit point, not
+		// the browser click. A cancel processed first leaves the record flagged;
+		// a later approve must refuse BEFORE claiming, so execution never
+		// starts. (Approve claimed first deletes the record; a later cancel then
+		// finds nothing — approval proceeds exactly once.)
+		if (interaction.cancelledAt !== undefined) {
+			throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
+		}
 		this.storage.delete(id)
 		// Detach before handing off to executeAndResolve: the approval popup
 		// closes immediately after the user approves, and the onRemoved event
@@ -118,6 +129,11 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		const interactionRequest = this.storage.get(id)
 		if (!interactionRequest) {
 			throw new Error("Invalid id")
+		}
+		// Same first-claim-wins refusal as approveInteraction — capability and
+		// discovery approvals must not outrun a processed cancel either.
+		if (interactionRequest.cancelledAt !== undefined) {
+			throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 		}
 		this.storage.delete(id)
 		// Detach before settling: popup may close in the same event-loop turn
@@ -176,8 +192,17 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	public cancelInteraction(cancellationToken: string) {
 		const interaction = [...this.storage.values()].find((x) => x.cancellationToken === cancellationToken)
 		if (interaction) {
+			// Durable BEFORE the broadcast: an event alone is lost on a popup that
+			// hasn't subscribed yet; the record's flag is what late mounts replay
+			// and what approveInteraction refuses on. The record is kept — window
+			// dismissal owns its removal.
+			interaction.cancelledAt = Date.now()
 			this.emit("onInteractionCancelled", interaction.id)
 		}
+	}
+
+	public async isInteractionCancelled(id: string): Promise<boolean> {
+		return this.storage.get(id)?.cancelledAt !== undefined
 	}
 
 	public async execute(params: ExecutionParams, cancellationToken?: string, hooks?: ExecutionHooks): Promise<ExecutionResult> {
@@ -198,7 +223,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				this.logInfo(
 					`execute: queued record ${hooks.queuedJournalId} is ${queuedRec.progress?.stage}; short-circuiting before popup`,
 				)
-				throw new JobCancelledError("Request was cancelled before approval")
+				throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 			}
 		}
 

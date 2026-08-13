@@ -16,6 +16,7 @@ export interface DappInteractionLike {
 	getInteractionPayload(requestId: string): Promise<unknown>
 	rejectInteraction(requestId: string, reason: string): void
 	resolveInteraction(requestId: string, result: unknown): Promise<void>
+	isInteractionCancelled(requestId: string): Promise<boolean>
 	onInteractionCancelled: EventHandler<string>
 }
 
@@ -86,6 +87,16 @@ export function useDappInteractionPayload<TPayload>(
 			const result = (await interactionService.getInteractionPayload(id)) as TPayload
 			if (disposed) throw new Error("Composable disposed before payload landed")
 			payload.value = result
+
+			// Replay a cancel that fired before this popup subscribed — the
+			// broadcast alone is lost to late mounts; the record's flag is not.
+			// Best-effort: a failed replay read must not fail an otherwise-good
+			// load (the live broadcast still covers the common path).
+			const cancelled = await interactionService.isInteractionCancelled(id).catch(() => false)
+			if (disposed) throw new Error("Composable disposed before payload landed")
+			if (cancelled) {
+				isCancelled.value = true
+			}
 
 			const meta = dappOf(result) as UIDappMetadata | undefined
 			if (meta) {
