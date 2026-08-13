@@ -48,3 +48,20 @@ math verified; baseline placements deadlock-free; the helpers⇄extension cycle 
 evaluation-safe; no consumer depends on the old quiet fixture degradation. r2: **APPROVE**
 ("Both folds are correct and isolated"). Lesson: an exactness upgrade FINDS fixture dirt the
 fuzzy assert was absorbing — audit every producer feeding an assert you tighten.
+
+## PR-4 (A5 fee-method + A4 durable cancel) — rounds 1–3
+
+r1 **iterate** (3 High, 2 Medium): the disabled pin was tautological (Confirm already
+disabled by other gates); the A5 execute-flow exercise ran on an UNFUNDED fixture
+(fee-helpers disable zero-balance methods — any pass raced the balance read); a raced
+approve's typed refusal rendered "Processing error." instead of the cancelled UI; the
+in-repo canceller gap means nothing settles the dApp promise (ledgered with the driver
+TODO); resolveInteraction lacked the first-claim guard. Folds: catch classification
+(instanceof JobCancelledError → cancelled UI), exercise dropped (fee-methods' funded
+submits exercise the shared selector), resolve guard + parity pin, honest pin renames.
+r2 **iterate**: H1 still unpinned — codex prescribed the exact recipe (reuse the
+executable-op setup: assert ENABLED, flip cancellation, assert DISABLED). Folded; removing
+the binding term now reds a test. r3: **APPROVE**. Lessons: a pin that passes with the
+guarded term REMOVED pins nothing — always red-team the pin against the deletion of what
+it claims to protect; and an exercise on a fixture that can't satisfy the preconditions
+is a race, not coverage.
