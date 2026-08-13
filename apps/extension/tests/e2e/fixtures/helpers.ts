@@ -76,66 +76,129 @@ export async function lockWallet(page: Page): Promise<void> {
  *  the standard test password; pass a different one if a prior test rotated
  *  it via change-password. */
 export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
-	// Lock state is the session record, never the route and never the DOM. Both
-	// of those lie in one direction each: `app.vue` pushes `/popup/auth` BEFORE
-	// `initNetworks()`/`initAccount()` finish, so an UNLOCKED wallet's freshly
-	// opened popup renders the password field (and `openPopup` returns inside
-	// that window), while `header-lock` tracks `isLogined`, which lockWallet
-	// documents as stale-TRUE after an authoritative lock. Submitting a password
-	// into the first case races the in-flight bootstrap; reading the second can
-	// skip a genuinely locked wallet. lockWallet asserts this same key, for the
-	// same reason.
+	// Lock state comes from the session record, never from the route and never
+	// from a lone DOM marker — each of those lies in one direction. `app.vue`
+	// pushes `/popup/auth` BEFORE `initNetworks()`/`initAccount()` finish and
+	// `openPopup` returns inside that window, so an UNLOCKED wallet transiently
+	// renders the password field; `header-lock` tracks `isLogined`, which
+	// lockWallet documents as stale-TRUE after an authoritative lock.
 	//
-	// The two accepted states are positive and cannot both hold: a present
-	// session record means unlocked; an absent one WITH the password field
-	// mounted means locked. Sampling either alone is what made the previous
-	// version wrong, so wait for whichever settles first. The unlocked branch
-	// resolves on the first poll, so the 5s budget — unchanged from the selector
-	// wait this replaces — only bites when the state is genuinely unresolved,
-	// which is a real failure rather than a slow success.
+	// The record's mere PRESENCE is not enough either: `SessionManager.restore`
+	// deliberately leaves it in place for a passkey profile (WebAuthn needs a
+	// user gesture, so the lock screen handles it) and preserves an undecodable
+	// one for repair. Presence therefore has to be paired with a shape check and
+	// with the route, giving two states that cannot both hold:
+	//   unlocked = a well-formed record AND the popup is not on /popup/auth
+	//   locked   = the password field is mounted AND no usable record exists
+	// Anything else — including a LOCKED passkey profile, which keeps its record
+	// while showing no password field — stays unresolved and lands in the
+	// timeout below, which names it. The 5s budget is unchanged from the
+	// selector wait this replaces.
+	const readSession = () =>
+		page.evaluate(async () => {
+			const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+			let rec: { profile?: unknown; since?: unknown } | undefined
+			try {
+				rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+			} catch {
+				rec = undefined
+			}
+			const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+			return { wellFormed, present: raw !== undefined, since: wellFormed ? (rec?.since as number) : 0 }
+		})
+
 	const state = await withTimeoutMessage(
 		page
 			.waitForFunction(
 				async () => {
-					const r = await chrome.storage.session.get("nulo:core:session")
-					if (r["nulo:core:session"]) return "unlocked"
-					return document.querySelector('[data-testid="auth-password-input"]') ? "locked" : null
+					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+					let rec: { profile?: unknown; since?: unknown } | undefined
+					try {
+						rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+					} catch {
+						rec = undefined
+					}
+					const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+					if (wellFormed && !window.location.hash.includes("/popup/auth")) return "unlocked"
+					if (!wellFormed && document.querySelector('[data-testid="auth-password-input"]')) return "locked"
+					return null
 				},
 				{ timeout: 5_000, polling: 200 },
 			)
 			.then((handle) => handle.jsonValue()),
 		async () => {
 			const diag = await page
-				.evaluate(async () => ({
-					hash: window.location.hash,
-					session: !!(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"],
-					field: !!document.querySelector('[data-testid="auth-password-input"]'),
-				}))
-				.catch(() => ({ hash: "<unreadable>", session: false, field: false }))
+				.evaluate(async () => {
+					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+					let rec: { profile?: unknown; since?: unknown } | undefined
+					try {
+						rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+					} catch {
+						rec = undefined
+					}
+					const shape =
+						raw === undefined
+							? "absent"
+							: rec && typeof rec.profile === "string" && typeof rec.since === "number"
+								? "well-formed"
+								: "malformed"
+					return {
+						hash: window.location.hash,
+						record: shape,
+						field: !!document.querySelector('[data-testid="auth-password-input"]'),
+					}
+				})
+				.catch(() => ({ hash: "<unreadable>", record: "<unreadable>", field: false }))
 			return (
-				`ensureUnlocked: lock state never settled within 5s (hash: ${diag.hash}, session record: ${diag.session}, ` +
-				`password field: ${diag.field}). No session record and no password field means the popup is neither unlocked ` +
-				"nor on the password screen — a passkey profile renders no password field and lands here."
+				`ensureUnlocked: lock state never settled within 5s (hash: ${diag.hash}, session record: ${diag.record}, ` +
+				`password field: ${diag.field}). A well-formed record on /popup/auth with no password field is a LOCKED ` +
+				"PASSKEY profile, which this helper cannot unlock — drive the passkey ceremony instead."
 			)
 		},
 	)
 
 	if (state === "unlocked") return
 
+	// Scope the proof below to THIS unlock: the profile the auth screen is about
+	// to unlock, and the record generation preceding it.
+	const before = await readSession()
+	const expectedProfile = await page.evaluate(
+		async () => (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"] as string | undefined,
+	)
+
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', password)
 	await clickByTestId(page, "auth-submit")
 
-	// Prove the UNLOCK, not the navigation. Leaving `/popup/auth` is also what
-	// the bootstrap's own redirect does, so a route-only wait stays green when
-	// the password never took.
+	// Prove the UNLOCK, not the navigation: leaving `/popup/auth` is also what
+	// the bootstrap's own redirect does, and any session record would also be
+	// written by a concurrent unlock of a different profile. Require a
+	// well-formed record for the expected profile, newer than the one we
+	// started from.
 	await withTimeoutMessage(
-		page.waitForFunction(async () => !!(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
-			timeout: 10_000,
-			polling: 200,
-		}),
+		page.waitForFunction(
+			async (want: string | undefined, priorSince: number) => {
+				const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+				let rec: { profile?: unknown; since?: unknown } | undefined
+				try {
+					rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+				} catch {
+					rec = undefined
+				}
+				if (!rec || typeof rec.profile !== "string" || typeof rec.since !== "number") return false
+				if (want !== undefined && rec.profile !== want) return false
+				return rec.since > priorSince
+			},
+			{ timeout: 10_000, polling: 200 },
+			expectedProfile,
+			before.since,
+		),
 		async () => {
 			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]')).catch(() => false)
-			return `ensureUnlocked: submitted the password but no session record appeared within 10s (wrong-password shown: ${wrong})`
+			const now = await readSession().catch(() => undefined)
+			return (
+				`ensureUnlocked: submitted the password but no session for profile ${expectedProfile ?? "<unknown>"} newer than ` +
+				`${before.since} appeared within 10s (wrong-password shown: ${wrong}; record now: ${JSON.stringify(now)})`
+			)
 		},
 	)
 }
