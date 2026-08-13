@@ -190,6 +190,21 @@ describe("TokensView — §3 sync-state guards", () => {
 		}
 	})
 
+	test("a BalanceUpdate task in flight shows the SECTION refresh dot; completion clears it", async () => {
+		// The one activity signal for routine refreshes (per-row indication is silent by design).
+		const wrapper = mount(TokensView, { shallow: true })
+		await flushPromises()
+		expect(wrapper.find('[data-testid="tokens-refreshing"]').exists()).toBe(false)
+
+		H.taskCreated.emit({ id: "t1", content: { kind: H.ContentKind.BalanceUpdate, tbId: 1 }, finishedAt: null })
+		await nextTick()
+		expect(wrapper.find('[data-testid="tokens-refreshing"]').exists()).toBe(true)
+
+		H.taskUpdated.emit({ id: "t1", content: { kind: H.ContentKind.BalanceUpdate, tbId: 1 }, finishedAt: 123 })
+		await nextTick()
+		expect(wrapper.find('[data-testid="tokens-refreshing"]').exists()).toBe(false)
+	})
+
 	test("caught-up never shows the dot regardless of reported lag", async () => {
 		const wrapper = mount(TokensView, { shallow: true })
 		await flushPromises()

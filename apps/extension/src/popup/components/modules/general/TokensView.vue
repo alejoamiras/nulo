@@ -64,6 +64,8 @@ const visibleTokenImports = computed(() => {
 })
 
 const tokenBalances = ref([])
+/** Any row's balance projection in flight → the section-header activity dot. */
+const anyRefreshing = computed(() => tokenBalances.value.some((tb) => tb.isUpdating))
 const sortedTokenBalances = computed(() => {
 	return tokenBalances.value.sort((a, b) => {
 		const tokenA = a.token
@@ -340,7 +342,13 @@ onBeforeUnmount(() => {
 <template>
 	<Flex direction="column" gap="12" :class="$style.wrapper">
 		<Flex align="end" justify="between" :class="$style.section_header">
-			<span :class="$style.header_title">TOKEN BALANCES</span>
+			<Flex align="center" gap="8">
+				<span :class="$style.header_title">TOKEN BALANCES</span>
+				<!-- The ONE refresh-activity signal for the whole list (per-row indication is deliberately
+				     silent — batch refreshes would animate every row). Same vocabulary as the gas card's
+				     activity dot: grey pulse = a shown value being re-verified. -->
+				<span v-if="anyRefreshing" :class="$style.refreshing_dot" data-testid="tokens-refreshing" aria-hidden="true" />
+			</Flex>
 
 			<Flex align="center" gap="6">
 				<Dropdown>
@@ -422,6 +430,31 @@ onBeforeUnmount(() => {
 
 .section_header {
 	padding-bottom: 0;
+}
+
+/* The gas card's activity-dot vocabulary, verbatim (4px grey, 1.2s ease pulse). */
+.refreshing_dot {
+	width: 4px;
+	height: 4px;
+	border-radius: 50%;
+	background: var(--nulo-secondary);
+	animation: refresh_pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes refresh_pulse {
+	0%,
+	100% {
+		opacity: 0.25;
+	}
+	50% {
+		opacity: 0.9;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.refreshing_dot {
+		animation: none;
+	}
 }
 
 .header_title {
