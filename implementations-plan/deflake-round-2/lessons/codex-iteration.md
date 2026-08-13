@@ -34,3 +34,17 @@ the toggle LEAVING the DOM before navigating back. Codex confirmations: trigger 
 with one owning dropdown; the new 5s wait is a bound on a NEW causal signal, not a raise;
 appearance.vue's onMounted ordering supports the persisted-read claim. r2: **APPROVE**
 ("closes the false-persistence-proof gap … PR-2 is ready").
+
+## PR-3 (A3 scan sweep) — rounds 1–2
+
+r1 **iterate**, two Highs the suite could NOT catch: (H1) feeJuiceReady's block-forcing mints
+accumulate raw dust on the extension account — the old fuzzy scan tolerated it, the new EXACT
+assert wouldn't, and the fixture has no current consumer so no run reds on it; (H2) the
+freshness helper's re-kick condition let fast stale projections burn the refresh cap in
+seconds (receive-unregistered's old loop = up to 60 kicks; the derived cap = 8). Folded:
+self-mint redirect + a 2s spacing floor with the cap derived from it. Codex confirmations:
+row-level public+private AND is correct (projector writes both atomically); per-site amount
+math verified; baseline placements deadlock-free; the helpers⇄extension cycle is
+evaluation-safe; no consumer depends on the old quiet fixture degradation. r2: **APPROVE**
+("Both folds are correct and isolated"). Lesson: an exactness upgrade FINDS fixture dirt the
+fuzzy assert was absorbing — audit every producer feeding an assert you tighten.
