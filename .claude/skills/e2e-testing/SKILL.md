@@ -350,3 +350,30 @@ window; (3) reproduce with a bare `npm install <pkg>@<ver>` + load-check OUTSIDE
 burning reruns — if it reproduces, reruns can NEVER go green and the fix is a toolchain pin
 (see the `aztec-update` skill), not patience. Two same-signature rerun failures = stop
 assuming "transient".
+
+## Deflake-round-2 lessons (2026-08-14, `implementations-plan/deflake-round-2/`)
+
+- **A wait is only as honest as the SIGNAL it polls.** Visibility (`offsetParent`) is a
+  rendering artifact: a `<Transition>`-leaving dropdown keeps its items visible while the
+  component state is already closed — a one-shot sample mid-close reads "open", skips the
+  trigger, and the option click times out (the appearance retry-flake, reproduced under CPU
+  load). Gate on STATE attributes (`data-dropdown-open`, `data-toggle-active`), never on a
+  visibility snapshot; expose the state attribute if it doesn't exist.
+- **Retry-masked flakes are now diagnosable from CI**: `RetryErrorReporter` (all three e2e
+  configs, single-owned in `vite.shared.ts#e2eReporters`) prints the retained first-attempt
+  errors of retried passes. NOTE: an explicit `reporters` list suppresses vitest's auto-added
+  `github-actions` annotations reporter — `e2eReporters()` re-adds it; never inline a
+  reporters array in a config.
+- **Local flake repro recipe**: run the file with `--retry=0` (first-attempt errors become
+  terminal) in batches, no-load baseline first, then under OWNED CPU hogs (setsid + kill by
+  pgid). One failing run with the real waiter identified beats 30 green speculation cycles.
+- **Red-team a pin against deletion of what it guards.** A disabled-binding pin that passes
+  with the binding term removed pins nothing (the harness's OTHER gates held it disabled) —
+  establish the enabled state first, flip exactly the guarded flag, assert the transition.
+- **An exactness upgrade finds producer dirt the fuzzy assert absorbed** (block-forcing mints
+  accumulating raw dust the display rounding hid) — audit every producer feeding an assert
+  you tighten, especially fixtures with no current consumer (no run can red on them).
+- **Sequential-landing PR stacks + labeled PRs**: opening a labeled PR fires opened+labeled
+  events whose cancelled duplicates leave FAILURE aggregator check-runs that can WIN GitHub's
+  latest-per-name required-check resolution → BLOCKED with all gates green. Diagnose via the
+  head's check-runs (success+failure pairs per status name); remedy = empty commit.
