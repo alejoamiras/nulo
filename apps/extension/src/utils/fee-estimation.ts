@@ -7,10 +7,11 @@ import { formatBaseUnits } from "@/utils/amount"
  */
 export const FEE_JUICE_DECIMALS = 18
 
-/** The ONE gas-balance display formatter (both cards render through it). */
-export function formatGasBalance(raw: string | null | undefined): string {
-	// Truncated to 4 decimals — full 18-decimal precision drowned the row.
-	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals: 4 })
+/** The ONE gas-balance display formatter (both cards render through it). Truncates (round-down) so
+ *  the shown balance is always ≤ actual. Default 4 decimals for the send fee card, where sub-cent
+ *  fee amounts carry signal; the home card passes 2 — fee juice is cheap, the tail digits are noise. */
+export function formatGasBalance(raw: string | null | undefined, maxDecimals = 4): string {
+	return formatBaseUnits(raw ?? "0", FEE_JUICE_DECIMALS, { maxDecimals })
 }
 
 export type AssetPricing = {

@@ -68,7 +68,7 @@ const isStale = computed(() => (entry.value?.stale ?? false) || gas.value?.statu
 const isRefreshing = computed(() => gas.value?.status === "fetching" && hasLoaded.value && isStale.value)
 
 // Null = the read failed (unknown) — an em dash, never a confident zero.
-const publicFormatted = computed(() => (displayedPublic.value === null ? "—" : formatGasBalance(displayedPublic.value)))
+const publicFormatted = computed(() => (displayedPublic.value === null ? "—" : formatGasBalance(displayedPublic.value, 2)))
 
 /** D2: fiat under non-zero balances, only with a usable AZTEC quote. */
 const priceService = new PriceServiceClient()
@@ -85,7 +85,7 @@ const privateFiat = computed(() => fiatFor(displayedPrivate.value))
 // Treat null (PrivateFPC not yet discovered or query errored) as 0 so the
 // column always renders. Keeps the gas-balance card stable instead of
 // collapsing/expanding mid-load.
-const privateFormatted = computed(() => formatGasBalance(displayedPrivate.value ?? "0"))
+const privateFormatted = computed(() => formatGasBalance(displayedPrivate.value ?? "0", 2))
 
 /** Service clients — tx client is retained for the ADDED event only (the
  *  optimistic overlay); the settle→refresh trigger is owned by the store. */
@@ -184,7 +184,7 @@ onBeforeUnmount(() => {
 	width: 100%;
 	max-width: 280px;
 	margin: 0 auto;
-	padding-top: 16px;
+	padding-top: 12px;
 	border-top: 1px solid rgba(74, 70, 63, 0.2);
 }
 

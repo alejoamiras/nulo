@@ -344,3 +344,33 @@ describe("BalanceView state matrix (S-A)", () => {
 		expect(wrapper.find('[data-testid="balance-amount"]').exists()).toBe(true)
 	})
 })
+
+describe("BalanceView — private/public breakdown vocabulary", () => {
+	test("token mode renders the lock/globe pair (bone lock = private, globe = public) with both values", async () => {
+		mockShowFiat = true
+		mockQuotes = {}
+		// Same setup as mountView, plus an explicit Icon stub — the auto-import resolver doesn't run
+		// in this suite (Vue warns "Failed to resolve component: Icon" under bare shallow mount).
+		const pinia = createTestingPinia({ stubActions: false })
+		const appStore = useAppStore(pinia)
+		appStore.profile = { id: "p1" } as never
+		appStore.network = { id: "n1" } as never
+		appStore.account = { address: "0xacct" } as never
+		appStore.displayOption = "total_account_value"
+		const wrapper = mount(BalanceView, {
+			shallow: true,
+			global: {
+				plugins: [pinia],
+				stubs: { Icon: { template: '<i data-testid="stub-icon" :data-name="name" />', props: ["name", "size"] } },
+			},
+		})
+		await flushPromises()
+		appStore.displayOption = "tok-1"
+		await flushPromises()
+
+		const icons = wrapper.findAll('[data-testid="stub-icon"]')
+		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
+		expect(wrapper.find('[data-testid="private-balance-value"]').text()).toBe("1,000")
+		expect(wrapper.find('[data-testid="public-balance-value"]').text()).toBe("250")
+	})
+})

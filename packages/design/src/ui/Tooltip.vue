@@ -167,6 +167,13 @@ const handleMouseLeave = () => {
 		clearTimeout(delayedHover.value)
 	}
 }
+
+// Keyboard parity: focusin/focusout bubble from any focusable child of the trigger, so a
+// tab-focused trigger shows the tooltip. Focus is deliberate — no hover delay applies.
+const handleFocusIn = () => {
+	if (props.disabled) return
+	isHovered.value = true
+}
 </script>
 
 <template>
@@ -175,6 +182,8 @@ const handleMouseLeave = () => {
 		@mouseleave="handleMouseLeave"
 		@touchstart="handleMouseEnter"
 		@touchend="handleMouseLeave"
+		@focusin="handleFocusIn"
+		@focusout="handleMouseLeave"
 		:class="$style.wrapper"
 		:style="{ width: wide ? '100%' : undefined }"
 	>

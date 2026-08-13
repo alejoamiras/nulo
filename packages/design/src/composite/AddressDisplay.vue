@@ -53,7 +53,7 @@ async function onClick() {
 	border: 1px solid var(--nulo-outline);
 	padding: 6px 10px;
 	background: var(--nulo-surface-low);
-	cursor: copy;
+	cursor: pointer;
 }
 
 .address:hover {

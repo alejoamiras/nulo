@@ -349,13 +349,17 @@ onBeforeUnmount(() => {
 				priced assets only
 			</div>
 
+			<!-- Glyphs-only: the lock/globe pair IS the vocabulary (same as the token rows) — no
+			     PRIVATE/PUBLIC words doubling it (owner call, post-approval). -->
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
-				<span :class="$style.breakdown_item">
-					<span :class="$style.breakdown_dot" /> PRIVATE: <span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
+				<span :class="$style.breakdown_item" aria-label="Private balance">
+					<span :class="$style.breakdown_private"><Icon name="lock" size="12" /></span>
+					<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
 				</span>
 				<span :class="$style.breakdown_divider">|</span>
-				<span :class="$style.breakdown_item">
-					<span :class="[$style.breakdown_dot, $style.public_dot]" /> PUBLIC: <span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
+				<span :class="$style.breakdown_item" aria-label="Public balance">
+					<span :class="$style.breakdown_public"><Icon name="globe" size="12" /></span>
+					<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
 				</span>
 			</Flex>
 		</section>
@@ -381,8 +385,8 @@ onBeforeUnmount(() => {
 	align-items: center;
 	text-align: center;
 
-	margin-top: 32px;
-	margin-bottom: 16px;
+	margin-top: 22px;
+	margin-bottom: 10px;
 }
 
 .balance_amount {
@@ -445,14 +449,15 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.breakdown_dot {
-	width: 6px;
-	height: 6px;
-	background: var(--nulo-accent);
+/* Same private/public vocabulary as TokenCard's split: bone lock = private, grey globe = public. */
+.breakdown_private {
+	display: inline-flex;
+	color: var(--nulo-accent);
 }
 
-.public_dot {
-	background: var(--nulo-outline);
+.breakdown_public {
+	display: inline-flex;
+	color: var(--nulo-secondary);
 }
 
 .breakdown_divider {
@@ -461,7 +466,7 @@ onBeforeUnmount(() => {
 
 .actions {
 	width: 100%;
-	margin-top: 16px;
+	margin-top: 12px;
 }
 
 .hover_red {

@@ -7,6 +7,7 @@ import { TaskServiceClient } from "@/wallet/services/task/client"
 
 /** Utils */
 import { managers } from "@/utils/core"
+import { copyAddressToClipboard } from "./header-copy-address"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
@@ -144,6 +145,9 @@ const handleOpenPopup = (target) => {
 	popupStore.open(target)
 }
 
+const { openToast } = useToast()
+const handleCopyAddress = () => copyAddressToClipboard(appStore.account?.address, openToast)
+
 const handleOpenNetworks = () => {
 	if (!appStore.isLogined) return
 	router.push("/popup/settings/networks")
@@ -212,21 +216,43 @@ onBeforeUnmount(() => {
 
 <template>
 	<header v-if="!appStore._isHomeScreenOpened && route.name !== 'popup-auth' && !route.meta.hideHeader" :class="$style.wrapper">
-		<button
-			v-if="appStore.isLogined"
-			type="button"
-			@click="handleOpenPopup('accounts')"
-			data-testid="account-selector"
-			aria-label="Switch account"
-			:class="$style.account_chip"
-		>
-			<span :class="$style.account_label">
-				{{ appStore.account?.name?.toUpperCase() || "PRIMARY ACCOUNT" }}
-			</span>
-			<span :class="$style.account_address">
-				{{ appStore.account?.address ? `${appStore.account.address.slice(0, 6)}...${appStore.account.address.slice(-4)}` : "" }}
-			</span>
-		</button>
+		<!-- The switcher owns TWO explicit affordances (avatar + name) while the address is a
+		     one-click copy target — no popup detour. `account-selector` stays on the name button so
+		     every existing e2e switching flow passes unchanged (testid-preservation contract). -->
+		<Flex v-if="appStore.isLogined" align="center" gap="10" :class="$style.account_group">
+			<button
+				type="button"
+				@click="handleOpenPopup('accounts')"
+				data-testid="account-avatar-btn"
+				aria-label="Switch account"
+				:class="$style.avatar_btn"
+			>
+				<AccountAvatar :name="appStore.account?.name || 'Primary Account'" :address="appStore.account?.address" :size="32" />
+			</button>
+			<Flex direction="column" gap="2" :class="$style.account_col">
+				<button
+					type="button"
+					@click="handleOpenPopup('accounts')"
+					data-testid="account-selector"
+					aria-label="Switch account"
+					:class="$style.account_label"
+				>
+					{{ appStore.account?.name?.toUpperCase() || "PRIMARY ACCOUNT" }}
+				</button>
+				<button
+					type="button"
+					@click="handleCopyAddress"
+					data-testid="account-address-copy"
+					aria-label="Copy address"
+					:class="$style.account_address"
+				>
+					<span :class="$style.address_text">
+						{{ appStore.account?.address ? `${appStore.account.address.slice(0, 6)}...${appStore.account.address.slice(-4)}` : "" }}
+						<span :class="$style.copy_reveal"><Icon name="copy" size="12" /></span>
+					</span>
+				</button>
+			</Flex>
+		</Flex>
 
 		<Flex align="center" gap="8">
 			<button
@@ -270,32 +296,39 @@ onBeforeUnmount(() => {
 	background: var(--app-bg);
 }
 
-.account_chip {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-
+.account_group {
 	min-width: 0;
 	flex-shrink: 1;
+}
+
+.account_col {
+	min-width: 0;
+	align-items: flex-start;
+}
+
+.avatar_btn {
+	display: flex;
+	flex-shrink: 0;
 
 	padding: 0;
 	background: transparent;
-	border: none;
+	border: 1px solid var(--nulo-border);
 	cursor: pointer;
 
-	text-align: left;
-
-	transition: opacity 0.2s var(--bezier);
-
-	&:hover {
-		opacity: 0.7;
-	}
+	transition: border-color 0.2s var(--bezier);
 }
 
 .account_label {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	max-width: 100%;
+
+	padding: 0;
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	text-align: left;
 
 	font-family: var(--font-headline);
 	font-size: 12px;
@@ -303,14 +336,75 @@ onBeforeUnmount(() => {
 	letter-spacing: -0.04em;
 	text-transform: uppercase;
 	color: var(--nulo-secondary);
+
+	transition: color 0.2s var(--bezier);
+}
+
+/* The avatar and the name are ONE switcher — hovering (or keyboard-focusing) either lights both,
+ * so they read as a single component. The address button below keeps its own independent
+ * copy-affordance hover and never participates. */
+.account_group:has(:is(.avatar_btn, .account_label):hover) .avatar_btn,
+.account_group:has(:is(.avatar_btn, .account_label):focus-visible) .avatar_btn {
+	border-color: var(--nulo-outline);
+}
+
+.account_group:has(:is(.avatar_btn, .account_label):hover) .account_label,
+.account_group:has(:is(.avatar_btn, .account_label):focus-visible) .account_label {
+	color: var(--txt-primary);
 }
 
 .account_address {
+	padding: 0;
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	text-align: left;
+
 	font-family: var(--font-headline);
 	font-size: 14px;
 	font-weight: 700;
 	letter-spacing: -0.02em;
 	color: var(--txt-primary);
+}
+
+/* Hover/focus underlines the address and reveals the copy icon — the icon is absolutely
+ * positioned in the free space to its right, so nothing shifts and no target shrinks. */
+.address_text {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+
+	text-decoration: underline transparent;
+	text-underline-offset: 3px;
+
+	transition: text-decoration-color 0.2s var(--bezier);
+}
+
+.copy_reveal {
+	position: absolute;
+	left: calc(100% + 6px);
+	top: 50%;
+	transform: translateY(-50%);
+
+	display: inline-flex;
+	color: var(--txt-tertiary);
+
+	opacity: 0;
+	transition: opacity 0.15s var(--bezier);
+}
+
+.account_address:hover .address_text,
+.account_address:focus-visible .address_text {
+	text-decoration-color: var(--nulo-outline);
+}
+
+.account_address:hover .copy_reveal,
+.account_address:focus-visible .copy_reveal {
+	opacity: 1;
+}
+
+.account_address:hover .copy_reveal {
+	color: var(--nulo-accent);
 }
 
 .network_chip {

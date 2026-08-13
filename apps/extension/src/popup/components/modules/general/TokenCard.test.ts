@@ -29,6 +29,13 @@ const STUBS = {
 	Flex: { template: "<div><slot /></div>" },
 	Spinner: { template: '<i data-testid="stub-spinner" />' },
 	RouterLink: { template: '<a :href="to"><slot /></a>', props: ["to"] },
+	Icon: { template: '<span data-testid="stub-icon" :data-name="name" />', props: ["name", "size", "color"] },
+	// Renders BOTH slots inline (the real component teleports #content on hover) so the tooltip
+	// copy is assertable without driving hover against a JSDOM teleport target.
+	Tooltip: {
+		template: '<span data-testid="stub-tooltip"><slot /><span data-testid="stub-tooltip-content"><slot name="content" /></span></span>',
+		props: ["side", "position", "delay"],
+	},
 }
 
 const CUSD = "0x018d47f656a0d242e28e5d15b5c965f39529bd860f2eaae947527b5094d800f6"
@@ -184,8 +191,8 @@ describe("TokenCard", () => {
 	})
 })
 
-describe("TokenCard — R5 layout (fiat left, dot split right)", () => {
-	test("priced: fiat REPLACES the static PRIVATE/PUBLIC label in the left column", async () => {
+describe("TokenCard — R5 layout (subtitle left, lock/globe split right)", () => {
+	test("priced: fiat fills the subtitle slot; no PRIVATE/PUBLIC label anywhere", async () => {
 		mockQuotes = { "usd-coin": { coingeckoId: "usd-coin", usd: 0.999857, fetchedAt: Date.now(), providerUpdatedAt: null } }
 		const w = factory(
 			{ updatedAt: 1, privateBalance: (1_000n * 10n ** 6n).toString(), publicBalance: (250n * 10n ** 6n).toString() },
@@ -196,19 +203,20 @@ describe("TokenCard — R5 layout (fiat left, dot split right)", () => {
 		expect(w.text()).not.toContain("PRIVATE / PUBLIC")
 	})
 
-	test("unpriced: the label survives (it keeps teaching the split)", async () => {
+	test("unpriced: the token's full NAME fills the subtitle slot (never the PRIVATE/PUBLIC label)", async () => {
 		mockQuotes = {}
 		const w = factory({ updatedAt: 1, publicBalance: "5" })
 		await flushPromises()
-		expect(w.text()).toContain("PRIVATE / PUBLIC")
+		expect(w.text()).not.toContain("PRIVATE / PUBLIC")
+		expect(w.text()).toContain("Test Token")
 	})
 
-	test("the split line renders both sides with the ●/○ dot marks", async () => {
+	test("the split line renders a bone lock (private) and a grey globe (public) with both amounts", async () => {
 		mockQuotes = {}
 		const w = factory({ updatedAt: 1, privateBalance: (7n * 10n ** 18n).toString(), publicBalance: (3n * 10n ** 18n).toString() })
 		await flushPromises()
-		const dots = w.findAll('span[class*="split_dot"]')
-		expect(dots.length).toBe(2)
+		const icons = w.findAll('[data-testid="stub-icon"]')
+		expect(icons.map((i) => i.attributes("data-name"))).toEqual(["lock", "globe"])
 		expect(w.text()).toContain("7")
 		expect(w.text()).toContain("3")
 	})
@@ -230,11 +238,15 @@ describe("TokenCard — §3 catching-up indicator", () => {
 		return mount(TokenCard, { props: { tokenBalance, backfilling } as never, global: { stubs: STUBS } })
 	}
 
-	test("backfilling with a resolved balance → 'Catching up…' caption beside the still-visible balance", () => {
+	test("backfilling with a resolved balance → the ambient dot beside the symbol, balance still visible", () => {
 		mockQuotes = {}
 		const w = mountCard({ updatedAt: 1, publicBalance: (5n * 10n ** 18n).toString() }, true)
-		expect(w.find('[data-testid="token-catching-up"]').exists()).toBe(true)
-		expect(w.text()).toContain("Catching up")
+		const dot = w.find('[data-testid="token-catching-up"]')
+		expect(dot.exists()).toBe(true)
+		// Keyboard-reachable: the wrapper is focusable so the tooltip opens on focus, not only hover.
+		expect(dot.attributes("tabindex")).toBe("0")
+		// The explanation lives in the tooltip, not as a visible caption line.
+		expect(w.find('[data-testid="stub-tooltip-content"]').text()).toBe("Catching up on incoming transfers")
 		// the balance is shown, NOT the loading block
 		expect(w.find('[data-testid="token-balance-loading"]').exists()).toBe(false)
 		expect(w.text()).toContain("5")

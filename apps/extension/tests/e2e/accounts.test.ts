@@ -166,3 +166,50 @@ test("hide and restore account moves it to/from hidden section", async ({ regist
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])
 }, 60_000)
+
+// ── Header split (avatar/name switch, address copies) ──────────────────────────
+// Three SEPARATE tests, each returning to a clean overlay state — the switcher
+// and the copy affordance must be provably independent.
+
+test("header address button copies the address in one click (toast, no popup detour)", async ({ registeredExtension }) => {
+	const page = await openPopup(registeredExtension)
+	await waitForHash(page, "#/popup/general")
+
+	// The success toast only fires AFTER navigator.clipboard.writeText resolves, and the async
+	// clipboard API requires a FOCUSED document (CDP can't overridePermissions on the
+	// chrome-extension:// origin — "opaque origin"). The real click below supplies the gesture.
+	await page.bringToFront()
+
+	await clickByTestId(page, "account-address-copy")
+	await waitForToast(page, "Address is copied")
+
+	// Copying must never open the account switcher.
+	expect(await page.$('[data-testid="accounts-popup"]')).toBeNull()
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("header avatar opens the account switcher", async ({ registeredExtension }) => {
+	const page = await openPopup(registeredExtension)
+	await waitForHash(page, "#/popup/general")
+
+	await clickByTestId(page, "account-avatar-btn")
+	await page.waitForSelector('[data-testid="accounts-popup"]', { visible: true, timeout: 5_000 })
+	await closeStuckPopup(page)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)
+
+test("header account name opens the account switcher (account-selector contract)", async ({ registeredExtension }) => {
+	const page = await openPopup(registeredExtension)
+	await waitForHash(page, "#/popup/general")
+
+	await clickByTestId(page, "account-selector")
+	await page.waitForSelector('[data-testid="accounts-popup"]', { visible: true, timeout: 5_000 })
+	await closeStuckPopup(page)
+
+	expect(registeredExtension.consoleErrors).toEqual([])
+	expect(registeredExtension.pageErrors).toEqual([])
+}, 60_000)

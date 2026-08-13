@@ -179,7 +179,7 @@ onBeforeUnmount(() => {
 		border-color: var(--nulo-outline);
 		span {
 			color: var(--txt-primary);
-			cursor: copy;
+			cursor: pointer;
 		}
 	}
 }
