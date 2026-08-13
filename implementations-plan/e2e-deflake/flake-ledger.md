@@ -237,3 +237,22 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
   whenever the slow leg engages).
 - #355 (`fix/cold-start-resilience`, merged 2026-08-11 17:51) may reduce entry 3;
   it demonstrably does NOT fix entry 2 (two reds on that very branch today).
+
+## deflake-round-2 additions (2026-08-14)
+
+- Deferred polish (codex-approved inline shapes; take when touching the helpers anyway):
+  fold the baseline capture into `waitForFreshBalanceRow` + a shared `MINT_AMOUNT` fixture
+  const; an `assertPgError` mirror for expected-error pg sites (the ok-side dump landed
+  class-wide in #360; error-side mirrors stayed bare by scope choice).
+- Labeled-PR duplicate-run cancellation leaves FAILURE aggregator check-runs on the head
+  SHA that can WIN GitHub's latest-per-name required-check resolution → mergeStateStatus
+  BLOCKED with every visible gate green (bit #360/#362/#364 in this arc; remedy = empty
+  commit → fresh head). Durable fix candidate: aggregator status jobs should conclude
+  CANCELLED/neutral when their run is cancelled instead of failure. OPEN CI follow-up.
+- `ensureUnlocked`'s first wait (`helpers.ts:82`, 5s auth-selector) lost once under CI load
+  in the frozen-account-canary's post-SW-restart leg (run 31730802901, 2026-08-13; rerun
+  green; helper untouched by this arc). Same tight-fixed-wait class as entry 2's
+  resetProfile 5s — candidate for a causal-signal treatment if it recurs. OPEN watch.
+- Retry census (post-A1, pre-certification): two full ARMED smoke runs with retries +
+  RetryErrorReporter — ZERO retry-passes suite-wide. The smoke suite enters certification
+  retry-clean.
