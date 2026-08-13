@@ -18,26 +18,41 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	}
 }
 
-/** Wait for the SW liveness heartbeat — confirms the SW has cold-spawned
- *  and the popup can boot. */
-async function waitForLiveness(page: Page): Promise<void> {
+/** Post-restart readiness: chrome.storage.session RETAINS the dead worker's
+ *  heartbeat while the extension stays loaded, so the gate requires a
+ *  timestamp STRICTLY NEWER than the pre-kill snapshot — truthy alone passes
+ *  before the replacement worker boots (see the regression pin below). */
+async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
-		async () => {
+		async (priorTs: number) => {
 			try {
 				const result = await chrome.storage.session.get("nulo:liveness")
-				return !!result["nulo:liveness"]
+				return Number(result["nulo:liveness"] ?? 0) > priorTs
 			} catch {
 				return false
 			}
 		},
 		{ timeout: 30_000, polling: 500 },
+		afterTs,
 	)
+}
+
+/** Read the current liveness heartbeat (0 when absent/unreadable). */
+async function readLiveness(page: Page): Promise<number> {
+	return await page.evaluate(async () => {
+		try {
+			const r = await chrome.storage.session.get("nulo:liveness")
+			return Number(r["nulo:liveness"] ?? 0)
+		} catch {
+			return 0
+		}
+	})
 }
 
 // Stopping and restarting the SW via CDP is the closest e2e approximation
 // of Chrome's MV3 lifecycle recycle (idle SW gets killed; next event respawns
-// it cold). After stop+respawn, chrome.storage.session is wiped and the
-// liveness heartbeat must reappear before the popup can boot. This test
+// it cold). chrome.storage.session survives the kill, so a FRESH heartbeat
+// (strictly newer than pre-kill) must appear before the popup can boot. This test
 // catches storage migration regressions, broken SW initialization, and any
 // hard-to-reach race in the cold-start boot path. (chrome.runtime.reload()
 // fully unloads the extension long enough that puppeteer-launched Chrome
@@ -53,6 +68,7 @@ test.skip("extension survives SW stop+respawn: lock → kill SW → unlock → g
 	await waitForHash(page, "#/popup/general")
 
 	await lockWallet(page)
+	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
@@ -61,7 +77,7 @@ test.skip("extension survives SW stop+respawn: lock → kill SW → unlock → g
 	// spawn cold, write the liveness heartbeat, and serve the locked-state
 	// initial route (/popup/auth).
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2)
+	await waitForLiveness(page2, preKillLiveness)
 
 	// Locked from before reload, so we land on auth
 	await waitForHash(page2, "#/popup/auth", 15_000)
@@ -93,12 +109,13 @@ test.skip("strict mode default ON: unlock → kill SW → expect lock screen on 
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
 	// Note: deliberately NO lockWallet() call. Strict mode is the lock.
+	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2)
+	await waitForLiveness(page2, preKillLiveness)
 
 	// Strict ON: persisted Session has no passhash → restore() silentCloses
 	// → popup boots locked → /popup/auth. This route assertion IS the
@@ -144,12 +161,13 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', TEST_PASSWORD)
 	await clickByTestId(page, "auth-submit")
 	await waitForHash(page, "#/popup/general", 10_000)
+	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2)
+	await waitForLiveness(page2, preKillLiveness)
 
 	// Lenient mode: bearer cached → silent restore → directly into /popup/general.
 	// (No lock screen; user wouldn't see it under strict OFF.)
