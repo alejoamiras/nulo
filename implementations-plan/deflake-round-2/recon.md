@@ -127,3 +127,21 @@ unfocused page.
   snappy 7.4.0 was DETERMINISTIC; the noirup 503s already had an inner 3× retry that failed
   through a sustained outage. Working thesis for the decision: fail-loud + targeted
   load-check pins > blanket setup retries.
+
+## A1 — EMPIRICAL REPRO (2026-08-13, local, retry=0)
+
+Baseline 10× no-load: 10/10 pass. Load batch 1 (nproc-2 CPU hogs) 10×: **1 failure — the
+theme-cycle test, 17s**, failing waiter identified: `clickByTestId("theme-dark-btn")` 10s
+timeout via `setTheme` (helpers.ts:938), NOT the html[theme] wait. Stack shows
+`patchPagePolling` (extension.ts:938-953) already injects `polling: 200` into every
+waitForFunction — the rAF/polling hypothesis is REFUTED (codex plan-audit Critical 1 concurs;
+Chrome also launches with anti-throttling flags and pages are brought to front).
+**Actual mechanism (source-confirmed):** `setTheme`'s ONE-SHOT `offsetParent` visibility
+sample (helpers.ts:933-936) races DropdownRoot's close `<Transition>` (DropdownRoot.vue:254-256
+— leaving items stay visible mid-close; no state attribute exposes `isOpen`): sample catches
+the closing menu from the PREVIOUS selection → trigger click skipped → option gone when the
+click-wait polls → 10s timeout. Load stretches the close animation, widening the window.
+Load batch 2 (20×): 0 failures — the window is narrow; the animations-test fast-fail signature
+(CI: ~2-3s first-attempt fail) remains UNREPRODUCED; plan: measure the click→class-flip
+latency distribution under load (p99 vs the 150ms sleep) as the evidence vehicle instead of
+waiting for a lottery hit.
