@@ -349,14 +349,16 @@ onBeforeUnmount(() => {
 				priced assets only
 			</div>
 
+			<!-- Glyphs-only: the lock/globe pair IS the vocabulary (same as the token rows) — no
+			     PRIVATE/PUBLIC words doubling it (owner call, post-approval). -->
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
-				<span :class="$style.breakdown_item">
-					<span :class="$style.breakdown_private"><Icon name="lock" size="10" /></span> PRIVATE:
+				<span :class="$style.breakdown_item" aria-label="Private balance">
+					<span :class="$style.breakdown_private"><Icon name="lock" size="12" /></span>
 					<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
 				</span>
 				<span :class="$style.breakdown_divider">|</span>
-				<span :class="$style.breakdown_item">
-					<span :class="$style.breakdown_public"><Icon name="globe" size="10" /></span> PUBLIC:
+				<span :class="$style.breakdown_item" aria-label="Public balance">
+					<span :class="$style.breakdown_public"><Icon name="globe" size="12" /></span>
 					<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
 				</span>
 			</Flex>

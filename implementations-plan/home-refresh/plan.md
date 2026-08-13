@@ -159,6 +159,8 @@ Codex plan audit (light tier), transcript in `audit-codex.md`.
 
 **Approved by the owner 2026-08-13** (explicit "approved"). All three Asks accepted as recommended: (1) `AccountAvatar` reused as-is (two-character initials); (2) density change applies app-wide via the shared layout — owner: "the case where we don't gets an inconsistent app"; (3) threshold sized by the Phase-1 measurement. Decided defaults stand unvetoed. Codex verdict: conditional approve, all conditions folded (see Audit log).
 
+**Post-approval owner tweaks (on the PR, 2026-08-13):** (1) avatar + name hover as ONE switcher component (group `:has()` hover); (2) token-page breakdown drops the PRIVATE/PUBLIC words — glyphs-only (12px), aria-labels carry the semantics for screen readers.
+
 ## Seeds
 
 *(FINAL — synced to the approved scope. Implementation session must run inside the `home-refresh` worktree — `agent-worktree resume home-refresh`.)*
