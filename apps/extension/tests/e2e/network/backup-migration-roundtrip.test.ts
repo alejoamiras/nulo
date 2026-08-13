@@ -30,12 +30,13 @@ import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, launchExtension, openPopup, replaceInputValue, test, waitForHash } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	getAccountAddress,
 	navigateByHash,
-	refreshBalances,
 	reopenAndRecoverAfterImport,
 	switchToLocalNetwork,
-	waitForBalance,
+	waitForFreshBalanceRow,
+	waitForTokenCardAmount,
 } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
 import { gotoPopupImport, importFullBackup, POPUP_IMPORT_SHELL, TEST_PASSWORD, writeBackupToTemp } from "../helpers/import-drivers"
@@ -130,15 +131,18 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 			// The wallet syncs the REAL on-chain balance through its own PXE
 			// (token rows + account-state contract registrations came from the
 			// backup). Mirror the tokenReadyExtension refresh cadence.
-			for (let i = 0; i < 40; i++) {
-				await refreshBalances(page2)
-				const bodyText = await page2.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) break
-				await page2
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page2, "1,000", 30_000)
+			// FRESHNESS-gated: the imported backup carries rows with nonzero
+			// updatedAt, so a value-only wait could pass with zero post-import
+			// sync (the backup-restore reference pattern).
+			const importBaseline = await captureBalanceBaseline(page2, tokenReadyExtension.accountAddress, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page2, {
+				account: tokenReadyExtension.accountAddress,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: importBaseline,
+				timeoutMs: 120_000,
+			})
+			await waitForTokenCardAmount(page2, "1,000", "TST")
 
 			// ── 5. Realistic-recovery leg ──────────────────────────────────
 			// Model the strict-mode + MV3-worker-restart path: the master is dropped
@@ -148,14 +152,15 @@ test.skipIf(!hasConfig || !HAS_FIXTURE)(
 			// after the reopen+unlock.
 			await reopenAndRecoverAfterImport(page2)
 			expect(await getAccountAddress(page2)).toBe(tokenReadyExtension.accountAddress)
-			for (let i = 0; i < 20; i++) {
-				await refreshBalances(page2)
-				if ((await page2.evaluate(() => document.body.innerText)).includes("1,000")) break
-				await page2
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 3_000, polling: 500 })
-					.catch(() => {})
-			}
-			await waitForBalance(page2, "1,000", 30_000)
+			const recoveryBaseline = await captureBalanceBaseline(page2, tokenReadyExtension.accountAddress, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page2, {
+				account: tokenReadyExtension.accountAddress,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: recoveryBaseline,
+				timeoutMs: 90_000,
+			})
+			await waitForTokenCardAmount(page2, "1,000", "TST")
 
 			await page2.close()
 		} finally {

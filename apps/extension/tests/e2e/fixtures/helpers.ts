@@ -814,18 +814,6 @@ export async function waitForTxConfirmation(
 	}
 }
 
-/** Wait for a specific balance text to appear on the general page.
- *  Uses textContent case-insensitive because balance labels are
- *  text-transform: uppercase via CSS (e.g. "PRIVATE" rendered, "Priv"
- *  in source). */
-export async function waitForBalance(page: Page, text: string, timeout = 60_000): Promise<void> {
-	await page.waitForFunction(
-		(t: string) => (document.body.textContent ?? "").toLowerCase().includes(t.toLowerCase()),
-		{ timeout, polling: 3_000 },
-		text,
-	)
-}
-
 // ── Fee Method ────────────────────────────────────────────────────────
 
 /** Select a fee payment method in the SendPopup's FeeSettingsCard dropdown.
@@ -1195,7 +1183,9 @@ export async function captureBalanceBaseline(page: Page, account: string, tokenC
 
 /** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
  *  captured baseline — proves a re-projection actually ran) and CORRECT (exact
- *  raw `publicBalance`). Drives at most `maxRefreshes` refreshes. Retry cadence:
+ *  raw `publicBalance`, plus exact raw `privateBalance` when the caller proves
+ *  a private leg — note discovery is what several sweeps assert). Drives at
+ *  most `maxRefreshes` refreshes. Retry cadence:
  *  a refresh is re-kicked when the previous projection observably finished (some
  *  row's `updatedAt` advanced past the last refresh) OR a bounded projection
  *  envelope elapsed with no write — a FAILED projection writes nothing (the
@@ -1217,6 +1207,7 @@ export async function waitForFreshBalanceRow(
 		account: string
 		tokenContract: string
 		expectedPublicRaw: string
+		expectedPrivateRaw?: string
 		baselineUpdatedAt: number
 		maxRefreshes?: number
 		timeoutMs?: number
@@ -1232,7 +1223,7 @@ export async function waitForFreshBalanceRow(
 	// Queue tick (1s) + a ≤12-row projection batch + margin — bounds the re-kick
 	// cadence only, never the acceptance signal.
 	const REFRESH_ENVELOPE_MS = 15_000
-	const { account, tokenContract, expectedPublicRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
+	const { account, tokenContract, expectedPublicRaw, expectedPrivateRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
 	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / REFRESH_ENVELOPE_MS)
 	const deadline = Date.now() + timeoutMs
 	type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
@@ -1280,7 +1271,15 @@ export async function waitForFreshBalanceRow(
 	let rows: BalanceRow[] = []
 	while (Date.now() < deadline) {
 		rows = await readRows()
-		if (rows.some((r) => (r.updatedAt ?? 0) > baselineUpdatedAt && r.publicBalance === expectedPublicRaw)) return
+		if (
+			rows.some(
+				(r) =>
+					(r.updatedAt ?? 0) > baselineUpdatedAt &&
+					r.publicBalance === expectedPublicRaw &&
+					(expectedPrivateRaw === undefined || r.privateBalance === expectedPrivateRaw),
+			)
+		)
+			return
 		const attemptFinished =
 			refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt) || Date.now() - lastRefreshAt >= REFRESH_ENVELOPE_MS
 		if (attemptFinished && refreshes < maxRefreshes) {

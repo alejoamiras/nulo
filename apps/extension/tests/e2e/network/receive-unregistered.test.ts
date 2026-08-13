@@ -16,7 +16,13 @@
  */
 import { expect, inject } from "vitest"
 import { test, openPopup, waitForHash } from "../fixtures/extension"
-import { getTokenDetailBalances, navigateByHash, navigateToTokenDetail, refreshBalances } from "../fixtures/helpers"
+import {
+	captureBalanceBaseline,
+	getTokenDetailBalances,
+	navigateByHash,
+	navigateToTokenDetail,
+	waitForFreshBalanceRow,
+} from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -95,17 +101,18 @@ test.skipIf(!hasConfig)(
 		//    Poll refresh (each refresh advances the extension PXE's sync).
 		await navigateByHash(page, "#/popup/general")
 		await page.waitForSelector('[data-testid="tokens-card"]', { visible: true, timeout: 30_000 })
-		let discovered = false
-		for (let i = 0; i < 60 && !discovered; i++) {
-			await refreshBalances(page)
-			await page
-				.waitForFunction(() => document.body.innerText.includes("1,025"), { timeout: 2_000, polling: 200 })
-				.then(() => {
-					discovered = true
-				})
-				.catch(() => {})
-		}
-		expect(discovered).toBe(true)
+		// Token-scoped freshness + EXACT raw private delta (0 → 25) — the old
+		// body-text "1,025" scan could false-positive on fiat and proved only a
+		// rendered total, not the discovered note.
+		const discoveryBaseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, aztecConfig.tokenAddress)
+		await waitForFreshBalanceRow(page, {
+			account: tokenReadyExtension.accountAddress,
+			tokenContract: aztecConfig.tokenAddress,
+			expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+			expectedPrivateRaw: AMOUNT.toString(),
+			baselineUpdatedAt: discoveryBaseline,
+			timeoutMs: 120_000,
+		})
 
 		// ── Exact private-balance delta on the token detail breakdown.
 		await navigateToTokenDetail(page)
