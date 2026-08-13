@@ -521,7 +521,14 @@ onUnmounted(disposeWindow)
 					variant="primary"
 					size="medium"
 					:loading="isLoading"
-					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0 || needsFeeSelection"
+					:disabled="
+						processingError?.type === 'error' ||
+						tokenMetadataLoading ||
+						!initComplete ||
+						operations.length === 0 ||
+						needsFeeSelection ||
+						isInteractionCancelled
+					"
 				>
 					<Text size="13" color="inverse">{{ isLoading ? "EXECUTING" : "Confirm" }}</Text>
 				</Button>

@@ -52,6 +52,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		"approveInteraction",
 		"resolveInteraction",
 		"rejectInteraction",
+		"isInteractionCancelled",
 	)
 	public static name = DAPP_INTERACTION_SERVICE_NAME
 
@@ -100,6 +101,14 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		const interaction = this.storage.get(id)
 		if (!interaction) {
 			throw new Error("Invalid id")
+		}
+		// First service claim wins — service acceptance is the commit point, not
+		// the browser click. A cancel processed first leaves the record flagged;
+		// a later approve must refuse BEFORE claiming, so execution never
+		// starts. (Approve claimed first deletes the record; a later cancel then
+		// finds nothing — approval proceeds exactly once.)
+		if (interaction.cancelledAt !== undefined) {
+			throw new JobCancelledError("Request was cancelled before approval")
 		}
 		this.storage.delete(id)
 		// Detach before handing off to executeAndResolve: the approval popup
@@ -176,8 +185,17 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	public cancelInteraction(cancellationToken: string) {
 		const interaction = [...this.storage.values()].find((x) => x.cancellationToken === cancellationToken)
 		if (interaction) {
+			// Durable BEFORE the broadcast: an event alone is lost on a popup that
+			// hasn't subscribed yet; the record's flag is what late mounts replay
+			// and what approveInteraction refuses on. The record is kept — window
+			// dismissal owns its removal.
+			interaction.cancelledAt = Date.now()
 			this.emit("onInteractionCancelled", interaction.id)
 		}
+	}
+
+	public async isInteractionCancelled(id: string): Promise<boolean> {
+		return this.storage.get(id)?.cancelledAt !== undefined
 	}
 
 	public async execute(params: ExecutionParams, cancellationToken?: string, hooks?: ExecutionHooks): Promise<ExecutionResult> {

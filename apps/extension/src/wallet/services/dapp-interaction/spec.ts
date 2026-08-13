@@ -66,6 +66,11 @@ export type DappInteraction = {
 	payload: ExecutionPayload | CapabilityPayload | DiscoveryPayload
 	handleId: string
 	cancellationToken: string
+	/** Set when the dApp cancelled the request. Durable on the record (not just
+	 *  the broadcast) so a popup that subscribes late can replay the state, and
+	 *  service-side approval can refuse — the record survives until the window
+	 *  is dismissed so overlay + WindowManager cleanup keep working. */
+	cancelledAt?: number
 	/**
 	 * Hooks bag carried across the popup handoff. `interaction()` sets it;
 	 * `approveInteraction → executeAndResolve` reads it back via storage
@@ -110,6 +115,8 @@ export type Methods = {
 	): void
 	resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): void
 	rejectInteraction(id: string, reason: string): void
+	/** Replay read for popups that mount after the cancel broadcast fired. */
+	isInteractionCancelled(id: string): boolean
 }
 
 export type Events = {

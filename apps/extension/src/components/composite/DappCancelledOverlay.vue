@@ -13,10 +13,10 @@ const emit = defineEmits(["dismiss"])
 </script>
 
 <template>
-	<Flex align="center" justify="center" :class="$style.notification_overlay">
+	<Flex data-testid="dapp-cancelled-overlay" align="center" justify="center" :class="$style.notification_overlay">
 		<Flex direction="column" align="center" gap="16" :class="$style.notification_content">
 			<Text size="13" weight="600" color="primary">{{ message }}</Text>
-			<Button @click="emit('dismiss')" variant="primary" size="small" :style="{ width: '50%' }">
+			<Button @click="emit('dismiss')" data-testid="dapp-cancelled-ok-btn" variant="primary" size="small" :style="{ width: '50%' }">
 				<Text size="13" color="inverse">OK</Text>
 			</Button>
 		</Flex>

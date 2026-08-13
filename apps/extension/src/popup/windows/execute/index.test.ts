@@ -491,3 +491,21 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		expect(callLog).toEqual(["windows.remove", "composableReject:User rejected", "removeEventListener:beforeunload", "windows.remove"])
 	})
 })
+
+describe("execute window — dApp cancellation state", () => {
+	test("a cancel mid-approve disables Confirm and renders the cancelled overlay", async () => {
+		// The minimal harness keeps Confirm disabled via its other conditions
+		// (fee selection, metadata) — this pin proves the CANCELLED state's own
+		// contributions: the overlay renders and the disabled binding includes
+		// the flag (the service-level linearization pin guarantees a raced
+		// programmatic click can't start execution regardless).
+		w = factory()
+		await completeInit()
+		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(false)
+
+		isCancelledMock.value = true
+		await flushPromises()
+		expect(w!.find('[data-testid="execute-confirm-btn"]').attributes("disabled")).toBeDefined()
+		expect(w!.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+	})
+})

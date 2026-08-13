@@ -24,23 +24,43 @@ const makeService = (): DappInteractionLike & {
 	__getInteractionPayload: ReturnType<typeof vi.fn>
 	__rejectInteraction: ReturnType<typeof vi.fn>
 	__resolveInteraction: ReturnType<typeof vi.fn>
+	__isInteractionCancelled: ReturnType<typeof vi.fn>
 } => {
 	const onInteractionCancelled = new EventHandler<string>()
 	const getInteractionPayload = vi.fn(async () => ({}))
 	const rejectInteraction = vi.fn()
 	const resolveInteraction = vi.fn(async () => {})
+	const isInteractionCancelled = vi.fn(async () => false)
 	return {
 		getInteractionPayload,
 		rejectInteraction,
 		resolveInteraction,
+		isInteractionCancelled,
 		onInteractionCancelled,
 		__getInteractionPayload: getInteractionPayload,
 		__rejectInteraction: rejectInteraction,
 		__resolveInteraction: resolveInteraction,
+		__isInteractionCancelled: isInteractionCancelled,
 	}
 }
 
 describe("useDappInteractionPayload", () => {
+	it("replays a cancel that fired before the popup subscribed (durable flag, not just the event)", async () => {
+		const service = makeService()
+		service.__isInteractionCancelled.mockResolvedValue(true)
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useDappInteractionPayload({
+				interactionService: service,
+				getRequestId: () => "req-1",
+				dappOf: () => undefined,
+			}),
+		)!
+		await result.load()
+		expect(result.isCancelled.value).toBe(true)
+		scope.stop()
+	})
+
 	let service: ReturnType<typeof makeService>
 
 	beforeEach(() => {
