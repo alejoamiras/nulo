@@ -7,7 +7,15 @@ on:
     # `ready_for_review` so a draft marked ready WITHOUT a new push still re-runs
     # CI — otherwise the required `… / Status` checks never report on the PR and
     # hang "Expected" forever → mergeStateStatus=BLOCKED.
-    types: [opened, reopened, synchronize, labeled, unlabeled, ready_for_review]
+    #
+    # NO `labeled`/`unlabeled`: nothing in this workflow reads labels, so a label
+    # event could only produce a duplicate run of work already done for this SHA.
+    # Those duplicates are not free — the concurrency group cancels the in-flight
+    # one, and a cancelled run's `quality-status` job still concludes FAILURE
+    # (see the aggregate step: `always()` + cancelled-is-failure), leaving a
+    # losing check-run on the same SHA. The label-gated suites keep both types
+    # because their gates genuinely depend on labels.
+    types: [opened, reopened, synchronize, ready_for_review]
 
 concurrency:
   group: pr-quick-${{ github.workflow }}-${{ github.head_ref || github.ref }}
