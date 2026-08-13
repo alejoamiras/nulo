@@ -43,14 +43,19 @@ test("settings carries the 'Show fiat values' kill-switch and it toggles", async
 	expect(await readActive()).toBe("true") // default ON
 
 	await clickByTestId(page, "fiat-values-toggle")
-	await withTimeoutMessage(
-		page.waitForFunction(
-			() => document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active") === "false",
-			{ timeout: 2_000, polling: 50 },
-		),
-		"fiat-values-toggle never flipped to off after the click",
+	const after = await withTimeoutMessage(
+		page
+			.waitForFunction(
+				() => {
+					const v = document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active")
+					return v === "false" ? v : null
+				},
+				{ timeout: 2_000, polling: 50 },
+			)
+			.then((handle) => handle.jsonValue()),
+		async () => `fiat-values-toggle never flipped to off after the click (still ${await readActive()})`,
 	)
-	expect(await readActive()).toBe("false")
+	expect(after).toBe("false")
 
 	expect(registeredExtension.pageErrors).toEqual([])
 })

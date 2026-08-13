@@ -1,6 +1,6 @@
-import { TimeoutError, type Page } from "puppeteer"
+import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
-import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
+import { clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
 
 /**
  * Selector contract for tests in this directory.
@@ -76,63 +76,68 @@ export async function lockWallet(page: Page): Promise<void> {
  *  the standard test password; pass a different one if a prior test rotated
  *  it via change-password. */
 export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
-	// Decide what to do from POSITIVE DOM state, never from a one-shot hash
-	// sample: read before the router settles, `window.location.hash` is still
-	// "" or "#/", so the old early-return did nothing and left the caller
-	// believing the wallet was unlocked. The two states this helper can act on
-	// are mutually exclusive and each has its own mounted marker, so waiting
-	// for "either marker present" cannot resolve against a half-rendered app.
-	// ONE deadline, unchanged from the selector wait this replaces: 5s. The
-	// bridge-ready check costs nothing on top of it because `openPopup` already
-	// gates on the loader being gone before it hands a page back — it is in the
-	// predicate so a caller that got its page some other way cannot read a
-	// half-connected shell.
-	const state = await page
-		.waitForFunction(
-			() => {
-				if (document.querySelector('[data-testid="global-loader"]')) return null
-				if (document.querySelector('[data-testid="auth-password-input"]')) return "locked"
-				if (document.querySelector('[data-testid="header-lock"]')) return "unlocked"
-				return null
-			},
-			{ timeout: 5_000, polling: 200 },
-		)
-		.then((handle) => handle.jsonValue())
-		.catch(async (err) => {
-			// Only a timeout means "state never settled". Anything else (frame
-			// detach, CDP disconnect, page crash) must keep its own identity.
-			if (!(err instanceof TimeoutError)) throw err
-			const diag = await page
-				.evaluate(() => ({
-					hash: window.location.hash,
-					loader: !!document.querySelector('[data-testid="global-loader"]'),
-				}))
-				.catch(() => ({ hash: "<unreadable>", loader: false }))
-			throw new Error(
-				`ensureUnlocked: neither the locked nor the unlocked shell was ready within 5s ` +
-					`(hash: ${diag.hash}, global-loader up: ${diag.loader}). Password profiles on the main popup only — ` +
-					"a passkey profile renders no password field and reaches this same timeout.",
-				{ cause: err },
+	// Lock state is the session record, never the route and never the DOM. Both
+	// of those lie in one direction each: `app.vue` pushes `/popup/auth` BEFORE
+	// `initNetworks()`/`initAccount()` finish, so an UNLOCKED wallet's freshly
+	// opened popup renders the password field (and `openPopup` returns inside
+	// that window), while `header-lock` tracks `isLogined`, which lockWallet
+	// documents as stale-TRUE after an authoritative lock. Submitting a password
+	// into the first case races the in-flight bootstrap; reading the second can
+	// skip a genuinely locked wallet. lockWallet asserts this same key, for the
+	// same reason.
+	//
+	// The two accepted states are positive and cannot both hold: a present
+	// session record means unlocked; an absent one WITH the password field
+	// mounted means locked. Sampling either alone is what made the previous
+	// version wrong, so wait for whichever settles first. The unlocked branch
+	// resolves on the first poll, so the 5s budget — unchanged from the selector
+	// wait this replaces — only bites when the state is genuinely unresolved,
+	// which is a real failure rather than a slow success.
+	const state = await withTimeoutMessage(
+		page
+			.waitForFunction(
+				async () => {
+					const r = await chrome.storage.session.get("nulo:core:session")
+					if (r["nulo:core:session"]) return "unlocked"
+					return document.querySelector('[data-testid="auth-password-input"]') ? "locked" : null
+				},
+				{ timeout: 5_000, polling: 200 },
 			)
-		})
+			.then((handle) => handle.jsonValue()),
+		async () => {
+			const diag = await page
+				.evaluate(async () => ({
+					hash: window.location.hash,
+					session: !!(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"],
+					field: !!document.querySelector('[data-testid="auth-password-input"]'),
+				}))
+				.catch(() => ({ hash: "<unreadable>", session: false, field: false }))
+			return (
+				`ensureUnlocked: lock state never settled within 5s (hash: ${diag.hash}, session record: ${diag.session}, ` +
+				`password field: ${diag.field}). No session record and no password field means the popup is neither unlocked ` +
+				"nor on the password screen — a passkey profile renders no password field and lands here."
+			)
+		},
+	)
 
 	if (state === "unlocked") return
 
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', password)
 	await clickByTestId(page, "auth-submit")
 
-	await page
-		.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
-		.catch(async (err) => {
-			if (!(err instanceof TimeoutError)) throw err
+	// Prove the UNLOCK, not the navigation. Leaving `/popup/auth` is also what
+	// the bootstrap's own redirect does, so a route-only wait stays green when
+	// the password never took.
+	await withTimeoutMessage(
+		page.waitForFunction(async () => !!(await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"], {
+			timeout: 10_000,
+			polling: 200,
+		}),
+		async () => {
 			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]')).catch(() => false)
-			throw new Error(
-				`ensureUnlocked: submitted the password but the route never left /popup/auth (wrong-password shown: ${wrong})`,
-				{
-					cause: err,
-				},
-			)
-		})
+			return `ensureUnlocked: submitted the password but no session record appeared within 10s (wrong-password shown: ${wrong})`
+		},
+	)
 }
 
 /**

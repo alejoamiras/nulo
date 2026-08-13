@@ -77,23 +77,17 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
-	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
-	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
-	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
-	// for slow CI runners on cold-boot Barretenberg wasm + service-graph init.
-	// Own the scratch page instead of adopting `pages[0]`, and retry the
-	// create+navigate pair on a detach. The armed smoke gate caught
-	// "Attempted to use detached Frame" thrown from this `goto` during
-	// migration.test.ts's relaunch; `openPopup` documents the same
-	// newPage()→goto() sequence producing a half-initialized frame under suite
-	// load, and the remedy there is the same — discard the page and re-create.
-	// Owning the page is what makes that possible: `pages()[0]` is Chrome's and
-	// closing it would be rude. The startup page is left alone so the browser
-	// always keeps at least one page open.
+	// The scratch page is ours, not `pages()[0]`: puppeteer can hand back a page
+	// whose frame is half-initialized and detaches during the first navigation
+	// (`openPopup` documents the same sequence and applies the same remedy), and
+	// the only fix is to discard the page and re-create it — which we may not do
+	// to Chrome's own startup page. That page is therefore left untouched, which
+	// also guarantees the browser always keeps one open.
 	let blankPage: Page | undefined
 	for (let attempt = 1; ; attempt++) {
-		const candidate = await browser.newPage()
+		let candidate: Page | undefined
 		try {
+			candidate = await browser.newPage()
 			patchPagePolling(candidate)
 			await candidate.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
 				waitUntil: "domcontentloaded",
@@ -101,10 +95,16 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 			blankPage = candidate
 			break
 		} catch (err) {
-			await candidate.close().catch(() => {})
+			// `newPage()` itself can throw the detach, so it lives inside the try;
+			// `candidate` is undefined in that case and there is nothing to close.
+			await candidate?.close().catch(() => {})
 			if (attempt >= 2 || !isFrameDetachError(err)) throw err
 		}
 	}
+	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
+	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
+	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
+	// for slow CI runners on cold-boot Barretenberg wasm + service-graph init.
 	if (waitForLiveness) {
 		await blankPage.waitForFunction(
 			async () => {
@@ -1006,13 +1006,6 @@ export function patchPagePolling(page: Page): void {
 	}
 }
 
-/**
- * Detect puppeteer detach errors that can occur during the brief CDP race
- * between `browser.newPage()` and the first `page.goto(...)`. These signal
- * a half-initialized frame, not a wallet-side problem — retrying with a
- * fresh page resolves them. Symptom string varies across puppeteer-core
- * versions and timing; match on any of the known phrases.
- */
 /** Await a puppeteer wait and, on TIMEOUT ONLY, replace it with a diagnostic
  *  that names what never happened. Every other failure — frame detach, CDP
  *  disconnect, page crash — keeps its own identity and message, because
@@ -1024,10 +1017,25 @@ export async function withTimeoutMessage<T>(wait: Promise<T>, message: string | 
 		return await wait
 	} catch (err) {
 		if (!(err instanceof TimeoutError)) throw err
-		throw new Error(typeof message === "function" ? await message() : message, { cause: err })
+		let text: string
+		try {
+			text = typeof message === "function" ? await message() : message
+		} catch (diagErr) {
+			// A diagnostic that reads a dead page must never replace the timeout
+			// it was meant to explain.
+			text = `<diagnostic failed: ${diagErr instanceof Error ? diagErr.message : String(diagErr)}>`
+		}
+		throw new Error(text, { cause: err })
 	}
 }
 
+/**
+ * Detect puppeteer detach errors that can occur during the brief CDP race
+ * between `browser.newPage()` and the first `page.goto(...)`. These signal
+ * a half-initialized frame, not a wallet-side problem — retrying with a
+ * fresh page resolves them. Symptom string varies across puppeteer-core
+ * versions and timing; match on any of the known phrases.
+ */
 function isFrameDetachError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err)
 	// "Attempted to use detached Frame/Page" is puppeteer's OTHER detach wording
