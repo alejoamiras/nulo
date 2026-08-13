@@ -201,19 +201,17 @@ test("round-trip: register → export encrypted key → import in fresh ext → 
 
 	// Poll until exportEncrypted resolves and the blob lands in the card.
 	await page1.waitForSelector('[data-testid="reveal-content"] input', { visible: true, timeout: 10_000 })
-	const encrypted = await page1.evaluate(() => {
-		return new Promise<string>((resolve, reject) => {
-			const start = Date.now()
-			const tick = () => {
-				const input = document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')
-				const v = input?.value ?? ""
-				if (v.length > 0) return resolve(v)
-				if (Date.now() - start > 10_000) return reject(new Error("encrypted blob never rendered"))
-				setTimeout(tick, 100)
-			}
-			tick()
+	await page1
+		.waitForFunction(() => (document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')?.value ?? "").length > 0, {
+			timeout: 10_000,
+			polling: 100,
 		})
-	})
+		.catch(() => {
+			throw new Error("encrypted blob never rendered into the reveal card")
+		})
+	const encrypted = await page1.evaluate(
+		() => document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')?.value ?? "",
+	)
 	expect(encrypted.length).toBeGreaterThan(0)
 	await page1.close()
 

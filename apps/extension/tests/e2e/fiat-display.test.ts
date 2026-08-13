@@ -35,19 +35,23 @@ test("settings carries the 'Show fiat values' kill-switch and it toggles", async
 	await navigateToSettings(page, "appearance")
 	await page.waitForSelector('[data-testid="fiat-values-toggle"]', { visible: true, timeout: 5_000 })
 
-	const before = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="fiat-values-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
-	expect(before).toBe(true) // default ON
+	// Toggle publishes its state as `data-toggle-active`; read and wait on that
+	// rather than sleeping and scraping a mangled CSS-module class name.
+	const readActive = () =>
+		page.evaluate(() => document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active"))
+
+	expect(await readActive()).toBe("true") // default ON
 
 	await clickByTestId(page, "fiat-values-toggle")
-	await new Promise((r) => setTimeout(r, 150))
-	const after = await page.evaluate(() => {
-		const t = document.querySelector('[data-testid="fiat-values-toggle"]')
-		return (t?.className ?? "").includes("active")
-	})
-	expect(after).toBe(false)
+	await page
+		.waitForFunction(
+			() => document.querySelector('[data-testid="fiat-values-toggle"]')?.getAttribute("data-toggle-active") === "false",
+			{ timeout: 2_000, polling: 50 },
+		)
+		.catch(() => {
+			throw new Error("fiat-values-toggle never flipped to off after the click")
+		})
+	expect(await readActive()).toBe("false")
 
 	expect(registeredExtension.pageErrors).toEqual([])
 })

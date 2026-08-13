@@ -76,19 +76,47 @@ export async function lockWallet(page: Page): Promise<void> {
  *  the standard test password; pass a different one if a prior test rotated
  *  it via change-password. */
 export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
-	const hash = await page.evaluate(() => window.location.hash)
-	if (!hash.includes("/popup/auth")) return
+	// Decide what to do from POSITIVE DOM state, never from a one-shot hash
+	// sample: read before the router settles, `window.location.hash` is still
+	// "" or "#/", so the old early-return did nothing and left the caller
+	// believing the wallet was unlocked. The two states this helper can act on
+	// are mutually exclusive and each has its own mounted marker, so waiting
+	// for "either marker present" cannot resolve against a half-rendered app.
+	await page
+		.waitForFunction(() => !document.querySelector('[data-testid="global-loader"]'), { timeout: 15_000, polling: 200 })
+		.catch(() => {
+			throw new Error("ensureUnlocked: background never connected — the global loader was still up after 15s")
+		})
 
-	await page.waitForSelector('[data-testid="auth-password-input"]', {
-		visible: true,
-		timeout: 5_000,
-	})
+	const state = await page
+		.waitForFunction(
+			() => {
+				if (document.querySelector('[data-testid="auth-password-input"]')) return "locked"
+				if (document.querySelector('[data-testid="header-lock"]')) return "unlocked"
+				return null
+			},
+			{ timeout: 5_000, polling: 200 },
+		)
+		.then((handle) => handle.jsonValue())
+		.catch(async () => {
+			const hash = await page.evaluate(() => window.location.hash)
+			throw new Error(
+				`ensureUnlocked: app settled into neither the locked nor the unlocked shell within 5s (hash: ${hash}). ` +
+					"This helper only understands the main popup — a caller on onboarding/register reaches here.",
+			)
+		})
+
+	if (state === "unlocked") return
+
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', password)
-
 	await clickByTestId(page, "auth-submit")
 
-	// Wait for navigation away from auth
-	await page.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
+	await page
+		.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
+		.catch(async () => {
+			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]'))
+			throw new Error(`ensureUnlocked: submitted the password but the route never left /popup/auth (wrong-password shown: ${wrong})`)
+		})
 }
 
 /**
