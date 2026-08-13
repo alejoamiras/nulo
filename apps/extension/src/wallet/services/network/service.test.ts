@@ -963,6 +963,19 @@ describe("NetworkService public API (M4.10)", () => {
 	})
 })
 
+describe("NetworkService default seeding", () => {
+	test("seeded dRPC endpoints carry the 'dRPC' label; Local Network stays unlabeled", async () => {
+		// Settings renders `endpoint.label || endpoint.rpcUrl` as the row title — the label is what
+		// keeps the raw provider URL out of the UI. Local Network is not dRPC-backed, so no label.
+		const { service } = setupServiceWithStorage({})
+		const networks = await service.getOrInitNetworks()
+		const byName = new Map(networks.map((n) => [n.name, n]))
+		expect(byName.get("Alpha V5")?.endpoints[0]?.label).toBe("dRPC")
+		expect(byName.get("Testnet")?.endpoints[0]?.label).toBe("dRPC")
+		expect(byName.get("Local Network")?.endpoints[0]?.label).toBeUndefined()
+	})
+})
+
 describe("NetworkService.onProfileDeleted cascade", () => {
 	test("purges every chain of the deleted profile (covers sender cleanup via PXE clear)", async () => {
 		// This test locks the cascade ContactService.onProfileDeleted's docstring

@@ -55,6 +55,8 @@ interface DefaultSeed {
 	chainId: number
 	kind: ChainKind
 	isPrimaryActive: boolean
+	/** Provider label stamped on the seeded endpoint (Settings shows it instead of the raw URL). */
+	endpointLabel?: string
 }
 
 /**
@@ -86,6 +88,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
 		kind: "mainnet",
 		isPrimaryActive: !E2E_DEFAULT_ACTIVE_TESTNET,
+		endpointLabel: "dRPC",
 	},
 	{
 		name: "Testnet",
@@ -93,6 +96,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		chainId: CHAIN_IDS.TESTNET,
 		kind: "testnet",
 		isPrimaryActive: E2E_DEFAULT_ACTIVE_TESTNET,
+		endpointLabel: "dRPC",
 	},
 	{
 		name: "Local Network",
@@ -214,7 +218,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			let activeId: string | undefined
 			for (const seed of DEFAULT_SEEDS) {
 				try {
-					const network = await this._buildNetwork(profile.id, seed.name, seed.rpcUrl, seed.chainId, seed.kind)
+					const network = await this._buildNetwork(
+						profile.id,
+						seed.name,
+						seed.rpcUrl,
+						seed.chainId,
+						seed.kind,
+						seed.endpointLabel,
+					)
 					await this.storage.set(network.id, network)
 					seeded.push(network)
 					if (seed.isPrimaryActive) activeId = network.id
@@ -814,12 +825,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	// ── Internals ────────────────────────────────────────────────────────
 
-	private async _buildNetwork(profileId: string, name: string, rpcUrl: string, chainId: number, kind: ChainKind): Promise<Network> {
+	private async _buildNetwork(
+		profileId: string,
+		name: string,
+		rpcUrl: string,
+		chainId: number,
+		kind: ChainKind,
+		endpointLabel?: string,
+	): Promise<Network> {
 		const networkId = await this._freshStored8()
 		const endpointId = `${networkId}-ep0`
 		const endpoint: NetworkEndpoint = {
 			id: endpointId,
 			rpcUrl: normalizeRpcUrl(rpcUrl),
+			label: endpointLabel?.trim() || undefined,
 		}
 		return {
 			id: networkId,
