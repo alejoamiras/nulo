@@ -72,9 +72,26 @@ export async function lockWallet(page: Page): Promise<void> {
 	await page.waitForFunction(() => window.location.hash.includes("/popup/auth"), { timeout: 15_000 })
 }
 
-/** If the wallet is locked (auth page), re-enter the password. Defaults to
- *  the standard test password; pass a different one if a prior test rotated
- *  it via change-password. */
+/** If the wallet is locked, re-enter the password; if it is already unlocked,
+ *  do nothing. Defaults to the standard test password; pass a different one if
+ *  a prior test rotated it via change-password.
+ *
+ *  Contract — this helper is authoritative only inside it:
+ *  - **Password profiles only.** A locked passkey profile keeps its session
+ *    record (`SessionManager.restore` returns early: WebAuthn needs a user
+ *    gesture), so it cannot be told apart from an unlocked one except by the
+ *    password field being absent on `/popup/auth`. On any other route it would
+ *    read as unlocked. Passkey lock/unlock is not e2e-drivable today anyway —
+ *    see `fixtures/passkey.ts`.
+ *  - **One profile, or a trustworthy `nulo:ui:lastActiveProfile`.** The unlock
+ *    proof is scoped to that id; `app.vue` can fall back to `profiles[0]`
+ *    WITHOUT persisting it, so with several profiles and no persisted id the
+ *    scope check degrades to "any newer well-formed record".
+ *  - **Callers keep an authoritative postcondition.** The session record is
+ *    persisted just before `activeSession` is assigned, so a success here can
+ *    in principle observe a session that a concurrent deletion fence then
+ *    closes. Every current caller follows with route convergence or an
+ *    account/on-chain read, which is what actually pins the outcome. */
 export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
 	// Lock state comes from the session record, never from the route and never
 	// from a lone DOM marker — each of those lies in one direction. `app.vue`
