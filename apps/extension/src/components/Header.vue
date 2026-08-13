@@ -316,11 +316,6 @@ onBeforeUnmount(() => {
 	cursor: pointer;
 
 	transition: border-color 0.2s var(--bezier);
-
-	&:hover,
-	&:focus-visible {
-		border-color: var(--nulo-outline);
-	}
 }
 
 .account_label {
@@ -343,11 +338,19 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 
 	transition: color 0.2s var(--bezier);
+}
 
-	&:hover,
-	&:focus-visible {
-		color: var(--txt-primary);
-	}
+/* The avatar and the name are ONE switcher — hovering (or keyboard-focusing) either lights both,
+ * so they read as a single component. The address button below keeps its own independent
+ * copy-affordance hover and never participates. */
+.account_group:has(:is(.avatar_btn, .account_label):hover) .avatar_btn,
+.account_group:has(:is(.avatar_btn, .account_label):focus-visible) .avatar_btn {
+	border-color: var(--nulo-outline);
+}
+
+.account_group:has(:is(.avatar_btn, .account_label):hover) .account_label,
+.account_group:has(:is(.avatar_btn, .account_label):focus-visible) .account_label {
+	color: var(--txt-primary);
 }
 
 .account_address {
