@@ -21,3 +21,15 @@ only.
 Census note (retry=0 exposure): the two fixture-side shapes (approveVerify "persistence may
 be racy" label; session-reconnect setup wait) are load-triggered, not steady-state flakes —
 both green solo. Not ledgered as flakes; noted here as load-sensitivity markers.
+
+## Merge-block mechanism: cancelled duplicate runs leave FAILURE aggregators
+
+Opening a PR with `--label`s fires pull_request events for opened + each labeled — the
+concurrency group cancels the duplicates, but their aggregator status jobs (`if: always()`)
+conclude FAILURE on the same head SHA. GitHub resolves required checks latest-per-name, and
+the duplicates' failure check-runs can WIN over the real runs' successes → mergeStateStatus
+BLOCKED with every visible gate green. Diagnosis: list the head's check-runs — both a success
+and a failure per status name is the signature. Remedy: fresh head (empty commit → single
+synchronize event). Durable fix candidate (ledger follow-up, out of this arc's scope): the
+aggregator jobs should conclude CANCELLED/neutral when their run is cancelled instead of
+failure — today's shape makes every labeled PR-open a coin flip on check-run ordering.
