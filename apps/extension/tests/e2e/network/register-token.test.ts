@@ -80,7 +80,7 @@ test.skipIf(!hasConfig)(
 		// clickByTestId waits on the same disabled bit but loses all of that.
 		await approveExecute(execPopup)
 		const result = await waitForPgResult(page, "registerToken", seqRegister, 30_000)
-		await assertPgOk(page, result, "register-token.test:result")
+		await assertPgOk(page, result, "register-token:result")
 
 		expect(dappConnectedExtensionWithAccountsCap.consoleErrors).toEqual([])
 		expect(dappConnectedExtensionWithAccountsCap.pageErrors).toEqual([])

@@ -104,6 +104,6 @@ test.skipIf(!hasConfig)(
 		await orderingPopup.close()
 
 		const r1 = await waitForPgResult(page, "sendTx", seqBefore, 300_000)
-		await assertPgOk(page, r1, "concurrent-sendtx-confirm.test:r1")
+		await assertPgOk(page, r1, "concurrent-sendtx-confirm:r1")
 	},
 )

@@ -38,6 +38,6 @@ test.skipIf(!hasConfig)(
 		await approveCapabilities(popup)
 
 		const result = await waitForPgResult(page, "requestCapabilities", fromSeq, 30_000)
-		await assertPgOk(page, result, "cap-request-basic.test:result")
+		await assertPgOk(page, result, "cap-request-basic:result")
 	},
 )

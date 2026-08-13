@@ -51,6 +51,6 @@ test.skipIf(!hasConfig)(
 
 		await approveCapabilities(popup2)
 		const ok = await waitForPgResult(page, "requestCapabilities", seqB, 20_000)
-		await assertPgOk(page, ok, "cap-request-rerequest.test:ok")
+		await assertPgOk(page, ok, "cap-request-rerequest:ok")
 	},
 )

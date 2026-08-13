@@ -35,7 +35,7 @@ test.skipIf(!hasConfig)(
 		await approveCapabilities(popup, { toggleOff: ["simulation"] })
 
 		const result = await waitForPgResult(page, "requestCapabilities", fromSeq, 30_000)
-		await assertPgOk(page, result, "cap-request-partial.test:result")
+		await assertPgOk(page, result, "cap-request-partial:result")
 		// resultJson is the WalletCapabilities response — granted should only contain contracts
 		const granted = (result.resultJson as { granted?: Array<{ type: string }> })?.granted ?? []
 		const grantedTypes = granted.map((g) => g.type)

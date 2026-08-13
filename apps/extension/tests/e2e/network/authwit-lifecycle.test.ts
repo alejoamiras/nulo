@@ -1,7 +1,7 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { navigateToSettings, switchAccountByAddress } from "../fixtures/helpers"
-import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
+import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, pickFeeAndSubmitAuthwitPopup, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
@@ -84,7 +84,7 @@ test.skipIf(!hasConfig)(
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
 			const res = await waitForPgResult(page, "grantPublicAuthwit", seq, 360_000)
-			await assertPgOk(page, res, "authwit-lifecycle.test:res")
+			await assertPgOk(page, res, "authwit-lifecycle:res")
 			await waitForTxMined(aztecConfig!, String(res.resultJson).replace(/^"(.*)"$/, "$1"))
 		}
 		// Consume as caller B: transfer_public_to_public(A, B, 1, nonce). sendTx now honors
@@ -101,17 +101,17 @@ test.skipIf(!hasConfig)(
 			await waitForExecuteContent(popup)
 			await approveExecute(popup)
 			const res = await waitForPgResult(page, "sendTx", seq, 360_000)
-			if (res.status !== "ok") return "error"
+			if (res.status !== "ok") return `error: ${formatPgMismatch(res)}`
 			const rj = res.resultJson
 			const inner = rj && typeof rj === "object" && "txHash" in rj ? (rj as { txHash: unknown }).txHash : rj
 			const hashSrc = inner && typeof inner === "object" && "hash" in inner ? (inner as { hash: unknown }).hash : inner
 			const txHash = String(hashSrc ?? "").replace(/^"(.*)"$/, "$1")
-			if (!/^0x[0-9a-fA-F]+$/.test(txHash)) return "error"
+			if (!/^0x[0-9a-fA-F]+$/.test(txHash)) return `error: malformed txHash ${txHash.slice(0, 80)}`
 			try {
 				await waitForTxMined(aztecConfig!, txHash)
 				return "ok"
-			} catch {
-				return "error"
+			} catch (err) {
+				return `error: waitForTxMined ${String(err).slice(0, 300)}`
 			}
 		}
 
@@ -189,7 +189,7 @@ test.skipIf(!hasConfig)(
 		step("assert revoke cleared G2's slot")
 		await waitForRegistry(async () => !(await isAuthwitConsumable(node, ownerA, g2hash as string)), "G2 revoked")
 		step("G2 consume (expect error — revoked)")
-		expect(await consume("2")).toBe("error")
+		expect(await consume("2")).toMatch(/^error/)
 
 		// ── Step 3: registry DISABLE → reject_all set; ENABLE → cleared (setRegistryEnabled) ──
 		step("disable registry via settings")

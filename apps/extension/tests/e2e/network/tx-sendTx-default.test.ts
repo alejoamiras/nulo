@@ -90,7 +90,7 @@ test.skipIf(!hasConfig)(
 		// submit) — that's the local assertion-logic check; the real-prove timing
 		// is exercised in CI.
 		const result = await waitForPgResult(page, "sendTx", seqTx, 300_000)
-		await assertPgOk(page, result, "tx-sendTx-default.test:result")
+		await assertPgOk(page, result, "tx-sendTx-default:result")
 		expect(typeof (result.resultJson as { txHash?: string } | undefined)?.txHash).toBe("string")
 	},
 )

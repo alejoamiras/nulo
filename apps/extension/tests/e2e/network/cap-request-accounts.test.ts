@@ -42,7 +42,7 @@ test.skipIf(!hasConfig)(
 		await approveCapabilities(popup, { accounts: [firstAccount] })
 
 		const result = await waitForPgResult(page, "requestCapabilities", fromSeq, 30_000)
-		await assertPgOk(page, result, "cap-request-accounts.test:result")
+		await assertPgOk(page, result, "cap-request-accounts:result")
 
 		// Playground should now show the account in pg-account-list
 		const accounts = await page.evaluate(() =>

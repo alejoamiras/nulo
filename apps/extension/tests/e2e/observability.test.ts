@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { expect, test } from "vitest"
-import { formatPgMismatch } from "./fixtures/playground"
+import { assertPgOk, formatPgMismatch } from "./fixtures/playground"
 
 test("formatPgMismatch: error result dumps errorJson (never the undefined resultJson)", () => {
 	const out = formatPgMismatch({ seq: 7, method: "grantPublicAuthwit", status: "error", errorJson: { message: "nope" } })
@@ -30,6 +30,34 @@ test("formatPgMismatch: hostile-length payload is truncated with a marker", () =
 	const out = formatPgMismatch({ seq: 3, method: "batch", status: "error", errorJson: { message: "x".repeat(10_000) } })
 	expect(out.length).toBeLessThan(2_300)
 	expect(out).toMatch(/…\[truncated \d+ chars\]/)
+})
+
+const stubPage = (pgErrorText: string | (() => never)) =>
+	({
+		evaluate: async () => {
+			if (typeof pgErrorText === "function") return pgErrorText()
+			return pgErrorText
+		},
+	}) as unknown as import("puppeteer").Page
+
+test("assertPgOk: ok result is a no-op; mismatch composes label + payload + pg-error-text", async () => {
+	await assertPgOk(stubPage("ignored"), { seq: 1, method: "sendTx", status: "ok", resultJson: "0xabc" }, "l")
+	await expect(
+		assertPgOk(stubPage("dapp said no"), { seq: 2, method: "sendTx", status: "error", errorJson: { message: "boom" } }, "myfile:res"),
+	).rejects.toThrow(/\[myfile:res\] expected ok: sendTx seq=2 status=error; errorJson=\{"message":"boom"\}; pg-error-text="dapp said no"/)
+})
+
+test("assertPgOk: pg-error-text is bounded and a failed read cannot mask the primary failure", async () => {
+	const long = "e".repeat(10_000)
+	await expect(assertPgOk(stubPage(long), { seq: 3, method: "batch", status: "error", errorJson: {} }, "l")).rejects.toThrow(
+		/…\[truncated \d+ chars\]/,
+	)
+	const throwing = () => {
+		throw new Error("page gone")
+	}
+	await expect(assertPgOk(stubPage(throwing), { seq: 4, method: "batch", status: "error", errorJson: {} }, "l")).rejects.toThrow(
+		/pg-error-text read failed/,
+	)
 })
 
 test("RetryErrorReporter surfaces the first-attempt error of a retried pass", () => {
@@ -65,7 +93,10 @@ test("fails first, passes on retry", () => {
 		const combined = `${child.stdout ?? ""}\n${child.stderr ?? ""}`
 		// The synthetic test PASSES on retry, so the child must exit 0 — a nonzero
 		// exit means the fixture or reporter itself broke.
-		expect(child.status, `child vitest exit ${child.status}; output:\n${combined.slice(0, 3_000)}`).toBe(0)
+		expect(
+			child.status,
+			`child vitest exit ${child.status} signal=${child.signal} spawnError=${String(child.error ?? "none")}; output:\n${combined.slice(0, 3_000)}`,
+		).toBe(0)
 		expect(combined.split("PASSED ON RETRY").length - 1, "reporter must fire exactly once").toBe(1)
 		expect(combined).toContain("SYNTHETIC_FIRST_ATTEMPT_FAILURE")
 	} finally {

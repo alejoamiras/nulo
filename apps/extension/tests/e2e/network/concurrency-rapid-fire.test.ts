@@ -36,7 +36,7 @@ test.skipIf(!hasConfig)(
 		for (let i = 0; i < 5; i++) {
 			const r = await waitForPgResult(page, "getChainInfo", seqBefore + i, 30_000)
 			settled.push(r.seq)
-			await assertPgOk(page, r, "concurrency-rapid-fire.test:r")
+			await assertPgOk(page, r, "concurrency-rapid-fire:r")
 		}
 
 		// FIFO check: seqs should be strictly ascending

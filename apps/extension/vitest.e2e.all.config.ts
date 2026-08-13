@@ -1,6 +1,5 @@
 import { defineConfig } from "vitest/config"
-import RetryErrorReporter from "./tests/e2e/retry-error-reporter"
-import { noirAliases, srcDir } from "./vite.shared"
+import { e2eReporters, noirAliases, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	resolve: {
@@ -30,8 +29,7 @@ export default defineConfig({
 		isolate: true,
 		// Match the network runner's retry budget (NULO_E2E_RETRY override, default 2).
 		retry: process.env.NULO_E2E_RETRY ? Number(process.env.NULO_E2E_RETRY) : 2,
-		// Default output plus the retained first-attempt errors of retried passes.
-		reporters: ["default", new RetryErrorReporter()],
+		reporters: e2eReporters(),
 		// Node v24 enforces JSON import attributes; `@aztec/accounts` lazy
 		// loaders import their .json artifacts without the `with: { type:
 		// "json" }` attribute, so vanilla Node refuses them in global-setup

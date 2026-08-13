@@ -26,7 +26,7 @@ test.skipIf(!hasConfig)(
 		const beforeSeq = await snapshotResultSeq(page)
 		await clickByTestId(page, "pg-btn-getChainInfo")
 		const before = await waitForPgResult(page, "getChainInfo", beforeSeq, 15_000)
-		await assertPgOk(page, before, "wallet-locked-mid-session.test:before")
+		await assertPgOk(page, before, "wallet-locked-mid-session:before")
 
 		// Lock the wallet via the popup UI
 		const popupPage = await openPopup(dappConnectedExtension)

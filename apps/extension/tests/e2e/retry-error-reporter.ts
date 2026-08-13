@@ -3,8 +3,8 @@ import type { Reporter, TestCase } from "vitest/node"
 /**
  * Surfaces the first-attempt errors of tests that PASSED on a vitest retry.
  * The default reporter prints only a `(retry xN)` marker for an eventual pass
- * and swallows the failed attempts' errors — which made retry-masked flakes
- * undiagnosable from CI logs (the reason had to be re-reproduced locally).
+ * and swallows the failed attempts' errors, leaving retry-masked flakes
+ * undiagnosable from CI logs.
  * Vitest retains those errors on the passed result (`TestResultPassed.errors`);
  * this reporter prints them loudly, once, when the case settles.
  *

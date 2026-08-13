@@ -32,14 +32,14 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		await approveCapabilities(await popupP)
 		const first = await waitForPgResult(page, "requestCapabilities", seqA, 30_000)
-		await assertPgOk(page, first, "cap-request-repeat-noPopup.test:first")
+		await assertPgOk(page, first, "cap-request-repeat-noPopup:first")
 
 		// Second request — should NOT open a popup
 		const seqB = await snapshotResultSeq(page)
 		const targetsBefore = dappConnectedExtension.browser.targets().length
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const second = await waitForPgResult(page, "requestCapabilities", seqB, 8_000)
-		await assertPgOk(page, second, "cap-request-repeat-noPopup.test:second")
+		await assertPgOk(page, second, "cap-request-repeat-noPopup:second")
 
 		const targetsAfter = dappConnectedExtension.browser.targets().length
 		expect(targetsAfter).toBeLessThanOrEqual(targetsBefore)

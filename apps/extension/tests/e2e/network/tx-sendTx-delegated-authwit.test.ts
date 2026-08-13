@@ -140,7 +140,7 @@ test.skipIf(!hasConfig || !hasStandardContracts)(
 		// discovered witness (a missing/wrong witness fails at prove time, before
 		// submit). Same submit-level assertion as tx-sendTx-default.
 		const result = await waitForPgResult(page, "sendTx", seqTx, 300_000)
-		await assertPgOk(page, result, "tx-sendTx-delegated-authwit.test:result")
+		await assertPgOk(page, result, "tx-sendTx-delegated-authwit:result")
 		expect(typeof (result.resultJson as { txHash?: string } | undefined)?.txHash).toBe("string")
 	},
 )

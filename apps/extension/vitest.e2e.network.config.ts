@@ -1,6 +1,5 @@
 import { defineConfig } from "vitest/config"
-import RetryErrorReporter from "./tests/e2e/retry-error-reporter"
-import { noirAliases, srcDir } from "./vite.shared"
+import { e2eReporters, noirAliases, srcDir } from "./vite.shared"
 
 export default defineConfig({
 	resolve: {
@@ -45,8 +44,7 @@ export default defineConfig({
 		// passes only on retries is not zero-flake, so the soak sets NULO_E2E_RETRY=0
 		// to make any flake fail an iteration (the "zero retries consumed" gate).
 		retry: process.env.NULO_E2E_RETRY ? Number(process.env.NULO_E2E_RETRY) : 2,
-		// Default output plus the retained first-attempt errors of retried passes.
-		reporters: ["default", new RetryErrorReporter()],
+		reporters: e2eReporters(),
 		// Node v24 enforces JSON import attributes; @aztec/accounts imports JSON without them.
 		// Use the unstable loader to relax this check in the global setup process.
 		server: {
