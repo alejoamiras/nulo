@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
-import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
+import { clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
 
 /**
  * Selector contract for tests in this directory.
@@ -72,23 +72,152 @@ export async function lockWallet(page: Page): Promise<void> {
 	await page.waitForFunction(() => window.location.hash.includes("/popup/auth"), { timeout: 15_000 })
 }
 
-/** If the wallet is locked (auth page), re-enter the password. Defaults to
- *  the standard test password; pass a different one if a prior test rotated
- *  it via change-password. */
+/** If the wallet is locked, re-enter the password; if it is already unlocked,
+ *  do nothing. Defaults to the standard test password; pass a different one if
+ *  a prior test rotated it via change-password.
+ *
+ *  Contract — this helper is authoritative only inside it:
+ *  - **Password profiles only.** A locked passkey profile keeps its session
+ *    record (`SessionManager.restore` returns early: WebAuthn needs a user
+ *    gesture), so it cannot be told apart from an unlocked one except by the
+ *    password field being absent on `/popup/auth`. On any other route it would
+ *    read as unlocked. Passkey lock/unlock is not e2e-drivable today anyway —
+ *    see `fixtures/passkey.ts`.
+ *  - **One profile, or a trustworthy `nulo:ui:lastActiveProfile`.** The unlock
+ *    proof is scoped to that id; `app.vue` can fall back to `profiles[0]`
+ *    WITHOUT persisting it, so with several profiles and no persisted id the
+ *    scope check degrades to "any newer well-formed record".
+ *  - **Callers keep an authoritative postcondition.** The session record is
+ *    persisted just before `activeSession` is assigned, so a success here can
+ *    in principle observe a session that a concurrent deletion fence then
+ *    closes. Every current caller follows with route convergence or an
+ *    account/on-chain read, which is what actually pins the outcome. */
 export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
-	const hash = await page.evaluate(() => window.location.hash)
-	if (!hash.includes("/popup/auth")) return
+	// Lock state comes from the session record, never from the route and never
+	// from a lone DOM marker — each of those lies in one direction. `app.vue`
+	// pushes `/popup/auth` BEFORE `initNetworks()`/`initAccount()` finish and
+	// `openPopup` returns inside that window, so an UNLOCKED wallet transiently
+	// renders the password field; `header-lock` tracks `isLogined`, which
+	// lockWallet documents as stale-TRUE after an authoritative lock.
+	//
+	// The record's mere PRESENCE is not enough either: `SessionManager.restore`
+	// deliberately leaves it in place for a passkey profile (WebAuthn needs a
+	// user gesture, so the lock screen handles it) and preserves an undecodable
+	// one for repair. Presence therefore has to be paired with a shape check and
+	// with the route, giving two states that cannot both hold:
+	//   unlocked = a well-formed record AND the popup is not on /popup/auth
+	//   locked   = the password field is mounted AND no usable record exists
+	// Anything else — including a LOCKED passkey profile, which keeps its record
+	// while showing no password field — stays unresolved and lands in the
+	// timeout below, which names it. The 5s budget is unchanged from the
+	// selector wait this replaces.
+	const readSession = () =>
+		page.evaluate(async () => {
+			const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+			let rec: { profile?: unknown; since?: unknown } | undefined
+			try {
+				rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+			} catch {
+				rec = undefined
+			}
+			const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+			return { wellFormed, present: raw !== undefined, since: wellFormed ? (rec?.since as number) : 0 }
+		})
 
-	await page.waitForSelector('[data-testid="auth-password-input"]', {
-		visible: true,
-		timeout: 5_000,
-	})
+	const state = await withTimeoutMessage(
+		page
+			.waitForFunction(
+				async () => {
+					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+					let rec: { profile?: unknown; since?: unknown } | undefined
+					try {
+						rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+					} catch {
+						rec = undefined
+					}
+					const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+					if (wellFormed && !window.location.hash.includes("/popup/auth")) return "unlocked"
+					if (!wellFormed && document.querySelector('[data-testid="auth-password-input"]')) return "locked"
+					return null
+				},
+				{ timeout: 5_000, polling: 200 },
+			)
+			.then((handle) => handle.jsonValue()),
+		async () => {
+			const diag = await page
+				.evaluate(async () => {
+					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+					let rec: { profile?: unknown; since?: unknown } | undefined
+					try {
+						rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+					} catch {
+						rec = undefined
+					}
+					const shape =
+						raw === undefined
+							? "absent"
+							: rec && typeof rec.profile === "string" && typeof rec.since === "number"
+								? "well-formed"
+								: "malformed"
+					return {
+						hash: window.location.hash,
+						record: shape,
+						field: !!document.querySelector('[data-testid="auth-password-input"]'),
+					}
+				})
+				.catch(() => ({ hash: "<unreadable>", record: "<unreadable>", field: false }))
+			return (
+				`ensureUnlocked: lock state never settled within 5s (hash: ${diag.hash}, session record: ${diag.record}, ` +
+				`password field: ${diag.field}). A well-formed record on /popup/auth with no password field is a LOCKED ` +
+				"PASSKEY profile, which this helper cannot unlock — drive the passkey ceremony instead."
+			)
+		},
+	)
+
+	if (state === "unlocked") return
+
+	// Scope the proof below to THIS unlock: the profile the auth screen is about
+	// to unlock, and the record generation preceding it.
+	const before = await readSession()
+	const expectedProfile = await page.evaluate(
+		async () => (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"] as string | undefined,
+	)
+
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', password)
-
 	await clickByTestId(page, "auth-submit")
 
-	// Wait for navigation away from auth
-	await page.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
+	// Prove the UNLOCK, not the navigation: leaving `/popup/auth` is also what
+	// the bootstrap's own redirect does, and any session record would also be
+	// written by a concurrent unlock of a different profile. Require a
+	// well-formed record for the expected profile, newer than the one we
+	// started from.
+	await withTimeoutMessage(
+		page.waitForFunction(
+			async (want: string | undefined, priorSince: number) => {
+				const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+				let rec: { profile?: unknown; since?: unknown } | undefined
+				try {
+					rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+				} catch {
+					rec = undefined
+				}
+				if (!rec || typeof rec.profile !== "string" || typeof rec.since !== "number") return false
+				if (want !== undefined && rec.profile !== want) return false
+				return rec.since > priorSince
+			},
+			{ timeout: 10_000, polling: 200 },
+			expectedProfile,
+			before.since,
+		),
+		async () => {
+			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]')).catch(() => false)
+			const now = await readSession().catch(() => undefined)
+			return (
+				`ensureUnlocked: submitted the password but no session for profile ${expectedProfile ?? "<unknown>"} newer than ` +
+				`${before.since} appeared within 10s (wrong-password shown: ${wrong}; record now: ${JSON.stringify(now)})`
+			)
+		},
+	)
 }
 
 /**

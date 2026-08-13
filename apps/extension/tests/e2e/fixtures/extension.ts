@@ -77,16 +77,34 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
+	// The scratch page is ours, not `pages()[0]`: puppeteer can hand back a page
+	// whose frame is half-initialized and detaches during the first navigation
+	// (`openPopup` documents the same sequence and applies the same remedy), and
+	// the only fix is to discard the page and re-create it — which we may not do
+	// to Chrome's own startup page. That page is therefore left untouched, which
+	// also guarantees the browser always keeps one open.
+	let blankPage: Page | undefined
+	for (let attempt = 1; ; attempt++) {
+		let candidate: Page | undefined
+		try {
+			candidate = await browser.newPage()
+			patchPagePolling(candidate)
+			await candidate.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
+				waitUntil: "domcontentloaded",
+			})
+			blankPage = candidate
+			break
+		} catch (err) {
+			// `newPage()` itself can throw the detach, so it lives inside the try;
+			// `candidate` is undefined in that case and there is nothing to close.
+			await candidate?.close().catch(() => {})
+			if (attempt >= 2 || !isFrameDetachError(err)) throw err
+		}
+	}
 	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
 	// for slow CI runners on cold-boot Barretenberg wasm + service-graph init.
-	const pages = await browser.pages()
-	const blankPage = pages[0]
-	patchPagePolling(blankPage)
-	await blankPage.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
-		waitUntil: "domcontentloaded",
-	})
 	if (waitForLiveness) {
 		await blankPage.waitForFunction(
 			async () => {
@@ -112,7 +130,7 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
 	})
 
-	await blankPage.goto("about:blank")
+	await blankPage.close()
 
 	return { browser, extensionId, consoleErrors: [], pageErrors: [] }
 }
@@ -988,6 +1006,29 @@ export function patchPagePolling(page: Page): void {
 	}
 }
 
+/** Await a puppeteer wait and, on TIMEOUT ONLY, replace it with a diagnostic
+ *  that names what never happened. Every other failure — frame detach, CDP
+ *  disconnect, page crash — keeps its own identity and message, because
+ *  relabelling those as "the state never settled" is exactly how a real fault
+ *  gets buried under a plausible-looking flake. The original is preserved as
+ *  `cause`. Pass a function when the diagnostic has to read live page state. */
+export async function withTimeoutMessage<T>(wait: Promise<T>, message: string | (() => string | Promise<string>)): Promise<T> {
+	try {
+		return await wait
+	} catch (err) {
+		if (!(err instanceof TimeoutError)) throw err
+		let text: string
+		try {
+			text = typeof message === "function" ? await message() : message
+		} catch (diagErr) {
+			// A diagnostic that reads a dead page must never replace the timeout
+			// it was meant to explain.
+			text = `<diagnostic failed: ${diagErr instanceof Error ? diagErr.message : String(diagErr)}>`
+		}
+		throw new Error(text, { cause: err })
+	}
+}
+
 /**
  * Detect puppeteer detach errors that can occur during the brief CDP race
  * between `browser.newPage()` and the first `page.goto(...)`. These signal
@@ -997,7 +1038,12 @@ export function patchPagePolling(page: Page): void {
  */
 function isFrameDetachError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err)
-	return /Navigating frame was detached|frame got detached|Session closed|Target closed|Connection closed/i.test(msg)
+	// "Attempted to use detached Frame/Page" is puppeteer's OTHER detach wording
+	// (thrown by the handle decorators rather than the navigation path). Without
+	// it the retry above cannot see the very failure it exists to absorb.
+	return /Navigating frame was detached|frame got detached|Attempted to use detached (Frame|Page)|Session closed|Target closed|Connection closed/i.test(
+		msg,
+	)
 }
 
 /** Open the extension popup in a new page with error collection. */
@@ -1025,6 +1071,18 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 
 async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
+	try {
+		return await setUpPopupPage(ctx, page)
+	} catch (err) {
+		// The retry in `openPopup` re-creates the page, so this one must not be
+		// left behind: a live target keeps its listeners and its extension
+		// connections, which the next attempt then races.
+		await page.close().catch(() => {})
+		throw err
+	}
+}
+
+async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> {
 	patchPagePolling(page)
 	await page.setViewport({ width: 360, height: 600 })
 	// Bring the new page to the front so the tab is "focused" — defense in

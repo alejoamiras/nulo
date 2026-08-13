@@ -203,9 +203,10 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 					`post-import route wait timed out ${Date.now() - submittedAt}ms after submit; parked state: ${JSON.stringify(diag)}; original: ${(err as Error).message}`,
 				)
 			}
-			// If the recovery routed to auth (locked), unlock to finish — this is the
-			// documented strict-mode recovery, not a failure.
-			if (await page2.evaluate(() => window.location.hash.includes("/popup/auth"))) await ensureUnlocked(page2)
+			// The recovery lands either locked (the documented strict-mode path, not a
+			// failure) or already unlocked; ensureUnlocked reads the shell's own state
+			// and no-ops in the latter, so it needs no caller-side hash sample.
+			await ensureUnlocked(page2)
 			await waitForHash(page2, "#/popup/general", 30_000)
 
 			// Same profile id + master key ⇒ identical derived account. Proves the

@@ -14,7 +14,7 @@
  * Deferred: true backup file round-trip; passkey import (needs WebAuthn virtualization).
  */
 import { expect } from "vitest"
-import { clickByTestId, launchExtension, openPopup, waitForHash, test } from "./fixtures/extension"
+import { withTimeoutMessage, clickByTestId, launchExtension, openPopup, waitForHash, test } from "./fixtures/extension"
 import {
 	buildSyntheticBackup,
 	CANONICAL_SEED_24,
@@ -201,19 +201,18 @@ test("round-trip: register → export encrypted key → import in fresh ext → 
 
 	// Poll until exportEncrypted resolves and the blob lands in the card.
 	await page1.waitForSelector('[data-testid="reveal-content"] input', { visible: true, timeout: 10_000 })
-	const encrypted = await page1.evaluate(() => {
-		return new Promise<string>((resolve, reject) => {
-			const start = Date.now()
-			const tick = () => {
-				const input = document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')
-				const v = input?.value ?? ""
-				if (v.length > 0) return resolve(v)
-				if (Date.now() - start > 10_000) return reject(new Error("encrypted blob never rendered"))
-				setTimeout(tick, 100)
-			}
-			tick()
-		})
-	})
+	const encrypted = await withTimeoutMessage(
+		page1
+			.waitForFunction(
+				() => {
+					const v = document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')?.value ?? ""
+					return v.length > 0 ? v : null
+				},
+				{ timeout: 10_000, polling: 100 },
+			)
+			.then((handle) => handle.jsonValue()),
+		"encrypted blob never rendered into the reveal card",
+	)
 	expect(encrypted.length).toBeGreaterThan(0)
 	await page1.close()
 
