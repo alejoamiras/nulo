@@ -20,18 +20,35 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	}
 }
 
-async function waitForLiveness(page: Page): Promise<void> {
+/** Post-restart readiness: session storage RETAINS the dead worker's
+ *  heartbeat, so the gate requires a timestamp STRICTLY NEWER than the
+ *  pre-kill snapshot — truthy alone passes before the replacement worker
+ *  boots (sw-resilience.test.ts's causal pattern). */
+async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
-		async () => {
+		async (priorTs: number) => {
 			try {
 				const result = await chrome.storage.session.get("nulo:liveness")
-				return !!result["nulo:liveness"]
+				return Number(result["nulo:liveness"] ?? 0) > priorTs
 			} catch {
 				return false
 			}
 		},
 		{ timeout: 30_000, polling: 500 },
+		afterTs,
 	)
+}
+
+/** Read the current liveness heartbeat (0 when absent/unreadable). */
+async function readLiveness(page: Page): Promise<number> {
+	return await page.evaluate(async () => {
+		try {
+			const r = await chrome.storage.session.get("nulo:liveness")
+			return Number(r["nulo:liveness"] ?? 0)
+		} catch {
+			return 0
+		}
+	})
 }
 
 // The active chain (`Network.id`) and the chain's primary endpoint
@@ -58,12 +75,13 @@ test("SW restart preserves active network + primary endpoint", async ({ register
 	expect(Object.keys(before.networkRows).length).toBeGreaterThan(0)
 
 	await lockWallet(page)
+	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2)
+	await waitForLiveness(page2, preKillLiveness)
 	await waitForHash(page2, "#/popup/auth", 15_000)
 
 	// Unlock

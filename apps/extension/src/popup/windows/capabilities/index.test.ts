@@ -19,6 +19,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { flushPromises, mount } from "@vue/test-utils"
 import { reactive, ref, type Ref } from "vue"
 
@@ -384,5 +385,18 @@ describe("capabilities window — shell lifecycle frozen oracle", () => {
 		handler(undefined)
 		await flushPromises()
 		expect(rejectViaInteractionServiceMock).toHaveBeenCalledTimes(2)
+	})
+
+	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
+		resolveInteractionMock.mockRejectedValueOnce(new JobCancelledError())
+		// Minimal payload so init() reaches initComplete (empty delta = no account gating).
+		payloadToLoad = { params: { delta: [], existingGrants: [] } }
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as { approve: () => Promise<void> }
+		await vm.approve()
+		await flushPromises()
+		expect(w.find('[data-testid="cancelled-overlay"]').exists()).toBe(true)
+		expect(w.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 })
