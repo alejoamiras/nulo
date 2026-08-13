@@ -506,6 +506,8 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const prev = this.syncState.get(key)
 		this.syncState.set(key, { state, blocksBehind })
 		const stateChanged = prev?.state !== state
+		// Relational `>=` binds tighter than `!==`, so this compares the two BOOLEAN bucket values
+		// (above/below threshold), not the raw numbers — i.e. "did the bucket flip?".
 		const crossedThreshold =
 			state === "backfilling" &&
 			prev?.state === "backfilling" &&

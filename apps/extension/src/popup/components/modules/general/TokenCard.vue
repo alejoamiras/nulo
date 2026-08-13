@@ -271,7 +271,8 @@ const handleRefreshBalance = async () => {
 }
 
 .pulse_dot_wrap .pulse_dot {
-	box-shadow: 0 0 4px 1px rgba(248, 241, 231, 0.35);
+	/* Glow follows the accent so it works in BOTH themes (bone halo in dark, warm in light). */
+	box-shadow: 0 0 4px 1px color-mix(in srgb, var(--nulo-accent) 35%, transparent);
 }
 
 .pulse_dot_wrap:focus-visible {
