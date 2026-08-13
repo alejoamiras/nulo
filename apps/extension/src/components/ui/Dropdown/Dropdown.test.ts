@@ -205,6 +205,25 @@ describe("ui/Dropdown — DropdownRoot", () => {
 		expect(dropdownRoot.textContent).toContain("Menu")
 	})
 
+	test("data-dropdown-open tracks state SYNCHRONOUSLY (unlike the transition-lingering items)", async () => {
+		// e2e waits gate on this attribute precisely because the leave
+		// <Transition> keeps menu items visible after isOpen flips false —
+		// the attribute must flip with the state, not with the animation.
+		const w = mount(DropdownRoot, {
+			slots: { default: "<button id='trigger-btn'>Open</button>", popup: "<span>Menu</span>" },
+			attachTo: document.body,
+			global: { stubs: STUBS },
+		})
+		const wrapper = () => w.find("[data-dropdown-open]")
+		expect(wrapper().attributes("data-dropdown-open")).toBe("false")
+		await w.find("#trigger").trigger("click")
+		await flushPromises()
+		expect(wrapper().attributes("data-dropdown-open")).toBe("true")
+		await w.find("#trigger").trigger("click")
+		await flushPromises()
+		expect(wrapper().attributes("data-dropdown-open")).toBe("false")
+	})
+
 	test("forceOpen prop opens the dropdown without a click", async () => {
 		const w = mount(DropdownRoot, {
 			props: { forceOpen: false },

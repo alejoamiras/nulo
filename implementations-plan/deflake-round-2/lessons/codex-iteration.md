@@ -25,3 +25,12 @@ no gate or bound weakened.
 r2 **iterate**: the temp detached-run wrapper had ridden into the fold commit via `git add -A`
 (its own header says never-commit). Untracked + git-ignored (`e3bae69`); lesson: `git add -A`
 is banned while a temp wrapper exists — add by explicit path. r3: **APPROVE** ("PR-1 is ready").
+
+## PR-2 (appearance/A1) — rounds 1–2
+
+r1 **iterate**: one Medium — the persisted read could inspect the SAME mounted component
+(navigateByHash proves hash, not rendering; the About page may never mount). FOLDED: gate on
+the toggle LEAVING the DOM before navigating back. Codex confirmations: trigger non-teleported
+with one owning dropdown; the new 5s wait is a bound on a NEW causal signal, not a raise;
+appearance.vue's onMounted ordering supports the persisted-read claim. r2: **APPROVE**
+("closes the false-persistence-proof gap … PR-2 is ready").
