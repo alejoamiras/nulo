@@ -305,7 +305,10 @@ export function buildSyntheticBackup({
 					profileId: "syn-profile-id",
 					name: "Local Network",
 					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
-					chainId: 31337,
+					// Canonical LOCAL chain id is 0 (network/service.ts DEFAULT_SEEDS): the view-simulation
+					// identity guard exempts ONLY chain 0 — a synthetic 31337 reads as a REAL chain identity
+					// and assertLiveChainIdentity throws on every read (fee-juice "— FJ" forever).
+					chainId: 0,
 					kind: "local",
 					endpoints: [{ id: "syn-endpoint-id", rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080" }],
 					primaryEndpointId: "syn-endpoint-id",
@@ -315,7 +318,10 @@ export function buildSyntheticBackup({
 				{
 					address: accountAddress ?? `0x${"01".repeat(32)}`,
 					profileId: "syn-profile-id",
-					chainId: 31337,
+					// Canonical LOCAL chain id is 0 (network/service.ts DEFAULT_SEEDS): the view-simulation
+					// identity guard exempts ONLY chain 0 — a synthetic 31337 reads as a REAL chain identity
+					// and assertLiveChainIdentity throws on every read (fee-juice "— FJ" forever).
+					chainId: 0,
 					name: "Account",
 					index: 0,
 					type: 0,

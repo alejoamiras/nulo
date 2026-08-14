@@ -233,9 +233,9 @@ test("round-trip: register → export encrypted key → import in fresh ext → 
 
 test("full backup: fresh install → synthetic plain backup → /popup/general", async ({ freshExtensionPerTest }) => {
 	const masterBase64 = await makeRandomMasterBase64()
-	// The account row must be derivation-consistent with the master (chainId 31337 = the
+	// The account row must be derivation-consistent with the master (chainId 0 = the
 	// synthetic network) — the integrity coordinator blocks a mismatched import at finalize.
-	const accountAddress = await deriveNuloAccountAddress(masterBase64, 31337)
+	const accountAddress = await deriveNuloAccountAddress(masterBase64, 0)
 	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, accountAddress }))
 
 	const page = await gotoPopupImport(freshExtensionPerTest)

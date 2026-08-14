@@ -793,12 +793,24 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * missing-key retry can provision-then-retry. The error deliberately does
 	 * NOT contain the PXE_STORE_KEY_MISSING marker: re-provisioning cannot
 	 * rescue a stale-generation op, so the client must not retry it.
+	 *
+	 * ONE non-live case passes: `deleted` under a DIFFERENT generation than the
+	 * capture. That op belongs to a same-id re-imported SUCCESSOR booting before
+	 * its first provision — not to the erased incarnation. It must fall through
+	 * to the missing-key path (the predecessor's key was crypto-erased, so the
+	 * runtime bind throws PXE_STORE_KEY_MISSING) and the client's provision —
+	 * which `provisionChainStoreKey` explicitly admits over deleted(other gen) —
+	 * flips the lifecycle live. Hard-rejecting here deadlocked the successor
+	 * forever: the only provision trigger is that retry marker, which this
+	 * error path deliberately suppresses (delete profile → re-import same seed
+	 * → every op rejected until the offscreen document restarted).
 	 */
 	private assertGenerationCurrent(network: NetworkInfo): void {
 		const captured = network.pxeGeneration
 		if (!captured) return
 		const current = this.profileLifecycles.get(network.profileId)
 		if (!current) return
+		if (current.kind === "deleted" && current.gen !== captured) return
 		if (current.kind !== "live" || current.gen !== captured) {
 			throw new Error(
 				`pxe op rejected: profile ${network.profileId} is ${current.kind} (generation ${current.gen === captured ? "matches" : "superseded"}) — the capture is stale`,
