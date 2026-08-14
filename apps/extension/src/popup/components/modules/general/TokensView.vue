@@ -234,7 +234,7 @@ async function fetchTokenImports() {
 	}
 }
 
-// §3 "Catching up…": per-contract public-scan sync state for the ACTIVE network. Seeded on mount /
+// §3 catching-up dot: per-contract public-scan sync state for the ACTIVE network. Seeded on mount /
 // account / network change + on port reconnect via getSyncState (the snapshot the SW holds), then kept
 // live by the transition-only event. Keyed by contract because the scan is per (networkId, contract) and
 // this view only ever shows the active network's tokens.
