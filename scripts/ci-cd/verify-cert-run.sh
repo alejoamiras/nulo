@@ -98,10 +98,12 @@ for WF in "${REQUIRED_WORKFLOWS[@]}"; do
 	while IFS=$'\t' read -r ID STATUS CONCLUSION ATTEMPT; do
 		[ -z "${ID:-}" ] && continue
 		echo "  $WF run $ID: $STATUS/$CONCLUSION attempt=$ATTEMPT"
-		[ "$STATUS" = "completed" ] && [ "$CONCLUSION" = "success" ] ||
+		if [ "$STATUS" != "completed" ] || [ "$CONCLUSION" != "success" ]; then
 			violation "run $ID ($WF) is $STATUS/$CONCLUSION"
-		[ "$ATTEMPT" = "1" ] ||
+		fi
+		if [ "$ATTEMPT" != "1" ]; then
 			violation "run $ID ($WF) is attempt $ATTEMPT — a re-run is not a first-attempt green"
+		fi
 
 		JOBS="$TMP/jobs-$ID.json"
 		if ! gh api "repos/$REPO/actions/runs/$ID/jobs?per_page=100" --paginate --slurp >"$JOBS"; then
