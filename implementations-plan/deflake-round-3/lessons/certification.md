@@ -46,3 +46,37 @@ not counted, so the campaign had not started. It matters for a different reason:
 SECOND occurrence of that exact lapse (round 2's #365 content run was the first), it is not
 caused by round-3's changes, and it is the recurrence the ledger watch was waiting for. The
 item is escalated from deferred to required work for the next arc.
+
+
+## Campaign 2 — RESET after one trigger
+
+Trigger 1 (`ce7dbd27`) failed on shard 4: `wallet-locked-mid-session` — "Expected no popup
+but 1 new popup target(s) appeared (`#/popup/auth`)". Outside this arc's change path (that
+test uses `lockWallet`, not the `ensureUnlocked` this arc touched) and the same shard was
+green minutes earlier, so: flake, re-triggered, occurrence ledgered with a watch note rather
+than swallowed.
+
+## Campaign 3 — CERTIFIED
+
+| Run | Head | Quality | Smoke | Network | Verdict |
+|---|---|---|---|---|---|
+| content (not counted) | `b1663db7` | pass | pass | pass | clean |
+| trigger 1/3 | `da227824` | 31763330402 ✓ | 31763330467 ✓ | 31763330329 ✓ | **QUALIFYING** |
+| trigger 2/3 | `9f24ce8c` | 31763917288 ✓ | 31763917219 ✓ | 31763917217 ✓ | **QUALIFYING** |
+| trigger 3/3 | `63818379` | 31764481028 ✓ | 31764481062 ✓ | 31764481005 ✓ | **QUALIFYING** |
+
+Each verified by `scripts/ci-cd/verify-cert-run.sh`: all three workflows present and
+successful at attempt 1, every workload job green BY NAME (quality's unit + lint, smoke's
+test job, the eight network agents), no failed/cancelled/non-terminal jobs, no retry markers
+or exit-86 warnings in any successful job's runtime log — failing closed if any of that
+evidence could not be fetched.
+
+## What three campaigns cost, and what that says
+
+Campaign 1 was invalidated by a bug of mine that its own success surfaced. Campaign 2 reset
+on a pre-existing flake outside this arc. Campaign 3 passed clean. The bar is three
+CONSECUTIVE first-attempt greens across ~40 minutes of e2e per attempt, so any flake with a
+per-run probability worth caring about will reset it — which is the point, and also the
+reason the two OPEN network flakes (`importFullBackup`'s 300s wait, now at two occurrences,
+and this campaign's no-popup race) are the highest-value follow-ups: they are what makes
+this expensive.
