@@ -240,6 +240,13 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
 
 ## deflake-round-2 additions (2026-08-14)
 
+- **A4 e2e cancel driver — DEFERRED BY OWNER (2026-08-13).** Exposing `cancelInteraction`
+  through the wallet-sdk schema patch + a network e2e where the dApp cancels mid-execute was
+  scoped for deflake-round-3 and explicitly removed from the goal by the owner before the arc
+  started. Round 2's product work (durable `cancelledAt`, the `isInteractionCancelled` replay
+  RPC, first-claim-wins refusal, typed classification in all three windows) remains covered by
+  service/window/composable pins only; there is still no end-to-end proof. Re-open by owner
+  decision, not by drift.
 - Deferred polish (codex-approved inline shapes; take when touching the helpers anyway):
   fold the baseline capture into `waitForFreshBalanceRow` + a shared `MINT_AMOUNT` fixture
   const; an `assertPgError` mirror for expected-error pg sites (the ok-side dump landed
@@ -307,6 +314,48 @@ ran green, each campaign run completed before the next trigger. A1–A5 + B6–B
   kill it: new target, session gone, cold-boot write. Three sw-resilience tests un-skipped
   and genuinely green; `sw-restart-network` converted. Details:
   `lessons/phase-3.md`.
+
+### Fixed-wait classification table (deflake-round-3 item 2)
+
+Full sweep of `apps/extension/tests/e2e/**`. `page.waitForTimeout`: **zero occurrences** —
+that antipattern is already gone. The overwhelming majority of waits are class B (bounded
+waits on a genuinely causal predicate), which are correct as they stand; class-B poll
+intervals inside bounded loops (e.g. `authwit-lifecycle.test.ts`'s `waitForRegistry`) were
+enumerated and excluded rather than counted as findings.
+
+**Class A — bare clock, no predicate:**
+
+| Site | Duration | Disposition |
+|---|---|---|
+| `fixtures/helpers.ts` `sendTransfer` (`PXE_ANCHOR_SYNC_WORKAROUND_MS`) | 5s | **KEPT** — documented pin for a real wallet bug; no product signal exists to wait on. The accepted exception. |
+| `fiat-display.test.ts` | 150ms | **FIXED** — waits for Toggle's `data-toggle-active`, and the assertion now reads the value the wait proved. |
+| `network/incoming-transfers.test.ts` | 3s | **OPEN** — page mount + client connect + first fetch. Needs a ready signal on the activity list; none exists today. |
+| `network/connect-locked-queue.test.ts` | 1.5s | **KEPT + pinned** — asserts an ABSENCE (popup must not open); an absence has no completion signal, so the window is the test. Rationale recorded at the site. |
+| `network/in-flight-send-guard.test.ts` | 1s | **KEPT + pinned** — same absence shape (switch must be refused). Noted risk: a guard slower than the window yields a false PASS. |
+| `network/account-switch-isolation.test.ts` | 3s | **KEPT + pinned** — observation window for a `MutationObserver` armed before the switch; the observer, not the clock, is the detector. |
+
+**Class C — causal but weak predicate (existence/truthy where staleness is possible):**
+
+| Site | Weakness | Disposition |
+|---|---|---|
+| `fixtures/helpers.ts` `ensureUnlocked` | one-shot `window.location.hash` sample; returned early before the router settled and the caller believed the wallet was unlocked | **FIXED** — decides from the session record's shape + route; unlock proved by a newer record for the expected profile |
+| `fixtures/extension.ts` `launchExtension` | navigated `browser.pages()[0]`, a page Chrome owns and can replace | **FIXED** — owns its page, bounded create/navigate retry, widened detach matching |
+| `import-paths.test.ts` | hand-rolled in-page `setTimeout` poll duplicating `revealSecretKey`'s pattern | **FIXED** — bounded `waitForFunction`, value taken from the wait that proved it |
+| `onboarding-tab.test.ts` | `while(true)` poll with no deadline of its own | **FIXED** — 20s deadline + named failure |
+| `sw-resilience.test.ts` / `sw-restart-network.test.ts` / canary — post-kill liveness | strictly-newer heartbeat believed to prove a respawn | **CORRECTED** — it does not (see round-3 findings); gates kept, claims fixed, real kill primitive adopted in the first two |
+| `helpers/import-drivers.ts` `importFullBackup` | single undifferentiated 300s route wait spanning restore + activation | **DEFERRED — see below** |
+
+**`importFullBackup`'s 300s wait — deferred, with reasoning.** The plan's final shape (after
+three codex rounds) was: expose a `restoreStage` ref advancing at real stage boundaries,
+measure per-stage envelopes in both proving modes, then grant an early-fail window ONLY to
+stages with a product-owned deadline — every other stage diagnostics-only, with the
+unchanged 300s as the sole failure criterion. That is a product observability change plus a
+measurement campaign plus network evidence runs, and the audit explicitly rejected the
+cheaper variants (a blind 240/60 split tightens the leg that actually lapsed; a
+`restoreStatus`-based stall detector is a shorter timeout in disguise, since that field sits
+flat at `"progress"` for the whole leg). It is therefore carried as an OPEN item with the
+design already settled, rather than half-done under time pressure. **Trigger:** the next
+time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
 
 ### OPEN
 
