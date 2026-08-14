@@ -147,9 +147,10 @@ test.skipIf(!hasConfig)(
 			await waitForGasBalanceRendered(page, ctx)
 			await importToken(page, aztecConfig!.tokenAddress)
 
+			// No stale-rejection console assertion here: PXE rejections log offscreen-side and never
+			// reach the popup's error-event collector (post-impl audit) — the digit-render + token-import
+			// assertions above are the real proof. Page errors stay asserted (popup-side truth).
 			expect(ctx.pageErrors).toEqual([])
-			const staleRejections = ctx.consoleErrors.filter((e) => e.includes("capture is stale"))
-			expect(staleRejections).toEqual([])
 		} finally {
 			rmSync(dirname(backupPath), { recursive: true, force: true })
 			await ctx.browser.close()
@@ -182,9 +183,10 @@ test.skipIf(!hasConfig)(
 			await waitForGasBalanceRendered(page, ctx)
 			await importToken(page, aztecConfig!.tokenAddress)
 
+			// No stale-rejection console assertion here: PXE rejections log offscreen-side and never
+			// reach the popup's error-event collector (post-impl audit) — the digit-render + token-import
+			// assertions above are the real proof. Page errors stay asserted (popup-side truth).
 			expect(ctx.pageErrors).toEqual([])
-			const staleRejections = ctx.consoleErrors.filter((e) => e.includes("capture is stale"))
-			expect(staleRejections).toEqual([])
 		} finally {
 			await ctx.browser.close()
 		}
