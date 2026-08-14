@@ -48,9 +48,9 @@ test.skipIf(!HAS_FIXTURE)(
 		const filePath = writeBackupToTemp(
 			buildSyntheticBackup({
 				masterBase64,
-				// Derivation-consistent with the master (chainId 31337 = the synthetic network) —
+				// Derivation-consistent with the master (chainId 0 = the synthetic LOCAL network) —
 				// the integrity coordinator blocks a mismatched import at finalize.
-				accountAddress: await deriveNuloAccountAddress(masterBase64, 31337),
+				accountAddress: await deriveNuloAccountAddress(masterBase64, 0),
 				extraData: {
 					// PRE-shape contact row: carries `legacyName`, no `name` — exactly
 					// what a v1 export would hold if v9001 had shipped as a real v2.
