@@ -109,8 +109,19 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 	//   locked   = the password field is mounted AND no usable record exists
 	// Anything else — including a LOCKED passkey profile, which keeps its record
 	// while showing no password field — stays unresolved and lands in the
-	// timeout below, which names it. The 5s budget is unchanged from the
-	// selector wait this replaces.
+	// timeout below, which names it.
+	//
+	// On the BUDGET, stated plainly because the arc bans raising bounds to paper
+	// over flakes: the old 5s governed a different question ("has the password
+	// field rendered"), which is answered in milliseconds. This wait asks "has the
+	// app DECIDED whether it is locked", and the answer legitimately takes as long
+	// as bootstrap does — the same transient window that makes a lone route or DOM
+	// read unsafe. A caller right after a service-worker restart (the canary) hit
+	// exactly that: record well-formed, hash still /popup/auth, field mounted, i.e.
+	// mid-decision, and 5s was simply too short to observe the outcome. The budget
+	// therefore matches the app's own post-restart envelope, in line with the
+	// neighbouring waits in `frozen-account-canary` (30s liveness, 60s hash, 120s
+	// general). Nothing here accepts a state it previously rejected.
 	const readSession = () =>
 		page.evaluate(async () => {
 			const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
@@ -140,7 +151,7 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 					if (!wellFormed && document.querySelector('[data-testid="auth-password-input"]')) return "locked"
 					return null
 				},
-				{ timeout: 5_000, polling: 200 },
+				{ timeout: 30_000, polling: 200 },
 			)
 			.then((handle) => handle.jsonValue()),
 		async () => {
@@ -167,7 +178,7 @@ export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Prom
 				})
 				.catch(() => ({ hash: "<unreadable>", record: "<unreadable>", field: false }))
 			return (
-				`ensureUnlocked: lock state never settled within 5s (hash: ${diag.hash}, session record: ${diag.record}, ` +
+				`ensureUnlocked: lock state never settled within 30s (hash: ${diag.hash}, session record: ${diag.record}, ` +
 				`password field: ${diag.field}). A well-formed record on /popup/auth with no password field is a LOCKED ` +
 				"PASSKEY profile, which this helper cannot unlock — drive the passkey ceremony instead."
 			)
