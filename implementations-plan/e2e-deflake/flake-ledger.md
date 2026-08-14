@@ -251,7 +251,9 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
   fold the baseline capture into `waitForFreshBalanceRow` + a shared `MINT_AMOUNT` fixture
   const; an `assertPgError` mirror for expected-error pg sites (the ok-side dump landed
   class-wide in #360; error-side mirrors stayed bare by scope choice).
-- Labeled-PR duplicate-run cancellation leaves FAILURE aggregator check-runs on the head
+- **[SUPERSEDED by deflake-round-3 — the "can WIN" mechanism is unsupported; see below.
+  Kept verbatim as the record of what round 2 believed.]** Labeled-PR duplicate-run
+  cancellation leaves FAILURE aggregator check-runs on the head
   SHA that can WIN GitHub's latest-per-name required-check resolution → mergeStateStatus
   BLOCKED with every visible gate green (bit #360/#362/#364 in this arc; remedy = empty
   commit → fresh head). Durable fix candidate: aggregator status jobs should conclude
@@ -282,7 +284,7 @@ smoke's retry:2 unconsumed), zero exit-86/infra-reboot warnings, all 8 network a
 ran green, each campaign run completed before the next trigger. A1–A5 + B6–B7 closed.
 
 
-## deflake-round-3 (2026-08-14) — two "known" mechanisms turned out not to exist
+## deflake-round-3 (2026-08-14) — two "known" mechanisms did not hold up
 
 ### CLOSED
 
@@ -328,6 +330,7 @@ enumerated and excluded rather than counted as findings.
 | Site | Duration | Disposition |
 |---|---|---|
 | `fixtures/helpers.ts` `sendTransfer` (`PXE_ANCHOR_SYNC_WORKAROUND_MS`) | 5s | **KEPT** — documented pin for a real wallet bug; no product signal exists to wait on. The accepted exception. |
+| `network/fee-methods.test.ts` ×2 (same `PXE_ANCHOR_SYNC_WORKAROUND_MS`) | 5s each | **KEPT** — same pin, same reason; they share the named constant so a future product signal retires all three together. |
 | `fiat-display.test.ts` | 150ms | **FIXED** — waits for Toggle's `data-toggle-active`, and the assertion now reads the value the wait proved. |
 | `network/incoming-transfers.test.ts` | 3s | **OPEN** — page mount + client connect + first fetch. Needs a ready signal on the activity list; none exists today. |
 | `network/connect-locked-queue.test.ts` | 1.5s | **KEPT + pinned** — asserts an ABSENCE (popup must not open); an absence has no completion signal, so the window is the test. Rationale recorded at the site. |

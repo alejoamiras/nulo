@@ -21,8 +21,11 @@
 #   scripts/ci-cd/verify-cert-run.sh <head-sha>
 #   scripts/ci-cd/verify-cert-run.sh --pr <number>
 #
-# Exits 0 only when the run qualifies, 1 when it does not, 2 on a usage or
-# environment error.
+# Exits 0 only when the run qualifies, 1 when it does not — including when the
+# evidence needed to judge it could not be fetched, since "we could not check"
+# is not "it passed" — and 2 only for a usage error or an unusable environment
+# (no gh auth, unresolvable repo/PR, no temp dir), where no verdict is possible
+# at all.
 set -uo pipefail
 
 REQUIRED_WORKFLOWS=("Quality" "Smoke e2e" "Network e2e")
@@ -94,26 +97,67 @@ for WF in "${REQUIRED_WORKFLOWS[@]}"; do
 			continue
 		fi
 
-		while IFS=$'\t' read -r JOB_ID JOB_CONCLUSION JOB_NAME; do
+		# Parse into a variable, not a process substitution: a jq failure inside
+		# `< <(...)` is invisible to this shell, and an empty result would run the
+		# loop zero times and add no violation — a run with no job evidence would
+		# then qualify silently.
+		if ! JOB_ROWS=$(jq -er '[.[].jobs[]?] | .[] | [(.id|tostring), .status, (.conclusion // "none"), .name] | @tsv' "$JOBS"); then
+			violation "run $ID ($WF) returned no readable job list — cannot judge it"
+			continue
+		fi
+		if [ -z "$JOB_ROWS" ]; then
+			violation "run $ID ($WF) reported zero jobs — cannot judge it"
+			continue
+		fi
+
+		while IFS=$'\t' read -r JOB_ID JOB_STATUS JOB_CONCLUSION JOB_NAME; do
 			[ -z "${JOB_ID:-}" ] && continue
+			if [ "$JOB_STATUS" != "completed" ]; then
+				violation "run $ID has a non-terminal job ($JOB_STATUS): $JOB_NAME ($JOB_ID)"
+				continue
+			fi
 			case "$JOB_CONCLUSION" in
-				failure | cancelled)
+				failure | cancelled | timed_out | action_required)
 					violation "run $ID has a $JOB_CONCLUSION job: $JOB_NAME ($JOB_ID)"
 					continue
 					;;
 				success) ;;
-				*) continue ;;
+				skipped | neutral) continue ;;
+				*)
+					violation "run $ID job $JOB_NAME ($JOB_ID) has an unrecognized conclusion '$JOB_CONCLUSION'"
+					continue
+					;;
 			esac
 			L="$TMP/job-$JOB_ID.txt"
 			if ! gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" >"$L" 2>/dev/null; then
 				violation "could not fetch logs for job $JOB_ID ($JOB_NAME) — cannot prove it consumed no retries"
 				continue
 			fi
-			RETRIES=$(grep -cE "\(retry x[0-9]" "$L")
-			REBOOTS=$(grep -cE "##\[warning\].*(exit 86|Infra boot)" "$L")
+			if [ ! -s "$L" ]; then
+				violation "job $JOB_ID ($JOB_NAME) returned an EMPTY log — a log we cannot read is not a clean log"
+				continue
+			fi
+			# grep exits 1 for "no match" (the good case) and >1 for a read error;
+			# without separating them, an unreadable log scores 0 and passes.
+			scan() {
+				local pattern=$1 count status
+				count=$(grep -cE "$pattern" "$L")
+				status=$?
+				if [ "$status" -gt 1 ]; then
+					echo "ERROR"
+					return
+				fi
+				echo "$count"
+			}
+			RETRIES=$(scan "\(retry x[0-9]")
+			REBOOTS=$(scan "##\[warning\].*(exit 86|Infra boot)")
+			if [ "$RETRIES" = "ERROR" ] || [ "$REBOOTS" = "ERROR" ]; then
+				violation "could not scan the log of job $JOB_ID ($JOB_NAME)"
+				continue
+			fi
 			[ "$RETRIES" = "0" ] || violation "job $JOB_ID ($JOB_NAME) consumed $RETRIES vitest retries"
 			[ "$REBOOTS" = "0" ] || violation "job $JOB_ID ($JOB_NAME) has $REBOOTS exit-86/infra-reboot warnings"
-		done < <(jq -r '[.[].jobs[]?] | .[] | [(.id|tostring), (.conclusion // "none"), .name] | @tsv' "$JOBS")
+		done <<<"$JOB_ROWS"
 
 		if [ "$WF" = "Network e2e" ]; then
 			for AGENT in "${EXPECTED_AGENTS[@]}"; do
