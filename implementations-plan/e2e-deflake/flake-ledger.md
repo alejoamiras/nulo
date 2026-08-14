@@ -348,7 +348,17 @@ enumerated and excluded rather than counted as findings.
 | `sw-resilience.test.ts` / `sw-restart-network.test.ts` / canary — post-kill liveness | strictly-newer heartbeat believed to prove a respawn | **CORRECTED** — it does not (see round-3 findings); gates kept, claims fixed, real kill primitive adopted in the first two |
 | `helpers/import-drivers.ts` `importFullBackup` | single undifferentiated 300s route wait spanning restore + activation | **DEFERRED — see below** |
 
-**`importFullBackup`'s 300s wait — deferred, with reasoning.** The plan's final shape (after
+**`importFullBackup`'s 300s wait — SECOND OCCURRENCE, now the blocking item.** It lapsed
+again on deflake-round-3's own close-out PR (#370 content run, shard 3,
+`backup-restore-sw-restart.test.ts:444` → `import-drivers.ts:182`), after the first
+occurrence on round 2's #365 content run. Two arcs, two content runs, same wait — this is
+load-dependent structural behaviour, not a coincidence, and it is the recurrence the watch
+below was waiting for. It is NOT caused by round-3's changes (`ensureUnlocked` does not
+appear in the stack; the failing wait is the import route wait). **Next arc should treat the
+staged design as required work rather than deferred**, since it now demonstrably gates
+certification campaigns.
+
+**`importFullBackup`'s 300s wait — the deferred design, unchanged.** The plan's final shape (after
 three codex rounds) was: expose a `restoreStage` ref advancing at real stage boundaries,
 measure per-stage envelopes in both proving modes, then grant an early-fail window ONLY to
 stages with a product-owned deadline — every other stage diagnostics-only, with the
