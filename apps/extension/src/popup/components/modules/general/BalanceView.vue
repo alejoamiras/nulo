@@ -4,9 +4,6 @@ import ActionButtonsView from "./ActionButtonsView.vue"
 import GasBalanceCard from "./GasBalanceCard.vue"
 import { Dropdown } from "@/components/ui/Dropdown"
 
-/** Vendor */
-import { DateTime } from "luxon"
-
 /** Services */
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
@@ -73,12 +70,6 @@ const publicBalanceFormatted = computed(() => {
 	return balanceFormatted(tokenBalanceToDisplay.value?.publicBalance || 0, decimals, 10).value
 })
 
-const BalanceDisplayOptionsMap = {
-	total_account_value: "Account Value",
-	total_private_balances: "Private Account Value",
-	total_public_balances: "Public Account Value",
-}
-
 /** Live prices (A1). Parent owns the client lifecycle; the composable owns
  *  freshness. Every fiat element below renders ONLY with a usable quote —
  *  no price means no dollar figure, never a fake $0.00. */
@@ -141,17 +132,9 @@ const aggregate = computed(() => {
 const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
 const isAggregatePartial = computed(() => aggregate.value.priced < aggregate.value.holdings)
 
-const isCopied = ref(false)
 const handleCopy = (value, label) => {
-	isCopied.value = true
 	window.navigator.clipboard.writeText(value)
 	openToast({ label: `${label} is copied`, icon: "copy" })
-	setTimeout(() => {
-		isCopied.value = false
-	}, 2500)
-}
-const handleRefreshBalance = () => {
-	tokenBalanceService.refreshTokenBalance(tokenBalanceToDisplay.value?.id)
 }
 const handleTokenBalanceClick = async () => {
 	let balance = totalTokenBalance.value?.value

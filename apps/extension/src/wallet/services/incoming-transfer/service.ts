@@ -180,7 +180,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 *  chain/profile purge, and never persisted (no storage bloat). */
 	private readonly feeCache = new Map<string, string>()
 
-	/** Last emitted public-scan sync state per `${networkId}|${contract}` (§3 "Catching up…"). Derived,
+	/** Last emitted public-scan sync state per `${networkId}|${contract}` (§3 catching-up dot). Derived,
 	 *  in-memory only (never persisted); backs both the transition-only emit and the getSyncState snapshot. */
 	private readonly syncState = new Map<string, IncomingSyncSnapshot>()
 

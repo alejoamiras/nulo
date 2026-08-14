@@ -28,7 +28,7 @@ import { z } from "zod"
 export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
 
 /**
- * Per-`(networkId, contract)` public-scan progress, surfaced to the token card as the "Catching up…"
+ * Per-`(networkId, contract)` public-scan progress, surfaced to the token card as the catching-up dot
  * affordance. `backfilling` = the scan cursor is materially behind the checkpointed tip (cold-start
  * hydration from far back, or a fresh add / SW restart); `caught-up` = at/near the tip (the steady
  * every-30s poll). Derived from data the scan already reads — the tip + the persisted cursor — so it
