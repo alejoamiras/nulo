@@ -234,7 +234,7 @@ async function fetchTokenImports() {
 	}
 }
 
-// §3 "Catching up…": per-contract public-scan sync state for the ACTIVE network. Seeded on mount /
+// §3 catching-up dot: per-contract public-scan sync state for the ACTIVE network. Seeded on mount /
 // account / network change + on port reconnect via getSyncState (the snapshot the SW holds), then kept
 // live by the transition-only event. Keyed by contract because the scan is per (networkId, contract) and
 // this view only ever shows the active network's tokens.
@@ -298,12 +298,8 @@ async function seedSyncStates() {
 	await Promise.all(contracts.map((contract) => applySnapshot(contract, networkId)))
 }
 
-function refreshBalance(tb) {
-	if (tb?.id) {
-		tokenBalanceService.refreshTokenBalance(tb.id)
-	} else {
-		for (const _tb of tokenBalances.value) tokenBalanceService.refreshTokenBalance(_tb.id)
-	}
+function refreshBalances() {
+	for (const tb of tokenBalances.value) tokenBalanceService.refreshTokenBalance(tb.id)
 }
 
 async function fetchTokenBalances() {
@@ -418,7 +414,7 @@ onBeforeUnmount(() => {
 							</Flex>
 						</DropdownItem>
 						<DropdownDivider />
-						<DropdownItem @click="refreshBalance" data-testid="tokens-menu-refresh">
+						<DropdownItem @click="refreshBalances" data-testid="tokens-menu-refresh">
 							<Flex align="center" gap="8">
 								<Icon name="refresh" size="14" color="primary" />
 								Refresh balances
@@ -437,12 +433,7 @@ onBeforeUnmount(() => {
 				<TokenCard v-for="t in newTokens" :newToken="t" />
 			</template>
 			<template v-if="sortedTokenBalances.length">
-				<TokenCard
-					v-for="tb in sortedTokenBalances"
-					@onRefreshBalance="refreshBalance(tb)"
-					:tokenBalance="tb"
-					:backfilling="isBackfilling(tb.token.contract)"
-				/>
+				<TokenCard v-for="tb in sortedTokenBalances" :tokenBalance="tb" :backfilling="isBackfilling(tb.token.contract)" />
 			</template>
 			<template v-if="!newTokens.length && !sortedTokenBalances.length && !visibleTokenImports.length">
 				<div :class="$style.empty_state">

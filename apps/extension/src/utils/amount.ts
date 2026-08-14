@@ -62,8 +62,7 @@ export const normalizeAmount = (target: string): string | undefined => {
 /**
  * Format a base-units value for display, with optional total-string-length
  * truncation + small-value hint. Returns `{ value, slashed }` so callers
- * can render an "expand" affordance when truncation fired (BalanceView,
- * SplittedBalancesView).
+ * can render an "expand" affordance when truncation fired (BalanceView).
  *
  * `length` is the OUTPUT-string length cap, not a decimal-places count:
  * - String shorter than `length`  → returned as-is, slashed=false.

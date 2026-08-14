@@ -3532,7 +3532,7 @@ describe("IncomingTransferService — public-scan sync state (§3 Catching up)",
 	test("(CRITICAL) a quiet token whose last event is far back but which SCANS THROUGH to the tip → caught-up", async () => {
 		// The regression guard for the cursor-vs-tip bug: cursor sits at block 10 (its last event), the tip
 		// is 100, and the reader returns an empty EOF (nothing new up to the tip). Coverage — not the
-		// last-event cursor — must decide, so this is CAUGHT-UP, not a permanent "Catching up…".
+		// last-event cursor — must decide, so this is CAUGHT-UP, not a permanently stuck indicator.
 		const { reader, state } = makePublicReader({ tips: { checkpointedBlockNumber: 100 } })
 		const { service } = await bootPublic(reader, state)
 		resetSync(service)

@@ -1,7 +1,4 @@
 <script setup>
-/** Vendor */
-import { DateTime } from "luxon"
-
 /** Services */
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
@@ -15,7 +12,6 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
 
-const emit = defineEmits(["onRefreshBalance"])
 const props = defineProps({
 	tokenBalance: {
 		type: Object,
@@ -25,8 +21,8 @@ const props = defineProps({
 		type: Object,
 		required: false,
 	},
-	/** §3: this token's incoming public-transfer history is cold-start backfilling — drives the
-	 *  "Catching up…" affordance. Grafted by TokensView from IncomingTransferService's sync state. */
+	/** §3: this token's incoming public-transfer history is genuinely behind — drives the
+	 *  catching-up dot. Threshold-gated by TokensView from IncomingTransferService's sync state. */
 	backfilling: {
 		type: Boolean,
 		default: false,
@@ -51,12 +47,10 @@ onBeforeUnmount(() => {
 })
 const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6).value)
 const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6).value)
-const hasPrivate = computed(() => privateRaw.value !== 0n)
-const hasPublic = computed(() => publicRaw.value !== 0n)
 // Treat updatedAt===0 as "balance has never synced" — the projector hasn't run yet
 // so the "0" placeholder in the row would be misleading. Render a spinner instead.
 const isInitialSync = computed(() => !!props.tokenBalance && props.tokenBalance.updatedAt === 0)
-// §3: the balance is known but incoming history is still hydrating → a subtle caption beside the balance.
+// §3: the balance is known but incoming history is still hydrating → the ambient dot beside the symbol.
 const catchingUp = computed(() => props.backfilling && !isInitialSync.value)
 // §3: balance ALSO unknown (fresh add) → escalate the loading block from a plain spinner to a shimmer.
 const catchingUpUnresolved = computed(() => props.backfilling && isInitialSync.value)
@@ -79,25 +73,10 @@ const description = computed(() => {
 // isInitialSync: a never-synced row whose FIRST projection failed must show
 // the failure, not an infinite "Loading balance…" spinner.
 const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.tokenBalance?.isUpdating)
-
-const isHovered = ref(false)
-
-const handleRefreshBalance = async () => {
-	if (!props.tokenBalance) return
-
-	emit("onRefreshBalance")
-}
 </script>
 
 <template>
-	<RouterLink
-		v-if="tokenBalance"
-		:to="`/popup/tokens/${token?.id}`"
-		data-testid="tokens-card"
-		:class="$style.row"
-		@pointerenter="isHovered = true"
-		@pointerleave="isHovered = false"
-	>
+	<RouterLink v-if="tokenBalance" :to="`/popup/tokens/${token?.id}`" data-testid="tokens-card" :class="$style.row">
 		<Flex direction="column" gap="2">
 			<Flex align="center" gap="6">
 				<!-- §3 catching-up: an ambient dot, not a caption — it renders only when the scan is

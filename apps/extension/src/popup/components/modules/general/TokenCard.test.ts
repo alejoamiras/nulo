@@ -263,7 +263,7 @@ describe("TokenCard — §3 catching-up indicator", () => {
 		expect(w.text()).toContain("Catching up")
 	})
 
-	test("NOT backfilling: no catching-up caption; updatedAt===0 keeps the plain spinner loader", () => {
+	test("NOT backfilling: no catching-up dot; updatedAt===0 keeps the plain spinner loader", () => {
 		mockQuotes = {}
 		const resolved = mountCard({ updatedAt: 1, publicBalance: "5" }, false)
 		expect(resolved.find('[data-testid="token-catching-up"]').exists()).toBe(false)
