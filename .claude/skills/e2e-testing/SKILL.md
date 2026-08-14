@@ -373,6 +373,32 @@ assuming "transient".
 - **An exactness upgrade finds producer dirt the fuzzy assert absorbed** (block-forcing mints
   accumulating raw dust the display rounding hid) — audit every producer feeding an assert
   you tighten, especially fixtures with no current consumer (no run can red on them).
+- **Verify the primitive does what its name says, before hardening anything built on it.**
+  `Runtime.terminateExecution` does NOT end the extension's service worker: the target
+  survives, `chrome.storage.session` survives, the wallet stays unlocked, and
+  `nulo:liveness` merely advances by one HEARTBEAT_INTERVAL_MS — enough to satisfy a
+  post-kill liveness gate with no respawn having happened. Chrome's documented method is
+  `await (await target.worker()).close()`; assert the ORIGINAL target is destroyed (arm a
+  `targetdestroyed` listener before closing and compare Target object identity — not
+  puppeteer's private `_targetId`). Two arcs hardened waits on top of the fake kill before
+  anyone measured it.
+- **A passing test is a claim, not evidence, until you know WHY it passes.** With a kill
+  that never killed, three of four SW-lifecycle tests passed for reasons unrelated to their
+  subject, and no number of re-runs could have shown that. When a test's premise involves a
+  disruptive action, assert the disruption actually occurred.
+- **Setup steps can be silently dead.** Driving a wallet service from a page via
+  `chrome.runtime.sendMessage` does NOTHING — services listen on PORTS, and the SW's only
+  `onMessage` listener returns false. A config toggle written that way never applied, so
+  the test asserted a behaviour its own setup had not enabled. Assert the setup took effect
+  (read the state back) before depending on it.
+- **Verify the storage key and the stored SHAPE before concluding from a read.**
+  `ValueStorage` persists `JSON.stringify(value)`, so `chrome.storage.*.get()` returns a
+  STRING, not the object; and config lives at `nulo:config`, not `nulo:core:config`. Both
+  cost a debugging cycle in one arc: a shape check that could never be true, and a probe
+  whose "absent before and after" proved nothing.
+- **Deterministic failure and flake are cheap to tell apart** — three identical solo runs at
+  `--retry=0`. A skip note asserting "intrinsically flaky" survived months without that
+  check, and was wrong.
 - **Duplicate check-runs from labeled PR opens do not explain the observed blocks.** Opening a labeled
   PR fires opened+labeled events; the concurrency-cancelled duplicates leave FAILURE
   aggregator check-runs beside the survivors' successes on the same SHA. A measured probe

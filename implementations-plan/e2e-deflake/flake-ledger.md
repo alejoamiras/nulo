@@ -273,3 +273,67 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
 vitest-retry markers in runtime logs (network shards run NULO_E2E_RETRY=0 by gate design;
 smoke's retry:2 unconsumed), zero exit-86/infra-reboot warnings, all 8 network agent jobs
 ran green, each campaign run completed before the next trigger. A1–A5 + B6–B7 closed.
+
+
+## deflake-round-3 (2026-08-14) — two "known" mechanisms turned out not to exist
+
+### CLOSED
+
+- **Duplicate-aggregator merge trap — MECHANISM UNSUPPORTED.** Round 2 recorded that a
+  cancelled duplicate's FAILURE aggregator wins latest-per-name resolution and blocks
+  merges. Measured on PR #367: `mergeStateStatus` goes BLOCKED → CLEAN once the survivors
+  land, with the duplicate's FAILURE still on the SHA, and on every round-2 "blocked" head
+  the FAILURE was the OLDER check-run (6–11 min earlier). Round 2's three empty-commit
+  remedies post-date the last survivor success by 41s–4m, so what it observed is NOT
+  explained — but it is not this. `pr-quick.yml` dropped `labeled`/`unlabeled` (it never
+  reads labels); no gate semantics changed. Full evidence:
+  `implementations-plan/deflake-round-3/lessons/phase-1.md`.
+- **`ensureUnlocked` silent no-op — FIXED.** It sampled `window.location.hash` once and
+  returned early when the router had not settled, leaving callers believing the wallet was
+  unlocked. Now decides from the session record's SHAPE plus the route, and proves the
+  unlock by that record reappearing for the expected profile with a newer `since` — the
+  old route-only wait was satisfiable by the bootstrap's own redirect, i.e. a broken unlock
+  could pass. Contract + three documented limits in its TSDoc (password profiles only;
+  single profile or trustworthy `nulo:ui:lastActiveProfile`; callers keep a downstream
+  postcondition).
+- **`launchExtension` frame detach — FIXED.** It navigated `browser.pages()[0]`, a page
+  Chrome owns; now creates its own with a bounded create/navigate retry. `openPopupOnce`
+  also leaked its page on the retry path, and `isFrameDetachError` did not match
+  "Attempted to use detached Frame" — puppeteer's other wording — so the retry could not
+  absorb the failure it exists for.
+- **`Runtime.terminateExecution` does not kill the service worker — ROOT-CAUSED.** Target
+  survives, session record survives, wallet stays unlocked, `nulo:liveness` advances by
+  exactly one HEARTBEAT_INTERVAL_MS. `worker().close()` (Chrome's documented method) does
+  kill it: new target, session gone, cold-boot write. Three sw-resilience tests un-skipped
+  and genuinely green; `sw-restart-network` converted. Details:
+  `lessons/phase-3.md`.
+
+### OPEN
+
+- **Two network tests still use the primitive that does not kill.**
+  `network/frozen-account-canary.test.ts` (stage 5) and
+  `network/backup-restore-sw-restart.test.ts` — the latter's entire premise is a
+  mid-restore crash which therefore never happens. Converting them to `worker().close()`
+  changes what they exercise and needs its own network evidence run. HIGH value: until
+  then, neither proves anything about a restart.
+- **sw-resilience test 3 ("strict mode OFF → silent restore") — three measured blockers.**
+  (1) its original setup posted to ConfigService over `chrome.runtime.sendMessage`, which
+  port-based services never receive (`nulo:config` never written); (2) driving the real
+  Settings → Security toggle stalls because that page's `onBeforeMount` config reads leave
+  `isLoading` true in a post-unlock/post-restart context; (3) reaching settings via the nav
+  tab races the unlock's routing. Needs the config-client reconnect lifecycle investigated.
+- **Round-2's liveness-gate claim was overstated** (a strictly-newer heartbeat does not
+  prove a respawn — the surviving worker supplies one within 10s). Comments corrected in
+  `sw-restart-network` + the canary; the gates stay, since truthy passes instantly against
+  a stale value.
+- **`pr-quick.yml` retarget gap.** A PR retargeted to `dev`/`main` fires `edited`, which is
+  not in its `types:`, so a head with no run of its own can sit at required
+  `quality-status: Expected`. Adding `edited` is not the fix (it fires on every title/body
+  edit → full re-runs + cancellation churn). Recovery: `gh workflow run pr-quick.yml --ref
+  <branch>` targeting the PR's current head, then confirm the check landed on that SHA.
+- **`withFreshBalanceRow` deferred out of the arc** (22 references across 7 network files +
+  fixtures behind a 25-45 min gate — bisection-killing churn inside a flake-reduction arc).
+- **Capture before remedying.** If a PR shows BLOCKED with every gate terminal-green,
+  record `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 min, and
+  the base branch's protection config BEFORE pushing anything. Two arcs have now destroyed
+  that state by remedying immediately.
