@@ -240,11 +240,20 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
 
 ## deflake-round-2 additions (2026-08-14)
 
+- **A4 e2e cancel driver — DEFERRED BY OWNER (2026-08-13).** Exposing `cancelInteraction`
+  through the wallet-sdk schema patch + a network e2e where the dApp cancels mid-execute was
+  scoped for deflake-round-3 and explicitly removed from the goal by the owner before the arc
+  started. Round 2's product work (durable `cancelledAt`, the `isInteractionCancelled` replay
+  RPC, first-claim-wins refusal, typed classification in all three windows) remains covered by
+  service/window/composable pins only; there is still no end-to-end proof. Re-open by owner
+  decision, not by drift.
 - Deferred polish (codex-approved inline shapes; take when touching the helpers anyway):
   fold the baseline capture into `waitForFreshBalanceRow` + a shared `MINT_AMOUNT` fixture
   const; an `assertPgError` mirror for expected-error pg sites (the ok-side dump landed
   class-wide in #360; error-side mirrors stayed bare by scope choice).
-- Labeled-PR duplicate-run cancellation leaves FAILURE aggregator check-runs on the head
+- **[SUPERSEDED by deflake-round-3 — the "can WIN" mechanism is unsupported; see below.
+  Kept verbatim as the record of what round 2 believed.]** Labeled-PR duplicate-run
+  cancellation leaves FAILURE aggregator check-runs on the head
   SHA that can WIN GitHub's latest-per-name required-check resolution → mergeStateStatus
   BLOCKED with every visible gate green (bit #360/#362/#364 in this arc; remedy = empty
   commit → fresh head). Durable fix candidate: aggregator status jobs should conclude
@@ -273,3 +282,131 @@ payload — worth dumping `resultJson` on mismatch in a follow-up.
 vitest-retry markers in runtime logs (network shards run NULO_E2E_RETRY=0 by gate design;
 smoke's retry:2 unconsumed), zero exit-86/infra-reboot warnings, all 8 network agent jobs
 ran green, each campaign run completed before the next trigger. A1–A5 + B6–B7 closed.
+
+
+## deflake-round-3 (2026-08-14) — two "known" mechanisms did not hold up
+
+### CLOSED
+
+- **Duplicate-aggregator merge trap — MECHANISM UNSUPPORTED.** Round 2 recorded that a
+  cancelled duplicate's FAILURE aggregator wins latest-per-name resolution and blocks
+  merges. Measured on PR #367: `mergeStateStatus` goes BLOCKED → CLEAN once the survivors
+  land, with the duplicate's FAILURE still on the SHA, and on every round-2 "blocked" head
+  the FAILURE was the OLDER check-run (6–11 min earlier). Round 2's three empty-commit
+  remedies post-date the last survivor success by 41s–4m, so what it observed is NOT
+  explained — but it is not this. `pr-quick.yml` dropped `labeled`/`unlabeled` (it never
+  reads labels); no gate semantics changed. Full evidence:
+  `implementations-plan/deflake-round-3/lessons/phase-1.md`.
+- **`ensureUnlocked` silent no-op — FIXED.** It sampled `window.location.hash` once and
+  returned early when the router had not settled, leaving callers believing the wallet was
+  unlocked. Now decides from the session record's SHAPE plus the route, and proves the
+  unlock by that record reappearing for the expected profile with a newer `since` — the
+  old route-only wait was satisfiable by the bootstrap's own redirect, i.e. a broken unlock
+  could pass. Contract + three documented limits in its TSDoc (password profiles only;
+  single profile or trustworthy `nulo:ui:lastActiveProfile`; callers keep a downstream
+  postcondition).
+- **`launchExtension` frame detach — FIXED.** It navigated `browser.pages()[0]`, a page
+  Chrome owns; now creates its own with a bounded create/navigate retry. `openPopupOnce`
+  also leaked its page on the retry path, and `isFrameDetachError` did not match
+  "Attempted to use detached Frame" — puppeteer's other wording — so the retry could not
+  absorb the failure it exists for.
+- **`Runtime.terminateExecution` does not kill the service worker — ROOT-CAUSED.** Target
+  survives, session record survives, wallet stays unlocked, `nulo:liveness` advances by
+  exactly one HEARTBEAT_INTERVAL_MS. `worker().close()` (Chrome's documented method) does
+  kill it: new target, session gone, cold-boot write. Three sw-resilience tests un-skipped
+  and genuinely green; `sw-restart-network` converted. Details:
+  `lessons/phase-3.md`.
+
+### Fixed-wait classification table (deflake-round-3 item 2)
+
+Full sweep of `apps/extension/tests/e2e/**`. `page.waitForTimeout`: **zero occurrences** —
+that antipattern is already gone. The overwhelming majority of waits are class B (bounded
+waits on a genuinely causal predicate), which are correct as they stand; class-B poll
+intervals inside bounded loops (e.g. `authwit-lifecycle.test.ts`'s `waitForRegistry`) were
+enumerated and excluded rather than counted as findings.
+
+**Class A — bare clock, no predicate:**
+
+| Site | Duration | Disposition |
+|---|---|---|
+| `fixtures/helpers.ts` `sendTransfer` (`PXE_ANCHOR_SYNC_WORKAROUND_MS`) | 5s | **KEPT** — documented pin for a real wallet bug; no product signal exists to wait on. The accepted exception. |
+| `network/fee-methods.test.ts` ×2 (same `PXE_ANCHOR_SYNC_WORKAROUND_MS`) | 5s each | **KEPT** — same pin, same reason; they share the named constant so a future product signal retires all three together. |
+| `fiat-display.test.ts` | 150ms | **FIXED** — waits for Toggle's `data-toggle-active`, and the assertion now reads the value the wait proved. |
+| `network/incoming-transfers.test.ts` | 3s | **OPEN** — page mount + client connect + first fetch. Needs a ready signal on the activity list; none exists today. |
+| `network/connect-locked-queue.test.ts` | 1.5s | **KEPT + pinned** — asserts an ABSENCE (popup must not open); an absence has no completion signal, so the window is the test. Rationale recorded at the site. |
+| `network/in-flight-send-guard.test.ts` | 1s | **KEPT + pinned** — same absence shape (switch must be refused). Noted risk: a guard slower than the window yields a false PASS. |
+| `network/account-switch-isolation.test.ts` | 3s | **KEPT + pinned** — observation window for a `MutationObserver` armed before the switch; the observer, not the clock, is the detector. |
+
+**Class C — causal but weak predicate (existence/truthy where staleness is possible):**
+
+| Site | Weakness | Disposition |
+|---|---|---|
+| `fixtures/helpers.ts` `ensureUnlocked` | one-shot `window.location.hash` sample; returned early before the router settled and the caller believed the wallet was unlocked | **FIXED** — decides from the session record's shape + route; unlock proved by a newer record for the expected profile |
+| `fixtures/extension.ts` `launchExtension` | navigated `browser.pages()[0]`, a page Chrome owns and can replace | **FIXED** — owns its page, bounded create/navigate retry, widened detach matching |
+| `import-paths.test.ts` | hand-rolled in-page `setTimeout` poll duplicating `revealSecretKey`'s pattern | **FIXED** — bounded `waitForFunction`, value taken from the wait that proved it |
+| `onboarding-tab.test.ts` | `while(true)` poll with no deadline of its own | **FIXED** — 20s deadline + named failure |
+| `sw-resilience.test.ts` / `sw-restart-network.test.ts` / canary — post-kill liveness | strictly-newer heartbeat believed to prove a respawn | **CORRECTED** — it does not (see round-3 findings); gates kept, claims fixed, real kill primitive adopted in the first two |
+| `helpers/import-drivers.ts` `importFullBackup` | single undifferentiated 300s route wait spanning restore + activation | **DEFERRED — see below** |
+
+**`importFullBackup`'s 300s wait — SECOND OCCURRENCE, now the blocking item.** It lapsed
+again on deflake-round-3's own close-out PR (#370 content run, shard 3,
+`backup-restore-sw-restart.test.ts:444` → `import-drivers.ts:182`), after the first
+occurrence on round 2's #365 content run. Two arcs, two content runs, same wait — this is
+load-dependent structural behaviour, not a coincidence, and it is the recurrence the watch
+below was waiting for. It is NOT caused by round-3's changes (`ensureUnlocked` does not
+appear in the stack; the failing wait is the import route wait). **Next arc should treat the
+staged design as required work rather than deferred**, since it now demonstrably gates
+certification campaigns.
+
+**`importFullBackup`'s 300s wait — the deferred design, unchanged.** The plan's final shape (after
+three codex rounds) was: expose a `restoreStage` ref advancing at real stage boundaries,
+measure per-stage envelopes in both proving modes, then grant an early-fail window ONLY to
+stages with a product-owned deadline — every other stage diagnostics-only, with the
+unchanged 300s as the sole failure criterion. That is a product observability change plus a
+measurement campaign plus network evidence runs, and the audit explicitly rejected the
+cheaper variants (a blind 240/60 split tightens the leg that actually lapsed; a
+`restoreStatus`-based stall detector is a shorter timeout in disguise, since that field sits
+flat at `"progress"` for the whole leg). It is therefore carried as an OPEN item with the
+design already settled, rather than half-done under time pressure. **Trigger:** the next
+time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
+
+### OPEN
+
+- **`wallet-locked-mid-session` — "Expected no popup but 1 new popup target(s) appeared"
+  (`#/popup/auth`), one occurrence 2026-08-14** on deflake-round-3's campaign-2 trigger 1
+  (shard 4). The test locks the wallet mid-flow and asserts no popup opens; an auth popup
+  did. NOT in this arc's change path (it uses `lockWallet`, not the `ensureUnlocked` this
+  arc touched), and the same shard was green on the content run minutes earlier — treated
+  as a flake and re-triggered, per red→flake→rerun. **Watch:** if it recurs, the question is
+  whether the SW opens an auth popup on a mid-session lock (product) or whether the test's
+  no-popup window is simply racing the lock (test). Capture the popup's opener before
+  assuming either.
+
+
+- **Two network tests still use the primitive that does not kill.**
+  `network/frozen-account-canary.test.ts` (stage 5) and
+  `network/backup-restore-sw-restart.test.ts` — the latter's entire premise is a
+  mid-restore crash which therefore never happens. Converting them to `worker().close()`
+  changes what they exercise and needs its own network evidence run. HIGH value: until
+  then, neither proves anything about a restart.
+- **sw-resilience test 3 ("strict mode OFF → silent restore") — three measured blockers.**
+  (1) its original setup posted to ConfigService over `chrome.runtime.sendMessage`, which
+  port-based services never receive (`nulo:config` never written); (2) driving the real
+  Settings → Security toggle stalls because that page's `onBeforeMount` config reads leave
+  `isLoading` true in a post-unlock/post-restart context; (3) reaching settings via the nav
+  tab races the unlock's routing. Needs the config-client reconnect lifecycle investigated.
+- **Round-2's liveness-gate claim was overstated** (a strictly-newer heartbeat does not
+  prove a respawn — the surviving worker supplies one within 10s). Comments corrected in
+  `sw-restart-network` + the canary; the gates stay, since truthy passes instantly against
+  a stale value.
+- **`pr-quick.yml` retarget gap.** A PR retargeted to `dev`/`main` fires `edited`, which is
+  not in its `types:`, so a head with no run of its own can sit at required
+  `quality-status: Expected`. Adding `edited` is not the fix (it fires on every title/body
+  edit → full re-runs + cancellation churn). Recovery: `gh workflow run pr-quick.yml --ref
+  <branch>` targeting the PR's current head, then confirm the check landed on that SHA.
+- **`withFreshBalanceRow` deferred out of the arc** (22 references across 7 network files +
+  fixtures behind a 25-45 min gate — bisection-killing churn inside a flake-reduction arc).
+- **Capture before remedying.** If a PR shows BLOCKED with every gate terminal-green,
+  record `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 min, and
+  the base branch's protection config BEFORE pushing anything. Two arcs have now destroyed
+  that state by remedying immediately.
