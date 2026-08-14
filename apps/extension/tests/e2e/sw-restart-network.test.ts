@@ -1,5 +1,5 @@
 import { expect } from "vitest"
-import type { Page } from "puppeteer"
+import type { Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
 import { lockWallet } from "./fixtures/helpers"
@@ -12,25 +12,29 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
 		timeout: 15_000,
 	})
-	// biome-ignore lint/suspicious/noExplicitAny: target identity is internal, and identity is the whole point here
-	const idOf = (t: any): string => t._targetId ?? t.targetId ?? "<unknown>"
-	const doomedId = idOf(swTarget)
+
+	// Arm the destruction listener BEFORE closing: puppeteer reports the very
+	// Target object that went away, so identity is object equality rather than a
+	// private `_targetId` read, and a fast replacement cannot be mistaken for the
+	// original surviving.
+	const destroyed = new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ext.browser.off("targetdestroyed", onDestroyed)
+			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
+		}, 15_000)
+		function onDestroyed(target: Target) {
+			if (target !== swTarget) return
+			clearTimeout(timer)
+			ext.browser.off("targetdestroyed", onDestroyed)
+			resolve()
+		}
+		ext.browser.on("targetdestroyed", onDestroyed)
+	})
 
 	const worker = await swTarget.worker()
 	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
 	await worker.close()
-
-	const deadline = Date.now() + 15_000
-	for (;;) {
-		const stillThere = ext.browser
-			.targets()
-			.some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId) && idOf(t) === doomedId)
-		if (!stillThere) return
-		if (Date.now() > deadline) {
-			throw new Error(`stopServiceWorker: service-worker target ${doomedId} was still alive 15s after close()`)
-		}
-		await new Promise((r) => setTimeout(r, 100))
-	}
+	await destroyed
 }
 
 /** Readiness after the restart: session storage retains the pre-kill heartbeat,

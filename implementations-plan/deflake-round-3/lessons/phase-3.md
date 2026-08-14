@@ -23,9 +23,12 @@ was refuted by three runs.
 [probe] post-kill hash=#/popup liveness delta=10000 session=present
 ```
 
-The target survives, the session record survives, the wallet stays unlocked, and
-`nulo:liveness` advances by exactly `HEARTBEAT_INTERVAL_MS` — so the "fresh heartbeat"
-every post-kill gate waits for is the surviving worker's own tick.
+The session record survives, the wallet stays unlocked, and `nulo:liveness` advances by
+exactly `HEARTBEAT_INTERVAL_MS` — so the "fresh heartbeat" every post-kill gate waits for
+is the surviving worker's own tick. (The target line is the WEAKEST of the three: polling
+`browser.targets()` by URL every 200 ms could in principle miss a fast destroy/create.
+What settled it was step 3's side-by-side comparison on target IDENTITY, plus the session
+record surviving — which a genuine cold boot cannot produce under strict mode.)
 
 That explained all four results at once: test 1 locks explicitly, test 3 expects the
 unlocked outcome, test 4 only needs liveness to advance within 10s — all satisfied with
@@ -48,8 +51,11 @@ The same review killed my proposed alternative — relaunching the browser, as
 which would destroy test 3's bearer-survival premise. Worth recording: my replacement was
 wrong for a reason I had not considered, and the correct one was already documented.
 
-`stopServiceWorker` now waits for the ORIGINAL target id to disappear. Without that
-assertion the tests silently go back to passing against a worker that never died.
+`stopServiceWorker` now arms a `targetdestroyed` listener BEFORE closing and resolves only
+when the destroyed `Target` is object-identical to the one it closed — public API, no
+`_targetId` read, and immune to a fast replacement being mistaken for the original
+surviving. Without that assertion the tests silently go back to passing against a worker
+that never died.
 
 ## Step 4 — what the real kill exposed
 
@@ -63,9 +69,10 @@ ever locked it. With a genuine kill, test 2 correctly leaves the wallet locked a
 failed at their first wait. They now establish that precondition themselves.
 
 **Test 4's stopwatch measured nothing.** It started after `openPopup`, which already waits
-for the background to connect — i.e. for the very write being timed. It now starts at the
-kill, so the elapsed is an upper bound on respawn-to-liveness and can actually catch the
-`setInterval`-only regression it exists for.
+for the background to connect — i.e. for the very write being timed. It now starts once
+termination has completed and before the popup is opened, so the elapsed is an upper bound
+on respawn-to-liveness and can actually catch the `setInterval`-only regression it exists
+for.
 
 ## Step 5 — test 3's setup never happened either
 
@@ -79,10 +86,12 @@ created. Strict mode stays ON, so the silent restore the test asserts cannot occ
 It "passed" for years only because the old kill left the worker running, so nothing needed
 restoring.
 
-**Disposition:** tests 1, 2 and 4 ship un-skipped (3/3 solo green at retry=0). Test 3 stays
-skipped with the measured mechanism and the concrete fix: drive the real Settings → Security
-toggle (`strict-security-toggle`, which its own comment already calls the equivalent),
-including its confirmation dialog, and assert the flag changed before depending on it.
+**Disposition:** all four ship un-skipped. Test 3 now drives the real Settings → Security
+toggle (`strict-security-toggle`) through its confirmation dialog and ASSERTS the flag
+actually flipped before depending on it — a setup step that silently no-ops is precisely
+what made the test vacuous, so the assertion is the point. Its old justification for going
+around the UI ("independent of layout changes") bought nothing: it made the test independent
+of the behaviour it was testing.
 
 ## Still using the primitive that does not kill
 

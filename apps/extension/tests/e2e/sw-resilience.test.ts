@@ -1,8 +1,16 @@
 import { expect } from "vitest"
-import type { Page } from "puppeteer"
+import type { Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
-import { ensureUnlocked, lockWallet } from "./fixtures/helpers"
+import {
+	test,
+	openPopup,
+	waitForHash,
+	clickByTestId,
+	replaceInputValue,
+	withTimeoutMessage,
+	type ExtensionContext,
+} from "./fixtures/extension"
+import { acceptConfirmPopup, ensureUnlocked, lockWallet, navigateByHash } from "./fixtures/helpers"
 
 /** Terminate the SW and WAIT for it to be gone, approximating MV3's
  *  idle-suspend recycle.
@@ -22,25 +30,29 @@ async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
 		timeout: 15_000,
 	})
-	// biome-ignore lint/suspicious/noExplicitAny: target identity is internal, and identity is the whole point here
-	const idOf = (t: any): string => t._targetId ?? t.targetId ?? "<unknown>"
-	const doomedId = idOf(swTarget)
+
+	// Arm the destruction listener BEFORE closing: puppeteer reports the very
+	// Target object that went away, so identity is object equality rather than a
+	// private `_targetId` read, and a fast replacement cannot be mistaken for the
+	// original surviving.
+	const destroyed = new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ext.browser.off("targetdestroyed", onDestroyed)
+			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
+		}, 15_000)
+		function onDestroyed(target: Target) {
+			if (target !== swTarget) return
+			clearTimeout(timer)
+			ext.browser.off("targetdestroyed", onDestroyed)
+			resolve()
+		}
+		ext.browser.on("targetdestroyed", onDestroyed)
+	})
 
 	const worker = await swTarget.worker()
 	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
 	await worker.close()
-
-	const deadline = Date.now() + 15_000
-	for (;;) {
-		const stillThere = ext.browser
-			.targets()
-			.some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId) && idOf(t) === doomedId)
-		if (!stillThere) return
-		if (Date.now() > deadline) {
-			throw new Error(`stopServiceWorker: service-worker target ${doomedId} was still alive 15s after close()`)
-		}
-		await new Promise((r) => setTimeout(r, 100))
-	}
+	await destroyed
 }
 
 /** Post-restart readiness: chrome.storage.session RETAINS the dead worker's
@@ -74,28 +86,13 @@ async function readLiveness(page: Page): Promise<number> {
 	})
 }
 
-// These tests intend to exercise Chrome's MV3 lifecycle recycle: the idle
-// worker is killed and the next event respawns it cold, which is where storage
-// migrations, service init and cold-boot races actually break.
-//
-// SKIP — and the reason is NOT flakiness. `Runtime.terminateExecution` does not
-// kill this worker. Measured directly (deflake-round-3, `lessons/phase-3.md`):
-// after the terminate the `service_worker` target never disappears, the session
-// record survives, the wallet stays unlocked, and `nulo:liveness` advances by
-// exactly HEARTBEAT_INTERVAL_MS — i.e. the "fresh heartbeat" a post-kill gate
-// waits for is the SURVIVING worker's next tick, not evidence of a respawn.
-//
-// Consequently three of the four tests below pass without any restart having
-// happened (one locks explicitly, one expects the unlocked outcome, one only
-// asserts that liveness advances within the heartbeat interval), and the fourth
-// — the only one whose assertion REQUIRES a cold restart — fails deterministically
-// (3/3 solo runs at retry=0). Un-skipping them as they stand would add three
-// tests that cannot fail for the reason they claim to test.
-//
-// To un-skip, the kill has to be real. `migration.test.ts` already proves the
-// faithful primitive: close the browser and relaunch on the same persistent
-// `userDataDir`, which IS the crash these tests describe. That means giving
-// this file a per-test profile dir instead of the shared file-scoped browser.
+// Chrome's MV3 lifecycle recycle — the idle worker is killed, the next event
+// respawns it cold — is where storage migrations, service init and cold-boot
+// races actually break. `stopServiceWorker` above is what makes these tests
+// mean anything: an earlier version used `Runtime.terminateExecution`, which
+// leaves this worker running (measured in deflake-round-3 `lessons/phase-3.md`),
+// so every test here passed against a worker that never died and the one test
+// requiring a real restart failed.
 test("extension survives SW stop+respawn: lock → kill SW → unlock → general", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
@@ -137,7 +134,6 @@ test("extension survives SW stop+respawn: lock → kill SW → unlock → genera
  * the previous test by NOT calling `lockWallet()` — proves the lock
  * comes from strict mode, not from explicit user action.
  */
-// SKIP: same SW-respawn timing flake as the first test in this file.
 test("strict mode default ON: unlock → kill SW → expect lock screen on respawn", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	await waitForHash(page, "#/popup/general")
@@ -161,29 +157,34 @@ test("strict mode default ON: unlock → kill SW → expect lock screen on respa
 }, 90_000)
 
 /**
- * Strict-mode opt-out: when the user disables strict mode AND
- * re-unlocks, the persisted `passhash` bearer comes back. Cold-restore
- * then silently reconstructs the in-memory secret → `/popup/general`
- * (no lock screen).
+ * Strict-mode opt-out: when the user disables strict mode AND re-unlocks, the
+ * persisted bearer comes back. Cold-restore then silently reconstructs the
+ * in-memory secret → `/popup/general` (no lock screen).
  *
- * Drives the toggle through the SW console rather than the settings UI
- * to keep the test independent of layout changes (the toggle's data-testid
- * still gets covered by the manual smoke checklist).
+ * The opt-out is driven through the real Settings → Security toggle. An earlier
+ * version posted to ConfigService over `chrome.runtime.sendMessage` to stay
+ * independent of layout, but wallet services listen on PORTS — the SW's only
+ * onMessage listener returns false — so the flag never actually changed and this
+ * test asserted a silent restore that strict mode had never been turned off for
+ * (deflake-round-3 `lessons/phase-3.md`).
  */
-// SKIP: same SW-respawn timing flake as the first test in this file.
-// SKIP — measured, not suspected: this test's setup never happens. It flips
-// strictSecurityMode by posting to ConfigService over `chrome.runtime.sendMessage`
-// (below), but wallet services listen on PORTS; the SW's only onMessage listener
-// (`src/wallet/index.ts`) returns false and handles one unrelated message. A probe
-// confirmed the round trip resolves with no reply and `nulo:config` is never
-// written, so strict mode stays ON and the "silent restore" this test asserts
-// cannot occur. It passed historically only because the old kill left the worker
-// running, so nothing had to be restored.
-//
-// To un-skip: drive the real Settings → Security toggle
-// (`strict-security-toggle`, which this comment already calls the equivalent),
-// including its confirmation dialog, and assert the flag actually changed before
-// relying on it.
+// SKIP — three distinct blockers, all measured, none of them "flaky CI":
+//  1. The original setup was dead. It flipped strictSecurityMode by posting to
+//     ConfigService over `chrome.runtime.sendMessage`, but wallet services listen
+//     on PORTS: the SW's only onMessage listener (`src/wallet/index.ts`) returns
+//     false. A probe confirmed the call resolves with no reply and `nulo:config`
+//     is never written, so strict mode stayed ON and the silent restore asserted
+//     here could not occur. The test only ever "passed" because the old kill left
+//     the worker running, so nothing needed restoring.
+//  2. Driving the real Settings → Security toggle instead (below, kept for the
+//     next attempt) gets further but stalls: the page's `onBeforeMount` awaits two
+//     `configService.getValue` calls and `isLoading` never clears within 10s in
+//     this post-unlock, post-restart context, so `strict-security-toggle` never
+//     renders. That points at the config client's reconnect lifecycle after an
+//     unlock — its own investigation, not a wait to lengthen.
+//  3. Reaching settings via the nav tab additionally races the routing the unlock
+//     is still finishing; hash navigation avoids that but does not fix (2).
+// The other three tests in this file are un-skipped and green.
 test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock → kill SW → silent restore", async ({ registeredExtension }) => {
 	const page = await openPopup(registeredExtension)
 	// These tests share one browser, and the strict-mode test above now leaves the
@@ -193,17 +194,32 @@ test.skip("strict mode OFF (opt-out): unlock → toggle off → relock+unlock �
 	await ensureUnlocked(page)
 	await waitForHash(page, "#/popup/general")
 
-	// Drive the config flag from the SW console — equivalent to flipping
-	// the Settings → Security toggle. Goes through ConfigService so the
-	// onUpdate event fires (matches production semantics).
-	await page.evaluate(async () => {
-		await chrome.runtime.sendMessage({
-			to: "config",
-			from: "e2e-test",
-			type: "Request",
-			content: { method: "setValue", params: ["strictSecurityMode", false], requestId: 1 },
-		})
-	})
+	// Turn strict mode off the way a user does: the Settings → Security toggle,
+	// through its confirmation dialog. Then assert the flag actually flipped —
+	// a setup step that silently no-ops is what made this test vacuous before.
+	// Direct hash navigation, not the nav tab: clicking through the shell races
+	// the routing the unlock above is still finishing, and this test's subject is
+	// the strict-mode contract, not settings navigation.
+	await navigateByHash(page, "#/popup/settings/security")
+	await page.waitForSelector('[data-testid="strict-security-toggle"]', { visible: true, timeout: 10_000 })
+	await clickByTestId(page, "strict-security-toggle")
+	await acceptConfirmPopup(page)
+	await withTimeoutMessage(
+		page.waitForFunction(
+			() => document.querySelector('[data-testid="strict-security-toggle"]')?.getAttribute("data-toggle-active") === "false",
+			{ timeout: 10_000, polling: 200 },
+		),
+		async () => {
+			const seen = await page
+				.evaluate(
+					() =>
+						document.querySelector('[data-testid="strict-security-toggle"]')?.getAttribute("data-toggle-active") ?? "<absent>",
+				)
+				.catch(() => "<unreadable>")
+			return `strict-security-toggle never flipped off (still ${seen}) — the opt-out this test depends on did not happen`
+		},
+	)
+	await navigateByHash(page, "#/popup/general")
 
 	// Lock then unlock so the next session is opened under strict OFF — the
 	// new bearer gets persisted via SessionManager.open's gate.
