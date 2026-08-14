@@ -1,5 +1,17 @@
 # deflake-round-3 certification campaign (2026-08-14, PR #370)
 
+> **The first campaign below was INVALIDATED by its own success.** After three qualifying
+> greens, the next commit's canary run failed with `ensureUnlocked`'s diagnostic — the
+> transient window where an unlocked wallet still shows the lock screen because `app.vue`
+> routes to `/popup/auth` before bootstrap completes. The predicate handles that state; the
+> budget I had preserved (5s, inherited from a question that resolves in milliseconds) did
+> not give it time. Fixing it changed a helper the e2e suites depend on, so the three greens
+> no longer describe the merged tree, and the campaign was re-run from zero. Recorded rather
+> than quietly re-labelled: a certification that survives a change to what it certified is
+> worthless.
+
+## Campaign 1 — INVALIDATED (kept as the record)
+
 Rules: e2e-deflake Phase 6 — 3 consecutive empty-commit triggers on the frozen tree, all
 three suites green at `run_attempt=1`, zero vitest-retry markers in runtime logs, zero
 exit-86 annotations, no wrongly-skipped jobs, each run completing before the next trigger.
