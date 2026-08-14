@@ -372,6 +372,17 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
 
 ### OPEN
 
+- **`wallet-locked-mid-session` — "Expected no popup but 1 new popup target(s) appeared"
+  (`#/popup/auth`), one occurrence 2026-08-14** on deflake-round-3's campaign-2 trigger 1
+  (shard 4). The test locks the wallet mid-flow and asserts no popup opens; an auth popup
+  did. NOT in this arc's change path (it uses `lockWallet`, not the `ensureUnlocked` this
+  arc touched), and the same shard was green on the content run minutes earlier — treated
+  as a flake and re-triggered, per red→flake→rerun. **Watch:** if it recurs, the question is
+  whether the SW opens an auth popup on a mid-session lock (product) or whether the test's
+  no-popup window is simply racing the lock (test). Capture the popup's opener before
+  assuming either.
+
+
 - **Two network tests still use the primitive that does not kill.**
   `network/frozen-account-canary.test.ts` (stage 5) and
   `network/backup-restore-sw-restart.test.ts` — the latter's entire premise is a
