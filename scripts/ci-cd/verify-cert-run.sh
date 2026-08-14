@@ -9,8 +9,10 @@
 #   - no successful job's runtime log contains a vitest retry marker or an
 #     exit-86 / infra-reboot warning (a pass that consumed a retry is not a
 #     green);
-#   - the network run executed its full agent set, BY NAME, so a wrongly-skipped
-#     matrix entry cannot masquerade as a pass.
+#   - the runs executed their WORKLOAD jobs by name — the network agent set, smoke's
+#     test job, and quality's unit/lint jobs — so a suite that resolved run=false and
+#     produced a green "passed or was skipped" aggregator cannot certify with nothing
+#     having run.
 #
 # It fails CLOSED: any API call that does not return usable data is a violation,
 # never a skipped check. `set -e` is deliberately not used — the script
@@ -33,6 +35,16 @@ REQUIRED_WORKFLOWS=("Quality" "Smoke e2e" "Network e2e")
 # The exact network agent set: 5 sharded jobs + 2 heavies + the prover-ON
 # canary. Checking names rather than a count means a missing shard cannot be
 # offset by an extra job elsewhere.
+# Workload jobs that must have actually EXECUTED. Without these, a head whose
+# `decide` job resolved run=false still produces a green aggregator ("passed or
+# was skipped" is by design for unrelated changes) and would certify with no
+# tests having run at all. Certification is a claim that the suites RAN and were
+# green, so label the PR to force them rather than accepting a skip.
+declare -A REQUIRED_JOBS=(
+	["Quality"]="Unit tests / Vitest|Lint + Typecheck / Biome + vue-tsc"
+	["Smoke e2e"]="Run / Vitest + Puppeteer"
+)
+
 EXPECTED_AGENTS=(
 	"Run / shard 1/5 / Aztec agent (shard 1/5)"
 	"Run / shard 2/5 / Aztec agent (shard 2/5)"
@@ -163,6 +175,14 @@ for WF in "${REQUIRED_WORKFLOWS[@]}"; do
 			for AGENT in "${EXPECTED_AGENTS[@]}"; do
 				OK=$(jq -r --arg n "$AGENT" '[.[].jobs[]? | select(.name==$n and .conclusion=="success")] | length' "$JOBS")
 				[ "${OK:-0}" -gt 0 ] || violation "network agent job did not run green: $AGENT"
+			done
+		fi
+
+		if [ -n "${REQUIRED_JOBS[$WF]:-}" ]; then
+			IFS='|' read -r -a NEEDED <<<"${REQUIRED_JOBS[$WF]}"
+			for JOB in "${NEEDED[@]}"; do
+				OK=$(jq -r --arg n "$JOB" '[.[].jobs[]? | select(.name==$n and .status=="completed" and .conclusion=="success")] | length' "$JOBS")
+				[ "${OK:-0}" -gt 0 ] || violation "$WF's workload job did not run green: $JOB (a skipped suite is not a certified suite)"
 			done
 		fi
 	done <<<"$ROWS"
