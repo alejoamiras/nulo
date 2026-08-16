@@ -4,10 +4,16 @@ import {
 	RestoreTornError,
 	CapabilityNotGrantedError,
 	CLIENT_DISCONNECTED_MESSAGE,
+	InvalidPasswordError,
 	isClientDisconnectRejection,
 	JobCancelledError,
+	ProfileIdConflictError,
 	remoteErrorFromResponseContent,
+	RpcDisconnectedError,
+	RpcTimeoutError,
+	TooManyPendingError,
 	UserRejectedError,
+	ValidationError,
 	WalletError,
 	walletErrorFromPayload,
 } from "./errors"
@@ -85,6 +91,76 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.constructor).toBe(WalletError) // base, not a subclass
 		expect(rebuilt.code).toBe("SOME_FUTURE_CODE")
 		expect(rebuilt.message).toBe("hi")
+	})
+})
+
+describe("constructor identity ritual (owned by the WalletError base)", () => {
+	// Every subclass ctor is a pure `super(...)` call: the base assigns the frozen
+	// literal name (passed as the 4th argument — never `new.target.name`, the
+	// production minifier mangles class names) and restores `new.target.prototype`.
+	// The sweep proves the base-owned ritual covers every subclass; a future
+	// subclass that forgets the name argument degrades cosmetically to
+	// "WalletError", while `instanceof` breakage is structurally impossible.
+	const instances: Array<{ err: WalletError; ctor: new (...args: never[]) => WalletError; name: string; code: string }> = [
+		{ err: new RpcTimeoutError("t"), ctor: RpcTimeoutError, name: "RpcTimeoutError", code: RpcTimeoutError.CODE },
+		{ err: new RpcDisconnectedError("d"), ctor: RpcDisconnectedError, name: "RpcDisconnectedError", code: RpcDisconnectedError.CODE },
+		{ err: new UserRejectedError(), ctor: UserRejectedError, name: "UserRejectedError", code: UserRejectedError.CODE },
+		{ err: new JobCancelledError(), ctor: JobCancelledError, name: "JobCancelledError", code: JobCancelledError.CODE },
+		{
+			err: new CapabilityNotGrantedError("accounts"),
+			ctor: CapabilityNotGrantedError,
+			name: "CapabilityNotGrantedError",
+			code: CapabilityNotGrantedError.CODE,
+		},
+		{ err: new TooManyPendingError(), ctor: TooManyPendingError, name: "TooManyPendingError", code: TooManyPendingError.CODE },
+		{ err: new ValidationError("v"), ctor: ValidationError, name: "ValidationError", code: ValidationError.CODE },
+		{ err: new InvalidPasswordError(), ctor: InvalidPasswordError, name: "InvalidPasswordError", code: InvalidPasswordError.CODE },
+		{
+			err: new AccountAddressInconsistencyError(),
+			ctor: AccountAddressInconsistencyError,
+			name: "AccountAddressInconsistencyError",
+			code: AccountAddressInconsistencyError.CODE,
+		},
+		{ err: new RestoreTornError(), ctor: RestoreTornError, name: "RestoreTornError", code: RestoreTornError.CODE },
+		{
+			err: new ProfileIdConflictError(),
+			ctor: ProfileIdConflictError,
+			name: "ProfileIdConflictError",
+			code: ProfileIdConflictError.CODE,
+		},
+	]
+
+	test("all 11 subclasses: exact prototype, literal name, and code on direct construction", () => {
+		for (const { err, ctor, name, code } of instances) {
+			expect(Object.getPrototypeOf(err)).toBe(ctor.prototype)
+			expect(err).toBeInstanceOf(WalletError)
+			expect(err.name).toBe(name)
+			expect(err.code).toBe(code)
+		}
+	})
+
+	test("the 10 switch-covered codes round-trip to the exact subclass with name intact", () => {
+		for (const { err, ctor, name } of instances) {
+			if (ctor === TooManyPendingError) continue // see BUG PIN below
+			const rebuilt = walletErrorFromPayload(err.toPayload())
+			expect(Object.getPrototypeOf(rebuilt)).toBe(ctor.prototype)
+			expect(rebuilt.name).toBe(name)
+			expect(rebuilt.code).toBe(err.code)
+			expect(rebuilt.message).toBe(err.message)
+		}
+	})
+
+	test("(BUG PIN) TOO_MANY_PENDING reconstructs as base WalletError, not TooManyPendingError", () => {
+		// `TooManyPendingError` is absent from `KnownWalletErrorPayload` and the
+		// `walletErrorFromPayload` switch, so it falls to the default arm — a
+		// client-side `instanceof TooManyPendingError` check would not survive the
+		// wire today. Preserved verbatim (adding the arm is a behavior change);
+		// tracked as an owner follow-up in the dedup-remediation report.
+		const rebuilt = walletErrorFromPayload(new TooManyPendingError().toPayload())
+		expect(rebuilt.constructor).toBe(WalletError)
+		expect(rebuilt).not.toBeInstanceOf(TooManyPendingError)
+		expect(rebuilt.code).toBe(TooManyPendingError.CODE)
+		expect(rebuilt.message).toBe("Too many pending transactions; retry after the in-flight ones settle.")
 	})
 })
 
