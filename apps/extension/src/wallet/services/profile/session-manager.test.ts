@@ -135,6 +135,42 @@ function setupFromExistingApi(
 }
 
 describe("SessionManager", () => {
+	// (B-01 PIN) A rejecting session-storage write must NOT discard the in-memory
+	// transition — the class contract is that a broken chrome.storage write at
+	// unlock still leaves the in-memory secret usable for the SW lifetime, and
+	// symmetrically a broken write at lock must still clear it. Memory-first
+	// ordering; the write's failure is logged, not fatal.
+	describe("(B-01 PIN) persistence failure does not corrupt the in-memory transition", () => {
+		test("open(): a rejecting session.set still leaves the profile active in memory", async () => {
+			const { api, manager } = setup()
+			const profile = passwordProfile()
+			const setSpy = vi.spyOn(api.storage.session, "set").mockRejectedValueOnce(new Error("QUOTA_BYTES exceeded"))
+
+			await manager.open(profile, secretBuffer(), asPasshash(new ArrayBuffer(8)))
+
+			expect(setSpy).toHaveBeenCalled()
+			// Contract: the in-memory secret is usable despite the write failure.
+			expect(manager.isActive("pid")).toBe(true)
+			await expect(manager.getActive()).resolves.toBeDefined()
+		})
+
+		test("close(): a rejecting session.delete still clears the in-memory session", async () => {
+			const { api, manager } = setup()
+			const profile = passwordProfile()
+			await manager.open(profile, secretBuffer(), asPasshash(new ArrayBuffer(8)))
+			expect(manager.isActive("pid")).toBe(true)
+
+			vi.spyOn(api.storage.session, "remove").mockImplementationOnce(async () => {
+				throw new Error("storage remove failed")
+			})
+			await manager.close()
+
+			// Contract: the secret must NOT stay live in memory after a lock request.
+			expect(manager.isActive("pid")).toBe(false)
+			await expect(manager.getActive()).resolves.toBeUndefined()
+		})
+	})
+
 	describe("open / getActive", () => {
 		test("persists the session, caches the secret, emits onChange", async () => {
 			const { api, emits, manager } = setup()
