@@ -187,6 +187,23 @@ describe("SessionManager", () => {
 			await expect(restarted.getActive()).resolves.toBeUndefined()
 			expect(restarted.isActive("A")).toBe(false)
 		})
+
+		test("open(): storage fully down (set + delete both reject) reports failure, not a false B", async () => {
+			// When cleanup can't be CONFIRMED, open() must not report degraded
+			// success as B — it undoes the in-memory transition so the caller's
+			// post-open check surfaces the failure. (The stale prior record we
+			// couldn't delete is left on disk; that residual is unavoidable.)
+			const { api, manager } = setup()
+			await manager.open(passwordProfile("A"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
+			vi.spyOn(api.storage.session, "set").mockRejectedValueOnce(new Error("set down"))
+			vi.spyOn(api.storage.session, "remove").mockRejectedValue(new Error("remove down"))
+
+			await manager.open(passwordProfile("B"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
+
+			// This SW lifetime must NOT report B as unlocked (no false success).
+			expect(manager.isActive("B")).toBe(false)
+			expect(manager.isActive("A")).toBe(false)
+		})
 	})
 
 	describe("open / getActive", () => {

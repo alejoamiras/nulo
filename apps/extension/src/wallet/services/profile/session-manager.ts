@@ -222,9 +222,7 @@ export class SessionManager {
 			// write so a rejecting `session.set` can't discard it — the class
 			// contract is that a broken chrome.storage write at unlock still leaves
 			// the in-memory secret usable for this SW lifetime (degraded success:
-			// not persisted, but usable). A stale prior-profile bearer that survives
-			// on disk is harmless — restore() validates the bearer against the
-			// active profile on the next SW start.
+			// not persisted, but usable).
 			const secret = Fr.fromBuffer(Buffer.from(secretBuffer))
 			this.activeSession = { profile, session, secret }
 			this.onChange(this.toInfo(profile))
@@ -233,12 +231,23 @@ export class SessionManager {
 			} catch (error) {
 				this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", getErrorMessage(error))
 				// The write failed, so the persisted record is now indeterminate — it
-				// may still hold a PRIOR profile's session, which restore() would
-				// silently reactivate on the next SW start (wrong profile). Best-effort
-				// clear it so a restart yields a clean locked state (user re-unlocks)
-				// rather than resurrecting stale state. If this also fails, the storage
-				// is fully down and the stale record is unavoidable.
+				// may still hold a PRIOR profile's session that restore() would
+				// reactivate on the next SW start (wrong profile). Best-effort clear it.
 				await this.session.delete().catch(() => {})
+				// Read back: if we CANNOT confirm the record is gone (storage fully
+				// down / delete also failed), do NOT report this open as a degraded
+				// success — undo the in-memory transition so `openSessionVerified`'s
+				// post-open `isActive` check surfaces the failure to the RPC caller
+				// (no false "unlocked as B"). NOTE: a stale prior record we couldn't
+				// delete stays on disk; a restart then restores that record — but it is
+				// the user's own last durably-persisted session (or an unparseable
+				// partial write → silent-close → locked), never a secret exposure. This
+				// residual is unavoidable while storage is fully unavailable.
+				if (await this.hasPersistedSession()) {
+					this.activeSession = undefined
+					this.onChange(undefined)
+					return
+				}
 			}
 			// Schedule the proactive lock alarm AFTER state is committed.
 			// If alarm scheduling fails (port error, browser throttling),
