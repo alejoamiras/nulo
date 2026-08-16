@@ -246,6 +246,63 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		expect(await tokenService.getTokensRaw("p1", NETWORK.chainId)).toHaveLength(1)
 	})
 
+	test("(Q-01 ordering pin) a failed import journals 'failed' BEFORE the token lock releases", async () => {
+		// The catch lives INSIDE the withLock closure: a queued token op must
+		// never observe the operation mid-failure. If the catch ever moves
+		// outside the lock, the queued op below runs before the journal write
+		// and this ordering assertion reds.
+		const { tokenService, journal } = await seedHarness()
+		const events: string[] = []
+		let releaseFailed!: () => void
+		const failedGate = new Promise<void>((r) => {
+			releaseFailed = r
+		})
+		let startQueued!: () => void
+		const queuedStarted = new Promise<void>((r) => {
+			startQueued = r
+		})
+		;(journal.transitionOperation as ReturnType<typeof vi.fn>).mockImplementation(async (...args: unknown[]) => {
+			const stage = (args[1] as { stage: string }).stage
+			if (stage === "simulating") {
+				// We are UNDER the token lock now: let the test enqueue a second
+				// locked op behind us, give it a beat to reach the lock queue,
+				// then fail the import.
+				startQueued()
+				await new Promise((r) => setTimeout(r, 0))
+				throw new Error("sim boom")
+			}
+			if (stage === "failed") {
+				// The discriminator: the failed transition BLOCKS until the test
+				// releases it. With the catch inside the closure, the token lock
+				// is held through this await — the queued op below must stay
+				// blocked while the gate is closed. A catch outside the lock
+				// releases first and the mid-flight assertion reds.
+				await failedGate
+				events.push("journal:failed-complete")
+			}
+		})
+		const failing = tokenService
+			.addSeededToken({
+				profileId: "p1",
+				networkId: NETWORK.id,
+				accountAddress: "0xacc1",
+				tokenInterface: seedIface(NETWORK.chainId, CONTRACT),
+				name: "Compressed USD",
+				symbol: "cUSD",
+				decimals: 6,
+			})
+			.catch(() => {})
+		await queuedStarted
+		const queued = tokenService.restore([]).then(() => events.push("queued-op:ran"))
+		// Generous window for the queued op to (wrongly) slip in while the failed
+		// transition is still pending — it must not.
+		await new Promise((r) => setTimeout(r, 20))
+		expect(events).toEqual([])
+		releaseFailed()
+		await Promise.all([failing, queued])
+		expect(events).toEqual(["journal:failed-complete", "queued-op:ran"])
+	})
+
 	test("deleting a DEFAULT token writes the user tombstone marker", async () => {
 		const { tokenService } = await seedHarness()
 		const info = await tokenService.addSeededToken({

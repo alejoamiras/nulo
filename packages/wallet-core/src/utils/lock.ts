@@ -17,10 +17,20 @@ export class Lock {
 	}
 
 	public async enter() {
+		// INVARIANT (hardened): once enter()'s promise resolves, ownership HAS
+		// transferred — that equivalence is what withLock's leave-iff-entered
+		// contract depends on. Logging and timer-arming are best-effort: a
+		// throwing logger or setTimeout must never reject enter() (before
+		// hardening, a post-acquisition logger throw rejected enter() with the
+		// lock held and NO timer armed: stranded forever), release a lock it
+		// doesn't own, or block leave(). A swallowed setTimeout failure leaves
+		// the lock untimed — accepted: strictly better than a rejected enter()
+		// while holding. Delimitation: Date.now()/clearTimeout are assumed
+		// non-throwing platform built-ins; they are outside this guarantee.
 		const waiting = this.locked
 		const start = this.logger ? Date.now() : 0
 		if (waiting && this.logger) {
-			this.logger.log(this.name!, LogLevel.Debug, `Lock: waiting (queue: ${this.queue.length})`)
+			this.tryLog(LogLevel.Debug, `Lock: waiting (queue: ${this.queue.length})`)
 		}
 		await new Promise<void>((resolve) => {
 			this.queue.push(resolve)
@@ -29,19 +39,40 @@ export class Lock {
 		if (this.logger) {
 			const waited = Date.now() - start
 			if (waited > 50) {
-				this.logger.log(this.name!, LogLevel.Debug, `Lock: acquired (waited ${waited}ms)`)
+				this.tryLog(LogLevel.Debug, `Lock: acquired (waited ${waited}ms)`)
 			}
 			this.acquiredAt = Date.now()
 		}
-		// Safety net: force-release if holder never calls leave()
-		this.forceReleaseTimer = setTimeout(() => {
-			if (this.locked) {
-				if (this.logger) {
-					this.logger.log(this.name!, LogLevel.Error, `Lock: force-released after ${MAX_HOLD_MS}ms (holder did not call leave)`)
+		// Safety net: force-release if holder never calls leave(). Arming is
+		// best-effort under the same never-reject invariant — a throwing
+		// setTimeout must not reject enter() after ownership transferred.
+		try {
+			this.forceReleaseTimer = setTimeout(() => {
+				if (this.locked) {
+					this.tryLog(LogLevel.Error, `Lock: force-released after ${MAX_HOLD_MS}ms (holder did not call leave)`)
+					this.leave()
 				}
-				this.leave()
-			}
-		}, MAX_HOLD_MS)
+			}, MAX_HOLD_MS)
+		} catch {
+			// Swallowed by design: an unarmed safety timer is strictly better
+			// than a rejected enter() while holding the lock.
+		}
+	}
+
+	/**
+	 * Run `fn` under the lock. INVARIANT: `leave()` fires iff `enter()`
+	 * resolved, on every exit path (return, throw, early return inside `fn`) —
+	 * the contract every hand-rolled `try { enter() } finally { leave() }`
+	 * frame encoded, made unforgettable. `enter()`/`leave()` stay public for
+	 * callers that genuinely need split acquisition.
+	 */
+	public async withLock<T>(fn: () => Promise<T> | T): Promise<T> {
+		await this.enter()
+		try {
+			return await fn()
+		} finally {
+			this.leave()
+		}
 	}
 
 	public leave() {
@@ -52,12 +83,21 @@ export class Lock {
 		if (this.logger && this.acquiredAt) {
 			const held = Date.now() - this.acquiredAt
 			if (held > 100) {
-				this.logger.log(this.name!, LogLevel.Debug, `Lock: released (held ${held}ms)`)
+				this.tryLog(LogLevel.Debug, `Lock: released (held ${held}ms)`)
 			}
 			this.acquiredAt = 0
 		}
 		this.locked = false
 		this.dispatch()
+	}
+
+	/** Best-effort log: a throwing logger must never affect the mutex. */
+	private tryLog(level: LogLevel, message: string) {
+		try {
+			this.logger?.log(this.name!, level, message)
+		} catch {
+			// Swallowed by design — see the enter() invariant comment.
+		}
 	}
 
 	private dispatch() {

@@ -153,8 +153,7 @@ export async function tryCreateQueuedJournal(
 		if (!network) return undefined
 
 		// Critical section: cap check + record create must be atomic.
-		await queuedCreationLock.enter()
-		try {
+		return await queuedCreationLock.withLock(async () => {
 			const sessionQueuedCount = await journal.countOperations({
 				sessionId: session.sessionId,
 				stage: "queued",
@@ -200,9 +199,7 @@ export async function tryCreateQueuedJournal(
 				initialStage: { stage: "queued" },
 			})
 			return record.id
-		} finally {
-			queuedCreationLock.leave()
-		}
+		})
 	} catch (error) {
 		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
 		return undefined

@@ -204,14 +204,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		this.incomingPollGate = incomingPollGate
 	}
 
-	/** Run `fn` inside the service lock. Acquire → try → finally release. */
+	/** Run `fn` inside the service lock. */
 	private async withServiceLock<T>(fn: () => Promise<T>): Promise<T> {
-		await this.serviceLock.enter()
-		try {
-			return await fn()
-		} finally {
-			this.serviceLock.leave()
-		}
+		return this.serviceLock.withLock(fn)
 	}
 
 	/** Bump the lifecycle epoch — call from clear / delete paths so any

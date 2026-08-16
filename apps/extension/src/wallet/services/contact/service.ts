@@ -92,9 +92,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const id = await nextRandomId(this.storage)
 
 			const contact: Contact = {
@@ -110,18 +108,14 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 			this.emit("onContactAdded", contact)
 
 			return contact
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async updateContact(contactId: string, name?: string, address?: string): Promise<Contact> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
 			const newContact = {
@@ -136,18 +130,14 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 			this.emit("onContactUpdated", newContact)
 
 			return newContact
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteContact(contactId: string): Promise<Contact> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const contact = requireOwnedRow(await this.storage.get(contactId), profile.id, "invalid id")
 
 			this.logDebug(`Remove contact #${contact.id} - ${contact.name}`)
@@ -156,9 +146,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 			this.emit("onContactDeleted", contact)
 
 			return contact
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async exportContacts(): Promise<string> {
@@ -242,8 +230,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related contacts`)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const contacts = (await this.storage.getValues()).filter((c) => c.profileId === profileId)
 			await purgeRows(
 				contacts,
@@ -253,9 +240,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 				},
 				(contact) => this.emit("onContactDeleted", contact),
 			)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	private _getAbbreviation(name: string): string {
@@ -269,8 +254,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	public async restore(contacts: Contact[]): Promise<Restored<Contact>[]> {
 		await this.ensureInitialized()
 
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {
 				let id = contact.id
 				while (await this.storage.contains(id)) {
@@ -283,8 +267,6 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 				await this.storage.set(id, written)
 				return written
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

@@ -57,17 +57,14 @@ export class ConfigStore implements IConfigStore {
 			throw new Error(`Invalid config value for "${String(key)}": ${parsed.error.message}`)
 		}
 		const validated = parsed.data as Config[TKey]
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			if (this.config[key] === validated) {
 				return
 			}
 			this.config[key] = validated
 			this.onUpdate.invoke({ key, value: validated } as ConfigProp)
 			await this.storage.set(this.config)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async reset() {

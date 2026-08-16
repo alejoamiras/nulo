@@ -251,11 +251,14 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		cancellationToken?: string,
 		hooks?: ExecutionHooks,
 	): Promise<ExecutionResult | CapabilityResult | DiscoveryResult> {
-		let interaction: DappInteraction
-
-		try {
-			await this.lock.enter()
-
+		// Assign-out shape: the closure CREATES the interaction promise (with its
+		// cleanup chain) and returns void — returning it from the closure would
+		// make withLock await the popup's settlement, holding the lock through
+		// the whole user interaction. The lock guards only id-mint + window-open
+		// + registration, exactly as before; the caller adopts the pending
+		// promise after release.
+		let pending!: Promise<ExecutionResult | CapabilityResult | DiscoveryResult>
+		await this.lock.withLock(async () => {
 			let id: string
 			do {
 				// 16 bytes / 128 bits (codex-round-1 defense-in-depth).
@@ -270,7 +273,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				kind: type,
 			})
 
-			interaction = {
+			const interaction: DappInteraction = {
 				id,
 				payload,
 				handleId: handle.handleId,
@@ -283,12 +286,11 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 			this.storage.set(id, interaction)
 
-			return handle.promise.finally(() => {
+			pending = handle.promise.finally(() => {
 				this.storage.delete(id)
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
+		return pending
 	}
 
 	private async silentInteraction(payload: ExecutionPayload, hooks?: ExecutionHooks): Promise<ExecutionResult> {

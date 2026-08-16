@@ -169,8 +169,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	): Promise<Tx> {
 		// Under the tx lock (codex blocker): serialize the dup-check + write against
 		// restore's create-only check + the coordinator's purge (finding D).
-		await this.lock.enter()
-		try {
+		return await this.lock.withLock(async () => {
 			// D13: an execution captured {profileId, epoch} when it was authorized.
 			// If a deletion of that profile has since begun (epoch advanced) OR the
 			// owning account row is already purged/re-owned, reject — a completing
@@ -216,9 +215,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			this.emit("onTransactionAdded", tx)
 			this.pending.set(tx.hash, tx)
 			return tx
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async waitForTx(txHash: string, parentTask?: WrappedTask) {
@@ -259,8 +256,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	public async purgeForAccounts(addresses: readonly string[], profileId?: string): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
-		await this.lock.enter()
-		try {
+		await this.lock.withLock(async () => {
 			// Two profiles built from one mnemonic own the same address, so an
 			// address-only match deletes the OTHER profile's history too. When the
 			// caller knows whose rows these are, a scoped row must match that
@@ -303,9 +299,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 				},
 				(tx) => this.emit("onTransactionDeleted", tx),
 			)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	private async runWorker() {
@@ -413,8 +407,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// not hash membership: after a purge, `addTransaction` may legitimately
 		// re-create the same hash as a NEW row (ABA) — a stale poll's `has(hash)`
 		// would pass and overwrite it, while `get(hash) !== tx` cannot.
-		await this.lock.enter()
-		try {
+		await this.lock.withLock(async () => {
 			if (this.pending.get(tx.hash) !== tx && this.droppedWatch.get(tx.hash) !== tx) return
 			tx.updatedAt = Date.now()
 			tx.status = status
@@ -443,9 +436,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 				this.droppedNextCheckAt.delete(tx.hash)
 			}
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	private getTxStatus(status: AztecTxStatus): TxStatus {
@@ -516,8 +507,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 		const result: Restored<Tx>[] = []
 
-		await this.lock.enter()
-		try {
+		return await this.lock.withLock(async () => {
 			for (const tx of txs) {
 				try {
 					// D16: never restore a Pending tx. `submittedEndpointUrl` is
@@ -553,8 +543,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			}
 
 			return result
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

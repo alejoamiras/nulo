@@ -209,8 +209,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getOrInitNetworks(): Promise<Network[]> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const existing = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			if (existing.length) return existing
 
@@ -241,9 +240,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				this.nodes.set(active.chainId, this.nodeFactory.createNode(primaryEndpoint.rpcUrl))
 			}
 			return seeded
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getNetworks(chainId?: number): Promise<Network[]> {
@@ -298,16 +295,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async setActiveForProfile(profileId: string, networkId: string): Promise<string> {
 		validateParams(NetworkMethodSchemas.setActiveForProfile.params, [profileId, networkId], "setActiveForProfile")
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			// `requireOwnedRow` rejects a networkId that isn't a row of THIS profile — the id comes from
 			// an attacker-controlled backup, so it must resolve only within the profile's restored rows.
 			requireOwnedRow(await this.storage.get(networkId), profileId)
 			await this._writeActive(profileId, networkId)
 			return networkId
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	// ── Network mutations ────────────────────────────────────────────────
@@ -317,8 +311,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
 		const chainId = await this._getChainId(rpcUrl)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const existingForProfile = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			const sameChain = existingForProfile.find((n) => n.chainId === chainId)
 			if (sameChain) {
@@ -331,17 +324,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.storage.set(network.id, network)
 			this.emit("onNetworkAdded", network)
 			return network
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async renameNetwork(id: string, name: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.renameNetwork.params, [id, name], "renameNetwork")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			if (network.name === name) return network
 			const collision = (await this.storage.getValues()).find((n) => n.profileId === profile.id && n.id !== id && n.name === name)
@@ -350,17 +340,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.storage.set(id, network)
 			this.emit("onNetworkUpdated", network)
 			return network
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteNetwork(id: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.deleteNetwork.params, [id], "deleteNetwork")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			const activeId = await this._readActive(profile.id)
 			if (activeId === id) {
@@ -381,9 +368,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			this.nodes.delete(network.chainId)
 			this.emit("onNetworkDeleted", network)
 			return network
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Network ids whose delete cascade is in progress — see `isNetworkLive`. */
@@ -404,8 +389,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		validateParams(NetworkMethodSchemas.setActiveNetwork.params, [id], "setActiveNetwork")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(id), profile.id)
 			await this._writeActive(profile.id, id)
 			const primaryEndpoint = network.endpoints.find((e) => e.id === network.primaryEndpointId)
@@ -414,9 +398,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			}
 			this.emit("onActiveNetworkChanged", network)
 			return network
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	// ── Endpoint mutations ───────────────────────────────────────────────
@@ -430,8 +412,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// guarded re-read below handles the (rare) deletion race.
 		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		const probedChainId = await this._getChainId(rpcUrl, peek.kind)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (probedChainId !== network.chainId) {
 				throw new Error(
@@ -451,9 +432,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			await this.storage.set(network.id, network)
 			this.emit("onNetworkUpdated", network)
 			return endpoint
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async updateEndpoint(
@@ -473,8 +452,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		let probedChainId: number | undefined
 		// We probe regardless to keep semantics simple — chainId could have shifted on the same URL.
 		probedChainId = await this._getChainId(rpcUrl, peek.kind)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (probedChainId !== undefined && probedChainId !== network.chainId) {
 				throw new Error(
@@ -501,17 +479,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			}
 			this.emit("onNetworkUpdated", network)
 			return updated
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteEndpoint(networkId: string, endpointId: string): Promise<NetworkEndpoint> {
 		validateParams(NetworkMethodSchemas.deleteEndpoint.params, [networkId, endpointId], "deleteEndpoint")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			const idx = network.endpoints.findIndex((e) => e.id === endpointId)
 			if (idx < 0) throw new Error("Invalid endpoint id")
@@ -526,17 +501,14 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			this.transientNodes.delete(removed.rpcUrl)
 			this.emit("onNetworkUpdated", network)
 			return removed
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setPrimaryEndpoint(networkId: string, endpointId: string): Promise<Network> {
 		validateParams(NetworkMethodSchemas.setPrimaryEndpoint.params, [networkId, endpointId], "setPrimaryEndpoint")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
 			if (!network.endpoints.some((e) => e.id === endpointId)) throw new Error("Invalid endpoint id")
 			if (network.primaryEndpointId === endpointId) return network
@@ -546,9 +518,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			this.emit("onPrimaryEndpointChanged", { networkId: network.id, endpointId })
 			this.emit("onNetworkUpdated", network)
 			return network
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	// ── Status / node accessors ──────────────────────────────────────────
@@ -590,8 +560,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 
 	public async getNode(chainId: number): Promise<AztecNode> {
 		await this.ensureInitialized()
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			let node = this.nodes.get(chainId)
 			if (!node) {
 				const profile = await requireActiveProfile(this.profileService)
@@ -603,9 +572,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				this.nodes.set(chainId, node)
 			}
 			return node
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/**
@@ -736,8 +703,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async restore(networks: unknown[]): Promise<Restored<Network>[]> {
 		await this.ensureInitialized()
 		const result: Restored<Network>[] = []
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const existing = await this.storage.getValues()
 			// A collision re-roll must avoid every SOURCE id in this batch too, not
 			// just stored ids — a fresh id equal to a LATER source id would alias that
@@ -782,21 +748,16 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				}
 			}
 			return result
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	// ── Profile lifecycle ────────────────────────────────────────────────
 
 	private readonly onActiveProfileChanged = async () => {
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			this.nodes.clear()
 			this.transientNodes.clear()
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Awaited profile-scoped network purge, called by the deletion coordinator
@@ -807,8 +768,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: purge chains + remove networks`)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			this.nodes.clear()
 			this.transientNodes.clear()
 			const networks = (await this.storage.getValues()).filter((n) => n.profileId === profileId)
@@ -818,9 +778,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				this.emit("onNetworkDeleted", network)
 			}
 			await this.browserApi.storage.local.remove(activeKey(profileId))
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	// ── Internals ────────────────────────────────────────────────────────

@@ -214,57 +214,57 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			subtitle: opContext.origin === "dapp" ? `Requested by ${opContext.dappOrigin}` : "Adding token…",
 		})
 
-		let holdsLock = false
-		try {
-			await this.lock.enter()
-			holdsLock = true
-			await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
-			let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-			if (!token) {
-				const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
-				// Backfill the title with the resolved symbol so the in-flight
-				// TokenImportRow stops falling back to the short contract
-				// address. Safe to call even if the row has already vanished
-				// (setOperationMeta tolerates terminal records).
-				await this.journal.setOperationMeta(journalOp.id, { title: symbol })
-				token = {
-					id: await nextNumericId(this.tokens),
-					profileId,
-					chainId: tokenInterface.chainId,
-					contract: tokenInterface.contract,
-					name: name,
-					symbol: symbol,
-					decimals: decimals,
-					getNameFn: tokenInterface.getNameFn,
-					getSymbolFn: tokenInterface.getSymbolFn,
-					getDecimalsFn: tokenInterface.getDecimalsFn,
-					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-					transferPublicFn: tokenInterface.transferPublicFn,
-					transferPrivateFn: tokenInterface.transferPrivateFn,
-					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+		// The catch stays INSIDE the locked section: the journal's "failed"
+		// transition must complete while the token lock is held, so a queued
+		// token op can never observe the operation mid-failure (audit D3).
+		return await this.lock.withLock(async () => {
+			try {
+				await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
+				let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
+				if (!token) {
+					const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
+					// Backfill the title with the resolved symbol so the in-flight
+					// TokenImportRow stops falling back to the short contract
+					// address. Safe to call even if the row has already vanished
+					// (setOperationMeta tolerates terminal records).
+					await this.journal.setOperationMeta(journalOp.id, { title: symbol })
+					token = {
+						id: await nextNumericId(this.tokens),
+						profileId,
+						chainId: tokenInterface.chainId,
+						contract: tokenInterface.contract,
+						name: name,
+						symbol: symbol,
+						decimals: decimals,
+						getNameFn: tokenInterface.getNameFn,
+						getSymbolFn: tokenInterface.getSymbolFn,
+						getDecimalsFn: tokenInterface.getDecimalsFn,
+						balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
+						balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
+						transferPublicFn: tokenInterface.transferPublicFn,
+						transferPrivateFn: tokenInterface.transferPrivateFn,
+						transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
+						transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+					}
+					await this.tokens.set(`${token.id}`, token)
+					this.emit("onTokenAdded", getTokenInfo(token))
 				}
-				await this.tokens.set(`${token.id}`, token)
-				this.emit("onTokenAdded", getTokenInfo(token))
+				const result = getTokenInfo(token)
+				// Codex's success-boundary call: succeeded means "token added to
+				// watchlist". Balance-load is a separate phase handled by the
+				// caller (NewTokenPopup's balanceWait + TokenCard's initial-sync
+				// spinner via updatedAt === 0).
+				await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
+				return result
+			} catch (error) {
+				await this.journal.transitionOperation(
+					journalOp.id,
+					{ stage: "failed" },
+					normalizeError(error, classifyTokenImportError(error)),
+				)
+				throw error
 			}
-			const result = getTokenInfo(token)
-			// Codex's success-boundary call: succeeded means "token added to
-			// watchlist". Balance-load is a separate phase handled by the
-			// caller (NewTokenPopup's balanceWait + TokenCard's initial-sync
-			// spinner via updatedAt === 0).
-			await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
-			return result
-		} catch (error) {
-			await this.journal.transitionOperation(
-				journalOp.id,
-				{ stage: "failed" },
-				normalizeError(error, classifyTokenImportError(error)),
-			)
-			throw error
-		} finally {
-			if (holdsLock) this.lock.leave()
-		}
+		})
 	}
 
 	/** Test/SW-internal trigger for a seed pass (also driven by the unlock and
@@ -308,47 +308,45 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			subtitle: "Default token",
 		})
 
-		let holdsLock = false
-		try {
-			await this.lock.enter()
-			holdsLock = true
-			await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
-			let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-			if (!token) {
-				token = {
-					id: await nextNumericId(this.tokens),
-					profileId,
-					chainId: tokenInterface.chainId,
-					contract: tokenInterface.contract,
-					name,
-					symbol,
-					decimals,
-					getNameFn: tokenInterface.getNameFn,
-					getSymbolFn: tokenInterface.getSymbolFn,
-					getDecimalsFn: tokenInterface.getDecimalsFn,
-					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-					transferPublicFn: tokenInterface.transferPublicFn,
-					transferPrivateFn: tokenInterface.transferPrivateFn,
-					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+		// Catch stays INSIDE the locked section — see addToken (audit D3).
+		return await this.lock.withLock(async () => {
+			try {
+				await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
+				let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
+				if (!token) {
+					token = {
+						id: await nextNumericId(this.tokens),
+						profileId,
+						chainId: tokenInterface.chainId,
+						contract: tokenInterface.contract,
+						name,
+						symbol,
+						decimals,
+						getNameFn: tokenInterface.getNameFn,
+						getSymbolFn: tokenInterface.getSymbolFn,
+						getDecimalsFn: tokenInterface.getDecimalsFn,
+						balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
+						balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
+						transferPublicFn: tokenInterface.transferPublicFn,
+						transferPrivateFn: tokenInterface.transferPrivateFn,
+						transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
+						transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+					}
+					await this.tokens.set(`${token.id}`, token)
+					this.emit("onTokenAdded", getTokenInfo(token))
 				}
-				await this.tokens.set(`${token.id}`, token)
-				this.emit("onTokenAdded", getTokenInfo(token))
+				const result = getTokenInfo(token)
+				await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
+				return result
+			} catch (error) {
+				await this.journal.transitionOperation(
+					journalOp.id,
+					{ stage: "failed" },
+					normalizeError(error, classifyTokenImportError(error)),
+				)
+				throw error
 			}
-			const result = getTokenInfo(token)
-			await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
-			return result
-		} catch (error) {
-			await this.journal.transitionOperation(
-				journalOp.id,
-				{ stage: "failed" },
-				normalizeError(error, classifyTokenImportError(error)),
-			)
-			throw error
-		} finally {
-			if (holdsLock) this.lock.leave()
-		}
+		})
 	}
 
 	public async updateToken(
@@ -362,49 +360,51 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		const stepContent = new StepContent("Updating token")
 		const task = this.tasks.startNewTask(stepContent)
 
-		try {
-			await this.lock.enter()
-			const _token = await this.tokens.get(`${tokenId}`)
-			if (!_token) {
-				throw new Error("unknown token id")
+		// Catch stays INSIDE the locked section: task.fail must be recorded
+		// while the token lock is held, so a freed waiter can never run before
+		// the task reflects the failure (audit H1 — same class as addToken).
+		return await this.lock.withLock(async () => {
+			try {
+				const _token = await this.tokens.get(`${tokenId}`)
+				if (!_token) {
+					throw new Error("unknown token id")
+				}
+				if (
+					_token.profileId !== profileId ||
+					_token.chainId !== tokenInterface.chainId ||
+					_token.contract !== tokenInterface.contract
+				) {
+					throw new Error("token profile id, chain id and contract cannot change")
+				}
+				const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
+				const token: Token = {
+					id: _token.id,
+					profileId: _token.profileId,
+					chainId: _token.chainId,
+					contract: _token.contract,
+					name: name,
+					symbol: symbol,
+					decimals: decimals,
+					getNameFn: tokenInterface.getNameFn,
+					getSymbolFn: tokenInterface.getSymbolFn,
+					getDecimalsFn: tokenInterface.getDecimalsFn,
+					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
+					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
+					transferPublicFn: tokenInterface.transferPublicFn,
+					transferPrivateFn: tokenInterface.transferPrivateFn,
+					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
+					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+				}
+				await this.tokens.set(`${token.id}`, token)
+				this.emit("onTokenUpdated", getTokenInfo(token))
+				const result = getTokenInfo(token)
+				task.complete()
+				return result
+			} catch (error) {
+				task.fail(error)
+				throw error
 			}
-			if (
-				_token.profileId !== profileId ||
-				_token.chainId !== tokenInterface.chainId ||
-				_token.contract !== tokenInterface.contract
-			) {
-				throw new Error("token profile id, chain id and contract cannot change")
-			}
-			const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
-			const token: Token = {
-				id: _token.id,
-				profileId: _token.profileId,
-				chainId: _token.chainId,
-				contract: _token.contract,
-				name: name,
-				symbol: symbol,
-				decimals: decimals,
-				getNameFn: tokenInterface.getNameFn,
-				getSymbolFn: tokenInterface.getSymbolFn,
-				getDecimalsFn: tokenInterface.getDecimalsFn,
-				balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-				balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-				transferPublicFn: tokenInterface.transferPublicFn,
-				transferPrivateFn: tokenInterface.transferPrivateFn,
-				transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-				transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
-			}
-			await this.tokens.set(`${token.id}`, token)
-			this.emit("onTokenUpdated", getTokenInfo(token))
-			const result = getTokenInfo(token)
-			task.complete()
-			return result
-		} catch (error) {
-			task.fail(error)
-			throw error
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteToken(id: number): Promise<TokenInfo> {
@@ -428,8 +428,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * them). The public `deleteToken` RPC does the ownership check first.
 	 */
 	private async _deleteTokenById(id: number, emit = true): Promise<TokenInfo> {
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const token = await this.tokens.get(`${id}`)
 			if (!token) {
 				throw new Error("unknown token id")
@@ -437,9 +436,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			await this.tokens.delete(`${id}`)
 			if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
 			return getTokenInfo(token)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getTokenInterface(networkId: string, tokenId: number): Promise<TokenInterface> {
@@ -735,8 +732,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	public async restore(tokens: Token[]): Promise<Restored<Token>[]> {
 		await this.ensureInitialized()
 
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			// Shared numeric cursor across the batch: ids are one global sequence,
 			// so a single write consumes an id and the next row picks up after it.
 			let id = await nextNumericId(this.tokens)
@@ -750,9 +746,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				id++
 				return row
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }
 

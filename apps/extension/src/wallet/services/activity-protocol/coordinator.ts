@@ -101,23 +101,11 @@ export class ActivityProtocolCoordinator {
 	}
 
 	private async withScope<T>(scopeKey: string, op: () => Promise<T>): Promise<T> {
-		const lock = this.lockFor(this.scopeLocks, scopeKey)
-		await lock.enter()
-		try {
-			return await op()
-		} finally {
-			lock.leave()
-		}
+		return this.lockFor(this.scopeLocks, scopeKey).withLock(op)
 	}
 
 	private async withSource<T>(scopeKey: string, source: DurableActivitySource, op: () => Promise<T>): Promise<T> {
-		const lock = this.lockFor(this.sourceLocks, sourceRowId(scopeKey, source))
-		await lock.enter()
-		try {
-			return await op()
-		} finally {
-			lock.leave()
-		}
+		return this.lockFor(this.sourceLocks, sourceRowId(scopeKey, source)).withLock(op)
 	}
 
 	/** The scope's live incarnation, minted on first use. */
