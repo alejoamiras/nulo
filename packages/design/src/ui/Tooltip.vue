@@ -73,7 +73,10 @@ watch(
 					case "end":
 						return end - tooltipSize
 					default:
-						return start
+						// Invalid position (the runtime validator only WARNS, it doesn't
+						// block): the old inner switches fell through leaving the
+						// coordinate at its initialized 0 — preserved exactly.
+						return 0
 				}
 			}
 			const xCross = () => crossAxisOffset(triggerRect.left, triggerRect.right, triggerRect.width, tooltipRect.width)
