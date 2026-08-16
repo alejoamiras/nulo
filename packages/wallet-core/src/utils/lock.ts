@@ -17,13 +17,16 @@ export class Lock {
 	}
 
 	public async enter() {
-		// INVARIANT (hardened): enter() never rejects, and once its promise
-		// resolves, ownership HAS transferred and the force-release timer IS
-		// armed. Logging is best-effort observability — a throwing logger must
-		// never reject enter() (before hardening, a post-acquisition logger
-		// throw rejected enter() with the lock held and NO timer armed:
-		// stranded forever), release a lock it doesn't own, or block leave().
-		// withLock's leave-iff-entered contract depends on this.
+		// INVARIANT (hardened): once enter()'s promise resolves, ownership HAS
+		// transferred — that equivalence is what withLock's leave-iff-entered
+		// contract depends on. Logging and timer-arming are best-effort: a
+		// throwing logger or setTimeout must never reject enter() (before
+		// hardening, a post-acquisition logger throw rejected enter() with the
+		// lock held and NO timer armed: stranded forever), release a lock it
+		// doesn't own, or block leave(). A swallowed setTimeout failure leaves
+		// the lock untimed — accepted: strictly better than a rejected enter()
+		// while holding. Delimitation: Date.now()/clearTimeout are assumed
+		// non-throwing platform built-ins; they are outside this guarantee.
 		const waiting = this.locked
 		const start = this.logger ? Date.now() : 0
 		if (waiting && this.logger) {

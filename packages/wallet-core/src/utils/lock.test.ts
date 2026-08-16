@@ -345,6 +345,50 @@ describe("Lock", () => {
 		await Promise.all([waiter, third])
 	})
 
+	test("(HARDENING) contended >50ms wait: the acquired-log throw point is exercised and enter() still resolves", async () => {
+		// The previous characterization never advanced time past 50ms, so the
+		// post-acquisition "acquired" tryLog branch was dead in the test. This
+		// drives it: waiter waits >50ms, the acquired log throws, enter resolves.
+		vi.useFakeTimers()
+		const throwingLogger: ILogger = {
+			log: () => {
+				throw new Error("logger exploded")
+			},
+		}
+		const lock = new Lock("hardened", throwingLogger)
+		await lock.enter()
+		let waiterAcquired = false
+		const waiter = (async () => {
+			await lock.enter()
+			waiterAcquired = true
+			lock.leave()
+		})()
+		await vi.advanceTimersByTimeAsync(60) // waited > 50ms → acquired-log path
+		lock.leave()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(waiterAcquired).toBe(true)
+		await waiter
+	})
+
+	test("(HARDENING) throwing setTimeout: enter() still resolves; lock is untimed but releasable", async () => {
+		const spy = vi.spyOn(globalThis, "setTimeout").mockImplementationOnce(() => {
+			throw new Error("setTimeout exploded")
+		})
+		try {
+			const lock = new Lock()
+			await expect(lock.enter()).resolves.toBeUndefined()
+			lock.leave()
+			// Releasable: a follow-up acquire succeeds (with a normal timer).
+			let acquired = false
+			await lock.withLock(() => {
+				acquired = true
+			})
+			expect(acquired).toBe(true)
+		} finally {
+			spy.mockRestore()
+		}
+	})
+
 	test("two-deep contention: second waiter sees the first run before it", async () => {
 		const lock = new Lock()
 		const order: string[] = []
