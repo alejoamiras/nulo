@@ -1756,22 +1756,22 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 				)
 				if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 				expect(captured.length).toBeGreaterThan(0)
+				// Before the TTL, the abandoned entry is intact (not yet swept).
+				expect(captured[0]!.some((b) => b !== 0)).toBe(true)
+
 				// Abandon the restore: never finalize. Advance past the 30-min TTL, then
-				// trigger a map-touching op (a second restore of a different id) so the
-				// stale entry is swept + zeroized.
+				// do a fresh restore (a different, never-seen id — no delete needed) so
+				// the ONLY sweep trigger is the restore's own pre-stash sweep.
 				vi.advanceTimersByTime(31 * 60 * 1000)
-				const original2 = await service.createPasskeyProfile("PK2")
-				const credentialId2 = await service.getPasskeyCredentialId(original2.id)
-				await service.lockActiveProfile()
-				await service.deleteProfile(original2.id)
 				await service.restore(
 					{ id: "ignored2", name: "PK2", type: "passkey" },
-					{ type: "passkey", credentialId: asBase64CredentialId(credentialId2) },
+					{ type: "passkey", credentialId: asBase64CredentialId("cred-fresh2") },
 					undefined,
-					fakeCredentialData(credentialId2, original2.id),
+					fakeCredentialData("cred-fresh2", "fresh2"),
 				)
 
-				// The FIRST (abandoned) restore's stashed secret must now be wiped.
+				// The FIRST (abandoned) restore's stashed secret must now be wiped
+				// by the second restore's pre-stash sweep.
 				expect(captured[0]!.every((b) => b === 0)).toBe(true)
 			} finally {
 				vi.useRealTimers()
@@ -1805,6 +1805,42 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			// And it is still present + re-readable (repo.delete never ran).
 			const profiles = await service.getProfiles()
 			expect(profiles.some((p) => p.id === profile.id)).toBe(true)
+		}, 30_000)
+
+		test("a commit-AMBIGUOUS tombstone write (key landed, then rejects) RETAINS the reservation fail-closed", async () => {
+			const { api, service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+
+			const tombPrefix = "nulo:core:profile-tombstones@"
+			const realSet = api.storage.local.set.bind(api.storage.local)
+			vi.spyOn(api.storage.local, "set").mockImplementation(async (items: Record<string, unknown>) => {
+				if (Object.keys(items).some((k) => k.startsWith(tombPrefix))) {
+					// Commit-ambiguous: the write ACTUALLY lands, then the promise rejects.
+					await realSet(items)
+					throw new Error("tombstone write ack lost")
+				}
+				return realSet(items)
+			})
+
+			await expect(service.deleteProfile(profile.id)).rejects.toThrow()
+
+			// The tombstone is durable → resumePendingDeletions will finish the delete.
+			// Releasing would let an unlock race the resume, so the reservation is KEPT.
+			expect(service.getDeletionState().isReserved(profile.id)).toBe(true)
+		}, 30_000)
+	})
+
+	// (B-01 close read-back PIN) An explicit lock whose persisted-session delete
+	// fails must NOT report success — lockActiveProfile reads back and surfaces it,
+	// else the surviving bearer would silently re-unlock on the next SW start.
+	describe("(B-01 PIN) lockActiveProfile surfaces a failed persisted-session clear", () => {
+		test("a rejecting session.remove during lock makes lockActiveProfile throw", async () => {
+			const { api, service } = await makeService()
+			await service.createProfile("P", "pass1234")
+			expect((await service.getActiveProfile())?.id).toBeDefined()
+
+			vi.spyOn(api.storage.session, "remove").mockRejectedValue(new Error("session remove failed"))
+			await expect(service.lockActiveProfile()).rejects.toThrow(/did not persist/)
 		}, 30_000)
 	})
 })

@@ -169,6 +169,24 @@ describe("SessionManager", () => {
 			expect(manager.isActive("pid")).toBe(false)
 			await expect(manager.getActive()).resolves.toBeUndefined()
 		})
+
+		test("open(): a failed persist of B must not leave A restorable after a SW restart", async () => {
+			// A is persisted; opening B fails to persist. Memory reports B this SW
+			// lifetime, but a restart must NOT resurrect the stale A record — the
+			// failed write clears the persisted record so restore() finds nothing.
+			const { api, manager } = setup()
+			await manager.open(passwordProfile("A"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
+			vi.spyOn(api.storage.session, "set").mockRejectedValueOnce(new Error("QUOTA_BYTES exceeded"))
+			await manager.open(passwordProfile("B"), secretBuffer(), asPasshash(new ArrayBuffer(8)))
+			expect(manager.isActive("B")).toBe(true)
+
+			// SW restart: a fresh manager over the same storage restores from disk.
+			const { manager: restarted } = setupFromExistingApi(api)
+			await restarted.restore(async (id) => passwordProfile(id))
+			// Neither the wrongly-persisted A nor a partial B — a clean locked state.
+			await expect(restarted.getActive()).resolves.toBeUndefined()
+			expect(restarted.isActive("A")).toBe(false)
+		})
 	})
 
 	describe("open / getActive", () => {

@@ -232,6 +232,13 @@ export class SessionManager {
 				await this.session.set(session)
 			} catch (error) {
 				this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", getErrorMessage(error))
+				// The write failed, so the persisted record is now indeterminate — it
+				// may still hold a PRIOR profile's session, which restore() would
+				// silently reactivate on the next SW start (wrong profile). Best-effort
+				// clear it so a restart yields a clean locked state (user re-unlocks)
+				// rather than resurrecting stale state. If this also fails, the storage
+				// is fully down and the stale record is unavoidable.
+				await this.session.delete().catch(() => {})
 			}
 			// Schedule the proactive lock alarm AFTER state is committed.
 			// If alarm scheduling fails (port error, browser throttling),
