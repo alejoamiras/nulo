@@ -18,3 +18,22 @@ The five primitive tests are insufficient. Add real pre-/post-acquisition logger
 Outline A is preferable to B: mutex protocol belongs on `Lock`, avoids imports, and B fixes none of these semantics. File-by-file commits are review-friendly, but sequencing must separate enter-before-try sites, enter-inside-try sites, catch-before-release sites, and promise-return sites; activity’s existing domain wrappers can delegate early.
 
 **VERDICT: reject (with blocking findings: acquisition-failure parity, token catch/release ordering, and dapp-interaction promise hold).**
+---
+
+## Post-implementation diff review (fresh codex session, xhigh)
+
+Blocker: None.
+
+High: None.
+
+Medium:
+
+- [token/service.composition.test.ts:260](apps/extension/src/wallet/services/token/service.composition.test.ts:260) — The ordering pin is non-discriminating. It records `journal:failed` synchronously when the failed transition is invoked, but records the waiter only after `restore([])` fully settles. Moving the catch outside `withLock()` still produces the expected order; I reproduced this scheduling. Use a deferred failed transition and assert the queued operation cannot enter until that deferred transition completes.
+
+Low: None.
+
+The implementation itself preserves all reviewed hold windows and special recipes. All 69 sites across 15 files migrated; no production raw `enter()`/`leave()` remains; FPC, popup promise capture, `isExpired`, token catches, and wrapper/striped delegation are correct. The 12 lock tests match the plan, and no import or layer-boundary delta exists.
+
+Verdict: fix requiredNo new material findings. The gated failed transition makes the mid-flight assertion genuinely discriminating, and the commit changes only that test.
+
+converged
