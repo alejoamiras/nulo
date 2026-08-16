@@ -20,6 +20,7 @@ const { openToast } = useToast()
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -76,7 +77,7 @@ const handleCopyAddress = (target) => {
 						v-for="account in accounts"
 						@click="handleSelectAccount(account)"
 						:title="account.name"
-						:description="`${account.address.slice(0, 6)}...${account.address.slice(-4)}`"
+						:description="trimAddress(account.address, 6, 4, '...')"
 						:icon="account?.address === appStore.account?.address ? 'check-circle' : 'circle'"
 						:iconFillColor="account?.address === appStore.account?.address ? 'primary' : 'tertiary'"
 						data-testid="manage-accounts-row"

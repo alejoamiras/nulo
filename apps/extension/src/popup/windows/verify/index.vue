@@ -17,6 +17,7 @@ import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 
 type UIDappMetadata = DappMetadata & {
@@ -41,7 +42,7 @@ const signerDisplay = computed(() => {
 	const first = session.value?.accounts?.[0]
 	if (!first) return "No account"
 	const addr = first.split(":")[2] ?? ""
-	return addr.length > 10 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr
+	return trimAddress(addr, 6, 4, "...")
 })
 const signerNetwork = computed(() => {
 	if (signerAccounts.value.length === 1) {

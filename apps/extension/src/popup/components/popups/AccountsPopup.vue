@@ -9,6 +9,7 @@ const { openToast } = useToast()
 /** Store */
 import { useAppStore } from "@/stores/app.store.ts"
 import { usePopupStore } from "@/stores/popup.store.ts"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 
@@ -73,7 +74,7 @@ const handleManageAccounts = () => {
 						v-for="acc in accounts"
 						@click="handleSelectAccount(acc)"
 						:title="acc.name"
-						:description="`${acc.address.slice(0, 6)}...${acc.address.slice(-4)}`"
+						:description="trimAddress(acc.address, 6, 4, '...')"
 						:icon="account.address === acc.address ? 'check-circle' : 'circle'"
 						:iconFillColor="account.address === acc.address ? 'primary' : 'tertiary'"
 						data-testid="account-item"
@@ -137,57 +138,6 @@ const handleManageAccounts = () => {
 	text-transform: uppercase;
 
 	color: var(--txt-primary);
-}
-
-.account {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px 16px 12px 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-		border: 1px solid var(--nulo-outline);
-
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.account_name {
-	max-width: 120px;
-
-	overflow: hidden;
-	text-overflow: ellipsis;
-}
-
-.txt_button {
-	& span,
-	& svg {
-		transition: all 0.2s var(--bezier);
-	}
-
-	&:hover {
-		& span,
-		& svg {
-			color: var(--txt-secondary);
-			fill: var(--txt-secondary);
-		}
-	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
 }
 
 .icon_btn {

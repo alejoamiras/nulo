@@ -181,19 +181,4 @@ const onKeydown = (e) => {
 .wrapper {
 	padding: 0 20px 24px 20px;
 }
-
-.icon_btn {
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-
-	&.disabled {
-		pointer-events: none;
-		opacity: 0.3;
-	}
-}
 </style>
