@@ -104,11 +104,34 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * to get the same secret would be a UX regression — we cache the recovery
 	 * secret here in memory only, never persisted, cleared on SW restart.
 	 */
-	private readonly pendingRestoreSecrets = new Map<string, MasterSecretBytes>()
+	private readonly pendingRestoreSecrets = new Map<string, { secret: MasterSecretBytes; capturedAt: number }>()
 
 	/** Durable delete-in-progress markers (finding D). NOT an EntityStorage — see
 	 *  TombstoneRepository: a corrupt tombstone must still reserve its id. */
 	private readonly tombstones: TombstoneRepository
+
+	/** B-11: an abandoned backup restore (row written, never finalized/deleted)
+	 *  would otherwise park a raw master secret in `pendingRestoreSecrets` for the
+	 *  SW lifetime. Sweep entries older than this, zeroizing them, at the entry of
+	 *  every op that touches the map (restore/finalizeRestore/deleteProfile). The
+	 *  window comfortably exceeds a slow multi-service backup import; a legitimate
+	 *  import that runs longer can be expired by a later trigger — accepted. NEVER
+	 *  the id currently being finalized (finalizeRestore removes it from the map
+	 *  before its await). */
+	private static readonly PENDING_RESTORE_TTL_MS = 30 * 60 * 1000
+
+	/** Zeroize + drop stale pending-restore secrets. MUST be called under the
+	 *  facade lock (`runExclusive`) so it can't zeroize an entry another op holds
+	 *  a live reference to. Optionally skips `exceptId` (the id being finalized). */
+	private sweepStalePendingRestore(now: number, exceptId?: string): void {
+		for (const [id, entry] of this.pendingRestoreSecrets) {
+			if (id === exceptId) continue
+			if (now - entry.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
+				this.pendingRestoreSecrets.delete(id)
+				zeroize(entry.secret)
+			}
+		}
+	}
 	/** In-memory reserved-id set + per-profile deletion epoch (fencing). Seeded
 	 *  from the tombstone raw keys in `init()` BEFORE the session is restored.
 	 *  Shared (via {@link getDeletionState}) with Execution + Transaction so a
@@ -472,17 +495,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// regardless of path.
 		const recovery = await this.acquireRecovery({ ceremony: "getById", credentialId: snapshot.credentialId }, credentialData)
 
-		// F-007: bind the recovered credential to the target profile. Mirrors
-		// the existing check in exportPlain (line ~656) and restore() (~916).
-		// Without this, a popup-supplied PasskeyCredentialData for credential
-		// B could unlock profile A using a session derived from credential B's
-		// master secret — opening a session with the wrong key material.
-		if (recovery.credentialId !== snapshot.credentialId) {
-			throw new Error("Invalid profile id")
-		}
-
 		// Phase 3 — re-enter lock, revalidate credentialId, open session.
 		try {
+			// F-007 (B-10): bind the recovered credential to the target profile.
+			// Mirrors the check in exportPlain + restore(). Without it, a
+			// popup-supplied PasskeyCredentialData for credential B could unlock
+			// profile A using a session derived from credential B's master secret.
+			// The check lives INSIDE this try so the `finally` below zeroizes
+			// `recovery.secret` even when the credential mismatches (previously the
+			// throw preceded the try, leaking the recovered master secret).
+			if (recovery.credentialId !== snapshot.credentialId) {
+				throw new Error("Invalid profile id")
+			}
 			return await this.runExclusive(async () => {
 				const current = await this.repo.get(id)
 				if (!current) {
@@ -552,6 +576,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
 			await this.sessionManager.close()
+			// B-01 post-close read-back: `close()` is memory-first and swallows a
+			// storage-delete failure (so clearLockAlarm always runs), but an
+			// explicit lock that leaves the persisted bearer alive would silently
+			// re-unlock on the next SW start. Surface that here so the RPC reports a
+			// real failure instead of a false "locked".
+			if (await this.sessionManager.hasPersistedSession()) {
+				throw new Error("Lock did not persist — the session record could not be cleared; retry")
+			}
 		})
 	}
 
@@ -862,6 +894,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			throw new Error("Invalid profile id")
 		}
+		// B-01: post-open invariant. open() is memory-first, so a persistence
+		// failure degrades to in-memory success (still active). But a genuine
+		// in-memory commit failure (e.g. Fr.fromBuffer / wrap throw) would leave
+		// the session inactive while this method returned success — surface it.
+		if (!this.sessionManager.isActive(profile.id)) {
+			throw new Error("Invalid profile id")
+		}
 	}
 
 	/** The SHARED deletion state (reserved ids + per-profile epoch). Execution +
@@ -894,6 +933,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		if (!delegate) throw new Error("deletion coordinator not ready")
 
 		const { profile, epoch, snapshot } = await this.runExclusive(async () => {
+			this.sweepStalePendingRestore(Date.now())
 			const profile = await this.repo.get(id)
 			if (!profile || this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
@@ -909,7 +949,30 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const rows = await delegate.snapshot(id)
 			const snapshot = { ...rows, pxeGeneration: profile.pxeGeneration }
 			const epoch = this.deletionState.beginDeletion(id)
-			await this.tombstones.write({ profileId: id, ...snapshot, epoch })
+			// B-12: `beginDeletion` reserves the id synchronously. If the tombstone
+			// write REJECTS, the delete didn't durably happen — but the rejection is
+			// commit-ambiguous (the key may still have landed). Read back the RAW
+			// tombstone key: release the reservation ONLY when its absence is
+			// confirmed (a cleanly-failed write), so the live profile isn't wedged.
+			// If the key exists / is corrupt / the read-back throws, RETAIN
+			// fail-closed (a durable tombstone means resumePendingDeletions will
+			// finish the delete; releasing would let an unlock race the resume).
+			// The epoch bump is kept regardless — rolling it back would let a later
+			// real deletion re-mint the same epoch and un-fence a stale writer.
+			try {
+				await this.tombstones.write({ profileId: id, ...snapshot, epoch })
+			} catch (writeError) {
+				let tombstoneDurable = true
+				try {
+					tombstoneDurable = (await this.tombstones.reservedIds()).has(id)
+				} catch {
+					tombstoneDurable = true
+				}
+				if (!tombstoneDurable) {
+					this.deletionState.release(id)
+				}
+				throw writeError
+			}
 			await this.repo.delete(id)
 			// Close the session BEFORE the emit (a subscriber reacting to the emit
 			// must not observe a still-open session for a deleted profile).
@@ -919,7 +982,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const pending = this.pendingRestoreSecrets.get(id)
 			if (pending) {
 				this.pendingRestoreSecrets.delete(id)
-				zeroize(pending)
+				zeroize(pending.secret)
 			}
 			// A deleted profile's integrity records must not outlive it: a stale blocking record
 			// would keep the barrier up forever, and a stale verified-stamp could let a future
@@ -1496,7 +1559,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 						// Late activation: stash the recovery secret so finalize
 						// can open the session without re-prompting WebAuthn.
 						// The map takes ownership — DO NOT zero in finally.
-						this.pendingRestoreSecrets.set(id, recovery.secret)
+						this.sweepStalePendingRestore(Date.now(), id)
+						this.pendingRestoreSecrets.set(id, { secret: recovery.secret, capturedAt: Date.now() })
 						storedPending = true
 
 						return this.getProfileInfo(newProfile)
@@ -1542,6 +1606,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 
 		return this.runExclusive(async () => {
+			// B-11: sweep stale entries but never the id being finalized here.
+			this.sweepStalePendingRestore(Date.now(), id)
 			const profile = await this.repo.get(id)
 			if (!profile) {
 				throw new Error("Invalid profile id")
@@ -1591,17 +1657,19 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 			}
 
-			// Passkey: consume the stashed recovery secret.
+			// Passkey: consume the stashed recovery secret. Remove it from the map
+			// BEFORE the await (B-11) so no concurrent sweep can zeroize the buffer
+			// while openSessionVerified is copying it; zeroize in finally.
 			const pending = this.pendingRestoreSecrets.get(id)
 			if (!pending) {
 				throw new Error("No pending restore secret for passkey profile")
 			}
+			this.pendingRestoreSecrets.delete(id)
 			try {
-				await this.openSessionVerified(profile, pending)
+				await this.openSessionVerified(profile, pending.secret)
 				return this.getProfileInfo(profile)
 			} finally {
-				this.pendingRestoreSecrets.delete(id)
-				zeroize(pending)
+				zeroize(pending.secret)
 			}
 		})
 	}

@@ -1701,6 +1701,84 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		}, 30_000)
 	})
 
+	// (B-10 / B-11 PIN) Secret-lifetime: a recovered master secret must be
+	// zeroized on EVERY exit — including the F-007 credential-mismatch throw
+	// (B-10) — and an abandoned restore's stashed secret must not linger past a
+	// bounded TTL (B-11). We capture the fake credential's derived buffer and
+	// assert its bytes are wiped.
+	describe("(B-10 / B-11 PIN) master-secret lifetime", () => {
+		function captureDerivedSecrets(passkeys: FakePasskeyService): Uint8Array[] {
+			const captured: Uint8Array[] = []
+			const realMaterialize = passkeys.materializeCredential.bind(passkeys)
+			vi.spyOn(passkeys, "materializeCredential").mockImplementation(async (data) => {
+				const cred = await realMaterialize(data)
+				const realDerive = cred.deriveMasterSecret.bind(cred)
+				cred.deriveMasterSecret = async () => {
+					const buf = await realDerive()
+					captured.push(buf as unknown as Uint8Array)
+					return buf
+				}
+				return cred
+			})
+			return captured
+		}
+
+		test("B-10: F-007 credential mismatch zeroizes the recovered secret", async () => {
+			const { service, passkeys } = await makeService()
+			const profile = await service.createPasskeyProfile("PK")
+			await service.lockActiveProfile()
+			const captured = captureDerivedSecrets(passkeys)
+
+			const wrongCred = fakeCredentialData("cred-OTHER", profile.id)
+			await expect(service.unlockPasskeyProfile(profile.id, wrongCred)).rejects.toThrow(/Invalid profile id/)
+
+			expect(captured.length).toBeGreaterThan(0)
+			// The recovered master secret buffer must be wiped despite the mismatch throw.
+			for (const buf of captured) expect(buf.every((b) => b === 0)).toBe(true)
+		}, 30_000)
+
+		test("B-11: an abandoned restore's stashed secret is swept + zeroized after the TTL", async () => {
+			vi.useFakeTimers()
+			try {
+				const { service, passkeys } = await makeService()
+				const original = await service.createPasskeyProfile("PK")
+				const credentialId = await service.getPasskeyCredentialId(original.id)
+				await service.lockActiveProfile()
+				await service.deleteProfile(original.id)
+
+				const captured = captureDerivedSecrets(passkeys)
+				const credData = fakeCredentialData(credentialId, original.id)
+				const out = await service.restore(
+					{ id: "ignored", name: "PK", type: "passkey" },
+					{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+					undefined,
+					credData,
+				)
+				if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+				expect(captured.length).toBeGreaterThan(0)
+				// Abandon the restore: never finalize. Advance past the 30-min TTL, then
+				// trigger a map-touching op (a second restore of a different id) so the
+				// stale entry is swept + zeroized.
+				vi.advanceTimersByTime(31 * 60 * 1000)
+				const original2 = await service.createPasskeyProfile("PK2")
+				const credentialId2 = await service.getPasskeyCredentialId(original2.id)
+				await service.lockActiveProfile()
+				await service.deleteProfile(original2.id)
+				await service.restore(
+					{ id: "ignored2", name: "PK2", type: "passkey" },
+					{ type: "passkey", credentialId: asBase64CredentialId(credentialId2) },
+					undefined,
+					fakeCredentialData(credentialId2, original2.id),
+				)
+
+				// The FIRST (abandoned) restore's stashed secret must now be wiped.
+				expect(captured[0]!.every((b) => b === 0)).toBe(true)
+			} finally {
+				vi.useRealTimers()
+			}
+		}, 30_000)
+	})
+
 	// (B-12 PIN) A failed tombstone write must roll back the in-memory reservation
 	// so the still-live profile is not wedged (falsely reserved) for the rest of
 	// the SW lifetime. beginDeletion reserves synchronously BEFORE the durable
