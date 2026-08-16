@@ -45,6 +45,38 @@ class TestClient extends ServiceClient<Methods> {
 	}
 }
 
+describe("frozen transport error contract", () => {
+	// Mirror of the background transport's pin suite: same base-built VALUES
+	// (class + details), offscreen-specific wording frozen exactly.
+	type ErrorHooks = {
+		makeTimeoutError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeSendFailureError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeDisconnectError(): unknown
+	}
+	const hooks = new TestClient() as unknown as ErrorHooks
+
+	test("timeout → RpcTimeoutError with exact message + details", () => {
+		const err = hooks.makeTimeoutError({ requestId: 7, methodName: "echo", timeoutMs: 500 })
+		expect(err).toBeInstanceOf(RpcTimeoutError)
+		expect((err as RpcTimeoutError).message).toBe("Offscreen request timed out: echo")
+		expect((err as RpcTimeoutError).details).toEqual({ requestId: 7, methodName: "echo" })
+	})
+
+	test("send failure → RpcDisconnectedError with exact message + stringified cause", () => {
+		const err = hooks.makeSendFailureError({ requestId: 8, methodName: "echo", cause: new Error("gone") })
+		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as RpcDisconnectedError).message).toBe("Offscreen send failed: echo")
+		expect((err as RpcDisconnectedError).details).toEqual({ requestId: 8, methodName: "echo", cause: "Error: gone" })
+	})
+
+	test("disconnect → plain Error (NOT WalletError) with the shared teardown message", () => {
+		const err = hooks.makeDisconnectError()
+		expect(err).toBeInstanceOf(Error)
+		expect(err).not.toBeInstanceOf(WalletError)
+		expect((err as Error).message).toBe("Client disconnected")
+	})
+})
+
 /** Capture the request envelope (requestId + from-uid) from the most recent
  *  chrome.runtime.sendMessage call so we can build a matching response. */
 function getLastRequest(): { requestId: number; fromUid: string } {
