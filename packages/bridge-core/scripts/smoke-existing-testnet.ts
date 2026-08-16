@@ -22,28 +22,29 @@ import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/azt
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { runRouterDeposit } from "../src/flows"
 import { ensurePermit2Allowance } from "../src/l1"
 import { SWAP_BRIDGE_ROUTER_ABI } from "../src/router-abi"
+import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
-const configArg = process.argv.indexOf("--config")
-if (configArg === -1) throw new Error("pass --config <candidate manifest path> (e.g. apps/faucet/public/testnet-bridge.candidate.json)")
-const CONFIG = JSON.parse(readFileSync(process.argv[configArg + 1] as string, "utf8"))
+const CONFIG = loadManifestFromConfigArg(process.argv, {
+	mode: "required",
+	requiredHint: "apps/faucet/public/testnet-bridge.candidate.json",
+	// biome-ignore lint/suspicious/noExplicitAny: manifest fields are accessed via dynamic property paths without a formal schema, matching the original untyped JSON.parse.
+	parse: (raw) => raw as any,
+})
 // --private exercises the recipient-committed path (the strand-risk gate): deposit commits to
 // H(deriveTokenClaimSecret(salt, recipient)) and claim_private re-derives the secret in-circuit.
 // --redirect-proof (implies private) additionally proves the CIRCUIT binding LIVE: a wrong recipient
@@ -55,12 +56,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
-})
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
 function evmArtifact(name: string): { abi: unknown[] } {
 	return { abi: JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8")).abi }
@@ -71,14 +67,12 @@ function nargoArtifact(rel: string) {
 }
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// ─── L1 (Sepolia, viem) ──────────────────────────────────────────
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
 	console.log("L1 funder", account.address)
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
 
 	const usdc = CONFIG.l1.usdc as `0x${string}`
 	const portal = CONFIG.l1.portal as `0x${string}`
@@ -94,8 +88,8 @@ async function main() {
 	console.log(`candidate: portal ${portal} (${CONFIG.l1.portalSource ?? "legacy"}), usdc ${usdc}`)
 
 	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const secret = Fr.random()
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)

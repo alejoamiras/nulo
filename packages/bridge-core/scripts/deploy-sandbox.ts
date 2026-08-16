@@ -20,7 +20,7 @@ import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/azt
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
+import { createL1Clients, createL1PublicClient, createL2Wallet, createNode } from "./script-bootstrap"
 import { GasFees } from "@aztec/stdlib/gas"
 import { registerInitialLocalNetworkAccountsInWallet } from "@aztec/wallets/testing"
 import { TxStatus } from "@aztec/aztec.js/tx"
@@ -28,9 +28,8 @@ import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
+import { defineChain, getContract } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { runRouterDeposit } from "../src/flows"
 import { SWAP_BRIDGE_ROUTER_ABI } from "../src/router-abi"
@@ -84,7 +83,7 @@ async function nodeAddrs(): Promise<{ registry: `0x${string}`; feeJuice: `0x${st
  * advance the anchor. Mirrors apps/extension/tests/e2e/fixtures/aztec.ts:waitForL1ToL2Message.
  */
 async function waitForL1ToL2Message(
-	node: ReturnType<typeof createAztecNodeClient>,
+	node: ReturnType<typeof createNode>,
 	messageHash: string,
 	forceBlock: () => Promise<unknown>,
 	timeoutMs = 180_000,
@@ -118,12 +117,13 @@ async function waitForL1ToL2Message(
 async function main() {
 	// ─── L1 (viem) ───────────────────────────────────────────────────
 	const account = privateKeyToAccount(ACCOUNT0_KEY)
-	const wallet = createWalletClient({ account, chain: sandbox, transport: http(SANDBOX_RPC) })
-	const pub = createPublicClient({ chain: sandbox, transport: http(SANDBOX_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sandbox, rpcUrl: SANDBOX_RPC, account })
 	const { registry, feeJuice, feeJuicePortal } = await nodeAddrs()
 	console.log("registry", registry, "feeJuice", feeJuice, "feeJuicePortal", feeJuicePortal)
 
-	const permit2Code = await createPublicClient({ chain: sandbox, transport: http(SEPOLIA_RPC) }).getCode({ address: PERMIT2 })
+	// Peculiar on purpose: a sandbox-chain-tagged client over the SEPOLIA
+	// transport, used only to copy the real Permit2 bytecode down.
+	const permit2Code = await createL1PublicClient({ chain: sandbox, rpcUrl: SEPOLIA_RPC }).getCode({ address: PERMIT2 })
 	if (!permit2Code) throw new Error("no Permit2 bytecode from Sepolia")
 	await pub.request({ method: "anvil_setCode" as never, params: [PERMIT2, permit2Code] as never })
 
@@ -144,8 +144,10 @@ async function main() {
 	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
 
 	// ─── L2 (aztec.js) ───────────────────────────────────────────────
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: false } })
+	const node = createNode(NODE_URL)
+	// proverEnabled: false is the DELIBERATE sandbox-vs-live delta (local anvil
+	// dev loop, no real funds) — stated here because required param, not silent.
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: false })
 	// rc.2 --local-network: the funded test accounts are PRE-DEPLOYED at genesis; register them.
 	// (The stale getInitialTestAccountsData + createSchnorrAccount path was for the old --sandbox and
 	// fails "Failed to get a note" — the account/FPC it derives isn't the genesis-funded one.)

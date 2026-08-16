@@ -18,7 +18,6 @@ import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/azt
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
@@ -28,9 +27,8 @@ import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
 import { PRIVATE_FPC_SALT } from "../src/private-fuel"
 import { runFpcGate } from "./check-fpc-version"
 import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { type Abi, createPublicClient, createWalletClient, defineChain, http } from "viem"
+import type { Abi } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { loadContractArtifact } from "@aztec/aztec.js/abi"
 import { Gas, type GasFees } from "@aztec/stdlib/gas"
@@ -40,6 +38,7 @@ import { runSwapBridge } from "../src/flows"
 import { PRIVATE_FPC_ADDRESS, deriveBridgeSecret, privateFeeJuicePayment, privateMintAndPayFee } from "../src/private-fuel"
 import { minOutputForSlippage, quoteFuelPath } from "../src/quote"
 import { buildFuelRoute } from "../src/route"
+import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -47,12 +46,12 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY as `0x${string}` | undefined
 if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.env)")
 
 const here = dirname(fileURLToPath(import.meta.url))
-const configArg = process.argv.indexOf("--config")
-const CONFIG_PATH =
-	configArg !== -1
-		? (process.argv[configArg + 1] as string)
-		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
-const CONFIG = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
+const CONFIG = loadManifestFromConfigArg(process.argv, {
+	mode: "fallback",
+	fallbackPath: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json"),
+	// biome-ignore lint/suspicious/noExplicitAny: manifest fields are accessed via dynamic property paths without a formal schema, matching the original untyped JSON.parse.
+	parse: (raw) => raw as any,
+})
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 const fuel = CONFIG.l1.fuel
 if (!fuel) throw new Error("testnet-bridge.json has no l1.fuel - run the P2 deploy first")
@@ -60,12 +59,7 @@ const core = fuel.core
 const swap = fuel.swap
 if (!swap) throw new Error("testnet-bridge.json has no l1.fuel.swap — this swap-fuel smoke needs the swap stack")
 
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
-})
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
 function evmAbi(name: string): Abi {
 	return JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8")).abi as Abi
@@ -79,8 +73,7 @@ const FUEL_SLICE = 25n * 10n ** 16n // 0.25 AZLO ≈ ~487 FJ at the live rate (t
 const RELIABILITY_PAD = Number(process.env.RELIABILITY_PAD ?? 1.5)
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// FUND-MOVING PREFLIGHT (codex ultra-audit HIGH): this canary deposits Fee Juice
 	// and pays fees THROUGH the PrivateFPC at PRIVATE_FPC_ADDRESS — an unrecoverable
@@ -94,8 +87,7 @@ async function main() {
 	if (account.address.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
 		throw new Error(`L1 sender ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
 	}
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
 	const azlo = CONFIG.l1.usdc as `0x${string}`
 	const erc20 = evmAbi("MintableERC20")
 	console.log("L1 sender", account.address, "| AZLO", azlo, "| router", core.router)
@@ -124,8 +116,8 @@ async function main() {
 	})
 
 	// ─── L2 (fresh account, real proofs; sponsored pays ONLY the account deploy) ──
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const secret = Fr.random()
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)

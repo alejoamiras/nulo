@@ -31,22 +31,21 @@ import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/azt
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { RegistryAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
+import { type Abi, getContract, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
+import { createL1Clients, createL2Wallet, createNode, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 // Token identity — env-overridable so a token cutover (e.g. the DP7 TestUsdc) configures the
@@ -84,12 +83,7 @@ const LIVE_PATH = join(PUBLIC_DIR, "testnet-bridge.json")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "testnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "testnet-bridge.journal.jsonl")
 
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
-})
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
 function evmArtifact(name: string): { abi: unknown[]; bytecode: `0x${string}` } {
 	const j = JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8"))
@@ -137,8 +131,7 @@ function assertSame(actual: unknown, expected: unknown, label: string): void {
 }
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// ─── 0. Reviewed bytes + drift alarm ─────────────────────────────
 	// Rebuild the fork from source and assert it still matches the reviewed pins, then deploy the
@@ -171,8 +164,7 @@ async function main() {
 		throw new Error(`L1 deployer ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
 	}
 	console.log("L1 deployer", account.address)
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
 	const registry = await nodeRegistry()
 
 	// In --from-journal mode we never send L1/L2 deploys; we reuse the recorded addresses and only
@@ -255,8 +247,8 @@ async function main() {
 	const portal = await deployEvm("portal", "NuloTokenPortal", portalArt.abi, portalArt.bytecode, [])
 
 	// ─── L2 (testnet aztec.js - REAL proofs) ─────────────────────────
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	// STABLE deployer (never Fr.random()): derived from BRIDGE_DEPLOYER_SECRET_TESTNET so a crash
 	// mid-generation keeps control of the account (and any funds) — re-run with the same env resumes.
 	const { secret, salt } = resolveDeployerKeys("testnet")

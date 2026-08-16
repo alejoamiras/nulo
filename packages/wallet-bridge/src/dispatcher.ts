@@ -767,22 +767,12 @@ export class WalletSdkDispatcher {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
 
-		// Resolve the dApp-supplied account against the session's authorized
-		// list. Falls back to the first session-authorized account if args[0]
-		// isn't a valid address (lenient parsing — old SDK shapes pass the
-		// address as a raw string vs. AztecAddress instance).
+		// Resolve the dApp-supplied account through the SAME session-authorization
+		// helper sendTx/createAuthWit use — one implementation of "which account
+		// may this dApp act as", with its distinct no-accounts / empty-session /
+		// not-authorized failure messages.
 		const requestedAccount = String(args[0])
-		const network = await this.resolveNetwork(ctx)
-		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
-		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
-		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
-		if (!account) {
-			// Either the dApp passed an unknown account, or the requested
-			// account isn't in this session's authorized set. Refuse rather
-			// than silently substituting — the user granted permission for a
-			// specific subset of accounts via requestCapabilities.
-			throw new Error(`registerToken: account ${requestedAccount} is not authorized for this dApp session`)
-		}
+		const [, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedAccount)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 
 		const tokenAddress = String(args[1])
@@ -818,14 +808,9 @@ export class WalletSdkDispatcher {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
 
+		// Same shared session-authorization resolve as registerToken/sendTx.
 		const requestedAccount = String(args[0])
-		const network = await this.resolveNetwork(ctx)
-		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
-		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
-		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
-		if (!account) {
-			throw new Error(`grantPublicAuthwit: account ${requestedAccount} is not authorized for this dApp session`)
-		}
+		const [, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedAccount)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 
 		const content = args[1] as { caller: string; contract: string; method: string; args: unknown[] }
