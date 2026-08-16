@@ -145,6 +145,206 @@ describe("Lock", () => {
 		expect(() => lock.leave()).not.toThrow()
 	})
 
+	test("withLock: returns fn's value and releases (next caller enters immediately)", async () => {
+		const lock = new Lock()
+		const result = await lock.withLock(async () => 41 + 1)
+		expect(result).toBe(42)
+		let acquired = false
+		await lock.withLock(() => {
+			acquired = true
+		})
+		expect(acquired).toBe(true)
+	})
+
+	test("withLock: releases on throw and rethrows", async () => {
+		const lock = new Lock()
+		await expect(
+			lock.withLock(async () => {
+				throw new Error("boom")
+			}),
+		).rejects.toThrow("boom")
+		// Released: an uncontended follow-up acquires without waiting.
+		let acquired = false
+		await lock.withLock(() => {
+			acquired = true
+		})
+		expect(acquired).toBe(true)
+	})
+
+	test("withLock: supports a synchronous fn", async () => {
+		const lock = new Lock()
+		expect(await lock.withLock(() => "sync")).toBe("sync")
+	})
+
+	test("withLock: two concurrent sections serialize (no overlap)", async () => {
+		const lock = new Lock()
+		const events: string[] = []
+		const gate = _deferred()
+		const first = lock.withLock(async () => {
+			events.push("first-in")
+			await gate.promise
+			events.push("first-out")
+		})
+		const second = lock.withLock(async () => {
+			events.push("second-in")
+		})
+		await flush()
+		expect(events).toEqual(["first-in"]) // second must not have entered
+		gate.resolve()
+		await Promise.all([first, second])
+		expect(events).toEqual(["first-in", "first-out", "second-in"])
+	})
+
+	test("withLock: leave() is NOT called when enter() rejects (invariant pin)", async () => {
+		// enter() never rejects in the real class today; this pins the wrapper's
+		// contract so a future enter() failure mode can't leak a spurious leave()
+		// — the exact guarantee token/service.ts's holdsLock boolean hand-built.
+		class RejectingLock extends Lock {
+			public leaveCalls = 0
+			public override async enter(): Promise<void> {
+				throw new Error("enter failed")
+			}
+			public override leave(): void {
+				this.leaveCalls += 1
+				super.leave()
+			}
+		}
+		const lock = new RejectingLock()
+		await expect(lock.withLock(async () => "unreachable")).rejects.toThrow("enter failed")
+		expect(lock.leaveCalls).toBe(0)
+	})
+
+	test("withLock: synchronous throw inside fn rejects with it and releases", async () => {
+		const lock = new Lock()
+		await expect(
+			lock.withLock(() => {
+				throw new Error("sync boom")
+			}),
+		).rejects.toThrow("sync boom")
+		let acquired = false
+		await lock.withLock(() => {
+			acquired = true
+		})
+		expect(acquired).toBe(true)
+	})
+
+	test("withLock: force-release interplay is identical to a hand-rolled frame", async () => {
+		// fn outlives MAX_HOLD_MS → the safety timer force-releases → a second
+		// holder enters → fn finally completes and withLock's finally performs
+		// the same late leave() a hand-rolled finally would (releasing the
+		// second holder — the pre-existing double-release hazard, pinned as
+		// today's behavior, deliberately NOT fixed in this arc).
+		vi.useFakeTimers()
+		const lock = new Lock()
+		const gate = _deferred()
+		const events: string[] = []
+		const long = lock.withLock(async () => {
+			events.push("long-in")
+			await gate.promise
+			events.push("long-out")
+		})
+		await vi.advanceTimersByTimeAsync(0)
+		expect(events).toEqual(["long-in"])
+		vi.advanceTimersByTime(5 * 60_000 + 1) // force-release fires
+		let secondAcquired = false
+		const second = (async () => {
+			await lock.enter()
+			secondAcquired = true
+		})()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(secondAcquired).toBe(true) // second holder entered post-force-release
+		gate.resolve()
+		await long // late leave() runs — same as a hand-rolled finally would
+		await second
+		// The late leave released the second holder's lock: a third caller enters.
+		let thirdAcquired = false
+		const third = (async () => {
+			await lock.enter()
+			thirdAcquired = true
+			lock.leave()
+		})()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(thirdAcquired).toBe(true)
+		await third
+	})
+
+	test("mixed-mode FIFO: raw enter() waiters and withLock waiters keep enqueue order", async () => {
+		const lock = new Lock()
+		const order: string[] = []
+		await lock.enter()
+		const a = lock.withLock(() => {
+			order.push("a-withLock")
+		})
+		const b = (async () => {
+			await lock.enter()
+			order.push("b-raw")
+			lock.leave()
+		})()
+		const c = lock.withLock(() => {
+			order.push("c-withLock")
+		})
+		await flush()
+		lock.leave()
+		await Promise.all([a, b, c])
+		expect(order).toEqual(["a-withLock", "b-raw", "c-withLock"])
+	})
+
+	test("non-reentrancy pin: nested withLock on one lock deadlocks until force-release", async () => {
+		// Documents the invariant the services' wrappers warn about: the mutex
+		// is not reentrant; a nested acquisition waits behind the outer holder.
+		vi.useFakeTimers()
+		const lock = new Lock()
+		let innerRan = false
+		const outer = lock.withLock(async () => {
+			const inner = lock.withLock(() => {
+				innerRan = true
+			})
+			await vi.advanceTimersByTimeAsync(0)
+			expect(innerRan).toBe(false) // deadlocked behind ourselves
+			vi.advanceTimersByTime(5 * 60_000 + 1) // force-release breaks it
+			await inner
+			expect(innerRan).toBe(true)
+		})
+		await outer
+	})
+
+	test("(HARDENING) throwing logger never rejects enter(), never blocks the mutex, still arms the timer", async () => {
+		vi.useFakeTimers()
+		const throwingLogger: ILogger = {
+			log: () => {
+				throw new Error("logger exploded")
+			},
+		}
+		const lock = new Lock("hardened", throwingLogger)
+		// Post-acquisition throw point (acquired-log + timer arm): enter resolves.
+		await expect(lock.enter()).resolves.toBeUndefined()
+		// Pre-enqueue throw point (waiting-log): contended enter still enqueues and
+		// acquires after release — a throw here used to reject BEFORE enqueue,
+		// which under enter-inside-try frames released another holder's lock.
+		let waiterAcquired = false
+		const waiter = (async () => {
+			await lock.enter()
+			waiterAcquired = true
+		})()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(waiterAcquired).toBe(false)
+		lock.leave()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(waiterAcquired).toBe(true)
+		// The waiter's own force-release timer was armed despite the throwing
+		// logger: advancing time force-releases (a third caller can enter).
+		vi.advanceTimersByTime(5 * 60_000 + 1)
+		let thirdAcquired = false
+		const third = (async () => {
+			await lock.enter()
+			thirdAcquired = true
+			lock.leave()
+		})()
+		await vi.advanceTimersByTimeAsync(0)
+		expect(thirdAcquired).toBe(true)
+		await Promise.all([waiter, third])
+	})
+
 	test("two-deep contention: second waiter sees the first run before it", async () => {
 		const lock = new Lock()
 		const order: string[] = []
