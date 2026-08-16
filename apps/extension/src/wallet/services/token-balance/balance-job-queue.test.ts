@@ -135,6 +135,31 @@ describe("BalanceJobQueue", () => {
 		expect(tasks.createNewTask).toHaveBeenCalledTimes(1)
 	})
 
+	test("(B-04 PIN) a stale task id (profile switch cleared TaskService) does not jam the sync — batch still projects", async () => {
+		// enqueue mints a task + records pendingTasks[id]. A profile switch then
+		// clears TaskService's map, so the next tick's startTask(staleId) throws
+		// "Invalid task id" — which today escapes BEFORE the try/finally, dropping
+		// the whole batch AND leaving the dead pendingTasks entry so every future
+		// enqueue coalesces onto it (permanent jam). The fix mints a fresh task on
+		// that failure so the balance still projects.
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector([])
+		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		queue.enqueue(raw(42))
+		// Profile switch cleared the task map: startTask on the stale id now throws.
+		tasks.startTask.mockImplementation(() => {
+			throw new Error("Invalid task id: cleared-on-profile-switch")
+		})
+
+		await queue.tick()
+
+		// The balance must STILL have been projected (synced) despite the stale task.
+		expect(calls.length).toBeGreaterThan(0)
+		expect(calls[0]?.some((b) => b.id === 42)).toBe(true)
+	})
+
 	test("hasPendingTask / getPendingTaskId reflect the freshly-minted task (D4 causal-ack seam)", () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
