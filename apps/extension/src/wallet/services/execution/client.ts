@@ -1,14 +1,23 @@
 import type { MethodsSpec, ServiceSpec } from "@/wallet/base"
-import { ServiceClient, definePassthroughs } from "@nulo/extension-messaging/background"
+import { ServiceClient, definePassthroughsExhaustive } from "@nulo/extension-messaging/background"
 import { LoggerServiceClient } from "@/wallet/services/logger/client"
 import { EXECUTION_SERVICE_NAME, type Methods } from "./spec"
 
 export * from "./spec"
 
-/** Every client method is a pure request-passthrough — installed on the
- *  prototype by `definePassthroughs`. The list is the only per-method content;
- *  the two drift guards below keep it locked to the `Methods` surface. */
-const EXECUTION_METHODS = [
+// Declaration-merge the passthrough signatures onto the class type. Bodies are
+// installed at runtime by `definePassthroughs`; this is what satisfies
+// `implements ServiceSpec` and gives consumers full inference.
+export interface ExecutionServiceClient extends MethodsSpec<Methods> {}
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: the merged interface's methods ARE installed — at runtime by definePassthroughsExhaustive below, whose signature proves the name list covers every Methods key, so no advertised method is missing.
+export class ExecutionServiceClient extends ServiceClient<Methods> implements ServiceSpec<Methods> {
+	public constructor(name?: string) {
+		super(EXECUTION_SERVICE_NAME, new LoggerServiceClient(), name)
+	}
+}
+// Every client method is a pure request-passthrough; the installer's
+// signature checks the name list in both directions against `Methods`.
+definePassthroughsExhaustive<Methods>()(ExecutionServiceClient.prototype, [
 	"executeTransfer",
 	"executeOperations",
 	"getGasBalances",
@@ -17,25 +26,4 @@ const EXECUTION_METHODS = [
 	"estimateOperationFee",
 	"cancelJob",
 	"cancelEstimate",
-] as const satisfies readonly (keyof Methods)[]
-// Completeness: if any `Methods` key is missing from the list above, the
-// declaration-merged type would advertise a method the runtime never installs.
-// This makes the union of missing keys the required type of `true` → type error.
-type _ExecutionMethodsExhaustive =
-	Exclude<keyof Methods, (typeof EXECUTION_METHODS)[number]> extends never
-		? true
-		: Exclude<keyof Methods, (typeof EXECUTION_METHODS)[number]>
-const _executionMethodsExhaustive: _ExecutionMethodsExhaustive = true
-void _executionMethodsExhaustive
-
-// Declaration-merge the passthrough signatures onto the class type. Bodies are
-// installed at runtime by `definePassthroughs`; this is what satisfies
-// `implements ServiceSpec` and gives consumers full inference.
-export interface ExecutionServiceClient extends MethodsSpec<Methods> {}
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: the merged interface's methods ARE installed — at runtime by definePassthroughs below — and the exhaustiveness guard above proves the name list covers every Methods key, so no advertised method is missing.
-export class ExecutionServiceClient extends ServiceClient<Methods> implements ServiceSpec<Methods> {
-	public constructor(name?: string) {
-		super(EXECUTION_SERVICE_NAME, new LoggerServiceClient(), name)
-	}
-}
-definePassthroughs<Methods>(ExecutionServiceClient.prototype, EXECUTION_METHODS)
+])
