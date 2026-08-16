@@ -6,7 +6,7 @@ Remediation arc 8 (final implementation arc) of the quality audit `audit/quality
 
 - `useFeeEstimation` no longer owns a parallel state machine — one debounce/token engine exists.
 - **Zero consumer-visible change**: `send.vue` and `execute/index.vue` keep their exact destructured APIs, types, and defaults (800ms / 500ms).
-- All characterization tests (39 pre-existing + 7 new pins + 1 hardened = 46 scalar-file+keyed-file total) pass **unchanged post-refactor** (they are the behavior proof).
+- All characterization tests (39 pre-existing + 12 pins + 1 hardened = 51 total: 29 scalar + 22 keyed) pass **unchanged post-refactor**, and all 51 were verified green against the PRE-refactor implementation too — pin-equivalence in both directions.
 - The two verified seams preserved exactly:
   1. `handoff()` (scalar) stays **in-flight-inclusive** (`completedToken ?? inflight?.token ?? null`); `handoffAll()` (keyed) stays **completed-only**.
   2. `flowKey` stays keyed-only: the scalar estimator keeps its 2-arg signature; the wrapper drops the third arg.
@@ -109,7 +109,7 @@ Both composables' hand-rolled timer/counter/token machinery (~90 lines each) col
 
 1. **Pin first** (on the CURRENT implementation) — DONE, 46/46 green pre-refactor: (a) in-flight-handoff pin; (b) never-started (debounce-pending) handoff returns the token; (c) keyed ASYMMETRY PIN (`handoffAll` excludes an in-flight key; its token IS remote-cancelled on dispose); (d) supersede-after-handoff; (e) reject-after-cancel is a stale settle; (f) seed-write pin hardened (asserts the write took effect — proves the writable-Ref contract non-vacuously); (g) successful-`undefined` preservation; (h) dispose-mid-flight exactly-once remote cancel + silent late reject. (NO "completed preference" test — per key, `completed`/`inflight` never coexist; the `??` chain never arbitrates; it would pin an unreachable state.)
 2. **Engine**: create `src/composables/internal/fee-estimation-engine.ts` by extracting today's keyed machinery verbatim with record writes → sink callbacks.
-3. **Adapters**: rewrite both composables over the engine. All 27 scalar + 19 keyed tests (46 total) must pass UNCHANGED — they are the equivalence proof for both adapters AND (transitively) the engine.
+3. **Adapters**: rewrite both composables over the engine. All 29 scalar + 22 keyed tests (51 total) must pass UNCHANGED — they are the equivalence proof for both adapters AND (transitively) the engine.
 4. Gates: `bun run audit:vue`; armed smoke (`VITE_NULO_E2E_MIGRATION_FIXTURE=1 bun run build` → `NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e`).
 5. Final fresh-context codex pass on plan+ledger (mid tier step 5), then implement, then the single codex xhigh pass over the complete arc diff → fix → converged → PR → merge.
 
