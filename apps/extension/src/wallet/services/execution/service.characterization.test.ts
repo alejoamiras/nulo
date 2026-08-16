@@ -79,8 +79,16 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 		const claimOrCreateJournal = vi.fn(async () => ({ journalId: "job-1", controller: new AbortController() }))
 		const beginJournal = vi.fn(async () => "job-1")
 		const proveAndSendCtxs: unknown[] = []
+		// Deferred prove: the slot must stay held until the prove PROMISE SETTLES,
+		// not merely until proveAndSend is invoked — a `p = prove(); release();
+		// return await p` regression would release early and must fail this pin.
+		let resolveProve!: () => void
+		const proveGate = new Promise<void>((r) => {
+			resolveProve = r
+		})
 		const proveAndSend = vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
 			proveAndSendCtxs.push(ctx)
+			await proveGate
 			await ctx.recordTransaction("0xhash")
 			return { txHash: { toString: () => "0xhash" } }
 		})
@@ -127,7 +135,7 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			logDebug: () => {},
 		})
 
-		const result = await executor.executeSendTransaction(
+		const pending = executor.executeSendTransaction(
 			{
 				kind: "send_transaction",
 				networkId: "net-1",
@@ -138,15 +146,22 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			{ type: OriginType.DAPP, name: "test" } as never,
 		)
 
+		// Let the slot be acquired + prove entered, then confirm the slot is STILL
+		// HELD while the prove promise is pending (release must not race the tx out).
+		await vi.waitFor(() => expect(proveAndSend).toHaveBeenCalledTimes(1))
+		expect(acquireSlot).toHaveBeenCalledTimes(1)
+		expect(releaseSlot).not.toHaveBeenCalled()
+
+		resolveProve()
+		const result = await pending
+
 		expect(result).toBe("0xhash")
 		// THE FIX: the slot is acquired, the journal claimed via the scaffold (not
-		// the old un-slotted beginJournal), and the slot released on success.
-		expect(acquireSlot).toHaveBeenCalledTimes(1)
+		// the old un-slotted beginJournal), and the slot released only AFTER the
+		// prove promise settled.
 		expect(claimOrCreateJournal).toHaveBeenCalledTimes(1)
 		expect(beginJournal).not.toHaveBeenCalled()
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
-		// The slot must WRAP the work: acquire before prove, release AFTER prove —
-		// releasing early would let a successor op interleave against the same PXE.
 		const acquireOrder = acquireSlot.mock.invocationCallOrder[0]!
 		const proveOrder = proveAndSend.mock.invocationCallOrder[0]!
 		const releaseOrder = releaseSlot.mock.invocationCallOrder[0]!
