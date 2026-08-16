@@ -189,7 +189,7 @@ describe("IncomingTrustPopup — contract verification surface", () => {
 		await flushPromises()
 
 		expect(writeText).toHaveBeenCalled()
-		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "warning" }))
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ icon: "warning" }), undefined)
 	})
 
 	test("state reset on close: open → expand → close → reopen reads collapsed", async () => {

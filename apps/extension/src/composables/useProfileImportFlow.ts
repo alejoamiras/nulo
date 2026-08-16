@@ -4,6 +4,7 @@ import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileNameField } from "@/composables/useProfileNameField"
 import { pickFile } from "@/utils"
+import { copyToClipboard } from "@/utils/clipboard"
 import { managers } from "@/utils/core"
 
 /**
@@ -85,8 +86,10 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	const isCopied = ref(false)
 	function handleCopyError() {
 		isCopied.value = true
-		window.navigator.clipboard.writeText(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`)
-		opts.openToast({ label: "Error is copied", icon: "copy" })
+		void copyToClipboard(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`, opts.openToast, {
+			success: { label: "Error is copied" },
+			failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+		})
 		setTimeout(() => {
 			isCopied.value = false
 		}, 1_500)

@@ -1,4 +1,4 @@
-import { stripWireControl } from "@/wallet/services/dapp-session/capability-meta"
+import { copyToClipboard } from "@/utils/clipboard"
 
 type ToastFn = (toast: { label: string; icon: string }, duration?: number) => void
 
@@ -10,12 +10,9 @@ type ToastFn = (toast: { label: string; icon: string }, duration?: number) => vo
  */
 export async function copyAddressToClipboard(address: string | null | undefined, openToast: ToastFn): Promise<boolean> {
 	if (!address) return false
-	try {
-		await window.navigator.clipboard.writeText(stripWireControl(address))
-	} catch {
-		openToast({ label: "Couldn't copy address", icon: "warning" }, 3_000)
-		return false
-	}
-	openToast({ label: "Address is copied", icon: "copy" })
-	return true
+	return copyToClipboard(address, openToast, {
+		success: { label: "Address is copied", icon: "copy" },
+		failure: { label: "Couldn't copy address", icon: "warning", duration: 3_000 },
+		sanitize: true,
+	})
 }

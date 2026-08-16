@@ -29,7 +29,7 @@ describe("copyAddressToClipboard", () => {
 
 		expect(ok).toBe(true)
 		expect(writeText).toHaveBeenCalledWith(ADDRESS)
-		expect(openToast).toHaveBeenCalledWith({ label: "Address is copied", icon: "copy" })
+		expect(openToast).toHaveBeenCalledWith({ label: "Address is copied", icon: "copy" }, undefined)
 		expect(order).toEqual([`write:${ADDRESS}`, "toast"])
 	})
 

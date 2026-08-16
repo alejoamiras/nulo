@@ -32,6 +32,7 @@ import { usePopupStore } from "@/stores/popup.store"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyToClipboard } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
@@ -74,12 +75,10 @@ function toggleExpanded() {
 async function handleCopy() {
 	const value = contractFull.value
 	if (!value) return
-	try {
-		await navigator.clipboard.writeText(value)
-		openToast({ label: "Contract address copied", icon: "copy" }, 1500)
-	} catch {
-		openToast({ label: "Couldn't copy address", icon: "warning" })
-	}
+	await copyToClipboard(value, openToast, {
+		success: { label: "Contract address copied", duration: 1_500 },
+		failure: { label: "Couldn't copy address", icon: "warning" },
+	})
 }
 
 async function handleAllow() {

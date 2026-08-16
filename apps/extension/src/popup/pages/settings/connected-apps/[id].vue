@@ -33,6 +33,7 @@ import { formatSessionExpiry, parseSessionParams } from "@/popup/components/modu
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { copyToClipboard } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const cacheStore = useCacheStore()
@@ -130,8 +131,10 @@ const handleDropSession = () => {
 }
 
 const handleCopyAddress = (target) => {
-	window.navigator.clipboard.writeText(target)
-	openToast({ label: "Address is copied", icon: "copy" })
+	void copyToClipboard(target, openToast, {
+		success: { label: "Address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 
 const getAccountAlias = (acc) => {
