@@ -43,11 +43,11 @@ Post-dual-audit consolidation. The dueling outlines (A: additive `handoff(key)` 
 Genuinely private: the auto-import `dirs` scan (`apps/extension/vite.config.ts:143`) is non-recursive, so nothing under `internal/` is auto-importable — explicit imports only. Pure TS, zero Vue imports (unit-testable without an effect scope; the composables own `onScopeDispose`).
 
 ```ts
-export interface FeeEstimationEngineOptions<TKey extends string | number, TParams> {
+export interface FeeEstimationEngineOptions<TKey extends string | number, TParams, TResult> {
   /** The RPC leg. Receives the raw key — adapters mint flowKeys etc. themselves. */
-  run: (params: TParams, estimateToken: string, key: TKey) => Promise<unknown>
+  run: (params: TParams, estimateToken: string, key: TKey) => Promise<TResult>
   debounceMs: number // required — each composable supplies its own documented default
-  onResult: (key: TKey, result: unknown) => void   // null clears; adapters own the refs
+  onResult: (key: TKey, result: TResult | null) => void // null clears; adapters own the refs
   onEstimating: (key: TKey, estimating: boolean) => void
   onError?: (key: TKey, err: unknown) => void
   cancelRemote?: (estimateToken: string) => void
@@ -67,7 +67,7 @@ export interface FeeEstimationEngine<TKey extends string | number, TParams> {
 
 The engine owns `timers`/`counters`/`inflight`/`completed`/`handedOff`/`disposed` and every transition (the exact bodies of today's keyed `schedule`/`cancel`/`cancelOwnedRemoteFor`/`dispose`, with record writes replaced by `onResult`/`onEstimating` callbacks — invoked at the same points, synchronously). Both handoff operations are ATOMIC engine members (token selection + `handedOff` marking in one call) — the invariant is never split across layers, which was the fatal flaw of a bare `peek()`.
 
-Generics note: the engine is `TParams`-generic but result-`unknown` — the composables own `TResult` typing at their unchanged public boundaries; the engine never inspects results. This keeps the engine free of a third type parameter that would buy nothing (internal helper, looser types are fine per the repo's boundary policy).
+Generics note: the engine carries a `TResult` generic that type-couples `run`'s `Promise<TResult>` to `onResult(key, TResult | null)` — it never inspects results, but the coupling makes a future engine edit that passes the wrong value to `onResult` a compile error instead of a silent `unknown` flow, and removes the casts each adapter's sink would otherwise need. (Reversed from an earlier `unknown` decision — ledger L6.)
 
 ### `useFeeEstimationMap` — thin adapter, public API BYTE-IDENTICAL
 
@@ -94,6 +94,7 @@ Both composables' hand-rolled timer/counter/token machinery (~90 lines each) col
 - D-keyed-1: `handoffAll()` completed-only, return shape unchanged. PINNED (asymmetry pin).
 - D-keyed-2: `rearm()`/`cancelAll()`/`instanceId`/flowKey minting keyed-only (F7); scalar API unchanged.
 - D-keyed-3: keyed `estimate` keeps its 3-arg signature + real flowKey (flowKey format `op:${instanceId}:${key}` byte-identical — pinned by existing keyed test).
+- D-order-1: sink invocation ORDER matches today's write order exactly — `schedule`: clear result BEFORE estimating-true; `cancel`: result-null BEFORE estimating-false; error path: `onError` fires BEFORE the finally flips estimating false (an `onError` handler observes `isEstimating === true`). Intermediate order is observable via `flush: 'sync'` watchers and inside the `onError` callback — verbatim-extraction is the mechanism, this item is the check.
 
 ## Rejected outlines (full trail)
 
@@ -105,7 +106,7 @@ Both composables' hand-rolled timer/counter/token machinery (~90 lines each) col
 
 1. **Pin first** (on the CURRENT implementation) — DONE, 46/46 green pre-refactor: (a) in-flight-handoff pin; (b) never-started (debounce-pending) handoff returns the token; (c) keyed ASYMMETRY PIN (`handoffAll` excludes an in-flight key; its token IS remote-cancelled on dispose); (d) supersede-after-handoff; (e) reject-after-cancel is a stale settle; (f) seed-write pin hardened (asserts the write took effect — proves the writable-Ref contract non-vacuously); (g) successful-`undefined` preservation; (h) dispose-mid-flight exactly-once remote cancel + silent late reject. (NO "completed preference" test — per key, `completed`/`inflight` never coexist; the `??` chain never arbitrates; it would pin an unreachable state.)
 2. **Engine**: create `src/composables/internal/fee-estimation-engine.ts` by extracting today's keyed machinery verbatim with record writes → sink callbacks.
-3. **Adapters**: rewrite both composables over the engine. All 46 scalar + 19 keyed tests must pass UNCHANGED — they are the equivalence proof for both adapters AND (transitively) the engine.
+3. **Adapters**: rewrite both composables over the engine. All 27 scalar + 19 keyed tests (46 total) must pass UNCHANGED — they are the equivalence proof for both adapters AND (transitively) the engine.
 4. Gates: `bun run audit:vue`; armed smoke (`VITE_NULO_E2E_MIGRATION_FIXTURE=1 bun run build` → `NULO_E2E_MIGRATION_FIXTURE=1 bun run test:e2e`).
 5. Final fresh-context codex pass on plan+ledger (mid tier step 5), then implement, then the single codex xhigh pass over the complete arc diff → fix → converged → PR → merge.
 
@@ -121,11 +122,12 @@ No trust boundary moves. The handoff/handedOff mechanism is a resource-lifecycle
 
 ## Decision ledger
 
+- L0 — Fable round-2 verdict on C: conditional approve; explicitly WITHDRAWS its round-1 A endorsement ("C dominates both A and B"; Middle Man objection does not apply — adapter over a hidden engine ≠ Middle Man). Conditions C1 (sink-order D-item) + C2 (count fix) applied; C3 recommendation adopted (see L6). **Status: cross-model agreement reached on C.**
 - L1 — **Shape C (state-sink engine) adopted over both original outlines.** The dual audit SPLIT: Fable confirmed A ("handoff(key) is a real, documentable per-key operation; B is a Middle Man"); codex REJECTED A (misuse-hazard member on the multi-op surface; writable-computed + `?? null` patches; extra RNG) and proposed C. Main-agent resolution: codex's objections to A are defects C removes STRUCTURALLY (plain refs, no coercion, no scalar RNG, keyed API untouched), while Fable's objections to B (Middle Man; peek splitting the handoff invariant) do NOT apply to C — the composables keep real responsibilities and both handoff operations are atomic engine members. C also matches verified/Q-03's own refined recommendation ("private unexported keyed engine; scalar as a thin wrapper with one fixed sentinel key") more literally than A did. **Status: adopted; cross-checked with the Fable auditor (resumed) + final fresh codex pass.**
 - L2 — Sentinel is `const SINGLE_SLOT = 0` (numeric, module-const). With the engine `TKey`-generic and never stringifying keys (flowKey minting moved out), the string-vs-number choice is inert; `0` keeps the adapter one line. **Status: settled.**
 - L3 — Pin-first ordering per the verified finding. **Status: executed — 8 pins across two commits, 46/46 green pre-refactor.**
 - L4 — (superseded by C) Writable computeds were the A-shape patch for the writable-Ref contract; C keeps plain refs, preserving the contract structurally. The HARDENED seed-write pin (assert-write-took-effect) stays — it guards any future regression to readonly refs. **Status: superseded, pin retained.**
 - L5 — No "completed preference" handoff test (Fable M2 + codex agree): per-key `completed`/`inflight` never coexist — unreachable state. **Status: adopted.**
-- L6 — Engine result type is `unknown`, not a third generic: the engine never inspects results; `TResult` typing lives at the composables' unchanged public boundaries (repo policy: precise types at package boundaries, looser internals). **Status: settled.**
+- L6 — REVERSED (Fable round-2 C3): the engine takes a `TResult` generic coupling `run` to `onResult`. The original `unknown` rationale ("buys nothing") was wrong — the generic buys exactly the run→sink coupling, turns a wrong-value sink call into a compile error, and deletes per-adapter casts. **Status: reversed, generic adopted.**
 - L7 — No RNG-call-count pin (codex asked, Fable found no semantic effect): Math.random consumption is not public contract; pinning it would forbid unrelated future internals for no consumer-visible reason. C makes the point moot (no RNG in the scalar path). Documented here instead of pinned. **Status: settled (deviation from one codex ask, with rationale).**
 - L8 — Codex's extra keyed tests for A's `handoff(key)` (key isolation, refire-after-handoff, rearm interaction) are dropped WITH A — no new keyed public member exists under C. The keyed suite stays unchanged; the supersede-after-handoff + rearm behaviors remain covered at the scalar level and by existing keyed tests. **Status: settled.**
