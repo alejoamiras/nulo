@@ -41,7 +41,7 @@ import { usePrices } from "@/composables/usePrices"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
-import { copyToClipboard } from "@/utils/clipboard"
+import { copyReceivedValue } from "./received-copy"
 import { trimAddress } from "@/utils/string"
 import { receivedLabel, resolveFromDisplay, resolveReceivedType } from "@/utils/received-display"
 import { getTransactionExplorerUrl, BLOCK_EXPLORERS } from "@/wallet/constants/explorers"
@@ -138,10 +138,7 @@ const formattedFeeUsd = computed(() => (feeJuiceRaw.value ? feeToUsd(BigInt(feeJ
 
 /** Handlers */
 const copy = async (value, label) => {
-	await copyToClipboard(value, openToast, {
-		success: { label: `${label} copied`, duration: 2_000 },
-		failure: { label: "Copy failed", icon: "alert", duration: 2_000 },
-	})
+	await copyReceivedValue(value, label, openToast)
 }
 
 /** Lifecycle */
