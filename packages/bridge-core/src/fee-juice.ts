@@ -51,7 +51,7 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 		// emits `Method not found: <m>` with code -32601 and the client rethrows it
 		// verbatim with `cause = response.error`. A bare "not found" (e.g. "block
 		// not found") is a transient error and MUST propagate.
-		const code = (e as { cause?: { code?: number } }).cause?.code
+		const code = (e as { cause?: { code?: number } } | null | undefined)?.cause?.code
 		const msg = e instanceof Error ? e.message : String(e)
 		if (code === -32601 || /method not found/i.test(msg)) return node.getCurrentMinFees()
 		throw e

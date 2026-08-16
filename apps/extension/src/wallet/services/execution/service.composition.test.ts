@@ -330,6 +330,32 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
 		held2.release()
 	}, 15_000)
+
+	// (B-02 forwarding-seam PIN) executeOperations must thread `hooks` (incl.
+	// originKey) all the way to DappSendExecutor.executeSendTransaction for the
+	// send_transaction kind — otherwise grants collapse into the __no_origin__
+	// slot bucket. The DappSendExecutor unit test injects hooks directly, so it
+	// can't catch a dropped forward at either ExecutionService hop.
+	test("send_transaction forwards hooks.originKey through executeOperations → executeSendTransaction → DappSendExecutor", async () => {
+		const { service } = await makeHarness()
+		const dse = (service as unknown as { dappSendExecutor: { executeSendTransaction: (...a: unknown[]) => Promise<string> } })
+			.dappSendExecutor
+		const spy = vi.spyOn(dse, "executeSendTransaction").mockResolvedValue("0xhash")
+
+		const sendTxOp = {
+			kind: "send_transaction",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", contract: "0xc", method: "m", args: [] }],
+		} as never
+		const origin = { type: OriginType.DAPP, name: "dapp" } as never
+		await service.executeOperations([sendTxOp], origin, undefined, { originKey: "https://dapp.example" } as never)
+
+		// 5th positional arg of DappSendExecutor.executeSendTransaction is `hooks`.
+		const hooks = spy.mock.calls[0]?.[4] as { originKey?: string } | undefined
+		expect(hooks?.originKey).toBe("https://dapp.example")
+	}, 15_000)
 })
 
 describe("ExecutionService composition — profile-switch gas-cache invalidation (D12)", () => {

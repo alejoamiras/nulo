@@ -79,6 +79,11 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 		const claimOrCreateJournal = vi.fn(async () => ({ journalId: "job-1", controller: new AbortController() }))
 		const beginJournal = vi.fn(async () => "job-1")
 		const proveAndSendCtxs: unknown[] = []
+		const proveAndSend = vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
+			proveAndSendCtxs.push(ctx)
+			await ctx.recordTransaction("0xhash")
+			return { txHash: { toString: () => "0xhash" } }
+		})
 		const account = { address: { toString: () => "0xacc" } }
 		const gasSettings = {
 			gasLimits: { daGas: 1, l2Gas: 2 },
@@ -89,13 +94,7 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 			planner: {} as never,
 			estimateWithDiscovery: {} as never,
 			txBuilder: {} as never,
-			coordinator: {
-				proveAndSend: vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
-					proveAndSendCtxs.push(ctx)
-					await ctx.recordTransaction("0xhash")
-					return { txHash: { toString: () => "0xhash" } }
-				}),
-			} as never,
+			coordinator: { proveAndSend } as never,
 			lane: {
 				registerController: vi.fn(),
 				deleteController: vi.fn(),
@@ -146,6 +145,13 @@ describe("slot-for-executeSendTransaction (B-02 fix)", () => {
 		expect(claimOrCreateJournal).toHaveBeenCalledTimes(1)
 		expect(beginJournal).not.toHaveBeenCalled()
 		expect(releaseSlot).toHaveBeenCalledTimes(1)
+		// The slot must WRAP the work: acquire before prove, release AFTER prove —
+		// releasing early would let a successor op interleave against the same PXE.
+		const acquireOrder = acquireSlot.mock.invocationCallOrder[0]!
+		const proveOrder = proveAndSend.mock.invocationCallOrder[0]!
+		const releaseOrder = releaseSlot.mock.invocationCallOrder[0]!
+		expect(acquireOrder).toBeLessThan(proveOrder)
+		expect(proveOrder).toBeLessThan(releaseOrder)
 		// Scopes passed to the tail: exactly [account.address] (R1-H1 executable scope assertion).
 		expect((proveAndSendCtxs[0] as { scopes: unknown[] }).scopes).toEqual([account.address])
 	})
