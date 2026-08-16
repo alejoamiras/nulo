@@ -12,6 +12,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyToClipboard } from "@/utils/clipboard"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
@@ -133,8 +134,10 @@ const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.valu
 const isAggregatePartial = computed(() => aggregate.value.priced < aggregate.value.holdings)
 
 const handleCopy = (value, label) => {
-	window.navigator.clipboard.writeText(value)
-	openToast({ label: `${label} is copied`, icon: "copy" })
+	void copyToClipboard(value, openToast, {
+		success: { label: `${label} is copied` },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 const handleTokenBalanceClick = async () => {
 	let balance = totalTokenBalance.value?.value

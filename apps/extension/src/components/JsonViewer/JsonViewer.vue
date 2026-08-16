@@ -14,6 +14,9 @@ import { indentationMarkers } from "@replit/codemirror-indentation-markers"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
+/** Utils */
+import { copyToClipboard } from "@/utils/clipboard"
+
 /** Services */
 import { customViewerTheme } from "./theme.js"
 
@@ -72,9 +75,10 @@ const isCopied = ref(false)
 const handleCopy = () => {
 	isCopied.value = true
 
-	window.navigator.clipboard.writeText(JSON.stringify(props.data))
-
-	openToast({ label: "Data is copied", icon: "copy" })
+	void copyToClipboard(JSON.stringify(props.data), openToast, {
+		success: { label: "Data is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 
 	setTimeout(() => {
 		isCopied.value = false

@@ -3,6 +3,7 @@
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Utils */
+import { copyToClipboard } from "@/utils/clipboard"
 import { isValidHex } from "@/utils/string"
 
 /** Composables */
@@ -144,8 +145,10 @@ const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
 const handleCopyAddress = () => {
-	window.navigator.clipboard.writeText(fpcToEdit.value.address)
-	openToast({ label: "FPC's address is copied", icon: "copy" })
+	void copyToClipboard(fpcToEdit.value.address, openToast, {
+		success: { label: "FPC's address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 
 watch(

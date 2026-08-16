@@ -26,9 +26,10 @@
  * peer: `AddressDisplay.vue`.
  */
 import { onMounted } from "vue"
+import { copyToClipboard } from "@/utils/clipboard"
 import { managers } from "@/utils/core"
 import { trimAddress } from "@/utils/string"
-import { sanitizeWireString, stripWireControl } from "@/wallet/services/dapp-session/capability-meta"
+import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 
 const props = defineProps<{ address: string }>()
 
@@ -49,8 +50,11 @@ function handleClick() {
 	// The user sees a trimmed display and expects to copy the full value; the
 	// strip step keeps an attacker from injecting bidi-overrides etc. into
 	// what the user pastes. (codex post-impl §3)
-	window.navigator.clipboard.writeText(stripWireControl(props.address))
-	openToast({ label: "Address is copied", icon: "copy" })
+	void copyToClipboard(props.address, openToast, {
+		success: { label: "Address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+		sanitize: true,
+	})
 }
 </script>
 

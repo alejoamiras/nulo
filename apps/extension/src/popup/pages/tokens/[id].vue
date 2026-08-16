@@ -25,6 +25,9 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 import { useToast } from "@/composables/toast.js"
 const { openToast } = useToast()
 
+/** Utils */
+import { copyToClipboard } from "@/utils/clipboard"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
@@ -99,8 +102,10 @@ watch(
 const handleRefreshBalance = () => scheduleRefresh()
 
 const handleCopy = (value, label) => {
-	window.navigator.clipboard.writeText(value)
-	openToast({ label: `${label} is copied`, icon: "copy" })
+	void copyToClipboard(value, openToast, {
+		success: { label: `${label} is copied` },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 
 const handleDeleteToken = () => {
