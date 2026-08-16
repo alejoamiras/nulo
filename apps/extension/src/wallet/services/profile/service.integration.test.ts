@@ -1700,4 +1700,33 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(await restarted.getActiveProfile()).toBeUndefined()
 		}, 30_000)
 	})
+
+	// (B-12 PIN) A failed tombstone write must roll back the in-memory reservation
+	// so the still-live profile is not wedged (falsely reserved) for the rest of
+	// the SW lifetime. beginDeletion reserves synchronously BEFORE the durable
+	// tombstone write; if that write rejects, repo.delete never runs, so the
+	// profile is still present and must stay unlockable.
+	describe("(B-12 PIN) failed tombstone write does not wedge the live profile", () => {
+		test("a rejecting tombstone write releases the reservation and leaves the profile usable", async () => {
+			const { api, service } = await makeService()
+			const profile = await service.createProfile("P", "pass1234")
+
+			const tombPrefix = "nulo:core:profile-tombstones@"
+			const realSet = api.storage.local.set.bind(api.storage.local)
+			vi.spyOn(api.storage.local, "set").mockImplementation(async (items: Record<string, unknown>) => {
+				if (Object.keys(items).some((k) => k.startsWith(tombPrefix))) {
+					throw new Error("tombstone write failed")
+				}
+				return realSet(items)
+			})
+
+			await expect(service.deleteProfile(profile.id)).rejects.toThrow()
+
+			// The delete did not durably happen — the profile must NOT be wedged.
+			expect(service.getDeletionState().isReserved(profile.id)).toBe(false)
+			// And it is still present + re-readable (repo.delete never ran).
+			const profiles = await service.getProfiles()
+			expect(profiles.some((p) => p.id === profile.id)).toBe(true)
+		}, 30_000)
+	})
 })
