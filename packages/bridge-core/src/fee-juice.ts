@@ -44,10 +44,16 @@ export async function predictedWorstMinFees(node: MinFeeNode): Promise<GasFees> 
 		// an argless call defaults the node to Target, which under-prices the cap under rising congestion.
 		predicted = await node.getPredictedMinFees(ManaUsageEstimate.Limit)
 	} catch (e) {
-		// Only fall back for old nodes that don't implement the method — NOT for transient RPC errors,
-		// which must propagate (a silent fallback to current-min would under-price the inclusion-safe cap).
+		// Only fall back for old nodes that don't IMPLEMENT the method — NOT for
+		// transient RPC errors (a silent fallback to current-min would under-price
+		// the inclusion-safe cap → the tx can be rejected for insufficient fee).
+		// Mirror BaseWallet's method-missing predicate: Aztec's JSON-RPC server
+		// emits `Method not found: <m>` with code -32601 and the client rethrows it
+		// verbatim with `cause = response.error`. A bare "not found" (e.g. "block
+		// not found") is a transient error and MUST propagate.
+		const code = (e as { cause?: { code?: number } }).cause?.code
 		const msg = e instanceof Error ? e.message : String(e)
-		if (/not found|not supported|unknown method|unimplemented|method.*not/i.test(msg)) return node.getCurrentMinFees()
+		if (code === -32601 || /method not found/i.test(msg)) return node.getCurrentMinFees()
 		throw e
 	}
 	if (!predicted || predicted.length === 0) return node.getCurrentMinFees()

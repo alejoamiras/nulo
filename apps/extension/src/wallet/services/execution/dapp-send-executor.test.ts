@@ -184,8 +184,21 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		const result = await executor.executeSendTransaction(op, ORIGIN)
 
 		expect(result).toBe("0xhash")
-		// Fifth arg: the authorization-time fence (none captured in this harness).
-		expect(deps.lane.beginJournal).toHaveBeenCalledWith("net-1", "0xacct", ORIGIN, [{ method: "dapp_method" }], undefined)
+		// B-02: send_transaction now takes the execution slot + journal scaffold
+		// (runInSlot) like the other two dApp-send paths — claimOrCreateJournal, NOT
+		// the old un-slotted beginJournal. Args: (networkId, account, origin, calls,
+		// hooks, preController, fence) — all undefined tail in this harness.
+		expect(deps.lane.acquireSlot).toHaveBeenCalledTimes(1)
+		expect(deps.lane.claimOrCreateJournal).toHaveBeenCalledWith(
+			"net-1",
+			"0xacct",
+			ORIGIN,
+			[{ method: "dapp_method" }],
+			undefined,
+			undefined,
+			undefined,
+		)
+		expect(deps.lane.beginJournal).not.toHaveBeenCalled()
 		expect(deps.lane.markJournal).toHaveBeenCalledWith("j1", { stage: "simulating" })
 		const ctx = (proveAndSend.mock.calls[0] as unknown[])[0] as { scopes: unknown[] }
 		expect(ctx.scopes).toEqual([built.account.address])
@@ -195,6 +208,23 @@ describe("DappSendExecutor.executeSendTransaction", () => {
 		expect(txArgs[3]).toBe(built.txCalls)
 		expect(txArgs[4]).toBe("42")
 		expect(deps.lane.deleteController).toHaveBeenCalledWith("j1")
+	})
+
+	test("(B-02 PIN) forwards hooks.originKey to acquireSlot so the slot buckets per-origin", async () => {
+		const { executor, deps } = makeHarness()
+		const op = {
+			kind: "send_transaction",
+			networkId: "net-1",
+			accountAddress: "0xacct",
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", contract: "0xc", method: "dapp_method", args: [] }],
+		} as never
+		await executor.executeSendTransaction(op, ORIGIN, undefined, undefined, { originKey: "https://dapp.example" } as never)
+
+		// acquireSlot(networkId, queuedJournalId, onExecutionEnqueued, originKey) —
+		// the originKey (4th arg) must be the dApp's, not the __no_origin__ default.
+		const call = (deps.lane.acquireSlot as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(call[3]).toBe("https://dapp.example")
 	})
 
 	test("records the SUBMITTING network's primary endpoint URL (C3 recording-site pin)", async () => {

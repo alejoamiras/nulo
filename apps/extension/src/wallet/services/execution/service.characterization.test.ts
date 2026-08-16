@@ -65,14 +65,19 @@ describe("cancelJob: journal-first ordering contract", () => {
 	})
 })
 
-// ── R1-M2 named pin: no-slot-for-executeSendTransaction ────────────────
+// ── B-02: slot-for-executeSendTransaction (was: no-slot bug pin) ────────
 
-describe("no-slot-for-executeSendTransaction (bug pin)", () => {
-	test("executeSendTransaction acquires ZERO execution-lane slots — preserve verbatim; do NOT harmonize", async () => {
-		// The flow now lives on DappSendExecutor; the lane interface carries
-		// acquireSlot for the aztec_sendTx paths, so the pin asserts this
-		// path never calls it even though it CAN.
-		const acquireSpy = vi.fn()
+describe("slot-for-executeSendTransaction (B-02 fix)", () => {
+	test("executeSendTransaction NOW takes an execution-lane slot and releases it", async () => {
+		// B-02: this path previously bypassed the ExecutionMutex, letting two
+		// concurrent send_transaction ops interleave simulate/prove against the
+		// same PXE + account. It now runs through the shared runInSlot scaffold
+		// like the other two dApp-send paths — acquireSlot + release, and
+		// claimOrCreateJournal instead of the old un-slotted beginJournal.
+		const releaseSlot = vi.fn()
+		const acquireSlot = vi.fn(async () => ({ release: releaseSlot, preController: undefined }))
+		const claimOrCreateJournal = vi.fn(async () => ({ journalId: "job-1", controller: new AbortController() }))
+		const beginJournal = vi.fn(async () => "job-1")
 		const proveAndSendCtxs: unknown[] = []
 		const account = { address: { toString: () => "0xacc" } }
 		const gasSettings = {
@@ -94,10 +99,9 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 			lane: {
 				registerController: vi.fn(),
 				deleteController: vi.fn(),
-				// The quirk under pin: the slot must never be touched on this path.
-				acquireSlot: acquireSpy as never,
-				claimOrCreateJournal: acquireSpy as never,
-				beginJournal: vi.fn(async () => "job-1"),
+				acquireSlot: acquireSlot as never,
+				claimOrCreateJournal: claimOrCreateJournal as never,
+				beginJournal: beginJournal as never,
 				markJournal: vi.fn(async () => {}),
 			},
 			buildAndEstimateValidated: vi.fn(async () => ({
@@ -136,8 +140,12 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 		)
 
 		expect(result).toBe("0xhash")
-		// THE PIN: zero lane/slot interaction on this path.
-		expect(acquireSpy).not.toHaveBeenCalled()
+		// THE FIX: the slot is acquired, the journal claimed via the scaffold (not
+		// the old un-slotted beginJournal), and the slot released on success.
+		expect(acquireSlot).toHaveBeenCalledTimes(1)
+		expect(claimOrCreateJournal).toHaveBeenCalledTimes(1)
+		expect(beginJournal).not.toHaveBeenCalled()
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
 		// Scopes passed to the tail: exactly [account.address] (R1-H1 executable scope assertion).
 		expect((proveAndSendCtxs[0] as { scopes: unknown[] }).scopes).toEqual([account.address])
 	})

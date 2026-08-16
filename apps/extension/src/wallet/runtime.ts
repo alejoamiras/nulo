@@ -248,6 +248,13 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// operation-time mismatch sink (the address-freeze runtime guard).
 		services.add(new AccountIntegrityCoordinator(logger, browserApi))
 
+		// B-03: capture the journal boot cutoff BEFORE services start. Service RPC
+		// handlers (including journal-creating ones) go live during `services.start()`,
+		// so a popup request replayed mid-startup can create an operation before the
+		// reaper's boot sweep runs. Anchoring the cutoff here means every op created
+		// in THIS SW lifetime has `createdAt >= journalBootCutoff` and is protected
+		// from the aggressive sweep.
+		const journalBootCutoff = Date.now()
 		await services.start()
 		logger.log("wallet", LogLevel.Info, "Services started")
 
@@ -264,7 +271,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// `failed` with kind=`stuck_proving`/`stale_on_resume`. Closes the
 		// "popup waits forever on a lost prove" failure mode.
 		const journalService = services.get(OperationJournalService.name) as OperationJournalService
-		reaper = new JournalReaper(journalService, browserApi.alarms, logger)
+		reaper = new JournalReaper(journalService, browserApi.alarms, logger, undefined, journalBootCutoff)
 		reaper.start().catch((error) => logger.log("wallet", LogLevel.Error, "JournalReaper start failed", getErrorMessage(error)))
 
 		// Bundle 1 (Phase 2+) terminal-record GC. Disjoint from the reaper:

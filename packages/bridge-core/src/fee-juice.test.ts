@@ -50,6 +50,22 @@ describe("fee-juice", () => {
 			await expect(predictedWorstMinFees(n)).resolves.toBeInstanceOf(GasFees)
 			expect(box.currentCalls).toBe(1)
 		})
+
+		test("a JSON-RPC -32601 (via error.cause.code) falls back even without the phrase", async () => {
+			const box = { currentCalls: 0 }
+			const err = Object.assign(new Error("rpc error"), { cause: { code: -32601 } })
+			const n: MinFeeNode = {
+				getPredictedMinFees: async () => {
+					throw err
+				},
+				getCurrentMinFees: async () => {
+					box.currentCalls++
+					return new GasFees(1n, 1n)
+				},
+			}
+			await expect(predictedWorstMinFees(n)).resolves.toBeInstanceOf(GasFees)
+			expect(box.currentCalls).toBe(1)
+		})
 	})
 	test("feeJuiceAddress is the canonical protocol Fee Juice address", () => {
 		expect(feeJuiceAddress).toMatch(/^0x[0-9a-f]{64}$/)
