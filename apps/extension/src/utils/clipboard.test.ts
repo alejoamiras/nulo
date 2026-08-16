@@ -16,9 +16,16 @@ const OPTS = {
 }
 
 describe("copyToClipboard", () => {
-	test("writeText is invoked synchronously as the first effect (gesture transience)", () => {
-		void copyToClipboard("abc", openToast, OPTS)
-		expect(writeText).toHaveBeenCalledWith("abc") // before any microtask ran
+	test("writeText is invoked synchronously as the first effect; NO toast before the write settles", async () => {
+		let resolveWrite!: () => void
+		writeText.mockReturnValue(new Promise<void>((r) => (resolveWrite = r)))
+		const result = copyToClipboard("abc", openToast, OPTS)
+		expect(writeText).toHaveBeenCalledWith("abc") // synchronously, before any microtask
+		await Promise.resolve()
+		expect(openToast).not.toHaveBeenCalled() // a premature success toast would fail here
+		resolveWrite()
+		await result
+		expect(openToast).toHaveBeenCalledWith({ label: "Copied!", icon: "copy" }, undefined)
 	})
 
 	test("success: success spec's label/icon/duration only after the write resolves", async () => {

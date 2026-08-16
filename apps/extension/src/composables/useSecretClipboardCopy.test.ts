@@ -22,9 +22,16 @@ afterEach(() => {
 })
 
 describe("useSecretClipboardCopy", () => {
-	test("copySecret writes the exact value synchronously (first effect, in-gesture)", () => {
+	test("copySecret writes the exact value synchronously; NO toast before the write settles", async () => {
+		let resolveWrite!: () => void
+		writeText.mockReturnValue(new Promise<void>((r) => (resolveWrite = r)))
 		make().copySecret("seed words here")
-		expect(writeText).toHaveBeenCalledWith("seed words here")
+		expect(writeText).toHaveBeenCalledWith("seed words here") // synchronously, in-gesture
+		await Promise.resolve()
+		expect(openToast).not.toHaveBeenCalled() // premature success toast would fail here
+		resolveWrite()
+		await flush()
+		expect(openToast).toHaveBeenCalledWith({ label: "Key is copied", icon: "copy" })
 	})
 
 	test("success: toast carries the configured label after the write settles", async () => {

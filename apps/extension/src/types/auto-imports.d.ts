@@ -45,6 +45,7 @@ declare global {
   const computeMaxFee: typeof import('../utils/fee-estimation').computeMaxFee
   const computed: typeof import('vue').computed
   const confirmationPolicies: typeof import('../utils/confirmation-policies').confirmationPolicies
+  const copyToClipboard: typeof import('../utils/clipboard').copyToClipboard
   const createApp: typeof import('vue').createApp
   const customRef: typeof import('vue').customRef
   const debounce: typeof import('../utils/general').debounce
@@ -204,6 +205,7 @@ declare global {
   const useProfileNameField: typeof import('../composables/useProfileNameField').useProfileNameField
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
+  const useSecretClipboardCopy: typeof import('../composables/useSecretClipboardCopy').useSecretClipboardCopy
   const useSecretCountdown: typeof import('../composables/useSecretCountdown').useSecretCountdown
   const useSlots: typeof import('vue').useSlots
   const useSyncedRef: typeof import('../composables/syncedRef.js').useSyncedRef
@@ -291,6 +293,9 @@ declare global {
   export type { FormatBaseUnitsOpts } from '../utils/amount'
   import('../utils/amount')
   // @ts-ignore
+  export type { CopyToastSpec } from '../utils/clipboard'
+  import('../utils/clipboard')
+  // @ts-ignore
   export type { ConfirmationPolicy } from '../utils/confirmation-policies'
   import('../utils/confirmation-policies')
   // @ts-ignore
@@ -370,6 +375,7 @@ declare module 'vue' {
     readonly computeMaxFee: UnwrapRef<typeof import('../utils/fee-estimation')['computeMaxFee']>
     readonly computed: UnwrapRef<typeof import('vue')['computed']>
     readonly confirmationPolicies: UnwrapRef<typeof import('../utils/confirmation-policies')['confirmationPolicies']>
+    readonly copyToClipboard: UnwrapRef<typeof import('../utils/clipboard')['copyToClipboard']>
     readonly createApp: UnwrapRef<typeof import('vue')['createApp']>
     readonly customRef: UnwrapRef<typeof import('vue')['customRef']>
     readonly debounce: UnwrapRef<typeof import('../utils/general')['debounce']>
@@ -528,6 +534,7 @@ declare module 'vue' {
     readonly useProfileNameField: UnwrapRef<typeof import('../composables/useProfileNameField')['useProfileNameField']>
     readonly useRoute: UnwrapRef<typeof import('vue-router')['useRoute']>
     readonly useRouter: UnwrapRef<typeof import('vue-router')['useRouter']>
+    readonly useSecretClipboardCopy: UnwrapRef<typeof import('../composables/useSecretClipboardCopy')['useSecretClipboardCopy']>
     readonly useSecretCountdown: UnwrapRef<typeof import('../composables/useSecretCountdown')['useSecretCountdown']>
     readonly useSlots: UnwrapRef<typeof import('vue')['useSlots']>
     readonly useSyncedRef: UnwrapRef<typeof import('../composables/syncedRef.js')['useSyncedRef']>
