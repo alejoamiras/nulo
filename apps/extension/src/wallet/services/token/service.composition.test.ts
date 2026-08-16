@@ -253,6 +253,10 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		// and this ordering assertion reds.
 		const { tokenService, journal } = await seedHarness()
 		const events: string[] = []
+		let releaseFailed!: () => void
+		const failedGate = new Promise<void>((r) => {
+			releaseFailed = r
+		})
 		let startQueued!: () => void
 		const queuedStarted = new Promise<void>((r) => {
 			startQueued = r
@@ -267,7 +271,15 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				await new Promise((r) => setTimeout(r, 0))
 				throw new Error("sim boom")
 			}
-			events.push(`journal:${stage}`)
+			if (stage === "failed") {
+				// The discriminator: the failed transition BLOCKS until the test
+				// releases it. With the catch inside the closure, the token lock
+				// is held through this await — the queued op below must stay
+				// blocked while the gate is closed. A catch outside the lock
+				// releases first and the mid-flight assertion reds.
+				await failedGate
+				events.push("journal:failed-complete")
+			}
 		})
 		const failing = tokenService
 			.addSeededToken({
@@ -282,8 +294,13 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 			.catch(() => {})
 		await queuedStarted
 		const queued = tokenService.restore([]).then(() => events.push("queued-op:ran"))
+		// Generous window for the queued op to (wrongly) slip in while the failed
+		// transition is still pending — it must not.
+		await new Promise((r) => setTimeout(r, 20))
+		expect(events).toEqual([])
+		releaseFailed()
 		await Promise.all([failing, queued])
-		expect(events).toEqual(["journal:failed", "queued-op:ran"])
+		expect(events).toEqual(["journal:failed-complete", "queued-op:ran"])
 	})
 
 	test("deleting a DEFAULT token writes the user tombstone marker", async () => {
