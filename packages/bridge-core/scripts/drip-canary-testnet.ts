@@ -22,6 +22,7 @@ import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { DripperContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Dripper.js"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import { stopwatch } from "./script-bootstrap"
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 // The faucet UI's NULO drip (constants/tokens.ts): 1,000 NULO at 6 decimals.
@@ -47,8 +48,7 @@ const deployments = JSON.parse(readFileSync(deploymentsPath, "utf8")) as {
 
 async function main() {
 	console.log(`drip canary config: ${deploymentsPath}`)
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	const node = createAztecNodeClient(NODE_URL)
 	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })

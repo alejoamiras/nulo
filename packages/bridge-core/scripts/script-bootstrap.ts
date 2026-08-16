@@ -13,13 +13,14 @@ import { readFileSync } from "node:fs"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import {
+	type Account,
 	type Chain,
 	createPublicClient,
 	createWalletClient,
 	defineChain,
 	http,
-	type PrivateKeyAccount,
 	type PublicClient,
+	type Transport,
 	type WalletClient,
 } from "viem"
 
@@ -44,12 +45,26 @@ export function mainnetChain(rpcUrl: string): Chain {
 }
 
 /** L1 wallet + public client pair. Construction order (wallet first) matches
- *  every conductor's original sequence. */
-export function createL1Clients(opts: { chain: Chain; rpcUrl: string; account: PrivateKeyAccount }): {
-	wallet: WalletClient
-	pub: PublicClient
+ *  every conductor's original sequence. Generic over chain + account so viem's
+ *  literal narrowing survives — `writeContract`/`deployContract` keep their
+ *  optional chain/account params at every call site, no casts needed. */
+export function createL1Clients<TChain extends Chain, TAccount extends Account>(opts: {
+	chain: TChain
+	rpcUrl: string
+	account: TAccount
+}): {
+	wallet: WalletClient<Transport, TChain, TAccount>
+	pub: PublicClient<Transport, TChain>
 } {
-	const wallet = createWalletClient({ account: opts.account, chain: opts.chain, transport: http(opts.rpcUrl) })
+	// One contained cast: viem's createWalletClient widens the account through
+	// parseAccount, so its inferred client type doesn't re-narrow to TAccount —
+	// the runtime value IS the caller's account. Centralizing the narrow here
+	// is the whole point (it replaced nine per-script casts).
+	const wallet = createWalletClient({
+		account: opts.account,
+		chain: opts.chain,
+		transport: http(opts.rpcUrl),
+	}) as unknown as WalletClient<Transport, TChain, TAccount>
 	const pub = createPublicClient({ chain: opts.chain, transport: http(opts.rpcUrl) })
 	return { wallet, pub }
 }
@@ -87,12 +102,15 @@ export function stopwatch(): () => string {
 export function loadManifestFromConfigArg<T>(
 	argv: readonly string[],
 	opts:
-		| { mode: "required"; requiredHint: string; parse: (raw: unknown) => T }
+		| { mode: "required"; requiredHint?: string; parse: (raw: unknown) => T }
 		| { mode: "fallback"; fallbackPath: string; parse: (raw: unknown) => T },
 ): T {
 	const configArg = argv.indexOf("--config")
 	if (configArg === -1) {
-		if (opts.mode === "required") throw new Error(`pass --config <candidate manifest path> (e.g. ${opts.requiredHint})`)
+		if (opts.mode === "required") {
+			const hint = opts.requiredHint ? ` (e.g. ${opts.requiredHint})` : ""
+			throw new Error(`pass --config <candidate manifest path>${hint}`)
+		}
 		return opts.parse(JSON.parse(readFileSync(opts.fallbackPath, "utf8")))
 	}
 	return opts.parse(JSON.parse(readFileSync(argv[configArg + 1] as string, "utf8")))
