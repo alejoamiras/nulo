@@ -1,4 +1,5 @@
 import { onScopeDispose, ref, type Ref } from "vue"
+import { createFeeEstimationEngine } from "./internal/fee-estimation-engine"
 
 export interface UseFeeEstimationMapOptions<TKey extends string | number, TParams, TResult> {
 	/**
@@ -58,112 +59,43 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 	const results = ref({}) as Ref<Record<TKey, TResult | null>>
 	const estimating = ref({}) as Ref<Record<TKey, boolean>>
 
-	const timers = new Map<TKey, ReturnType<typeof setTimeout>>()
-	const counters = new Map<TKey, number>()
-	const inflight = new Map<TKey, { token: string; started: boolean }>()
-	const completed = new Map<TKey, string>()
-	const handedOff = new Set<string>()
 	// Scopes the SW-side coalescing slot to THIS composable instance: two
 	// concurrent approval windows both estimating op 0 must never share a
 	// latest-wins slot, or one window's parked estimate would evict the
 	// other's under capacity pressure.
 	const instanceId = Math.random().toString(36).slice(2, 8)
-	let disposed = false
 
-	const clearTimerFor = (key: TKey) => {
-		const t = timers.get(key)
-		if (t) {
-			clearTimeout(t)
-			timers.delete(key)
-		}
-	}
+	const engine = createFeeEstimationEngine<TKey, TParams, TResult>({
+		run: (params, estimateToken, key) => estimate(params, estimateToken, `op:${instanceId}:${String(key)}`),
+		debounceMs,
+		onResult: (key, r) => {
+			results.value[key] = r
+		},
+		onEstimating: (key, e) => {
+			estimating.value[key] = e
+		},
+		onError,
+		cancelRemote,
+	})
 
-	/** Remote-cancel every live token still owned for `key`. */
-	const cancelOwnedRemoteFor = (key: TKey) => {
-		const flight = inflight.get(key)
-		const tokens = [flight?.started ? flight.token : null, completed.get(key) ?? null]
-		for (const token of tokens) {
-			if (token && !handedOff.has(token)) cancelRemote?.(token)
-		}
-		inflight.delete(key)
-		completed.delete(key)
-	}
-
-	const cancel = (key: TKey) => {
-		clearTimerFor(key)
-		cancelOwnedRemoteFor(key)
-		// Bumping the counter for this key invalidates any in-flight estimator promise.
-		counters.set(key, (counters.get(key) ?? 0) + 1)
-		results.value[key] = null
-		estimating.value[key] = false
-	}
-
-	const cancelAll = () => {
-		const keys = new Set<TKey>([...timers.keys(), ...inflight.keys(), ...completed.keys()])
-		for (const key of keys) cancel(key)
-	}
-
-	const schedule = (key: TKey, params: TParams) => {
-		clearTimerFor(key)
-		cancelOwnedRemoteFor(key)
-		results.value[key] = null
-		estimating.value[key] = true
-		const myCounter = (counters.get(key) ?? 0) + 1
-		counters.set(key, myCounter)
-		const token = crypto.randomUUID()
-		inflight.set(key, { token, started: false })
-
-		const timer = setTimeout(async () => {
-			try {
-				const flight = inflight.get(key)
-				if (flight?.token === token) flight.started = true
-				const r = await estimate(params, token, `op:${instanceId}:${String(key)}`)
-				if (disposed || myCounter !== counters.get(key)) return
-				results.value[key] = r
-				completed.set(key, token)
-				inflight.delete(key)
-			} catch (err) {
-				if (disposed || myCounter !== counters.get(key)) return
-				results.value[key] = null
-				// See useFeeEstimation: a transport failure must not orphan the
-				// SW-side runner + its stash.
-				const flight = inflight.get(key)
-				if (flight?.token && !handedOff.has(flight.token)) cancelRemote?.(flight.token)
-				inflight.delete(key)
-				onError?.(key, err)
-			} finally {
-				if (!disposed && myCounter === counters.get(key)) {
-					estimating.value[key] = false
-				}
-			}
-		}, debounceMs)
-		timers.set(key, timer)
-	}
+	onScopeDispose(engine.dispose)
 
 	const handoffAll = (): Partial<Record<TKey, string>> => {
 		const tokens: Partial<Record<TKey, string>> = {}
-		for (const [key, token] of completed) {
-			handedOff.add(token)
+		for (const [key, token] of engine.handoffCompleted()) {
 			tokens[key] = token
 		}
 		return tokens
 	}
 
-	const rearm = (): void => {
-		handedOff.clear()
+	return {
+		results,
+		estimating,
+		estimate: engine.schedule,
+		cancel: engine.cancel,
+		cancelAll: engine.cancelAll,
+		handoffAll,
+		rearm: engine.rearm,
+		dispose: engine.dispose,
 	}
-
-	const dispose = () => {
-		if (disposed) return
-		for (const t of timers.values()) clearTimeout(t)
-		timers.clear()
-		for (const key of new Set<TKey>([...inflight.keys(), ...completed.keys()])) {
-			cancelOwnedRemoteFor(key)
-		}
-		disposed = true
-	}
-
-	onScopeDispose(dispose)
-
-	return { results, estimating, estimate: schedule, cancel, cancelAll, handoffAll, rearm, dispose }
 }
