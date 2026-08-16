@@ -375,6 +375,7 @@ export class DappSendExecutor {
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		fence?: ExecutionFence,
+		hooks?: ExecutionHooks,
 	): Promise<string> {
 		// JS-context trust boundary: approveInteraction() at
 		// dapp-interaction/service.ts ships popup-built operations through
@@ -386,77 +387,70 @@ export class DappSendExecutor {
 			throw new Error("send_transaction: feeSettings is required")
 		}
 
-		// Durable journal record for dApp-initiated sends. Mirrors the same
-		// pattern the transfer flow uses for UI-initiated transfers so the
-		// activity feed stays consistent across SW restart + popup
-		// close/reopen. The card shape unification in
-		// `TransactionCardLayout.vue` relies on this record carrying the
-		// dApp identity in `subtitle` so the in-flight chip matches the
-		// settled chip rendered from the transaction itself.
+		// B-02: take the shared execution slot + journal scaffold (runInSlot) like
+		// the other two dApp-send pipelines. Without it, two concurrent
+		// send_transaction ops (e.g. a dApp calling grantPublicAuthwit twice, or one
+		// racing an in-flight aztec_sendTx on the same account) run simulateTx/proveTx
+		// concurrently against the same PXE + account → stale-private-note interleaving
+		// → double-spent nullifier / on-chain-rejected tx. The journal record is
+		// created inside claimOrCreateJournal (identical shape to the prior
+		// beginJournal); the primary-method calls are a thunk so they read after
+		// acquireSlot. hooks (esp. originKey) bucket the slot per-origin.
 		const primaryMethod = pickActionMethod(op.actions)
-		const journalId = await this.deps.lane.beginJournal(
-			op.networkId,
-			op.accountAddress,
-			origin,
-			primaryMethod ? [{ method: primaryMethod }] : undefined,
-			fence,
+		return this.runInSlot(
+			{
+				networkId: op.networkId,
+				accountAddress: op.accountAddress,
+				origin,
+				hooks,
+				fence,
+				getCalls: () => (primaryMethod ? [{ method: primaryMethod }] : undefined),
+			},
+			async ({ checkCancelled, markJournal }) => {
+				// Enter `simulating` BEFORE the build/estimate work — fee
+				// strategies inside the build run real simulateTx calls (can be
+				// several seconds), and leaving the journal at `pending` would
+				// hide that from the popup.
+				await markJournal({ stage: "simulating" })
+				checkCancelled()
+
+				const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
+					await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
+
+				const { txHash } = await this.deps.coordinator.proveAndSend({
+					pxe,
+					node,
+					txRequest,
+					scopes: [account.address],
+					parentTask,
+					checkCancelled,
+					markJournal,
+					// One post-send closure owns BOTH the activity record AND the public-authwit
+					// index write. grantPublicAuthwit routes here (kind: send_transaction), so this
+					// is where a granted authwit is recorded — pending, reconciled by tx outcome.
+					recordTransaction: async (hash) => {
+						await this.deps.addTransaction(
+							origin,
+							network.chainId,
+							account.address.toString(),
+							txCalls,
+							nonce.toString(),
+							feePaymentMethod,
+							hash,
+							primaryEndpointUrl(network),
+							getEstimatedFee(txRequest),
+							getGasDetails(txRequest),
+							fence,
+							op.networkId,
+						)
+						if (pendingPublicAuthwits.length > 0) {
+							await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
+						}
+					},
+				})
+				return txHash.toString()
+			},
 		)
-
-		const controller = journalId ? new AbortController() : undefined
-		if (journalId && controller) this.deps.lane.registerController(journalId, controller)
-		const checkCancelled = (): void => {
-			if (controller?.signal.aborted) throw new JobCancelledSentinel(journalId ?? "")
-		}
-
-		try {
-			// Enter `simulating` BEFORE the build/estimate work — fee
-			// strategies inside the build run real simulateTx calls (can be
-			// several seconds), and leaving the journal at `pending` would
-			// hide that from the popup.
-			await this.deps.lane.markJournal(journalId, { stage: "simulating" })
-			checkCancelled()
-
-			const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-				await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
-
-			const { txHash } = await this.deps.coordinator.proveAndSend({
-				pxe,
-				node,
-				txRequest,
-				scopes: [account.address],
-				parentTask,
-				checkCancelled,
-				markJournal: (patch) => this.deps.lane.markJournal(journalId, patch),
-				// One post-send closure owns BOTH the activity record AND the public-authwit
-				// index write. grantPublicAuthwit routes here (kind: send_transaction), so this
-				// is where a granted authwit is recorded — pending, reconciled by tx outcome.
-				recordTransaction: async (hash) => {
-					await this.deps.addTransaction(
-						origin,
-						network.chainId,
-						account.address.toString(),
-						txCalls,
-						nonce.toString(),
-						feePaymentMethod,
-						hash,
-						primaryEndpointUrl(network),
-						getEstimatedFee(txRequest),
-						getGasDetails(txRequest),
-						fence,
-						op.networkId,
-					)
-					if (pendingPublicAuthwits.length > 0) {
-						await this.deps.recordPendingAuthwits(account.address.toString(), pendingPublicAuthwits, hash)
-					}
-				},
-			})
-			return txHash.toString()
-		} catch (error) {
-			await markFailedUnlessCancelled(error, journalId, this.deps.lane)
-			throw error
-		} finally {
-			if (journalId) this.deps.lane.deleteController(journalId)
-		}
 	}
 
 	public async executeAztecSendTx(

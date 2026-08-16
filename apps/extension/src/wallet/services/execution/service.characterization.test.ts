@@ -65,15 +65,33 @@ describe("cancelJob: journal-first ordering contract", () => {
 	})
 })
 
-// ── R1-M2 named pin: no-slot-for-executeSendTransaction ────────────────
+// ── B-02: slot-for-executeSendTransaction (was: no-slot bug pin) ────────
 
-describe("no-slot-for-executeSendTransaction (bug pin)", () => {
-	test("executeSendTransaction acquires ZERO execution-lane slots — preserve verbatim; do NOT harmonize", async () => {
-		// The flow now lives on DappSendExecutor; the lane interface carries
-		// acquireSlot for the aztec_sendTx paths, so the pin asserts this
-		// path never calls it even though it CAN.
-		const acquireSpy = vi.fn()
+describe("slot-for-executeSendTransaction (B-02 fix)", () => {
+	test("executeSendTransaction NOW takes an execution-lane slot and releases it", async () => {
+		// B-02: this path previously bypassed the ExecutionMutex, letting two
+		// concurrent send_transaction ops interleave simulate/prove against the
+		// same PXE + account. It now runs through the shared runInSlot scaffold
+		// like the other two dApp-send paths — acquireSlot + release, and
+		// claimOrCreateJournal instead of the old un-slotted beginJournal.
+		const releaseSlot = vi.fn()
+		const acquireSlot = vi.fn(async () => ({ release: releaseSlot, preController: undefined }))
+		const claimOrCreateJournal = vi.fn(async () => ({ journalId: "job-1", controller: new AbortController() }))
+		const beginJournal = vi.fn(async () => "job-1")
 		const proveAndSendCtxs: unknown[] = []
+		// Deferred prove: the slot must stay held until the prove PROMISE SETTLES,
+		// not merely until proveAndSend is invoked — a `p = prove(); release();
+		// return await p` regression would release early and must fail this pin.
+		let resolveProve!: () => void
+		const proveGate = new Promise<void>((r) => {
+			resolveProve = r
+		})
+		const proveAndSend = vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
+			proveAndSendCtxs.push(ctx)
+			await proveGate
+			await ctx.recordTransaction("0xhash")
+			return { txHash: { toString: () => "0xhash" } }
+		})
 		const account = { address: { toString: () => "0xacc" } }
 		const gasSettings = {
 			gasLimits: { daGas: 1, l2Gas: 2 },
@@ -84,20 +102,13 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 			planner: {} as never,
 			estimateWithDiscovery: {} as never,
 			txBuilder: {} as never,
-			coordinator: {
-				proveAndSend: vi.fn(async (ctx: { scopes: unknown; recordTransaction: (h: string) => Promise<unknown> }) => {
-					proveAndSendCtxs.push(ctx)
-					await ctx.recordTransaction("0xhash")
-					return { txHash: { toString: () => "0xhash" } }
-				}),
-			} as never,
+			coordinator: { proveAndSend } as never,
 			lane: {
 				registerController: vi.fn(),
 				deleteController: vi.fn(),
-				// The quirk under pin: the slot must never be touched on this path.
-				acquireSlot: acquireSpy as never,
-				claimOrCreateJournal: acquireSpy as never,
-				beginJournal: vi.fn(async () => "job-1"),
+				acquireSlot: acquireSlot as never,
+				claimOrCreateJournal: claimOrCreateJournal as never,
+				beginJournal: beginJournal as never,
 				markJournal: vi.fn(async () => {}),
 			},
 			buildAndEstimateValidated: vi.fn(async () => ({
@@ -124,7 +135,7 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 			logDebug: () => {},
 		})
 
-		const result = await executor.executeSendTransaction(
+		const pending = executor.executeSendTransaction(
 			{
 				kind: "send_transaction",
 				networkId: "net-1",
@@ -135,9 +146,27 @@ describe("no-slot-for-executeSendTransaction (bug pin)", () => {
 			{ type: OriginType.DAPP, name: "test" } as never,
 		)
 
+		// Let the slot be acquired + prove entered, then confirm the slot is STILL
+		// HELD while the prove promise is pending (release must not race the tx out).
+		await vi.waitFor(() => expect(proveAndSend).toHaveBeenCalledTimes(1))
+		expect(acquireSlot).toHaveBeenCalledTimes(1)
+		expect(releaseSlot).not.toHaveBeenCalled()
+
+		resolveProve()
+		const result = await pending
+
 		expect(result).toBe("0xhash")
-		// THE PIN: zero lane/slot interaction on this path.
-		expect(acquireSpy).not.toHaveBeenCalled()
+		// THE FIX: the slot is acquired, the journal claimed via the scaffold (not
+		// the old un-slotted beginJournal), and the slot released only AFTER the
+		// prove promise settled.
+		expect(claimOrCreateJournal).toHaveBeenCalledTimes(1)
+		expect(beginJournal).not.toHaveBeenCalled()
+		expect(releaseSlot).toHaveBeenCalledTimes(1)
+		const acquireOrder = acquireSlot.mock.invocationCallOrder[0]!
+		const proveOrder = proveAndSend.mock.invocationCallOrder[0]!
+		const releaseOrder = releaseSlot.mock.invocationCallOrder[0]!
+		expect(acquireOrder).toBeLessThan(proveOrder)
+		expect(proveOrder).toBeLessThan(releaseOrder)
 		// Scopes passed to the tail: exactly [account.address] (R1-H1 executable scope assertion).
 		expect((proveAndSendCtxs[0] as { scopes: unknown[] }).scopes).toEqual([account.address])
 	})

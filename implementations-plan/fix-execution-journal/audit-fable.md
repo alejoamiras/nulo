@@ -1,0 +1,14 @@
+# Fable audit trail — fix-execution-journal (Arc 2)
+
+Claude-side leg of the mid-tier dual audit (Plan agent). **Conditional approve**; converged tightly with the codex leg. All conditions folded into the plan's "Reconciled design" (R-B02, R-B03, R-B19).
+
+## Verdict: conditional approve — conditions
+
+- **B-02 (F1)** — `hooks: undefined` is incomplete. `grantPublicAuthwit` deliberately passes `{originKey: ctx.origin}` "so the lane doesn't bucket under `__no_origin__`"; that intent is dead today and stays dead unless hooks/originKey thread through `executeOperations → ExecutionService.executeSendTransaction → DappSendExecutor.executeSendTransaction`. Adopted: thread hooks; UI auth-registry callers legitimately pass none. Accepted consequence: `TooManyPendingError` becomes reachable from UI `revokeAuthwits` under the depth-8 `__no_origin__` cap (theoretical). Verified equivalence: `claimOrCreateJournal` (no queued id) → `createFreshRecord` → the same `beginJournal(n,a,o,c,fence)`; controller registered into the same `activeControllers` map; catch/finally match; the only new behavior is `releaseSlot`. No re-entrant deadlock (batches hold no outer slot; all callers call slot-free).
+- **B-02 (F2)** — the existing pins at `dapp-send-executor.test.ts:174-236` (`beginJournal`/`markJournal("j1",…)` expectations) and the "ZERO slots—preserve" characterization test go RED after the fix by design (the harness mock returns its own id). Adopted: MIGRATE them to the `claimOrCreateJournal`/slot shape, don't just add a new pin.
+- **B-03 (F3)** — residual window codex missed: popup-RPC handlers register INSIDE `services.start()`, so a request replayed during startup could `createOperation` before `reaper.start()` (runtime.ts:268), giving a live op `createdAt < bootCutoff`. Adopted: capture the cutoff BEFORE `await services.start()` and thread it via the reaper ctor. `createdAt` (not `updatedAt`) is the correct lifetime signal; `>=` skip errs toward not-sweeping (periodic tick owns intra-lifetime staleness).
+- **B-19** — confirmed correct: Aztec's `safe_json_rpc_server` emits `Method not found: ${m}` + code -32601, client rethrows verbatim with `cause = response.error`; `/method not found/i` matches every real old-node method-missing, dropping bare `not found` cannot miss one. Optional cheap hardening: also accept `cause?.code === -32601` (adopted).
+
+## Cross-model reconciliation
+
+Both auditors converged on threading hooks (F1) and the `-32601`/"Method not found" predicate. Fable added F2 (migrate the existing bug-pins) and F3 (pre-`services.start()` cutoff) — both folded. The complete-arc-diff codex pass later added three Low polish items (null-safe cause access, slot invocation-order → prove-settlement pin, the ExecutionService forwarding-seam pin) before converging. No blocking findings at any stage.

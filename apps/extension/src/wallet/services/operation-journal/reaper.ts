@@ -99,12 +99,19 @@ export class JournalReaper {
 	/** Per-instance now-source. Real `Date.now()` in production; injectable
 	 *  via the optional 4th ctor arg for unit tests using fake clocks. */
 	private readonly now: () => number
+	/** B-03: the boot-sweep cutoff. When the composition root supplies it (captured
+	 *  BEFORE `services.start()`), it protects even ops created by a popup-RPC
+	 *  replayed during service startup — records with `createdAt >= bootCutoff` are
+	 *  this-lifetime and live. When omitted (unit tests / legacy), `start()` falls
+	 *  back to `this.now()` at its first statement. */
+	private readonly bootCutoff?: number
 
-	public constructor(journal: OperationJournalService, alarms: AlarmsPort, logger: ILogger, now?: () => number) {
+	public constructor(journal: OperationJournalService, alarms: AlarmsPort, logger: ILogger, now?: () => number, bootCutoff?: number) {
 		this.journal = journal
 		this.alarms = alarms
 		this.logger = logger
 		this.now = now ?? (() => Date.now())
+		this.bootCutoff = bootCutoff
 	}
 
 	/**
@@ -115,6 +122,11 @@ export class JournalReaper {
 	 * a defensive seam for tests).
 	 */
 	public async start(): Promise<void> {
+		// B-03: capture the boot cutoff as the FIRST synchronous statement so it
+		// precedes the delayed alarm-create await + RPC-listener install. Prefer the
+		// composition-root-supplied cutoff (captured before services.start(), so it
+		// also predates any popup-RPC replayed mid-startup).
+		const bootCutoff = this.bootCutoff ?? this.now()
 		this.alarmUnsubscribe = this.alarms.onAlarm(this.onAlarmFired)
 		await this.alarms.create(JOURNAL_REAPER_ALARM_NAME, { periodInMinutes: REAP_PERIOD_MINUTES })
 
@@ -127,7 +139,7 @@ export class JournalReaper {
 		// `sw_restart_post_prove` (proving) / `stale_on_resume` (others) —
 		// no grace window to wait for, since recovery is impossible.
 		try {
-			await this.reap({ unconditional: true })
+			await this.reap({ unconditional: true, bootCutoff })
 		} catch (err) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-reap threw; continuing", getErrorMessage(err))
 		}
@@ -165,13 +177,21 @@ export class JournalReaper {
 	 * window — a proving op started 10s ago in THIS SW instance should
 	 * NOT be reaped.
 	 */
-	public async reap(opts?: { unconditional?: boolean }): Promise<void> {
+	public async reap(opts?: { unconditional?: boolean; bootCutoff?: number }): Promise<void> {
 		const inflight = await this.journal.getOperations({ isTerminal: false })
 		const now = this.now()
 		const unconditional = opts?.unconditional === true
+		const bootCutoff = opts?.bootCutoff
 		for (const op of inflight) {
 			const stage = op.progress.stage
 			if (stage === "succeeded" || stage === "failed" || stage === "cancelled") continue
+			// B-03: the aggressive boot sweep must NOT fail a record created in THIS
+			// SW lifetime (createdAt >= bootCutoff) — e.g. by the request that woke
+			// the SW. Such an op is live; the pipeline still owns it. Prior-lifetime
+			// records (createdAt < bootCutoff) are unrecoverable and swept as before.
+			// `>=` errs toward NOT sweeping (clock skew / same-ms) — the periodic
+			// tick catches genuine intra-lifetime staleness under its grace window.
+			if (unconditional && bootCutoff !== undefined && op.createdAt >= bootCutoff) continue
 			const grace = STAGE_GRACE_MS[stage]
 			const age = now - op.updatedAt
 			if (!unconditional && age < grace) continue

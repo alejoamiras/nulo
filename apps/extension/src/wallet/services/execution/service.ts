@@ -528,7 +528,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "send_transaction": {
-						result = await this.executeSendTransaction(operation, origin, operationTask)
+						// B-02: forward hooks so the slot buckets per-origin (grantPublicAuthwit
+						// carries { originKey }); without it hostile-dApp grants + UI auth ops
+						// collapse into one __no_origin__ capacity bucket, losing fairness.
+						result = await this.executeSendTransaction(operation, origin, operationTask, hooks)
 						break
 					}
 					case "simulate_transaction": {
@@ -717,10 +720,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		await this.tokenService.addToken(profile.id, op.networkId, op.accountAddress, ti, opContext)
 	}
 
-	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
+	public async executeSendTransaction(
+		op: SendTransactionOperation,
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
+	): Promise<string> {
 		await this.ensureInitialized()
 		const fence = await this.captureFence()
-		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence)
+		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence, hooks)
 	}
 
 	/**
