@@ -136,6 +136,36 @@ describe("JournalReaper.reap", () => {
 		expect(after?.error?.kind).toBe("stuck_queued")
 	})
 
+	// (B-03 PIN) The cold-start boot sweep must NOT fail a record created in the
+	// CURRENT SW lifetime — i.e. by the very request that woke the SW after
+	// reaper.start() began. bootCutoff is captured at start(); rows with
+	// createdAt >= bootCutoff are live and must be skipped. Prior-lifetime rows
+	// (createdAt < bootCutoff) still sweep.
+	test("boot sweep skips a this-lifetime record (createdAt >= bootCutoff) but reaps a prior one", async () => {
+		// A record created "after boot began": make the reaper's clock (bootCutoff
+		// source) read BEFORE this record's createdAt.
+		const live = await service.createOperation(VALID_INPUT)
+		const reaper = new JournalReaper(service, api.alarms, logger, () => live.createdAt - 1_000)
+
+		await reaper.start()
+
+		const after = await service.getOperation(live.id)
+		// The live cold-start op must remain pending — not falsely failed.
+		expect(after?.progress.stage).toBe("pending")
+	})
+
+	test("boot sweep still reaps a genuinely prior-lifetime record (createdAt < bootCutoff)", async () => {
+		const stale = await service.createOperation(VALID_INPUT)
+		// Boot happened AFTER this record — it is from a prior SW lifetime.
+		const reaper = new JournalReaper(service, api.alarms, logger, () => stale.createdAt + 5_000)
+
+		await reaper.start()
+
+		const after = await service.getOperation(stale.id)
+		expect(after?.progress.stage).toBe("failed")
+		expect(after?.error?.kind).toBe("stale_on_resume")
+	})
+
 	test("leaves terminal records alone (succeeded / failed / cancelled)", async () => {
 		const recA = await service.createOperation(VALID_INPUT)
 		await service.transitionOperation(recA.id, { stage: "simulating" })
