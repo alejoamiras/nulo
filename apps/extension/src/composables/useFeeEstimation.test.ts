@@ -133,6 +133,23 @@ describe("useFeeEstimation — remote cancellation + handoff", () => {
 		expect(cancelRemote).not.toHaveBeenCalled()
 	})
 
+	it("a handed-off token survives a superseding estimate(): no remote cancel for it", async () => {
+		const { scope, composable, cancelRemote, tokens } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		const handed = composable.handoff()
+		expect(handed).toBe(tokens[0])
+		composable.estimate(2)
+		await vi.advanceTimersByTimeAsync(800)
+		await flushAll()
+		composable.dispose()
+		// Only the SECOND attempt's completed token is cancelled on dispose; the
+		// handed-off first token belongs to the execution path now.
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[1])
+		scope.stop()
+	})
+
 	it("cancel() remote-cancels an in-flight (started) estimate", async () => {
 		const cancelRemote = vi.fn()
 		let release: (n: number) => void = () => {}
@@ -322,6 +339,31 @@ describe("useFeeEstimation", () => {
 		expect(result.result.value).toBeNull()
 		expect(result.isEstimating.value).toBe(false)
 		expect(onError).toHaveBeenCalledWith(boom)
+		scope.stop()
+	})
+
+	it("an estimator that REJECTS after cancel() is a stale settle: onError is not called", async () => {
+		const onError = vi.fn()
+		let fail: (err: Error) => void = () => {}
+		const gate = new Promise<number>((_r, reject) => {
+			fail = reject
+		})
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: () => gate,
+				debounceMs: 100,
+				onError,
+			}),
+		)!
+		result.estimate(1)
+		await vi.advanceTimersByTimeAsync(100) // RPC in flight
+		result.cancel()
+		fail(new Error("late transport failure"))
+		await flush()
+		expect(onError).not.toHaveBeenCalled()
+		expect(result.result.value).toBeNull()
+		expect(result.isEstimating.value).toBe(false)
 		scope.stop()
 	})
 
