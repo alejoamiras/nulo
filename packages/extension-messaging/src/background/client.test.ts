@@ -61,6 +61,7 @@ describe("frozen transport error contract", () => {
 	test("timeout → RpcTimeoutError with exact message + details", () => {
 		const err = hooks.makeTimeoutError({ requestId: 7, methodName: "echo", timeoutMs: 500 })
 		expect(err).toBeInstanceOf(RpcTimeoutError)
+		expect((err as RpcTimeoutError).code).toBe("RPC_TIMEOUT") // literal: pins static + instance code together
 		expect((err as RpcTimeoutError).message).toBe("RPC 'echo' timed out after 500ms")
 		expect((err as RpcTimeoutError).details).toEqual({ requestId: 7, methodName: "echo" })
 	})
@@ -68,6 +69,7 @@ describe("frozen transport error contract", () => {
 	test("send failure → RpcDisconnectedError with exact message + stringified cause", () => {
 		const err = hooks.makeSendFailureError({ requestId: 8, methodName: "echo", cause: new Error("port gone") })
 		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as RpcDisconnectedError).code).toBe("RPC_DISCONNECTED") // literal: pins static + instance code together
 		expect((err as RpcDisconnectedError).message).toBe("RPC 'echo' aborted: port disconnected")
 		expect((err as RpcDisconnectedError).details).toEqual({ requestId: 8, methodName: "echo", cause: "Error: port gone" })
 	})
