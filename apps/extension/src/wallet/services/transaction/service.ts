@@ -507,8 +507,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 
 		const result: Restored<Tx>[] = []
 
-		await this.lock.enter()
-		try {
+		return await this.lock.withLock(async () => {
 			for (const tx of txs) {
 				try {
 					// D16: never restore a Pending tx. `submittedEndpointUrl` is
@@ -544,8 +543,6 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			}
 
 			return result
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }
