@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { effectScope, nextTick } from "vue"
+import { effectScope, nextTick, watch } from "vue"
 import { useFeeEstimationMap } from "./useFeeEstimationMap"
 
 describe("useFeeEstimationMap — remote cancellation + handoff", () => {
@@ -101,6 +101,65 @@ describe("useFeeEstimationMap — remote cancellation + handoff", () => {
 		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(inflightToken)
 		release(0)
 		scope.stop()
+	})
+
+	it("rearm() after handoffAll() reverts ownership: dispose remote-cancels the previously handed-off token", async () => {
+		const { scope, composable, cancelRemote, calls } = make()
+		composable.estimate(0, 1)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		const handed = composable.handoffAll()
+		expect(handed[0]).toBe(calls[0]!.token)
+		composable.rearm()
+		composable.dispose()
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(calls[0]!.token)
+		scope.stop()
+	})
+
+	it("a sync results-watcher firing mid-resolve cannot hand off the settling token (result lands BEFORE completion registration)", async () => {
+		// The result sink fires before the token is registered as completed —
+		// same order as the previous inline implementation. A flush:'sync'
+		// watcher re-entering handoffAll() at that instant must not capture
+		// the still-settling token.
+		const { scope, composable, calls } = make()
+		let midResolveHandoff: Partial<Record<number, string>> | null = null
+		scope.run(() => {
+			watch(
+				() => composable.results.value[0],
+				(v) => {
+					if (v !== null && midResolveHandoff === null) {
+						midResolveHandoff = composable.handoffAll()
+					}
+				},
+				{ flush: "sync" },
+			)
+		})
+		composable.estimate(0, 1)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		expect(midResolveHandoff).toEqual({})
+		expect(composable.handoffAll()[0]).toBe(calls[0]!.token)
+		scope.stop()
+	})
+
+	it("two instances estimating the same key mint distinct flow-key namespaces with independent state", async () => {
+		const a = make()
+		const b = make()
+		a.composable.estimate(0, 1)
+		b.composable.estimate(0, 2)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		expect(a.calls).toHaveLength(1)
+		expect(b.calls).toHaveLength(1)
+		expect(a.calls[0]!.flowKey).not.toBe(b.calls[0]!.flowKey)
+		expect(a.composable.results.value[0]).toBe(2)
+		expect(b.composable.results.value[0]).toBe(4)
+		// Cancelling one instance's key leaves the other's state untouched.
+		a.composable.cancel(0)
+		expect(a.composable.results.value[0]).toBeNull()
+		expect(b.composable.results.value[0]).toBe(4)
+		a.scope.stop()
+		b.scope.stop()
 	})
 
 	it("dispose without handoff remote-cancels every completed estimate", async () => {

@@ -58,9 +58,11 @@ export interface FeeEstimationEngine<TKey extends string | number, TParams> {
 	 * Multi-op approve seam: completed tokens ONLY, each marked handed off.
 	 * In-flight estimates are deliberately left armed — their ids never reach
 	 * the approve payload, so handing them off would only orphan their
-	 * eventual stashes.
+	 * eventual stashes. `collect` runs immediately after each token's mark, so
+	 * a mid-iteration throw cannot leave later tokens handed off but
+	 * unreported (orphaned stashes).
 	 */
-	handoffCompleted(): Array<[TKey, string]>
+	handoffCompleted(collect: (key: TKey, token: string) => void): void
 	/** Undo a handoff after a FAILED approve — normal cancellation applies again. */
 	rearm(): void
 	/** Idempotent teardown: clears timers, remote-cancels every owned live token. */
@@ -157,13 +159,11 @@ export function createFeeEstimationEngine<TKey extends string | number, TParams,
 		return token
 	}
 
-	const handoffCompleted = (): Array<[TKey, string]> => {
-		const tokens: Array<[TKey, string]> = []
+	const handoffCompleted = (collect: (key: TKey, token: string) => void): void => {
 		for (const [key, token] of completed) {
 			handedOff.add(token)
-			tokens.push([key, token])
+			collect(key, token)
 		}
-		return tokens
 	}
 
 	const rearm = (): void => {

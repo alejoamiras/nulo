@@ -323,6 +323,45 @@ describe("useFeeEstimation", () => {
 		scope.stop()
 	})
 
+	it("an onError handler observes isEstimating === true (the flag flips false only after the handler runs)", async () => {
+		const observed: boolean[] = []
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: async () => {
+					throw new Error("boom")
+				},
+				debounceMs: 100,
+				onError: () => {
+					observed.push(result.isEstimating.value)
+				},
+			}),
+		)!
+		result.estimate(1)
+		await vi.advanceTimersByTimeAsync(100)
+		await flush()
+		expect(observed).toEqual([true])
+		expect(result.isEstimating.value).toBe(false)
+		scope.stop()
+	})
+
+	it("the single-slot path consumes no Math.random (no flow-key or instance-id machinery)", async () => {
+		const randomSpy = vi.spyOn(Math, "random")
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: async (n) => n,
+				debounceMs: 100,
+			}),
+		)!
+		result.estimate(1)
+		await vi.advanceTimersByTimeAsync(100)
+		await flush()
+		expect(randomSpy).not.toHaveBeenCalled()
+		randomSpy.mockRestore()
+		scope.stop()
+	})
+
 	it("surfaces estimator errors via onError and clears result", async () => {
 		const onError = vi.fn()
 		const boom = new Error("estimate failed")

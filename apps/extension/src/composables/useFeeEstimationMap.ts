@@ -82,9 +82,9 @@ export function useFeeEstimationMap<TKey extends string | number, TParams, TResu
 
 	const handoffAll = (): Partial<Record<TKey, string>> => {
 		const tokens: Partial<Record<TKey, string>> = {}
-		for (const [key, token] of engine.handoffCompleted()) {
+		engine.handoffCompleted((key, token) => {
 			tokens[key] = token
-		}
+		})
 		return tokens
 	}
 
