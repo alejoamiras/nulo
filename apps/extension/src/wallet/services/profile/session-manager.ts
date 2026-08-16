@@ -218,10 +218,37 @@ export class SessionManager {
 				since,
 				lockedAt: this.sessionTtl > 0 ? since + this.sessionTtl : undefined,
 			}
-			await this.session.set(session)
+			// B-01: memory-first. Commit the in-memory session BEFORE the storage
+			// write so a rejecting `session.set` can't discard it — the class
+			// contract is that a broken chrome.storage write at unlock still leaves
+			// the in-memory secret usable for this SW lifetime (degraded success:
+			// not persisted, but usable).
 			const secret = Fr.fromBuffer(Buffer.from(secretBuffer))
 			this.activeSession = { profile, session, secret }
 			this.onChange(this.toInfo(profile))
+			try {
+				await this.session.set(session)
+			} catch (error) {
+				this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", getErrorMessage(error))
+				// The write failed, so the persisted record is now indeterminate — it
+				// may still hold a PRIOR profile's session that restore() would
+				// reactivate on the next SW start (wrong profile). Best-effort clear it.
+				await this.session.delete().catch(() => {})
+				// Read back: if we CANNOT confirm the record is gone (storage fully
+				// down / delete also failed), do NOT report this open as a degraded
+				// success — undo the in-memory transition so `openSessionVerified`'s
+				// post-open `isActive` check surfaces the failure to the RPC caller
+				// (no false "unlocked as B"). NOTE: a stale prior record we couldn't
+				// delete stays on disk; a restart then restores that record — but it is
+				// the user's own last durably-persisted session (or an unparseable
+				// partial write → silent-close → locked), never a secret exposure. This
+				// residual is unavoidable while storage is fully unavailable.
+				if (await this.hasPersistedSession()) {
+					this.activeSession = undefined
+					this.onChange(undefined)
+					return
+				}
+			}
 			// Schedule the proactive lock alarm AFTER state is committed.
 			// If alarm scheduling fails (port error, browser throttling),
 			// log + fall back to the reactive `isExpired` check — never
@@ -237,10 +264,21 @@ export class SessionManager {
 	 *  Safe to call multiple times. */
 	public async close(): Promise<void> {
 		try {
-			await this.session.delete()
+			// B-01: memory-first + asymmetric-to-open. Clear the in-memory session
+			// FIRST so a rejecting `session.delete` can't leave the secret live in
+			// memory after an explicit lock. Unlike open(), a swallowed delete
+			// failure here is NOT benign — the persisted bearer would survive and
+			// re-unlock on the next SW start — so `delete()` gets its OWN catch
+			// (clearLockAlarm must still run) and callers that need the durable
+			// guarantee (lockActiveProfile) read back via hasPersistedSession().
 			if (this.activeSession) {
 				this.activeSession = undefined
 				this.onChange(undefined)
+			}
+			try {
+				await this.session.delete()
+			} catch (error) {
+				this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to delete persisted session on close", getErrorMessage(error))
 			}
 			// Cancel any pending lock alarm. Idempotent — `clear()` returns
 			// `false` if no alarm exists. Run after state-clear so a racing
@@ -250,6 +288,19 @@ export class SessionManager {
 			await this.clearLockAlarm()
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
+		}
+	}
+
+	/** True iff a session record is still persisted in storage. Used by
+	 *  `lockActiveProfile` as a post-close read-back (B-01): a swallowed
+	 *  `session.delete` failure would leave a bearer that re-unlocks on the next
+	 *  SW start, so the lock RPC surfaces the failure rather than reporting a
+	 *  false "locked". Fail-closed: a read error reports "still persisted". */
+	public async hasPersistedSession(): Promise<boolean> {
+		try {
+			return (await this.session.get()) !== undefined
+		} catch {
+			return true
 		}
 	}
 
