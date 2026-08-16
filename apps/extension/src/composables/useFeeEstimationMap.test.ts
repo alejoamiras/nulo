@@ -69,6 +69,40 @@ describe("useFeeEstimationMap — remote cancellation + handoff", () => {
 		expect(cancelRemote).not.toHaveBeenCalled()
 	})
 
+	it("(ASYMMETRY PIN) handoffAll excludes an in-flight key: its token is absent from the return and IS remote-cancelled on dispose", async () => {
+		// handoffAll() is deliberately completed-only: an in-flight id never reaches
+		// the approve payload, so handing it off would only orphan its eventual stash.
+		// Contrast the single-slot handoff, which is in-flight-inclusive.
+		const cancelRemote = vi.fn()
+		let release: (n: number) => void = () => {}
+		const gate = new Promise<number>((r) => {
+			release = r
+		})
+		const calls: { token: string; flowKey: string }[] = []
+		const scope = effectScope()
+		const composable = scope.run(() =>
+			useFeeEstimationMap<number, number, number>({
+				estimate: async (n, token, flowKey) => {
+					calls.push({ token, flowKey })
+					if (n === 2) return gate // key 1 stays in flight
+					return n * 2
+				},
+				cancelRemote,
+			}),
+		)!
+		composable.estimate(0, 1)
+		composable.estimate(1, 2)
+		await vi.advanceTimersByTimeAsync(500)
+		await flushAll()
+		const handed = composable.handoffAll()
+		expect(Object.keys(handed)).toEqual(["0"])
+		composable.dispose()
+		const inflightToken = calls.find((c) => c.flowKey.endsWith(":1"))!.token
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(inflightToken)
+		release(0)
+		scope.stop()
+	})
+
 	it("dispose without handoff remote-cancels every completed estimate", async () => {
 		const { scope, composable, cancelRemote, calls } = make()
 		composable.estimate(0, 1)

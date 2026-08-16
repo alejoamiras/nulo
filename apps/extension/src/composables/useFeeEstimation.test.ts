@@ -93,6 +93,46 @@ describe("useFeeEstimation — remote cancellation + handoff", () => {
 		scope.stop()
 	})
 
+	it("(IN-FLIGHT HANDOFF PIN) handoff of a started-but-unsettled estimate returns its token; unmount does NOT remote-cancel it", async () => {
+		// handoff() is deliberately in-flight-inclusive (completedToken ?? inflight?.token):
+		// the submit path consumes THIS slot's estimate, so a still-in-flight token's
+		// stash will be consumed the moment it lands. Contrast handoffAll() on the
+		// keyed composable, which is completed-only by design.
+		const cancelRemote = vi.fn()
+		let release: (n: number) => void = () => {}
+		const gate = new Promise<number>((r) => {
+			release = r
+		})
+		const tokens: string[] = []
+		const scope = effectScope()
+		const composable = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: async (_n, token) => {
+					tokens.push(token)
+					return gate
+				},
+				cancelRemote,
+			}),
+		)!
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(800) // RPC in flight, unsettled
+		expect(composable.handoff()).toBe(tokens[0])
+		composable.dispose()
+		scope.stop()
+		expect(cancelRemote).not.toHaveBeenCalled()
+		release(0)
+	})
+
+	it("handoff of a never-started (debounce-pending) token still returns the token", async () => {
+		const { scope, composable, cancelRemote } = make()
+		composable.estimate(1)
+		await vi.advanceTimersByTimeAsync(100) // debounce still pending, RPC never fired
+		expect(composable.handoff()).not.toBeNull()
+		composable.dispose()
+		scope.stop()
+		expect(cancelRemote).not.toHaveBeenCalled()
+	})
+
 	it("cancel() remote-cancels an in-flight (started) estimate", async () => {
 		const cancelRemote = vi.fn()
 		let release: (n: number) => void = () => {}
