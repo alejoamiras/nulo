@@ -313,8 +313,11 @@ describe("useFeeEstimation", () => {
 				estimate: async (n) => n,
 			}),
 		)!
-		// Manually seed a stale result
+		// Manually seed a stale result. The intermediate assert proves the public
+		// Ref is genuinely writable — without it, a silently no-oping readonly ref
+		// would make the final toBeNull() pass vacuously.
 		result.result.value = 42 as unknown as number
+		expect(result.result.value).toBe(42)
 		result.estimate(1)
 		expect(result.result.value).toBeNull()
 		scope.stop()
@@ -339,6 +342,54 @@ describe("useFeeEstimation", () => {
 		expect(result.result.value).toBeNull()
 		expect(result.isEstimating.value).toBe(false)
 		expect(onError).toHaveBeenCalledWith(boom)
+		scope.stop()
+	})
+
+	it("a successful estimator resolving undefined is preserved, not coerced to null", async () => {
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useFeeEstimation<number, undefined>({
+				estimate: async () => undefined,
+				debounceMs: 100,
+			}),
+		)!
+		result.estimate(1)
+		await vi.advanceTimersByTimeAsync(100)
+		await flush()
+		expect(result.result.value).toBeUndefined()
+		expect(result.result.value).not.toBeNull()
+		expect(result.isEstimating.value).toBe(false)
+		scope.stop()
+	})
+
+	it("dispose() mid-flight remote-cancels the started token exactly once; a late reject is silent", async () => {
+		const cancelRemote = vi.fn()
+		const onError = vi.fn()
+		let fail: (err: Error) => void = () => {}
+		const gate = new Promise<number>((_r, reject) => {
+			fail = reject
+		})
+		const tokens: string[] = []
+		const scope = effectScope()
+		const result = scope.run(() =>
+			useFeeEstimation<number, number>({
+				estimate: (_n, token) => {
+					tokens.push(token)
+					return gate
+				},
+				debounceMs: 100,
+				onError,
+				cancelRemote,
+			}),
+		)!
+		result.estimate(1)
+		await vi.advanceTimersByTimeAsync(100) // RPC in flight
+		result.dispose()
+		expect(cancelRemote).toHaveBeenCalledExactlyOnceWith(tokens[0])
+		fail(new Error("late transport failure"))
+		await flush()
+		expect(onError).not.toHaveBeenCalled()
+		expect(result.result.value).toBeNull()
 		scope.stop()
 	})
 
