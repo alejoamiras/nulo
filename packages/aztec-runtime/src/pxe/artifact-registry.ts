@@ -1,3 +1,4 @@
+import { memoizeAsync } from "./async-memo"
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import type { ContractArtifact } from "@aztec/stdlib/abi"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
@@ -49,7 +50,16 @@ export function defaultPolicy(): ArtifactPolicy {
  */
 export class ArtifactRegistry {
 	private known: KnownArtifacts | null = null
-	private initPromise: Promise<void> | null = null
+	// `known` stays the synchronous resolved-value store (read directly by
+	// getKnownInstance and friends); the memo only guards the one-shot load.
+	// Pre-existing and unchanged: an old still-in-flight loader that SUCCEEDS
+	// after a concurrent clear() repopulates `known` — the memo's identity
+	// guard covers rejections only.
+	private readonly knownMemo = memoizeAsync<void>(() =>
+		this.loader().then((known) => {
+			this.known = known
+		}),
+	)
 	private policy: ArtifactPolicy
 	/**
 	 * Cache of class-ids whose artifact has been recomputed and verified
@@ -98,17 +108,7 @@ export class ArtifactRegistry {
 	 *  concurrent calls (shared promise). */
 	public async ensureKnown(): Promise<void> {
 		if (this.known) return
-		if (!this.initPromise) {
-			this.initPromise = this.loader()
-				.then((known) => {
-					this.known = known
-				})
-				.catch((err) => {
-					this.initPromise = null
-					throw err
-				})
-		}
-		await this.initPromise
+		await this.knownMemo.get()
 	}
 
 	public getKnownInstance(address: string): ContractInstanceWithAddress | undefined {
@@ -129,7 +129,7 @@ export class ArtifactRegistry {
 	 *  between profiles. */
 	public clear(): void {
 		this.known = null
-		this.initPromise = null
+		this.knownMemo.reset()
 		this.verifiedClassIds.clear()
 	}
 
