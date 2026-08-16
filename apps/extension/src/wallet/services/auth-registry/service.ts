@@ -143,8 +143,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  retry after a partial write does not duplicate. */
 	public async recordPendingAuthwits(account: string, items: { hash: string; content: AuthwitContent }[], txHash: string): Promise<void> {
 		if (items.length === 0) return
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const existing = await this.authwits.getValues()
 			const seen = new Set(existing.filter((x) => x.account === account).map((x) => x.hash))
 			let nextId = array_max(existing.map((x) => x.id)) + 1
@@ -155,9 +154,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				await this.authwits.set(`${authwit.id}`, authwit)
 				this.emit("onAuthwitAdded", authwit)
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Reconcile pending rows for a tx once its outcome is known: `mined` clears
@@ -165,8 +162,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  rows (the grant never landed, so the local index must not claim it exists).
 	 *  Confirmed (non-pending) rows are untouched. */
 	public async reconcileAuthwits(txHash: string, outcome: "mined" | "dropped"): Promise<void> {
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const rows = (await this.authwits.getValues()).filter((x) => x.pending && x.txHash === txHash)
 			for (const row of rows) {
 				if (outcome === "mined") {
@@ -176,9 +172,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 					this.emit("onAuthwitDeleted", row)
 				}
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async revokeAuthwits(networkId: string, account: string, ids: number[], feeSettings: FeeSettings): Promise<void> {
@@ -359,15 +353,12 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		if (await isAuthwitConsumable(node, authwit.account, authwit.hash)) return
 		const task = parentTask.startSubtask(new StepContent(`Sync authwit #${authwit.id}`))
 		try {
-			try {
-				await this.lock.enter()
+			await this.lock.withLock(async () => {
 				if (await this.authwits.get(`${authwit.id}`)) {
 					await this.authwits.delete(`${authwit.id}`)
 					this.emit("onAuthwitDeleted", authwit)
 				}
-			} finally {
-				this.lock.leave()
-			}
+			})
 			task.complete()
 		} catch (error) {
 			task.fail(error)
@@ -379,8 +370,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const task = parentTask.startSubtask(new StepContent("Sync status"))
 		try {
 			const isEnabled = await isAuthRegistryEnabled(node, account)
-			try {
-				await this.lock.enter()
+			await this.lock.withLock(async () => {
 				const enabled = await this.statuses.get(account)
 				if (enabled !== isEnabled) {
 					if (isEnabled) {
@@ -391,9 +381,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 						this.emit("onRegistryDisabled", account)
 					}
 				}
-			} finally {
-				this.lock.leave()
-			}
+			})
 			task.complete()
 		} catch (error) {
 			task.fail(error)
@@ -427,8 +415,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const authwits = (await this.authwits.getValues()).filter((a) => set.has(a.account))
 			await purgeRows(
 				authwits,
@@ -438,9 +425,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			for (const addr of set) {
 				if (await this.statuses.contains(addr)) await this.statuses.delete(addr)
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async restore(authwits: Authwit[]): Promise<Restored<Authwit>[]> {
@@ -448,9 +433,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 		const result: Restored<Authwit>[] = []
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
 			for (const authwit of authwits) {
 				try {
@@ -469,8 +452,6 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			}
 
 			return result
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

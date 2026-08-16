@@ -167,12 +167,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  `applyTtlChange` and deadlock — keep `sessionTtl` writes off the locked
 	 *  paths. */
 	private async runExclusive<T>(fn: () => Promise<T>): Promise<T> {
-		try {
-			await this.lock.enter()
-			return await fn()
-		} finally {
-			this.lock.leave()
-		}
+		return this.lock.withLock(fn)
 	}
 
 	protected async init(services: ServiceCollection) {

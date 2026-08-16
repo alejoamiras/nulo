@@ -135,9 +135,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
 		await this.deleteExpired()
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			let id: string
 			do {
 				id = getRandomHex(64)
@@ -157,9 +155,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionAdded", session)
 
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async updateDappSession(
@@ -168,9 +164,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		accounts: string[],
 		confirmationLevel: AccessLevel,
 	): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) {
 				throw new Error("Invalid id")
@@ -182,15 +176,11 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionUpdated", session)
 
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async upgradeDappSession(sessionId: string, newSessionId: string, newExpiry: number): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			if (await this.storage.contains(newSessionId)) {
 				throw new Error("Invalid new id")
 			}
@@ -207,65 +197,51 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionAdded", newSession)
 
 			return newSession
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setVerificationHash(sessionId: string, verificationHash: string): Promise<DappSession> {
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) throw new Error("Invalid id")
 			session.verificationHash = verificationHash
 			await this.storage.set(sessionId, session)
 			this.emit("onDappSessionUpdated", session)
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setTrustedVerification(sessionId: string, trusted: boolean): Promise<DappSession> {
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) throw new Error("Invalid id")
 			session.trustedVerification = trusted
 			await this.storage.set(sessionId, session)
 			this.emit("onDappSessionUpdated", session)
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setAccountAliases(sessionId: string, aliases: Record<string, string>): Promise<DappSession> {
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) throw new Error("Invalid id")
 			session.accountAliases = { ...session.accountAliases, ...aliases }
 			await this.storage.set(sessionId, session)
 			this.emit("onDappSessionUpdated", session)
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): Promise<DappSession> {
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) throw new Error("Invalid id")
 			session.capabilityGrants = grants
 			await this.storage.set(sessionId, session)
 			this.emit("onDappSessionUpdated", session)
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getCapabilityGrants(sessionId: string): Promise<GrantedCapabilityRecord[]> {
@@ -275,17 +251,14 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setCapabilityRejections(sessionId: string, rejections: RejectedCapabilityRecord[]): Promise<DappSession> {
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) throw new Error("Invalid id")
 			session.capabilityRejections = rejections
 			await this.storage.set(sessionId, session)
 			this.emit("onDappSessionUpdated", session)
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getCapabilityRejections(sessionId: string): Promise<RejectedCapabilityRecord[]> {
@@ -295,9 +268,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async deleteDappSession(sessionId: string): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) {
 				throw new Error("Invalid id")
@@ -306,33 +277,25 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionDeleted", session)
 
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async isExpired(session: DappSession): Promise<boolean> {
 		if (session.expiry < Date.now()) {
-			try {
-				await this.lock.enter()
-
+			await this.lock.withLock(async () => {
 				if (await this.storage.contains(session.id)) {
 					this.logDebug(`Session ${session.id} has expired`)
 					await this.storage.delete(session.id)
 					this.emit("onDappSessionDeleted", session)
 				}
-			} finally {
-				this.lock.leave()
-			}
+			})
 			return true
 		}
 		return false
 	}
 
 	public async deleteExpired(): Promise<void> {
-		try {
-			await this.lock.enter()
-
+		await this.lock.withLock(async () => {
 			const now = Date.now()
 			const expired = (await this.storage.getValues()).filter((x) => x.expiry < now)
 			await purgeRows(
@@ -343,9 +306,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 				},
 				(session) => this.emit("onDappSessionDeleted", session),
 			)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
@@ -353,8 +314,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related dapp sessions`)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			// MAC-free, key-aware raw purge: a DELETED profile may be INACTIVE (MAC
 			// key underivable → `getValues()` HIDES its rows) or hold a schema-invalid
 			// / key-aliased row; all must be removed or they revive on a same-secret
@@ -370,8 +330,6 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 				},
 				({ row }) => this.emit("onDappSessionDeleted", row),
 			)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }
