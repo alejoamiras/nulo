@@ -1075,6 +1075,44 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		).rejects.toThrow(/Requested account 0xunauthorized is not authorized/)
 	})
 
+	test("grantPublicAuthwit failure branches use the SHARED resolver's differentiated errors", async () => {
+		// Mirror of the registerToken branch pins — the same two newly-
+		// differentiated failures must hold for the second migrated handler.
+		const grants = [
+			{
+				capability: {
+					type: "accounts",
+					canGet: true,
+					canCreateAuthWit: true,
+					accounts: [{ alias: "main", item: "0xacc" }],
+				} as Capability,
+				grantedAt: 1,
+			},
+			{ capability: { type: "transaction", scope: "*" } as Capability, grantedAt: 1 },
+		]
+		const interaction: IDappInteractionRunner = {
+			execute: async () => [{ status: "ok", result: undefined }] as never,
+			requestCapabilities: async () => ({}) as never,
+		}
+		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
+		const network: INetworkReader = {
+			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+		}
+		const grantArgs = ["0xacc", { caller: "0xc", contract: "0xd", method: "m", args: [] }]
+
+		// Branch 1: NO wallet accounts on this profile/chain.
+		const emptyWallet: IAccountReader = { getAccounts: async () => [] }
+		const s1 = makeSession({ capabilityGrants: grants, accounts: ["aztec:0:0xacc"] })
+		const d1 = new WalletSdkDispatcher(network, emptyWallet, execution, interaction, makeSessionWriter(s1).writer, noopLogger)
+		await expect(d1.dispatch("grantPublicAuthwit", grantArgs, ctx)).rejects.toThrow(/No accounts found for profile/)
+
+		// Branch 2: wallet has accounts but the session's authorized set is EMPTY.
+		const walletAccounts: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
+		const s2 = makeSession({ capabilityGrants: grants, accounts: [] })
+		const d2 = new WalletSdkDispatcher(network, walletAccounts, execution, interaction, makeSessionWriter(s2).writer, noopLogger)
+		await expect(d2.dispatch("grantPublicAuthwit", grantArgs, ctx)).rejects.toThrow(/must call requestCapabilities/)
+	})
+
 	test("batch([{name:'registerToken', ...}]) is rejected server-side", async () => {
 		// Even if a raw protocol client bypasses the SDK's dApp-side Zod
 		// validation (BatchedMethodSchema is built from WalletMethodSchemas,
