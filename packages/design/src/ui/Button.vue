@@ -297,19 +297,28 @@ const rel = computed(() => {
 	line-height: 1;
 }
 
-/** CTA — full-width brutalist call-to-action for primary page-level
- *  submits (Continue, Decrypt Backup, Import, Confirm). */
-.wrapper.cta {
+/** Shared CTA typography contract — ONE source for all three variants
+ *  (a CTA-wide tracking/size/height change is a single edit; a fourth
+ *  variant inherits it by joining this selector list). Variants below
+ *  keep only their colors, border, and interaction states. */
+.wrapper.cta,
+.wrapper.cta_outline,
+.wrapper.cta_destructive {
 	width: 100%;
-	background: var(--nulo-accent);
-	color: var(--txt-inverse);
-	fill: var(--txt-inverse);
 	font-family: var(--font-headline);
 	font-weight: 700;
 	font-size: 14px;
 	letter-spacing: 0.2em;
 	text-transform: uppercase;
 	padding: 20px 0;
+}
+
+/** CTA — full-width brutalist call-to-action for primary page-level
+ *  submits (Continue, Decrypt Backup, Import, Confirm). */
+.wrapper.cta {
+	background: var(--nulo-accent);
+	color: var(--txt-inverse);
+	fill: var(--txt-inverse);
 	border: none;
 }
 .wrapper.cta:hover:not(.disabled):not(.loading) {
@@ -324,16 +333,9 @@ const rel = computed(() => {
 /** Outlined CTA flavor — transparent + nulo-outline border + secondary
  *  text. Used as a Cancel / Back partner to a primary CTA. */
 .wrapper.cta_outline {
-	width: 100%;
 	background: transparent;
 	color: var(--nulo-secondary);
 	fill: var(--nulo-secondary);
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 14px;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-	padding: 20px 0;
 	border: 1px solid var(--nulo-outline);
 }
 .wrapper.cta_outline:hover:not(.disabled):not(.loading) {
@@ -345,16 +347,9 @@ const rel = computed(() => {
 /** Destructive CTA flavor — red bg + white text. Reserved for
  *  irreversible actions (Delete Profile, Wipe Wallet). */
 .wrapper.cta_destructive {
-	width: 100%;
 	background: var(--red);
 	color: var(--txt-white);
 	fill: var(--txt-white);
-	font-family: var(--font-headline);
-	font-weight: 700;
-	font-size: 14px;
-	letter-spacing: 0.2em;
-	text-transform: uppercase;
-	padding: 20px 0;
 	border: none;
 }
 .wrapper.cta_destructive:hover:not(.disabled):not(.loading) {
