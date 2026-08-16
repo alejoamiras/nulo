@@ -1,4 +1,5 @@
 import { onScopeDispose, ref, type Ref } from "vue"
+import { createFeeEstimationEngine } from "./internal/fee-estimation-engine"
 
 export interface UseFeeEstimationOptions<TParams, TResult> {
 	/**
@@ -44,11 +45,15 @@ export interface UseFeeEstimationResult<TParams, TResult> {
 	 * submit, BEFORE navigating away, so unmount cleanup cannot race the
 	 * fire-and-forget confirm out of its stashed reuse entry. Returns the
 	 * handed-off token (or null when there's nothing to hand off).
+	 * Deliberately in-flight-inclusive, unlike the keyed `handoffAll()`.
 	 */
 	handoff: () => string | null
 	/** Manually dispose. Auto-runs on scope stop. */
 	dispose: () => void
 }
+
+/** The engine is keyed; the single-slot composable uses one fixed key. */
+const SINGLE_SLOT = 0
 
 export function useFeeEstimation<TParams, TResult>(
 	options: UseFeeEstimationOptions<TParams, TResult>,
@@ -58,91 +63,29 @@ export function useFeeEstimation<TParams, TResult>(
 	const result = ref<TResult | null>(null) as Ref<TResult | null>
 	const isEstimating = ref(false)
 
-	let timer: ReturnType<typeof setTimeout> | null = null
-	let counter = 0
-	let disposed = false
-	/** Token of the scheduled/in-flight attempt; `started` flips when the RPC fires. */
-	let inflight: { token: string; started: boolean } | null = null
-	/** Token of the last completed attempt (its stash may be cached SW-side). */
-	let completedToken: string | null = null
-	const handedOff = new Set<string>()
+	const engine = createFeeEstimationEngine<typeof SINGLE_SLOT, TParams, TResult>({
+		// The single-slot path does no per-op SW-side coalescing — no flowKey
+		// (or instanceId) exists here; the estimator keeps its 2-arg shape.
+		run: (params, estimateToken) => estimate(params, estimateToken),
+		debounceMs,
+		onResult: (_key, r) => {
+			result.value = r
+		},
+		onEstimating: (_key, estimating) => {
+			isEstimating.value = estimating
+		},
+		onError: onError ? (_key, err) => onError(err) : undefined,
+		cancelRemote,
+	})
 
-	const clearTimer = () => {
-		if (timer) {
-			clearTimeout(timer)
-			timer = null
-		}
+	onScopeDispose(engine.dispose)
+
+	return {
+		result,
+		isEstimating,
+		estimate: (params) => engine.schedule(SINGLE_SLOT, params),
+		cancel: () => engine.cancel(SINGLE_SLOT),
+		handoff: () => engine.handoffInclusive(SINGLE_SLOT),
+		dispose: engine.dispose,
 	}
-
-	/** Remote-cancel every live token this composable still owns. */
-	const cancelOwnedRemote = () => {
-		const tokens = [inflight?.started ? inflight.token : null, completedToken]
-		for (const token of tokens) {
-			if (token && !handedOff.has(token)) cancelRemote?.(token)
-		}
-		inflight = null
-		completedToken = null
-	}
-
-	const cancel = () => {
-		clearTimer()
-		cancelOwnedRemote()
-		// Bumping the counter invalidates any in-flight estimator promise.
-		counter++
-		result.value = null
-		isEstimating.value = false
-	}
-
-	const schedule = (params: TParams) => {
-		clearTimer()
-		cancelOwnedRemote()
-		result.value = null
-		isEstimating.value = true
-		const myCounter = ++counter
-		const token = crypto.randomUUID()
-		inflight = { token, started: false }
-
-		timer = setTimeout(async () => {
-			try {
-				if (inflight?.token === token) inflight.started = true
-				const r = await estimate(params, token)
-				if (disposed || myCounter !== counter) return
-				result.value = r
-				completedToken = token
-				inflight = null
-			} catch (err) {
-				if (disposed || myCounter !== counter) return
-				result.value = null
-				// A transport failure (RPC timeout) leaves the SW-side runner
-				// alive with no local owner — without this cancel it would be
-				// unreachable by every later cleanup path and its stash would
-				// sit un-evictable for the full TTL.
-				if (inflight?.token && !handedOff.has(inflight.token)) cancelRemote?.(inflight.token)
-				inflight = null
-				onError?.(err)
-			} finally {
-				if (!disposed && myCounter === counter) {
-					isEstimating.value = false
-				}
-			}
-		}, debounceMs)
-	}
-
-	const handoff = (): string | null => {
-		const token = completedToken ?? inflight?.token ?? null
-		if (token) handedOff.add(token)
-		return token
-	}
-
-	const dispose = () => {
-		if (disposed) return
-		clearTimer()
-		cancelOwnedRemote()
-		disposed = true
-		counter++
-	}
-
-	onScopeDispose(dispose)
-
-	return { result, isEstimating, estimate: schedule, cancel, handoff, dispose }
 }
