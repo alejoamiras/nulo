@@ -28,3 +28,18 @@ Inlining one-use method arrays is cleaner. The factory positive test plus missin
 These stale instructions could reintroduce the rejected work during implementation. Synchronize them with the amended Architecture section.
 
 **conditional approve (conditions: update the stale Assumptions, Phases 1–2, and Security wording before implementation).**
+---
+
+## Post-implementation diff review (fresh codex session, xhigh)
+
+Blocker/High/Medium: None.
+
+Low
+
+- [background/client.test.ts:61](packages/extension-messaging/src/background/client.test.ts:61), [offscreen/client.test.ts:58](packages/extension-messaging/src/offscreen/client.test.ts:58): The promised frozen error-shape tests omit exact `.code` assertions. Class, message, details, and cause are covered, but the package suite would accept simultaneous drift of the static and instance codes because `errors.test.ts` compares them only to `Rpc*Error.CODE`. Add literal pins for `"RPC_TIMEOUT"` and `"RPC_DISCONNECTED"` in both transport suites.
+
+No runtime behavior, prototype, import-cycle, telemetry, passthrough-order/descriptor, or exhaustiveness defects found. All 16 method lists are preserved.
+
+Verdict: **fix required**No new material findings. Commit `84521587` fully closes the prior Low: both transport suites now pin literal timeout and disconnect codes alongside class, message, details, and cause.
+
+converged
