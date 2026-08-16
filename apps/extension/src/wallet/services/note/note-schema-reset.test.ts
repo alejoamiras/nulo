@@ -1,10 +1,11 @@
 /**
- * Pins the note-schema memo + the CASCADING catalog reset end to end: the test
- * hook must clear both the schema memo AND the real artifact-catalog store, or
- * class ids re-resolve against stale entries after a reset. Only the class-id
- * hasher is mocked (the real one Poseidon-hashes through bb WASM, excluded in
- * vitest) — the catalog module, its Map, and both reset hooks are REAL, so a
- * no-op'd catalog reset reds the recompute assertion below.
+ * Pins the note-schema memo + the CASCADING catalog reset end to end against
+ * the REAL aztec-runtime modules (this tree resolves the vite-only artifact
+ * aliases; the aztec-runtime package's own vitest run cannot load the catalog
+ * at all). Only the class-id hasher is mocked — real bb.js faults under
+ * repeated unit-test calls (see note-schemas.test.ts). If
+ * `_resetArtifactCatalogForTests` ever stops clearing the real catalog store,
+ * the recompute count below stays at 4 and this file reds.
  */
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -20,21 +21,19 @@ vi.mock("@aztec/stdlib/contract", async (importOriginal) => {
 	}
 })
 
-import { getCatalogEntry } from "./artifact-catalog"
-import { _resetNoteSchemasForTests, loadProductionNoteSchemas } from "./note-schemas"
+import { _resetNoteSchemasForTests, loadProductionNoteSchemas } from "@nulo/aztec-runtime/pxe"
 
-describe("note-schema memo + cascading catalog reset (real catalog, mocked hasher)", () => {
+describe("note-schema memo + cascading catalog reset (real modules, mocked hasher)", () => {
 	beforeEach(() => {
 		_resetNoteSchemasForTests()
 		hashState.count = 0
 	})
 
-	test("schemas load once; repeat calls and direct catalog hits reuse the real cached entries", async () => {
+	test("schemas load once: the four note-bearing keys hash exactly once across repeat loads", async () => {
 		const first = await loadProductionNoteSchemas()
-		expect(hashState.count).toBe(4) // the four note-bearing keys, hashed once each
+		expect(hashState.count).toBe(4)
 		const second = await loadProductionNoteSchemas()
 		expect(second).toBe(first)
-		await getCatalogEntry("token") // same REAL map the schema load populated
 		expect(hashState.count).toBe(4)
 	})
 
