@@ -38,6 +38,7 @@ declare module 'vue' {
     GlobalLoader: typeof import('./../components/GlobalLoader.vue')['default']
     Header: typeof import('./../components/Header.vue')['default']
     Icon: typeof import('@nulo/design')['Icon']
+    IdentityStrip: typeof import('./../components/composite/IdentityStrip.vue')['default']
     ImportFullBackupForm: typeof import('./../components/composite/import/ImportFullBackupForm.vue')['default']
     ImportMethodPicker: typeof import('./../components/composite/import/ImportMethodPicker.vue')['default']
     ImportSecretForm: typeof import('./../components/composite/import/ImportSecretForm.vue')['default']

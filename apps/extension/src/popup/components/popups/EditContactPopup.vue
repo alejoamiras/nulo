@@ -296,24 +296,3 @@ const onKeydown = (e) => {
 	</FormPopup>
 </template>
 
-<style module>
-.shake {
-	animation: shake 0.5s ease;
-}
-
-@keyframes shake {
-	0%,
-	100% {
-		transform: translateX(0);
-	}
-	25% {
-		transform: translateX(-2px);
-	}
-	50% {
-		transform: translateX(2px);
-	}
-	75% {
-		transform: translateX(-2px);
-	}
-}
-</style>

@@ -310,11 +310,6 @@ const onKeydown = (e) => {
 		padding: 12px;
 	}
 
-	.row {
-		padding: 0 0 8px 8px;
-
-	}
-	
 	.fullscreen_icon {
 		cursor: pointer;
 		&:hover {

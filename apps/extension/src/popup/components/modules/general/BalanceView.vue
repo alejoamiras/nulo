@@ -384,16 +384,4 @@ onBeforeUnmount(() => {
 	width: 100%;
 	margin-top: 12px;
 }
-
-.hover_red {
-	& svg,
-	& span {
-		transition: all 0.2s var(--bezier);
-	}
-
-	&:hover {
-		svg { fill: var(--red); }
-		span { color: var(--red); }
-	}
-}
 </style>

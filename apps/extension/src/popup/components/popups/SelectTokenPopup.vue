@@ -107,23 +107,4 @@ watch(
 .wrapper {
 	padding: 0 20px 24px 20px;
 }
-
-.token {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px 16px 12px 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-		border: 1px solid var(--nulo-outline);
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
 </style>

@@ -132,19 +132,10 @@ watch(
 	&:hover {
 		background: var(--nulo-surface-low);
 		border: 1px solid var(--nulo-outline);
-		& .icons {
-			opacity: 1;
-		}
 	}
 
 	&:active {
 		background: var(--nulo-surface-high);
 	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
 }
 </style>

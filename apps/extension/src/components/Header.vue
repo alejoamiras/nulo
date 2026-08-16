@@ -13,6 +13,7 @@ import { copyAddressToClipboard } from "./header-copy-address"
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
@@ -247,7 +248,7 @@ onBeforeUnmount(() => {
 					:class="$style.account_address"
 				>
 					<span :class="$style.address_text">
-						{{ appStore.account?.address ? `${appStore.account.address.slice(0, 6)}...${appStore.account.address.slice(-4)}` : "" }}
+						{{ appStore.account?.address ? trimAddress(appStore.account.address, 6, 4, "...") : "" }}
 						<span :class="$style.copy_reveal"><Icon name="copy" size="12" /></span>
 					</span>
 				</button>

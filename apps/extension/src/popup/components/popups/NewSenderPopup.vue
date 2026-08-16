@@ -177,63 +177,6 @@ const onKeydown = (e) => {
 	padding: 0 20px 24px 20px;
 }
 
-.network {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
-}
-
-.item {
-	height: 30px;
-
-	border-radius: 8px;
-	border: 2px solid var(--nulo-border);
-	cursor: pointer;
-
-	padding: 0 16px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		border: 2px solid var(--nulo-outline);
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-
-	&.selected {
-		background: var(--green);
-	}
-
-	&.disabled {
-		opacity: 0.5;
-		pointer-events: none;
-	}
-}
-
 .shake {
 	animation: shake 0.5s ease;
 }

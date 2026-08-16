@@ -33,6 +33,7 @@ import { formatSessionExpiry, parseSessionParams } from "@/popup/components/modu
 import { useAppStore } from "@/stores/app.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { usePopupStore } from "@/stores/popup.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const cacheStore = useCacheStore()
 const popupStore = usePopupStore()
@@ -228,7 +229,7 @@ onBeforeUnmount(() => {
 						:key="`${acc.chainId}:${acc.address}`"
 						materialIcon="account_balance_wallet"
 						:title="getAccountAlias(acc)"
-						:description="`${getChainName(acc.chainId).toUpperCase()} · ${acc.address.slice(0, 6)}...${acc.address.slice(-4)}`"
+						:description="`${getChainName(acc.chainId).toUpperCase()} · ${trimAddress(acc.address, 6, 4, '...')}`"
 						raw
 					>
 						<template #right>
