@@ -1,0 +1,5 @@
+# Lessons — dedup-withlock phase 2
+
+- **Never `git add -A` while parallel edit-agents are live in the same worktree.** The dapp-session commit (8fa370fd) swept five subagent-in-progress files in whatever on-disk state they had. Recovery: branch is squash-merged so history mess is erased; correctness is re-established by reviewing each file's FULL cumulative diff + tests before the arc closes. Standing rule for the rest of the goal: stage explicit paths when any background editor is running.
+- Codex plan-audit (session 01a00832…) rejected the draft for real: 52/68 frames are enter-INSIDE-try (different acquisition-failure behavior than withLock), token catch-under-lock ordering, dapp-interaction promise hold. Resolution D2 (harden enter() to never-reject) turned the parity question from "preserve two broken shapes" into "make the equivalence true". Fable's leg independently found the same token inversion + a 15th site (config/store.ts) + updateToken reclassification — dual audit earned its cost on this arc.
+- vitest path filters are relative to apps/extension (`src/wallet/services/...`), not repo root — repo-root-style filters silently match nothing and exit 1.

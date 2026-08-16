@@ -348,9 +348,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// Serialise the whole restore: the intersection check + the writes must be
 		// atomic w.r.t. a concurrent restore, or two imports of the same address
 		// both pass the check then both write (last-writer-wins ownership — H4).
-		try {
-			await this.restoreLock.enter()
-
+		return await this.restoreLock.withLock(async () => {
 			const result: Restored<Account>[] = []
 
 			// Identity is the full row id, not the address alone: two profiles restored
@@ -388,8 +386,6 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			}
 
 			return result
-		} finally {
-			this.restoreLock.leave()
-		}
+		})
 	}
 }
