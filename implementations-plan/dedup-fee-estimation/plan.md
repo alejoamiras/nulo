@@ -58,8 +58,12 @@ export interface FeeEstimationEngine<TKey extends string | number, TParams> {
   cancelAll(): void
   /** Single-slot submit seam: completed ?? in-flight token, marked handed off. */
   handoffInclusive(key: TKey): string | null
-  /** Multi-op approve seam: completed tokens ONLY, each marked handed off. */
-  handoffCompleted(): Array<[TKey, string]>
+  /**
+   * Multi-op approve seam: completed tokens ONLY. `collect` runs immediately
+   * after each token's handed-off mark (per-entry mark→assign — a
+   * mid-iteration throw cannot leave later tokens marked-but-unreported).
+   */
+  handoffCompleted(collect: (key: TKey, token: string) => void): void
   rearm(): void
   dispose(): void
 }
