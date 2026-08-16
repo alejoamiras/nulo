@@ -4,6 +4,7 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { decodeResult } from "./decode"
 import { wrapParams } from "../utils"
+import { CLIENT_DISCONNECTED_MESSAGE, remoteErrorFromResponseContent, RpcDisconnectedError, RpcTimeoutError } from "../errors"
 import type { RequestTerminalStatus } from "../offscreen/telemetry"
 
 /**
@@ -24,12 +25,12 @@ import type { RequestTerminalStatus } from "../offscreen/telemetry"
  *
  *   - liveness / readiness (`ensureTransportReady`) and the wire send
  *     (`sendEnvelope`); the message listener + routing stay in the subclass.
- *   - the error-VALUE construction (`makeRemoteError` / `makeTimeoutError` /
- *     `makeSendFailureError` / `makeDisconnectError`). The background transport
- *     rejects with typed `WalletError`s; the offscreen transport currently
- *     rejects with raw strings. Keeping error shaping in hooks is what lets the
- *     offscreen string→typed flip be a localized, later change rather than a
- *     behavior change smuggled into this core.
+ *   - the human-readable timeout/send-failure MESSAGE wording
+ *     (`timeoutMessage` / `sendFailureMessage`). Both transports reject with
+ *     the same typed `WalletError` shapes, so the error-VALUE construction
+ *     (`make*Error`) lives here with the messages as the only per-transport
+ *     variation; a transport with a genuinely different error SHAPE can still
+ *     override the concrete `make*Error` hooks.
  *   - terminal observability (`onTerminal`); the offscreen subclass records
  *     telemetry, the background subclass does not.
  */
@@ -256,17 +257,43 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 	 *  core treats both as a send failure. */
 	protected abstract sendEnvelope(content: unknown, methodName: string, requestId: number): void | Promise<void>
 
-	/** Build the rejection value for a remote (service-side) error response. */
-	protected abstract makeRemoteError(content: ResponseContentLike): unknown
+	/** Build the rejection value for a remote (service-side) error response:
+	 *  reconstruct the typed WalletError (or plain Error) from the envelope. */
+	protected makeRemoteError(content: ResponseContentLike): unknown {
+		return remoteErrorFromResponseContent(content)
+	}
 
-	/** Build the rejection value for a hard timeout. */
-	protected abstract makeTimeoutError(meta: RequestErrorMeta): unknown
+	/** Build the rejection value for a hard timeout. Shape (class + details) is
+	 *  owned here; only the message wording is the transport's. */
+	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
+		return new RpcTimeoutError(this.timeoutMessage(meta), {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+		})
+	}
 
-	/** Build the rejection value when the wire send fails. */
-	protected abstract makeSendFailureError(meta: RequestErrorMeta): unknown
+	/** Build the rejection value when the wire send fails. Shape owned here;
+	 *  message wording is the transport's. */
+	protected makeSendFailureError(meta: RequestErrorMeta): unknown {
+		return new RpcDisconnectedError(this.sendFailureMessage(meta), {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+			cause: meta.cause === undefined ? undefined : String(meta.cause),
+		})
+	}
 
-	/** Build the rejection value for an explicit `disconnect()`. */
-	protected abstract makeDisconnectError(): unknown
+	/** Build the rejection value for an explicit `disconnect()`. Deliberately a
+	 *  plain Error: the shared teardown message is a string-shaped contract —
+	 *  see `CLIENT_DISCONNECTED_MESSAGE` / `isClientDisconnectRejection`. */
+	protected makeDisconnectError(): unknown {
+		return new Error(CLIENT_DISCONNECTED_MESSAGE)
+	}
+
+	/** Transport-specific wording for a hard-timeout rejection. */
+	protected abstract timeoutMessage(meta: RequestErrorMeta): string
+
+	/** Transport-specific wording for a wire-send-failure rejection. */
+	protected abstract sendFailureMessage(meta: RequestErrorMeta): string
 
 	/** Per-method timeout. Defaults to the constructor default; offscreen
 	 *  overrides for long-running methods (e.g. proveTx). */

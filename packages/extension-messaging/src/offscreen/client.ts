@@ -1,8 +1,7 @@
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { getRandomHex } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
-import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike, type TerminalRecord } from "../core/base-client"
-import { CLIENT_DISCONNECTED_MESSAGE, RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
+import { BaseServiceClient, type RequestErrorMeta, type TerminalRecord } from "../core/base-client"
 import { MessageType } from "../messages"
 import type { EventMessage, ResponseMessage } from "./messages"
 import { type RequestTelemetry, type TelemetrySink, LoggingTelemetrySink } from "./telemetry"
@@ -21,9 +20,9 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 90_000
 
 /**
  * SW ↔ offscreen-document client over one-shot `chrome.runtime.sendMessage`.
- * Correlation, timeout, and terminal cleanup live in `BaseServiceClient`; this
- * subclass owns the offscreen routing (uid + from/to), readiness, telemetry,
- * and the (currently string-shaped) error contract.
+ * Correlation, timeout, terminal cleanup, and typed-error construction live in
+ * `BaseServiceClient`; this subclass owns the offscreen routing (uid +
+ * from/to), readiness, telemetry, and its error-message wording.
  */
 export abstract class ServiceClient<
 	TRequests extends MethodsMap,
@@ -104,33 +103,15 @@ export abstract class ServiceClient<
 		await chrome.runtime.sendMessage({ type: MessageType.Request, content, from: this.uid, to: this.service })
 	}
 
-	// Typed error shaping — parity with the background transport. The offscreen
-	// service emits `errorPayload` (P3), so remote errors reconstruct the
-	// original WalletError subclass; timeout/send-failure/disconnect become the
-	// same typed errors the Port transport already used. Rejections that reach a
-	// connected dApp via prove/simulate are mapped to a stable response.error in
-	// `error-envelope.ts` (the Rpc* cases added in this phase).
-	protected makeRemoteError(content: ResponseContentLike): unknown {
-		return remoteErrorFromResponseContent(content)
+	// Typed error construction lives in `BaseServiceClient`; only the wording is
+	// transport-specific. Rejections that reach a connected dApp via
+	// prove/simulate are mapped to a stable response.error in `error-envelope.ts`.
+	protected timeoutMessage(meta: RequestErrorMeta): string {
+		return `Offscreen request timed out: ${meta.methodName}`
 	}
 
-	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
-		return new RpcTimeoutError(`Offscreen request timed out: ${meta.methodName}`, {
-			requestId: meta.requestId,
-			methodName: meta.methodName,
-		})
-	}
-
-	protected makeSendFailureError(meta: RequestErrorMeta): unknown {
-		return new RpcDisconnectedError(`Offscreen send failed: ${meta.methodName}`, {
-			requestId: meta.requestId,
-			methodName: meta.methodName,
-			cause: meta.cause === undefined ? undefined : String(meta.cause),
-		})
-	}
-
-	protected makeDisconnectError(): unknown {
-		return new Error(CLIENT_DISCONNECTED_MESSAGE)
+	protected sendFailureMessage(meta: RequestErrorMeta): string {
+		return `Offscreen send failed: ${meta.methodName}`
 	}
 
 	protected onTerminal(record: TerminalRecord): void {

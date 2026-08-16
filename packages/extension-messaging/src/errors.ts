@@ -25,14 +25,17 @@ export class WalletError extends Error {
 	public readonly code: string
 	public readonly details?: unknown
 
-	public constructor(code: string, message: string, details?: unknown) {
+	public constructor(code: string, message: string, details?: unknown, name = "WalletError") {
 		super(message)
-		this.name = "WalletError"
+		this.name = name
 		this.code = code
 		this.details = details
-		// Ensure `instanceof` works when errors are reconstructed across
-		// workers/JSON boundaries. Subclasses repeat this in their ctors.
-		Object.setPrototypeOf(this, WalletError.prototype)
+		// Prototype identity is owned HERE, once: `new.target.prototype` resolves to
+		// the most-derived class, so `instanceof` survives reconstruction across
+		// workers/JSON boundaries without any per-subclass fixup. Subclasses pass
+		// their frozen literal name through `super` — never derive it from
+		// `new.target.name`; the production minifier mangles class names.
+		Object.setPrototypeOf(this, new.target.prototype)
 	}
 
 	public toPayload(): WalletErrorPayload {
@@ -48,9 +51,7 @@ export class RpcTimeoutError extends WalletError {
 	public static readonly CODE = "RPC_TIMEOUT"
 
 	public constructor(message: string, details?: unknown) {
-		super(RpcTimeoutError.CODE, message, details)
-		this.name = "RpcTimeoutError"
-		Object.setPrototypeOf(this, RpcTimeoutError.prototype)
+		super(RpcTimeoutError.CODE, message, details, "RpcTimeoutError")
 	}
 }
 
@@ -69,9 +70,7 @@ export class RpcDisconnectedError extends WalletError {
 	public static readonly CODE = "RPC_DISCONNECTED"
 
 	public constructor(message: string, details?: unknown) {
-		super(RpcDisconnectedError.CODE, message, details)
-		this.name = "RpcDisconnectedError"
-		Object.setPrototypeOf(this, RpcDisconnectedError.prototype)
+		super(RpcDisconnectedError.CODE, message, details, "RpcDisconnectedError")
 	}
 }
 
@@ -100,9 +99,7 @@ export class UserRejectedError extends WalletError {
 	public static readonly CODE = "USER_REJECTED"
 
 	public constructor(message = "User rejected the request", details?: unknown) {
-		super(UserRejectedError.CODE, message, details)
-		this.name = "UserRejectedError"
-		Object.setPrototypeOf(this, UserRejectedError.prototype)
+		super(UserRejectedError.CODE, message, details, "UserRejectedError")
 	}
 }
 
@@ -126,9 +123,7 @@ export class JobCancelledError extends WalletError {
 	public static readonly CODE = "JOB_CANCELLED"
 
 	public constructor(message = "Transaction cancelled by user", details?: { jobId?: string }) {
-		super(JobCancelledError.CODE, message, details)
-		this.name = "JobCancelledError"
-		Object.setPrototypeOf(this, JobCancelledError.prototype)
+		super(JobCancelledError.CODE, message, details, "JobCancelledError")
 	}
 }
 
@@ -154,9 +149,7 @@ export class CapabilityNotGrantedError extends WalletError {
 	public static readonly CODE = "CAPABILITY_NOT_GRANTED"
 
 	public constructor(capabilityType: string, message = `${capabilityType} capability not granted. Call requestCapabilities() first.`) {
-		super(CapabilityNotGrantedError.CODE, message, { capabilityType })
-		this.name = "CapabilityNotGrantedError"
-		Object.setPrototypeOf(this, CapabilityNotGrantedError.prototype)
+		super(CapabilityNotGrantedError.CODE, message, { capabilityType }, "CapabilityNotGrantedError")
 	}
 }
 
@@ -176,9 +169,7 @@ export class TooManyPendingError extends WalletError {
 	public static readonly CODE = "TOO_MANY_PENDING"
 
 	public constructor(message = "Too many pending transactions; retry after the in-flight ones settle.") {
-		super(TooManyPendingError.CODE, message)
-		this.name = "TooManyPendingError"
-		Object.setPrototypeOf(this, TooManyPendingError.prototype)
+		super(TooManyPendingError.CODE, message, undefined, "TooManyPendingError")
 	}
 }
 
@@ -187,9 +178,7 @@ export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
 
 	public constructor(message: string, details?: unknown) {
-		super(ValidationError.CODE, message, details)
-		this.name = "ValidationError"
-		Object.setPrototypeOf(this, ValidationError.prototype)
+		super(ValidationError.CODE, message, details, "ValidationError")
 	}
 }
 
@@ -203,9 +192,7 @@ export class InvalidPasswordError extends WalletError {
 	public static readonly LEGACY_MESSAGE = "Invalid profile password"
 
 	public constructor(message: string = InvalidPasswordError.LEGACY_MESSAGE, details?: unknown) {
-		super(InvalidPasswordError.CODE, message, details)
-		this.name = "InvalidPasswordError"
-		Object.setPrototypeOf(this, InvalidPasswordError.prototype)
+		super(InvalidPasswordError.CODE, message, details, "InvalidPasswordError")
 	}
 }
 
@@ -220,9 +207,7 @@ export class AccountAddressInconsistencyError extends WalletError {
 	public static readonly CODE = "ACCOUNT_ADDRESS_INCONSISTENCY"
 
 	public constructor(message = "Account address inconsistency", details?: unknown) {
-		super(AccountAddressInconsistencyError.CODE, message, details)
-		this.name = "AccountAddressInconsistencyError"
-		Object.setPrototypeOf(this, AccountAddressInconsistencyError.prototype)
+		super(AccountAddressInconsistencyError.CODE, message, details, "AccountAddressInconsistencyError")
 	}
 }
 
@@ -239,9 +224,7 @@ export class RestoreTornError extends WalletError {
 	public static readonly CODE = "RESTORE_TORN"
 
 	public constructor(message = "This profile's import didn't finish", details?: unknown) {
-		super(RestoreTornError.CODE, message, details)
-		this.name = "RestoreTornError"
-		Object.setPrototypeOf(this, RestoreTornError.prototype)
+		super(RestoreTornError.CODE, message, details, "RestoreTornError")
 	}
 }
 
@@ -262,9 +245,7 @@ export class ProfileIdConflictError extends WalletError {
 	public static readonly CODE = "PROFILE_ID_CONFLICT"
 
 	public constructor(message = "Profile id was claimed during WebAuthn prompt; retry with a new id.", details?: unknown) {
-		super(ProfileIdConflictError.CODE, message, details)
-		this.name = "ProfileIdConflictError"
-		Object.setPrototypeOf(this, ProfileIdConflictError.prototype)
+		super(ProfileIdConflictError.CODE, message, details, "ProfileIdConflictError")
 	}
 }
 
