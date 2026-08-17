@@ -213,6 +213,14 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		// bump — a flip is a flip.
 		this.generation += 1
 		const myGen = this.generation
+		if (!enable) {
+			// Neutralize any in-flight refresh SYNCHRONOUSLY (outside the chain, and
+			// even when this disable is later superseded): `refresh()` shares
+			// `this.inflight` BEFORE its generation check, so a following enable would
+			// otherwise adopt this stale run and never start a fresh fetch.
+			this.abortController?.abort()
+			this.inflight = undefined
+		}
 		// Chain the cache-committing tail so transitions run strictly one-at-a-time:
 		// a disable's cache.delete can never interleave with an enable's cache.set.
 		this.configTransition = this.configTransition
@@ -221,8 +229,6 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 				// truth, so skip this transition's storage/emit work wholesale.
 				if (this.generation !== myGen) return
 				if (!enable) {
-					this.abortController?.abort()
-					this.inflight = undefined
 					await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
 					await this.cache.delete()
 					this.emit("onQuotesUpdated", {})

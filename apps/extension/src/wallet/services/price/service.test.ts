@@ -449,6 +449,26 @@ describe("PriceService — post-ship audit pins (codex B)", () => {
 		expect(seen.at(-1) && Object.keys(seen.at(-1)!).length).toBeGreaterThan(0)
 	})
 
+	test("(B-21 fresh-fetch PIN) a disable→re-enable starts a fresh fetch, not a stale in-flight", async () => {
+		const flush = () => new Promise((r) => setTimeout(r, 0))
+		const { service, state, fakeConfig } = await harness()
+		// Refresh A stalls in-flight (deferred fetch).
+		state.fetchImpl = () => new Promise<FetchResponse>(() => {})
+		void service.refreshIfStale()
+		await flush()
+		expect(state.fetchCalls).toHaveLength(1)
+
+		// Disable then immediately re-enable. The disable must SYNCHRONOUSLY neutralize
+		// refresh A's in-flight so the re-enable can't adopt it (refresh() shares
+		// this.inflight before its generation check) and never start a fresh fetch.
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: false })
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: true })
+		await flush()
+		await flush()
+
+		expect(state.fetchCalls.length).toBeGreaterThanOrEqual(2)
+	})
+
 	test("future-dated cache rows are INVALID: they neither serve nor block a repair-refresh", async () => {
 		const { service, state, browserApi } = await harness()
 		// Attacker/corruption plants far-future rows for BOTH mapped ids —

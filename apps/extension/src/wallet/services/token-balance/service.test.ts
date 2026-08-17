@@ -293,4 +293,54 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 
 		expect(setSpy).not.toHaveBeenCalled()
 	})
+
+	test("(B-05 createTokenBalance PIN) a switch DURING the balance write skips the emit/enqueue for the departed context", async () => {
+		const flush = () => new Promise((r) => setTimeout(r, 0))
+		const api = new FakeBrowserApi()
+		api.reset()
+
+		const onTokenAdded = new EventHandler<never>()
+		const onActiveProfileChanged = new EventHandler<never>()
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged, getActiveProfile: async () => ({ id: "A", name: "A" }) }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(
+			svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccounts: async () => [{ address: "0xa", chainId: 1 }] }),
+		)
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded,
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw: async () => [],
+				getTokenRaw: async () => tokenRaw(100, "A"),
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, { createNewTask: () => ({ id: "t1" }) }))
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		await services.start()
+
+		// Park inside the id ALLOCATION (before repo.set) so a switch lands past the
+		// loop-level fence but inside createTokenBalance's own await window.
+		let resolveAlloc!: (id: number) => void
+		vi.spyOn((service as never as { repo: { allocateId: () => Promise<number> } }).repo, "allocateId").mockImplementation(
+			() => new Promise((r) => (resolveAlloc = r as never)),
+		)
+		const setSpy = vi.spyOn((service as never as { repo: { set: (b: unknown) => Promise<void> } }).repo, "set")
+
+		void onTokenAdded.invoke(tokenRaw(100, "A"))
+		await flush() // reaches createTokenBalance, parks in allocateId
+
+		void onActiveProfileChanged.invoke({ id: "B", name: "B" } as never)
+		await flush()
+		resolveAlloc(5)
+		await flush()
+
+		// The context departed mid-allocation: the write must be skipped entirely.
+		expect(setSpy).not.toHaveBeenCalled()
+	})
 })

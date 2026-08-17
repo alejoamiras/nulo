@@ -95,11 +95,24 @@ export class BalanceJobQueue {
 	 *  record as a phantom "in-progress" task until the SW restarts. A record whose
 	 *  id TaskService no longer knows (a real profile switch cleared it) is skipped. */
 	public reset(): void {
-		for (const taskId of this.pendingTasks.values()) {
-			if (this.tasks.hasTask(taskId)) this.tasks.cancelTask(taskId)
+		try {
+			for (const taskId of this.pendingTasks.values()) {
+				if (!this.tasks.hasTask(taskId)) continue
+				// A task can finish (complete/fail) between this check and the cancel,
+				// or be cancelled concurrently — cancelTask then throws "already
+				// finished". Tolerate it: the record is terminal either way.
+				try {
+					this.tasks.cancelTask(taskId)
+				} catch {
+					// Already finished / raced — nothing to cancel.
+				}
+			}
+		} finally {
+			// Always drop the pointers + queue, even if a cancel throws, so the
+			// jam this reset exists to clear can never survive an error above.
+			this.queue.clear()
+			this.pendingTasks.clear()
 		}
-		this.queue.clear()
-		this.pendingTasks.clear()
 	}
 
 	/** Enqueue a balance for refresh. Creates a TaskService record if

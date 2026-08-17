@@ -54,6 +54,8 @@ function makeTaskService(): TaskMock {
 	// wiped map (the pre-registered ids no longer resolve).
 	const hasTask = vi.fn().mockReturnValue(true)
 	const cancelTask = vi.fn().mockImplementation((id: string) => {
+		// Mirror the real TaskService: finishing an already-finished task throws.
+		if (finishedAt.get(id)) throw new Error(`Cannot finish already finished task ${id}`)
 		finishedAt.set(id, true)
 	})
 	return {
@@ -199,6 +201,20 @@ describe("BalanceJobQueue", () => {
 		for (const id of droppedIds) expect(tasks.cancelTask).toHaveBeenCalledWith(id)
 		expect(queue.hasPendingTask(1)).toBe(false)
 		expect(queue.hasPendingTask(2)).toBe(false)
+	})
+
+	test("(B-04 cancel-race PIN) reset tolerates an already-finished task and still clears its pointer", () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		queue.enqueue(raw(1))
+		const id = queue.getPendingTaskId(1)!
+		// The task finished (completed/failed) between enqueue and reset — cancel now
+		// throws "already finished". reset must swallow it AND still drop the pointer.
+		tasks.service.completeTask(id)
+
+		expect(() => queue.reset()).not.toThrow()
+		expect(queue.hasPendingTask(1)).toBe(false)
 	})
 
 	test("hasPendingTask / getPendingTaskId reflect the freshly-minted task (D4 causal-ack seam)", () => {

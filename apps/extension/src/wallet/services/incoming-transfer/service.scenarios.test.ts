@@ -2210,9 +2210,10 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		accountResolvers[0]([{ profileId: "p1", chainId: 1, address: "0xa" }])
 		await flushPromises()
 
-		// The token-add's install must survive: the bumped-behind hydration bails
-		// instead of overwriting the account's watched set with its stale [A]-only set.
-		expect([...(watched.get(key) ?? [])]).toContain(tokenB.contract)
+		// Both must survive: the token-add rebuilds from the CURRENT set (A+B), and the
+		// bumped-behind slow hydration bails without clearing. Neither token is lost —
+		// an epoch-bump-then-incremental-install would have kept only B (A cleared).
+		expect([...(watched.get(key) ?? [])].sort()).toEqual([tokenA.contract, tokenB.contract].sort())
 	})
 
 	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {

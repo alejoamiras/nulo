@@ -307,7 +307,13 @@ export const useActivityStore = defineStore("activity", () => {
 		for (const [key, slice] of [...slices.value]) {
 			if (slice.scope.profileId !== profileId) continue
 			slices.value.delete(key)
-			mutationVersion.value.delete(key)
+		}
+		// Drop version entries by KEY, not by surviving slice: an EVICTED scope keeps
+		// its version (eviction no longer deletes it), so a slices-only sweep would
+		// leave a stale entry a pre-clear fetch could still match. The key is
+		// `JSON.stringify([profileId, ...])`, so its first element is the profile id.
+		for (const key of [...mutationVersion.value.keys()]) {
+			if ((JSON.parse(key) as [string])[0] === profileId) mutationVersion.value.delete(key)
 		}
 		advanceIncarnation()
 		touch()

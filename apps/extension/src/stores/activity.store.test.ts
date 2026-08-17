@@ -372,4 +372,19 @@ describe("activity store — B-29 eviction fences", () => {
 		const accepted = store.setTransactions(S, [tx(S, "0xstale")], captured)
 		expect(accepted).toBe(false)
 	})
+
+	test("(B-29d PIN) clearProfile drops an EVICTED scope's retained version so its pre-clear fetch is rejected", () => {
+		const store = useActivityStore()
+		const S: ActivityScope = { profileId: "p1", networkId: "n1", chainId: 1, accountAddress: "0xevicted" }
+		// S gets a real mutation (version entry), and a fetch captures that version.
+		store.ingestTransaction(tx(S, "0xs1"), S)
+		const captured = store.mutationVersionFor(S)
+		// Evict S by flooding: its slice drops but its version is RETAINED across eviction.
+		for (let i = 0; i < 40; i++) store.ingestTransaction(tx(floodScope(i), `0xf${i}`), floodScope(i))
+		// clearProfile must drop S's retained version too (a slices-only sweep misses it,
+		// since S's slice is already gone), so the pre-clear fetch can't match afterward.
+		store.clearProfile("p1")
+		const accepted = store.setTransactions(S, [tx(S, "0xstale")], captured)
+		expect(accepted).toBe(false)
+	})
 })

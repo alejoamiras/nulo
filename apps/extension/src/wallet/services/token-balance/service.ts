@@ -210,9 +210,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		return id
 	}
 
-	private async createTokenBalance(token: Token, account: Account) {
+	private async createTokenBalance(token: Token, account: Account, gen?: number) {
+		const id = await this.allocateUnfencedId()
+		// A profile switch during allocation makes this write belong to a departed
+		// context — skip it (the id isn't persisted, so it's reused by the next call).
+		if (gen !== undefined && gen !== this.profileGeneration) return
 		const tb: TokenBalanceRaw = {
-			id: await this.allocateUnfencedId(),
+			id,
 			token: token.id,
 			account: account.address,
 			privateBalance: "0",
@@ -220,6 +224,9 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			updatedAt: 0,
 		}
 		await this.repo.set(tb)
+		// A switch during the write must not emit a UI event or enqueue a sync under
+		// the new profile's context.
+		if (gen !== undefined && gen !== this.profileGeneration) return
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
 	}
@@ -265,8 +272,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onAccountAdded = async (account: Account) => {
+		const gen = this.profileGeneration
 		for (const token of [...this.tokens.values()].filter((x) => x.chainId === account.chainId)) {
-			await this.createTokenBalance(token, account)
+			if (gen !== this.profileGeneration) return
+			await this.createTokenBalance(token, account, gen)
 		}
 	}
 
@@ -285,7 +294,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		if (gen !== this.profileGeneration) return
 		for (const account of accounts) {
 			if (gen !== this.profileGeneration) return
-			await this.createTokenBalance(tokenRaw, account)
+			await this.createTokenBalance(tokenRaw, account, gen)
 		}
 	}
 
