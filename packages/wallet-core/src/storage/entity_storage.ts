@@ -32,9 +32,9 @@ export class EntityStorage<T> {
 	 * `parse` is an OPTIONAL boundary codec: `(raw: unknown) => T` (e.g. a zod
 	 * schema's `parse`). When omitted, reads keep the legacy `JSON.parse(...) as T`
 	 * behavior (no validation). When provided, every read validates the parsed
-	 * JSON — see `decodeRow` for the deliberate split between JSON-SYNTAX failure
-	 * (drop, legacy) and CODEC-VALIDATION failure (KEEP, never drop). wallet-core
-	 * carries no zod itself; the schema is injected from the app layer.
+	 * JSON. Both JSON-SYNTAX failure and CODEC-VALIDATION failure KEEP the row
+	 * (return undefined; the read path never deletes — see `decodeRow`).
+	 * wallet-core carries no zod itself; the schema is injected from the app layer.
 	 */
 	public constructor(root: string, area: MinimalStorageArea, parse?: (raw: unknown) => T) {
 		this.root = root
@@ -43,19 +43,20 @@ export class EntityStorage<T> {
 	}
 
 	/**
-	 * Decode a raw storage value. Two failure modes, DELIBERATELY different:
+	 * Decode a raw storage value. Both failure modes KEEP the row (return
+	 * undefined = "present but unreadable"); the read path NEVER deletes by id.
 	 *
 	 *   - JSON-SYNTAX failure (`JSON.parse` throws — half-written mutation,
-	 *     genuine corruption): the byte is unrecoverable, so we log + DROP the
-	 *     row (fire-and-forget `remove`), the long-standing policy. Returns
-	 *     undefined.
+	 *     genuine corruption): log + KEEP. B-23: the old fire-and-forget `remove`
+	 *     here raced a concurrent valid write and could destroy the newer value,
+	 *     and the storage API has no atomic compare-and-delete — so deletion of a
+	 *     genuinely-dead row is left to an explicitly serialized repair path.
 	 *   - CODEC-VALIDATION failure (`parse` throws — the JSON is well-formed but
 	 *     doesn't match the schema, e.g. a forward-incompatible shape the app
-	 *     itself wrote): we must NEVER delete. Silently dropping a present-but-
-	 *     unreadable row turns a recoverable value into permanent data loss — the
-	 *     opposite of what a codec should do. Log, KEEP the row, return undefined
-	 *     ("present but unreadable"); a future migration / repair path can still
-	 *     see it. The write→read round-trip corpus tests guard against the codec
+	 *     itself wrote): log + KEEP. Silently dropping a present-but-unreadable
+	 *     row turns a recoverable value into permanent data loss — the opposite of
+	 *     what a codec should do; a future migration / repair path can still see
+	 *     it. The write→read round-trip corpus tests guard against the codec
 	 *     rejecting a shape the app actually produces.
 	 */
 	private decodeRow(fullKey: string, raw: unknown): T | undefined {
@@ -65,11 +66,17 @@ export class EntityStorage<T> {
 		} catch (err) {
 			const preview = typeof raw === "string" ? raw.slice(0, PARSE_FAILURE_PREVIEW_MAX) : String(raw)
 			const msg = err instanceof Error ? err.message : String(err)
-			console.error(`EntityStorage[${this.root}]: dropping malformed row "${fullKey}" — ${msg} — payload preview: ${preview}`)
-			void this.storage.remove(fullKey).catch((removeErr) => {
-				const rmsg = removeErr instanceof Error ? removeErr.message : String(removeErr)
-				console.error(`EntityStorage[${this.root}]: failed to delete malformed row "${fullKey}" — ${rmsg}`)
-			})
+			// B-23: KEEP the malformed row, don't delete-by-id on the read path. The
+			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write:
+			// a `get()` reads a stale malformed snapshot, a concurrent `set()`
+			// overwrites the same key with valid JSON, then this delete lands on the
+			// NEW value it never observed — silent data loss. The storage API has no
+			// atomic compare-and-delete, so hide the unreadable row (return
+			// undefined) and leave deletion to an explicitly serialized repair path,
+			// exactly as the validation-failure branch below already does.
+			console.error(
+				`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload preview: ${preview}`,
+			)
 			return undefined
 		}
 		if (!this.parse) return parsed as T
@@ -144,7 +151,7 @@ export class EntityStorage<T> {
 	 * For maintenance paths (e.g. a profile-scoped purge) that MUST act on every
 	 * row regardless of validity and cannot trust the row's self-reported id. A row
 	 * whose stored value is itself unparseable JSON is skipped (there is nothing to
-	 * key a predicate off) — those are handled by the syntax-drop path on normal reads.
+	 * key a predicate off) — a serialized repair path, not the read path, cleans those.
 	 */
 	public async rawEntries(): Promise<Array<[string, unknown]>> {
 		const path = `${this.root}@`
