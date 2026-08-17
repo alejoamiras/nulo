@@ -79,6 +79,24 @@ describe("Lock", () => {
 		expect(secondAcquired).toBe(true)
 	})
 
+	test("maxHoldMs: null disables the watchdog — a held lock never force-releases", async () => {
+		vi.useFakeTimers()
+		const lock = new Lock(undefined, undefined, null)
+		await lock.enter()
+		// Holder forgets to leave. Advance well past the default 5-minute watchdog.
+		let secondAcquired = false
+		void lock.enter().then(() => {
+			secondAcquired = true
+		})
+		await vi.advanceTimersByTimeAsync(10 * 60_000)
+		// No watchdog armed → the waiter is still blocked (matches a hand-rolled
+		// watchdog-less chain).
+		expect(secondAcquired).toBe(false)
+		lock.leave() // now it can proceed
+		await vi.advanceTimersByTimeAsync(0)
+		expect(secondAcquired).toBe(true)
+	})
+
 	test("double leave: idempotent, no throw", async () => {
 		const lock = new Lock()
 		await lock.enter()

@@ -176,7 +176,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * inside their `getValues → compute index → set` sequence, producing
 	 * duplicate accounts at indices 0 and 1.
 	 */
-	private readonly tupleLocks = new KeyedLock()
+	// maxHoldMs: null — the prior hand-rolled promise chain had no watchdog; keep
+	// it that way so this stays byte-for-byte equivalent (Q-08 audit).
+	private readonly tupleLocks = new KeyedLock({ maxHoldMs: null })
 	private serializePerTuple<T>(profileId: string, chainId: number, type: AccountType, op: () => Promise<T>): Promise<T> {
 		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
 	}

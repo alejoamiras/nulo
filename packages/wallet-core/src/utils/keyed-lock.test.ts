@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 import { KeyedLock } from "./keyed-lock"
 
 const deferred = <T = void>() => {
@@ -82,5 +82,25 @@ describe("KeyedLock (Q-08)", () => {
 	test("delete of an absent key is a no-op", () => {
 		const kl = new KeyedLock()
 		expect(() => kl.delete("never-seen")).not.toThrow()
+	})
+
+	test("maxHoldMs: null disables the per-key watchdog (a held key never force-releases)", async () => {
+		vi.useFakeTimers()
+		try {
+			const kl = new KeyedLock({ maxHoldMs: null })
+			const held = deferred()
+			void kl.withLock("k", () => held.promise) // holds "k", never resolves
+			let secondRan = false
+			void kl.withLock("k", async () => {
+				secondRan = true
+			})
+			await vi.advanceTimersByTimeAsync(10 * 60_000) // past the default 5-min watchdog
+			expect(secondRan).toBe(false) // no watchdog → still queued behind the held op
+			held.resolve()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(secondRan).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })

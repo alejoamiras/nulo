@@ -10,10 +10,20 @@ export class Lock {
 	private readonly logger?: ILogger
 	private acquiredAt = 0
 	private forceReleaseTimer?: ReturnType<typeof setTimeout>
+	private readonly maxHoldMs: number | null
 
-	constructor(name?: string, logger?: ILogger) {
+	/**
+	 * @param maxHoldMs force-release the lock if the holder never calls
+	 *   `leave()` within this many ms (best-effort safety net). Defaults to
+	 *   {@link MAX_HOLD_MS}; pass `null` to disable the watchdog entirely — for
+	 *   a caller that previously hand-rolled a watchdog-less serialization and
+	 *   must stay byte-for-byte equivalent (a wedged op then blocks its queue
+	 *   until the SW dies, exactly as before).
+	 */
+	constructor(name?: string, logger?: ILogger, maxHoldMs: number | null = MAX_HOLD_MS) {
 		this.name = name
 		this.logger = logger
+		this.maxHoldMs = maxHoldMs
 	}
 
 	public async enter() {
@@ -46,16 +56,20 @@ export class Lock {
 		// Safety net: force-release if holder never calls leave(). Arming is
 		// best-effort under the same never-reject invariant — a throwing
 		// setTimeout must not reject enter() after ownership transferred.
-		try {
-			this.forceReleaseTimer = setTimeout(() => {
-				if (this.locked) {
-					this.tryLog(LogLevel.Error, `Lock: force-released after ${MAX_HOLD_MS}ms (holder did not call leave)`)
-					this.leave()
-				}
-			}, MAX_HOLD_MS)
-		} catch {
-			// Swallowed by design: an unarmed safety timer is strictly better
-			// than a rejected enter() while holding the lock.
+		// Skipped entirely when the watchdog is disabled (maxHoldMs === null).
+		if (this.maxHoldMs !== null) {
+			const maxHoldMs = this.maxHoldMs
+			try {
+				this.forceReleaseTimer = setTimeout(() => {
+					if (this.locked) {
+						this.tryLog(LogLevel.Error, `Lock: force-released after ${maxHoldMs}ms (holder did not call leave)`)
+						this.leave()
+					}
+				}, maxHoldMs)
+			} catch {
+				// Swallowed by design: an unarmed safety timer is strictly better
+				// than a rejected enter() while holding the lock.
+			}
 		}
 	}
 

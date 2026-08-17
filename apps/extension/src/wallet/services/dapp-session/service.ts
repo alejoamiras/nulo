@@ -182,7 +182,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		accounts: string[],
 		confirmationLevel: AccessLevel,
 	): Promise<DappSession> {
-		return this.patchSession(sessionId, (session) => {
+		return await this.patchSession(sessionId, (session) => {
 			session.permissions = permissions
 			session.accounts = accounts
 			session.confirmationLevel = confirmationLevel
@@ -211,25 +211,25 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setVerificationHash(sessionId: string, verificationHash: string): Promise<DappSession> {
-		return this.patchSession(sessionId, (session) => {
+		return await this.patchSession(sessionId, (session) => {
 			session.verificationHash = verificationHash
 		})
 	}
 
 	public async setTrustedVerification(sessionId: string, trusted: boolean): Promise<DappSession> {
-		return this.patchSession(sessionId, (session) => {
+		return await this.patchSession(sessionId, (session) => {
 			session.trustedVerification = trusted
 		})
 	}
 
 	public async setAccountAliases(sessionId: string, aliases: Record<string, string>): Promise<DappSession> {
-		return this.patchSession(sessionId, (session) => {
+		return await this.patchSession(sessionId, (session) => {
 			session.accountAliases = { ...session.accountAliases, ...aliases }
 		})
 	}
 
 	public async setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): Promise<DappSession> {
-		return this.patchSession(sessionId, (session) => {
+		return await this.patchSession(sessionId, (session) => {
 			session.capabilityGrants = grants
 		})
 	}
@@ -241,7 +241,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setCapabilityRejections(sessionId: string, rejections: RejectedCapabilityRecord[]): Promise<DappSession> {
-		return this.patchSession(sessionId, (session) => {
+		return await this.patchSession(sessionId, (session) => {
 			session.capabilityRejections = rejections
 		})
 	}

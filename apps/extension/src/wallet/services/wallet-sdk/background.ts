@@ -337,7 +337,8 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
 	const origDecrypt = (handler as any).handleEncryptedMessage.bind(handler)
-	const decryptLocks = new KeyedLock()
+	// maxHoldMs: null — the prior hand-rolled decrypt chain had no watchdog (Q-08).
+	const decryptLocks = new KeyedLock({ maxHoldMs: null })
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
 	;(handler as any).handleEncryptedMessage = (sessionId: string, encrypted: unknown) =>
 		decryptLocks.withLock(sessionId, () => origDecrypt(sessionId, encrypted))

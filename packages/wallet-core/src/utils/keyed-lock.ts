@@ -1,6 +1,19 @@
 import type { ILogger } from "../logger/interfaces"
 import { Lock } from "./lock"
 
+export interface KeyedLockOptions {
+	name?: string
+	logger?: ILogger
+	/**
+	 * Forwarded to each per-key {@link Lock}'s force-release watchdog. Omit for
+	 * Lock's default 5-minute net; pass `null` to DISABLE it — for a caller
+	 * replacing a watchdog-less hand-rolled `prev.then(op)` chain that must stay
+	 * byte-for-byte equivalent (a wedged op then blocks only its own key, until
+	 * the SW dies, exactly as before).
+	 */
+	maxHoldMs?: number | null
+}
+
 /**
  * Q-08: per-key serialization. Holds one lazily-created {@link Lock} per key;
  * `withLock(key, fn)` runs `fn` only after every prior op for that SAME key has
@@ -19,12 +32,15 @@ export class KeyedLock {
 	readonly #locks = new Map<string, Lock>()
 	readonly #name?: string
 	readonly #logger?: ILogger
+	readonly #maxHoldMs?: number | null
 
-	/** `name`/`logger` are forwarded to each per-key {@link Lock}; omit both to
-	 *  match the silent, un-named locks the hand-rolled sites used. */
-	public constructor(name?: string, logger?: ILogger) {
-		this.#name = name
-		this.#logger = logger
+	/** `name`/`logger` are forwarded to each per-key {@link Lock} (omit both to
+	 *  match the silent, un-named locks the hand-rolled sites used); `maxHoldMs`
+	 *  controls the per-key watchdog — see {@link KeyedLockOptions}. */
+	public constructor(opts: KeyedLockOptions = {}) {
+		this.#name = opts.name
+		this.#logger = opts.logger
+		this.#maxHoldMs = opts.maxHoldMs
 	}
 
 	/** Run `fn` under `key`'s lock (FIFO per key). */
@@ -45,7 +61,8 @@ export class KeyedLock {
 	#lockFor(key: string): Lock {
 		let lock = this.#locks.get(key)
 		if (!lock) {
-			lock = new Lock(this.#name, this.#logger)
+			// `#maxHoldMs === undefined` → Lock's default watchdog; `null` → disabled.
+			lock = new Lock(this.#name, this.#logger, this.#maxHoldMs)
 			this.#locks.set(key, lock)
 		}
 		return lock
