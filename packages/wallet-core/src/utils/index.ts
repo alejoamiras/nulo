@@ -1,4 +1,4 @@
-export * from "./alarm-backed-task"
+export * from "./alarm-dispatcher"
 export * from "./arrays"
 export * from "./encoding"
 export * from "./errors"

@@ -22,8 +22,12 @@ const FIXTURES: Array<[string, number]> = [
 	// Disallowed punctuation / symbols stripped.
 	["a!b@c#d$e%", 0],
 	["<script>alert(1)</script>", 0],
+	// Quotes (straight + typographic) — a common divergence point.
+	["say \"hi\" and 'bye'", 0],
+	["“smart” ‘quotes’", 0],
 	// Non-Latin scripts (allowed: any \p{L}).
-	[" Crypto", 0], // Cyrillic с
+	["Привет мир", 0], // Cyrillic
+	["С丂rypto", 0], // leading char is Cyrillic С (U+0421), not ASCII C
 	["日本語 テスト", 0],
 	["Ωμέγα", 0],
 	// Bidi / zero-width control chars (stripped).

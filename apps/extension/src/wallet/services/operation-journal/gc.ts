@@ -30,7 +30,7 @@
  */
 
 import type { AlarmsPort } from "@nulo/wallet-core/ports"
-import { AlarmBackedTask, getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
 import type { OperationJournalService } from "./service"
@@ -63,40 +63,45 @@ const NO_ACCOUNT = "<no-account>"
  */
 export class JournalGC {
 	private readonly journal: OperationJournalService
-	private readonly alarms: AlarmsPort
 	private readonly logger: ILogger
 	private readonly capPerScope: number
-	// Q-05: the alarm lifecycle (create / clear / boot-run / name-filtered
-	// dispatch / tick error-catch) is owned by the shared AlarmBackedTask.
-	private task?: AlarmBackedTask
+	// Q-05: the name-guarded create/clear/dispatch ritual is owned by the shared
+	// AlarmDispatcher; the boot-time sweep + its cadence stay local (they differ
+	// per alarm consumer, so the wrapper deliberately doesn't own them).
+	private readonly dispatcher: AlarmDispatcher
 
 	public constructor(journal: OperationJournalService, alarms: AlarmsPort, logger: ILogger, opts?: { capPerScope?: number }) {
 		this.journal = journal
-		this.alarms = alarms
 		this.logger = logger
 		this.capPerScope = opts?.capPerScope ?? DEFAULT_TERMINAL_CAP_PER_SCOPE
+		this.dispatcher = new AlarmDispatcher(JOURNAL_GC_ALARM_NAME, { alarms, logger, logSource: LOG_SOURCE })
 	}
 
 	/**
 	 * Register the periodic alarm + boot-time sweep. Idempotent within a
 	 * single SW lifetime — calling twice replaces the alarm registration
-	 * (chrome.alarms.create semantics).
+	 * (chrome.alarms.create semantics) and stacks the listener.
 	 */
 	public async start(): Promise<void> {
-		this.task = new AlarmBackedTask({
-			name: JOURNAL_GC_ALARM_NAME,
-			periodInMinutes: JOURNAL_GC_PERIOD_MINUTES,
-			tick: () => this.sweep(),
-			alarms: this.alarms,
-			logger: this.logger,
-			logSource: LOG_SOURCE,
+		// Self-catch so the observable dispatch diagnostic stays "sweep tick threw"
+		// (the shared dispatcher only backstops an escaping rejection).
+		this.dispatcher.listen(async () => {
+			try {
+				await this.sweep()
+			} catch (err) {
+				this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err))
+			}
 		})
-		await this.task.start()
+		await this.dispatcher.create({ periodInMinutes: JOURNAL_GC_PERIOD_MINUTES })
+		try {
+			await this.sweep()
+		} catch (err) {
+			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-sweep threw; continuing", getErrorMessage(err))
+		}
 	}
 
 	public async stop(): Promise<void> {
-		await this.task?.stop()
-		this.task = undefined
+		await this.dispatcher.stop()
 	}
 
 	/**

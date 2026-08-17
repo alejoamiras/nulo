@@ -1,5 +1,4 @@
 import { describe, expect, test, vi } from "vitest"
-import { type ILogger, LogLevel } from "../logger/interfaces"
 import { EventHandler } from "./event-handler"
 
 describe("EventHandler", () => {
@@ -35,19 +34,18 @@ describe("EventHandler", () => {
 		expect(after).toHaveBeenCalledTimes(1)
 	})
 
-	test("(Q-03) with a logger, a throwing subscriber's error is reported (not swallowed silently)", () => {
-		const log = vi.fn()
-		const logger: ILogger = { log }
-		const eh = new EventHandler<void>("onThing", logger)
+	test("(Q-03) with an onError reporter, a throwing subscriber's error is reported (not swallowed silently)", () => {
+		const onError = vi.fn()
+		const eh = new EventHandler<void>("onThing", onError)
 		const err = new Error("boom")
 		eh.add(() => {
 			throw err
 		})
 		eh.invoke()
-		expect(log).toHaveBeenCalledWith("event-handler", LogLevel.Error, expect.stringContaining("onThing"), err)
+		expect(onError).toHaveBeenCalledWith(err, "onThing")
 	})
 
-	test("(Q-03) without a logger, a throwing subscriber is silently isolated (back-compat)", () => {
+	test("(Q-03) without a reporter, a throwing subscriber is silently isolated (back-compat)", () => {
 		const eh = new EventHandler<void>()
 		const after = vi.fn()
 		eh.add(() => {
@@ -58,13 +56,11 @@ describe("EventHandler", () => {
 		expect(after).toHaveBeenCalledTimes(1)
 	})
 
-	test("(Q-03) a THROWING logger must not break dispatch", () => {
-		const logger: ILogger = {
-			log: () => {
-				throw new Error("logger down")
-			},
+	test("(Q-03) a THROWING reporter must not break dispatch", () => {
+		const onError = () => {
+			throw new Error("reporter down")
 		}
-		const eh = new EventHandler<void>("onThing", logger)
+		const eh = new EventHandler<void>("onThing", onError)
 		const after = vi.fn()
 		eh.add(() => {
 			throw new Error("boom")
