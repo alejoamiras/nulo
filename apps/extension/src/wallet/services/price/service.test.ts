@@ -387,6 +387,41 @@ describe("PriceService — post-ship audit pins (codex B)", () => {
 		expect(fetchFn).not.toHaveBeenCalled()
 	})
 
+	test("(B-21 PIN) a stale refresh settling after a kill-switch restart does not clear the newer run's in-flight", async () => {
+		const flush = () => new Promise((r) => setTimeout(r, 0))
+		const { service, state, fakeConfig } = await harness()
+		// A queue of fetch gates so refresh A and refresh B stall independently.
+		const gates: ((v: FetchResponse) => void)[] = []
+		state.fetchImpl = () => new Promise<FetchResponse>((r) => gates.push(r))
+
+		// Refresh A starts and parks on its fetch.
+		const aPromise = service.refreshIfStale()
+		await flush()
+		expect(state.fetchCalls).toHaveLength(1)
+
+		// Kill switch OFF: generation bump, abort, inflight cleared, cache deleted.
+		state.enabled = false
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: false })
+		await flush()
+		// Re-enable: refresh B starts and parks on its OWN fetch.
+		state.enabled = true
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: true })
+		await flush()
+		expect(state.fetchCalls).toHaveLength(2) // B fired
+
+		// Resolve A's now-stale fetch; A bails on the generation check and runs its
+		// finally. It must NOT clear B's inflight/controller (a shared, unconditional
+		// clear would strand B and let a third caller start a duplicate fetch).
+		gates[0]?.({ ok: true, status: 200, json: async () => state.body })
+		await aPromise
+		await flush()
+
+		// A third caller must SHARE B's still-live in-flight run — not fetch again.
+		void service.refreshIfStale()
+		await flush()
+		expect(state.fetchCalls).toHaveLength(2)
+	})
+
 	test("future-dated cache rows are INVALID: they neither serve nor block a repair-refresh", async () => {
 		const { service, state, browserApi } = await harness()
 		// Attacker/corruption plants far-future rows for BOTH mapped ids —

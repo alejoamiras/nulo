@@ -206,12 +206,21 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			if (prop.value === false) {
 				// Kill switch: no late response may repopulate the cache.
 				this.generation += 1
+				const myGen = this.generation
 				this.abortController?.abort()
 				this.inflight = undefined
 				await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+				// A re-enable that raced in bumps the generation too and now owns the
+				// cache + emit — a stale disable must not wipe the fresh cache it
+				// wrote or blank the UI it is populating.
+				if (this.generation !== myGen) return
 				await this.cache.delete()
 				this.emit("onQuotesUpdated", {})
 			} else {
+				// Bump too: this is a kill-switch FLIP. Pairing the enable with a
+				// generation bump lets a still-draining disable detect it lost the
+				// race (above) and skip its cache-delete/emit.
+				this.generation += 1
 				const gen = this.generation
 				const profile = await this.profileService.getActiveProfile()
 				if (profile) {
@@ -276,10 +285,14 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	private refresh(gen = this.generation): Promise<PriceState> {
 		if (this.inflight) return this.inflight
 		if (gen !== this.generation) return Promise.resolve({})
-		this.inflight = this.doRefresh(gen).finally(() => {
-			this.inflight = undefined
+		const run = this.doRefresh(gen).finally(() => {
+			// Clear ONLY if we're still the current in-flight run: a kill-switch
+			// restart may have replaced `this.inflight` with a newer refresh, and
+			// clearing that would let a third caller start a duplicate fetch.
+			if (this.inflight === run) this.inflight = undefined
 		})
-		return this.inflight
+		this.inflight = run
+		return run
 	}
 
 	private async doRefresh(gen: number): Promise<PriceState> {
@@ -295,10 +308,16 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		const headers: Record<string, string> = apiKey ? { "x-cg-demo-api-key": apiKey } : {}
 
 		if (gen !== this.generation) return {}
-		this.abortController = new AbortController()
-		const timeout = setTimeout(() => this.abortController?.abort(), 10_000)
+		// Own the controller + timeout LOCALLY. A kill-switch restart installs a
+		// newer refresh's controller into `this.abortController`; a shared closure
+		// or an unconditional `finally` clear would then abort — or orphan — the
+		// wrong fetch. Only touch the shared field to publish ourselves and, in
+		// `finally`, to retract ourselves iff we're still the one published.
+		const controller = new AbortController()
+		this.abortController = controller
+		const timeout = setTimeout(() => controller.abort(), 10_000)
 		try {
-			const response = await this.fetchFn(url, { signal: this.abortController.signal, headers })
+			const response = await this.fetchFn(url, { signal: controller.signal, headers })
 			if (!response.ok) {
 				throw new Error(`price fetch failed: HTTP ${response.status}`)
 			}
@@ -314,11 +333,19 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			const merged = await this.mergeMonotonic(incoming)
 			if (gen !== this.generation) return {}
 			await this.cache.set(merged)
+			// A kill-switch flip DURING the cache write invalidates this run: don't
+			// reset the backoff, refresh the watermark, or re-emit for a dead
+			// generation (a stale success must not silence a newer disable's
+			// protections). Leave the cache to the owning generation — deleting here
+			// could wipe a newer refresh's fresh write; while disabled the row is
+			// never read (every reader gates on isEnabled).
+			if (gen !== this.generation) return {}
 			this.consecutiveFailures = 0
 			this.nextAllowedFetchAt = 0
 			this.lastCompletedFetchAt = this.now()
 
 			const usable = await this.readUsable()
+			if (gen !== this.generation) return {}
 			this.emit("onQuotesUpdated", usable)
 			return usable
 		} catch (error) {
@@ -331,7 +358,8 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			return this.readUsable()
 		} finally {
 			clearTimeout(timeout)
-			this.abortController = undefined
+			// Retract only our own controller — a newer refresh may have published its own.
+			if (this.abortController === controller) this.abortController = undefined
 		}
 	}
 
