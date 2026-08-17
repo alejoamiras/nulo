@@ -177,6 +177,12 @@ const {
 })
 
 const init = async () => {
+	// B-30: disconnect the locally-constructed account/network clients on EVERY
+	// exit path. They were disconnected only on the success path (after the ops
+	// loop), so any throw in the loop — e.g. "Account no longer exists" — leaked
+	// both live SW ports for the failed popup's lifetime.
+	let accountService: AccountServiceClient | undefined
+	let networkService: NetworkServiceClient | undefined
 	try {
 		profile.value = await profileService.getActiveProfile()
 		await loadInteractionPayload()
@@ -188,18 +194,18 @@ const init = async () => {
 			throw new Error("Sign in with another profile")
 		}
 
-		const accountService = new AccountServiceClient()
-		const networkService = new NetworkServiceClient()
+		accountService = new AccountServiceClient()
+		networkService = new NetworkServiceClient()
 
 		const getNetwork = async (caipChain: CaipChain): Promise<Network> => {
 			const { chainId } = parseCaipChain(caipChain)
-			return resolveNetworkByChainId(networkService, chainId)
+			return resolveNetworkByChainId(networkService!, chainId)
 		}
 
 		const getNetworkAndAccount = async (caipAccount: CaipAccount): Promise<[Network, Account]> => {
 			const { chainId, address } = parseCaipAccount(caipAccount)
-			const network = await resolveNetworkByChainId(networkService, chainId)
-			const account = await accountService.getAccount(profile.value!.id, network.chainId, address)
+			const network = await resolveNetworkByChainId(networkService!, chainId)
+			const account = await accountService!.getAccount(profile.value!.id, network.chainId, address)
 			if (!account) throw new Error("Account no longer exists")
 			return [network, account]
 		}
@@ -292,8 +298,6 @@ const init = async () => {
 		// is dismissed mid-init (cancel from another window) we want the
 		// approve gate to stay closed.
 		initComplete.value = _operations.length > 0
-		accountService.disconnect()
-		networkService.disconnect()
 
 		// Pre-fetch token metadata for any `register_token` ops so the
 		// OperationCard renders name/symbol/decimals before Allow. The Allow
@@ -322,6 +326,11 @@ const init = async () => {
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
+	} finally {
+		// Both are idle after the ops loop; disconnect on success, throw, or
+		// early-return alike (undefined when init returned before constructing them).
+		accountService?.disconnect()
+		networkService?.disconnect()
 	}
 }
 

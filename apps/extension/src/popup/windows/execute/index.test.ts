@@ -486,6 +486,25 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		expect(beforeunloadAdds()).toBe(1)
 	})
 
+	test("(B-30) init throwing AFTER the account/network clients are built disconnects both", async () => {
+		// Same profile (construction proceeds), then an unknown op kind throws inside
+		// the ops loop — after `new AccountServiceClient()` / `new NetworkServiceClient()`.
+		// Pre-fix the disconnect ran only on the success path, leaking both ports.
+		payloadToLoad = {
+			session: { profileId: "p1", dappMetadata: { name: "D", url: "https://x" } },
+			params: { operations: [{ kind: "definitely_not_a_valid_kind", chain: "eip155:1" }] },
+		}
+		w = factory()
+		await completeInit({ id: "p1" })
+
+		expect(accountServiceCtorMock).toHaveBeenCalledTimes(1)
+		expect(networkServiceCtorMock).toHaveBeenCalledTimes(1)
+		const acct = accountServiceCtorMock.mock.results[0]?.value as { disconnect: ReturnType<typeof vi.fn> }
+		const net = networkServiceCtorMock.mock.results[0]?.value as { disconnect: ReturnType<typeof vi.fn> }
+		expect(acct.disconnect).toHaveBeenCalledTimes(1)
+		expect(net.disconnect).toHaveBeenCalledTimes(1)
+	})
+
 	test("D14: wrong-profile rejection is delivered on dismiss → unload, not inline", async () => {
 		payloadToLoad = wrongProfilePayload()
 		w = factory()

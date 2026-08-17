@@ -246,6 +246,17 @@ const transferType = computed(() => {
 })
 
 const executionService = new ExecutionServiceClient()
+// B-30: executionService opens a live SW port as soon as fee estimation runs
+// (before any submit). Its ONLY disconnect used to live in executeTransfer's
+// `.finally`, which never runs unless Send was actually clicked — so the common
+// "open Send, pick amount, navigate away" flow leaked the port. Disconnect it in
+// onBeforeUnmount too, idempotently (submit + unmount must not double-disconnect).
+let executionDisconnected = false
+function disconnectExecution() {
+	if (executionDisconnected) return
+	executionDisconnected = true
+	executionService.disconnect()
+}
 
 // Per-mount instance id so the in-app log viewer can pin which Send
 // page mount initiated each estimate / submit. Helps diagnose
@@ -354,7 +365,7 @@ const handleSend = async () => {
 			console.error("[send] executeTransfer failed:", err)
 		})
 		.finally(() => {
-			executionService.disconnect()
+			disconnectExecution()
 		})
 
 	// Navigate away immediately. Progress is visible on the general page
@@ -495,6 +506,7 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	disconnectExecution()
 
 	cancelFeeEstimate()
 
