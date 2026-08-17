@@ -102,28 +102,38 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		method: T,
 		...params: Parameters<TRequests[T]>
 	): Promise<Awaited<ReturnType<TRequests[T]>>> {
+		const requestId = this.nextRequestId++
+		const methodName = String(method)
+		const timeoutMs = this.getRequestTimeoutMs(method)
+		// The request deadline is set BEFORE awaiting transport readiness so it
+		// covers connection establishment too (B-13/B-15): a wedged transport whose
+		// `connect()` retries forever would otherwise hang the request past its
+		// configured timeout, because the timeout timer used to start only after
+		// readiness resolved.
+		const deadline = Date.now() + timeoutMs
+
 		// Only suspend if the transport actually needs to wait. A transport
 		// that is ready synchronously (the background Port when already
 		// connected) returns void, so the request runs straight through to the
 		// wire send without an intervening microtask — preserving the
 		// synchronous-send timing the Port transport always had.
 		const ready = this.ensureTransportReady()
-		if (ready) await ready
-		const requestId = this.nextRequestId++
-		const methodName = String(method)
+		if (ready) await this.awaitReadyWithinDeadline(ready, deadline, requestId, methodName, timeoutMs)
 		const startedAtMs = Date.now()
 		const content = {
 			requestId,
 			method,
 			params: jsonSanitize(wrapParams(params)) as unknown as Parameters<TRequests[T]>,
 		}
-		const timeoutMs = this.getRequestTimeoutMs(method)
 		this.logDebug(`→ ${methodName}`)
 
 		const promise = new Promise<Awaited<ReturnType<TRequests[T]>>>((resolve, reject) => {
+			// Remaining budget after readiness — so the TOTAL request time
+			// (readiness + wire) is bounded by `timeoutMs`.
+			const remainingMs = Math.max(0, deadline - Date.now())
 			const timeoutHandle = setTimeout(() => {
 				this.settle(requestId, { reject: this.makeTimeoutError({ requestId, methodName, timeoutMs }) }, "timeout", "timeout_fired")
-			}, timeoutMs)
+			}, remainingMs)
 			const warnHandle =
 				this.warnAfterMs === undefined
 					? undefined
@@ -244,6 +254,30 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		else entry.reject(outcome.reject)
 		this.onTerminal({ requestId, method: entry.method, startedAtMs: entry.startedAtMs, endedAtMs, status, detail })
 		this.logDebug(`← ${entry.method} (${endedAtMs - entry.startedAtMs}ms)`, "pending:", this.pending.size)
+	}
+
+	/** Await transport readiness but never past the request deadline (B-15). A
+	 *  wedged transport (its `connect()` retrying forever) rejects with the same
+	 *  timeout error the request itself would produce, so the caller isn't held past
+	 *  its configured timeout while connection establishment stalls. */
+	private async awaitReadyWithinDeadline(
+		ready: Promise<void>,
+		deadline: number,
+		requestId: number,
+		methodName: string,
+		timeoutMs: number,
+	): Promise<void> {
+		const remainingMs = deadline - Date.now()
+		if (remainingMs <= 0) throw this.makeTimeoutError({ requestId, methodName, timeoutMs })
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const timeout = new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(() => reject(this.makeTimeoutError({ requestId, methodName, timeoutMs })), remainingMs)
+		})
+		try {
+			await Promise.race([ready, timeout])
+		} finally {
+			if (timer) clearTimeout(timer)
+		}
 	}
 
 	// ── Transport hooks (subclass-owned) ────────────────────────────────
