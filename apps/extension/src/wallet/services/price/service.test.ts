@@ -422,6 +422,33 @@ describe("PriceService — post-ship audit pins (codex B)", () => {
 		expect(state.fetchCalls).toHaveLength(2)
 	})
 
+	test("(B-21 config PIN) a disable draining behind a re-enable is serialized — the fresh emit is the last word", async () => {
+		const flush = () => new Promise((r) => setTimeout(r, 0))
+		const { service, fakeConfig } = await harness()
+		const seen: PriceState[] = []
+		service.onQuotesUpdated.add((s) => seen.push(s))
+		// Park the disable inside its cache.delete so the re-enable's fresh write can
+		// race it under the UNSERIALIZED code (the disable's late {} emit would then
+		// land after the enable's fresh quotes and blank the UI).
+		let resolveDelete!: () => void
+		vi.spyOn((service as never as { cache: { delete: () => Promise<void> } }).cache, "delete").mockImplementation(
+			() => new Promise<void>((r) => (resolveDelete = r)),
+		)
+
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: false })
+		await flush() // disable reaches (and parks in) cache.delete
+		fakeConfig.onUpdate.invoke({ key: "showFiatValues", value: true })
+		await flush() // unserialized: re-enable emits fresh NOW; serialized: it waits
+
+		resolveDelete()
+		await flush()
+		await flush()
+
+		// Serialized, the re-enable's fresh emit is strictly last; unserialized, the
+		// drained disable's trailing {} clobbers it.
+		expect(seen.at(-1) && Object.keys(seen.at(-1)!).length).toBeGreaterThan(0)
+	})
+
 	test("future-dated cache rows are INVALID: they neither serve nor block a repair-refresh", async () => {
 		const { service, state, browserApi } = await harness()
 		// Attacker/corruption plants far-future rows for BOTH mapped ids —

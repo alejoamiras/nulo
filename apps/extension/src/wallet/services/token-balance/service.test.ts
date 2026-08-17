@@ -242,4 +242,55 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		const visible = (await service.getTokenBalances()).map((b) => b.token.id).sort((x, y) => x - y)
 		expect(visible).toEqual([200])
 	})
+
+	test("(B-05 tail PIN) onTokenAdded aborts after a mid-fan-out profile switch — no cross-context balance persisted", async () => {
+		const flush = () => new Promise((r) => setTimeout(r, 0))
+		const api = new FakeBrowserApi()
+		api.reset()
+
+		// The account fan-out parks here so a switch can land mid-flight.
+		let resolveAccounts!: (v: unknown) => void
+		const getAccounts = vi.fn().mockImplementation(() => new Promise((r) => (resolveAccounts = r)))
+		const onTokenAdded = new EventHandler<never>()
+		const onActiveProfileChanged = new EventHandler<never>()
+
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged, getActiveProfile: async () => ({ id: "A", name: "A" }) }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccounts }))
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded,
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw: async () => [],
+				getTokenRaw: async () => tokenRaw(100, "A"),
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, { createNewTask: () => ({ id: "t1" }) }))
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		await services.start() // active profile A, empty token map
+
+		const setSpy = vi.spyOn((service as never as { repo: { set: (...a: unknown[]) => Promise<void> } }).repo, "set")
+
+		// A token is added under A; its account fan-out parks on getAccounts.
+		void onTokenAdded.invoke(tokenRaw(100, "A"))
+		await flush()
+		expect(getAccounts).toHaveBeenCalled()
+
+		// The user switches profile mid-fan-out — bumps the generation.
+		void onActiveProfileChanged.invoke({ id: "B", name: "B" } as never)
+		await flush()
+
+		// Release the accounts; onTokenAdded resumes and must bail on the generation
+		// check before persisting any balance for the now-departed context.
+		resolveAccounts([{ address: "0xa", chainId: 1 }])
+		await flush()
+
+		expect(setSpy).not.toHaveBeenCalled()
+	})
 })

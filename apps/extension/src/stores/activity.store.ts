@@ -126,15 +126,31 @@ export const useActivityStore = defineStore("activity", () => {
 	 * by a different state.
 	 */
 	let mutationSeq = 0
+	/**
+	 * The baseline a NEVER-mutated scope reports. A clear* advances it past every
+	 * prior version so a fetch that captured a virgin scope's baseline (the old
+	 * absent-key sentinel `0`) can't be accepted after a lock/clear repopulates
+	 * that scope — the absent-key ABA the per-scope sequence alone can't see.
+	 */
+	let incarnation = 0
 
 	function bumpMutation(key: string): void {
 		mutationSeq += 1
 		mutationVersion.value.set(key, mutationSeq)
 	}
 
-	/** The mutation count a fetch should carry, captured before it awaits. */
+	/** Advance the virgin baseline past every issued version. Called by clear* so a
+	 *  pre-clear capture of an absent key can never match its post-clear absent state. */
+	function advanceIncarnation(): void {
+		mutationSeq += 1
+		incarnation = mutationSeq
+	}
+
+	/** The mutation count a fetch should carry, captured before it awaits. An absent
+	 *  key reports the current incarnation (not a fixed `0`), so a capture taken
+	 *  before a clear can't match the same key after it. */
 	function mutationVersionFor(scope: ActivityScope): number {
-		return mutationVersion.value.get(activityScopeKey(scope)) ?? 0
+		return mutationVersion.value.get(activityScopeKey(scope)) ?? incarnation
 	}
 
 	const activeSlice = computed<ActivitySlice>(() => {
@@ -283,6 +299,7 @@ export const useActivityStore = defineStore("activity", () => {
 		const key = activityScopeKey(scope)
 		slices.value.delete(key)
 		mutationVersion.value.delete(key)
+		advanceIncarnation()
 		touch()
 	}
 
@@ -292,6 +309,7 @@ export const useActivityStore = defineStore("activity", () => {
 			slices.value.delete(key)
 			mutationVersion.value.delete(key)
 		}
+		advanceIncarnation()
 		touch()
 	}
 
@@ -307,6 +325,9 @@ export const useActivityStore = defineStore("activity", () => {
 		// Keyed by scope, so leaving it behind would retain profile + address
 		// identifiers past a lock.
 		mutationVersion.value.clear()
+		// Advance the virgin baseline so a pre-lock fetch that captured a scope's
+		// absent-key sentinel can't be accepted after unlock and repopulate it.
+		advanceIncarnation()
 		activeKey.value = null
 		activeScope.value = null
 		touch()

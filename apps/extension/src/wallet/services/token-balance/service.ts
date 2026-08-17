@@ -271,24 +271,34 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onTokenAdded = async (token: TokenInfo) => {
+		// Capture the generation before any await. profileId alone can't see an
+		// A→B→A switch (same id), and it doesn't fence the mutations AFTER the map
+		// set (getAccounts + createTokenBalance) — a switch there would persist
+		// balances for the departed context. Re-check the generation after every
+		// await, before every map/repo mutation.
+		const gen = this.profileGeneration
 		const tokenRaw = await this.tokenService.getTokenRaw(token.id)
-		// A profile switch during the await would make this token foreign to the
-		// now-active map. Its own profileId is the ground truth (never trust the
-		// event's timing): skip the repopulate + account fan-out if it isn't ours.
-		if (tokenRaw.profileId !== this.profile?.id) return
+		const profile = this.profile
+		if (gen !== this.profileGeneration || !profile || tokenRaw.profileId !== profile.id) return
 		this.tokens.set(token.id, tokenRaw)
-		for (const account of await this.accountService.getAccounts(this.profile.id, token.chainId, true)) {
+		const accounts = await this.accountService.getAccounts(profile.id, token.chainId, true)
+		if (gen !== this.profileGeneration) return
+		for (const account of accounts) {
+			if (gen !== this.profileGeneration) return
 			await this.createTokenBalance(tokenRaw, account)
 		}
 	}
 
 	private readonly onTokenUpdated = async (token: TokenInfo) => {
+		const gen = this.profileGeneration
 		const tokenRaw = await this.tokenService.getTokenRaw(token.id)
-		// Same fence as onTokenAdded: a switch mid-await must not let this token
-		// repopulate the active-only map for a profile that no longer owns it.
-		if (tokenRaw.profileId !== this.profile?.id) return
+		// Same generation fence as onTokenAdded: a switch mid-await must not let this
+		// token repopulate the active-only map or enqueue foreign rows.
+		if (gen !== this.profileGeneration || tokenRaw.profileId !== this.profile?.id) return
 		this.tokens.set(token.id, tokenRaw)
-		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
+		const rows = (await this.repo.getAll()).filter((x) => x.token === token.id)
+		if (gen !== this.profileGeneration) return
+		for (const tb of rows) {
 			this.queue.enqueue(tb)
 		}
 	}

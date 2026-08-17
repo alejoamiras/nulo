@@ -88,8 +88,16 @@ export class BalanceJobQueue {
 	 *  the TaskService records these pointers reference are wiped with the profile,
 	 *  so keeping them would (a) coalesce new-profile enqueues onto dead task ids
 	 *  (enqueue gates fresh-mint on `!pendingTasks.has`) and (b) leave stale entries
-	 *  an in-flight batch's identity-checked cleanup must tolerate. */
+	 *  an in-flight batch's identity-checked cleanup must tolerate.
+	 *
+	 *  Cancel the records we still own first: on LOCK (`profile === undefined`)
+	 *  TaskService keeps its map, so dropping only our pointer would strand each
+	 *  record as a phantom "in-progress" task until the SW restarts. A record whose
+	 *  id TaskService no longer knows (a real profile switch cleared it) is skipped. */
 	public reset(): void {
+		for (const taskId of this.pendingTasks.values()) {
+			if (this.tasks.hasTask(taskId)) this.tasks.cancelTask(taskId)
+		}
 		this.queue.clear()
 		this.pendingTasks.clear()
 	}

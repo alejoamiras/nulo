@@ -830,10 +830,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	private onTokenAdded = async (token: TokenInfo): Promise<void> => {
-		// Capture the epoch before any await. A profile/network/token lifecycle
-		// change since entry (each bumps the epoch) makes this add stale — its
-		// awaited tail must not install schedulers or watch contracts under a
-		// context that no longer applies (codex B-20 condition).
+		// A token add changes the schedulable-contract surface, so bump the epoch
+		// FIRST — like onTokenDeleted/onAccountAdded. Without it a concurrent
+		// hydrateSchedulers that snapshotted the pre-add token set would pass its
+		// post-await epoch check and overwrite this add's install with the stale
+		// descriptor set (a same-epoch lost update). Capture AFTER the bump.
+		this.bumpServiceEpoch()
 		const epochAtStart = this.serviceEpoch
 		// TokenInfo lacks `profileId`; trust the active profile context the
 		// emit is happening in. (The token service emits while the owning

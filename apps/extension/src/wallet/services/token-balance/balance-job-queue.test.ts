@@ -25,6 +25,7 @@ type TaskMock = {
 	failTask: ReturnType<typeof vi.fn>
 	getTaskSync: ReturnType<typeof vi.fn>
 	hasTask: ReturnType<typeof vi.fn>
+	cancelTask: ReturnType<typeof vi.fn>
 }
 
 function makeTaskService(): TaskMock {
@@ -52,8 +53,20 @@ function makeTaskService(): TaskMock {
 	// Real tasks exist by default; a profile-switch test flips this to model the
 	// wiped map (the pre-registered ids no longer resolve).
 	const hasTask = vi.fn().mockReturnValue(true)
+	const cancelTask = vi.fn().mockImplementation((id: string) => {
+		finishedAt.set(id, true)
+	})
 	return {
-		service: { createNewTask, startNewTask, startTask, completeTask, failTask, getTaskSync, hasTask } as unknown as TaskService,
+		service: {
+			createNewTask,
+			startNewTask,
+			startTask,
+			completeTask,
+			failTask,
+			getTaskSync,
+			hasTask,
+			cancelTask,
+		} as unknown as TaskService,
 		createNewTask,
 		startNewTask,
 		startTask,
@@ -61,6 +74,7 @@ function makeTaskService(): TaskMock {
 		failTask,
 		getTaskSync,
 		hasTask,
+		cancelTask,
 	}
 }
 
@@ -168,6 +182,23 @@ describe("BalanceJobQueue", () => {
 		// The fix detects the stale id via hasTask and mints fresh — it must NOT
 		// call startTask on the cleared id (which throws and drops the batch).
 		expect(tasks.startTask).not.toHaveBeenCalled()
+	})
+
+	test("(B-04 reset PIN) reset cancels the TaskService records it drops so none are orphaned", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		queue.enqueue(raw(1))
+		queue.enqueue(raw(2))
+		const droppedIds = [queue.getPendingTaskId(1), queue.getPendingTaskId(2)]
+
+		// On lock, TaskService keeps its map — dropping only our pointer would strand
+		// each record as a phantom "in-progress" task. reset must finish them.
+		queue.reset()
+
+		for (const id of droppedIds) expect(tasks.cancelTask).toHaveBeenCalledWith(id)
+		expect(queue.hasPendingTask(1)).toBe(false)
+		expect(queue.hasPendingTask(2)).toBe(false)
 	})
 
 	test("hasPendingTask / getPendingTaskId reflect the freshly-minted task (D4 causal-ack seam)", () => {

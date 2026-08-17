@@ -359,4 +359,17 @@ describe("activity store — B-29 eviction fences", () => {
 		const accepted = store.setTransactions(target, [tx(target, "0xstale", { updatedAt: 1 })], captured)
 		expect(accepted).toBe(false)
 	})
+
+	test("(B-29c PIN) a virgin fetch capturing the absent-key baseline is rejected after a lock/clear", () => {
+		const store = useActivityStore()
+		const S: ActivityScope = { profileId: "p1", networkId: "n1", chainId: 1, accountAddress: "0xvirgin" }
+		// A fetch for a NEVER-mutated scope captures its baseline (the old sentinel 0).
+		const captured = store.mutationVersionFor(S)
+		// A lock clears everything for privacy…
+		store.clearAll()
+		// …then the pre-lock fetch resolves. It must NOT be accepted and repopulate
+		// the cleared scope — the absent-key ABA the positive sequence alone misses.
+		const accepted = store.setTransactions(S, [tx(S, "0xstale")], captured)
+		expect(accepted).toBe(false)
+	})
 })

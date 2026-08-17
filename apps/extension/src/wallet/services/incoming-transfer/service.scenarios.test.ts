@@ -2168,6 +2168,53 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract])
 	})
 
+	test("(B-20 lost-update PIN) a slow hydration can't overwrite a concurrent token-add's install", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+		await flushPromises()
+
+		const key = "n1|0xa"
+		const watched = (service as never as { watchedContracts: Map<string, Set<string>> }).watchedContracts
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract]) // bootstrap hydrate
+
+		// Make getAccounts deferrable via a resolver queue so hydration and the
+		// token-add each park in it independently.
+		const accountResolvers: ((v: unknown) => void)[] = []
+		accountStub.getAccounts.mockImplementation(() => new Promise((r) => accountResolvers.push(r as never)))
+
+		// Re-hydration starts (bumps epoch, snapshots tokens [A]) and parks in getAccounts.
+		void profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(accountResolvers).toHaveLength(1)
+
+		// A token-add for a NEW contract fires while hydration is parked mid-fan-out.
+		tokenStub.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		void tokenStub.onTokenAdded.invoke({
+			id: tokenB.id,
+			chainId: tokenB.chainId,
+			contract: tokenB.contract,
+			symbol: tokenB.symbol,
+			decimals: tokenB.decimals,
+			name: "Token B",
+		} as never)
+		await flushPromises()
+		expect(accountResolvers.length).toBeGreaterThanOrEqual(2)
+
+		// Let the token-add finish first: it installs tokenB's contract on the account.
+		accountResolvers[1]([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		await flushPromises()
+
+		// Then let the SLOW hydration resume; its descriptor set predates the add.
+		accountResolvers[0]([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		await flushPromises()
+
+		// The token-add's install must survive: the bumped-behind hydration bails
+		// instead of overwriting the account's watched set with its stale [A]-only set.
+		expect([...(watched.get(key) ?? [])]).toContain(tokenB.contract)
+	})
+
 	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {
 		// Two onTransactionAdded events for the same tx hash. The serviceLock
 		// serializes them: the first runs to completion (deletes record,

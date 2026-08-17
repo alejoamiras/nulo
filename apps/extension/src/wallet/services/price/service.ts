@@ -92,6 +92,11 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	 *  request on every popup connect, and successful fetches keep resetting
 	 *  the failure backoff. */
 	private lastCompletedFetchAt = 0
+	/** Serializes the cache-committing work of config flips so a rapid
+	 *  disable↔enable can't interleave `cache.delete()` with a fresh `cache.set()`
+	 *  (the last flip's work would otherwise race the prior flip's). The generation
+	 *  bump stays synchronous at flip time; only the storage/emit tail is chained. */
+	private configTransition: Promise<void> = Promise.resolve()
 
 	public constructor(logger: ILogger, browserApi?: BrowserApi, opts?: { fetchFn?: FetchLike; now?: () => number }) {
 		super(PRICE_SERVICE_NAME, logger)
@@ -202,33 +207,34 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 
 	private readonly onConfigUpdated = (prop: { key: string; value: unknown }): void => {
 		if (prop.key !== "showFiatValues") return
-		void (async () => {
-			if (prop.value === false) {
-				// Kill switch: no late response may repopulate the cache.
-				this.generation += 1
-				const myGen = this.generation
-				this.abortController?.abort()
-				this.inflight = undefined
-				await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
-				// A re-enable that raced in bumps the generation too and now owns the
-				// cache + emit — a stale disable must not wipe the fresh cache it
-				// wrote or blank the UI it is populating.
+		const enable = prop.value !== false
+		// Bump SYNCHRONOUSLY so an in-flight refresh from the prior state is
+		// invalidated immediately (its generation check now fails). Both directions
+		// bump — a flip is a flip.
+		this.generation += 1
+		const myGen = this.generation
+		// Chain the cache-committing tail so transitions run strictly one-at-a-time:
+		// a disable's cache.delete can never interleave with an enable's cache.set.
+		this.configTransition = this.configTransition
+			.then(async () => {
+				// A newer flip already superseded this one — the newest intent is the
+				// truth, so skip this transition's storage/emit work wholesale.
 				if (this.generation !== myGen) return
-				await this.cache.delete()
-				this.emit("onQuotesUpdated", {})
-			} else {
-				// Bump too: this is a kill-switch FLIP. Pairing the enable with a
-				// generation bump lets a still-draining disable detect it lost the
-				// race (above) and skip its cache-delete/emit.
-				this.generation += 1
-				const gen = this.generation
-				const profile = await this.profileService.getActiveProfile()
-				if (profile) {
-					await this.ensureAlarm()
-					await this.refresh(gen).catch(() => {})
+				if (!enable) {
+					this.abortController?.abort()
+					this.inflight = undefined
+					await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+					await this.cache.delete()
+					this.emit("onQuotesUpdated", {})
+				} else {
+					const profile = await this.profileService.getActiveProfile()
+					if (profile) {
+						await this.ensureAlarm()
+						await this.refresh(myGen).catch(() => {})
+					}
 				}
-			}
-		})().catch((err) => this.log(LogLevel.Warn, "config-change handling failed", getErrorMessage(err)))
+			})
+			.catch((err) => this.log(LogLevel.Warn, "config-change handling failed", getErrorMessage(err)))
 	}
 
 	// ── Internals ───────────────────────────────────────────────────────
