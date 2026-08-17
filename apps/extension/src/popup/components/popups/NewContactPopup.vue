@@ -8,6 +8,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
+import { isPopupSubmitKey } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -149,16 +150,9 @@ watch(
 )
 
 const onKeydown = (e) => {
-	// Only fire on input/textarea fields. Without this guard, pressing
-	// Enter while focused on the Add button would double-fire: the button's
-	// native Enter→click activation already calls handleAddContact via
-	// FormPopup's @submit; the keydown listener would call it a second time.
-	// (The same shape pre-migration without FormPopup; the guard is correct
-	// either way.)
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleAddContact()
+	// Guarded to input/textarea focus so a global Enter (e.g. on the Add button,
+	// which already submits via FormPopup) can't double-fire handleAddContact.
+	if (isPopupSubmitKey(e)) handleAddContact()
 }
 </script>
 

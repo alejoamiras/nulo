@@ -1,5 +1,17 @@
 import { watch } from "vue"
 
+/**
+ * Q-07: the Enter-submit guard shared by the plain create/edit popups — fire
+ * only when Enter is pressed WHILE an `<input>`/`<textarea>` is focused (a
+ * global Enter must NOT submit). Five popups hand-copied this exact predicate;
+ * this is its single source of truth (also used by `usePopupEntity` below).
+ */
+export function isPopupSubmitKey(e: KeyboardEvent): boolean {
+	if (e.key !== "Enter") return false
+	const target = e.target
+	return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement
+}
+
 /** Handlers a plain create/edit popup wires into its show/hide lifecycle. */
 export type UsePopupEntityHandlers = {
 	/** The popup's primary submit — fired on Enter pressed WHILE an
@@ -31,10 +43,7 @@ export type UsePopupEntityHandlers = {
  */
 export function usePopupEntity(show: () => boolean, handlers: UsePopupEntityHandlers): void {
 	const onKeydown = (e: KeyboardEvent) => {
-		if (e.key !== "Enter") return
-		const target = e.target
-		if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-		handlers.submit()
+		if (isPopupSubmitKey(e)) handlers.submit()
 	}
 	watch(show, (isShown) => {
 		if (isShown) {

@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { effectScope, nextTick, ref } from "vue"
-import { usePopupEntity } from "./usePopupEntity"
+import { isPopupSubmitKey, usePopupEntity } from "./usePopupEntity"
 
 /** Run the composable inside an effect scope so its `watch` is active; return a
  *  `stop()` to tear it down (mirrors component unmount). */
@@ -34,6 +34,16 @@ function makeInput(): HTMLInputElement {
 	document.body.appendChild(el)
 	return el
 }
+
+describe("isPopupSubmitKey (Q-07)", () => {
+	const keyOn = (tag: string, key: string) => isPopupSubmitKey({ key, target: document.createElement(tag) } as unknown as KeyboardEvent)
+
+	it("true for Enter on an <input>", () => expect(keyOn("input", "Enter")).toBe(true))
+	it("true for Enter on a <textarea>", () => expect(keyOn("textarea", "Enter")).toBe(true))
+	it("false for Enter on a non-field element (<div>)", () => expect(keyOn("div", "Enter")).toBe(false))
+	it("false for a non-Enter key on an <input>", () => expect(keyOn("input", "a")).toBe(false))
+	it("false when target is null", () => expect(isPopupSubmitKey({ key: "Enter", target: null } as unknown as KeyboardEvent)).toBe(false))
+})
 
 describe("usePopupEntity", () => {
 	it("does NOT install the keydown listener until show flips true (watch is not immediate)", async () => {
