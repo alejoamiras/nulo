@@ -46,6 +46,7 @@ import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-me
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
+import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
 import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
@@ -484,14 +485,15 @@ async function handleDiscovery(
 ): Promise<void> {
 	// B-16: reject an approval the dApp can no longer receive. The drain-gate
 	// staleness check is not enough — an interactive Allow/Deny popup (or a wait
-	// on another origin's popup) can resolve after the dApp's 60s discovery
-	// window closes. Re-check immediately before EVERY approval, and before the
-	// durable DappSession write, so a slow approval doesn't strand a half-open
-	// handshake or persist a session the dApp never learns about.
+	// on a concurrent popup for the same (origin, chainId)) can resolve after the
+	// dApp's 60s discovery window closes. Re-check immediately before EVERY
+	// approval, and before the durable DappSession write, so a slow approval
+	// doesn't strand a half-open handshake or persist a session the dApp never
+	// learns about.
 	const rejectIfExpired = (): boolean => {
 		if (isDiscoveryExpired(discovery)) {
 			handler.rejectDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past the 60s discovery window): ${discovery.origin}`)
+			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past Nulo's 55s freshness cutoff): ${discovery.origin}`)
 			return true
 		}
 		return false
@@ -634,9 +636,21 @@ async function handleDiscovery(
 			// blocks non-exempt methods until requestCapabilities() is called.
 			await dappSessionService.setCapabilityGrants(newSession.id, [])
 
-			pendingVerification.add(dedupeKey)
-			handler.approveDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: ${discovery.origin} chain=${chainId}`)
+			// B-16: re-check freshness AFTER the durable writes (which can
+			// themselves cross the deadline) and approve, or roll back + reject.
+			const approved = await approveOrRollbackDiscoverySession({
+				discovery,
+				sessionId: newSession.id,
+				dedupeKey,
+				approveDiscovery: (id) => handler.approveDiscovery(id),
+				rejectDiscovery: (id) => handler.rejectDiscovery(id),
+				deleteSession: (id) => dappSessionService.deleteDappSession(id),
+				pendingVerification,
+				logger,
+			})
+			if (approved) {
+				logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: ${discovery.origin} chain=${chainId}`)
+			}
 		} finally {
 			resolvePopup!()
 			pendingDiscoveryPromises.delete(dedupeKey)
