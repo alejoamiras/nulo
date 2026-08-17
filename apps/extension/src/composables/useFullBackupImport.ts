@@ -47,7 +47,7 @@ const CLEANUP_PENDING_MESSAGE =
 	"Import didn't finish and the partial profile couldn't be removed automatically. Delete it in Settings, then try again."
 
 /** The full-backup envelope: the checksum + the checksum-covered body. */
-type FullBackupEnvelope = {
+export type FullBackupEnvelope = {
 	checksum?: string
 	"compat-epoch"?: unknown
 	"backup-schema-version"?: unknown
@@ -80,7 +80,7 @@ type ValidateAndMigrateResult = ({ kind: "ok" } & ValidatedBackup) | { kind: "re
  * / permission guard and the `restoreStatus`/`fillError` side effects stay with
  * the caller.
  */
-async function validateAndMigrateBackup(fullBackup: FullBackupEnvelope): Promise<ValidateAndMigrateResult> {
+export async function validateAndMigrateBackup(fullBackup: FullBackupEnvelope): Promise<ValidateAndMigrateResult> {
 	const { checksum, ...backup } = fullBackup
 
 	// Trust-gate order is deliberate: integrity FIRST — re-serialized exactly as
@@ -330,6 +330,15 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		// discriminated result the caller maps to status/fillError; the earlier
 		// profile name/type reads in pickBackupFile/decryptBackup are sanitized
 		// display-only prefill and gate nothing.
+		//
+		// Scheduling note (audit-accepted): extracting the awaited stage into a
+		// function adds one promise-reaction turn before the `failed`/stage-2
+		// continuation below — inherent to any function-extraction of an async
+		// stage. It's unobservable in practice (a sub-microsecond microtask vs the
+		// real crypto/migration awaits) and strictly SAFE at the only seam it could
+		// touch: the `restoreStatus === "progress"` re-entrancy guard above stays
+		// "progress" for that extra turn, so a (humanly-impossible) re-trigger in
+		// the window is MORE likely to be blocked, never less.
 		const validated = await validateAndMigrateBackup(sel.backup as FullBackupEnvelope)
 		if (validated.kind === "rejected") {
 			restoreStatus.value = "failed"

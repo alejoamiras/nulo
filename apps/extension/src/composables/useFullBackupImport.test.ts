@@ -173,7 +173,7 @@ vi.mock("@/wallet/storage/migrations", async () => {
 })
 
 // Imported AFTER mocks are registered.
-import { useFullBackupImport } from "./useFullBackupImport"
+import { useFullBackupImport, validateAndMigrateBackup } from "./useFullBackupImport"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -216,6 +216,62 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const checksum = await EncryptionKey.getHashHex(JSON.stringify(body))
 	return { ...body, checksum }
 }
+
+// biome-ignore lint/suspicious/noExplicitAny: the extracted validator takes the raw backup envelope
+const validate = (b: unknown) => validateAndMigrateBackup(b as any)
+
+describe("validateAndMigrateBackup — exact reject copy (Q-02)", () => {
+	it("tampered checksum → 'Backup Integrity Check Failed' with the exact message", async () => {
+		const r = await validate({ ...(await buildBackup()), checksum: "definitely-wrong" })
+		expect(r).toEqual({
+			kind: "rejected",
+			title: "Backup Integrity Check Failed",
+			message: "The backup file appears to be corrupted or has been tampered with. Please ensure you have the correct backup file.",
+		})
+	})
+
+	it("unsupported compat-epoch → 'Incompatible backup' (incompatible-version copy)", async () => {
+		const r = await validate(await buildBackup({ "compat-epoch": 2 }))
+		expect(r).toEqual({
+			kind: "rejected",
+			title: "Incompatible backup",
+			message:
+				"This backup was created by an incompatible wallet version and cannot be imported. Re-export a backup from a current version of the wallet.",
+		})
+	})
+
+	it("malformed schema-version → 'Incompatible backup' (no-valid-version copy)", async () => {
+		const r = await validate(await buildBackup({ "backup-schema-version": 0 }))
+		expect(r).toEqual({
+			kind: "rejected",
+			title: "Incompatible backup",
+			message: "This backup does not carry a valid schema version. Re-export a backup from a current version of the wallet.",
+		})
+	})
+
+	it("too-new schema-version → 'Backup is too new' with the exact message", async () => {
+		const r = await validate(await buildBackup({ "backup-schema-version": 999 }))
+		expect(r).toEqual({
+			kind: "rejected",
+			title: "Backup is too new",
+			message: "This backup was created by a newer version of the wallet. Update the wallet, then import it again.",
+		})
+	})
+
+	it("checksum wins over a bad compat-epoch (trust-gate order)", async () => {
+		const r = await validate({ ...(await buildBackup({ "compat-epoch": 2 })), checksum: "wrong" })
+		expect((r as { title: string }).title).toBe("Backup Integrity Check Failed")
+	})
+
+	it("a valid backup resolves ok with the migrated data + checksum-stripped backup", async () => {
+		const r = await validate(await buildBackup())
+		expect(r.kind).toBe("ok")
+		if (r.kind === "ok") {
+			expect(r.backup).not.toHaveProperty("checksum")
+			expect(r.data.profile?.id).toBe("src-profile-id")
+		}
+	})
+})
 
 interface MakeOpts {
 	password?: string

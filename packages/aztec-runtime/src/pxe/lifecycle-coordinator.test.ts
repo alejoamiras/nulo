@@ -23,11 +23,14 @@ describe("PxeLifecycleCoordinator (Q-01)", () => {
 		expect(() => c.assertUnchanged("k", captured, "op")).not.toThrow()
 	})
 
-	test("assertUnchanged throws the stable 'purged mid-operation' message once the epoch advances", () => {
+	test("assertUnchanged throws the exact stable message once the epoch advances", () => {
 		const c = new PxeLifecycleCoordinator()
 		const captured = c.current("k") // 0
 		c.bump("k") // a concurrent purge lands
-		expect(() => c.assertUnchanged("k", captured, "myLabel")).toThrow(/myLabel: chain was purged mid-operation/)
+		// The full string is a behavior contract — callers/e2e match on it.
+		expect(() => c.assertUnchanged("k", captured, "myLabel")).toThrow(
+			"myLabel: chain was purged mid-operation — refusing to re-create its runtime/store",
+		)
 	})
 
 	test("assertUnchanged fences a capture from BEFORE a double-bump (B-18 shape)", () => {
