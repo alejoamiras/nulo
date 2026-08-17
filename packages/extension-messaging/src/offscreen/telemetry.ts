@@ -33,19 +33,10 @@
  */
 
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
+// Q-06: owned by core/ (transport-agnostic); this transport imports it DOWN.
+import type { RequestTerminalStatus } from "../core/terminal-status"
 
-export type RequestTerminalStatus =
-	| "success"
-	| "rejected"
-	| "timeout"
-	| "disconnected"
-	/**
-	 * Synchronous failure of `chrome.runtime.sendMessage(...)` —
-	 * typically because the offscreen document is gone or transitioning.
-	 * The request never reached the offscreen handler; the client cleaned
-	 * up state synchronously and rejected the caller's promise.
-	 */
-	| "send_failed"
+export type { RequestTerminalStatus }
 
 export interface RequestTelemetry {
 	/** Service-method name (e.g. "getGasBalances"). Public RPC name; not

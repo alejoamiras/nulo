@@ -5,7 +5,7 @@ import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { decodeResult } from "./decode"
 import { wrapParams } from "../utils"
 import { CLIENT_DISCONNECTED_MESSAGE, remoteErrorFromResponseContent, RpcDisconnectedError, RpcTimeoutError } from "../errors"
-import type { RequestTerminalStatus } from "../offscreen/telemetry"
+import type { RequestTerminalStatus } from "./terminal-status"
 
 /**
  * Shared request-correlator core for both transport clients (popup↔SW Port and
