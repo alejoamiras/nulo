@@ -69,6 +69,8 @@ vi.mock("@/wallet/services/account/client", () => ({
 
 import { managers, initTransactionService } from "@/utils/core"
 import { CHAIN_IDS } from "@/utils/chain-ids"
+import { AccountServiceClient } from "@/wallet/services/account/client"
+import { NetworkServiceClient } from "@/wallet/services/network/client"
 import { useAppStore } from "@/stores/app.store"
 import { useProfileBootstrap } from "./useProfileBootstrap"
 
@@ -166,6 +168,34 @@ describe("useProfileBootstrap", () => {
 		const { bootstrapActiveProfile } = useProfileBootstrap()
 		await bootstrapActiveProfile(fakeProfile)
 		expect(initTransactionService).toHaveBeenCalled()
+	})
+
+	test("(B-27) a concurrent bootstrap + hydrate for the same profile share ONE init (no client stomping)", async () => {
+		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue(fakeProfile)
+		// Hold initNetworks mid-flight so the second caller must JOIN the first run
+		// rather than start its own network/account init that replaces the clients.
+		let releaseNetworks!: () => void
+		netMock.getOrInitNetworks.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					releaseNetworks = () => resolve([{ id: "n1", chainId: 1, kind: "testnet" }])
+				}),
+		)
+
+		const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
+		const p1 = bootstrapActiveProfile(fakeProfile) // enters the core, awaits getOrInitNetworks
+		await Promise.resolve()
+		await Promise.resolve()
+		const p2 = hydrateKnownProfile() // same profile → joins the in-flight core
+		await Promise.resolve()
+
+		releaseNetworks()
+		await Promise.all([p1, p2])
+
+		// Single-flighted: each shared client was constructed ONCE, not once per
+		// caller (pre-fix, both ran initNetworks/initAccount and stomped the clients).
+		expect(NetworkServiceClient).toHaveBeenCalledTimes(1)
+		expect(AccountServiceClient).toHaveBeenCalledTimes(1)
 	})
 
 	test("bootstrapActiveProfile flips isLogined to true and returns true when its profile stays active", async () => {

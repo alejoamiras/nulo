@@ -16,6 +16,19 @@ import { NetworkServiceClient } from "@/wallet/services/network/client"
 import type { ProfileInfo } from "@/wallet/services/profile/client"
 import { useAppStore } from "@/stores/app.store"
 
+/**
+ * B-27: single-flight the activation core per profile id, module-level so it
+ * coordinates across composable instances AND across the two entry points
+ * (`bootstrapActiveProfile` from the `onActiveProfileChanged` event, and
+ * `hydrateKnownProfile` from import-timeout recovery). Both `initNetworks` and
+ * `initAccount` disconnect + REPLACE the shared `managers.network`/`.account`
+ * clients; two concurrent runs for the same profile stomped each other — the
+ * recovery bootstrap replaced a client the original was mid-use of, so the
+ * original threw and mis-routed to "needs unlock". A second caller now joins
+ * the in-flight run instead of starting its own.
+ */
+const inFlightBootstraps = new Map<string, Promise<void>>()
+
 export function useProfileBootstrap() {
 	const appStore = useAppStore()
 
@@ -60,6 +73,28 @@ export function useProfileBootstrap() {
 	}
 
 	/**
+	 * The shared activation core (network + account + tx-service + sync). B-27:
+	 * single-flighted per profile id, so a concurrent caller for the same profile
+	 * (recovery vs. the original event bootstrap) joins the in-flight run rather
+	 * than kicking off a second one that replaces the shared managers mid-use.
+	 */
+	const runBootstrapCore = (profileId: string): Promise<void> => {
+		const existing = inFlightBootstraps.get(profileId)
+		if (existing) return existing
+		const run = (async () => {
+			await initNetworks()
+			await initAccount()
+			initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
+			await appStore.syncTransactions()
+		})().finally(() => {
+			// Identity-guard: only clear the slot if it still holds THIS run.
+			if (inFlightBootstraps.get(profileId) === run) inFlightBootstraps.delete(profileId)
+		})
+		inFlightBootstraps.set(profileId, run)
+		return run
+	}
+
+	/**
 	 * Bootstrap a freshly-activated profile. Mirrors the truthy branch of
 	 * popup/app.vue's `onActiveProfileChanged(profile)` — minus the routing
 	 * decisions and `popupStore.closeAll()` which stay in the calling shell.
@@ -71,11 +106,7 @@ export function useProfileBootstrap() {
 		// and updates (rename).
 		appStore.profiles = await managers.profile.getProfiles()
 
-		await initNetworks()
-		await initAccount()
-
-		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
-		await appStore.syncTransactions()
+		await runBootstrapCore(profile.id)
 
 		// The lock must win: if the active session was cleared or switched while
 		// this bootstrap awaited (e.g. a lock fired right after a password change),
@@ -100,11 +131,9 @@ export function useProfileBootstrap() {
 		if (!activeProfile) return null
 
 		appStore.profile = activeProfile
-		await initNetworks()
-		await initAccount()
-
-		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
-		await appStore.syncTransactions()
+		// B-27: join the in-flight event-driven bootstrap for this profile instead
+		// of racing a second network/account init that replaces its clients.
+		await runBootstrapCore(activeProfile.id)
 
 		// Same lock-wins guard as bootstrapActiveProfile: don't flip isLogined if the
 		// session was cleared/switched mid-hydrate. isSessionChecked is set either way
