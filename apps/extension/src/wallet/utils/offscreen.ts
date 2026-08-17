@@ -80,6 +80,20 @@ export function isSupersededByAdopt(
 	)
 }
 
+/**
+ * B-17: the offscreen answers a health PING with PONG only once its PXE services
+ * are actually initialized — not merely when the document has loaded. A PONG
+ * returned during init let the SW (after an SW restart that left a mid-init
+ * document alive) adopt that document and dispatch a PXE RPC before `PxeService`
+ * existed — a missing-handler timeout instead of a clean readiness wait. The
+ * PING listener is still installed early; it just withholds PONG until services
+ * are ready, so `isOffscreenHealthy` treats a still-initializing document as
+ * not-yet-adoptable and the caller recreates + waits for READY.
+ */
+export function shouldRespondPong(message: unknown, servicesReady: boolean): boolean {
+	return message === OFFSCREEN_PING && servicesReady
+}
+
 const onOffscreenReady = (message: unknown) => {
 	if (message === OFFSCREEN_READY_MESSAGE) {
 		chrome.runtime.onMessage.removeListener(onOffscreenReady)
@@ -97,11 +111,27 @@ const onOffscreenTimeout = () => {
 	// branch sees a stale pass id and propagates instead of re-creating an
 	// untracked document (unguarded, that once produced a false-success pass).
 	passSeq += 1
-	// Kill the half-initialized offscreen so it doesn't become a ghost.
-	closeOffscreen().catch(() => {})
+	// B-17: kill the half-initialized offscreen, and TRACK the close so the next
+	// pass can join it. The gate below rejects `ready`, which clears the
+	// single-flight gate (ensureInFlight) — so a successor pass can begin while
+	// this close is still in flight. Without joining it, a late-landing
+	// `closeDocument()` here tears down the successor's freshly-created document
+	// (the cross-caller kill the passSeq fence guards `createOffscreen` against,
+	// but which the dangling close itself is not guarded by).
+	const closing = closeOffscreen().catch(() => {})
+	pendingClose = closing
+	void closing.finally(() => {
+		if (pendingClose === closing) pendingClose = null
+	})
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
 }
+
+/** B-17: a timed-out pass's in-flight `closeOffscreen()`. A successor pass joins
+ *  it (in `doEnsureOffscreenRunning`) before probing/creating, so a late close
+ *  can't tear down the successor's document. Identity-guarded so a newer
+ *  timeout's close isn't nulled by an older one settling. */
+let pendingClose: Promise<void> | null = null
 
 /** Monotonic create-pass fence. Each ensure pass captures `++passSeq`; the
  *  timeout handler bumps it to invalidate the running pass. `createOffscreen`
@@ -234,6 +264,16 @@ async function createOffscreen(passId: number) {
 	if (!win) {
 		throw new Error("Firefox offscreen fallback: chrome.windows.create resolved without a window")
 	}
+	// B-17: fence the window-handle assignment behind the pass id, mirroring the
+	// Chromium branch. If this pass was superseded while `chrome.windows.create`
+	// was pending (its ready-gate timed out and a successor pass is running),
+	// overwriting `firefoxOffscreenWindowId` would orphan the successor's live
+	// window (never closeable afterward). Instead close the orphan we just made
+	// and bail without clobbering the tracked handle or broadcasting adoption.
+	if (passId !== passSeq) {
+		if (win.id != null) await chrome.windows.remove(win.id).catch(() => {})
+		return
+	}
 	firefoxOffscreenWindowId = win.id ?? null
 	// F-10: notify any stale offscreen (a prior SW instance's window, leaked
 	// across a SW restart) that a newer instance now owns the offscreen — it
@@ -290,6 +330,13 @@ export function ensureOffscreenRunning(): Promise<void> {
 }
 
 async function doEnsureOffscreenRunning() {
+	// B-17: join a timed-out predecessor's close before probing or creating.
+	// onOffscreenTimeout fences + closes but does NOT await the close, and the
+	// single-flight gate clears when its `ready` rejects — so without this a
+	// successor could probe/create while `closeDocument()` is still in flight and
+	// have its new document torn down by that late close.
+	if (pendingClose) await pendingClose
+
 	if (await isOffscreenAlreadyRunning()) {
 		// Offscreen exists — verify it's actually responsive
 		if (await isOffscreenHealthy()) {
