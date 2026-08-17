@@ -4,9 +4,10 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import { EntityStorage } from "@/wallet/storage"
 import { DappSessionMacStorage } from "./mac-storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
@@ -138,10 +139,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
 		await this.deleteExpired()
 		return await this.lock.withLock(async () => {
-			let id: string
-			do {
-				id = getRandomHex(64)
-			} while (await this.storage.contains(id))
+			const id = await nextRandomId(this.storage, 64)
 
 			const session: DappSession = {
 				id,
@@ -160,24 +158,34 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		})
 	}
 
+	/**
+	 * Q-09: the shared "load → require → mutate → persist → emit" body every
+	 * single-field setter below repeats. Under the session lock: load the row,
+	 * throw `Invalid id` if absent, apply `mutate` (synchronous), persist, and
+	 * emit `onDappSessionUpdated`. `applyCapabilityDecision` intentionally does
+	 * NOT route through here (it merges deltas under one lock).
+	 */
+	private patchSession(sessionId: string, mutate: (session: DappSession) => void): Promise<DappSession> {
+		return this.lock.withLock(async () => {
+			const session = await this.storage.get(sessionId)
+			if (!session) throw new Error("Invalid id")
+			mutate(session)
+			await this.storage.set(sessionId, session)
+			this.emit("onDappSessionUpdated", session)
+			return session
+		})
+	}
+
 	public async updateDappSession(
 		sessionId: string,
 		permissions: DappPermissions[],
 		accounts: string[],
 		confirmationLevel: AccessLevel,
 	): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) {
-				throw new Error("Invalid id")
-			}
+		return await this.patchSession(sessionId, (session) => {
 			session.permissions = permissions
 			session.accounts = accounts
 			session.confirmationLevel = confirmationLevel
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-
-			return session
 		})
 	}
 
@@ -203,46 +211,26 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setVerificationHash(sessionId: string, verificationHash: string): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.verificationHash = verificationHash
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
 	public async setTrustedVerification(sessionId: string, trusted: boolean): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.trustedVerification = trusted
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
 	public async setAccountAliases(sessionId: string, aliases: Record<string, string>): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.accountAliases = { ...session.accountAliases, ...aliases }
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
 	public async setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.capabilityGrants = grants
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
@@ -253,13 +241,8 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setCapabilityRejections(sessionId: string, rejections: RejectedCapabilityRecord[]): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.capabilityRejections = rejections
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 

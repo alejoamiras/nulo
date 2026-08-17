@@ -7,6 +7,7 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { isPopupSubmitKey } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -119,11 +120,7 @@ watch(
 	},
 )
 const onKeydown = (e) => {
-	// Only fire on input/textarea fields — see NewContactPopup for rationale.
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleAddFpc()
+	if (isPopupSubmitKey(e)) handleAddFpc()
 }
 </script>
 

@@ -1,5 +1,5 @@
 import type { ILogger } from "@/wallet/logger"
-import { toRestoreError } from "@/utils/restore-error"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
@@ -431,27 +431,20 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	public async restore(authwits: Authwit[]): Promise<Restored<Authwit>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<Authwit>[] = []
-
 		return await this.lock.withLock(async () => {
 			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
-			for (const authwit of authwits) {
-				try {
-					// Parse the persisted shape so a malformed backup authwit is recorded
-					// as restoreError, not silently written + codec-hidden on read.
-					const row = AuthwitSchema.parse({ ...authwit, id })
-					await this.authwits.set(`${id}`, row)
-					result.push(row)
-					id++
-				} catch (err) {
-					result.push({
-						...authwit,
-						restoreError: toRestoreError(err),
-					})
-				}
-			}
-
-			return result
+			// `id` advances only after a successful write: restoreRows routes a
+			// throwing row to `restoreError` and never reaches the `id++`, so a
+			// malformed authwit doesn't consume a cursor slot (matches the prior
+			// hand-rolled loop exactly).
+			return await restoreRows(authwits, async (authwit) => {
+				// Parse the persisted shape so a malformed backup authwit is recorded
+				// as restoreError, not silently written + codec-hidden on read.
+				const row = AuthwitSchema.parse({ ...authwit, id })
+				await this.authwits.set(`${id}`, row)
+				id++
+				return row
+			})
 		})
 	}
 }

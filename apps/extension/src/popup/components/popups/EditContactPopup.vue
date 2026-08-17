@@ -8,6 +8,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
+import { isPopupSubmitKey } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -193,13 +194,8 @@ watch(
 )
 
 const onKeydown = (e) => {
-	// Only fire on input/textarea fields. Pressing Enter while focused on
-	// the Update button would otherwise double-fire (button activation
-	// triggers @submit on its own).
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateContact()
+	// Guarded to input/textarea focus so a global Enter can't double-fire.
+	if (isPopupSubmitKey(e)) handleUpdateContact()
 }
 </script>
 

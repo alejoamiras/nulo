@@ -24,7 +24,7 @@ import {
 } from "@nulo/wallet-core/activity"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { EntityStorage } from "@/wallet/storage"
-import { Lock } from "@/wallet/utils"
+import { KeyedLock } from "@/wallet/utils"
 import {
 	ACTIVITY_COUNTER_STORAGE_ROOT,
 	ACTIVITY_INCARNATION_STORAGE_ROOT,
@@ -80,9 +80,9 @@ export class ActivityProtocolCoordinator {
 	private readonly tombstones: EntityStorage<ActivityTombstoneRow>
 
 	/** One lock per scope, guarding incarnation reads/writes. */
-	private readonly scopeLocks = new Map<string, Lock>()
+	private readonly scopeLocks = new KeyedLock()
 	/** One lock per (scope, source), guarding sequence bookkeeping. */
-	private readonly sourceLocks = new Map<string, Lock>()
+	private readonly sourceLocks = new KeyedLock()
 
 	public constructor(browserApi: BrowserApi) {
 		const area = browserApi.storage.local
@@ -91,21 +91,12 @@ export class ActivityProtocolCoordinator {
 		this.tombstones = new EntityStorage(ACTIVITY_TOMBSTONE_STORAGE_ROOT, area, (raw) => ActivityTombstoneRowSchema.parse(raw))
 	}
 
-	private lockFor(map: Map<string, Lock>, key: string): Lock {
-		let lock = map.get(key)
-		if (!lock) {
-			lock = new Lock()
-			map.set(key, lock)
-		}
-		return lock
-	}
-
 	private async withScope<T>(scopeKey: string, op: () => Promise<T>): Promise<T> {
-		return this.lockFor(this.scopeLocks, scopeKey).withLock(op)
+		return this.scopeLocks.withLock(scopeKey, op)
 	}
 
 	private async withSource<T>(scopeKey: string, source: DurableActivitySource, op: () => Promise<T>): Promise<T> {
-		return this.lockFor(this.sourceLocks, sourceRowId(scopeKey, source)).withLock(op)
+		return this.sourceLocks.withLock(sourceRowId(scopeKey, source), op)
 	}
 
 	/** The scope's live incarnation, minted on first use. */

@@ -25,6 +25,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { TransferType } from "@/wallet/services/transaction/spec"
 import type { Network } from "@/wallet/services/network/service"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
+import { pendingHashesChanged, SingleShotTtlCache } from "./estimate-reuse-shared"
 import type { TransferRequest } from "./operation-planner"
 import type { FeeSettings } from "./spec"
 
@@ -121,25 +122,20 @@ export interface TransferEstimateReuseDeps {
 }
 
 export class TransferEstimateReuse {
-	private cache = new Map<string, TransferEstimateReuseEntry>()
+	private readonly cache = new SingleShotTtlCache<TransferEstimateReuseEntry>(ESTIMATE_REUSE_TTL_MS)
 
 	public constructor(private readonly deps: TransferEstimateReuseDeps) {}
 
-	/** Store an entry under a fresh id, then opportunistically sweep
-	 *  expired entries so the map doesn't grow unboundedly when the popup
-	 *  keeps re-estimating without ever consuming. */
+	/** Store an entry under a fresh id (the store sweeps expired entries so the
+	 *  map doesn't grow when the popup re-estimates without ever consuming). */
 	public stash(estimateId: string, entry: TransferEstimateReuseEntry): void {
-		this.cache.set(estimateId, entry)
-		this.evictStale()
-		// Per-entry timer so the signed request is physically dropped AT the
-		// TTL (idempotent vs consume/evict; dies with the SW, as does the map).
-		setTimeout(() => this.cache.delete(estimateId), ESTIMATE_REUSE_TTL_MS + 1)
+		this.cache.stash(estimateId, entry)
 	}
 
 	/** Drop a stashed entry (cancelled estimate, rejected interaction).
 	 *  Idempotent; unknown ids are a no-op. */
 	public evict(estimateId: string): void {
-		this.cache.delete(estimateId)
+		this.cache.evict(estimateId)
 	}
 
 	/** Pop a cached estimate if (a) the id exists, (b) inputs match
@@ -148,8 +144,7 @@ export class TransferEstimateReuse {
 	 *  Any mismatch ⇒ delete + return undefined; caller falls back to a
 	 *  full rebuild. Single-shot: the entry is consumed on first lookup. */
 	public async tryConsume(estimateId: string, inputs: TransferRequest): Promise<TransferEstimateReuseEntry | undefined> {
-		const entry = this.cache.get(estimateId)
-		this.cache.delete(estimateId) // single-shot
+		const entry = this.cache.consume(estimateId) // single-shot
 		if (!entry) return undefined
 
 		// TTL gate
@@ -225,23 +220,12 @@ export class TransferEstimateReuse {
 		// Rebuild rather than risk a note-exhaustion failure mid-flight.
 		// (codex audit SHOULD-FIX #2 partial — PXE rebuild detection
 		// remains deferred; conservative TTL bounds that risk.)
-		const currentPending = new Set(this.deps.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash))
-		const cachedPending = new Set(entry.pendingHashes)
-		if (currentPending.size !== cachedPending.size || [...currentPending].some((h) => !cachedPending.has(h))) {
+		const currentHashes = this.deps.getPendingForAccount(inputs.accountAddress).map((tx) => tx.hash)
+		if (pendingHashesChanged(currentHashes, entry.pendingHashes)) {
 			this.deps.logDebug(`tryConsumeTransferEstimate ${estimateId}: pending tx set changed`)
 			return undefined
 		}
 
 		return entry
-	}
-
-	/** Garbage-collect entries past their TTL. */
-	private evictStale(): void {
-		const now = Date.now()
-		for (const [id, entry] of this.cache) {
-			if (now - entry.builtAt > ESTIMATE_REUSE_TTL_MS) {
-				this.cache.delete(id)
-			}
-		}
 	}
 }

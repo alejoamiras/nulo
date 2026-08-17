@@ -9,7 +9,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
-import { nextRandomId } from "@/wallet/services/id-allocators"
+import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -734,8 +734,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 					if (existing.some((n) => n.profileId === candidate.profileId && n.chainId === candidate.chainId)) {
 						throw new Error(`A network for chain ${candidate.chainId} already exists in profile ${candidate.profileId}.`)
 					}
-					let id = candidate.id
-					while ((await this.storage.contains(id)) || (id !== candidate.id && sourceIds.has(id))) id = getRandomHex(8)
+					const id = await preferOrReallocId(this.storage, candidate.id, sourceIds)
 					const stored: Network = { ...candidate, id }
 					await this.storage.set(id, stored)
 					existing.push(stored)
