@@ -246,57 +246,57 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				// (safety-net `.finally(releaseFifo)`), whichever fires first.
 				const { baton, releaseFifo } = createSessionBaton()
 
-				// Only top-level `sendTx` messages get a pre-allocated queued
-				// journal record. `batch` is excluded by design — the recursive
-				// dispatch in WalletSdkDispatcher.handleBatch can't safely
-				// route hooks per-leg, so we'd end up with a batch-level
-				// queued record that no inner leg knows to claim.
-				// TODO(queued-visibility-for-batch): batched sendTx legs
-				// currently bypass the queued-record creation path. Lifting
-				// this requires a per-leg queued-record model or a relaxation
-				// of the batch contract; out of scope for the
-				// concurrent-dApp-sendTx fix.
-				const queuedJournalIdPromise: Promise<string | undefined> =
-					message.type === "sendTx"
-						? tryCreateQueuedJournal(message, session, {
-								journal: operationJournal,
-								profile: profileService,
-								dappSession: dappSessionService,
-								networkSvc: networkService,
-								account: accountService,
-								logger,
-							})
-						: Promise.resolve(undefined)
+				const handlerChain = prev.then(async () => {
+					// B-13: gate BEFORE any side effect (incl. the durable queued-journal
+					// record). Between the SDK's key-exchange response and
+					// onSessionEstablished's async validation, a message must not ride a
+					// session being terminated as unverified — and must not persist a
+					// durable journal record for it. Capture the validation promise and
+					// re-check its identity AFTER the await: a termination during the wait
+					// deletes (or replaces) the entry, so an already-waiting handler drops.
+					const validation = establishmentStatus.get(session.sessionId)
+					const established = await (validation ?? Promise.resolve(false))
+					if (!established || establishmentStatus.get(session.sessionId) !== validation) {
+						logger.log(
+							"wallet-sdk-bg",
+							LogLevel.Warn,
+							`Dropping message for ${session.sessionId}: session failed/lost establishment validation`,
+						)
+						return
+					}
 
-				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
-					prev.then(async () => {
-						// B-13: don't process a message until this session's establishment
-						// validation has completed AND succeeded. Between the SDK's
-						// key-exchange response and onSessionEstablished's async validation,
-						// a message must not ride a session that's being terminated as
-						// unverified. A missing entry (already terminated/cleaned) → drop.
-						const established = await (establishmentStatus.get(session.sessionId) ?? Promise.resolve(false))
-						if (!established) {
-							logger.log(
-								"wallet-sdk-bg",
-								LogLevel.Warn,
-								`Dropping message for ${session.sessionId}: session failed establishment validation`,
-							)
-							return
-						}
-						return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
-							// Bind the baton release into the `onExecutionEnqueued`
-							// slot — fired downstream by ExecutionService the instant
-							// the approved request enqueues on the execution mutex
-							// (which preserves execution order). The field name is
-							// shared across DispatchHooks → ExecutionHooks so the wiring
-							// is type-checked end-to-end (a past field-name drift here
-							// is exactly what left this release dead before).
-							onExecutionEnqueued: releaseFifo,
-							queuedJournalId,
-						})
-					}),
-				)
+					// Only NOW (validation passed) create the queued journal record.
+					// Only top-level `sendTx` messages get a pre-allocated queued journal
+					// record. `batch` is excluded by design — the recursive dispatch in
+					// WalletSdkDispatcher.handleBatch can't safely route hooks per-leg, so
+					// we'd end up with a batch-level queued record that no inner leg knows
+					// to claim.
+					// TODO(queued-visibility-for-batch): batched sendTx legs currently
+					// bypass the queued-record creation path.
+					const queuedJournalId =
+						message.type === "sendTx"
+							? await tryCreateQueuedJournal(message, session, {
+									journal: operationJournal,
+									profile: profileService,
+									dappSession: dappSessionService,
+									networkSvc: networkService,
+									account: accountService,
+									logger,
+								})
+							: undefined
+
+					return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+						// Bind the baton release into the `onExecutionEnqueued`
+						// slot — fired downstream by ExecutionService the instant
+						// the approved request enqueues on the execution mutex
+						// (which preserves execution order). The field name is
+						// shared across DispatchHooks → ExecutionHooks so the wiring
+						// is type-checked end-to-end (a past field-name drift here
+						// is exactly what left this release dead before).
+						onExecutionEnqueued: releaseFifo,
+						queuedJournalId,
+					})
+				})
 				// Safety-net release for handlers that don't call releaseFifo
 				// explicitly (every non-sendTx path) — preserves backward-
 				// compatible FIFO semantics for those. `.catch(() => {})` on
