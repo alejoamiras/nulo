@@ -81,7 +81,30 @@ async function handleCopy() {
 	})
 }
 
+// B-26: a shared submit latch. Without it, double-clicking Allow/Block fires two
+// decisions: the first closes this prompt (PopupManager then dequeues the NEXT
+// one), and the second's `emit("onClose")` then closes THAT next prompt the user
+// never decided on. The latch drops re-entry while a decision is in flight; the
+// key guard below is the second line of defense.
+const isSubmitting = ref(false)
+
+// The identifying triple of the CURRENTLY-displayed prompt. Captured at handler
+// entry and re-checked before `emit("onClose")` so a decision that completes
+// after the active identity switched (PopupManager reassigns
+// `cacheStore.incomingTrust`) can't close whatever prompt is showing now.
+function payloadKey() {
+	const t = cacheStore.incomingTrust
+	return `${t.profileId ?? ""}|${t.networkId ?? ""}|${t.contract ?? ""}`
+}
+
 async function handleAllow() {
+	if (isSubmitting.value) return
+	isSubmitting.value = true
+	// B-28: capture the label + key BEFORE awaiting. The active identity can
+	// switch mid-RPC, reassigning `cacheStore.incomingTrust`, which would make
+	// `tokenSymbol.value` resolve against the NEXT payload.
+	const symbol = tokenSymbol.value
+	const key = payloadKey()
 	try {
 		// setTrustAllow returns true when the trust flip was applied, false
 		// when the service refused (stale-popup race — token deleted between
@@ -91,24 +114,32 @@ async function handleAllow() {
 		// doesn't mislead the user.
 		const ok = await cacheStore.incomingTrust.allow?.()
 		if (ok === true) {
-			openToast({ label: `Now showing receives for ${tokenSymbol.value}`, icon: "check" })
+			openToast({ label: `Now showing receives for ${symbol}`, icon: "check" })
 		}
 	} catch {
 		openToast({ label: "Couldn't update trust state", icon: "warning" })
+	} finally {
+		isSubmitting.value = false
 	}
-	emit("onClose")
+	if (payloadKey() === key) emit("onClose")
 }
 
 async function handleReject() {
+	if (isSubmitting.value) return
+	isSubmitting.value = true
+	const symbol = tokenSymbol.value
+	const key = payloadKey()
 	try {
 		const ok = await cacheStore.incomingTrust.reject?.()
 		if (ok === true) {
-			openToast({ label: `Hiding receives from ${tokenSymbol.value}`, icon: "info" })
+			openToast({ label: `Hiding receives from ${symbol}`, icon: "info" })
 		}
 	} catch {
 		openToast({ label: "Couldn't update trust state", icon: "warning" })
+	} finally {
+		isSubmitting.value = false
 	}
-	emit("onClose")
+	if (payloadKey() === key) emit("onClose")
 }
 
 // Initial focus on the expand toggle so a keyboard-only user lands on
@@ -123,6 +154,9 @@ watch(
 			expanded.value = false
 			return
 		}
+		// Fresh prompt (the component instance is reused across the queue) — clear
+		// any latch left set by the previous decision's in-flight submit.
+		isSubmitting.value = false
 		await nextTick()
 		expandToggleRef.value?.focus()
 	},
@@ -189,6 +223,7 @@ watch(
 				<Flex gap="12">
 					<Button
 						@click="handleReject"
+						:disabled="isSubmitting"
 						wide
 						variant="primary_outline"
 						size="medium"
@@ -198,6 +233,7 @@ watch(
 					</Button>
 					<Button
 						@click="handleAllow"
+						:disabled="isSubmitting"
 						wide
 						size="medium"
 						data-testid="incoming-trust-allow"

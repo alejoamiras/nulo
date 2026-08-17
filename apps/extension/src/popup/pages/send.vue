@@ -27,6 +27,7 @@ import { TransferType } from "@/wallet/services/transaction/client"
 import { isValidHex } from "@/utils/string"
 import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
+import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
@@ -102,15 +103,10 @@ const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 function onBalanceAdded(balance) {
-	if (balance.account !== appStore.account.address) return
-
-	tokenBalance.push(balance)
+	applyBalanceAdd(tokenBalances.value, appStore.account.address, balance)
 }
 function onBalanceUpdated(balance) {
-	const idx = tokenBalances.value.findIndex((tb) => tb.id === balance.id)
-	if (idx === -1) return
-
-	tokenBalances.value[idx] = balance
+	applyBalanceUpdate(tokenBalances.value, balance)
 }
 
 const tokenBalances = ref([])
