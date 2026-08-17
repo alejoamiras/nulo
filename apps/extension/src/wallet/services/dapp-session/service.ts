@@ -277,8 +277,9 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	 * (discarding the approval + a cryptic error) and two concurrent approvals both
 	 * snapshotted the pre-write row, the later clobbering the earlier. This merges
 	 * the DELTAS against the LATEST row under ONE lock: accounts UNION, aliases
-	 * merge, grants keep-latest-minus-rejected-minus-replaced + new records, and
-	 * rejections preserve unrelated types (an approval clears its type's rejection).
+	 * merge, grants keep-latest-minus-REPLACED + new records (a rejected/denied
+	 * widening PRESERVES its older grant), and rejections preserve unrelated types
+	 * (an approval clears its type's rejection).
 	 * A missing row rejects cleanly with no partial write.
 	 *
 	 * Concurrent SAME-type approvals are last-completion-wins (an accepted deviation
