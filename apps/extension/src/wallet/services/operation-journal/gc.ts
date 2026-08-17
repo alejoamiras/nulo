@@ -29,8 +29,8 @@
  * `(profileId, null)` bucket with the same cap.
  */
 
-import type { AlarmEvent, AlarmsPort, Unsubscribe } from "@nulo/wallet-core/ports"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { AlarmsPort } from "@nulo/wallet-core/ports"
+import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
 import type { OperationJournalService } from "./service"
@@ -63,16 +63,18 @@ const NO_ACCOUNT = "<no-account>"
  */
 export class JournalGC {
 	private readonly journal: OperationJournalService
-	private readonly alarms: AlarmsPort
 	private readonly logger: ILogger
 	private readonly capPerScope: number
-	private alarmUnsubscribe?: Unsubscribe
+	// Q-05: the name-guarded create/clear/dispatch ritual is owned by the shared
+	// AlarmDispatcher; the boot-time sweep + its cadence stay local (they differ
+	// per alarm consumer, so the wrapper deliberately doesn't own them).
+	private readonly dispatcher: AlarmDispatcher
 
 	public constructor(journal: OperationJournalService, alarms: AlarmsPort, logger: ILogger, opts?: { capPerScope?: number }) {
 		this.journal = journal
-		this.alarms = alarms
 		this.logger = logger
 		this.capPerScope = opts?.capPerScope ?? DEFAULT_TERMINAL_CAP_PER_SCOPE
+		this.dispatcher = new AlarmDispatcher(JOURNAL_GC_ALARM_NAME, alarms)
 	}
 
 	/**
@@ -81,8 +83,13 @@ export class JournalGC {
 	 * (chrome.alarms.create semantics) and stacks the listener.
 	 */
 	public async start(): Promise<void> {
-		this.alarmUnsubscribe = this.alarms.onAlarm(this.onAlarmFired)
-		await this.alarms.create(JOURNAL_GC_ALARM_NAME, { periodInMinutes: JOURNAL_GC_PERIOD_MINUTES })
+		// The caller owns the diagnostic, so this stays byte-identical to the
+		// pre-extraction `sweep().catch(err => log("sweep tick threw", …))`.
+		this.dispatcher.listen(
+			() => this.sweep(),
+			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err)),
+		)
+		await this.dispatcher.create({ periodInMinutes: JOURNAL_GC_PERIOD_MINUTES })
 		try {
 			await this.sweep()
 		} catch (err) {
@@ -91,16 +98,7 @@ export class JournalGC {
 	}
 
 	public async stop(): Promise<void> {
-		this.alarmUnsubscribe?.()
-		this.alarmUnsubscribe = undefined
-		await this.alarms.clear(JOURNAL_GC_ALARM_NAME)
-	}
-
-	private readonly onAlarmFired = (alarm: AlarmEvent): void => {
-		if (alarm.name !== JOURNAL_GC_ALARM_NAME) return
-		this.sweep().catch((err) => {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err))
-		})
+		await this.dispatcher.stop()
 	}
 
 	/**
