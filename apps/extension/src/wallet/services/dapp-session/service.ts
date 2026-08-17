@@ -4,9 +4,10 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import { EntityStorage } from "@/wallet/storage"
 import { DappSessionMacStorage } from "./mac-storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
@@ -138,10 +139,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
 		await this.deleteExpired()
 		return await this.lock.withLock(async () => {
-			let id: string
-			do {
-				id = getRandomHex(64)
-			} while (await this.storage.contains(id))
+			const id = await nextRandomId(this.storage, 64)
 
 			const session: DappSession = {
 				id,

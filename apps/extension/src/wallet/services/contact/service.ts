@@ -6,10 +6,10 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { restoreRows } from "@/wallet/services/restore-rows"
-import { nextRandomId } from "@/wallet/services/id-allocators"
+import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { getInitials, sanitizeString } from "@/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -256,10 +256,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {
-				let id = contact.id
-				while (await this.storage.contains(id)) {
-					id = getRandomHex(8)
-				}
+				const id = await preferOrReallocId(this.storage, contact.id)
 				const written = { ...contact, id }
 				// Parse the persisted shape so a malformed backup contact is recorded as
 				// restoreError, not silently written + codec-hidden on read.

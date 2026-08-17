@@ -1,5 +1,5 @@
 import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
-import { toRestoreError } from "@/utils/restore-error"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
@@ -505,44 +505,34 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	public async restore(txs: Tx[]): Promise<Restored<Tx>[]> {
 		await this.ensureInitialized()
 
-		const result: Restored<Tx>[] = []
-
 		return await this.lock.withLock(async () => {
-			for (const tx of txs) {
-				try {
-					// D16: never restore a Pending tx. `submittedEndpointUrl` is
-					// backup-controlled and `updateTx` dials it (or, when absent, the
-					// ACTIVE profile's node) — the sync worker would leak an
-					// attacker-chosen hash to the wrong RPC. Pending is transient sync
-					// state that re-derives on the next real submission. Drop-and-record;
-					// NEVER write it (a written Pending row is re-armed by the init scan)
-					// and NEVER add it to `this.pending`.
-					if (tx.status === TxStatus.Pending) {
-						result.push({ ...tx, restoreError: "restored pending transaction rejected" })
-						continue
-					}
-					// B: create-only. `EntityStorage.set` is an upsert on the
-					// profile-shared txs root keyed by `hash`; a crafted hash equal to a
-					// victim's tx would overwrite (erase) it. A restore must never
-					// overwrite an existing tx.
-					if (await this.txs.contains(tx.hash)) {
-						result.push({ ...tx, restoreError: "transaction already exists (hash collision)" })
-						continue
-					}
-					// H: validate + canonicalize the persisted shape (mirror the read
-					// codec) so a malformed row is recorded, not written + codec-hidden.
-					const row = TxSchema.parse(tx)
-					await this.txs.set(row.hash, row)
-					result.push(row)
-				} catch (err) {
-					result.push({
-						...tx,
-						restoreError: toRestoreError(err),
-					})
+			// The two guard rejections THROW (not push-and-continue) so restoreRows
+			// records them as `restoreError` with the identical message; the throw
+			// also guarantees the row is never written / never added to `this.pending`.
+			return await restoreRows(txs, async (tx) => {
+				// D16: never restore a Pending tx. `submittedEndpointUrl` is
+				// backup-controlled and `updateTx` dials it (or, when absent, the
+				// ACTIVE profile's node) — the sync worker would leak an
+				// attacker-chosen hash to the wrong RPC. Pending is transient sync
+				// state that re-derives on the next real submission. Drop-and-record;
+				// NEVER write it (a written Pending row is re-armed by the init scan)
+				// and NEVER add it to `this.pending`.
+				if (tx.status === TxStatus.Pending) {
+					throw new Error("restored pending transaction rejected")
 				}
-			}
-
-			return result
+				// B: create-only. `EntityStorage.set` is an upsert on the
+				// profile-shared txs root keyed by `hash`; a crafted hash equal to a
+				// victim's tx would overwrite (erase) it. A restore must never
+				// overwrite an existing tx.
+				if (await this.txs.contains(tx.hash)) {
+					throw new Error("transaction already exists (hash collision)")
+				}
+				// H: validate + canonicalize the persisted shape (mirror the read
+				// codec) so a malformed row is recorded, not written + codec-hidden.
+				const row = TxSchema.parse(tx)
+				await this.txs.set(row.hash, row)
+				return row
+			})
 		})
 	}
 }

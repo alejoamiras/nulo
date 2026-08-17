@@ -1,5 +1,5 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
-import { toRestoreError } from "@/utils/restore-error"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
 import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -334,43 +334,33 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// atomic w.r.t. a concurrent restore, or two imports of the same address
 		// both pass the check then both write (last-writer-wins ownership — H4).
 		return await this.restoreLock.withLock(async () => {
-			const result: Restored<Account>[] = []
-
 			// Identity is the full row id, not the address alone: two profiles restored
 			// from the same mnemonic legitimately derive the same address, and each owns
-			// its own row.
+			// its own row. This whole-batch collision check stays OUTSIDE restoreRows —
+			// it aborts the entire restore, not a single row.
 			const collides = hasIntersectionByKeys(await this.liveRows(), accounts, ["profileId", "chainId", "address"])
 			if (collides) throw new Error("Duplicate account")
 
 			const seen = new Set<string>()
-			for (const account of accounts) {
-				try {
-					// H: validate + canonicalize the persisted shape (mirror the read codec).
-					const parsed = AccountSchema.parse(account)
-					// F: reject an empty/whitespace address. "Successfully restored" must NOT
-					// mean "set() didn't throw" for a blank address — a blank-account row
-					// would otherwise join the imported-account allow-set and let a tx/authwit
-					// referencing "" through. (Full AztecAddress canonicalization is a stronger
-					// follow-up; a legit backup's addresses are already canonical, so the
-					// composable's address-match stays exact for real data.)
-					if (parsed.address.trim().length === 0) throw new Error("empty account address")
-					// Dedupe within the batch — the storage-intersection check above only
-					// covers pre-existing rows, so two identical addresses in one restore
-					// would otherwise both "succeed" (last write wins).
-					const rowId = accountRowIdOf(parsed)
-					if (seen.has(rowId)) throw new Error("duplicate account address in batch")
-					seen.add(rowId)
-					await this.storage.set(rowId, parsed)
-					result.push(parsed)
-				} catch (err) {
-					result.push({
-						...account,
-						restoreError: toRestoreError(err),
-					})
-				}
-			}
-
-			return result
+			return await restoreRows(accounts, async (account) => {
+				// H: validate + canonicalize the persisted shape (mirror the read codec).
+				const parsed = AccountSchema.parse(account)
+				// F: reject an empty/whitespace address. "Successfully restored" must NOT
+				// mean "set() didn't throw" for a blank address — a blank-account row
+				// would otherwise join the imported-account allow-set and let a tx/authwit
+				// referencing "" through. (Full AztecAddress canonicalization is a stronger
+				// follow-up; a legit backup's addresses are already canonical, so the
+				// composable's address-match stays exact for real data.)
+				if (parsed.address.trim().length === 0) throw new Error("empty account address")
+				// Dedupe within the batch — the storage-intersection check above only
+				// covers pre-existing rows, so two identical addresses in one restore
+				// would otherwise both "succeed" (last write wins).
+				const rowId = accountRowIdOf(parsed)
+				if (seen.has(rowId)) throw new Error("duplicate account address in batch")
+				seen.add(rowId)
+				await this.storage.set(rowId, parsed)
+				return parsed
+			})
 		})
 	}
 }

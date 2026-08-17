@@ -8,11 +8,11 @@ import { NetworkService, networkInfoFrom } from "@/wallet/services/network/servi
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { restoreRows } from "@/wallet/services/restore-rows"
-import { nextRandomId } from "@/wallet/services/id-allocators"
+import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -433,10 +433,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					throw new Error("Token FPC deprecated and no longer supported")
 				}
 
-				let id = fpc.id
-				while (await this.storage.contains(id)) {
-					id = getRandomHex(8)
-				}
+				const id = await preferOrReallocId(this.storage, fpc.id)
 
 				// Strip `isProtocol` (recomputed at read time) and any
 				// legacy decoration fields a v3 backup might carry.
