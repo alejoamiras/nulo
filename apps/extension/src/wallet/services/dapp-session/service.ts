@@ -160,24 +160,34 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		})
 	}
 
+	/**
+	 * Q-09: the shared "load → require → mutate → persist → emit" body every
+	 * single-field setter below repeats. Under the session lock: load the row,
+	 * throw `Invalid id` if absent, apply `mutate` (synchronous), persist, and
+	 * emit `onDappSessionUpdated`. `applyCapabilityDecision` intentionally does
+	 * NOT route through here (it merges deltas under one lock).
+	 */
+	private patchSession(sessionId: string, mutate: (session: DappSession) => void): Promise<DappSession> {
+		return this.lock.withLock(async () => {
+			const session = await this.storage.get(sessionId)
+			if (!session) throw new Error("Invalid id")
+			mutate(session)
+			await this.storage.set(sessionId, session)
+			this.emit("onDappSessionUpdated", session)
+			return session
+		})
+	}
+
 	public async updateDappSession(
 		sessionId: string,
 		permissions: DappPermissions[],
 		accounts: string[],
 		confirmationLevel: AccessLevel,
 	): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) {
-				throw new Error("Invalid id")
-			}
+		return this.patchSession(sessionId, (session) => {
 			session.permissions = permissions
 			session.accounts = accounts
 			session.confirmationLevel = confirmationLevel
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-
-			return session
 		})
 	}
 
@@ -203,46 +213,26 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setVerificationHash(sessionId: string, verificationHash: string): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return this.patchSession(sessionId, (session) => {
 			session.verificationHash = verificationHash
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
 	public async setTrustedVerification(sessionId: string, trusted: boolean): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return this.patchSession(sessionId, (session) => {
 			session.trustedVerification = trusted
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
 	public async setAccountAliases(sessionId: string, aliases: Record<string, string>): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return this.patchSession(sessionId, (session) => {
 			session.accountAliases = { ...session.accountAliases, ...aliases }
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
 	public async setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return this.patchSession(sessionId, (session) => {
 			session.capabilityGrants = grants
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
@@ -253,13 +243,8 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setCapabilityRejections(sessionId: string, rejections: RejectedCapabilityRecord[]): Promise<DappSession> {
-		return await this.lock.withLock(async () => {
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return this.patchSession(sessionId, (session) => {
 			session.capabilityRejections = rejections
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
 		})
 	}
 
