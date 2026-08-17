@@ -24,9 +24,11 @@ export interface KeyedLockOptions {
  * Generalizes the `Map<string, Lock>` + lazily-created-`lockFor` idiom that
  * `activity-protocol/coordinator`, `account`'s `serializePerTuple`, and the
  * wallet-sdk decrypt monkeypatch each hand-rolled (the latter two as raw
- * `prev.then(op)` promise chains). Adopting `Lock` also gains its best-effort
- * 5-minute force-release safety net — a wedged op no longer blocks the key's
- * queue forever, matching how `coordinator` already used `Lock`.
+ * `prev.then(op)` promise chains). Each adopter chooses its watchdog via
+ * `maxHoldMs` so the migration is byte-zero-delta: `coordinator` keeps `Lock`'s
+ * default 5-minute force-release (its prior `new Lock()` had it), while the two
+ * raw-chain sites pass `{ maxHoldMs: null }` to disable it (their chains had no
+ * watchdog).
  */
 export class KeyedLock {
 	readonly #locks = new Map<string, Lock>()

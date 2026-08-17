@@ -92,4 +92,9 @@ Helper `restore-rows.ts:22-35` (`restoreRows(rows, writeOne)`), already used by 
 Typecheck (affected package) + the finding's existing colocated tests + new tests for each new helper/class. Full repo typecheck:all + lint + affected suites before the dual audit. `audit:vue` before PR (apps/extension touched).
 
 ## Dual audit (codex + fable) over complete arc diff — bounded (initial + max 2 resumes)
-_pending._
+- **Initial (parallel):** **fable/opus → approve** (no blocking; both scope questions endorsed — Q-10 worth it, Q-11b deferral agreed). **codex → reject** on 3 (all things fable passed as non-blocking, escalated under a purist zero-delta reading): (1) KeyedLock's Lock-backed 5-min watchdog inherited by serializePerTuple + decrypt (which had none); (2) the dropped `void next.finally`; (3) Q-09 `return await`→`return` losing the setter's async stack frame.
+- **Round-1 fixes → resume: reject (narrowed to 1).** (1) watchdog opt-out RESOLVED; (3) `return await` RESOLVED. Codex held only on the dropped `void next.finally` — correctly, per the repo's **bug-pinning rule**: a zero-delta extraction must PRESERVE pre-existing buggy behavior verbatim (the latent `unhandledrejection`) and fix it in a separately-classified behavior arc, not smuggle the fix into a "zero-delta" refactor.
+- **Round-2 fix → resume:** re-added `void next.finally(() => {})` in `serializePerTuple` as a `(BUG PIN)` — reproduces the exact prior latent unhandledrejection; fixed the stale KeyedLock doc comment. _Awaiting final codex verdict (resume 2 of 2)._
+
+## Owned, dated follow-up (2026-08-17)
+- **account `serializePerTuple` latent unhandledrejection** — the pinned `void next.finally(() => {})` re-raises when `op` rejects. This is pre-existing (on dev today) and preserved verbatim here per the zero-delta rule. Fix (drop the branch) belongs in a separate behavior-fix arc, classified as a behavior change, not a dedup.
