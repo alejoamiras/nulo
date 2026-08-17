@@ -13,6 +13,7 @@ import {
 	DAPP_SESSION_SERVICE_NAME,
 	type DappMetadata,
 	type DappPermissions,
+	type CapabilityDecision,
 	type DappSession,
 	type GrantedCapabilityRecord,
 	type RejectedCapabilityRecord,
@@ -38,6 +39,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		"getCapabilityGrants",
 		"setCapabilityRejections",
 		"getCapabilityRejections",
+		"applyCapabilityDecision",
 	)
 	public static name = DAPP_SESSION_SERVICE_NAME
 
@@ -265,6 +267,60 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		const session = await this.storage.get(sessionId)
 		if (!session) throw new Error("Invalid id")
 		return session.capabilityRejections ?? []
+	}
+
+	/**
+	 * Apply a capability decision atomically (B-14). The dispatcher used to push
+	 * precomputed whole-row arrays across FOUR separately-locked writes
+	 * (updateDappSession → setAccountAliases → setCapabilityGrants →
+	 * setCapabilityRejections), so a concurrent revoke could throw mid-sequence
+	 * (discarding the approval + a cryptic error) and two concurrent approvals both
+	 * snapshotted the pre-write row, the later clobbering the earlier. This merges
+	 * the DELTAS against the LATEST row under ONE lock: accounts UNION, aliases
+	 * merge, grants keep-latest-minus-REPLACED + new records (a rejected/denied
+	 * widening PRESERVES its older grant), and rejections preserve unrelated types
+	 * (an approval clears its type's rejection).
+	 * A missing row rejects cleanly with no partial write.
+	 *
+	 * Concurrent SAME-type approvals are last-completion-wins (an accepted deviation
+	 * — two popups approving the same capability type for one session simultaneously
+	 * is not a real flow); DIFFERENT-type concurrent approvals both survive because
+	 * the merge reads the latest row.
+	 */
+	public async applyCapabilityDecision(sessionId: string, decision: CapabilityDecision): Promise<DappSession> {
+		return await this.lock.withLock(async () => {
+			const session = await this.storage.get(sessionId)
+			if (!session) throw new Error("Invalid id")
+			const now = Date.now()
+
+			if (decision.addAccounts.length > 0) {
+				session.accounts = [...new Set([...(session.accounts ?? []), ...decision.addAccounts])]
+			}
+			if (Object.keys(decision.aliasPatch).length > 0) {
+				session.accountAliases = { ...session.accountAliases, ...decision.aliasPatch }
+			}
+
+			// Only REPLACED types drop their stored grant; a REJECTED type keeps its
+			// existing grant — a denied widening (a re-consent the user declined) must
+			// preserve the older, narrower grant, never revoke it.
+			const replaceSet = new Set(decision.replaceTypes)
+			session.capabilityGrants = [
+				...(session.capabilityGrants ?? []).filter((g) => !replaceSet.has(g.capability.type)),
+				...decision.grantRecords,
+			]
+
+			// Preserve rejections for types this decision didn't touch; an approval
+			// clears its type's prior rejection (only rejectedTypes get re-recorded).
+			const touched = new Set<string>([...decision.approvedTypes, ...decision.rejectedTypes])
+			session.capabilityRejections = [
+				...(session.capabilityRejections ?? []).filter((r) => !touched.has(r.capabilityType)),
+				...decision.rejectedTypes.map((t) => ({ capabilityType: t, rejectedAt: now })),
+			]
+
+			await this.storage.set(sessionId, session)
+			this.emit("onDappSessionUpdated", session)
+			return session
+		})
 	}
 
 	public async deleteDappSession(sessionId: string): Promise<DappSession> {

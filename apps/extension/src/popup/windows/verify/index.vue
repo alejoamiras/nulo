@@ -138,6 +138,11 @@ onMounted(async () => {
 	}
 
 	const sessionId = router.currentRoute.value.query.sessionId as string
+	// Per-session snapshot the SW passes when opening this window (B-06). A concurrent
+	// session for the same (origin,chain) can overwrite the shared DappSession row's
+	// hash, so the trust-decision emojis MUST derive from THIS session's own hash, not
+	// the row's. The row hash is only a legacy fallback for opens without the param.
+	const snapshotHash = router.currentRoute.value.query.verificationHash as string | undefined
 	isReconnect.value = router.currentRoute.value.query.isReconnect === "true"
 
 	if (!sessionId) {
@@ -152,8 +157,9 @@ onMounted(async () => {
 			return
 		}
 
-		if (session.value.verificationHash) {
-			emojis.value = hashToEmoji(session.value.verificationHash)
+		const displayHash = snapshotHash || session.value.verificationHash
+		if (displayHash) {
+			emojis.value = hashToEmoji(displayHash)
 		}
 
 		// Hydrate dApp logo

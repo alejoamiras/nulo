@@ -1,5 +1,11 @@
 import { z } from "zod"
-import { AccessLevel, type DappPermissions, type GrantedCapabilityRecord, type RejectedCapabilityRecord } from "@nulo/wallet-bridge"
+import {
+	AccessLevel,
+	type CapabilityDecision,
+	type DappPermissions,
+	type GrantedCapabilityRecord,
+	type RejectedCapabilityRecord,
+} from "@nulo/wallet-bridge"
 
 export const DAPP_SESSION_SERVICE_NAME = "dapp-session"
 
@@ -10,6 +16,7 @@ export const DAPP_SESSION_SERVICE_NAME = "dapp-session"
  * existing consumers of `dapp-session/spec.ts`.
  */
 export { AccessLevel } from "@nulo/wallet-bridge"
+export type { CapabilityDecision } from "@nulo/wallet-bridge"
 export type {
 	AccountsCapability,
 	Capability,
@@ -107,6 +114,7 @@ export type Methods = {
 	getCapabilityGrants(sessionId: string): GrantedCapabilityRecord[]
 	setCapabilityRejections(sessionId: string, rejections: RejectedCapabilityRecord[]): DappSession
 	getCapabilityRejections(sessionId: string): RejectedCapabilityRecord[]
+	applyCapabilityDecision(sessionId: string, decision: CapabilityDecision): DappSession
 }
 
 export type Events = {

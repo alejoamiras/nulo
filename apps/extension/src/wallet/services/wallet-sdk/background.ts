@@ -48,9 +48,9 @@ import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispa
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
+import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
-import type { Fr } from "@aztec/foundation/curves/bn254"
 
 declare const __VERSION__: string
 
@@ -119,9 +119,6 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 */
 	const pendingDiscoveryPromises = new Map<string, Promise<void>>()
 
-	/** Composite key used by both maps above. */
-	const pendingKey = (origin: string, chainId: string) => `${origin}|${chainId}`
-
 	/**
 	 * Per-session message queue — ensures messages from the same dApp session
 	 * are processed sequentially (FIFO). Without this, the fire-and-forget
@@ -129,6 +126,16 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 * conditions (e.g. executeUtility runs before registerContract completes).
 	 */
 	const sessionQueues = new Map<string, Promise<void>>()
+
+	/**
+	 * Per-session establishment-validation result (B-13). The SDK sends the
+	 * key-exchange response BEFORE invoking `onSessionEstablished`, whose async
+	 * validation (row lookup, hash persist, verify-window open) may then TERMINATE
+	 * the session as unverified. `onWalletMessage` awaits this promise before
+	 * dispatching, so a message can never ride a session that's concurrently being
+	 * torn down. Resolves `true` when established, `false` when terminated.
+	 */
+	const establishmentStatus = new Map<string, Promise<boolean>>()
 
 	let discoveryQueue: DiscoveryQueue
 
@@ -209,55 +216,24 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				)
 			},
 
-			onSessionEstablished: async (session) => {
-				// Sessions are per-`(origin, chainId)`. The upstream
-				// `ActiveSession` carries `chainInfo` (set from the matching
-				// discovery during key exchange — see the wallet-sdk
-				// `BackgroundConnectionHandler` source), so derive `chainId`
-				// directly from the session being established. No side-channel
-				// map needed.
-				const chainId = String(chainInfoToChainId(session))
-				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
-				if (dappSession) {
-					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
-				} else {
-					// F-006 (Round 2 B-2): if a session was established but the
-					// backing DappSession is gone, the user revoked between
-					// approveDiscovery and key-exchange. Terminate immediately
-					// so the dApp can't ride a stale approved-pending-discovery
-					// into a live ActiveSession. Without this, the upstream
-					// state machine would let the dApp re-key-exchange after
-					// revocation (see audit-codex-final.md B-2).
-					logger.log(
-						"wallet-sdk-bg",
-						LogLevel.Warn,
-						`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
-					)
-					handler.terminateSession(session.sessionId)
-					return
-				}
-
-				const verifKey = pendingKey(session.origin, chainId)
-				const isNewConnection = pendingVerification.has(verifKey)
-				if (isNewConnection) pendingVerification.delete(verifKey)
-
-				const needsVerification = isNewConnection || (dappSession && !dappSession.trustedVerification)
-
-				if (needsVerification && dappSession) {
-					chrome.windows.create({
-						type: "popup",
-						url: chrome.runtime.getURL(
-							`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
-						),
-						height: 800,
-						width: 400,
-					})
-				}
+			onSessionEstablished: (session) => {
+				// Record the validation promise SYNCHRONOUSLY (before its first await)
+				// so onWalletMessage can gate on it even if a message arrives in the
+				// gap between the SDK's key-exchange response and this validation (B-13).
+				const validated = handleSessionEstablished(session, {
+					dappSessionService,
+					terminateSession: (sessionId) => handler.terminateSession(sessionId),
+					pendingVerification,
+					logger,
+				})
+				establishmentStatus.set(session.sessionId, validated)
+				return validated.then(() => undefined)
 			},
 
 			onSessionTerminated: (sessionId) => {
 				sessionQueues.delete(sessionId)
 				decryptQueues.delete(sessionId)
+				establishmentStatus.delete(sessionId)
 			},
 
 			onWalletMessage: (session, message) => {
@@ -270,31 +246,60 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				// (safety-net `.finally(releaseFifo)`), whichever fires first.
 				const { baton, releaseFifo } = createSessionBaton()
 
-				// Only top-level `sendTx` messages get a pre-allocated queued
-				// journal record. `batch` is excluded by design — the recursive
-				// dispatch in WalletSdkDispatcher.handleBatch can't safely
-				// route hooks per-leg, so we'd end up with a batch-level
-				// queued record that no inner leg knows to claim.
-				// TODO(queued-visibility-for-batch): batched sendTx legs
-				// currently bypass the queued-record creation path. Lifting
-				// this requires a per-leg queued-record model or a relaxation
-				// of the batch contract; out of scope for the
-				// concurrent-dApp-sendTx fix.
+				// B-13: gate on establishment validation. Between the SDK's
+				// key-exchange response and onSessionEstablished's async validation, a
+				// message must not ride a session being terminated as unverified — and
+				// must not persist a durable journal record for it. Capture the
+				// per-session validation promise and re-check its identity after the
+				// await: a termination during the wait deletes (or replaces) the entry,
+				// so an already-waiting handler drops. This gate is computed on message
+				// ARRIVAL, NOT behind the FIFO baton — so a queued sibling still gets its
+				// durable queued-journal record immediately. Two concurrent `sendTx`
+				// requests must BOTH show as `queued` before either is approved (the
+				// anti-lost-tx invariant `concurrent-sendtx.test.ts` pins); serializing
+				// only execution — never record creation — behind the baton preserves it.
+				const validation = establishmentStatus.get(key)
+				const establishedPromise = (validation ?? Promise.resolve(false)).then(
+					(established) => established && establishmentStatus.get(key) === validation,
+				)
+
+				// Queued journal is created on arrival (concurrent across siblings),
+				// gated on establishment. Only top-level `sendTx` gets a pre-allocated
+				// record — `batch` is excluded by design: the recursive dispatch in
+				// WalletSdkDispatcher.handleBatch can't safely route hooks per-leg, so
+				// we'd end up with a batch-level record no inner leg knows to claim.
+				// TODO(queued-visibility-for-batch): batched sendTx legs currently
+				// bypass the queued-record creation path.
 				const queuedJournalIdPromise: Promise<string | undefined> =
 					message.type === "sendTx"
-						? tryCreateQueuedJournal(message, session, {
-								journal: operationJournal,
-								profile: profileService,
-								dappSession: dappSessionService,
-								networkSvc: networkService,
-								account: accountService,
-								logger,
-							})
+						? establishedPromise.then((ok) =>
+								ok
+									? tryCreateQueuedJournal(message, session, {
+											journal: operationJournal,
+											profile: profileService,
+											dappSession: dappSessionService,
+											networkSvc: networkService,
+											account: accountService,
+											logger,
+										})
+									: undefined,
+							)
 						: Promise.resolve(undefined)
 
 				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
-					prev.then(() =>
-						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+					prev.then(async () => {
+						// B-13: re-gate execution behind the baton. A session that
+						// failed/lost establishment must not execute either — not just skip
+						// its journal. Same promise as the journal gate, so it resolves once.
+						if (!(await establishedPromise)) {
+							logger.log(
+								"wallet-sdk-bg",
+								LogLevel.Warn,
+								`Dropping message for ${key}: session failed/lost establishment validation`,
+							)
+							return
+						}
+						return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
 							// Bind the baton release into the `onExecutionEnqueued`
 							// slot — fired downstream by ExecutionService the instant
 							// the approved request enqueues on the execution mutex
@@ -304,8 +309,8 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							// is exactly what left this release dead before).
 							onExecutionEnqueued: releaseFifo,
 							queuedJournalId,
-						}),
-					),
+						})
+					}),
 				)
 				// Safety-net release for handlers that don't call releaseFifo
 				// explicitly (every non-sendTx path) — preserves backward-
@@ -770,9 +775,3 @@ function toJsonSafe(value: unknown, seen = new WeakSet()): unknown {
  * to numbers and XOR chainId with rollup version, matching the convention
  * used by NetworkService (chainId = l1ChainId ^ rollupVersion).
  */
-function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
-	const raw = obj.chainInfo
-	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
-	const version = typeof raw.version === "string" ? Number(BigInt(raw.version)) : Number(raw.version.toBigInt())
-	return (chainId ^ version) >>> 0
-}

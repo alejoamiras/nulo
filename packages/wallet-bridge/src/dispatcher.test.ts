@@ -6,6 +6,7 @@ import type { CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type {
+	CapabilityDecision,
 	IAccountReader,
 	IDappInteractionRunner,
 	IDappSessionWriter,
@@ -13,6 +14,27 @@ import type {
 	IExecutionRunner,
 	INetworkReader,
 } from "./services-contract"
+
+/** Shared fake of the real DappSessionService.applyCapabilityDecision merge (B-14):
+ *  deltas merged against the LATEST row. Returns the new row. */
+function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision): IDappSessionRef {
+	const next = { ...session } as IDappSessionRef & {
+		accounts: string[]
+		accountAliases?: Record<string, string>
+		capabilityGrants?: GrantedCapabilityRecord[]
+		capabilityRejections?: RejectedCapabilityRecord[]
+	}
+	if (decision.addAccounts.length > 0) next.accounts = [...new Set([...(next.accounts ?? []), ...decision.addAccounts])]
+	if (Object.keys(decision.aliasPatch).length > 0) next.accountAliases = { ...next.accountAliases, ...decision.aliasPatch }
+	const replaceSet = new Set(decision.replaceTypes)
+	next.capabilityGrants = [...(next.capabilityGrants ?? []).filter((g) => !replaceSet.has(g.capability.type)), ...decision.grantRecords]
+	const touched = new Set<string>([...decision.approvedTypes, ...decision.rejectedTypes])
+	next.capabilityRejections = [
+		...(next.capabilityRejections ?? []).filter((r) => !touched.has(r.capabilityType)),
+		...decision.rejectedTypes.map((t) => ({ capabilityType: t, rejectedAt: Date.now() })),
+	]
+	return next
+}
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 
@@ -66,6 +88,19 @@ function makeSessionWriter(initial: IDappSessionRef) {
 		setCapabilityRejections: async (_id, rejections) => {
 			calls.setRejections.push(rejections)
 			session = { ...session, capabilityRejections: rejections } as IDappSessionRef
+			return session
+		},
+		applyCapabilityDecision: async (_id, decision) => {
+			session = applyDecisionTo(session, decision)
+			// Mirror the merged result onto the legacy call trackers so tests that
+			// assert the final grants/rejections keep working post-B-14. Only record a
+			// grant write when the decision actually changes grants — a pure-reject
+			// (no approvals) leaves grants untouched, matching the old flow that called
+			// setCapabilityRejections only.
+			if (decision.grantRecords.length > 0 || decision.replaceTypes.length > 0) {
+				calls.setGrants.push(session.capabilityGrants ?? [])
+			}
+			calls.setRejections.push(session.capabilityRejections ?? [])
 			return session
 		},
 	}
@@ -137,6 +172,55 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
 
 		expect(calls.setGrants).toHaveLength(0)
+	})
+
+	test("(B-14 PIN) concurrent approvals of different types both survive (reacquire-latest, no clobber)", async () => {
+		const { writer, calls } = makeSessionWriter(makeSession())
+		let resolveA!: () => void
+		const gateA = new Promise<void>((r) => (resolveA = r))
+		let n = 0
+		const dispatcher = makeDispatcher(writer, async () => {
+			n += 1
+			if (n === 1) {
+				await gateA
+				return { granted: [{ type: "data" }] } as CapabilityResult
+			}
+			return { granted: [{ type: "transaction", scope: [{ contract: "*", function: "*" }] }] } as CapabilityResult
+		})
+
+		// A snapshots the empty session then parks in its popup.
+		const pA = dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data" }] }], ctx)
+		await new Promise((r) => setTimeout(r, 0))
+		// B snapshots the SAME empty session, approves transaction, and writes.
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction" }] }], ctx)
+		// A resumes and writes — under B-14 it reacquires B's committed row and merges,
+		// rather than clobbering it with a grant list computed from the stale snapshot.
+		resolveA()
+		await pA
+
+		const finalGrants = calls.setGrants.at(-1) ?? []
+		expect(finalGrants.map((g) => g.capability.type).sort()).toEqual(["data", "transaction"])
+	})
+
+	test("(B-14 PIN) approving a delta type does NOT clear an UNRELATED type's rejection", async () => {
+		// A rejection of an existing type landed concurrently (it's in the latest row).
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "transaction", scope: [{ contract: "*", function: "*" }] }, grantedAt: 1 } as GrantedCapabilityRecord,
+			],
+			capabilityRejections: [{ capabilityType: "transaction", rejectedAt: 100 }],
+		})
+		const { writer } = makeSessionWriter(session)
+		// The popup approves the delta 'data' AND echoes the existing 'transaction' grant.
+		const dispatcher = makeDispatcher(
+			writer,
+			async () => ({ granted: [{ type: "data" }, { type: "transaction", scope: [{ contract: "*", function: "*" }] }] }) as never,
+		)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data" }] }], ctx)
+		const stored = await writer.getDappSession("test-session-id")
+		// Only delta-approved types clear their rejection — echoing an unrelated existing
+		// type must NOT erase its concurrent rejection (the lost-update the fix closes).
+		expect((stored.capabilityRejections ?? []).some((r) => r.capabilityType === "transaction")).toBe(true)
 	})
 
 	test("merge: keeps unrelated existing rejections", async () => {
@@ -319,6 +403,7 @@ function makeGetAccountsDispatcher(opts: {
 		setAccountAliases: async () => opts.session,
 		setCapabilityGrants: async () => opts.session,
 		setCapabilityRejections: async () => opts.session,
+		applyCapabilityDecision: async (_id, decision) => applyDecisionTo(opts.session, decision),
 	}
 	const network: INetworkRef = { id: "net-0", chainId: 0 }
 	const networkReader: INetworkReader = { getNetworks: async () => [network] }
@@ -352,6 +437,7 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 			setAccountAliases: async () => null as unknown as IDappSessionRef,
 			setCapabilityGrants: async () => null as unknown as IDappSessionRef,
 			setCapabilityRejections: async () => null as unknown as IDappSessionRef,
+			applyCapabilityDecision: async () => null as unknown as IDappSessionRef,
 		}
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
 		const networkReader: INetworkReader = { getNetworks: async () => [network] }
@@ -1186,6 +1272,7 @@ describe("F-006: network-only methods fail-closed on missing session (Phase 3)",
 			setAccountAliases: async () => null as unknown as IDappSessionRef,
 			setCapabilityGrants: async () => null as unknown as IDappSessionRef,
 			setCapabilityRejections: async () => null as unknown as IDappSessionRef,
+			applyCapabilityDecision: async () => null as unknown as IDappSessionRef,
 		}
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
 		const networkReader: INetworkReader = { getNetworks: async () => [network] }
@@ -1243,6 +1330,10 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 			},
 			setCapabilityRejections: async (_id, rejections) => {
 				session = { ...(session as IDappSessionRef), capabilityRejections: rejections } as IDappSessionRef
+				return session
+			},
+			applyCapabilityDecision: async (_id, decision) => {
+				session = applyDecisionTo(session as IDappSessionRef, decision)
 				return session
 			},
 		}
@@ -1554,15 +1645,16 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 
 	test("a REJECTED contracts re-consent keeps the old grant intact (rejection interplay)", async () => {
 		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
-		const { writer, calls } = makeSessionWriter(session)
+		const { writer } = makeSessionWriter(session)
+		// The user declines the widening — nothing new is approved.
 		const dispatcher = makeDispatcher(writer, async () => ({ granted: [] }) as never)
 		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx).catch(() => {})
-		const stored = calls.setGrants.at(-1)
-		if (stored) {
-			const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
-			expect(contractsGrants).toHaveLength(1)
-			expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
-		}
+		// Assert the STORED state unconditionally: the denied widening must not drop or
+		// widen the older grant — storage still holds exactly ["0xold"].
+		const stored = await writer.getDappSession("test-session-id")
+		const contractsGrants = (stored.capabilityGrants ?? []).filter((g) => g.capability.type === "contracts")
+		expect(contractsGrants).toHaveLength(1)
+		expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
 	})
 
 	test("CAIP-stored session accounts accept RAW-hex scope arrays (the fresh-session balance bug)", async () => {
@@ -1885,6 +1977,7 @@ describe("dispatcher — arg guards: order, tolerance, batch-leg validation", ()
 			setAccountAliases: async () => session as IDappSessionRef,
 			setCapabilityGrants: async () => session as IDappSessionRef,
 			setCapabilityRejections: async () => session as IDappSessionRef,
+			applyCapabilityDecision: async (_id, decision) => applyDecisionTo(session as IDappSessionRef, decision),
 		}
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
