@@ -11,18 +11,20 @@ import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
  * storage contention, service-worker suspension, or the machine sleeping mid
  * `await`. So freshness is re-checked HERE, immediately before the approval,
  * NOT only at the popup boundary. If the discovery expired during those writes
- * the just-created session is deleted, no verification is scheduled, and the
- * discovery is rejected — we never leave behind an approved-but-unreachable
- * (nor, worse, an unverified-yet-live) session for a dApp that has stopped
- * listening.
+ * the just-created session is deleted (best effort — a genuine storage failure
+ * can still leave the row, but approval fails closed regardless), no
+ * verification is scheduled, and the discovery is rejected — so an
+ * approved-but-unreachable, or unverified-yet-live, session is not handed to a
+ * dApp that has stopped listening.
  *
- * @returns `true` iff the discovery was approved; `false` on rollback.
+ * @returns `true` iff the discovery was approved; `false` on rollback or when
+ *   the SDK reports the approval did not land (the request was already gone).
  */
 export async function approveOrRollbackDiscoverySession(args: {
 	discovery: PendingDiscovery
 	sessionId: string
 	dedupeKey: string
-	approveDiscovery: (requestId: string) => void
+	approveDiscovery: (requestId: string) => boolean
 	rejectDiscovery: (requestId: string) => void
 	deleteSession: (sessionId: string) => Promise<unknown>
 	pendingVerification: Set<string>
@@ -47,7 +49,15 @@ export async function approveOrRollbackDiscoverySession(args: {
 		return false
 	}
 
+	// Schedule verification before approving so onSessionEstablished can find the
+	// entry, but if the SDK reports the approval didn't land (the request was
+	// already gone) undo it — a stale pendingVerification entry would otherwise
+	// leak for the SW's lifetime.
 	pendingVerification.add(dedupeKey)
-	approveDiscovery(discovery.requestId)
+	if (!approveDiscovery(discovery.requestId)) {
+		pendingVerification.delete(dedupeKey)
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery approve did not land (already gone): ${discovery.origin}`)
+		return false
+	}
 	return true
 }

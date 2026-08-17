@@ -10,7 +10,7 @@ const discoveryAt = (requestId: string, timestamp: number): PendingDiscovery =>
 
 function harness() {
 	return {
-		approve: vi.fn(),
+		approve: vi.fn(() => true), // SDK: approval landed (requestId still pending)
 		reject: vi.fn(),
 		del: vi.fn(async () => {}),
 		pv: new Set<string>(),
@@ -79,5 +79,28 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		expect(h.del).not.toHaveBeenCalled() // no rollback
 		expect(h.reject).not.toHaveBeenCalled()
 		expect(h.pv.has("https://a.com|1")).toBe(true) // verification scheduled
+	})
+
+	// The SDK's approveDiscovery returns false when the requestId is already gone
+	// (approved/rejected/removed). The scheduled pendingVerification must be
+	// undone so it doesn't leak for the SW's lifetime.
+	test("undoes the scheduled verification when the SDK reports approval did not land", async () => {
+		const h = harness()
+		h.approve.mockReturnValueOnce(false) // already gone
+		const approved = await approveOrRollbackDiscoverySession({
+			discovery: discoveryAt("r1", Date.now() - 5_000), // fresh — reaches the approve branch
+			sessionId: "S1",
+			dedupeKey: "https://a.com|1",
+			approveDiscovery: h.approve,
+			rejectDiscovery: h.reject,
+			deleteSession: h.del,
+			pendingVerification: h.pv,
+			logger: noopLogger,
+		})
+
+		expect(approved).toBe(false)
+		expect(h.approve).toHaveBeenCalledWith("r1")
+		expect(h.pv.size).toBe(0) // scheduled entry rolled back
+		expect(h.reject).not.toHaveBeenCalled() // nothing to reject — it's already gone
 	})
 })
