@@ -86,3 +86,17 @@ Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 - [dedup-ui-structure](dedup-ui-structure/plan.md) — completed (light), #379 merged — Q-08 IdentityStrip (testids verbatim) + Q-11 all 13 files + Q-09 trimAddress separator param (short-input deviation D3; ReceivePopup scoped out; 4-style unification = owner call)
 - [dedup-clipboard](dedup-clipboard/plan.md) — completed (mid), #380 merged — Q-06: 22 modules → `copyToClipboard` + `useSecretClipboardCopy` (F-14 scrub, no-lifecycle BY DESIGN); false-toast fix propagated (authorized); dual audit + 4-session codex trail
 - [dedup-fee-estimation](dedup-fee-estimation/plan.md) — completed (mid), #381 merged — Q-03: private state-sink engine behind both fee composables (byte-identical APIs, handoffInclusive/handoffCompleted seams); dual audit SPLIT then converged on Shape C; 51 pins green on both impls
+
+## 2026-08-16-extension-mid dual audit remediation (30 bugs + 12 quality; 9 arcs → dev)
+
+Full remediation of `audit/{bugs,quality}/2026-08-16-extension-mid/` — every finding prove-first, each arc codex-converged (mid arcs dual codex+fable), one PR per arc. Records: `audit/bugs/2026-08-16-extension-mid/remediation.md` + `audit/quality/2026-08-16-extension-mid/remediation.md`.
+
+- [fix-session-profile](fix-session-profile/plan.md) — completed (mid), #384 merged — B-01/10/11/12: persist-first session transition + secret zeroize/lifetime + tombstone-wedge unstick
+- [fix-execution-journal](fix-execution-journal/plan.md) — completed (mid), #385 merged — B-02/03/19: dApp-send mutex slot + boot-reaper bootCutoff + exact fee-error match
+- [fix-state-fences](fix-state-fences/plan.md) — completed (mid), #386 merged — B-04/05/08/20/21/29: six async state-transition races fenced by generation/incarnation checks
+- [fix-transport-sessions](fix-transport-sessions/plan.md) — completed (light), #387 + #390 merged — B-06/13/14/15/16: per-session verification isolation, guarded establish branches, timeout-spans-establishment, SDK 60s discovery staleness (restart-safety follow-up)
+- [fix-pxe-offscreen](fix-pxe-offscreen/plan.md) — completed (light), #391 merged — B-07/17/18: OPFS-wedge quarantine + offscreen lifecycle fences + double-bump purge epoch
+- [fix-ui-storage](fix-ui-storage/plan.md) — completed (light), #393 merged — B-09/22/23/24/25/26/27/28/30: nine UI/storage/composable fixes (send guard, migration-idle re-check, retain-on-read, rollback retry, balance reducers, submit latches, bootstrap single-flight, disconnect leaks)
+- [quality-quick-wins](quality-quick-wins/plan.md) — completed (light, single codex), #394 merged — Q-03 EventHandler onError + Q-06 messaging/bridge cycle + Q-12 sanitizer parity test + Q-05 thin AlarmDispatcher (narrowed per verified.md)
+- [quality-dedup-adoption](quality-dedup-adoption/plan.md) — completed (mid, dual audit converged), #395 merged — Q-07 restoreRows/id + isPopupSubmitKey · Q-08 KeyedLock (opt-out watchdog) · Q-09 patchSession · Q-10 SingleShotTtlCache · Q-11 DappApprovalFooter; documented deferrals per finding
+- [quality-first-extractions](quality-first-extractions/plan.md) — completed (mid, dual audit converged), #396 merged — Q-01 PxeLifecycleCoordinator (epoch-fence dedup, scoped) + Q-02 validateAndMigrateBackup (restore stage 1, staged); Q-04 codex-agreed deferral; god-service decomposition = owner follow-up
