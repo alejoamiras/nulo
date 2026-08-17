@@ -39,6 +39,13 @@ import { runImportChainSync } from "./importChainSync"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
+/** B-24: how many times to retry the compensating profile delete on rollback. */
+const ROLLBACK_MAX_ATTEMPTS = 3
+/** Shown when a partial import can't be rolled back — the profile row survives,
+ *  so tell the user how to remove it rather than hiding the failure. */
+const CLEANUP_PENDING_MESSAGE =
+	"Import didn't finish and the partial profile couldn't be removed automatically. Delete it in Settings, then try again."
+
 export interface UseFullBackupImportOptions {
 	password: Ref<string>
 	repeatedPassword: Ref<string>
@@ -324,6 +331,32 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		let createdProfileId: string | undefined
 		let finalizeStarted = false
 
+		// B-24: roll back a partially-imported profile with a bounded retry, shared
+		// by all three failure paths below. A single `deleteProfile` that rejected
+		// (e.g. its tombstone write failed) used to be swallowed to `console.error`,
+		// leaving the profile row as a normal, selectable, never-finalized entry.
+		// Returns whether the orphan was actually removed so the caller can surface
+		// an actionable "cleanup pending" message instead of a generic failure.
+		const rollbackCreatedProfile = async (profileId: string): Promise<boolean> => {
+			for (let attempt = 1; attempt <= ROLLBACK_MAX_ATTEMPTS; attempt++) {
+				try {
+					await profileService.deleteProfile(profileId)
+					return true
+				} catch (err) {
+					// NOTE: deleteProfile is commit-ambiguous / non-idempotent — a
+					// prior partial attempt may reserve the id so a retry sees "Invalid
+					// profile id". We deliberately do NOT treat that as success (the
+					// reservation can be dropped on a worker restart, re-revealing the
+					// orphan), nor is a persistent failure provably durable. Surfacing
+					// the actionable cleanup-pending message is the safe conservative
+					// choice; a truly authoritative deletion-status check is a
+					// ProfileService-level follow-up beyond this rollback helper.
+					console.error(`[full-backup] rollback delete attempt ${attempt}/${ROLLBACK_MAX_ATTEMPTS} failed:`, err)
+				}
+			}
+			return false
+		}
+
 		try {
 			restoreErrorLog.value = {}
 			const masterKey = backup["master-key"] as string
@@ -405,13 +438,13 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			const createdNetworks = newNetworks.filter((n) => !n.restoreError)
 
 			if (!createdNetworks.length) {
-				try {
-					await profileService.deleteProfile(newProfile.id)
-				} catch (err) {
-					console.error(err)
-				}
+				const rolledBack = await rollbackCreatedProfile(newProfile.id)
 				restoreStatus.value = "failed"
-				opts.fillError("full_backup", "Can't import", "Couldn't restore any networks from this backup")
+				if (rolledBack) {
+					opts.fillError("full_backup", "Can't import", "Couldn't restore any networks from this backup")
+				} else {
+					opts.fillError("full_backup", "Import incomplete", CLEANUP_PENDING_MESSAGE)
+				}
 				return
 			}
 
@@ -537,16 +570,15 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				// not via string-equality on `err` itself.
 				const msg = err instanceof Error ? err.message : String(err)
 				if (msg === "Duplicate account") {
-					try {
-						await profileService.deleteProfile(newProfile.id)
-					} catch (deleteErr) {
-						console.error(deleteErr)
-					}
 					// NetworkService.onProfileDeleted cascades — purges this
-					// profile's networks automatically. No explicit cleanup
-					// needed.
-					opts.fillError("full_backup", "Can't import", "An account from this backup is already in your wallet")
+					// profile's networks automatically. No explicit cleanup needed.
+					const rolledBack = await rollbackCreatedProfile(newProfile.id)
 					restoreStatus.value = "failed"
+					if (rolledBack) {
+						opts.fillError("full_backup", "Can't import", "An account from this backup is already in your wallet")
+					} else {
+						opts.fillError("full_backup", "Import incomplete", CLEANUP_PENDING_MESSAGE)
+					}
 					return
 				}
 				// Non-duplicate failure: fall through to the outer catch so
@@ -722,12 +754,13 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// retry starts clean. Post-finalize errors keep the profile (see the
 			// bookkeeping note above); the finalize call itself has its own catch
 			// and never reaches here.
-			if (createdProfileId !== undefined && !finalizeStarted) {
-				try {
-					await profileService.deleteProfile(createdProfileId)
-				} catch (deleteErr) {
-					console.error(deleteErr)
-				}
+			if (createdProfileId !== undefined && !finalizeStarted && !(await rollbackCreatedProfile(createdProfileId))) {
+				// The orphan couldn't be removed — surface an actionable message
+				// instead of the generic failure, and mark the import failed.
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Import incomplete", CLEANUP_PENDING_MESSAGE)
+				console.error((err as Error)?.message || err)
+				return
 			}
 			restoreStatus.value = ""
 			opts.fillError("full_backup", "Import failed", String((err as Error)?.message ?? err))
