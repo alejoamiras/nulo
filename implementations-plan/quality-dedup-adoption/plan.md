@@ -38,7 +38,7 @@ Helper `restore-rows.ts:22-35` (`restoreRows(rows, writeOne)`), already used by 
 
 `KeyedLock` — NEW `@nulo/wallet-core/utils` class (sibling to `Lock`) wrapping `Map<string, Lock>` + `withLock(key, fn)` + `delete(key)` (for session-termination eviction). Generalizes the proven `activity-protocol/coordinator.ts:94-101` `lockFor` idiom. [DO]
 - Adopt in `coordinator.ts` (scopeLocks + sourceLocks → KeyedLock) — the proven idiom becomes the 1st adopter.
-- Migrate `account/service.ts` `serializePerTuple` (180-197) → `keyedLock.withLock(key, op)`; **drop the dead `finally` (190-195)** — its guard is always-false, body is comment-only, and its `void next.finally` spawns a latent unhandled-rejection branch the `next.catch` sibling doesn't cover.
+- Migrate `account/service.ts` `serializePerTuple` (180-197) → `keyedLock.withLock(key, op)`. Its `void next.finally(...)` branch (guard always-false, body comment-only) spawns a latent unhandled-rejection when `op` rejects. **Zero-delta rule + repo bug-pinning: PRESERVE it verbatim** (`void next.finally(() => {})`, `(BUG PIN)`) rather than remove it here — removing the emission is a behavior fix for a separately-classified arc (see the dated follow-up below; codex round-2).
 - Migrate `wallet-sdk/background.ts` `decryptQueues` monkeypatch (338-350) → `keyedLock.withLock`; keep the `onSessionTerminated` eviction via `keyedLock.delete(sessionId)`.
 - 4 adopters (coordinator ×2 maps counts as the idiom source; serializePerTuple; decryptQueues) — ≥3.
 - DEFER (documented): `sessionQueues` (background.ts:240-326) — early-release baton + arrival-time concurrent journal creation (the `concurrent-sendtx` anti-lost-tx invariant, fixed in Arc 4 B-13). Migrating would require an explicit split acquire/early-release AND keep pre-lock journal creation outside the lock — not a plain FIFO. `pendingDiscoveryPromises` is a dedup guard, not a FIFO — excluded.
@@ -82,7 +82,7 @@ Helper `restore-rows.ts:22-35` (`restoreRows(rows, writeOne)`), already used by 
 
 ## Implementation order (lowest-risk first, commit each)
 1. Q-07(a) isPopupSubmitKey — pure predicate, 6 adoptions.
-2. Q-08 KeyedLock — new class + 3 adoptions + drop dead finally.
+2. Q-08 KeyedLock — new class + 3 adoptions (dead finally PINNED verbatim, not dropped — see Q-08).
 3. Q-09 patchSession — 6 dapp-session setters.
 4. Q-07(b/c) restoreRows ×3 + preferOrReallocId ×3 + nextRandomId ×1.
 5. Q-10 SingleShotTtlCache + pending-set helper.
@@ -94,7 +94,7 @@ Typecheck (affected package) + the finding's existing colocated tests + new test
 ## Dual audit (codex + fable) over complete arc diff — bounded (initial + max 2 resumes)
 - **Initial (parallel):** **fable/opus → approve** (no blocking; both scope questions endorsed — Q-10 worth it, Q-11b deferral agreed). **codex → reject** on 3 (all things fable passed as non-blocking, escalated under a purist zero-delta reading): (1) KeyedLock's Lock-backed 5-min watchdog inherited by serializePerTuple + decrypt (which had none); (2) the dropped `void next.finally`; (3) Q-09 `return await`→`return` losing the setter's async stack frame.
 - **Round-1 fixes → resume: reject (narrowed to 1).** (1) watchdog opt-out RESOLVED; (3) `return await` RESOLVED. Codex held only on the dropped `void next.finally` — correctly, per the repo's **bug-pinning rule**: a zero-delta extraction must PRESERVE pre-existing buggy behavior verbatim (the latent `unhandledrejection`) and fix it in a separately-classified behavior arc, not smuggle the fix into a "zero-delta" refactor.
-- **Round-2 fix → resume:** re-added `void next.finally(() => {})` in `serializePerTuple` as a `(BUG PIN)` — reproduces the exact prior latent unhandledrejection; fixed the stale KeyedLock doc comment. _Awaiting final codex verdict (resume 2 of 2)._
+- **Round-2 fix → resume: APPROVE (converged).** Re-added `void next.finally(() => {})` in `serializePerTuple` as a `(BUG PIN)` — reproduces the exact prior latent unhandledrejection; fixed the stale KeyedLock doc comment. Codex verdict (resume 2 of 2): "approve — no remaining blocking findings; the pinned finally preserves the prior unhandledrejection; timerless account/decrypt + default-watchdog coordinator preserved; all six setters retain return await." **Both audit legs approve.**
 
 ## Owned, dated follow-up (2026-08-17)
 - **account `serializePerTuple` latent unhandledrejection** — the pinned `void next.finally(() => {})` re-raises when `op` rejects. This is pre-existing (on dev today) and preserved verbatim here per the zero-delta rule. Fix (drop the branch) belongs in a separate behavior-fix arc, classified as a behavior change, not a dedup.
