@@ -1,4 +1,7 @@
 <script setup>
+/** Composables */
+import { useToast } from "@/composables/toast"
+
 /** Utils */
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
@@ -9,6 +12,8 @@ import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
+
+const { openToast } = useToast()
 
 const router = useRouter()
 
@@ -28,7 +33,19 @@ const displaceIdx = computed(() => {
 })
 
 const handleSelectProfile = async (profile) => {
-	appStore.profile = profile
+	// B-09: a profile switch changes the active scope exactly like an account or
+	// network switch, and a send in flight is still reading the current scope as
+	// it builds and proves. Route through the same guard the other scope-mutating
+	// call sites use (AccountsPopup, NewAccountPopup, …) instead of assigning
+	// `appStore.profile` directly, and persist the last-active id only once the
+	// switch is actually admitted.
+	const switched = await appStore.commitScopeChange(() => {
+		appStore.profile = profile
+	})
+	if (!switched) {
+		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		return
+	}
 	await setLastActiveProfileId(profile.id)
 	emit("onClose")
 }
