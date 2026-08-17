@@ -202,6 +202,27 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		expect(finalGrants.map((g) => g.capability.type).sort()).toEqual(["data", "transaction"])
 	})
 
+	test("(B-14 PIN) approving a delta type does NOT clear an UNRELATED type's rejection", async () => {
+		// A rejection of an existing type landed concurrently (it's in the latest row).
+		const session = makeSession({
+			capabilityGrants: [
+				{ capability: { type: "transaction", scope: [{ contract: "*", function: "*" }] }, grantedAt: 1 } as GrantedCapabilityRecord,
+			],
+			capabilityRejections: [{ capabilityType: "transaction", rejectedAt: 100 }],
+		})
+		const { writer } = makeSessionWriter(session)
+		// The popup approves the delta 'data' AND echoes the existing 'transaction' grant.
+		const dispatcher = makeDispatcher(
+			writer,
+			async () => ({ granted: [{ type: "data" }, { type: "transaction", scope: [{ contract: "*", function: "*" }] }] }) as never,
+		)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data" }] }], ctx)
+		const stored = await writer.getDappSession("test-session-id")
+		// Only delta-approved types clear their rejection — echoing an unrelated existing
+		// type must NOT erase its concurrent rejection (the lost-update the fix closes).
+		expect((stored.capabilityRejections ?? []).some((r) => r.capabilityType === "transaction")).toBe(true)
+	})
+
 	test("merge: keeps unrelated existing rejections", async () => {
 		const session = makeSession({
 			capabilityRejections: [{ capabilityType: "transaction", rejectedAt: 500 }],
