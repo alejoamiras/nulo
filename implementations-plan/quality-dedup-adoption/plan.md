@@ -75,11 +75,8 @@ Helper `restore-rows.ts:22-35` (`restoreRows(rows, writeOne)`), already used by 
 - **Testids preserved verbatim** (component emits them via props): `error-text` (all 3), `execute-reject-btn`/`execute-confirm-btn`, `discover-deny-btn`/`discover-allow-btn`, `cap-reject-btn`/`cap-approve-btn`. Reject `:disabled` (`isLoading || !requestId`) is identical across all 3.
 - `useDappApprovalWindow` already owns the logic half — untouched.
 
-### (b) `BlockingBarrierFrame.vue` for the 2 barriers [DO — pending codex agreement on 2-site bar]
-`MigrationBarrier.vue` + `AccountIntegrityBarrier.vue` share byte-identical `.wrapper`/`.card`/`.title`/`.sub`/`.detail` CSS + a Teleport-overlay skeleton (warning icon + title/sub/detail card). Extract a visual-only `BlockingBarrierFrame` (title/sub/detail slots + testid prop).
-- **Staleness guards stay in each component** (confirmed genuinely different: Migration's `eventTouched` Set-wins-over-snapshot vs Integrity's `refreshGeneration` monotonic counter; different keys, different reactive shape). Migration's degraded-banner CSS stays local too.
-- Testids preserved: `migration-blocked`/`-detail`/`migration-updating`/`migration-degraded`/`-dismiss`; `account-integrity-blocked`/`-copy`.
-- **≥3-site note:** only 2 sites → below the default bar. Present to the dual audit; DEFER if codex rejects.
+### (b) `BlockingBarrierFrame.vue` for the 2 barriers [DEFERRED — documented, present to dual audit]
+`MigrationBarrier.vue` + `AccountIntegrityBarrier.vue` share byte-identical `.wrapper`/`.card`/`.title`/`.sub`/`.detail` CSS + a Teleport-overlay skeleton. **Deferred** and NOT implemented in this arc: it's a **2-site** extraction (below the default ≥3 bar), pure-visual (no incidental-divergence fix to justify it the way Q-10 had), and touches two security-sensitive blocking overlays whose distinct staleness guards (Migration's `eventTouched` Set-wins-over-snapshot vs Integrity's `refreshGeneration` monotonic counter) must NOT be merged. Q-11's higher-value, ≥3-justified half (the footer) is done. Owned follow-up (2026-08-17): extract a visual-only `BlockingBarrierFrame` (title/sub/detail slots + testid prop) if the dual audit judges the 2-site dedup worth it — testids to preserve: `migration-blocked`/`-detail`/`migration-updating`/`migration-degraded`/`-dismiss`; `account-integrity-blocked`/`-copy`.
 
 ---
 
