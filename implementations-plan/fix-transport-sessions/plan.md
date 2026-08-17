@@ -68,3 +68,21 @@ Return the committed row. Dispatcher computes the deltas from `result`/`delta`/`
 
 ### B-16 — ESCALATED, own follow-up PR
 Persist BOTH the discovery queue AND enough to replay the SDK `pendingDiscoveries` to `chrome.storage.session`; `expiresAt = timestamp + 60_000`; one serialized reconcile-on-boot state machine (hydrate → validate tab/origin → drop expired → process live when unlocked; remove durable entries only after terminal processing). Ships AFTER B-14/B-15 land.
+
+## Outcome (B-06/B-13/B-14/B-15 done; B-16 follow-up)
+
+Committed on `worktree-fix-transport-sessions`; each fix prove-first RED→GREEN.
+- **B-06** (Critical) fixed — per-session verify-hash snapshot via URL; window prefers it; settings copy reframed as "most recent connection".
+- **B-13** (Major) fixed — fail-closed `handleSessionEstablished` (returns validated boolean) + `onWalletMessage` establishment gate BEFORE any side effect (incl. the durable journal write) + promise-identity re-check.
+- **B-14** (Major) fixed — atomic `applyCapabilityDecision` (delta merge against latest row, one lock); `deltaApprovedTypes`-scoped rejection clearing; used on grant + reject paths. Pins: concurrent-approval, over-clear.
+- **B-15** (Major) fixed — request deadline covers connection establishment (`awaitReadyWithinDeadline`); wire send no longer awaited (can't hang past the timer). connect()/waitForConnection retry-loop cancellation → B-16 follow-up.
+- **B-16** — own follow-up PR (codex-escalated: persist queue + SDK pendingDiscoveries, 60s expiry, serialized reconcile).
+
+**Codex arc-diff loop**: initial (reject, 3 blocking) → round-1 fixes (b-13 gate, b-14 over-clear, b-15 send-hang) → resume (reject, b-13 journal-ordering) → round-2 fixes (gate-before-journal, b-06 copy) → final resume. Bounded at the 2-round cap.
+
+**Codex-agreed out-of-scope / follow-ups (documented deviations):**
+- Capability-widening enrichment defect (deselected same-type widening reported as the wider shape while storage keeps narrower) — PRE-EXISTING (predates the atomic-write refactor), not in the audit's B-14; logged as a separate finding.
+- connect()/per-request waitForConnection retry-loop cancellation — B-16 follow-up (the request no longer hangs; the leaked retry loop remains).
+- B-06 settings tuple-model: the row shows the last-established hash; fully session-binding settings needs the per-session store codex told us NOT to add.
+
+**Validation**: typecheck:all green; lint clean; audit:vue green; suites green (extension 4190, wallet-bridge 204, extension-messaging 184).
