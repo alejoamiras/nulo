@@ -48,9 +48,9 @@ import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispa
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
+import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
-import type { Fr } from "@aztec/foundation/curves/bn254"
 
 declare const __VERSION__: string
 
@@ -118,9 +118,6 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 * the chain-B discovery being auto-approved against a chain-A session).
 	 */
 	const pendingDiscoveryPromises = new Map<string, Promise<void>>()
-
-	/** Composite key used by both maps above. */
-	const pendingKey = (origin: string, chainId: string) => `${origin}|${chainId}`
 
 	/**
 	 * Per-session message queue — ensures messages from the same dApp session
@@ -209,51 +206,13 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				)
 			},
 
-			onSessionEstablished: async (session) => {
-				// Sessions are per-`(origin, chainId)`. The upstream
-				// `ActiveSession` carries `chainInfo` (set from the matching
-				// discovery during key exchange — see the wallet-sdk
-				// `BackgroundConnectionHandler` source), so derive `chainId`
-				// directly from the session being established. No side-channel
-				// map needed.
-				const chainId = String(chainInfoToChainId(session))
-				const dappSession = await dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
-				if (dappSession) {
-					await dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
-				} else {
-					// F-006 (Round 2 B-2): if a session was established but the
-					// backing DappSession is gone, the user revoked between
-					// approveDiscovery and key-exchange. Terminate immediately
-					// so the dApp can't ride a stale approved-pending-discovery
-					// into a live ActiveSession. Without this, the upstream
-					// state machine would let the dApp re-key-exchange after
-					// revocation (see audit-codex-final.md B-2).
-					logger.log(
-						"wallet-sdk-bg",
-						LogLevel.Warn,
-						`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
-					)
-					handler.terminateSession(session.sessionId)
-					return
-				}
-
-				const verifKey = pendingKey(session.origin, chainId)
-				const isNewConnection = pendingVerification.has(verifKey)
-				if (isNewConnection) pendingVerification.delete(verifKey)
-
-				const needsVerification = isNewConnection || (dappSession && !dappSession.trustedVerification)
-
-				if (needsVerification && dappSession) {
-					chrome.windows.create({
-						type: "popup",
-						url: chrome.runtime.getURL(
-							`src/popup/index.html#/windows/verify?sessionId=${dappSession.id}&isReconnect=${!isNewConnection}`,
-						),
-						height: 800,
-						width: 400,
-					})
-				}
-			},
+			onSessionEstablished: (session) =>
+				handleSessionEstablished(session, {
+					dappSessionService,
+					terminateSession: (sessionId) => handler.terminateSession(sessionId),
+					pendingVerification,
+					logger,
+				}),
 
 			onSessionTerminated: (sessionId) => {
 				sessionQueues.delete(sessionId)
@@ -770,9 +729,3 @@ function toJsonSafe(value: unknown, seen = new WeakSet()): unknown {
  * to numbers and XOR chainId with rollup version, matching the convention
  * used by NetworkService (chainId = l1ChainId ^ rollupVersion).
  */
-function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
-	const raw = obj.chainInfo
-	const chainId = typeof raw.chainId === "string" ? Number(BigInt(raw.chainId)) : Number(raw.chainId.toBigInt())
-	const version = typeof raw.version === "string" ? Number(BigInt(raw.version)) : Number(raw.version.toBigInt())
-	return (chainId ^ version) >>> 0
-}
