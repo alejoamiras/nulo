@@ -84,6 +84,16 @@ export class BalanceJobQueue {
 		this.tickerHandle = undefined
 	}
 
+	/** Drop all queued work and pending-task pointers. Called on a profile switch:
+	 *  the TaskService records these pointers reference are wiped with the profile,
+	 *  so keeping them would (a) coalesce new-profile enqueues onto dead task ids
+	 *  (enqueue gates fresh-mint on `!pendingTasks.has`) and (b) leave stale entries
+	 *  an in-flight batch's identity-checked cleanup must tolerate. */
+	public reset(): void {
+		this.queue.clear()
+		this.pendingTasks.clear()
+	}
+
 	/** Enqueue a balance for refresh. Creates a TaskService record if
 	 *  no pending one exists for this id. Dedups via `priorityPass`. */
 	public enqueue(balance: TokenBalanceRaw): void {
@@ -153,16 +163,28 @@ export class BalanceJobQueue {
 	}
 
 	private async syncBatch(batch: TokenBalanceRaw[]): Promise<void> {
+		// The task id THIS batch owns per balance id — captured up front so a
+		// concurrent queue reset (profile switch) that re-registers a newer task
+		// for the same id can't cause us to complete/fail/delete the wrong record.
+		const owned = new Map<number, string>()
 		// Start each balance's task record. Handles both the
 		// already-registered case (from `enqueue`) and the defensive
 		// create-missing case (mirrors service.ts:262-267).
 		for (const tb of batch) {
 			const taskId = this.pendingTasks.get(tb.id)
-			if (!taskId) {
+			// A pre-registered id the TaskService no longer knows (its map was
+			// cleared on a profile switch) is stale: mint a fresh record instead of
+			// letting `startTask` throw "Invalid task id" OUTSIDE the try/finally
+			// below — that escape drops the whole batch and strands the dead
+			// `pendingTasks` entry, permanently jamming every future enqueue for
+			// this id. A genuine not-pending invariant error still propagates.
+			if (!taskId || !this.tasks.hasTask(taskId)) {
 				const task = this.tasks.startNewTask(new BalanceUpdateContent(tb.id, tb.account))
 				this.pendingTasks.set(tb.id, task.id)
+				owned.set(tb.id, task.id)
 			} else {
 				this.tasks.startTask(taskId)
+				owned.set(tb.id, taskId)
 			}
 		}
 
@@ -171,7 +193,7 @@ export class BalanceJobQueue {
 			const now = Date.now()
 
 			for (const result of results) {
-				const taskId = this.pendingTasks.get(result.id)
+				const taskId = owned.get(result.id)
 				if (!taskId) continue
 
 				if (result.kind === "error") {
@@ -227,8 +249,10 @@ export class BalanceJobQueue {
 			// service.ts:406-415.
 			const errorMessage = getErrorMessage(err)
 			for (const tb of batch) {
-				const taskId = this.pendingTasks.get(tb.id)
-				if (!taskId) continue
+				const taskId = owned.get(tb.id)
+				// A reset since batch-start may have cleared this batch's task record;
+				// `getTaskSync` would throw and abort the remaining failure writes.
+				if (!taskId || !this.tasks.hasTask(taskId)) continue
 				const task = this.tasks.getTaskSync(taskId)
 				if (!task.finishedAt) {
 					this.tasks.failTask(taskId, errorMessage)
@@ -237,7 +261,12 @@ export class BalanceJobQueue {
 			}
 		} finally {
 			for (const tb of batch) {
-				this.pendingTasks.delete(tb.id)
+				// Identity-checked: only clear the pointer if it STILL points at the
+				// task this batch owned. A reset that re-registered a newer task for
+				// this id must keep its fresh pointer intact.
+				if (this.pendingTasks.get(tb.id) === owned.get(tb.id)) {
+					this.pendingTasks.delete(tb.id)
+				}
 			}
 		}
 	}

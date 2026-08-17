@@ -58,6 +58,12 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	private profile?: ProfileInfo = undefined
 
+	/** Bumped on every profile switch. The active-token-map rebuild awaits
+	 *  `getTokensRaw`, so two rapid switches can resolve out of order — a late
+	 *  rebuild must not repopulate the map for a profile that is no longer active.
+	 *  Captured before the await; the commit is dropped if it changed since. */
+	private profileGeneration = 0
+
 	/** Deletion fence for the job queue's re-read→write window: ids are added
 	 *  BEFORE the awaited `repo.delete` and checked SYNCHRONOUSLY right before
 	 *  every queue write, so a delete interleaving between the queue's re-read
@@ -238,12 +244,23 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onActiveProfileChanged = async (profile?: ProfileInfo) => {
+		const gen = ++this.profileGeneration
 		this.profile = profile
-		if (profile) {
-			this.tokens.clear()
-			for (const token of await this.tokenService.getTokensRaw(profile.id)) {
-				this.tokens.set(token.id, token)
-			}
+		// Clear synchronously and UNCONDITIONALLY (including profile === undefined) so
+		// no reader — getTokenBalances, the queue's isRowEmittable, the token handlers
+		// — can ever observe the prior profile's tokens once the switch has begun.
+		this.tokens.clear()
+		// The prior profile's queued balance work + pending-task pointers reference
+		// TaskService records that are about to be wiped; drop them so a new enqueue
+		// can't coalesce onto a dead task id (B-04).
+		this.queue.reset()
+		if (!profile) return
+		const raw = await this.tokenService.getTokensRaw(profile.id)
+		// Commit the rebuilt map only if this is still the live switch (no newer
+		// switch since) AND the active profile is still the one we fetched for.
+		if (gen !== this.profileGeneration || this.profile?.id !== profile.id) return
+		for (const token of raw) {
+			this.tokens.set(token.id, token)
 		}
 	}
 
@@ -255,14 +272,22 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	private readonly onTokenAdded = async (token: TokenInfo) => {
 		const tokenRaw = await this.tokenService.getTokenRaw(token.id)
+		// A profile switch during the await would make this token foreign to the
+		// now-active map. Its own profileId is the ground truth (never trust the
+		// event's timing): skip the repopulate + account fan-out if it isn't ours.
+		if (tokenRaw.profileId !== this.profile?.id) return
 		this.tokens.set(token.id, tokenRaw)
-		for (const account of await this.accountService.getAccounts(this.profile!.id, token.chainId, true)) {
+		for (const account of await this.accountService.getAccounts(this.profile.id, token.chainId, true)) {
 			await this.createTokenBalance(tokenRaw, account)
 		}
 	}
 
 	private readonly onTokenUpdated = async (token: TokenInfo) => {
-		this.tokens.set(token.id, await this.tokenService.getTokenRaw(token.id))
+		const tokenRaw = await this.tokenService.getTokenRaw(token.id)
+		// Same fence as onTokenAdded: a switch mid-await must not let this token
+		// repopulate the active-only map for a profile that no longer owns it.
+		if (tokenRaw.profileId !== this.profile?.id) return
+		this.tokens.set(token.id, tokenRaw)
 		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
 			this.queue.enqueue(tb)
 		}

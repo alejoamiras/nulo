@@ -24,6 +24,7 @@ type TaskMock = {
 	completeTask: ReturnType<typeof vi.fn>
 	failTask: ReturnType<typeof vi.fn>
 	getTaskSync: ReturnType<typeof vi.fn>
+	hasTask: ReturnType<typeof vi.fn>
 }
 
 function makeTaskService(): TaskMock {
@@ -48,14 +49,18 @@ function makeTaskService(): TaskMock {
 		id,
 		finishedAt: finishedAt.get(id) ? Date.now() : undefined,
 	}))
+	// Real tasks exist by default; a profile-switch test flips this to model the
+	// wiped map (the pre-registered ids no longer resolve).
+	const hasTask = vi.fn().mockReturnValue(true)
 	return {
-		service: { createNewTask, startNewTask, startTask, completeTask, failTask, getTaskSync } as unknown as TaskService,
+		service: { createNewTask, startNewTask, startTask, completeTask, failTask, getTaskSync, hasTask } as unknown as TaskService,
 		createNewTask,
 		startNewTask,
 		startTask,
 		completeTask,
 		failTask,
 		getTaskSync,
+		hasTask,
 	}
 }
 
@@ -148,7 +153,9 @@ describe("BalanceJobQueue", () => {
 		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, { onBalanceUpdated: vi.fn() })
 
 		queue.enqueue(raw(42))
-		// Profile switch cleared the task map: startTask on the stale id now throws.
+		// Profile switch cleared the task map: the pre-registered id no longer
+		// resolves, and calling startTask on it would throw "Invalid task id".
+		tasks.hasTask.mockReturnValue(false)
 		tasks.startTask.mockImplementation(() => {
 			throw new Error("Invalid task id: cleared-on-profile-switch")
 		})
@@ -158,6 +165,9 @@ describe("BalanceJobQueue", () => {
 		// The balance must STILL have been projected (synced) despite the stale task.
 		expect(calls.length).toBeGreaterThan(0)
 		expect(calls[0]?.some((b) => b.id === 42)).toBe(true)
+		// The fix detects the stale id via hasTask and mints fresh — it must NOT
+		// call startTask on the cleared id (which throws and drops the batch).
+		expect(tasks.startTask).not.toHaveBeenCalled()
 	})
 
 	test("hasPendingTask / getPendingTaskId reflect the freshly-minted task (D4 causal-ack seam)", () => {

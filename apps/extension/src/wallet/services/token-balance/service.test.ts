@@ -186,3 +186,60 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 		expect((await seedRepo.getAll()).map((b) => b.token)).toEqual([2])
 	})
 })
+
+describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild generation fence (B-05)", () => {
+	const tokenRaw = (id: number, profileId: string) =>
+		({ id, profileId, chainId: 1, name: `T${id}`, symbol: `T${id}`, decimals: 18, contract: `0xtok${id}` }) as never
+
+	test("(B-05 PIN) a slow rebuild for a switched-away profile never repopulates the active map", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const seedRepo = new BalanceRepository(api)
+		// Two profiles, one token each; a balance row per token so getTokenBalances
+		// (which filters by the in-memory active-token map) can observe the map.
+		await seedRepo.set(balance(1, 100)) // profile A's token
+		await seedRepo.set(balance(2, 200)) // profile B's token
+
+		// A's raw-token fetch is slow (resolves LAST); B's is immediate. The bug: A's
+		// late rebuild sets its token into the map that now belongs to active profile B.
+		let resolveA!: (v: unknown) => void
+		const getTokensRaw = vi.fn().mockImplementation((profileId?: string) => {
+			if (profileId === "A") return new Promise((r) => (resolveA = r))
+			if (profileId === "B") return Promise.resolve([tokenRaw(200, "B")])
+			return Promise.resolve([])
+		})
+
+		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged: new EventHandler(), getActiveProfile: async () => undefined }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler() }))
+		services.add(
+			svc(TOKEN_SERVICE_NAME, {
+				onTokenAdded: new EventHandler(),
+				onTokenUpdated: new EventHandler(),
+				onTokenDeleted: new EventHandler(),
+				getTokensRaw,
+			}),
+		)
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api, noopTicker)
+		services.add(service)
+		await services.start() // active profile undefined → empty map
+
+		const handler = (service as unknown as { onActiveProfileChanged: (p?: { id: string; name: string }) => Promise<void> })
+			.onActiveProfileChanged
+
+		const switchA = handler({ id: "A", name: "A" }) // suspends on the slow getTokensRaw(A)
+		const switchB = handler({ id: "B", name: "B" }) // resolves immediately → commits {200}
+		await switchB
+		resolveA([tokenRaw(100, "A")]) // A's stale rebuild resolves after the switch away
+		await switchA
+
+		// Active profile is B; the map must hold B's token ONLY — A's late rebuild is fenced out.
+		const visible = (await service.getTokenBalances()).map((b) => b.token.id).sort((x, y) => x - y)
+		expect(visible).toEqual([200])
+	})
+})
