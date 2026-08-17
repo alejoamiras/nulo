@@ -158,7 +158,21 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		// `postMessage` before returning, so its throw is caught here too.
 		try {
 			const sent = this.sendEnvelope(content, methodName, requestId)
-			if (sent) await sent
+			if (sent) {
+				// Do NOT await the wire send: a wedged async transport must not hold the
+				// request past its deadline (the correlated `promise` already carries the
+				// timeout timer; B-15). An async send FAILURE still settles early via the
+				// catch below; a sync throw is caught by the enclosing try. `settle` is
+				// idempotent, so a disconnect that raced the timeout simply loses.
+				void sent.catch((cause) => {
+					this.settle(
+						requestId,
+						{ reject: this.makeSendFailureError({ requestId, methodName, cause }) },
+						"send_failed",
+						"sendMessage_threw",
+					)
+				})
+			}
 		} catch (cause) {
 			this.settle(
 				requestId,

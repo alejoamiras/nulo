@@ -43,11 +43,15 @@ export interface SessionEstablishedDeps {
  * hash or open the verify window TERMINATES the session (it must never stay live
  * unverified), and the pending-verification marker is ALWAYS cleared in `finally`,
  * including the missing-row early return (the prior leak).
+ *
+ * Returns `true` when the session validated + established, `false` when it was
+ * terminated. The caller gates message dispatch on this so a message can't ride a
+ * session that is concurrently being torn down (B-13 race).
  */
 export async function handleSessionEstablished(
 	session: { origin: string; sessionId: string; verificationHash: string; chainInfo: { chainId: Fr | string; version: Fr | string } },
 	deps: SessionEstablishedDeps,
-): Promise<void> {
+): Promise<boolean> {
 	const chainId = String(chainInfoToChainId(session))
 	// Establish the cleanup key BEFORE any fallible await so `finally` always clears
 	// it — including the missing-row early return that previously leaked (B-13).
@@ -64,7 +68,7 @@ export async function handleSessionEstablished(
 				`Session established for ${session.origin} chain ${chainId} but DappSession missing — terminating to honor revocation`,
 			)
 			deps.terminateSession(session.sessionId)
-			return
+			return false
 		}
 		// Persist for the settings/reconnect view (informational). The verify window
 		// does NOT rely on this — it gets the per-session snapshot via its URL (B-06).
@@ -82,6 +86,7 @@ export async function handleSessionEstablished(
 			})
 			if (!win?.id) throw new Error("verify window creation returned no window id")
 		}
+		return true
 	} catch (err) {
 		// Fail closed: a session whose verification couldn't be persisted or shown must
 		// not stay live accepting messages unverified (B-13).
@@ -91,6 +96,7 @@ export async function handleSessionEstablished(
 			`onSessionEstablished failed for ${session.origin} chain ${chainId} — terminating: ${getErrorMessage(err)}`,
 		)
 		deps.terminateSession(session.sessionId)
+		return false
 	} finally {
 		if (isNewConnection) deps.pendingVerification.delete(verifKey)
 	}

@@ -127,6 +127,16 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 */
 	const sessionQueues = new Map<string, Promise<void>>()
 
+	/**
+	 * Per-session establishment-validation result (B-13). The SDK sends the
+	 * key-exchange response BEFORE invoking `onSessionEstablished`, whose async
+	 * validation (row lookup, hash persist, verify-window open) may then TERMINATE
+	 * the session as unverified. `onWalletMessage` awaits this promise before
+	 * dispatching, so a message can never ride a session that's concurrently being
+	 * torn down. Resolves `true` when established, `false` when terminated.
+	 */
+	const establishmentStatus = new Map<string, Promise<boolean>>()
+
 	let discoveryQueue: DiscoveryQueue
 
 	const handler = new BackgroundConnectionHandler(
@@ -206,17 +216,24 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				)
 			},
 
-			onSessionEstablished: (session) =>
-				handleSessionEstablished(session, {
+			onSessionEstablished: (session) => {
+				// Record the validation promise SYNCHRONOUSLY (before its first await)
+				// so onWalletMessage can gate on it even if a message arrives in the
+				// gap between the SDK's key-exchange response and this validation (B-13).
+				const validated = handleSessionEstablished(session, {
 					dappSessionService,
 					terminateSession: (sessionId) => handler.terminateSession(sessionId),
 					pendingVerification,
 					logger,
-				}),
+				})
+				establishmentStatus.set(session.sessionId, validated)
+				return validated.then(() => undefined)
+			},
 
 			onSessionTerminated: (sessionId) => {
 				sessionQueues.delete(sessionId)
 				decryptQueues.delete(sessionId)
+				establishmentStatus.delete(sessionId)
 			},
 
 			onWalletMessage: (session, message) => {
@@ -252,8 +269,22 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 						: Promise.resolve(undefined)
 
 				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
-					prev.then(() =>
-						handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+					prev.then(async () => {
+						// B-13: don't process a message until this session's establishment
+						// validation has completed AND succeeded. Between the SDK's
+						// key-exchange response and onSessionEstablished's async validation,
+						// a message must not ride a session that's being terminated as
+						// unverified. A missing entry (already terminated/cleaned) → drop.
+						const established = await (establishmentStatus.get(session.sessionId) ?? Promise.resolve(false))
+						if (!established) {
+							logger.log(
+								"wallet-sdk-bg",
+								LogLevel.Warn,
+								`Dropping message for ${session.sessionId}: session failed establishment validation`,
+							)
+							return
+						}
+						return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
 							// Bind the baton release into the `onExecutionEnqueued`
 							// slot — fired downstream by ExecutionService the instant
 							// the approved request enqueues on the execution mutex
@@ -263,8 +294,8 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							// is exactly what left this release dead before).
 							onExecutionEnqueued: releaseFifo,
 							queuedJournalId,
-						}),
-					),
+						})
+					}),
 				)
 				// Safety-net release for handlers that don't call releaseFifo
 				// explicitly (every non-sendTx path) — preserves backward-

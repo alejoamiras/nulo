@@ -1624,15 +1624,16 @@ describe("dispatcher — contracts field-diff re-consent", () => {
 
 	test("a REJECTED contracts re-consent keeps the old grant intact (rejection interplay)", async () => {
 		const session = makeSession({ capabilityGrants: [grant(["0xold"])] })
-		const { writer, calls } = makeSessionWriter(session)
+		const { writer } = makeSessionWriter(session)
+		// The user declines the widening — nothing new is approved.
 		const dispatcher = makeDispatcher(writer, async () => ({ granted: [] }) as never)
 		await dispatcher.dispatch("requestCapabilities", [manifest(["0xold", "0xnew"])], ctx).catch(() => {})
-		const stored = calls.setGrants.at(-1)
-		if (stored) {
-			const contractsGrants = stored.filter((g) => g.capability.type === "contracts")
-			expect(contractsGrants).toHaveLength(1)
-			expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
-		}
+		// Assert the STORED state unconditionally: the denied widening must not drop or
+		// widen the older grant — storage still holds exactly ["0xold"].
+		const stored = await writer.getDappSession("test-session-id")
+		const contractsGrants = (stored.capabilityGrants ?? []).filter((g) => g.capability.type === "contracts")
+		expect(contractsGrants).toHaveLength(1)
+		expect((contractsGrants[0].capability as { contracts: string[] }).contracts).toEqual(["0xold"])
 	})
 
 	test("CAIP-stored session accounts accept RAW-hex scope arrays (the fresh-session balance bug)", async () => {

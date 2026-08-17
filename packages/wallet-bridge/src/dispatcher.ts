@@ -1020,7 +1020,10 @@ export class WalletSdkDispatcher {
 			aliasPatch: hasAccountSelection ? (result.accountAliases ?? {}) : {},
 			grantRecords: newGrants,
 			replaceTypes: [...deltaApprovedTypes],
-			approvedTypes: [...approvedTypes],
+			// ONLY the delta types that were approved clear their rejection — NOT the
+			// full grantedResults set (the popup echoes untouched existing caps, and
+			// clearing their rejections would erase a concurrent unrelated rejection).
+			approvedTypes: [...deltaApprovedTypes],
 			rejectedTypes: rejectedDeltaTypes,
 		})
 
