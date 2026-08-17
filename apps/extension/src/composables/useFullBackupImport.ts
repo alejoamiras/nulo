@@ -46,6 +46,107 @@ const ROLLBACK_MAX_ATTEMPTS = 3
 const CLEANUP_PENDING_MESSAGE =
 	"Import didn't finish and the partial profile couldn't be removed automatically. Delete it in Settings, then try again."
 
+/** The full-backup envelope: the checksum + the checksum-covered body. */
+export type FullBackupEnvelope = {
+	checksum?: string
+	"compat-epoch"?: unknown
+	"backup-schema-version"?: unknown
+	"master-key"?: string
+	"active-network-id"?: string
+	data: Record<string, unknown>
+}
+
+/** The checksum-stripped body + the migrated slices that survive stage 1. */
+type ValidatedBackup = {
+	data: Record<string, unknown> & {
+		account?: unknown[]
+		network?: unknown[]
+		token?: unknown[]
+		"token-balance"?: Array<Record<string, unknown>>
+		profile?: { id: string; name?: string }
+	}
+	backup: Omit<FullBackupEnvelope, "checksum">
+}
+
+type ValidateAndMigrateResult = ({ kind: "ok" } & ValidatedBackup) | { kind: "rejected"; title: string; message: string }
+
+/**
+ * Q-02: stage 1 of the full-backup restore — integrity + compatibility gate,
+ * then migrate the verified slices forward, all BEFORE any live state is
+ * touched. Deliberately closure-state-free (a pure function of the envelope +
+ * the module-level codec/migrator): a `rejected` result carries the exact
+ * user-facing title/message the caller surfaces via `fillError`; an `ok` result
+ * carries the migrated `data` + the checksum-stripped `backup`. The re-entrancy
+ * / permission guard and the `restoreStatus`/`fillError` side effects stay with
+ * the caller.
+ */
+export async function validateAndMigrateBackup(fullBackup: FullBackupEnvelope): Promise<ValidateAndMigrateResult> {
+	const { checksum, ...backup } = fullBackup
+
+	// Trust-gate order is deliberate: integrity FIRST — re-serialized exactly as
+	// the exporter hashed it (the exporter also hashed JSON.stringify of the
+	// object, so this IS the exported body) — then the non-migratable
+	// compat-epoch, then the migratable schema-version range. The checksum is
+	// accidental-integrity detection only — a plain backup's checksum is
+	// attacker-recomputable, so nothing downstream may treat it as authentication.
+	const comparisonChecksum = await EncryptionKey.getHashHex(JSON.stringify(backup))
+	if (checksum !== comparisonChecksum) {
+		return {
+			kind: "rejected",
+			title: "Backup Integrity Check Failed",
+			message: "The backup file appears to be corrupted or has been tampered with. Please ensure you have the correct backup file.",
+		}
+	}
+
+	// A pre-baseline blob (the legacy conflated `schema-version: 2`, no
+	// `compat-epoch`) fails this gate too — intended fail-closed.
+	if (!isSupportedCompatEpoch(backup[COMPAT_EPOCH_FIELD])) {
+		return {
+			kind: "rejected",
+			title: "Incompatible backup",
+			message:
+				"This backup was created by an incompatible wallet version and cannot be imported. Re-export a backup from a current version of the wallet.",
+		}
+	}
+
+	const backupSchemaVersion = backup[BACKUP_SCHEMA_VERSION_FIELD]
+	if (typeof backupSchemaVersion !== "number" || !Number.isInteger(backupSchemaVersion) || backupSchemaVersion < 1) {
+		return {
+			kind: "rejected",
+			title: "Incompatible backup",
+			message: "This backup does not carry a valid schema version. Re-export a backup from a current version of the wallet.",
+		}
+	}
+	if (backupSchemaVersion > maxBackupSchemaVersion()) {
+		return {
+			kind: "rejected",
+			title: "Backup is too new",
+			message: "This backup was created by a newer version of the wallet. Update the wallet, then import it again.",
+		}
+	}
+
+	// Migrate the verified slices forward BEFORE anything touches live storage:
+	// pure and in-memory, so a failure here rejects the import with ZERO live
+	// state to roll back. The migrated data replaces the parsed slices; the
+	// checksum was already verified over the ORIGINAL bytes and is dropped —
+	// migration is a pure function of verified input, so its output is covered
+	// transitively (never recompute-and-trust a post-migration checksum).
+	// `master-key` is a top-level field, not a slice — it never enters the migrator.
+	const migrationResult = await migrateBackupData({ data: backup.data, backupSchemaVersion })
+	if (migrationResult.kind === "incompatible") {
+		return { kind: "rejected", title: "Incompatible backup", message: migrationResult.reason }
+	}
+	if (migrationResult.kind === "failed") {
+		return {
+			kind: "rejected",
+			title: "Import failed",
+			message: `The backup could not be upgraded to the current format: ${migrationResult.reason}`,
+		}
+	}
+
+	return { kind: "ok", data: migrationResult.data as ValidatedBackup["data"], backup }
+}
+
 export interface UseFullBackupImportOptions {
 	password: Ref<string>
 	repeatedPassword: Ref<string>
@@ -224,99 +325,27 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		restoreStatus.value = "progress"
 
 		const sel = selectedBackup.value as BackupSelection
-		const fullBackup = sel.backup as {
-			checksum?: string
-			"compat-epoch"?: unknown
-			"backup-schema-version"?: unknown
-			"master-key"?: string
-			"active-network-id"?: string
-			data: Record<string, unknown>
-		}
-		const { checksum, ...backup } = fullBackup
-
-		// Trust-gate order is deliberate: integrity FIRST — re-serialized
-		// exactly as the exporter hashed it (the exporter also hashed
-		// JSON.stringify of the object, so this IS the exported body) — then
-		// the non-migratable compat-epoch, then the migratable schema-version
-		// range. The earlier profile name/type reads in pickBackupFile/
-		// decryptBackup are sanitized display-only prefill and gate nothing.
-		// The checksum is accidental-integrity detection only — a plain
-		// backup's checksum is attacker-recomputable, so nothing downstream
-		// may treat it as authentication.
-		const comparisonChecksum = await EncryptionKey.getHashHex(JSON.stringify(backup))
-		if (checksum !== comparisonChecksum) {
+		// Q-02: integrity + compatibility gate + forward-migration, all before any
+		// live state is touched. The (many) reject branches are threaded back as a
+		// discriminated result the caller maps to status/fillError; the earlier
+		// profile name/type reads in pickBackupFile/decryptBackup are sanitized
+		// display-only prefill and gate nothing.
+		//
+		// Scheduling note (audit-accepted): extracting the awaited stage into a
+		// function adds one promise-reaction turn before the `failed`/stage-2
+		// continuation below — inherent to any function-extraction of an async
+		// stage. It's unobservable in practice (a sub-microsecond microtask vs the
+		// real crypto/migration awaits) and strictly SAFE at the only seam it could
+		// touch: the `restoreStatus === "progress"` re-entrancy guard above stays
+		// "progress" for that extra turn, so a (humanly-impossible) re-trigger in
+		// the window is MORE likely to be blocked, never less.
+		const validated = await validateAndMigrateBackup(sel.backup as FullBackupEnvelope)
+		if (validated.kind === "rejected") {
 			restoreStatus.value = "failed"
-			opts.fillError(
-				"full_backup",
-				"Backup Integrity Check Failed",
-				"The backup file appears to be corrupted or has been tampered with. Please ensure you have the correct backup file.",
-			)
+			opts.fillError("full_backup", validated.title, validated.message)
 			return
 		}
-
-		// A pre-baseline blob (the legacy conflated `schema-version: 2`, no
-		// `compat-epoch`) fails this gate too — intended fail-closed; the fix
-		// is re-exporting from a current wallet.
-		if (!isSupportedCompatEpoch(backup[COMPAT_EPOCH_FIELD])) {
-			restoreStatus.value = "failed"
-			opts.fillError(
-				"full_backup",
-				"Incompatible backup",
-				"This backup was created by an incompatible wallet version and cannot be imported. Re-export a backup from a current version of the wallet.",
-			)
-			return
-		}
-
-		const backupSchemaVersion = backup[BACKUP_SCHEMA_VERSION_FIELD]
-		if (typeof backupSchemaVersion !== "number" || !Number.isInteger(backupSchemaVersion) || backupSchemaVersion < 1) {
-			restoreStatus.value = "failed"
-			opts.fillError(
-				"full_backup",
-				"Incompatible backup",
-				"This backup does not carry a valid schema version. Re-export a backup from a current version of the wallet.",
-			)
-			return
-		}
-		if (backupSchemaVersion > maxBackupSchemaVersion()) {
-			restoreStatus.value = "failed"
-			opts.fillError(
-				"full_backup",
-				"Backup is too new",
-				"This backup was created by a newer version of the wallet. Update the wallet, then import it again.",
-			)
-			return
-		}
-
-		// Migrate the verified slices forward BEFORE anything touches live
-		// storage: pure and in-memory, so a failure here rejects the import
-		// with ZERO live state to roll back. The migrated data replaces the
-		// parsed slices; the checksum was already verified over the ORIGINAL
-		// bytes and is dropped — migration is a pure function of verified
-		// input, so its output is covered transitively (never recompute-and-
-		// trust a post-migration checksum). `master-key` is a top-level field,
-		// not a slice — it never enters the migrator.
-		const migrationResult = await migrateBackupData({ data: backup.data, backupSchemaVersion })
-		if (migrationResult.kind === "incompatible") {
-			restoreStatus.value = "failed"
-			opts.fillError("full_backup", "Incompatible backup", migrationResult.reason)
-			return
-		}
-		if (migrationResult.kind === "failed") {
-			restoreStatus.value = "failed"
-			opts.fillError(
-				"full_backup",
-				"Import failed",
-				`The backup could not be upgraded to the current format: ${migrationResult.reason}`,
-			)
-			return
-		}
-		const data = migrationResult.data as Record<string, unknown> & {
-			account?: unknown[]
-			network?: unknown[]
-			token?: unknown[]
-			"token-balance"?: Array<Record<string, unknown>>
-			profile?: { id: string; name?: string }
-		}
+		const { data, backup } = validated
 
 		// Kept alive for the whole restore so the duplicate-address rollback
 		// can call `profileService.deleteProfile()` and so we can call

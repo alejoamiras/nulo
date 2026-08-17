@@ -39,6 +39,7 @@ import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { listChainStoreDirs, removeChainStoreDir, removeProfileStoreDirs } from "./opfs-store"
 import { ArtifactRegistry } from "./artifact-registry"
+import { PxeLifecycleCoordinator } from "./lifecycle-coordinator"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
 import { type Methods, PXE_SERVICE_NAME } from "./spec"
@@ -129,13 +130,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * scoped clear).
 	 */
 	private readonly chainGuards = new Map<string, ReadWriteGuard>()
-	/** Per-chain purge epochs (#281 review): bumped by `clearChainState` so an
-	 *  in-flight read op cannot RESURRECT a just-purged chain — its write-rebind
-	 *  step would otherwise re-create the runtime + a fresh OPFS store dir for a
-	 *  chain whose network row is gone (nothing ever removes that dir again). A
-	 *  read that entered BEFORE the purge refuses to rebind; a new op after the
-	 *  purge sees the new epoch at entry and may legitimately re-create. */
-	private readonly chainPurgeEpochs = new Map<string, number>()
+	/** Per-chain purge-epoch fence (Q-01): owns the epoch counter + the
+	 *  capture/assert the op paths share. See {@link PxeLifecycleCoordinator}. */
+	private readonly lifecycle = new PxeLifecycleCoordinator()
 	private readonly profileBarriers = new Map<string, ReadWriteGuard>()
 	private readonly guardLogger: ILogger
 	private readonly registry: ChainRuntimeRegistry
@@ -178,8 +175,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * so it can't recreate the runtime/store for a chain that is being (or was)
 	 * purged. Called at both ends of clearChainState's destructive section. */
 	private bumpChainPurgeEpoch(profileId: string, chainId: number): void {
-		const k = this.chainKey(profileId, chainId)
-		this.chainPurgeEpochs.set(k, (this.chainPurgeEpochs.get(k) ?? 0) + 1)
+		this.lifecycle.bump(this.chainKey(profileId, chainId))
 	}
 
 	private getChainGuard(profileId: string, chainId: number): ReadWriteGuard {
@@ -839,7 +835,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// raced concurrent readers + the SAH-pool lock (#281 D3). The read is
 			// fully released before the write is requested — no read→write upgrade.
 			const missed = Symbol("runtime-miss")
-			const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
+			const chainKey = this.chainKey(network.profileId, network.chainId)
+			const purgeEpochAtEntry = this.lifecycle.current(chainKey)
 			for (let attempt = 0; attempt < PxeService.MAX_RUNTIME_BIND_ATTEMPTS; attempt++) {
 				const result = await barrier.read(async () => {
 					return chainGuard.read(async () => {
@@ -855,9 +852,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 				await barrier.read(async () => {
 					await chainGuard.write(async () => {
-						if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
-							throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
-						}
+						this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					})
 				})
@@ -890,7 +885,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
 		const chainGuard = this.getChainGuard(network.profileId, network.chainId)
-		const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
+		const chainKey = this.chainKey(network.profileId, network.chainId)
+		const purgeEpochAtEntry = this.lifecycle.current(chainKey)
 		try {
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
@@ -899,10 +895,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 					// A write op that captured NetworkInfo before a mid-flight clearChainState must
 					// NOT resurrect the purged chain by re-creating its runtime + a fresh OPFS store
 					// (concurrency audit MED #4 — the read path fenced this but the write path called
-					// ensure directly). Same epoch check as withPxeRead.
-					if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
-						throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
-					}
+					// ensure directly). Same epoch check as withPxeRead — now the shared fence.
+					this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 					// Already under the chain WRITE guard — `ensure` may rebind here.
 					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)

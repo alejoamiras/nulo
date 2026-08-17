@@ -153,7 +153,7 @@ describe("incarnation fence (#281 D4)", () => {
 		const svc = service as unknown as {
 			withPxeWrite: (l: string, n: NetworkInfo, fn: () => Promise<void>) => Promise<void>
 			clearChainState: (p: string, c: number) => Promise<void>
-			chainPurgeEpochs: Map<string, number>
+			lifecycle: { current: (key: string) => number; bump: (key: string) => void }
 			chainKey: (p: string, c: number) => string
 		}
 		await svc.withPxeWrite("boot", net(GEN_1), async () => {})
@@ -164,21 +164,22 @@ describe("incarnation fence (#281 D4)", () => {
 		// DURING destruction reads the already-incremented value and would pass
 		// the equality check. The closing bump closes it.
 		const key = svc.chainKey("p1", 31337)
-		const before = svc.chainPurgeEpochs.get(key) ?? 0
+		const before = svc.lifecycle.current(key)
 		await service.clearChainState("p1", 31337)
-		expect(svc.chainPurgeEpochs.get(key) ?? 0).toBe(before + 2)
+		expect(svc.lifecycle.current(key)).toBe(before + 2)
 
 		// An op that captured the PRE-purge epoch is rejected at the write-path rebind rather
 		// than resurrecting the purged chain's runtime + store. withPxeWrite reads the epoch
 		// SYNCHRONOUSLY at entry (before its first await), so starting the op then bumping the
 		// epoch before its guard body runs models a concurrent purge landing mid-op.
 		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
-		const captured = svc.chainPurgeEpochs.get(key) ?? 0
 		let ran = false
 		const stale = svc.withPxeWrite("stale", { ...net(GEN_1) }, async () => {
 			ran = true
 		})
-		svc.chainPurgeEpochs.set(key, captured + 1) // a later concurrent purge advances the epoch after entry-read
+		// The op captured the current epoch synchronously at entry; a later concurrent
+		// purge bumps it before the op's guard body runs, so its fence must reject.
+		svc.lifecycle.bump(key)
 		await expect(stale).rejects.toThrow(/purged mid-operation/)
 		expect(ran).toBe(false)
 	})
@@ -188,7 +189,7 @@ describe("incarnation fence (#281 D4)", () => {
 		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
 		const svc = service as unknown as {
 			withPxeWrite: (l: string, n: NetworkInfo, fn: () => Promise<void>) => Promise<void>
-			chainPurgeEpochs: Map<string, number>
+			lifecycle: { current: (key: string) => number; bump: (key: string) => void }
 			chainKey: (p: string, c: number) => string
 		}
 		await svc.withPxeWrite("boot", net(GEN_1), async () => {})
@@ -199,13 +200,12 @@ describe("incarnation fence (#281 D4)", () => {
 		// be fenced — with only ONE bump, base+1 would still equal the stored value
 		// and the op would resurrect the just-purged chain.
 		const key = svc.chainKey("p1", 31337)
-		const base = svc.chainPurgeEpochs.get(key) ?? 0
-		svc.chainPurgeEpochs.set(key, base + 1) // opening bump landed; destruction in progress
+		svc.lifecycle.bump(key) // opening bump landed (base → base+1); destruction in progress
 		let ran = false
 		const midDestruction = svc.withPxeWrite("mid-destruction-op", { ...net(GEN_1) }, async () => {
 			ran = true
 		})
-		svc.chainPurgeEpochs.set(key, base + 2) // closing bump lands before the op's guard body runs
+		svc.lifecycle.bump(key) // closing bump lands (base+1 → base+2) before the op's guard body runs
 		await expect(midDestruction).rejects.toThrow(/purged mid-operation/)
 		expect(ran).toBe(false)
 	})
