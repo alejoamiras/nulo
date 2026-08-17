@@ -2216,6 +2216,34 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect([...(watched.get(key) ?? [])].sort()).toEqual([tokenA.contract, tokenB.contract].sort())
 	})
 
+	test("(B-20 stale-tick PIN) an old scheduler ticking during a hydration's construction window does not scan", async () => {
+		vi.useFakeTimers()
+		try {
+			const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+			const tokenStub = makeTokenStub([tokenA])
+			const profileStub = makeProfileStub({ id: "p1" })
+			const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+			await vi.advanceTimersByTimeAsync(0) // drain the bootstrap hydrate
+
+			// Poll is what a scheduler tick calls; spy AFTER boot so only later ticks count.
+			const pollSpy = vi.spyOn(service as never as { poll: (...a: unknown[]) => Promise<void> }, "poll").mockResolvedValue(undefined)
+
+			// A re-hydration bumps the epoch and PARKS in construction (deferred getAccounts),
+			// so it hasn't committed (the old scheduler is not yet torn down).
+			accountStub.getAccounts.mockImplementation(() => new Promise(() => {}))
+			void profileStub.onActiveProfileChanged.invoke()
+			await vi.advanceTimersByTimeAsync(0)
+
+			// Fire the OLD scheduler's periodic tick (installed at the pre-bump epoch).
+			await vi.advanceTimersByTimeAsync(1_000_000)
+
+			// Its tick must bail on the creation-epoch guard: no scan under the bumped epoch.
+			expect(pollSpy).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {
 		// Two onTransactionAdded events for the same tx hash. The serviceLock
 		// serializes them: the first runs to completion (deletes record,

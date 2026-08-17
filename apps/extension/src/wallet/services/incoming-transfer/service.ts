@@ -775,7 +775,14 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	private startScheduler(profileId: string, networkId: string, accountAddress: string): void {
 		const key = this.schedulerKey(networkId, accountAddress)
 		if (this.schedulers.has(key)) return
+		// The epoch this scheduler belongs to. A hydrate/clear bumps the epoch at its
+		// entry but only tears the old intervals down at its COMMIT — so between the
+		// two, an old interval can still fire. Bail its tick if the epoch has moved:
+		// otherwise the scan it starts would capture the NEW epoch and commit stale
+		// old-profile work under it.
+		const bornAtEpoch = this.serviceEpoch
 		const interval = setInterval(() => {
+			if (this.serviceEpoch !== bornAtEpoch) return
 			this.poll(profileId, networkId, accountAddress).catch((err) => {
 				this.logWarn(`Poll failed: ${getErrorMessage(err)}`)
 			})
@@ -797,7 +804,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const key = this.publicSchedulerKey(networkId, contract)
 		this.publicWatched.set(key, { profileId, networkId, contract })
 		if (this.publicSchedulers.has(key)) return
+		// Same creation-epoch fence as the note arm: an old interval firing during a
+		// newer hydrate's construction window must not start a scan under the bumped epoch.
+		const bornAtEpoch = this.serviceEpoch
 		const interval = setInterval(() => {
+			if (this.serviceEpoch !== bornAtEpoch) return
 			this.pollPublic(key).catch((err) => this.logWarn(`Public poll failed: ${getErrorMessage(err)}`))
 		}, this.pollIntervalMs)
 		this.publicSchedulers.set(key, interval)
