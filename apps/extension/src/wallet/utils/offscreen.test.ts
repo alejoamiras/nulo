@@ -249,6 +249,47 @@ describe("ensureOffscreenRunning (cold-start single-flight)", () => {
 			vi.useRealTimers()
 		}
 	})
+
+	test("(B-17) a hung create-retry close COMPOSES with the timeout close; a successor joins both", async () => {
+		vi.useFakeTimers()
+		try {
+			// Pass A: the first create hits the loading race → the retry branch closes,
+			// and THAT close hangs. The ready-gate then times out and fires a SECOND
+			// close. Both run through one serialized tail, so a successor that joins
+			// pendingClose waits for the whole tail — the hung retry close can't land
+			// after B created and tear B's document down.
+			createDocument
+				.mockRejectedValueOnce(new Error("Offscreen document closed before fully loading."))
+				.mockImplementation(async () => {})
+			let resolveRetryClose!: () => void
+			closeDocument
+				.mockImplementationOnce(
+					() =>
+						new Promise<void>((r) => {
+							resolveRetryClose = r
+						}),
+				)
+				.mockImplementation(async () => {})
+
+			const pA = ensureOffscreenRunning().catch((e) => String(e))
+			await vi.advanceTimersByTimeAsync(10_000)
+			expect(await pA).toBe("Offscreen is not responding")
+			const createsAfterA = createDocument.mock.calls.length
+
+			// Successor starts while the retry close is STILL hanging → must NOT create.
+			const pB = ensureOffscreenRunning()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(createDocument.mock.calls.length).toBe(createsAfterA) // blocked on the composed tail
+
+			resolveRetryClose() // the hung retry close settles → tail drains → B proceeds
+			await vi.advanceTimersByTimeAsync(0)
+			deliver(OFFSCREEN_READY_MESSAGE)
+			await pB
+			expect(createDocument.mock.calls.length).toBeGreaterThan(createsAfterA) // B created only after joining both closes
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 })
 
 describe("ensureOffscreenRunning — Firefox hidden-window path (B-17 pass fence)", () => {

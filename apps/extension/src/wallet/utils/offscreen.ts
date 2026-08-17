@@ -111,27 +111,37 @@ const onOffscreenTimeout = () => {
 	// branch sees a stale pass id and propagates instead of re-creating an
 	// untracked document (unguarded, that once produced a false-success pass).
 	passSeq += 1
-	// B-17: kill the half-initialized offscreen, and TRACK the close so the next
-	// pass can join it. The gate below rejects `ready`, which clears the
-	// single-flight gate (ensureInFlight) — so a successor pass can begin while
-	// this close is still in flight. Without joining it, a late-landing
-	// `closeDocument()` here tears down the successor's freshly-created document
-	// (the cross-caller kill the passSeq fence guards `createOffscreen` against,
-	// but which the dangling close itself is not guarded by).
-	const closing = closeOffscreen().catch(() => {})
-	pendingClose = closing
-	void closing.finally(() => {
-		if (pendingClose === closing) pendingClose = null
-	})
+	// B-17: kill the half-initialized offscreen through the serialized close tail
+	// so the next pass can join it (see `trackedClose`). The gate below rejects
+	// `ready`, which clears the single-flight gate (ensureInFlight) — so a
+	// successor pass can begin while this close is still in flight; without
+	// joining it, a late-landing `closeDocument()` here tears down the
+	// successor's freshly-created document.
+	void trackedClose()
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
 }
 
-/** B-17: a timed-out pass's in-flight `closeOffscreen()`. A successor pass joins
- *  it (in `doEnsureOffscreenRunning`) before probing/creating, so a late close
- *  can't tear down the successor's document. Identity-guarded so a newer
- *  timeout's close isn't nulled by an older one settling. */
+/** B-17: serialize EVERY offscreen close (timeout kill, zombie-adopt kill, and
+ *  the create-retry loading-race close) through one tail, and expose its latest
+ *  link as `pendingClose`. `closeDocument()`/`windows.remove()` act on the
+ *  singleton offscreen surface, so two closes that overlap in time can compose
+ *  destructively: a create-retry close that lands AFTER a successor pass created
+ *  a fresh document tears that document down. Serializing means closes settle in
+ *  order and a successor that joins `pendingClose` waits for ALL of them before
+ *  probing/creating. Identity-guarded so an earlier link settling doesn't null a
+ *  newer one. */
+let closeTail: Promise<void> = Promise.resolve()
 let pendingClose: Promise<void> | null = null
+function trackedClose(): Promise<void> {
+	const link = closeTail.then(() => closeOffscreen()).catch(() => {})
+	closeTail = link
+	pendingClose = link
+	void link.finally(() => {
+		if (pendingClose === link) pendingClose = null
+	})
+	return link
+}
 
 /** Monotonic create-pass fence. Each ensure pass captures `++passSeq`; the
  *  timeout handler bumps it to invalidate the running pass. `createOffscreen`
@@ -240,7 +250,11 @@ async function createOffscreen(passId: number) {
 			// pass no longer tracks.
 			const msg = String(err)
 			if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
-				await closeOffscreen()
+				// B-17: route through the serialized close tail so this close composes
+				// with a concurrent timeout close instead of racing it — a successor
+				// joins the tail and can't create into a document this close then tears
+				// down out of order.
+				await trackedClose()
 				// The close suspends: re-check the fence so a timeout landing in
 				// the close window can't be followed by an untracked create.
 				if (passId !== passSeq) throw err
@@ -342,8 +356,9 @@ async function doEnsureOffscreenRunning() {
 		if (await isOffscreenHealthy()) {
 			return
 		}
-		// Zombie offscreen — kill it and recreate below
-		await closeOffscreen()
+		// Zombie offscreen — kill it and recreate below. Through the serialized
+		// tail (B-17) so it composes with any other in-flight close.
+		await trackedClose()
 	}
 
 	if (!offscreenPromise) {
