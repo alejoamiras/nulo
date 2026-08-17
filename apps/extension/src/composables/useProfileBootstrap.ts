@@ -24,36 +24,46 @@ import { useAppStore } from "@/stores/app.store"
  * `initAccount` disconnect + REPLACE the shared `managers.network`/`.account`
  * clients; two concurrent runs for the same profile stomped each other — the
  * recovery bootstrap replaced a client the original was mid-use of, so the
- * original threw and mis-routed to "needs unlock". A same-profile caller now
- * joins the in-flight run instead of starting its own.
+ * original threw and mis-routed to "needs unlock". A same-profile caller whose
+ * run is still the current generation joins it instead of starting its own.
  */
-const inFlightBootstraps = new Map<string, Promise<void>>()
+const inFlightBootstraps = new Map<string, { gen: number; promise: Promise<void> }>()
 
 /**
  * B-27 (generation fence): per-id single-flight covers same-profile recovery,
  * but a DIFFERENT profile activating mid-bootstrap (a rapid switch) would still
  * run its own init and stomp the shared clients while the older run continues.
- * Every new bootstrap bumps this counter; a run whose captured generation is no
- * longer current stops before its next shared-state mutation, so the LATEST
- * activation wins and a superseded one can't disconnect/replace the winner's
- * clients or run `initAccount` with cross-profile network state.
+ * Every new bootstrap bumps this counter, and `initNetworks`/`initAccount` fence
+ * EACH shared-state mutation on it — a superseded run stops before disconnecting/
+ * replacing the winner's dynamically-referenced `managers.*` client or writing
+ * stale network/account state. Joining also requires the in-flight run to still
+ * be the current generation, so a re-activation of a superseded profile starts
+ * fresh rather than adopting an aborted run.
  */
 let bootstrapGeneration = 0
 
 export function useProfileBootstrap() {
 	const appStore = useAppStore()
 
-	/** Replaces the inline `initNetworks` in popup/app.vue. */
-	const initNetworks = async () => {
+	/** Replaces the inline `initNetworks` in popup/app.vue. `isCurrent` (B-27) is
+	 *  checked after every await and before every shared-state mutation so a
+	 *  superseded bootstrap stops instead of replacing the winner's `managers.network`
+	 *  (read dynamically here) or writing stale networks. Standalone callers omit it. */
+	const initNetworks = async (isCurrent: () => boolean = () => true) => {
+		if (!isCurrent()) return
 		appStore.networks = []
 		appStore.network = undefined
 
 		managers.network?.disconnect()
-		managers.network = new NetworkServiceClient()
+		const network = new NetworkServiceClient()
+		managers.network = network
 
-		appStore.networks = await managers.network.getOrInitNetworks()
+		const nets = await network.getOrInitNetworks()
+		if (!isCurrent()) return // a newer activation took over — don't write stale networks
+		appStore.networks = nets
 
-		const active = await managers.network.getActiveNetwork()
+		const active = await network.getActiveNetwork()
+		if (!isCurrent()) return
 		if (active) {
 			appStore.network = active
 		} else {
@@ -62,24 +72,32 @@ export function useProfileBootstrap() {
 			// service — single-sourced from the `isPrimaryActive` seed (Alpha in prod, Testnet under
 			// the e2e flag), so it can't diverge from a fresh profile's default or break e2e the way a
 			// hardcoded `kind === "testnet"` did (#305 flipped the default to Alpha but left this).
-			const primary = await managers.network.getPrimaryNetwork()
+			const primary = await network.getPrimaryNetwork()
+			if (!isCurrent()) return
 			appStore.network = primary ?? appStore.networks[0]
 		}
 
 		// Persist the resolved active network (covers both the restored-active and fallback branches).
 		if (appStore.network) {
-			await managers.network.setActiveNetwork(appStore.network.id)
+			await network.setActiveNetwork(appStore.network.id)
+			if (!isCurrent()) return
 		}
 		appStore.syncNetworkStatus()
 	}
 
-	/** Replaces the inline `initAccount` in popup/app.vue. */
-	const initAccount = async () => {
-		if (!appStore.profile || !appStore.network) return
+	/** Replaces the inline `initAccount` in popup/app.vue. Fenced per B-27 (see initNetworks). */
+	const initAccount = async (isCurrent: () => boolean = () => true) => {
+		if (!isCurrent() || !appStore.profile || !appStore.network) return
+		const profileId = appStore.profile.id
+		const chainId = appStore.network.chainId
 		managers.account?.disconnect()
-		managers.account = new AccountServiceClient()
-		await managers.account.ensureDefaultAccount(appStore.profile.id, appStore.network.chainId, AccountType.Nulo_v1, "Account")
-		appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
+		const account = new AccountServiceClient()
+		managers.account = account
+		await account.ensureDefaultAccount(profileId, chainId, AccountType.Nulo_v1, "Account")
+		if (!isCurrent()) return
+		const accounts = await account.getAccounts(profileId, chainId, true)
+		if (!isCurrent()) return
+		appStore.accounts = accounts
 		await appStore.setupActiveAccount()
 	}
 
@@ -91,26 +109,26 @@ export function useProfileBootstrap() {
 	 */
 	const runBootstrapCore = (profileId: string): Promise<void> => {
 		const existing = inFlightBootstraps.get(profileId)
-		if (existing) return existing
+		// Join only a STILL-CURRENT same-profile run (same-profile recovery). A run
+		// that a newer activation already superseded is aborting, so re-activating
+		// this profile must start fresh rather than adopt it.
+		if (existing && existing.gen === bootstrapGeneration) return existing.promise
 		// A new bootstrap supersedes any older in-flight one (of ANY profile).
 		const myGeneration = ++bootstrapGeneration
-		const superseded = () => bootstrapGeneration !== myGeneration
-		const run = (async () => {
-			await initNetworks()
-			// A newer activation started mid-init — stop before touching more shared
-			// state so we can't disconnect/replace the winner's clients or run
-			// initAccount with this (now-stale) profile's network.
-			if (superseded()) return
-			await initAccount()
-			if (superseded()) return
+		const isCurrent = () => bootstrapGeneration === myGeneration
+		const promise = (async () => {
+			await initNetworks(isCurrent)
+			if (!isCurrent()) return
+			await initAccount(isCurrent)
+			if (!isCurrent()) return
 			initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 			await appStore.syncTransactions()
 		})().finally(() => {
 			// Identity-guard: only clear the slot if it still holds THIS run.
-			if (inFlightBootstraps.get(profileId) === run) inFlightBootstraps.delete(profileId)
+			if (inFlightBootstraps.get(profileId)?.promise === promise) inFlightBootstraps.delete(profileId)
 		})
-		inFlightBootstraps.set(profileId, run)
-		return run
+		inFlightBootstraps.set(profileId, { gen: myGeneration, promise })
+		return promise
 	}
 
 	/**

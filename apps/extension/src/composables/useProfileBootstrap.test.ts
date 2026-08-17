@@ -214,6 +214,7 @@ describe("useProfileBootstrap", () => {
 			)
 			.mockResolvedValue([{ id: "n2", chainId: 2, kind: "testnet" }])
 
+		const appStore = useAppStore()
 		const { bootstrapActiveProfile } = useProfileBootstrap()
 		const b1 = bootstrapActiveProfile(fakeProfile) // gen 1, hangs in initNetworks
 		await Promise.resolve()
@@ -221,12 +222,14 @@ describe("useProfileBootstrap", () => {
 		const b2 = bootstrapActiveProfile(p2) // gen 2 — supersedes P1
 		await b2 // P2 completes: initNetworks + initAccount
 
-		releaseP1Networks() // P1's initNetworks resolves → superseded → aborts before initAccount
+		releaseP1Networks() // P1's initNetworks resolves → superseded → aborts mid-init
 		await b1
 
-		// Only P2 constructed an account client. The superseded P1 stopped at the
-		// fence and never ran initAccount with the now-stale profile/network.
+		// Only P2 constructed an account client, and the shared network state
+		// reflects P2 — the superseded P1 stopped at a fence and never wrote its
+		// (now-stale) networks over P2's.
 		expect(AccountServiceClient).toHaveBeenCalledTimes(1)
+		expect(appStore.networks.map((n: { id: string }) => n.id)).toEqual(["n2"])
 	})
 
 	test("bootstrapActiveProfile flips isLogined to true and returns true when its profile stays active", async () => {
