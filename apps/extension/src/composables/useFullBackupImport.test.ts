@@ -1094,6 +1094,27 @@ describe("useFullBackupImport — failure branches", () => {
 		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
 	})
 
+	it("(B-24) a persistently-failing rollback retries and surfaces a cleanup-pending error", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "x", restoreError: "boom" }]) // no networks → site-1 rollback
+		// The compensating delete rejects on every attempt (e.g. its tombstone write fails).
+		profileClient.deleteProfile.mockRejectedValue(new Error("tombstone write failed"))
+
+		await c.restoreBackup()
+
+		// Retried a bounded number of times, not swallowed after one attempt.
+		expect(profileClient.deleteProfile).toHaveBeenCalledTimes(3)
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(c.restoreStatus.value).toBe("failed")
+		// Actionable cleanup-pending message instead of the generic per-site error.
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import incomplete", expect.stringContaining("Delete it in Settings"))
+	})
+
 	it("duplicate account: matches on err.message, rolls back, surfaces new copy", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)
