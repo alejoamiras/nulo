@@ -138,12 +138,19 @@ export function useProfileBootstrap() {
 	 */
 	const bootstrapActiveProfile = async (profile: ProfileInfo): Promise<boolean> => {
 		appStore.profile = profile
+		// B-27 (supersede at entry): kick off / join the core SYNCHRONOUSLY, before
+		// the getProfiles await, so this activation's generation is bumped up front
+		// — an older bootstrap is fenced immediately, not only once control reaches
+		// runBootstrapCore after the await. (No await between the profile assignment
+		// and this call, so no other activation can interleave in that window.)
+		const core = runBootstrapCore(profile.id)
+
 		// Refresh the in-memory list so the profile switcher + any other
 		// consumer sees adds (backup-import activates a restored profile)
 		// and updates (rename).
 		appStore.profiles = await managers.profile.getProfiles()
 
-		await runBootstrapCore(profile.id)
+		await core
 
 		// The lock must win: if the active session was cleared or switched while
 		// this bootstrap awaited (e.g. a lock fired right after a password change),
