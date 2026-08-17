@@ -714,7 +714,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 */
 	private async hydrateSchedulers(): Promise<void> {
 		this.bumpServiceEpoch()
-		// Clear existing schedulers (both arms); we re-register below.
+		const epochAtStart = this.serviceEpoch
+		// Clear existing schedulers (both arms); we re-register below ONLY if this
+		// rebuild is still the live one when its reads complete.
 		for (const id of this.schedulers.values()) clearInterval(id)
 		this.schedulers.clear()
 		this.watchedContracts.clear()
@@ -727,20 +729,42 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const networks = await this.networkService.getNetworks()
 		const tokens = await this.tokenService.getTokensRaw(profile.id)
 
+		// Build the desired scheduler set OFF-MAP first — all awaits happen here, so
+		// the live maps stay untouched until the single synchronous commit below.
+		const noteDescriptors: { profileId: string; networkId: string; accountAddress: string; contracts: Set<string> }[] = []
+		const publicDescriptors: { profileId: string; networkId: string; contract: string }[] = []
 		for (const network of networks) {
 			const tokensForNet = tokens.filter((t) => t.chainId === network.chainId)
 			if (tokensForNet.length === 0) continue
 			const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+			const contracts = new Set(tokensForNet.map((t) => t.contract))
 			for (const account of accounts) {
-				const key = this.schedulerKey(network.id, account.address)
-				const contracts = new Set(tokensForNet.map((t) => t.contract))
-				this.watchedContracts.set(key, contracts)
-				this.startScheduler(profile.id, network.id, account.address)
+				noteDescriptors.push({
+					profileId: profile.id,
+					networkId: network.id,
+					accountAddress: account.address,
+					contracts: new Set(contracts),
+				})
 			}
 			// Public arm: one scheduler per (networkId, contract) — serves every account.
-			for (const contract of new Set(tokensForNet.map((t) => t.contract))) {
-				this.startPublicScheduler(profile.id, network.id, contract)
+			for (const contract of contracts) {
+				publicDescriptors.push({ profileId: profile.id, networkId: network.id, contract })
 			}
+		}
+
+		// A concurrent hydrate / clear (each bumps the epoch) since our entry means
+		// our descriptor set is stale — its own teardown+rebuild owns the maps now.
+		// Installing our intervals would leak a scheduler polling under a dead
+		// profile/network/contract set for the worker's lifetime.
+		if (this.serviceEpoch !== epochAtStart) return
+
+		// Commit synchronously — no awaits between the epoch check and the full install.
+		for (const d of noteDescriptors) {
+			this.watchedContracts.set(this.schedulerKey(d.networkId, d.accountAddress), d.contracts)
+			this.startScheduler(d.profileId, d.networkId, d.accountAddress)
+		}
+		for (const d of publicDescriptors) {
+			this.startPublicScheduler(d.profileId, d.networkId, d.contract)
 		}
 	}
 
@@ -806,6 +830,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	}
 
 	private onTokenAdded = async (token: TokenInfo): Promise<void> => {
+		// Capture the epoch before any await. A profile/network/token lifecycle
+		// change since entry (each bumps the epoch) makes this add stale — its
+		// awaited tail must not install schedulers or watch contracts under a
+		// context that no longer applies (codex B-20 condition).
+		const epochAtStart = this.serviceEpoch
 		// TokenInfo lacks `profileId`; trust the active profile context the
 		// emit is happening in. (The token service emits while the owning
 		// profile is loaded.)
@@ -813,6 +842,7 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		if (!profile) return
 		const network = await this.resolveNetworkByChainId(token.chainId)
 		if (!network) return
+		if (this.serviceEpoch !== epochAtStart) return
 
 		// Every TokenService.addToken call is a user-explicit add path —
 		// either the in-popup "Add custom token" form or a dApp's
@@ -830,6 +860,9 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		})
 
 		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+		// Re-check after the awaited trust write + account read, before mutating the
+		// live scheduler maps (incl. contracts.add) — the epoch fence's core site.
+		if (this.serviceEpoch !== epochAtStart) return
 		for (const account of accounts) {
 			const key = this.schedulerKey(network.id, account.address)
 			let contracts = this.watchedContracts.get(key)

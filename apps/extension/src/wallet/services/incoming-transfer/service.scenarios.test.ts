@@ -2122,6 +2122,52 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect(upsertSpy).not.toHaveBeenCalled()
 	})
 
+	test("(B-20 PIN) a profile switch during onTokenAdded fences out its stale scheduler install", async () => {
+		// onTokenAdded resolves the active profile, network, trust, and accounts across
+		// several awaits before installing per-account note schedulers + watching the new
+		// contract. A profile switch mid-flight bumps serviceEpoch (via hydrateSchedulers);
+		// the resumed add must NOT graft its contract onto the now-current scheduler set.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+		await flushPromises()
+
+		const key = "n1|0xa"
+		const watched = (service as never as { watchedContracts: Map<string, Set<string>> }).watchedContracts
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract]) // bootstrap hydrate
+
+		// Defer the add's trust read so it parks (holding the service lock, which the
+		// lock-free hydrate path does not contend) right before the scheduler install.
+		const repo = (service as never as { repo: { getTrust: (...a: unknown[]) => Promise<unknown> } }).repo
+		let resolveTrust!: (v: unknown) => void
+		const getTrustSpy = vi.spyOn(repo, "getTrust").mockImplementation(() => new Promise((r) => (resolveTrust = r as never)))
+
+		const addPromise = tokenStub.onTokenAdded.invoke({
+			id: tokenB.id,
+			chainId: tokenB.chainId,
+			contract: tokenB.contract,
+			symbol: tokenB.symbol,
+			decimals: tokenB.decimals,
+			name: "Token B",
+		} as never)
+		await flushPromises()
+		expect(getTrustSpy).toHaveBeenCalled() // parked on the trust read
+
+		// Profile switch fires → hydrateSchedulers bumps the epoch (invalidating the
+		// in-flight add) and re-installs from current tokens only (tokenA).
+		await profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+
+		resolveTrust(undefined) // release the trust read; the add resumes
+		await addPromise
+		await flushPromises()
+
+		// The stale add must not have watched tokenB's contract on the live scheduler.
+		expect([...(watched.get(key) ?? [])]).not.toContain(tokenB.contract)
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract])
+	})
+
 	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {
 		// Two onTransactionAdded events for the same tx hash. The serviceLock
 		// serializes them: the first runs to completion (deletes record,
