@@ -90,3 +90,18 @@ These are correctness/state-integrity fixes (wrong balances shown, stale pollers
 - L2 — B-04 both-ends (try/catch + queue reset), not a generation fence. **Status: verified.md, settled.**
 - L3 — B-29 use the awaiting-exemption (simplest) for (a); separate monotonic map for (b). **Status: pending audit.**
 - L4 — B-08/B-29 may land NOT-REPRODUCED if no deterministic RED. **Status: prove-first will decide.**
+
+## Implementation record (outcome)
+
+**Merged as sequential prove-first commits on `worktree-fix-state-fences` (base `dev`).** Every fix carries a RED-against-pre-fix pin (verified by source-swap) then GREEN.
+
+- **B-08 → NOT-REPRODUCED** (codex-agreed). The forced wait-out and the non-forced fetch share `INIT_FETCH_TIMEOUT_MS` and the non-forced started strictly earlier, so its own timeout fires first and takes it to the degraded path before the forced run's wait-out can clear `forcedGasPending`. The window the finding needs is empty (`T_forced+20s < T_ensure+20s ⟺ T_forced < T_ensure`, a contradiction). A permanent guard-holds pin (`balances.store.test.ts`, "(B-08 PROVE-ATTEMPT)") pins it; no code change.
+- **B-04 fixed** — `TaskService.hasTask` (non-throwing) detects a stale/cleared task id → mint fresh instead of throwing outside the try/finally; `owned`-map identity-checked cleanup; `queue.reset()` on profile switch cancels the records it drops (try/catch + finally so a cancel race can't leave the jam).
+- **B-05 fixed** — `profileGeneration` captured before the rebuild await; commit only if gen AND active-profile-id still match; map cleared synchronously+unconditionally at entry; `onTokenAdded`/`onTokenUpdated`/`onAccountAdded` tails fence every post-await mutation, and the generation is threaded into `createTokenBalance` (checked before the write and before emit/enqueue).
+- **B-20 fixed** — `hydrateSchedulers` builds descriptors off-map and clears-in-commit (a bailed rebuild leaves existing schedulers intact); `onTokenAdded` does a FULL rebuild via `hydrateSchedulers` (reads the live token set, so no concurrent add or existing token is lost — the epoch-bump-then-incremental-install approach was rejected after it was shown to lose them).
+- **B-21 fixed** — local promise/controller identity (retract from the shared fields only if still published; timeout closes over the LOCAL controller); post-`cache.set` generation re-check before counters/emit; config transitions serialized via a `configTransition` promise chain; the disable aborts + clears `inflight` synchronously (outside the chain) so a re-enable starts a fresh fetch.
+- **B-29 fixed** — `awaiting`-non-empty slices are exempt from LRU eviction; mutation versions come from a store-lifetime strictly-increasing sequence (never reused) and are kept across eviction; a store `incarnation` (advanced by every `clear*`) is the virgin-key baseline, and `clearProfile` deletes version entries by key so an evicted scope's retained version can't survive.
+
+**Codex loop**: initial complete-arc-diff pass (reject, 5 findings) → round-1 fixes → resume (reject, 5 deeper windows) → round-2 fixes → final resume. Bounded at the 2-round cap.
+
+**Validation**: `typecheck:all` green; `bun run lint` exit 0; full extension unit suite green (4183 passed). Armed-smoke + `e2e:agent` (SOLO) run at the arc gate before the PR.
