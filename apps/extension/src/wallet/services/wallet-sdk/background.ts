@@ -246,57 +246,72 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				// (safety-net `.finally(releaseFifo)`), whichever fires first.
 				const { baton, releaseFifo } = createSessionBaton()
 
-				const handlerChain = prev.then(async () => {
-					// B-13: gate BEFORE any side effect (incl. the durable queued-journal
-					// record). Between the SDK's key-exchange response and
-					// onSessionEstablished's async validation, a message must not ride a
-					// session being terminated as unverified — and must not persist a
-					// durable journal record for it. Capture the validation promise and
-					// re-check its identity AFTER the await: a termination during the wait
-					// deletes (or replaces) the entry, so an already-waiting handler drops.
-					const validation = establishmentStatus.get(session.sessionId)
-					const established = await (validation ?? Promise.resolve(false))
-					if (!established || establishmentStatus.get(session.sessionId) !== validation) {
-						logger.log(
-							"wallet-sdk-bg",
-							LogLevel.Warn,
-							`Dropping message for ${session.sessionId}: session failed/lost establishment validation`,
-						)
-						return
-					}
+				// B-13: gate on establishment validation. Between the SDK's
+				// key-exchange response and onSessionEstablished's async validation, a
+				// message must not ride a session being terminated as unverified — and
+				// must not persist a durable journal record for it. Capture the
+				// per-session validation promise and re-check its identity after the
+				// await: a termination during the wait deletes (or replaces) the entry,
+				// so an already-waiting handler drops. This gate is computed on message
+				// ARRIVAL, NOT behind the FIFO baton — so a queued sibling still gets its
+				// durable queued-journal record immediately. Two concurrent `sendTx`
+				// requests must BOTH show as `queued` before either is approved (the
+				// anti-lost-tx invariant `concurrent-sendtx.test.ts` pins); serializing
+				// only execution — never record creation — behind the baton preserves it.
+				const validation = establishmentStatus.get(key)
+				const establishedPromise = (validation ?? Promise.resolve(false)).then(
+					(established) => established && establishmentStatus.get(key) === validation,
+				)
 
-					// Only NOW (validation passed) create the queued journal record.
-					// Only top-level `sendTx` messages get a pre-allocated queued journal
-					// record. `batch` is excluded by design — the recursive dispatch in
-					// WalletSdkDispatcher.handleBatch can't safely route hooks per-leg, so
-					// we'd end up with a batch-level queued record that no inner leg knows
-					// to claim.
-					// TODO(queued-visibility-for-batch): batched sendTx legs currently
-					// bypass the queued-record creation path.
-					const queuedJournalId =
-						message.type === "sendTx"
-							? await tryCreateQueuedJournal(message, session, {
-									journal: operationJournal,
-									profile: profileService,
-									dappSession: dappSessionService,
-									networkSvc: networkService,
-									account: accountService,
-									logger,
-								})
-							: undefined
+				// Queued journal is created on arrival (concurrent across siblings),
+				// gated on establishment. Only top-level `sendTx` gets a pre-allocated
+				// record — `batch` is excluded by design: the recursive dispatch in
+				// WalletSdkDispatcher.handleBatch can't safely route hooks per-leg, so
+				// we'd end up with a batch-level record no inner leg knows to claim.
+				// TODO(queued-visibility-for-batch): batched sendTx legs currently
+				// bypass the queued-record creation path.
+				const queuedJournalIdPromise: Promise<string | undefined> =
+					message.type === "sendTx"
+						? establishedPromise.then((ok) =>
+								ok
+									? tryCreateQueuedJournal(message, session, {
+											journal: operationJournal,
+											profile: profileService,
+											dappSession: dappSessionService,
+											networkSvc: networkService,
+											account: accountService,
+											logger,
+										})
+									: undefined,
+							)
+						: Promise.resolve(undefined)
 
-					return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
-						// Bind the baton release into the `onExecutionEnqueued`
-						// slot — fired downstream by ExecutionService the instant
-						// the approved request enqueues on the execution mutex
-						// (which preserves execution order). The field name is
-						// shared across DispatchHooks → ExecutionHooks so the wiring
-						// is type-checked end-to-end (a past field-name drift here
-						// is exactly what left this release dead before).
-						onExecutionEnqueued: releaseFifo,
-						queuedJournalId,
-					})
-				})
+				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
+					prev.then(async () => {
+						// B-13: re-gate execution behind the baton. A session that
+						// failed/lost establishment must not execute either — not just skip
+						// its journal. Same promise as the journal gate, so it resolves once.
+						if (!(await establishedPromise)) {
+							logger.log(
+								"wallet-sdk-bg",
+								LogLevel.Warn,
+								`Dropping message for ${key}: session failed/lost establishment validation`,
+							)
+							return
+						}
+						return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
+							// Bind the baton release into the `onExecutionEnqueued`
+							// slot — fired downstream by ExecutionService the instant
+							// the approved request enqueues on the execution mutex
+							// (which preserves execution order). The field name is
+							// shared across DispatchHooks → ExecutionHooks so the wiring
+							// is type-checked end-to-end (a past field-name drift here
+							// is exactly what left this release dead before).
+							onExecutionEnqueued: releaseFifo,
+							queuedJournalId,
+						})
+					}),
+				)
 				// Safety-net release for handlers that don't call releaseFifo
 				// explicitly (every non-sendTx path) — preserves backward-
 				// compatible FIFO semantics for those. `.catch(() => {})` on
