@@ -1,5 +1,4 @@
 import { describe, expect, test, vi } from "vitest"
-import type { ILogger } from "../logger/interfaces"
 import type { AlarmEvent, AlarmsPort } from "../ports"
 import { AlarmDispatcher } from "./alarm-dispatcher"
 
@@ -24,10 +23,8 @@ function fakeAlarms() {
 	}
 }
 
-const noopLogger: ILogger = { log: () => {} }
-
-const make = (a: ReturnType<typeof fakeAlarms>, logger: ILogger = noopLogger) =>
-	new AlarmDispatcher("nulo:test", { alarms: a.port, logger, logSource: "Test" })
+const make = (a: ReturnType<typeof fakeAlarms>) => new AlarmDispatcher("nulo:test", a.port)
+const noop = () => {}
 
 describe("AlarmDispatcher (Q-05)", () => {
 	test("create() forwards the caller's schedule shape verbatim (periodic AND when)", async () => {
@@ -42,7 +39,7 @@ describe("AlarmDispatcher (Q-05)", () => {
 	test("does NOT run any boot tick on its own (boot-run stays with the caller)", async () => {
 		const a = fakeAlarms()
 		const tick = vi.fn(async () => {})
-		make(a).listen(tick)
+		make(a).listen(tick, noop)
 		await Promise.resolve()
 		expect(tick).not.toHaveBeenCalled()
 	})
@@ -50,27 +47,31 @@ describe("AlarmDispatcher (Q-05)", () => {
 	test("listen() dispatches only a name-matching alarm", async () => {
 		const a = fakeAlarms()
 		const tick = vi.fn(async () => {})
-		make(a).listen(tick)
+		make(a).listen(tick, noop)
 		a.fire("some:other:alarm")
 		expect(tick).not.toHaveBeenCalled()
 		a.fire("nulo:test")
 		expect(tick).toHaveBeenCalledTimes(1)
 	})
 
-	test("a throwing tick is caught + logged and never escapes the alarm callback", async () => {
+	test("a rejecting tick routes to the caller's onError (dispatcher owns no diagnostic)", async () => {
 		const a = fakeAlarms()
-		const log = vi.fn()
-		make(a, { log }).listen(async () => {
-			throw new Error("boom")
-		})
+		const onError = vi.fn()
+		const err = new Error("boom")
+		make(a).listen(async () => {
+			throw err
+		}, onError)
 		expect(() => a.fire("nulo:test")).not.toThrow()
 		await Promise.resolve()
-		expect(log).toHaveBeenCalledWith("Test", expect.anything(), "alarm tick threw", expect.anything())
+		expect(onError).toHaveBeenCalledWith(err)
 	})
 
 	test("clear() clears without detaching a listen() subscription", async () => {
 		const a = fakeAlarms()
-		make(a).listen(vi.fn(async () => {}))
+		make(a).listen(
+			vi.fn(async () => {}),
+			noop,
+		)
 		const d = make(a)
 		await d.clear()
 		expect(a.port.clear).toHaveBeenCalledWith("nulo:test")
@@ -80,7 +81,10 @@ describe("AlarmDispatcher (Q-05)", () => {
 	test("stop() unsubscribes and clears the alarm", async () => {
 		const a = fakeAlarms()
 		const d = make(a)
-		d.listen(vi.fn(async () => {}))
+		d.listen(
+			vi.fn(async () => {}),
+			noop,
+		)
 		await d.stop()
 		expect(a.unsubscribe).toHaveBeenCalled()
 		expect(a.port.clear).toHaveBeenCalledWith("nulo:test")

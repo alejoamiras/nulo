@@ -74,7 +74,7 @@ export class JournalGC {
 		this.journal = journal
 		this.logger = logger
 		this.capPerScope = opts?.capPerScope ?? DEFAULT_TERMINAL_CAP_PER_SCOPE
-		this.dispatcher = new AlarmDispatcher(JOURNAL_GC_ALARM_NAME, { alarms, logger, logSource: LOG_SOURCE })
+		this.dispatcher = new AlarmDispatcher(JOURNAL_GC_ALARM_NAME, alarms)
 	}
 
 	/**
@@ -83,15 +83,12 @@ export class JournalGC {
 	 * (chrome.alarms.create semantics) and stacks the listener.
 	 */
 	public async start(): Promise<void> {
-		// Self-catch so the observable dispatch diagnostic stays "sweep tick threw"
-		// (the shared dispatcher only backstops an escaping rejection).
-		this.dispatcher.listen(async () => {
-			try {
-				await this.sweep()
-			} catch (err) {
-				this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err))
-			}
-		})
+		// The caller owns the diagnostic, so this stays byte-identical to the
+		// pre-extraction `sweep().catch(err => log("sweep tick threw", …))`.
+		this.dispatcher.listen(
+			() => this.sweep(),
+			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err)),
+		)
 		await this.dispatcher.create({ periodInMinutes: JOURNAL_GC_PERIOD_MINUTES })
 		try {
 			await this.sweep()
