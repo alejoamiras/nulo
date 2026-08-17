@@ -30,7 +30,7 @@ import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 export async function migrationIdle(): Promise<void> {
 	const flag = await chrome.storage.local.get(SCHEMA_RUNNING_KEY)
 	if (!(SCHEMA_RUNNING_KEY in flag)) return
-	await new Promise<void>((resolve) => {
+	await new Promise<void>((resolve, reject) => {
 		const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
 			if (area !== "local" || !(SCHEMA_RUNNING_KEY in changes)) return
 			if (changes[SCHEMA_RUNNING_KEY].newValue === undefined) {
@@ -41,12 +41,25 @@ export async function migrationIdle(): Promise<void> {
 		chrome.storage.onChanged.addListener(listener)
 		// Re-check after subscribing: the marker may have cleared between the
 		// first read and the listener attach (classic check-then-subscribe race).
-		void chrome.storage.local.get(SCHEMA_RUNNING_KEY).then((again) => {
-			if (!(SCHEMA_RUNNING_KEY in again)) {
+		chrome.storage.local.get(SCHEMA_RUNNING_KEY).then(
+			(again) => {
+				if (!(SCHEMA_RUNNING_KEY in again)) {
+					chrome.storage.onChanged.removeListener(listener)
+					resolve()
+				}
+			},
+			// B-22: without this rejection handler the re-check's promise had no
+			// `.catch`, so a transient storage error on it left the outer promise
+			// unsettled forever — and if the marker had already cleared before we
+			// subscribed, no `onChanged` event will ever arrive to resolve it, so
+			// EVERY subsequent UI storage access hangs. A failed re-check can't
+			// confirm the migration finished, so surface the error instead of
+			// hanging (or proceeding mid-migration).
+			(err) => {
 				chrome.storage.onChanged.removeListener(listener)
-				resolve()
-			}
-		})
+				reject(err)
+			},
+		)
 	})
 }
 

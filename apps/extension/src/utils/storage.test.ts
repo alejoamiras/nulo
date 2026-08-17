@@ -57,6 +57,21 @@ describe("migration-aware storage facade", () => {
 		expect(s.listeners).toHaveLength(0) // listener removed after the re-check
 	})
 
+	test("(B-22) a rejecting re-check settles (rejects) instead of hanging forever", async () => {
+		const s = installChromeStorage({ [SCHEMA_RUNNING_KEY]: 1 })
+		// First get() sees the marker (migration running); the re-check get()
+		// rejects transiently. Pre-fix that `.then` had no rejection handler, so
+		// the outer promise never settled and every later UI storage access hung.
+		let calls = 0
+		s.get.mockImplementation(async (_keys?: string | string[] | null) => {
+			calls++
+			if (calls === 1) return { [SCHEMA_RUNNING_KEY]: 1 }
+			throw new Error("storage unavailable")
+		})
+		await expect(migrationIdle()).rejects.toThrow("storage unavailable")
+		expect(s.listeners).toHaveLength(0) // listener removed on the failed re-check
+	})
+
 	test("changes in OTHER areas or keys don't unblock", async () => {
 		const s = installChromeStorage({ [SCHEMA_RUNNING_KEY]: 1 })
 		let done = false
