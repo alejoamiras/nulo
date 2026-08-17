@@ -59,7 +59,6 @@ import type {
 	ContractsCapability,
 	DataCapability,
 	GrantedCapabilityRecord,
-	RejectedCapabilityRecord,
 	Scope,
 	SimulationCapability,
 	TransactionCapability,
@@ -947,16 +946,20 @@ export class WalletSdkDispatcher {
 			})
 		} catch (err) {
 			// On popup reject/close, persist rejection for all delta items so the
-			// next request renders the "previously denied" badge. The grant-path
-			// write below is unreachable when this throws.
-			const rejectedAt = Date.now()
-			const newRejections: RejectedCapabilityRecord[] = delta.map((cap) => ({
-				capabilityType: cap.type as string,
-				rejectedAt,
-			}))
-			const deltaTypes = new Set(delta.map((cap) => cap.type as string))
-			const mergedRejections = [...existingRejections.filter((r) => !deltaTypes.has(r.capabilityType)), ...newRejections]
-			await this.dappSessionService.setCapabilityRejections(dappSession.id, mergedRejections)
+			// next request renders the "previously denied" badge. One atomic decision
+			// (B-14), and if the row was revoked meanwhile just surface the popup error.
+			try {
+				await this.dappSessionService.applyCapabilityDecision(dappSession.id, {
+					addAccounts: [],
+					aliasPatch: {},
+					grantRecords: [],
+					replaceTypes: [],
+					approvedTypes: [],
+					rejectedTypes: delta.map((cap) => cap.type as string),
+				})
+			} catch {
+				// Session already revoked — nothing to persist.
+			}
 			throw err
 		}
 
@@ -969,25 +972,6 @@ export class WalletSdkDispatcher {
 				if (accountsCap) {
 					grantedResults.push(accountsCap)
 				}
-			}
-		}
-
-		// If accounts were selected in the popup, merge with existing (don't replace)
-		if (result.selectedAccounts && result.selectedAccounts.length > 0) {
-			const existingAccounts = new Set(dappSession.accounts ?? [])
-			for (const acc of result.selectedAccounts) {
-				existingAccounts.add(acc)
-			}
-			const mergedAccounts = [...existingAccounts]
-
-			await this.dappSessionService.updateDappSession(
-				dappSession.id,
-				dappSession.permissions,
-				mergedAccounts,
-				dappSession.confirmationLevel,
-			)
-			if (result.accountAliases) {
-				await this.dappSessionService.setAccountAliases(dappSession.id, result.accountAliases)
 			}
 		}
 
@@ -1021,28 +1005,27 @@ export class WalletSdkDispatcher {
 			const replacement = replacementFor(type) ?? (delta.find((c) => c.type === type) as unknown as Capability)
 			newGrants.push({ capability: replacement, grantedAt: now })
 		}
-		// Merge: keep existing grants minus rejected AND minus replaced types, then the new records.
-		const mergedGrants = [
-			...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type) && !deltaApprovedTypes.has(g.capability.type)),
-			...newGrants,
-		]
 
-		await this.dappSessionService.setCapabilityGrants(dappSession.id, mergedGrants)
+		// Delta items NOT approved become rejections.
+		const rejectedDeltaTypes = delta.filter((cap) => !approvedTypes.has(cap.type as string)).map((cap) => cap.type as string)
+		const hasAccountSelection = (result.selectedAccounts?.length ?? 0) > 0
 
-		// Track rejections: delta items that were NOT approved
-		const newRejections: RejectedCapabilityRecord[] = delta
-			.filter((cap) => !approvedTypes.has(cap.type as string))
-			.map((cap) => ({ capabilityType: cap.type as string, rejectedAt: now }))
-		// Merge: keep old rejections for types not in this delta + new rejections
-		const deltaTypes = new Set(delta.map((cap) => cap.type as string))
-		const mergedRejections = [...existingRejections.filter((r) => !deltaTypes.has(r.capabilityType)), ...newRejections]
-		await this.dappSessionService.setCapabilityRejections(dappSession.id, mergedRejections)
-
-		// Reload session to pick up updated accounts/aliases
-		const updatedSession = await this.dappSessionService.getDappSession(dappSession.id)
+		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
+		// against the LATEST row under a single lock — no interleaving between the
+		// formerly-separate writes, and a concurrent revoke fails cleanly (no
+		// half-written row) instead of collapsing to a bare "Invalid id". Different-type
+		// concurrent approvals both survive (the merge reads the latest row).
+		const updatedSession = await this.dappSessionService.applyCapabilityDecision(dappSession.id, {
+			addAccounts: hasAccountSelection ? (result.selectedAccounts ?? []) : [],
+			aliasPatch: hasAccountSelection ? (result.accountAliases ?? {}) : {},
+			grantRecords: newGrants,
+			replaceTypes: [...deltaApprovedTypes],
+			approvedTypes: [...approvedTypes],
+			rejectedTypes: rejectedDeltaTypes,
+		})
 
 		const granted = await this.enrichGrantedCapabilities(
-			mergedGrants.map((g) => g.capability),
+			(updatedSession.capabilityGrants ?? []).map((g) => g.capability),
 			requestedCapabilities,
 			ctx,
 			updatedSession,

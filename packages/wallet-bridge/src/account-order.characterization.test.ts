@@ -61,6 +61,10 @@ function makeDispatcher(): { dispatcher: WalletSdkDispatcher; sent: () => string
 		setAccountAliases: async () => session,
 		setCapabilityGrants: async () => session,
 		setCapabilityRejections: async () => session,
+		applyCapabilityDecision: async (_id, decision) => ({
+			...session,
+			accounts: decision.addAccounts.length > 0 ? [...new Set([...session.accounts, ...decision.addAccounts])] : session.accounts,
+		}),
 	}
 	const network: INetworkRef = { id: "net-0", chainId: CHAIN }
 	const networkReader: INetworkReader = { getNetworks: async () => [network] }

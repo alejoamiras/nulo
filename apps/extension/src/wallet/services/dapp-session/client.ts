@@ -35,4 +35,5 @@ definePassthroughsExhaustive<Methods>()(DappSessionServiceClient.prototype, [
 	"getCapabilityGrants",
 	"setCapabilityRejections",
 	"getCapabilityRejections",
+	"applyCapabilityDecision",
 ])

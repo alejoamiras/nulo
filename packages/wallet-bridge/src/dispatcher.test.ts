@@ -6,6 +6,7 @@ import type { CapabilityResult } from "./dapp-interaction-protocol"
 import type { Operation } from "./operation"
 import type { OperationResult } from "./operation-result"
 import type {
+	CapabilityDecision,
 	IAccountReader,
 	IDappInteractionRunner,
 	IDappSessionWriter,
@@ -13,6 +14,27 @@ import type {
 	IExecutionRunner,
 	INetworkReader,
 } from "./services-contract"
+
+/** Shared fake of the real DappSessionService.applyCapabilityDecision merge (B-14):
+ *  deltas merged against the LATEST row. Returns the new row. */
+function applyDecisionTo(session: IDappSessionRef, decision: CapabilityDecision): IDappSessionRef {
+	const next = { ...session } as IDappSessionRef & {
+		accounts: string[]
+		accountAliases?: Record<string, string>
+		capabilityGrants?: GrantedCapabilityRecord[]
+		capabilityRejections?: RejectedCapabilityRecord[]
+	}
+	if (decision.addAccounts.length > 0) next.accounts = [...new Set([...(next.accounts ?? []), ...decision.addAccounts])]
+	if (Object.keys(decision.aliasPatch).length > 0) next.accountAliases = { ...next.accountAliases, ...decision.aliasPatch }
+	const replaceSet = new Set(decision.replaceTypes)
+	next.capabilityGrants = [...(next.capabilityGrants ?? []).filter((g) => !replaceSet.has(g.capability.type)), ...decision.grantRecords]
+	const touched = new Set<string>([...decision.approvedTypes, ...decision.rejectedTypes])
+	next.capabilityRejections = [
+		...(next.capabilityRejections ?? []).filter((r) => !touched.has(r.capabilityType)),
+		...decision.rejectedTypes.map((t) => ({ capabilityType: t, rejectedAt: Date.now() })),
+	]
+	return next
+}
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { LogLevel, type ILogger } from "@nulo/wallet-core/logger"
 
@@ -66,6 +88,19 @@ function makeSessionWriter(initial: IDappSessionRef) {
 		setCapabilityRejections: async (_id, rejections) => {
 			calls.setRejections.push(rejections)
 			session = { ...session, capabilityRejections: rejections } as IDappSessionRef
+			return session
+		},
+		applyCapabilityDecision: async (_id, decision) => {
+			session = applyDecisionTo(session, decision)
+			// Mirror the merged result onto the legacy call trackers so tests that
+			// assert the final grants/rejections keep working post-B-14. Only record a
+			// grant write when the decision actually changes grants — a pure-reject
+			// (no approvals) leaves grants untouched, matching the old flow that called
+			// setCapabilityRejections only.
+			if (decision.grantRecords.length > 0 || decision.replaceTypes.length > 0) {
+				calls.setGrants.push(session.capabilityGrants ?? [])
+			}
+			calls.setRejections.push(session.capabilityRejections ?? [])
 			return session
 		},
 	}
@@ -137,6 +172,34 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 		await expect(dispatcher.dispatch("requestCapabilities", [manifest], ctx)).rejects.toThrow()
 
 		expect(calls.setGrants).toHaveLength(0)
+	})
+
+	test("(B-14 PIN) concurrent approvals of different types both survive (reacquire-latest, no clobber)", async () => {
+		const { writer, calls } = makeSessionWriter(makeSession())
+		let resolveA!: () => void
+		const gateA = new Promise<void>((r) => (resolveA = r))
+		let n = 0
+		const dispatcher = makeDispatcher(writer, async () => {
+			n += 1
+			if (n === 1) {
+				await gateA
+				return { granted: [{ type: "data" }] } as CapabilityResult
+			}
+			return { granted: [{ type: "transaction", scope: [{ contract: "*", function: "*" }] }] } as CapabilityResult
+		})
+
+		// A snapshots the empty session then parks in its popup.
+		const pA = dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "data" }] }], ctx)
+		await new Promise((r) => setTimeout(r, 0))
+		// B snapshots the SAME empty session, approves transaction, and writes.
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [{ type: "transaction" }] }], ctx)
+		// A resumes and writes — under B-14 it reacquires B's committed row and merges,
+		// rather than clobbering it with a grant list computed from the stale snapshot.
+		resolveA()
+		await pA
+
+		const finalGrants = calls.setGrants.at(-1) ?? []
+		expect(finalGrants.map((g) => g.capability.type).sort()).toEqual(["data", "transaction"])
 	})
 
 	test("merge: keeps unrelated existing rejections", async () => {
@@ -319,6 +382,7 @@ function makeGetAccountsDispatcher(opts: {
 		setAccountAliases: async () => opts.session,
 		setCapabilityGrants: async () => opts.session,
 		setCapabilityRejections: async () => opts.session,
+		applyCapabilityDecision: async (_id, decision) => applyDecisionTo(opts.session, decision),
 	}
 	const network: INetworkRef = { id: "net-0", chainId: 0 }
 	const networkReader: INetworkReader = { getNetworks: async () => [network] }
@@ -352,6 +416,7 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 			setAccountAliases: async () => null as unknown as IDappSessionRef,
 			setCapabilityGrants: async () => null as unknown as IDappSessionRef,
 			setCapabilityRejections: async () => null as unknown as IDappSessionRef,
+			applyCapabilityDecision: async () => null as unknown as IDappSessionRef,
 		}
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
 		const networkReader: INetworkReader = { getNetworks: async () => [network] }
@@ -1186,6 +1251,7 @@ describe("F-006: network-only methods fail-closed on missing session (Phase 3)",
 			setAccountAliases: async () => null as unknown as IDappSessionRef,
 			setCapabilityGrants: async () => null as unknown as IDappSessionRef,
 			setCapabilityRejections: async () => null as unknown as IDappSessionRef,
+			applyCapabilityDecision: async () => null as unknown as IDappSessionRef,
 		}
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
 		const networkReader: INetworkReader = { getNetworks: async () => [network] }
@@ -1243,6 +1309,10 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 			},
 			setCapabilityRejections: async (_id, rejections) => {
 				session = { ...(session as IDappSessionRef), capabilityRejections: rejections } as IDappSessionRef
+				return session
+			},
+			applyCapabilityDecision: async (_id, decision) => {
+				session = applyDecisionTo(session as IDappSessionRef, decision)
 				return session
 			},
 		}
@@ -1885,6 +1955,7 @@ describe("dispatcher — arg guards: order, tolerance, batch-leg validation", ()
 			setAccountAliases: async () => session as IDappSessionRef,
 			setCapabilityGrants: async () => session as IDappSessionRef,
 			setCapabilityRejections: async () => session as IDappSessionRef,
+			applyCapabilityDecision: async (_id, decision) => applyDecisionTo(session as IDappSessionRef, decision),
 		}
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
