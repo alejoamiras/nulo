@@ -7,7 +7,7 @@
  * entry points the producers use and assert the active view never moves.
  */
 
-import type { ActivityScope } from "@nulo/wallet-core/activity"
+import { type ActivityScope, activityScopeKey } from "@nulo/wallet-core/activity"
 import { createPinia, setActivePinia } from "pinia"
 import { beforeEach, describe, expect, test } from "vitest"
 import { useActivityStore } from "./activity.store"
@@ -317,5 +317,46 @@ describe("activity store — lifetime", () => {
 
 		expect(store._slices.size).toBeLessThanOrEqual(33)
 		expect(store.transactions.map((t) => t.hash)).toEqual(["0xkeep"])
+	})
+})
+
+describe("activity store — B-29 eviction fences", () => {
+	beforeEach(() => {
+		setActivePinia(createPinia())
+	})
+
+	const floodScope = (i: number): ActivityScope => ({ profileId: "p1", networkId: "n1", chainId: 1, accountAddress: `0xflood${i}` })
+
+	test("(B-29a PIN) a slice with unresolved awaiting placeholders survives LRU eviction", () => {
+		const store = useActivityStore()
+		const hot: ActivityScope = { profileId: "p1", networkId: "n1", chainId: 1, accountAddress: "0xhot" }
+		// A live, unresolved optimistic send — no durable backing.
+		store.addAwaiting(hot, { id: "await-1", account: "0xhot", contract: "0xtoken", destination: "0xdest" })
+
+		// Flood the cache well past the cap with OTHER scopes, all created after the
+		// hot slice so timestamp-based LRU would target the hot one first.
+		for (let i = 0; i < 40; i++) store.ingestTransaction(tx(floodScope(i), `0xtx${i}`), floodScope(i))
+
+		const key = activityScopeKey(hot)
+		expect(store._slices.get(key)).toBeDefined()
+		expect(store._slices.get(key)?.awaiting.some((a) => a.id === "await-1")).toBe(true)
+	})
+
+	test("(B-29b PIN) eviction keeps the mutation fence so a pre-eviction fetch can't ABA-revert a live tx", () => {
+		const store = useActivityStore()
+		const target: ActivityScope = { profileId: "p1", networkId: "n1", chainId: 1, accountAddress: "0xtarget" }
+
+		// A fetch captures the version while the scope is fresh.
+		const captured = store.mutationVersionFor(target)
+		// A live transaction advances the scope's version after the capture.
+		store.ingestTransaction(tx(target, "0xlive", { updatedAt: 5 }), target)
+		// The scope is then evicted (flood past the cap) — under the bug this deletes
+		// its version, letting a later recreation reset the fence back to the captured value.
+		for (let i = 0; i < 40; i++) store.ingestTransaction(tx(floodScope(i), `0xtx${i}`), floodScope(i))
+
+		// The pre-live-event fetch resolves. It MUST be rejected — accepting it would
+		// revert the live "0xlive" transaction that arrived after the capture.
+		const accepted = store.setTransactions(target, [tx(target, "0xstale", { updatedAt: 1 })], captured)
+		expect(accepted).toBe(false)
 	})
 })

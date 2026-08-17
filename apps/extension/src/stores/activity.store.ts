@@ -116,9 +116,20 @@ export const useActivityStore = defineStore("activity", () => {
 	 * invalidate anything.
 	 */
 	const mutationVersion = shallowRef(new Map<string, number>())
+	/**
+	 * Strictly-increasing, store-lifetime sequence. A mutation version is drawn
+	 * from it and NEVER reused, so a fetch's captured version can't recur for a
+	 * scope that was evicted and later recreated (the ABA that would let a stale
+	 * fetch silently revert a live transaction). Per-scope entries may be dropped
+	 * for privacy (clear*) or kept across a cache eviction; either way the next
+	 * mutation draws a fresh, higher value, so no captured version is ever matched
+	 * by a different state.
+	 */
+	let mutationSeq = 0
 
 	function bumpMutation(key: string): void {
-		mutationVersion.value.set(key, (mutationVersion.value.get(key) ?? 0) + 1)
+		mutationSeq += 1
+		mutationVersion.value.set(key, mutationSeq)
 	}
 
 	/** The mutation count a fetch should carry, captured before it awaits. */
@@ -161,12 +172,19 @@ export const useActivityStore = defineStore("activity", () => {
 		if (slices.value.size <= MAX_CACHED_SLICES) return
 		const evictable = [...slices.value.entries()]
 			.filter(([key]) => key !== activeKey.value)
+			// A slice holding unresolved optimistic placeholders is live work, not a
+			// cold cache entry: evicting it would silently drop an AwaitingTx that has
+			// no durable backing (mirrors balances.store's forcedGasPending exemption).
+			.filter(([, slice]) => slice.awaiting.length === 0)
 			.sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt)
 		// Dropping an inactive slice only drops a cache: the rows are durable and
 		// the scope re-populates from storage the next time it is activated.
 		for (const [key] of evictable.slice(0, slices.value.size - MAX_CACHED_SLICES)) {
 			slices.value.delete(key)
-			mutationVersion.value.delete(key)
+			// Keep the mutation version: eviction is a cache drop, and resetting the
+			// fence would let a pre-eviction fetch's captured version recur once the
+			// scope is recreated (ABA), silently reverting a live transaction that
+			// arrived after the capture. The map is bounded by the real scope count.
 		}
 	}
 
