@@ -85,8 +85,12 @@ async function handleCopy() {
 // decisions: the first closes this prompt (PopupManager then dequeues the NEXT
 // one), and the second's `emit("onClose")` then closes THAT next prompt the user
 // never decided on. The latch drops re-entry while a decision is in flight; the
-// key guard below is the second line of defense.
+// key guard below is the second line of defense. `submitGeneration` is an owner
+// token: a decision only clears the latch it still owns, so a slow prior-prompt
+// handler settling AFTER this component was reused for the next prompt can't
+// unlock the new one (the re-open bumps the generation).
 const isSubmitting = ref(false)
+let submitGeneration = 0
 
 // The identifying triple of the CURRENTLY-displayed prompt. Captured at handler
 // entry and re-checked before `emit("onClose")` so a decision that completes
@@ -100,6 +104,7 @@ function payloadKey() {
 async function handleAllow() {
 	if (isSubmitting.value) return
 	isSubmitting.value = true
+	const myGen = ++submitGeneration
 	// B-28: capture the label + key BEFORE awaiting. The active identity can
 	// switch mid-RPC, reassigning `cacheStore.incomingTrust`, which would make
 	// `tokenSymbol.value` resolve against the NEXT payload.
@@ -119,7 +124,7 @@ async function handleAllow() {
 	} catch {
 		openToast({ label: "Couldn't update trust state", icon: "warning" })
 	} finally {
-		isSubmitting.value = false
+		if (submitGeneration === myGen) isSubmitting.value = false
 	}
 	if (payloadKey() === key) emit("onClose")
 }
@@ -127,6 +132,7 @@ async function handleAllow() {
 async function handleReject() {
 	if (isSubmitting.value) return
 	isSubmitting.value = true
+	const myGen = ++submitGeneration
 	const symbol = tokenSymbol.value
 	const key = payloadKey()
 	try {
@@ -137,7 +143,7 @@ async function handleReject() {
 	} catch {
 		openToast({ label: "Couldn't update trust state", icon: "warning" })
 	} finally {
-		isSubmitting.value = false
+		if (submitGeneration === myGen) isSubmitting.value = false
 	}
 	if (payloadKey() === key) emit("onClose")
 }
@@ -154,8 +160,10 @@ watch(
 			expanded.value = false
 			return
 		}
-		// Fresh prompt (the component instance is reused across the queue) — clear
-		// any latch left set by the previous decision's in-flight submit.
+		// Fresh prompt (the component instance is reused across the queue) — bump
+		// the owner token so a still-pending previous submit's `finally` can't clear
+		// THIS prompt's latch, then clear it for the new prompt.
+		submitGeneration++
 		isSubmitting.value = false
 		await nextTick()
 		expandToggleRef.value?.focus()

@@ -257,6 +257,11 @@ function disconnectExecution() {
 	executionDisconnected = true
 	executionService.disconnect()
 }
+// While a submit is in flight, teardown is OWNED by executeTransfer's `.finally`
+// — the page navigates away immediately after submitting, so disconnecting in
+// onBeforeUnmount would reject the still-pending executeTransfer RPC and surface
+// a false "transaction not sent" for a tx the SW is actually executing.
+let submitInFlight = false
 
 // Per-mount instance id so the in-app log viewer can pin which Send
 // page mount initiated each estimate / submit. Helps diagnose
@@ -347,6 +352,7 @@ const handleSend = async () => {
 		contract,
 	})
 
+	submitInFlight = true
 	executionService
 		.executeTransfer(...transferArgs)
 		.then(() => {
@@ -365,6 +371,7 @@ const handleSend = async () => {
 			console.error("[send] executeTransfer failed:", err)
 		})
 		.finally(() => {
+			submitInFlight = false
 			disconnectExecution()
 		})
 
@@ -506,7 +513,9 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
-	disconnectExecution()
+	// Only when NO submit is in flight — otherwise executeTransfer's `.finally`
+	// owns the disconnect, and tearing down here would abort the pending RPC.
+	if (!submitInFlight) disconnectExecution()
 
 	cancelFeeEstimate()
 

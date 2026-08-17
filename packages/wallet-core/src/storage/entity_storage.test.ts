@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "../testing/fake-browser-api"
 import { EntityStorage } from "./entity_storage"
 
+/** Drain the compare-and-delete's two async hops (re-read then conditional remove). */
+const settle = () => new Promise((r) => setTimeout(r, 0))
+
 /**
  * Contract tests for `EntityStorage`.
  *
@@ -97,17 +100,17 @@ describe("EntityStorage", () => {
 			errorSpy.mockRestore()
 		})
 
-		test("(B-23) get of a malformed row returns undefined and RETAINS it (no read-path delete)", async () => {
+		test("(B-23) an UNCHANGED malformed row is removed via compare-and-delete", async () => {
 			await api.storage.local.set({ "users@bad": "{not valid json" })
 			const removeSpy = vi.spyOn(api.storage.local, "remove")
 			expect(await storage.get("bad")).toBeUndefined()
 			expect(errorSpy).toHaveBeenCalledTimes(1)
 			expect(errorSpy.mock.calls[0]?.[0]).toContain("users@bad")
-			await Promise.resolve()
-			// The read path must NEVER delete-by-id (it would race a concurrent valid
-			// write). The malformed row is retained for a serialized repair path.
-			expect(removeSpy).not.toHaveBeenCalled()
-			expect(await storage.contains("bad")).toBe(true)
+			await settle()
+			// Re-read saw the same unreadable bytes → delete-by-id (keeps the
+			// incidental cleanup profile purges rely on).
+			expect(removeSpy).toHaveBeenCalledWith("users@bad")
+			expect(await storage.contains("bad")).toBe(false)
 			removeSpy.mockRestore()
 		})
 
@@ -133,37 +136,44 @@ describe("EntityStorage", () => {
 			expect(errorSpy).toHaveBeenCalledTimes(1)
 		})
 
-		test("(B-23) multiple malformed rows are RETAINED (not deleted); valid rows untouched", async () => {
+		test("(B-23) multiple UNCHANGED malformed rows are removed; valid rows untouched", async () => {
 			await storage.set("alice", { name: "Alice", age: 30 })
 			await api.storage.local.set({ "users@bad1": "{", "users@bad2": "]" })
-			const removeSpy = vi.spyOn(api.storage.local, "remove")
 
 			const values = await storage.getValues()
 			expect(values).toEqual([{ name: "Alice", age: 30 }])
 			expect(errorSpy).toHaveBeenCalledTimes(2)
-			await Promise.resolve()
-			expect(removeSpy).not.toHaveBeenCalled()
-			expect(await storage.contains("bad1")).toBe(true)
-			expect(await storage.contains("bad2")).toBe(true)
-			removeSpy.mockRestore()
+			await settle()
+			expect(await storage.contains("bad1")).toBe(false)
+			expect(await storage.contains("bad2")).toBe(false)
+			expect(await storage.contains("alice")).toBe(true) // valid row untouched
 		})
 
-		test("(B-23) a valid write to a key survives a prior malformed read of it", async () => {
-			// The read-path delete used to destroy a concurrent valid replacement; with
-			// no read-path delete, a valid write after a malformed read is preserved.
+		test("(B-23) compare-and-delete does NOT remove a row REPLACED with valid JSON before its re-read", async () => {
 			await api.storage.local.set({ "users@a": "{malformed" })
-			expect(await storage.get("a")).toBeUndefined() // hidden, NOT deleted
-			await storage.set("a", { name: "Anna", age: 1 })
-			expect(await storage.get("a")).toEqual({ name: "Anna", age: 1 })
+			const removeSpy = vi.spyOn(api.storage.local, "remove")
+			// The finding's race: a concurrent set() replaces the malformed row with
+			// valid JSON between our decode snapshot and the delete. Model it by
+			// having the compare-and-delete's RE-READ observe the valid replacement.
+			let getCalls = 0
+			const validJson = JSON.stringify({ name: "Anna", age: 1 })
+			vi.spyOn(api.storage.local, "get").mockImplementation(async () => ({
+				"users@a": ++getCalls === 1 ? "{malformed" : validJson,
+			}))
+
+			expect(await storage.get("a")).toBeUndefined() // stale malformed decode
+			await settle()
+			// The re-read saw valid JSON → the replacement is left intact (pre-fix the
+			// blind delete destroyed it).
+			expect(removeSpy).not.toHaveBeenCalled()
 		})
 	})
 
 	/**
-	 * Injected boundary codec. Both JSON-SYNTAX failure and CODEC-VALIDATION
-	 * failure now KEEP the row (return undefined, never delete-by-id on the read
-	 * path — B-23: a fire-and-forget read-path delete raced a concurrent valid
-	 * write). Guards the mega-deep trap where a stricter codec turns a
-	 * valid-but-drifted row into permanent loss.
+	 * Injected boundary codec: the deliberate split between JSON-SYNTAX failure
+	 * (drop via B-23 compare-and-delete) and CODEC-VALIDATION failure (KEEP the
+	 * row — never delete present-but-unreadable data). Guards the mega-deep trap
+	 * where a stricter codec turns a valid-but-drifted row into permanent loss.
 	 */
 	describe("injected codec (validation split)", () => {
 		let errorSpy: ReturnType<typeof vi.spyOn>
@@ -218,14 +228,15 @@ describe("EntityStorage", () => {
 			removeSpy.mockRestore()
 		})
 
-		test("(B-23) JSON-SYNTAX failure now KEEPS the row too (no read-path delete), like validation failure", async () => {
+		test("(B-23) JSON-SYNTAX failure removes an UNCHANGED row (compare-and-delete); validation failure KEEPS", async () => {
 			const removeSpy = vi.spyOn(api.storage.local, "remove")
 			const s = new EntityStorage<User>("users", api.storage.local, userParse)
 			await api.storage.local.set({ "users@corrupt": "{not json" })
 			expect(await s.get("corrupt")).toBeUndefined()
-			await Promise.resolve()
-			expect(removeSpy).not.toHaveBeenCalled()
-			expect(await s.contains("corrupt")).toBe(true)
+			await settle()
+			// Syntax failure on an unchanged row IS dropped (unlike a validation failure).
+			expect(removeSpy).toHaveBeenCalledWith("users@corrupt")
+			expect(await s.contains("corrupt")).toBe(false)
 			removeSpy.mockRestore()
 		})
 

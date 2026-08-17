@@ -32,9 +32,10 @@ export class EntityStorage<T> {
 	 * `parse` is an OPTIONAL boundary codec: `(raw: unknown) => T` (e.g. a zod
 	 * schema's `parse`). When omitted, reads keep the legacy `JSON.parse(...) as T`
 	 * behavior (no validation). When provided, every read validates the parsed
-	 * JSON. Both JSON-SYNTAX failure and CODEC-VALIDATION failure KEEP the row
-	 * (return undefined; the read path never deletes — see `decodeRow`).
-	 * wallet-core carries no zod itself; the schema is injected from the app layer.
+	 * JSON — see `decodeRow` for the deliberate split between JSON-SYNTAX failure
+	 * (compare-and-delete: drop only if still the same unreadable bytes) and
+	 * CODEC-VALIDATION failure (KEEP, never drop). wallet-core carries no zod
+	 * itself; the schema is injected from the app layer.
 	 */
 	public constructor(root: string, area: MinimalStorageArea, parse?: (raw: unknown) => T) {
 		this.root = root
@@ -43,20 +44,20 @@ export class EntityStorage<T> {
 	}
 
 	/**
-	 * Decode a raw storage value. Both failure modes KEEP the row (return
-	 * undefined = "present but unreadable"); the read path NEVER deletes by id.
+	 * Decode a raw storage value. Two failure modes, DELIBERATELY different:
 	 *
 	 *   - JSON-SYNTAX failure (`JSON.parse` throws — half-written mutation,
-	 *     genuine corruption): log + KEEP. B-23: the old fire-and-forget `remove`
-	 *     here raced a concurrent valid write and could destroy the newer value,
-	 *     and the storage API has no atomic compare-and-delete — so deletion of a
-	 *     genuinely-dead row is left to an explicitly serialized repair path.
+	 *     genuine corruption): the byte is unrecoverable, so drop it — but via a
+	 *     COMPARE-AND-DELETE (B-23), re-reading the key and removing only if it is
+	 *     still this same unreadable value, so a concurrent `set()` that replaced
+	 *     it with valid JSON isn't destroyed. Returns undefined.
 	 *   - CODEC-VALIDATION failure (`parse` throws — the JSON is well-formed but
 	 *     doesn't match the schema, e.g. a forward-incompatible shape the app
-	 *     itself wrote): log + KEEP. Silently dropping a present-but-unreadable
-	 *     row turns a recoverable value into permanent data loss — the opposite of
-	 *     what a codec should do; a future migration / repair path can still see
-	 *     it. The write→read round-trip corpus tests guard against the codec
+	 *     itself wrote): we must NEVER delete. Silently dropping a present-but-
+	 *     unreadable row turns a recoverable value into permanent data loss — the
+	 *     opposite of what a codec should do. Log, KEEP the row, return undefined
+	 *     ("present but unreadable"); a future migration / repair path can still
+	 *     see it. The write→read round-trip corpus tests guard against the codec
 	 *     rejecting a shape the app actually produces.
 	 */
 	private decodeRow(fullKey: string, raw: unknown): T | undefined {
@@ -66,17 +67,28 @@ export class EntityStorage<T> {
 		} catch (err) {
 			const preview = typeof raw === "string" ? raw.slice(0, PARSE_FAILURE_PREVIEW_MAX) : String(raw)
 			const msg = err instanceof Error ? err.message : String(err)
-			// B-23: KEEP the malformed row, don't delete-by-id on the read path. The
-			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write:
-			// a `get()` reads a stale malformed snapshot, a concurrent `set()`
-			// overwrites the same key with valid JSON, then this delete lands on the
-			// NEW value it never observed — silent data loss. The storage API has no
-			// atomic compare-and-delete, so hide the unreadable row (return
-			// undefined) and leave deletion to an explicitly serialized repair path,
-			// exactly as the validation-failure branch below already does.
-			console.error(
-				`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload preview: ${preview}`,
-			)
+			console.error(`EntityStorage[${this.root}]: dropping malformed row "${fullKey}" — ${msg} — payload preview: ${preview}`)
+			// B-23: compare-and-delete. The old blind `remove(fullKey)` raced a
+			// concurrent valid write — get() reads a stale malformed snapshot, a
+			// concurrent set() overwrites the key with valid JSON, then the delete
+			// lands on the NEW value it never observed (silent data loss). Re-read
+			// the key immediately before removing and delete ONLY if it is STILL
+			// this same unreadable value; a set() that replaced it is left intact.
+			// This keeps the incidental cleanup that profile purges rely on (their
+			// liveRows()/getAll() reads used to drop malformed rows) while shrinking
+			// the delete window to the re-read→remove gap. The storage API has no
+			// atomic compare-and-delete, so a vanishingly-small residual TOCTOU
+			// remains — acceptable versus the prior full-snapshot-span blind delete.
+			void this.storage
+				.get(fullKey)
+				.then((fresh) => {
+					if (fresh[fullKey] !== raw) return // replaced (or already gone) — leave it
+					return this.storage.remove(fullKey)
+				})
+				.catch((removeErr) => {
+					const rmsg = removeErr instanceof Error ? removeErr.message : String(removeErr)
+					console.error(`EntityStorage[${this.root}]: failed to delete malformed row "${fullKey}" — ${rmsg}`)
+				})
 			return undefined
 		}
 		if (!this.parse) return parsed as T
@@ -151,7 +163,7 @@ export class EntityStorage<T> {
 	 * For maintenance paths (e.g. a profile-scoped purge) that MUST act on every
 	 * row regardless of validity and cannot trust the row's self-reported id. A row
 	 * whose stored value is itself unparseable JSON is skipped (there is nothing to
-	 * key a predicate off) — a serialized repair path, not the read path, cleans those.
+	 * key a predicate off) — those are handled by the compare-and-delete path on normal reads.
 	 */
 	public async rawEntries(): Promise<Array<[string, unknown]>> {
 		const path = `${this.root}@`

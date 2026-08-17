@@ -10,10 +10,10 @@
  * `tokenBalances` ARRAY, which this helper makes explicit.
  */
 
-/** A live token-balance event carries at least an owning account and an id. */
+/** A live token-balance event carries at least an owning account and a numeric id. */
 export interface TokenBalanceEvent {
 	account: string
-	id: string
+	id: number
 }
 
 /**

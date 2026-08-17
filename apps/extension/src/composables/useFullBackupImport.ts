@@ -343,6 +343,13 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 					await profileService.deleteProfile(profileId)
 					return true
 				} catch (err) {
+					// deleteProfile is commit-ambiguous: a prior attempt may have
+					// reserved/tombstoned the id before failing, so a retry sees
+					// "Invalid profile id". That means the orphan is already gone (or
+					// being removed) — treat it as a successful rollback, not a
+					// perpetual failure that would show a bogus "cleanup pending".
+					const msg = err instanceof Error ? err.message : String(err)
+					if (msg.includes("Invalid profile id")) return true
 					console.error(`[full-backup] rollback delete attempt ${attempt}/${ROLLBACK_MAX_ATTEMPTS} failed:`, err)
 				}
 			}

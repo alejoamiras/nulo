@@ -32,22 +32,34 @@ const displaceIdx = computed(() => {
 	return popupStore.len - popupStore.popups.select_profile?.order
 })
 
+// B-09: serialize switches — two quick taps on different rows would otherwise
+// both await `commitScopeChange` and race, with whichever's `refreshInFlight`
+// resolved first winning rather than the last tap. Drop re-entry while a switch
+// is in flight.
+const isSwitching = ref(false)
+
 const handleSelectProfile = async (profile) => {
-	// B-09: a profile switch changes the active scope exactly like an account or
-	// network switch, and a send in flight is still reading the current scope as
-	// it builds and proves. Route through the same guard the other scope-mutating
-	// call sites use (AccountsPopup, NewAccountPopup, …) instead of assigning
-	// `appStore.profile` directly, and persist the last-active id only once the
-	// switch is actually admitted.
-	const switched = await appStore.commitScopeChange(() => {
-		appStore.profile = profile
-	})
-	if (!switched) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
-		return
+	if (isSwitching.value) return
+	isSwitching.value = true
+	try {
+		// A profile switch changes the active scope exactly like an account or
+		// network switch, and a send in flight is still reading the current scope as
+		// it builds and proves. Route through the same guard the other scope-mutating
+		// call sites use (AccountsPopup, NewAccountPopup, …) instead of assigning
+		// `appStore.profile` directly, and persist the last-active id only once the
+		// switch is actually admitted.
+		const switched = await appStore.commitScopeChange(() => {
+			appStore.profile = profile
+		})
+		if (!switched) {
+			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			return
+		}
+		await setLastActiveProfileId(profile.id)
+		emit("onClose")
+	} finally {
+		isSwitching.value = false
 	}
-	await setLastActiveProfileId(profile.id)
-	emit("onClose")
 }
 
 const handleImportProfile = () => {

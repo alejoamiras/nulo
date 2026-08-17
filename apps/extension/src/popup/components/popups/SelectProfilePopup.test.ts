@@ -94,6 +94,29 @@ describe("SelectProfilePopup — scope-switch guard (B-09)", () => {
 		expect(w.emitted("onClose")?.length).toBe(1)
 	})
 
+	test("(B-09) a double-click switches once — the second is dropped by the submit latch", async () => {
+		// Hold the first commit in flight so the second click lands while it's still submitting.
+		let releaseCommit!: (v: boolean) => void
+		H.appStoreState.commitScopeChange.mockImplementationOnce(
+			(commit: () => void) =>
+				new Promise((resolve) => {
+					releaseCommit = (v: boolean) => {
+						if (v) commit()
+						resolve(v)
+					}
+				}),
+		)
+		const w = await mountOpen()
+		const row = w.find('[data-testid="select-profile-row"]')
+		await row.trigger("click") // first click → commit pending, latch set
+		await row.trigger("click") // second click → dropped by the latch
+		expect(H.appStoreState.commitScopeChange).toHaveBeenCalledTimes(1)
+
+		releaseCommit(true)
+		await flushPromises()
+		expect(w.emitted("onClose")?.length).toBe(1) // exactly one switch completed
+	})
+
 	test("refuses the switch when a send is in flight: no scope change, no persist, no close, toast shown", async () => {
 		H.appStoreState.blockSend = true
 		const w = await mountOpen()

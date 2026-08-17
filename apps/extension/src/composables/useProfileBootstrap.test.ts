@@ -198,6 +198,37 @@ describe("useProfileBootstrap", () => {
 		expect(AccountServiceClient).toHaveBeenCalledTimes(1)
 	})
 
+	test("(B-27) a superseded cross-profile bootstrap stops before running initAccount with stale state", async () => {
+		const p2 = { id: "prof-2", name: "Second", type: "password" as const } as never
+		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue(p2) // p2 wins
+
+		// P1's initNetworks hangs; P2's resolves — so P2 (the later activation)
+		// completes while P1 is still mid-init.
+		let releaseP1Networks!: () => void
+		netMock.getOrInitNetworks
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						releaseP1Networks = () => resolve([{ id: "n1", chainId: 1, kind: "testnet" }])
+					}),
+			)
+			.mockResolvedValue([{ id: "n2", chainId: 2, kind: "testnet" }])
+
+		const { bootstrapActiveProfile } = useProfileBootstrap()
+		const b1 = bootstrapActiveProfile(fakeProfile) // gen 1, hangs in initNetworks
+		await Promise.resolve()
+		await Promise.resolve()
+		const b2 = bootstrapActiveProfile(p2) // gen 2 — supersedes P1
+		await b2 // P2 completes: initNetworks + initAccount
+
+		releaseP1Networks() // P1's initNetworks resolves → superseded → aborts before initAccount
+		await b1
+
+		// Only P2 constructed an account client. The superseded P1 stopped at the
+		// fence and never ran initAccount with the now-stale profile/network.
+		expect(AccountServiceClient).toHaveBeenCalledTimes(1)
+	})
+
 	test("bootstrapActiveProfile flips isLogined to true and returns true when its profile stays active", async () => {
 		;(managers.profile.getActiveProfile as ReturnType<typeof vi.fn>).mockResolvedValue(fakeProfile)
 		const { bootstrapActiveProfile } = useProfileBootstrap()

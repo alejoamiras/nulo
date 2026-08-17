@@ -24,10 +24,21 @@ import { useAppStore } from "@/stores/app.store"
  * `initAccount` disconnect + REPLACE the shared `managers.network`/`.account`
  * clients; two concurrent runs for the same profile stomped each other — the
  * recovery bootstrap replaced a client the original was mid-use of, so the
- * original threw and mis-routed to "needs unlock". A second caller now joins
- * the in-flight run instead of starting its own.
+ * original threw and mis-routed to "needs unlock". A same-profile caller now
+ * joins the in-flight run instead of starting its own.
  */
 const inFlightBootstraps = new Map<string, Promise<void>>()
+
+/**
+ * B-27 (generation fence): per-id single-flight covers same-profile recovery,
+ * but a DIFFERENT profile activating mid-bootstrap (a rapid switch) would still
+ * run its own init and stomp the shared clients while the older run continues.
+ * Every new bootstrap bumps this counter; a run whose captured generation is no
+ * longer current stops before its next shared-state mutation, so the LATEST
+ * activation wins and a superseded one can't disconnect/replace the winner's
+ * clients or run `initAccount` with cross-profile network state.
+ */
+let bootstrapGeneration = 0
 
 export function useProfileBootstrap() {
 	const appStore = useAppStore()
@@ -81,9 +92,17 @@ export function useProfileBootstrap() {
 	const runBootstrapCore = (profileId: string): Promise<void> => {
 		const existing = inFlightBootstraps.get(profileId)
 		if (existing) return existing
+		// A new bootstrap supersedes any older in-flight one (of ANY profile).
+		const myGeneration = ++bootstrapGeneration
+		const superseded = () => bootstrapGeneration !== myGeneration
 		const run = (async () => {
 			await initNetworks()
+			// A newer activation started mid-init — stop before touching more shared
+			// state so we can't disconnect/replace the winner's clients or run
+			// initAccount with this (now-stale) profile's network.
+			if (superseded()) return
 			await initAccount()
+			if (superseded()) return
 			initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 			await appStore.syncTransactions()
 		})().finally(() => {
