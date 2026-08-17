@@ -80,6 +80,20 @@ export function isSupersededByAdopt(
 	)
 }
 
+/**
+ * B-17: the offscreen answers a health PING with PONG only once its PXE services
+ * are actually initialized — not merely when the document has loaded. A PONG
+ * returned during init let the SW (after an SW restart that left a mid-init
+ * document alive) adopt that document and dispatch a PXE RPC before `PxeService`
+ * existed — a missing-handler timeout instead of a clean readiness wait. The
+ * PING listener is still installed early; it just withholds PONG until services
+ * are ready, so `isOffscreenHealthy` treats a still-initializing document as
+ * not-yet-adoptable and the caller recreates + waits for READY.
+ */
+export function shouldRespondPong(message: unknown, servicesReady: boolean): boolean {
+	return message === OFFSCREEN_PING && servicesReady
+}
+
 const onOffscreenReady = (message: unknown) => {
 	if (message === OFFSCREEN_READY_MESSAGE) {
 		chrome.runtime.onMessage.removeListener(onOffscreenReady)
@@ -97,10 +111,36 @@ const onOffscreenTimeout = () => {
 	// branch sees a stale pass id and propagates instead of re-creating an
 	// untracked document (unguarded, that once produced a false-success pass).
 	passSeq += 1
-	// Kill the half-initialized offscreen so it doesn't become a ghost.
-	closeOffscreen().catch(() => {})
+	// B-17: kill the half-initialized offscreen through the serialized close tail
+	// so the next pass can join it (see `trackedClose`). The gate below rejects
+	// `ready`, which clears the single-flight gate (ensureInFlight) — so a
+	// successor pass can begin while this close is still in flight; without
+	// joining it, a late-landing `closeDocument()` here tears down the
+	// successor's freshly-created document.
+	void trackedClose()
 	rejectOffscreenPromise("Offscreen is not responding")
 	offscreenPromise = null
+}
+
+/** B-17: serialize EVERY offscreen close (timeout kill, zombie-adopt kill, and
+ *  the create-retry loading-race close) through one tail, and expose its latest
+ *  link as `pendingClose`. `closeDocument()`/`windows.remove()` act on the
+ *  singleton offscreen surface, so two closes that overlap in time can compose
+ *  destructively: a create-retry close that lands AFTER a successor pass created
+ *  a fresh document tears that document down. Serializing means closes settle in
+ *  order and a successor that joins `pendingClose` waits for ALL of them before
+ *  probing/creating. Identity-guarded so an earlier link settling doesn't null a
+ *  newer one. */
+let closeTail: Promise<void> = Promise.resolve()
+let pendingClose: Promise<void> | null = null
+function trackedClose(): Promise<void> {
+	const link = closeTail.then(() => closeOffscreen()).catch(() => {})
+	closeTail = link
+	pendingClose = link
+	void link.finally(() => {
+		if (pendingClose === link) pendingClose = null
+	})
+	return link
 }
 
 /** Monotonic create-pass fence. Each ensure pass captures `++passSeq`; the
@@ -210,7 +250,11 @@ async function createOffscreen(passId: number) {
 			// pass no longer tracks.
 			const msg = String(err)
 			if (passId === passSeq && (msg.includes("single offscreen document") || msg.includes("closed before fully loading"))) {
-				await closeOffscreen()
+				// B-17: route through the serialized close tail so this close composes
+				// with a concurrent timeout close instead of racing it — a successor
+				// joins the tail and can't create into a document this close then tears
+				// down out of order.
+				await trackedClose()
 				// The close suspends: re-check the fence so a timeout landing in
 				// the close window can't be followed by an untracked create.
 				if (passId !== passSeq) throw err
@@ -233,6 +277,16 @@ async function createOffscreen(passId: number) {
 	})
 	if (!win) {
 		throw new Error("Firefox offscreen fallback: chrome.windows.create resolved without a window")
+	}
+	// B-17: fence the window-handle assignment behind the pass id, mirroring the
+	// Chromium branch. If this pass was superseded while `chrome.windows.create`
+	// was pending (its ready-gate timed out and a successor pass is running),
+	// overwriting `firefoxOffscreenWindowId` would orphan the successor's live
+	// window (never closeable afterward). Instead close the orphan we just made
+	// and bail without clobbering the tracked handle or broadcasting adoption.
+	if (passId !== passSeq) {
+		if (win.id != null) await chrome.windows.remove(win.id).catch(() => {})
+		return
 	}
 	firefoxOffscreenWindowId = win.id ?? null
 	// F-10: notify any stale offscreen (a prior SW instance's window, leaked
@@ -290,13 +344,21 @@ export function ensureOffscreenRunning(): Promise<void> {
 }
 
 async function doEnsureOffscreenRunning() {
+	// B-17: join a timed-out predecessor's close before probing or creating.
+	// onOffscreenTimeout fences + closes but does NOT await the close, and the
+	// single-flight gate clears when its `ready` rejects — so without this a
+	// successor could probe/create while `closeDocument()` is still in flight and
+	// have its new document torn down by that late close.
+	if (pendingClose) await pendingClose
+
 	if (await isOffscreenAlreadyRunning()) {
 		// Offscreen exists — verify it's actually responsive
 		if (await isOffscreenHealthy()) {
 			return
 		}
-		// Zombie offscreen — kill it and recreate below
-		await closeOffscreen()
+		// Zombie offscreen — kill it and recreate below. Through the serialized
+		// tail (B-17) so it composes with any other in-flight close.
+		await trackedClose()
 	}
 
 	if (!offscreenPromise) {

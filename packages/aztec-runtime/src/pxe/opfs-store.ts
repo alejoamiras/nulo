@@ -43,6 +43,47 @@ export const PXE_DATA_SCHEMA_VERSION_PIN = 13
 /** The database name inside each per-chain pool directory (mirrors upstream's default). */
 const DB_NAME = "pxe_data"
 
+const OPEN_TIMEOUT_MS = 30_000
+
+/** A prior open for this chain-store dir timed out and its OPFS worker never
+ *  released its exclusive SAH-pool lock — OR another open is concurrently in
+ *  flight. Either way we refuse to start a SECOND worker (it would deadlock on
+ *  that lock). Recoverable only by restarting the offscreen document, which
+ *  tears the wedged worker down. Fail-closed + typed. */
+export class ChainStoreWedgedError extends Error {
+	public readonly isChainStoreWedged = true as const
+	public constructor(dir: string) {
+		super(
+			`openChainStore: an open for ${dir} is already in flight or a prior one wedged (its OPFS worker never released its lock). Refusing to start a second worker — restart the offscreen document to recover.`,
+		)
+	}
+}
+
+/** Internal marker distinguishing a 30s init timeout from the open itself
+ *  rejecting (e.g. a wrong store key). Not exported — callers see a plain Error. */
+class ChainStoreOpenTimeoutError extends Error {}
+
+type OpenState = "opening" | "abandoned" | "closing"
+/**
+ * B-07: at most ONE underlying `AztecSQLiteOPFSStore.open()` per chain-store dir
+ * at a time. The open's worker cannot be cancelled (there is no handle until it
+ * resolves, and no AbortSignal), so a timed-out open is QUARANTINED here rather
+ * than abandoned: a same-chain retry fails fast (`ChainStoreWedgedError`)
+ * instead of spawning a second worker that would deadlock on the first's
+ * exclusive OPFS SAH-pool lock. The abandoned open, if it ever resolves, is
+ * closed EXACTLY once and only THEN is the dir freed; a failed close keeps the
+ * entry poisoned (only an offscreen restart clears it). Keyed by the persisted
+ * `chainDataDir` (`(profileId, chainId)`, URL-independent) — the raw store open
+ * is single-flighted, NOT the RPC-derived `initStoreVersionStamp` step.
+ */
+const inFlightOpens = new Map<string, { state: OpenState }>()
+
+/** Free a dir's in-flight slot only if it still holds THIS entry (identity
+ *  guard: an earlier open settling must not clear a later open's slot). */
+function releaseOpenSlot(dir: string, entry: { state: OpenState }): void {
+	if (inFlightOpens.get(dir) === entry) inFlightOpens.delete(dir)
+}
+
 export interface OpenChainStoreOptions {
 	network: ChainCoordinates
 	/** The chain's rollup address — a redeploy (rollupVersion change) wipes THIS store only. */
@@ -57,6 +98,16 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 	if (storeKey.length !== 32) {
 		throw new Error(`openChainStore: storeKey must be 32 bytes (got ${storeKey.length})`)
 	}
+	const dir = chainDataDir(network)
+
+	// B-07: refuse to start a second worker while any open for this dir is in
+	// flight or quarantined. Service callers are already serialized by the chain
+	// WRITE guard, but this function is exported — reject concurrent consumers
+	// explicitly rather than relying on that contract.
+	if (inFlightOpens.has(dir)) {
+		throw new ChainStoreWedgedError(dir)
+	}
+
 	// Upstream TRANSFERS the key buffer to its worker (detaching it) — always hand over a copy so
 	// the provisioned per-profile key survives for the next chain's open.
 	const keyCopy = new Uint8Array(storeKey)
@@ -65,7 +116,10 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 	// holding the chain guard, and transitively wedge profile deletion. 30s is generous for a
 	// worker boot + wasm compile on any hardware; converting the silence into a loud error keeps
 	// the failure fail-closed AND recoverable.
-	const openPromise = AztecSQLiteOPFSStore.open(log, DB_NAME, false, chainDataDir(network), keyCopy)
+	const openPromise = AztecSQLiteOPFSStore.open(log, DB_NAME, false, dir, keyCopy)
+	const entry: { state: OpenState } = { state: "opening" }
+	inFlightOpens.set(dir, entry)
+
 	let timer: ReturnType<typeof setTimeout> | undefined
 	let store: AztecSQLiteOPFSStore
 	try {
@@ -73,27 +127,53 @@ export async function openChainStore({ network, rollupAddress, storeKey, log }: 
 			openPromise,
 			new Promise<never>((_, reject) => {
 				timer = setTimeout(
-					() => reject(new Error(`openChainStore: sqlite worker did not answer init within 30s for ${chainDataDir(network)}`)),
-					30_000,
+					() => reject(new ChainStoreOpenTimeoutError(`openChainStore: sqlite worker did not answer init within 30s for ${dir}`)),
+					OPEN_TIMEOUT_MS,
 				)
 			}),
 		])
 	} catch (err) {
-		// The timeout (or the open itself) rejected. If it was the timeout, `openPromise` may STILL
-		// resolve later with a live worker holding the exclusive SAH-pool lock that nothing else can
-		// release — close that abandoned store so it can't permanently wedge every later open of this
-		// dir (and block purge's removeEntry). A rejected openPromise is handled here too (no leak).
-		openPromise.then((s) => s.close().catch(() => {})).catch(() => {})
+		if (err instanceof ChainStoreOpenTimeoutError) {
+			// The open may STILL resolve later with a live worker holding the
+			// exclusive SAH-pool lock nothing else can release. QUARANTINE the dir
+			// (leave the entry in the map) so a retry fails fast instead of spawning
+			// a second contending worker. When/if the abandoned open settles, close
+			// it EXACTLY once and only then free the dir; a failed close keeps the
+			// entry poisoned — recoverable only by an offscreen restart.
+			entry.state = "abandoned"
+			void openPromise.then(
+				(s) => {
+					entry.state = "closing"
+					void s.close().then(
+						() => releaseOpenSlot(dir, entry),
+						() => {
+							// close failed → keep the poisoned entry; the worker still holds the lock.
+						},
+					)
+				},
+				() => releaseOpenSlot(dir, entry), // the abandoned open rejected late → its worker is gone; free the dir
+			)
+			throw err
+		}
+		// The open itself rejected (e.g. a wrong key) — upstream terminates its
+		// worker, so free the dir immediately for a clean retry.
+		releaseOpenSlot(dir, entry)
 		// A wrong/rotated store key surfaces as upstream's SqliteEncryptionError — map it to a typed,
 		// fail-closed error so callers never mistake it for corruption or an absent store.
 		if (err instanceof SqliteEncryptionError) {
-			throw new WrongStoreKeyError(`openChainStore: wrong store key for ${chainDataDir(network)} (${err.message})`)
+			throw new WrongStoreKeyError(`openChainStore: wrong store key for ${dir} (${err.message})`)
 		}
 		throw err
 	} finally {
 		clearTimeout(timer)
 	}
+
+	// Normal resolution: this caller owns the store — free the dir for the next open.
+	releaseOpenSlot(dir, entry)
 	try {
+		// NOT single-flighted: `rollupAddress` is RPC-derived, so sharing this step
+		// across callers could recreate the stale-URL hazard the runtime-level dedup
+		// was removed to avoid (chain-runtime.ts).
 		await initStoreVersionStamp(store, rollupAddress, log)
 	} catch (err) {
 		await store.close().catch(() => {})

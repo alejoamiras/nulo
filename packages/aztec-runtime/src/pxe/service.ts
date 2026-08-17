@@ -173,6 +173,15 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		return chainRegistryKey({ profileId, chainId })
 	}
 
+	/** Monotonically advance a chain's purge epoch. Any operation that captured
+	 * the prior value fails its post-await equality check in withPxeWrite/Read,
+	 * so it can't recreate the runtime/store for a chain that is being (or was)
+	 * purged. Called at both ends of clearChainState's destructive section. */
+	private bumpChainPurgeEpoch(profileId: string, chainId: number): void {
+		const k = this.chainKey(profileId, chainId)
+		this.chainPurgeEpochs.set(k, (this.chainPurgeEpochs.get(k) ?? 0) + 1)
+	}
+
 	private getChainGuard(profileId: string, chainId: number): ReadWriteGuard {
 		const k = this.chainKey(profileId, chainId)
 		let g = this.chainGuards.get(k)
@@ -634,13 +643,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				// with the profile (other chains share it); crypto-erase for the profile as a
 				// whole happens in clearProfileState. The IndexedDB delete is the LEGACY
 				// (rc.2-era) cleanup layer.
-				this.chainPurgeEpochs.set(
-					this.chainKey(profileId, chainId),
-					(this.chainPurgeEpochs.get(this.chainKey(profileId, chainId)) ?? 0) + 1,
-				)
+				// B-18: bump the purge epoch at BOTH ends of the destructive section.
+				// The opening bump fences ops that captured before the purge began;
+				// the closing bump (right before the guard releases) fences an op that
+				// entered DURING the 641-643 destruction window — it would have read
+				// the already-incremented value and otherwise passed the equality
+				// check in withPxeWrite/withPxeRead, resurrecting a chain whose row is
+				// gone. Only a genuinely-post-purge op captures the stable final value.
+				this.bumpChainPurgeEpoch(profileId, chainId)
 				await this.registry.dispose(profileId, chainId)
 				await removeChainStoreDir({ profileId, chainId })
 				await this.deleteDb(chainDataDir({ profileId, chainId }))
+				this.bumpChainPurgeEpoch(profileId, chainId)
 			})
 		})
 	}

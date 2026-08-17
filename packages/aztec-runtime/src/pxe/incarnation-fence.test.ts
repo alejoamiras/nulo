@@ -147,7 +147,7 @@ describe("incarnation fence (#281 D4)", () => {
 		await expect(service.clearProfileState("p1", "")).rejects.toThrow(/missing pxe generation/)
 	})
 
-	test("clearChainState bumps the purge epoch and fences an op whose capture predates it", async () => {
+	test("clearChainState bumps the purge epoch at BOTH ends (fences pre-purge and mid-destruction captures)", async () => {
 		const { service } = makeService()
 		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
 		const svc = service as unknown as {
@@ -158,23 +158,55 @@ describe("incarnation fence (#281 D4)", () => {
 		}
 		await svc.withPxeWrite("boot", net(GEN_1), async () => {})
 
-		// The purge bumps the per-chain epoch (concurrency audit MED #4).
+		// B-18: the purge bumps the per-chain epoch TWICE — once before the
+		// destructive section, once immediately before releasing the guard.
+		// A single bump (the pre-fix behavior) left a window: an op entering
+		// DURING destruction reads the already-incremented value and would pass
+		// the equality check. The closing bump closes it.
 		const key = svc.chainKey("p1", 31337)
 		const before = svc.chainPurgeEpochs.get(key) ?? 0
 		await service.clearChainState("p1", 31337)
-		expect(svc.chainPurgeEpochs.get(key) ?? 0).toBe(before + 1)
+		expect(svc.chainPurgeEpochs.get(key) ?? 0).toBe(before + 2)
 
 		// An op that captured the PRE-purge epoch is rejected at the write-path rebind rather
 		// than resurrecting the purged chain's runtime + store. withPxeWrite reads the epoch
 		// SYNCHRONOUSLY at entry (before its first await), so starting the op then bumping the
 		// epoch before its guard body runs models a concurrent purge landing mid-op.
 		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+		const captured = svc.chainPurgeEpochs.get(key) ?? 0
 		let ran = false
 		const stale = svc.withPxeWrite("stale", { ...net(GEN_1) }, async () => {
 			ran = true
 		})
-		svc.chainPurgeEpochs.set(key, before + 2) // concurrent purge advances the epoch after entry-read
+		svc.chainPurgeEpochs.set(key, captured + 1) // a later concurrent purge advances the epoch after entry-read
 		await expect(stale).rejects.toThrow(/purged mid-operation/)
+		expect(ran).toBe(false)
+	})
+
+	test("(B-18) an op that entered DURING destruction (captured only the opening bump) is fenced by the closing bump", async () => {
+		const { service } = makeService()
+		await service.provisionChainStoreKey("p1", KEY_B64, GEN_1)
+		const svc = service as unknown as {
+			withPxeWrite: (l: string, n: NetworkInfo, fn: () => Promise<void>) => Promise<void>
+			chainPurgeEpochs: Map<string, number>
+			chainKey: (p: string, c: number) => string
+		}
+		await svc.withPxeWrite("boot", net(GEN_1), async () => {})
+
+		// Model the mid-destruction window directly: the opening bump has landed
+		// (epoch = base+1), an op enters withPxeWrite and captures base+1
+		// synchronously, then the closing bump lands (epoch = base+2). The op must
+		// be fenced — with only ONE bump, base+1 would still equal the stored value
+		// and the op would resurrect the just-purged chain.
+		const key = svc.chainKey("p1", 31337)
+		const base = svc.chainPurgeEpochs.get(key) ?? 0
+		svc.chainPurgeEpochs.set(key, base + 1) // opening bump landed; destruction in progress
+		let ran = false
+		const midDestruction = svc.withPxeWrite("mid-destruction-op", { ...net(GEN_1) }, async () => {
+			ran = true
+		})
+		svc.chainPurgeEpochs.set(key, base + 2) // closing bump lands before the op's guard body runs
+		await expect(midDestruction).rejects.toThrow(/purged mid-operation/)
 		expect(ran).toBe(false)
 	})
 
