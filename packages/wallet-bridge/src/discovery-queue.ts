@@ -2,7 +2,27 @@ import type { BackgroundConnectionHandler, PendingDiscovery } from "@aztec/walle
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 
-const STALE_MS = 5 * 60 * 1000 // 5 minutes
+// B-16: bound discovery staleness to the SDK's discovery window, not an
+// arbitrary 5 minutes. The extension provider's DEFAULT_DISCOVERY_TIMEOUT_MS is
+// 60s — the dApp removes its DISCOVERY_RESPONSE listener at t=60s. Approving a
+// discovery past that window strands a half-open handshake the dApp can no
+// longer complete. 55s leaves a ~5s margin for the DISCOVERY_RESPONSE to be
+// scheduled and delivered before t=60s (the subsequent 2s ECDH exchange runs
+// over the already-transferred port, so it is not what the 60s bounds). This is
+// a policy value: a dApp may pass a shorter custom timeout, which the SDK does
+// not surface per-discovery, so it cannot be honored exactly — we align to the
+// documented default.
+export const DISCOVERY_STALE_MS = 55 * 1000 // 55 seconds — just inside the SDK's 60s discovery timeout
+
+/**
+ * True when `discovery` has aged past the SDK's discovery window and must be
+ * rejected rather than approved. MUST be re-checked immediately before EVERY
+ * approval (and before any durable session write), not only at drain-gate
+ * entry: an interactive approval popup can resolve after t=60s.
+ */
+export function isDiscoveryExpired(discovery: PendingDiscovery, now: number = Date.now()): boolean {
+	return now - discovery.timestamp > DISCOVERY_STALE_MS
+}
 
 // F-04: bound the locked-wallet discovery queue so a flooding dApp cannot grow
 // it without limit. A legitimate dApp needs at most a handful of concurrent
@@ -68,7 +88,6 @@ export class DiscoveryQueue {
 		this.queue.length = 0
 		this.updateBadge()
 
-		const now = Date.now()
 		for (let i = 0; i < snapshot.length; i++) {
 			const entry = snapshot[i]
 			const discovery = this.handler.getPendingDiscovery(entry.requestId)
@@ -82,7 +101,9 @@ export class DiscoveryQueue {
 				continue
 			}
 
-			if (now - discovery.timestamp > STALE_MS) {
+			// Re-read the clock per entry: processing an earlier discovery (which
+			// can await a popup) may itself push a later one past the window.
+			if (isDiscoveryExpired(discovery)) {
 				this.handler.rejectDiscovery(discovery.requestId)
 				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): ${discovery.origin}`)
 				continue

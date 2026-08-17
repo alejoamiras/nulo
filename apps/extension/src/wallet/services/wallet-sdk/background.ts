@@ -44,7 +44,7 @@ import type { DiscoveryParams } from "@/wallet/services/dapp-interaction/spec"
 import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/service"
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { type DispatchHooks, DiscoveryQueue, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
+import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
@@ -482,6 +482,21 @@ async function handleDiscovery(
 	discoveryQueue: DiscoveryQueue,
 	logger: ILogger,
 ): Promise<void> {
+	// B-16: reject an approval the dApp can no longer receive. The drain-gate
+	// staleness check is not enough — an interactive Allow/Deny popup (or a wait
+	// on another origin's popup) can resolve after the dApp's 60s discovery
+	// window closes. Re-check immediately before EVERY approval, and before the
+	// durable DappSession write, so a slow approval doesn't strand a half-open
+	// handshake or persist a session the dApp never learns about.
+	const rejectIfExpired = (): boolean => {
+		if (isDiscoveryExpired(discovery)) {
+			handler.rejectDiscovery(discovery.requestId)
+			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past the 60s discovery window): ${discovery.origin}`)
+			return true
+		}
+		return false
+	}
+
 	try {
 		// F-04: resolve chainId up-front — the locked-queue coalesce/cap and the
 		// popup caps below all key on `(origin,chainId)`, not just the
@@ -508,6 +523,7 @@ async function handleDiscovery(
 		// NOT silently auto-approve on mainnet (AUDIT plan A12).
 		const existingSession = await dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
 		if (existingSession) {
+			if (rejectIfExpired()) return
 			handler.approveDiscovery(discovery.requestId)
 			logger.log("wallet-sdk", LogLevel.Info, `Discovery auto-approved (existing session): ${discovery.origin} chain=${chainId}`)
 			return
@@ -535,6 +551,7 @@ async function handleDiscovery(
 			// approval the user never gave.
 			const settledSession = await dappSessionService.tryGetDappSessionByOriginAndChain(discovery.origin, chainId)
 			if (settledSession) {
+				if (rejectIfExpired()) return
 				handler.approveDiscovery(discovery.requestId)
 				logger.log(
 					"wallet-sdk",
@@ -593,6 +610,11 @@ async function handleDiscovery(
 				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: ${discovery.origin}`)
 				return
 			}
+
+			// B-16: the user may have taken longer than the dApp's 60s window to
+			// click Allow. Reject BEFORE the durable DappSession write so we never
+			// persist a session the dApp has already stopped waiting for.
+			if (rejectIfExpired()) return
 
 			// User approved — create a DappSession with empty accounts.
 			// Accounts will be shared later via the getAccounts authorization
