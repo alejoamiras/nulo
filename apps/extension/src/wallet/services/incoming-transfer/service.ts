@@ -714,40 +714,75 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 	 */
 	private async hydrateSchedulers(): Promise<void> {
 		this.bumpServiceEpoch()
-		// Clear existing schedulers (both arms); we re-register below.
+		const epochAtStart = this.serviceEpoch
+
+		// Build the desired scheduler set OFF-MAP first — the live maps are NOT
+		// touched until the single synchronous commit below, so a bail (a newer
+		// hydrate/clear/add bumped the epoch) leaves the existing schedulers running
+		// intact. Clearing at entry would strand them if this rebuild then bails.
+		const profile = await this.profileService.getActiveProfile()
+		// No active profile → the desired set is empty; still commit so a lock/logout
+		// tears the schedulers down.
+		const networks = profile ? await this.networkService.getNetworks() : []
+		const tokens = profile ? await this.tokenService.getTokensRaw(profile.id) : []
+
+		const noteDescriptors: { profileId: string; networkId: string; accountAddress: string; contracts: Set<string> }[] = []
+		const publicDescriptors: { profileId: string; networkId: string; contract: string }[] = []
+		if (profile) {
+			for (const network of networks) {
+				const tokensForNet = tokens.filter((t) => t.chainId === network.chainId)
+				if (tokensForNet.length === 0) continue
+				const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
+				const contracts = new Set(tokensForNet.map((t) => t.contract))
+				for (const account of accounts) {
+					noteDescriptors.push({
+						profileId: profile.id,
+						networkId: network.id,
+						accountAddress: account.address,
+						contracts: new Set(contracts),
+					})
+				}
+				// Public arm: one scheduler per (networkId, contract) — serves every account.
+				for (const contract of contracts) {
+					publicDescriptors.push({ profileId: profile.id, networkId: network.id, contract })
+				}
+			}
+		}
+
+		// A concurrent hydrate/clear/token-add (each bumps the epoch) since our entry
+		// owns the maps now — bail WITHOUT touching them: clearing would drop
+		// schedulers the newer op is responsible for, and installing our stale set
+		// would leak a poller under a dead profile/network/contract set.
+		if (this.serviceEpoch !== epochAtStart) return
+
+		// COMMIT (synchronous, no awaits): atomically REPLACE — tear down the old set
+		// then install the desired one. A bailed rebuild never reaches here.
 		for (const id of this.schedulers.values()) clearInterval(id)
 		this.schedulers.clear()
 		this.watchedContracts.clear()
 		for (const id of this.publicSchedulers.values()) clearInterval(id)
 		this.publicSchedulers.clear()
 		this.publicWatched.clear()
-
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) return
-		const networks = await this.networkService.getNetworks()
-		const tokens = await this.tokenService.getTokensRaw(profile.id)
-
-		for (const network of networks) {
-			const tokensForNet = tokens.filter((t) => t.chainId === network.chainId)
-			if (tokensForNet.length === 0) continue
-			const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
-			for (const account of accounts) {
-				const key = this.schedulerKey(network.id, account.address)
-				const contracts = new Set(tokensForNet.map((t) => t.contract))
-				this.watchedContracts.set(key, contracts)
-				this.startScheduler(profile.id, network.id, account.address)
-			}
-			// Public arm: one scheduler per (networkId, contract) — serves every account.
-			for (const contract of new Set(tokensForNet.map((t) => t.contract))) {
-				this.startPublicScheduler(profile.id, network.id, contract)
-			}
+		for (const d of noteDescriptors) {
+			this.watchedContracts.set(this.schedulerKey(d.networkId, d.accountAddress), d.contracts)
+			this.startScheduler(d.profileId, d.networkId, d.accountAddress)
+		}
+		for (const d of publicDescriptors) {
+			this.startPublicScheduler(d.profileId, d.networkId, d.contract)
 		}
 	}
 
 	private startScheduler(profileId: string, networkId: string, accountAddress: string): void {
 		const key = this.schedulerKey(networkId, accountAddress)
 		if (this.schedulers.has(key)) return
+		// The epoch this scheduler belongs to. A hydrate/clear bumps the epoch at its
+		// entry but only tears the old intervals down at its COMMIT — so between the
+		// two, an old interval can still fire. Bail its tick if the epoch has moved:
+		// otherwise the scan it starts would capture the NEW epoch and commit stale
+		// old-profile work under it.
+		const bornAtEpoch = this.serviceEpoch
 		const interval = setInterval(() => {
+			if (this.serviceEpoch !== bornAtEpoch) return
 			this.poll(profileId, networkId, accountAddress).catch((err) => {
 				this.logWarn(`Poll failed: ${getErrorMessage(err)}`)
 			})
@@ -769,7 +804,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		const key = this.publicSchedulerKey(networkId, contract)
 		this.publicWatched.set(key, { profileId, networkId, contract })
 		if (this.publicSchedulers.has(key)) return
+		// Same creation-epoch fence as the note arm: an old interval firing during a
+		// newer hydrate's construction window must not start a scan under the bumped epoch.
+		const bornAtEpoch = this.serviceEpoch
 		const interval = setInterval(() => {
+			if (this.serviceEpoch !== bornAtEpoch) return
 			this.pollPublic(key).catch((err) => this.logWarn(`Public poll failed: ${getErrorMessage(err)}`))
 		}, this.pollIntervalMs)
 		this.publicSchedulers.set(key, interval)
@@ -819,29 +858,22 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 		// register_token approved through the dapp-interaction modal. Both
 		// already require the user to confirm the contract address, so the
 		// first-receive trust popup that fires moments later is redundant
-		// friction. Flip trust→trusted BEFORE the per-account schedulers
-		// kick scans, so the first per-note CS reads trusted and persists
-		// records visible from the start (instead of hidden+pending).
-		// Idempotent: skip the write+emit when already trusted.
+		// friction. Flip trust→trusted BEFORE the rebuild kicks scans, so the
+		// first per-note CS reads trusted and persists records visible from the
+		// start (instead of hidden+pending). Idempotent: skip when already trusted.
 		await this.withServiceLock(async () => {
 			const current = await this.repo.getTrust(profile.id, network.id, token.contract)
 			if (current?.state === "trusted") return
 			await this._setTrustStateLocked(profile.id, network.id, token.contract, "trusted")
 		})
 
-		const accounts = await this.accountService.getAccounts(profile.id, network.chainId)
-		for (const account of accounts) {
-			const key = this.schedulerKey(network.id, account.address)
-			let contracts = this.watchedContracts.get(key)
-			if (!contracts) {
-				contracts = new Set()
-				this.watchedContracts.set(key, contracts)
-			}
-			contracts.add(token.contract)
-			this.startScheduler(profile.id, network.id, account.address)
-		}
-		// Public arm: one stream per (networkId, contract).
-		this.startPublicScheduler(profile.id, network.id, token.contract)
+		// Rebuild the WHOLE scheduler set from the current token set rather than
+		// incrementally grafting this one contract on. The token is already persisted,
+		// so the rebuild includes it; and because every rebuild reads the live set and
+		// hydrateSchedulers's epoch fence + atomic clear-then-install commit serialize
+		// them, this can't drop a concurrently-added token or a token the rebuild it
+		// races cleared (the lost updates a manual incremental install had).
+		await this.hydrateSchedulers()
 	}
 
 	private onTokenDeleted = async (token: TokenDeleted): Promise<void> => {

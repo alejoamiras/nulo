@@ -24,6 +24,8 @@ type TaskMock = {
 	completeTask: ReturnType<typeof vi.fn>
 	failTask: ReturnType<typeof vi.fn>
 	getTaskSync: ReturnType<typeof vi.fn>
+	hasTask: ReturnType<typeof vi.fn>
+	cancelTask: ReturnType<typeof vi.fn>
 }
 
 function makeTaskService(): TaskMock {
@@ -48,14 +50,33 @@ function makeTaskService(): TaskMock {
 		id,
 		finishedAt: finishedAt.get(id) ? Date.now() : undefined,
 	}))
+	// Real tasks exist by default; a profile-switch test flips this to model the
+	// wiped map (the pre-registered ids no longer resolve).
+	const hasTask = vi.fn().mockReturnValue(true)
+	const cancelTask = vi.fn().mockImplementation((id: string) => {
+		// Mirror the real TaskService: finishing an already-finished task throws.
+		if (finishedAt.get(id)) throw new Error(`Cannot finish already finished task ${id}`)
+		finishedAt.set(id, true)
+	})
 	return {
-		service: { createNewTask, startNewTask, startTask, completeTask, failTask, getTaskSync } as unknown as TaskService,
+		service: {
+			createNewTask,
+			startNewTask,
+			startTask,
+			completeTask,
+			failTask,
+			getTaskSync,
+			hasTask,
+			cancelTask,
+		} as unknown as TaskService,
 		createNewTask,
 		startNewTask,
 		startTask,
 		completeTask,
 		failTask,
 		getTaskSync,
+		hasTask,
+		cancelTask,
 	}
 }
 
@@ -133,6 +154,67 @@ describe("BalanceJobQueue", () => {
 		queue.enqueue(raw(1))
 		queue.enqueue(raw(1))
 		expect(tasks.createNewTask).toHaveBeenCalledTimes(1)
+	})
+
+	test("(B-04 PIN) a stale task id (profile switch cleared TaskService) does not jam the sync — batch still projects", async () => {
+		// enqueue mints a task + records pendingTasks[id]. A profile switch then
+		// clears TaskService's map, so the next tick's startTask(staleId) throws
+		// "Invalid task id" — which today escapes BEFORE the try/finally, dropping
+		// the whole batch AND leaving the dead pendingTasks entry so every future
+		// enqueue coalesces onto it (permanent jam). The fix mints a fresh task on
+		// that failure so the balance still projects.
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const { projector, calls } = makeProjector([])
+		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, { onBalanceUpdated: vi.fn() })
+
+		queue.enqueue(raw(42))
+		// Profile switch cleared the task map: the pre-registered id no longer
+		// resolves, and calling startTask on it would throw "Invalid task id".
+		tasks.hasTask.mockReturnValue(false)
+		tasks.startTask.mockImplementation(() => {
+			throw new Error("Invalid task id: cleared-on-profile-switch")
+		})
+
+		await queue.tick()
+
+		// The balance must STILL have been projected (synced) despite the stale task.
+		expect(calls.length).toBeGreaterThan(0)
+		expect(calls[0]?.some((b) => b.id === 42)).toBe(true)
+		// The fix detects the stale id via hasTask and mints fresh — it must NOT
+		// call startTask on the cleared id (which throws and drops the batch).
+		expect(tasks.startTask).not.toHaveBeenCalled()
+	})
+
+	test("(B-04 reset PIN) reset cancels the TaskService records it drops so none are orphaned", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		queue.enqueue(raw(1))
+		queue.enqueue(raw(2))
+		const droppedIds = [queue.getPendingTaskId(1), queue.getPendingTaskId(2)]
+
+		// On lock, TaskService keeps its map — dropping only our pointer would strand
+		// each record as a phantom "in-progress" task. reset must finish them.
+		queue.reset()
+
+		for (const id of droppedIds) expect(tasks.cancelTask).toHaveBeenCalledWith(id)
+		expect(queue.hasPendingTask(1)).toBe(false)
+		expect(queue.hasPendingTask(2)).toBe(false)
+	})
+
+	test("(B-04 cancel-race PIN) reset tolerates an already-finished task and still clears its pointer", () => {
+		const ticker = new FakeBackgroundTicker()
+		const tasks = makeTaskService()
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		queue.enqueue(raw(1))
+		const id = queue.getPendingTaskId(1)!
+		// The task finished (completed/failed) between enqueue and reset — cancel now
+		// throws "already finished". reset must swallow it AND still drop the pointer.
+		tasks.service.completeTask(id)
+
+		expect(() => queue.reset()).not.toThrow()
+		expect(queue.hasPendingTask(1)).toBe(false)
 	})
 
 	test("hasPendingTask / getPendingTaskId reflect the freshly-minted task (D4 causal-ack seam)", () => {

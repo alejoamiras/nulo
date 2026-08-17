@@ -2122,6 +2122,128 @@ describe("IncomingTransferService — lock-races (Phase 7 pins for the global se
 		expect(upsertSpy).not.toHaveBeenCalled()
 	})
 
+	test("(B-20 PIN) a profile switch during onTokenAdded fences out its stale scheduler install", async () => {
+		// onTokenAdded resolves the active profile, network, trust, and accounts across
+		// several awaits before installing per-account note schedulers + watching the new
+		// contract. A profile switch mid-flight bumps serviceEpoch (via hydrateSchedulers);
+		// the resumed add must NOT graft its contract onto the now-current scheduler set.
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+		await flushPromises()
+
+		const key = "n1|0xa"
+		const watched = (service as never as { watchedContracts: Map<string, Set<string>> }).watchedContracts
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract]) // bootstrap hydrate
+
+		// Defer the add's trust read so it parks (holding the service lock, which the
+		// lock-free hydrate path does not contend) right before the scheduler install.
+		const repo = (service as never as { repo: { getTrust: (...a: unknown[]) => Promise<unknown> } }).repo
+		let resolveTrust!: (v: unknown) => void
+		const getTrustSpy = vi.spyOn(repo, "getTrust").mockImplementation(() => new Promise((r) => (resolveTrust = r as never)))
+
+		const addPromise = tokenStub.onTokenAdded.invoke({
+			id: tokenB.id,
+			chainId: tokenB.chainId,
+			contract: tokenB.contract,
+			symbol: tokenB.symbol,
+			decimals: tokenB.decimals,
+			name: "Token B",
+		} as never)
+		await flushPromises()
+		expect(getTrustSpy).toHaveBeenCalled() // parked on the trust read
+
+		// Profile switch fires → hydrateSchedulers bumps the epoch (invalidating the
+		// in-flight add) and re-installs from current tokens only (tokenA).
+		await profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+
+		resolveTrust(undefined) // release the trust read; the add resumes
+		await addPromise
+		await flushPromises()
+
+		// The stale add must not have watched tokenB's contract on the live scheduler.
+		expect([...(watched.get(key) ?? [])]).not.toContain(tokenB.contract)
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract])
+	})
+
+	test("(B-20 lost-update PIN) a slow hydration can't overwrite a concurrent token-add's install", async () => {
+		const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		const tokenStub = makeTokenStub([tokenA])
+		const profileStub = makeProfileStub({ id: "p1" })
+		const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+		await flushPromises()
+
+		const key = "n1|0xa"
+		const watched = (service as never as { watchedContracts: Map<string, Set<string>> }).watchedContracts
+		expect([...(watched.get(key) ?? [])]).toEqual([tokenA.contract]) // bootstrap hydrate
+
+		// Make getAccounts deferrable via a resolver queue so hydration and the
+		// token-add each park in it independently.
+		const accountResolvers: ((v: unknown) => void)[] = []
+		accountStub.getAccounts.mockImplementation(() => new Promise((r) => accountResolvers.push(r as never)))
+
+		// Re-hydration starts (bumps epoch, snapshots tokens [A]) and parks in getAccounts.
+		void profileStub.onActiveProfileChanged.invoke()
+		await flushPromises()
+		expect(accountResolvers).toHaveLength(1)
+
+		// A token-add for a NEW contract fires while hydration is parked mid-fan-out.
+		tokenStub.getTokensRaw.mockResolvedValue([tokenA, tokenB])
+		void tokenStub.onTokenAdded.invoke({
+			id: tokenB.id,
+			chainId: tokenB.chainId,
+			contract: tokenB.contract,
+			symbol: tokenB.symbol,
+			decimals: tokenB.decimals,
+			name: "Token B",
+		} as never)
+		await flushPromises()
+		expect(accountResolvers.length).toBeGreaterThanOrEqual(2)
+
+		// Let the token-add finish first: it installs tokenB's contract on the account.
+		accountResolvers[1]([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		await flushPromises()
+
+		// Then let the SLOW hydration resume; its descriptor set predates the add.
+		accountResolvers[0]([{ profileId: "p1", chainId: 1, address: "0xa" }])
+		await flushPromises()
+
+		// Both must survive: the token-add rebuilds from the CURRENT set (A+B), and the
+		// bumped-behind slow hydration bails without clearing. Neither token is lost —
+		// an epoch-bump-then-incremental-install would have kept only B (A cleared).
+		expect([...(watched.get(key) ?? [])].sort()).toEqual([tokenA.contract, tokenB.contract].sort())
+	})
+
+	test("(B-20 stale-tick PIN) an old scheduler ticking during a hydration's construction window does not scan", async () => {
+		vi.useFakeTimers()
+		try {
+			const accountStub = makeAccountStub([{ profileId: "p1", chainId: 1, address: "0xa" }])
+			const tokenStub = makeTokenStub([tokenA])
+			const profileStub = makeProfileStub({ id: "p1" })
+			const { service } = await bootService({ profile: profileStub, network: network(), account: accountStub, token: tokenStub })
+			await vi.advanceTimersByTimeAsync(0) // drain the bootstrap hydrate
+
+			// Poll is what a scheduler tick calls; spy AFTER boot so only later ticks count.
+			const pollSpy = vi.spyOn(service as never as { poll: (...a: unknown[]) => Promise<void> }, "poll").mockResolvedValue(undefined)
+
+			// A re-hydration bumps the epoch and PARKS in construction (deferred getAccounts),
+			// so it hasn't committed (the old scheduler is not yet torn down).
+			accountStub.getAccounts.mockImplementation(() => new Promise(() => {}))
+			void profileStub.onActiveProfileChanged.invoke()
+			await vi.advanceTimersByTimeAsync(0)
+
+			// Fire the OLD scheduler's periodic tick (installed at the pre-bump epoch).
+			await vi.advanceTimersByTimeAsync(1_000_000)
+
+			// Its tick must bail on the creation-epoch guard: no scan under the bumped epoch.
+			expect(pollSpy).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("(LR4 concurrent onTransactionAdded same hash) → exactly one Delete emit", async () => {
 		// Two onTransactionAdded events for the same tx hash. The serviceLock
 		// serializes them: the first runs to completion (deletes record,

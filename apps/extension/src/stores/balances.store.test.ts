@@ -149,6 +149,41 @@ describe("balances store — raw-request reuse (timeout survivors)", () => {
 		expect(snap.gas.verified).toEqual({ publicFeeJuice: "2000", privateFeeJuice: null })
 		expect(mocks.getGasBalances).toHaveBeenCalledTimes(2)
 	})
+
+	// B-08 (audit 2026-08-16) claimed a slow pre-trigger ensure could clobber a
+	// settled forced refresh once forcedGasPending clears. It CANNOT: the forced
+	// run waits out the pre-trigger raw flight with the SAME INIT_FETCH_TIMEOUT_MS
+	// bound the ensure itself uses, and the ensure started strictly earlier — so
+	// the ensure's own withTimeout fires FIRST and takes it to the degraded path
+	// before the forced run's wait-out can expire and clear the pending counter.
+	// The window the finding needs (raw settles AFTER pending clears yet BEFORE the
+	// ensure times out) requires T_forced+20s < T_ensure+20s, i.e. T_forced <
+	// T_ensure — a contradiction. This is a NOT-REPRODUCED prove-attempt: the stale
+	// value is handed every chance to win and must not. (remediation.md → B-08)
+	it("(B-08 PROVE-ATTEMPT) a late stale pre-trigger ensure never overwrites a settled forced refresh", async () => {
+		vi.useFakeTimers()
+		const store = useBalancesStore()
+		const STALE = { publicFeeJuice: "1", privateFeeJuice: null }
+		const FRESH = { publicFeeJuice: "2000", privateFeeJuice: null }
+		let resolveStale!: (v: unknown) => void
+		mocks.getGasBalances.mockImplementationOnce(() => new Promise((r) => (resolveStale = r))).mockResolvedValue(FRESH)
+		const pending = store.ensure(SCOPE_A, { legs: ["gas"] }) // pre-trigger ensure, T≈0
+		await vi.advanceTimersByTimeAsync(5)
+		const forced = store.ensure(SCOPE_A, { legs: ["gas"], forceRefresh: true }) // settle-forced, T≈5
+		// Drive the forced wait-out to timeout; the ensure's own equal-bound timeout
+		// fires first and degrades it, then the forced run re-enters with FRESH.
+		await vi.advanceTimersByTimeAsync(INIT_FETCH_TIMEOUT_MS + 10)
+		await forced.catch(() => {})
+		// Only NOW settle the original slow RPC with the stale pre-settlement value —
+		// as late as possible, after the forced commit + pending-counter clear.
+		resolveStale(STALE)
+		await vi.advanceTimersByTimeAsync(50)
+		await pending.catch(() => {})
+		expect(store.entry(SCOPE_A)?.gas.verified).toEqual(FRESH)
+		// Non-vacuity: two RPCs prove the forced run waited out N and re-entered
+		// (it did NOT join N's flight), so FRESH is a genuine post-settle commit.
+		expect(mocks.getGasBalances).toHaveBeenCalledTimes(2)
+	})
 })
 
 describe("balances store — profile epoch fence", () => {

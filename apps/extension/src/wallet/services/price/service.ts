@@ -92,6 +92,11 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	 *  request on every popup connect, and successful fetches keep resetting
 	 *  the failure backoff. */
 	private lastCompletedFetchAt = 0
+	/** Serializes the cache-committing work of config flips so a rapid
+	 *  disable↔enable can't interleave `cache.delete()` with a fresh `cache.set()`
+	 *  (the last flip's work would otherwise race the prior flip's). The generation
+	 *  bump stays synchronous at flip time; only the storage/emit tail is chained. */
+	private configTransition: Promise<void> = Promise.resolve()
 
 	public constructor(logger: ILogger, browserApi?: BrowserApi, opts?: { fetchFn?: FetchLike; now?: () => number }) {
 		super(PRICE_SERVICE_NAME, logger)
@@ -202,24 +207,40 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 
 	private readonly onConfigUpdated = (prop: { key: string; value: unknown }): void => {
 		if (prop.key !== "showFiatValues") return
-		void (async () => {
-			if (prop.value === false) {
-				// Kill switch: no late response may repopulate the cache.
-				this.generation += 1
-				this.abortController?.abort()
-				this.inflight = undefined
-				await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
-				await this.cache.delete()
-				this.emit("onQuotesUpdated", {})
-			} else {
-				const gen = this.generation
-				const profile = await this.profileService.getActiveProfile()
-				if (profile) {
-					await this.ensureAlarm()
-					await this.refresh(gen).catch(() => {})
+		const enable = prop.value !== false
+		// Bump SYNCHRONOUSLY so an in-flight refresh from the prior state is
+		// invalidated immediately (its generation check now fails). Both directions
+		// bump — a flip is a flip.
+		this.generation += 1
+		const myGen = this.generation
+		if (!enable) {
+			// Neutralize any in-flight refresh SYNCHRONOUSLY (outside the chain, and
+			// even when this disable is later superseded): `refresh()` shares
+			// `this.inflight` BEFORE its generation check, so a following enable would
+			// otherwise adopt this stale run and never start a fresh fetch.
+			this.abortController?.abort()
+			this.inflight = undefined
+		}
+		// Chain the cache-committing tail so transitions run strictly one-at-a-time:
+		// a disable's cache.delete can never interleave with an enable's cache.set.
+		this.configTransition = this.configTransition
+			.then(async () => {
+				// A newer flip already superseded this one — the newest intent is the
+				// truth, so skip this transition's storage/emit work wholesale.
+				if (this.generation !== myGen) return
+				if (!enable) {
+					await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+					await this.cache.delete()
+					this.emit("onQuotesUpdated", {})
+				} else {
+					const profile = await this.profileService.getActiveProfile()
+					if (profile) {
+						await this.ensureAlarm()
+						await this.refresh(myGen).catch(() => {})
+					}
 				}
-			}
-		})().catch((err) => this.log(LogLevel.Warn, "config-change handling failed", getErrorMessage(err)))
+			})
+			.catch((err) => this.log(LogLevel.Warn, "config-change handling failed", getErrorMessage(err)))
 	}
 
 	// ── Internals ───────────────────────────────────────────────────────
@@ -276,10 +297,14 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	private refresh(gen = this.generation): Promise<PriceState> {
 		if (this.inflight) return this.inflight
 		if (gen !== this.generation) return Promise.resolve({})
-		this.inflight = this.doRefresh(gen).finally(() => {
-			this.inflight = undefined
+		const run = this.doRefresh(gen).finally(() => {
+			// Clear ONLY if we're still the current in-flight run: a kill-switch
+			// restart may have replaced `this.inflight` with a newer refresh, and
+			// clearing that would let a third caller start a duplicate fetch.
+			if (this.inflight === run) this.inflight = undefined
 		})
-		return this.inflight
+		this.inflight = run
+		return run
 	}
 
 	private async doRefresh(gen: number): Promise<PriceState> {
@@ -295,10 +320,16 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		const headers: Record<string, string> = apiKey ? { "x-cg-demo-api-key": apiKey } : {}
 
 		if (gen !== this.generation) return {}
-		this.abortController = new AbortController()
-		const timeout = setTimeout(() => this.abortController?.abort(), 10_000)
+		// Own the controller + timeout LOCALLY. A kill-switch restart installs a
+		// newer refresh's controller into `this.abortController`; a shared closure
+		// or an unconditional `finally` clear would then abort — or orphan — the
+		// wrong fetch. Only touch the shared field to publish ourselves and, in
+		// `finally`, to retract ourselves iff we're still the one published.
+		const controller = new AbortController()
+		this.abortController = controller
+		const timeout = setTimeout(() => controller.abort(), 10_000)
 		try {
-			const response = await this.fetchFn(url, { signal: this.abortController.signal, headers })
+			const response = await this.fetchFn(url, { signal: controller.signal, headers })
 			if (!response.ok) {
 				throw new Error(`price fetch failed: HTTP ${response.status}`)
 			}
@@ -314,11 +345,19 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			const merged = await this.mergeMonotonic(incoming)
 			if (gen !== this.generation) return {}
 			await this.cache.set(merged)
+			// A kill-switch flip DURING the cache write invalidates this run: don't
+			// reset the backoff, refresh the watermark, or re-emit for a dead
+			// generation (a stale success must not silence a newer disable's
+			// protections). Leave the cache to the owning generation — deleting here
+			// could wipe a newer refresh's fresh write; while disabled the row is
+			// never read (every reader gates on isEnabled).
+			if (gen !== this.generation) return {}
 			this.consecutiveFailures = 0
 			this.nextAllowedFetchAt = 0
 			this.lastCompletedFetchAt = this.now()
 
 			const usable = await this.readUsable()
+			if (gen !== this.generation) return {}
 			this.emit("onQuotesUpdated", usable)
 			return usable
 		} catch (error) {
@@ -331,7 +370,8 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 			return this.readUsable()
 		} finally {
 			clearTimeout(timeout)
-			this.abortController = undefined
+			// Retract only our own controller — a newer refresh may have published its own.
+			if (this.abortController === controller) this.abortController = undefined
 		}
 	}
 
