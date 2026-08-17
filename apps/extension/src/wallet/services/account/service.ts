@@ -9,7 +9,7 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { NetworkService } from "@/wallet/services/network/service"
 import { purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { array_max, hasIntersectionByKeys, Lock } from "@/wallet/utils"
+import { array_max, hasIntersectionByKeys, KeyedLock, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
@@ -176,24 +176,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 * inside their `getValues → compute index → set` sequence, producing
 	 * duplicate accounts at indices 0 and 1.
 	 */
-	private readonly tupleLocks = new Map<string, Promise<unknown>>()
+	private readonly tupleLocks = new KeyedLock()
 	private serializePerTuple<T>(profileId: string, chainId: number, type: AccountType, op: () => Promise<T>): Promise<T> {
-		const key = `${profileId}:${chainId}:${type}`
-		const previous = this.tupleLocks.get(key) ?? Promise.resolve()
-		const next = previous.then(op, op)
-		// Don't propagate failures into the chain; swallow at the lock boundary
-		// (the caller still receives the rejected next).
-		this.tupleLocks.set(
-			key,
-			next.catch(() => {}),
-		)
-		void next.finally(() => {
-			if (this.tupleLocks.get(key)?.then === undefined) return
-			// Cleanup the slot only if no later callers chained onto it.
-			// (We never know for sure without ref counting, but as a
-			// best-effort the map entry stays harmlessly resolved.)
-		})
-		return next
+		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
 	}
 
 	public async changeAccountName(profileId: string, chainId: number, address: string, name: string): Promise<Account | undefined> {

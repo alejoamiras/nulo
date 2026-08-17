@@ -45,7 +45,7 @@ import { DappSessionService, AccessLevel } from "@/wallet/services/dapp-session/
 import { sanitizeWireString } from "@/wallet/services/dapp-session/capability-meta"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
 import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
-import { jsonStringify, getErrorMessage } from "@nulo/wallet-core/utils"
+import { jsonStringify, getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
@@ -233,7 +233,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 
 			onSessionTerminated: (sessionId) => {
 				sessionQueues.delete(sessionId)
-				decryptQueues.delete(sessionId)
+				decryptLocks.delete(sessionId)
 				establishmentStatus.delete(sessionId)
 			},
 
@@ -337,17 +337,10 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 */
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
 	const origDecrypt = (handler as any).handleEncryptedMessage.bind(handler)
-	const decryptQueues = new Map<string, Promise<void>>()
+	const decryptLocks = new KeyedLock()
 	// biome-ignore lint/suspicious/noExplicitAny: monkey-patching private method on BackgroundConnectionHandler to serialize decryption
-	;(handler as any).handleEncryptedMessage = async (sessionId: string, encrypted: unknown) => {
-		const prev = decryptQueues.get(sessionId) ?? Promise.resolve()
-		const next = prev.then(() => origDecrypt(sessionId, encrypted))
-		decryptQueues.set(
-			sessionId,
-			next.catch(() => {}),
-		)
-		return next
-	}
+	;(handler as any).handleEncryptedMessage = (sessionId: string, encrypted: unknown) =>
+		decryptLocks.withLock(sessionId, () => origDecrypt(sessionId, encrypted))
 
 	/** F-006: when a stored DappSession is deleted (settings disconnect OR
 	 *  TTL expiry — both emit the same event), tear down every matching
