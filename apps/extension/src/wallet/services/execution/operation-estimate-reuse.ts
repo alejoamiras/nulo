@@ -33,6 +33,7 @@ import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { Network } from "@/wallet/services/network/service"
 import type { FpcInfo } from "@/wallet/services/fpc/spec"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
+import { pendingHashesChanged, SingleShotTtlCache } from "./estimate-reuse-shared"
 import { ESTIMATE_REUSE_TTL_MS, fingerprintBaseFee } from "./transfer-estimate-reuse"
 import { fingerprintOperation, type OperationFingerprintInput } from "./operation-fingerprint"
 import type { BuiltStandardTx } from "./tx-request-builder"
@@ -91,22 +92,18 @@ export interface OperationEstimateReuseDeps {
 }
 
 export class OperationEstimateReuse {
-	private cache = new Map<string, OperationEstimateReuseEntry>()
+	private readonly cache = new SingleShotTtlCache<OperationEstimateReuseEntry>(ESTIMATE_REUSE_TTL_MS)
 
 	public constructor(private readonly deps: OperationEstimateReuseDeps) {}
 
 	public stash(estimateId: string, entry: OperationEstimateReuseEntry): void {
-		this.cache.set(estimateId, entry)
-		this.evictStale()
-		// Per-entry timer so the signed request is physically dropped AT the
-		// TTL (idempotent vs consume/evict; dies with the SW, as does the map).
-		setTimeout(() => this.cache.delete(estimateId), ESTIMATE_REUSE_TTL_MS + 1)
+		this.cache.stash(estimateId, entry)
 	}
 
 	/** Drop a stashed entry (cancelled estimate, rejected interaction).
 	 *  Idempotent; unknown ids are a no-op. */
 	public evict(estimateId: string): void {
-		this.cache.delete(estimateId)
+		this.cache.evict(estimateId)
 	}
 
 	/**
@@ -115,9 +112,8 @@ export class OperationEstimateReuse {
 	 * failed validation still consumes the slot and the caller rebuilds.
 	 */
 	public async tryConsume(estimateId: string, input: OperationFingerprintInput): Promise<OperationEstimateReuseEntry | undefined> {
-		const entry = this.cache.get(estimateId)
+		const entry = this.cache.consume(estimateId) // single-shot
 		if (!entry) return undefined
-		this.cache.delete(estimateId)
 
 		if (Date.now() - entry.builtAt > ESTIMATE_REUSE_TTL_MS) {
 			return this.reject("entry expired")
@@ -135,12 +131,8 @@ export class OperationEstimateReuse {
 		if (!primary || primary.id !== entry.primaryEndpointId || primary.rpcUrl !== entry.primaryEndpointUrl) {
 			return this.reject("primary endpoint changed")
 		}
-		const pendingNow = this.deps
-			.getPendingForAccount(entry.accountAddress)
-			.map((tx) => tx.hash)
-			.sort()
-		const pendingThen = [...entry.pendingHashes].sort()
-		if (pendingNow.length !== pendingThen.length || pendingNow.some((h, i) => h !== pendingThen[i])) {
+		const pendingNow = this.deps.getPendingForAccount(entry.accountAddress).map((tx) => tx.hash)
+		if (pendingHashesChanged(pendingNow, entry.pendingHashes)) {
 			return this.reject("pending tx set changed")
 		}
 		try {
@@ -180,12 +172,5 @@ export class OperationEstimateReuse {
 	private reject(reason: string): undefined {
 		this.deps.logDebug(`operation estimate reuse rejected: ${reason}`)
 		return undefined
-	}
-
-	private evictStale(): void {
-		const now = Date.now()
-		for (const [id, entry] of this.cache) {
-			if (now - entry.builtAt > ESTIMATE_REUSE_TTL_MS) this.cache.delete(id)
-		}
 	}
 }
