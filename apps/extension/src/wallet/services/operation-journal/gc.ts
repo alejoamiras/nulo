@@ -29,8 +29,8 @@
  * `(profileId, null)` bucket with the same cap.
  */
 
-import type { AlarmEvent, AlarmsPort, Unsubscribe } from "@nulo/wallet-core/ports"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { AlarmsPort } from "@nulo/wallet-core/ports"
+import { AlarmBackedTask, getErrorMessage } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { ILogger } from "@/wallet/logger"
 import type { OperationJournalService } from "./service"
@@ -66,7 +66,9 @@ export class JournalGC {
 	private readonly alarms: AlarmsPort
 	private readonly logger: ILogger
 	private readonly capPerScope: number
-	private alarmUnsubscribe?: Unsubscribe
+	// Q-05: the alarm lifecycle (create / clear / boot-run / name-filtered
+	// dispatch / tick error-catch) is owned by the shared AlarmBackedTask.
+	private task?: AlarmBackedTask
 
 	public constructor(journal: OperationJournalService, alarms: AlarmsPort, logger: ILogger, opts?: { capPerScope?: number }) {
 		this.journal = journal
@@ -78,29 +80,23 @@ export class JournalGC {
 	/**
 	 * Register the periodic alarm + boot-time sweep. Idempotent within a
 	 * single SW lifetime — calling twice replaces the alarm registration
-	 * (chrome.alarms.create semantics) and stacks the listener.
+	 * (chrome.alarms.create semantics).
 	 */
 	public async start(): Promise<void> {
-		this.alarmUnsubscribe = this.alarms.onAlarm(this.onAlarmFired)
-		await this.alarms.create(JOURNAL_GC_ALARM_NAME, { periodInMinutes: JOURNAL_GC_PERIOD_MINUTES })
-		try {
-			await this.sweep()
-		} catch (err) {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "boot-sweep threw; continuing", getErrorMessage(err))
-		}
+		this.task = new AlarmBackedTask({
+			name: JOURNAL_GC_ALARM_NAME,
+			periodInMinutes: JOURNAL_GC_PERIOD_MINUTES,
+			tick: () => this.sweep(),
+			alarms: this.alarms,
+			logger: this.logger,
+			logSource: LOG_SOURCE,
+		})
+		await this.task.start()
 	}
 
 	public async stop(): Promise<void> {
-		this.alarmUnsubscribe?.()
-		this.alarmUnsubscribe = undefined
-		await this.alarms.clear(JOURNAL_GC_ALARM_NAME)
-	}
-
-	private readonly onAlarmFired = (alarm: AlarmEvent): void => {
-		if (alarm.name !== JOURNAL_GC_ALARM_NAME) return
-		this.sweep().catch((err) => {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "sweep tick threw", getErrorMessage(err))
-		})
+		await this.task?.stop()
+		this.task = undefined
 	}
 
 	/**
