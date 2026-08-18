@@ -44,3 +44,7 @@ re-running on both PRs).
 ## Round 2 — codex (resumed, post-fix)
 
 **approve, zero new material findings** (quoted: "All three round-1 conditions are correctly applied. No new material findings exist."). The post-impl fix loop converged in ONE round of fixes.
+
+## CI note (2026-08-18): the ledger's cancellation-aggregator mechanism, fresh data point
+
+Marking the draft PRs READY re-triggered all three workflows on the SAME sha; concurrency cancelled the push-triggered runs; the cancelled runs' aggregators concluded FAILURE (the flake-ledger's OPEN CI follow-up — 'conclude CANCELLED/neutral instead of failure' remains the durable fix). The superseding in-progress runs' check-runs replace them on completion. New trigger variant recorded: ready_for_review, not just rapid pushes.
