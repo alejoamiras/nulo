@@ -1332,6 +1332,266 @@ describe("ProfileService — deletion coordinator integration (finding D)", () =
 	})
 })
 
+describe("F-B24 — torn-import sweep on boot resume", () => {
+	// A torn import (restore() ran; finalize never did — SW/popup death, transport
+	// death, or a persistently-failed compensating delete) leaves the profile row
+	// + its restore-pending marker durable. A marker only proves the restore is
+	// INCOMPLETE (a password import whose SW died can still finalize via the
+	// popup's auto-reconnect — codex audit), so the sweep proves ABANDONMENT by
+	// age: only markers older than TORN_IMPORT_MIN_AGE_MS are reaped. The boot
+	// resume must then complete the compensating delete instead of leaving the
+	// zombie immortal.
+	const TORN_MASTER_KEY = Buffer.from(new Uint8Array(32).fill(13)).toString("base64")
+	const AGED = ProfileService.TORN_IMPORT_MIN_AGE_MS + 60 * 60 * 1000 // floor + 1h
+
+	const tornRestore = async (service: ProfileService, id = "ignored") => {
+		const out = await service.restore(
+			{ id, name: "Torn", type: "password" },
+			{ type: "password", masterKey: asBase64MasterSecret(TORN_MASTER_KEY) },
+			"pass1234",
+		)
+		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+		return out
+	}
+
+	const markerKey = (id: string) => `${RESTORE_PENDING_ROOT}@${id}`
+	const markerRaw = async (api: FakeBrowserApi, id: string) => (await api.storage.local.get(markerKey(id)))[markerKey(id)]
+
+	/** Back-date a real marker so the sweep sees it as aged past the floor. */
+	const ageMarker = async (api: FakeBrowserApi, id: string, ageMs = AGED) => {
+		const raw = await markerRaw(api, id)
+		const marker = JSON.parse(raw as string)
+		marker.at = Date.now() - ageMs
+		await api.storage.local.set({ [markerKey(id)]: JSON.stringify(marker) })
+	}
+
+	test("(RED-1) an ABANDONED torn import (aged past the floor) is completed by the next boot's resume", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		// The import dies here: no finalize, and the compensating delete never
+		// reached the service (transport death) — row + marker are durable.
+		expect(await markerRaw(api, orphan.id)).toBeDefined()
+		await ageMarker(api, orphan.id)
+
+		const bootCutoff = Date.now()
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+		const purged: string[] = []
+		boot2.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async (id: string) => {
+				purged.push(id)
+			},
+		})
+
+		await boot2.resumePendingDeletions(bootCutoff)
+
+		// The orphan is gone: row deleted, siblings purged, marker cleared.
+		expect((await boot2.getProfiles()).map((p) => p.id)).not.toContain(orphan.id)
+		expect(purged).toContain(orphan.id)
+		expect(await markerRaw(api, orphan.id)).toBeUndefined()
+	}, 30_000)
+
+	test("(RED-2) a persistently-failed compensating delete (the B-12 tombstone-write window) self-heals at the next boot", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		// The rollback's deleteProfile fails CLEANLY at the tombstone WRITE — the
+		// exact B-12 window: reservation released, nothing durable recorded.
+		const realSet = api.storage.local.set.bind(api.storage.local)
+		const setSpy = vi.spyOn(api.storage.local, "set").mockImplementation(async (items: Record<string, unknown>) => {
+			if (Object.keys(items).some((k) => k.startsWith("nulo:core:profile-tombstones@"))) {
+				throw new Error("tombstone write failed")
+			}
+			return realSet(items)
+		})
+		await expect(boot1.deleteProfile(orphan.id)).rejects.toThrow(/tombstone write failed/)
+		setSpy.mockRestore()
+		// B-12 pin territory: NOT reserved, still listed, marker still present.
+		expect((await boot1.getProfiles()).map((p) => p.id)).toContain(orphan.id)
+		expect(await markerRaw(api, orphan.id)).toBeDefined()
+
+		await ageMarker(api, orphan.id)
+		const bootCutoff = Date.now()
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+		await boot2.resumePendingDeletions(bootCutoff)
+
+		expect((await boot2.getProfiles()).map((p) => p.id)).not.toContain(orphan.id)
+		expect(await markerRaw(api, orphan.id)).toBeUndefined()
+	}, 30_000)
+
+	test("a LIVE import's marker (at >= bootCutoff) is never reaped", async () => {
+		const { api, service } = await makeService()
+		const bootCutoff = Date.now()
+		await new Promise((r) => setTimeout(r, 3))
+		// The import starts AFTER this lifetime's cutoff — e.g. an import RPC that
+		// raced startup. Its marker must be invisible to the sweep (B-03 discipline).
+		const live = await tornRestore(service)
+
+		await service.resumePendingDeletions(bootCutoff)
+
+		expect((await service.getProfiles()).map((p) => p.id)).toContain(live.id)
+		expect(await markerRaw(api, live.id)).toBeDefined()
+	}, 30_000)
+
+	test("an INCOMPLETE-but-young torn import (below the age floor) is NOT reaped — it may still finalize", async () => {
+		const { api, service: boot1 } = await makeService()
+		const young = await tornRestore(boot1)
+		// The SW dies and reboots mid-import; the popup's auto-reconnect could
+		// still legitimately finalize a password import — the sweep must wait.
+		await new Promise((r) => setTimeout(r, 3))
+		const bootCutoff = Date.now()
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+
+		await boot2.resumePendingDeletions(bootCutoff)
+
+		expect((await boot2.getProfiles()).map((p) => p.id)).toContain(young.id)
+		expect(await markerRaw(api, young.id)).toBeDefined()
+	}, 30_000)
+
+	test("one failing reap does not abort the rest of the sweep (per-marker isolation)", async () => {
+		const { api, service: boot1 } = await makeService()
+		const first = await tornRestore(boot1, "torn-a")
+		const second = await tornRestore(boot1, "torn-b")
+		await ageMarker(api, first.id)
+		await ageMarker(api, second.id)
+
+		const bootCutoff = Date.now()
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+		// The FIRST reap's purge fails (delegate throws for torn-a only) — the
+		// sweep must still complete torn-b's compensating delete.
+		boot2.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async (id: string) => {
+				if (id === first.id) throw new Error("purge interrupted")
+			},
+		})
+
+		await boot2.resumePendingDeletions(bootCutoff)
+
+		// torn-a: purge failed post-tombstone → reserved (deletion pending), absent
+		// from reads, finished by a later tombstone resume; torn-b: fully completed.
+		expect((await boot2.getProfiles()).map((p) => p.id)).not.toContain(second.id)
+		expect(await markerRaw(api, second.id)).toBeUndefined()
+	}, 30_000)
+
+	test("a torn reap RETAINS its tombstone; the next boot re-purges (late-row cleanup) then releases", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		await ageMarker(api, orphan.id)
+
+		const cutoff2 = Date.now()
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+		const boot2Purges: string[] = []
+		boot2.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async (id: string) => {
+				boot2Purges.push(id)
+			},
+		})
+		await boot2.resumePendingDeletions(cutoff2)
+		expect(boot2Purges).toContain(orphan.id)
+		// Phase 3 was skipped: the tombstone survives, so a wall-clock-corner
+		// loser's late slice writes get re-purged once it has quiesced.
+		const tombKeys = Object.keys(await api.storage.local.get()).filter((k) => k.startsWith("nulo:core:profile-tombstones@"))
+		expect(tombKeys).toContain(`nulo:core:profile-tombstones@${orphan.id}`)
+
+		// Next boot: the tombstone loop re-purges idempotently, then releases.
+		const { service: boot3 } = await makeServiceFromExistingApi(api)
+		const boot3Purges: string[] = []
+		boot3.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async (id: string) => {
+				boot3Purges.push(id)
+			},
+		})
+		await boot3.resumePendingDeletions(Date.now())
+		expect(boot3Purges).toContain(orphan.id)
+		const tombKeysAfter = Object.keys(await api.storage.local.get()).filter((k) => k.startsWith("nulo:core:profile-tombstones@"))
+		expect(tombKeysAfter).not.toContain(`nulo:core:profile-tombstones@${orphan.id}`)
+		// Fully settled: a fresh delete lifecycle still works end-to-end.
+		const q = await boot3.createProfile("B", "password123")
+		await boot3.deleteProfile(q.id)
+		expect((await boot3.getProfiles()).map((p) => p.id)).not.toContain(q.id)
+	}, 30_000)
+
+	test("a finalize that lands BEFORE the reap wins: the marker guard refuses the delete (finalized profile survives)", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		await ageMarker(api, orphan.id) // aged past the floor → sweep-eligible
+
+		// The popup's finalize arrives first (auto-reconnect continuation): it
+		// clears the marker under the facade lock and opens the session. The
+		// generation is UNCHANGED — only the marker guard can save the profile.
+		await boot1.finalizeRestore(orphan.id, "pass1234")
+
+		const bootCutoff = Date.now()
+		await boot1.resumePendingDeletions(bootCutoff)
+
+		// The just-finalized profile must survive the sweep.
+		expect((await boot1.getProfiles()).map((p) => p.id)).toContain(orphan.id)
+		expect((await boot1.getActiveProfile())?.id).toBe(orphan.id)
+	}, 30_000)
+
+	test("the tornGuard itself refuses when the marker changed after the sweep's observation (finalize won the race)", async () => {
+		const { api, service } = await makeService()
+		const orphan = await tornRestore(service)
+		// The sweep observed this tuple…
+		const observed = JSON.parse((await markerRaw(api, orphan.id)) as string)
+		// …then finalize landed (clears the marker under the lock; generation unchanged).
+		await service.finalizeRestore(orphan.id, "pass1234")
+
+		// A reap decided on the stale observation must refuse UNDER THE LOCK.
+		await expect(service.deleteProfile(orphan.id, { pxeGeneration: observed.pxeGeneration, markerAt: observed.at })).rejects.toThrow(
+			/marker changed/,
+		)
+		expect((await service.getProfiles()).map((p) => p.id)).toContain(orphan.id)
+	}, 30_000)
+
+	test("a generation-MISMATCHED stale marker is purged without touching the row", async () => {
+		const { api, service } = await makeService()
+		const p = await service.createProfile("Kept", "password123")
+		// A stale marker from a previous incarnation of the same id.
+		await new RestorePendingRepository(api.storage.local).write({ profileId: p.id, pxeGeneration: "deadbeef", at: Date.now() - 10 })
+
+		await service.resumePendingDeletions(Date.now())
+
+		expect((await service.getProfiles()).map((x) => x.id)).toContain(p.id)
+		expect(await markerRaw(api, p.id)).toBeUndefined()
+	}, 30_000)
+
+	test("a bare marker with NO row is purged", async () => {
+		const { api, service } = await makeService()
+		await new RestorePendingRepository(api.storage.local).write({ profileId: "ghost", pxeGeneration: "aa", at: Date.now() - 10 })
+
+		await service.resumePendingDeletions(Date.now())
+
+		expect(await markerRaw(api, "ghost")).toBeUndefined()
+	}, 30_000)
+
+	test("a CORRUPT marker fails closed: marker and row both untouched", async () => {
+		const { api, service } = await makeService()
+		const p = await service.createProfile("Kept", "password123")
+		await api.storage.local.set({ [`${RESTORE_PENDING_ROOT}@${p.id}`]: "{not json" })
+
+		await service.resumePendingDeletions(Date.now())
+
+		expect((await service.getProfiles()).map((x) => x.id)).toContain(p.id)
+		expect(await markerRaw(api, p.id)).toBe("{not json")
+	}, 30_000)
+
+	test("resume WITHOUT a bootCutoff skips the torn sweep entirely (safe default)", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		await new Promise((r) => setTimeout(r, 3))
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+
+		await boot2.resumePendingDeletions()
+
+		// No cutoff → no way to distinguish a live import → sweep must not run.
+		expect((await boot2.getProfiles()).map((p) => p.id)).toContain(orphan.id)
+		expect(await markerRaw(api, orphan.id)).toBeDefined()
+	}, 30_000)
+})
+
 describe("account-integrity delegate — the session-open chokepoint", () => {
 	const throwingDelegate = () => {
 		const calls: Array<{ profileId: string }> = []
