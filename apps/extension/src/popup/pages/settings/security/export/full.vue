@@ -122,8 +122,19 @@ async function handleBackup() {
 		}
 	}
 
+	let entropyB64
 	try {
-		key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
+		if (isPasskeyProfile.value) {
+			// Passkey blobs carry the credentialId as `master-key` and NEVER an entropy field —
+			// the master re-derives from the passkey PRF at restore.
+			key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
+		} else {
+			// Atomic paired export: master + recovery-phrase entropy from ONE unseal, so the two
+			// backup fields can never come from different row states.
+			const material = await managers.profile.exportBackupMaterial(appStore.profile.id, password.value)
+			key = material.masterKey
+			entropyB64 = material.entropy
+		}
 	} catch (error) {
 		if (!isPasskeyProfile.value) {
 			isWrongPassword.value = true
@@ -148,6 +159,10 @@ async function handleBackup() {
 		[COMPAT_EPOCH_FIELD]: CURRENT_COMPAT_EPOCH,
 		[BACKUP_SCHEMA_VERSION_FIELD]: CURRENT_BACKUP_SCHEMA_VERSION,
 		"master-key": key,
+		// Password blobs REQUIRE this; passkey blobs must NOT carry it (`undefined` is dropped
+		// by JSON.stringify). Restore verifies PBKDF2(words(entropy)) == master-key before
+		// sealing either.
+		entropy: entropyB64,
 		// Item 1b: preserve the user's ACTIVE-network selection (a top-level raw network id, like
 		// `master-key` — NOT a slice). Restore resolves it against the restored rows; absent (older
 		// backups / no active network) → the import falls back to the primary network. `undefined`

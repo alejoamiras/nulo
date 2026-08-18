@@ -194,9 +194,12 @@ import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
 async function buildBackup(overrides: Record<string, unknown> = {}) {
 	const { data: dataOverride, ...bodyOverrides } = overrides
 	const body = {
-		"compat-epoch": 3,
+		"compat-epoch": 4,
 		"backup-schema-version": 1,
 		"master-key": Buffer.from(new Uint8Array(32)).toString("base64"),
+		// Epoch-4 password blobs REQUIRE the entropy field. The composable checks only
+		// presence/shape; the words↔master pairing check is service-side (mocked here).
+		entropy: Buffer.from(new Uint8Array(32).fill(1)).toString("base64"),
 		data: {
 			profile: { id: "src-profile-id", name: "Imported", type: "password" },
 			// P6: schema-realistic default fixtures (new-shape network with
@@ -209,12 +212,24 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 					name: "Testnet",
 					rpcUrl: "https://t/",
 					chainId: 1,
+					l1ChainId: 1,
 					kind: "custom",
 					endpoints: [{ id: "src-ep-1", rpcUrl: "https://t/" }],
 					primaryEndpointId: "src-ep-1",
 				},
 			],
-			account: [{ profileId: "src-profile-id", chainId: 1, address: "0xaaaa", index: 0, type: 0, name: "Account 1", visible: true }],
+			account: [
+				{
+					profileId: "src-profile-id",
+					chainId: 1,
+					address: "0xaaaa",
+					index: 0,
+					type: 0,
+					l1ChainId: 1,
+					name: "Account 1",
+					visible: true,
+				},
+			],
 			token: [],
 			// Present-but-empty: the mocked v2 migration READS contacts, and a
 			// missing non-optional slice a pending migration reads rejects.
@@ -613,9 +628,10 @@ describe("useFullBackupImport — guards before any writes", () => {
 		expect(profileClient.restore).not.toHaveBeenCalled()
 	}
 
-	it("rejects an unsupported compat-epoch (incl. the rc-era epoch 2 — pre-signing-key-root addresses)", async () => {
+	it("rejects an unsupported compat-epoch (incl. epoch 3 — the superseded KDF-v1 generation)", async () => {
 		await expectRejected(await buildBackup({ "compat-epoch": 2 }), "Incompatible backup")
-		await expectRejected(await buildBackup({ "compat-epoch": 4 }), "Incompatible backup")
+		await expectRejected(await buildBackup({ "compat-epoch": 3 }), "Incompatible backup")
+		await expectRejected(await buildBackup({ "compat-epoch": 5 }), "Incompatible backup")
 	})
 
 	it("rejects a pre-baseline blob (legacy schema-version only, no new fields) with the re-export copy", async () => {
@@ -1380,8 +1396,10 @@ describe("useFullBackupImport — passkey backup", () => {
 		// `ProfileService.exportPlain`'s passkey return). The composable
 		// uses `master-key` as the runCeremony's credentialId so the
 		// modal targets the right key.
+		// Passkey blobs must NOT carry an entropy field (the composable rejects one).
 		return buildBackup({
 			"master-key": PASSKEY_CRED_ID,
+			entropy: undefined,
 			data: {
 				profile: { id: "src-profile-id", name: "PK", type: "passkey" },
 				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],

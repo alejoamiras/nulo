@@ -6,8 +6,6 @@ vi.mock("@/utils/core", () => {
 	const profileMock = {
 		getProfiles: vi.fn(async () => [] as Array<{ name: string }>),
 		importMnemonic: vi.fn(async () => ({ id: "p1", name: "Imported", type: "password" })),
-		importPlain: vi.fn(async () => ({ id: "p1", name: "Imported", type: "password" })),
-		importEncrypted: vi.fn(async () => ({ id: "p1", name: "Imported", type: "password" })),
 		importPasskey: vi.fn(async () => ({ id: "p1", name: "Imported", type: "passkey" })),
 	}
 	return { managers: { profile: profileMock } }
@@ -55,29 +53,6 @@ describe("useProfileImportFlow", () => {
 		expect(profileApi.importMnemonic).toHaveBeenCalledWith("MyProfile", SEED_24.split(" "), "password123")
 		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 		expect(flow.isImporting.value).toBe(false)
-	})
-
-	test("private-key happy path imports and completes once", async () => {
-		const { flow, opts } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "private_key"
-		flow.password.value = "password123"
-		flow.repeatedPassword.value = "password123"
-		flow.privateKey.value = "0xabc"
-		await flow.handleImportPrivateKey()
-		expect(profileApi.importPlain).toHaveBeenCalledWith("MyProfile", "0xabc", "password123")
-		expect(opts.completeImport).toHaveBeenCalledTimes(1)
-	})
-
-	test("public-key happy path imports and completes once", async () => {
-		const { flow, opts } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "public_key"
-		flow.password.value = "password123"
-		flow.publicKey.value = "0xpub"
-		await flow.handleImportPublicKey()
-		expect(profileApi.importEncrypted).toHaveBeenCalledWith("MyProfile", "0xpub", "password123")
-		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 	})
 
 	test("passkey happy path runs the ceremony then imports + completes once", async () => {
@@ -130,30 +105,6 @@ describe("useProfileImportFlow", () => {
 		expect(flow.nameError.value).toBeTruthy()
 	})
 
-	test("private-key 'Invalid secret length' routes to the secret field", async () => {
-		profileApi.importPlain.mockRejectedValueOnce(new Error("Invalid secret length"))
-		const { flow, opts } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "private_key"
-		flow.password.value = "password123"
-		flow.repeatedPassword.value = "password123"
-		flow.privateKey.value = "0xabc"
-		await flow.handleImportPrivateKey()
-		expect(flow.error.value).toEqual({ type: "secret", title: "Invalid key length", tooltip: "" })
-		expect(opts.completeImport).not.toHaveBeenCalled()
-	})
-
-	test("public-key 'Invalid password' routes to the password field", async () => {
-		profileApi.importEncrypted.mockRejectedValueOnce(new Error("Invalid password"))
-		const { flow } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "public_key"
-		flow.password.value = "password123"
-		flow.publicKey.value = "0xpub"
-		await flow.handleImportPublicKey()
-		expect(flow.error.value).toEqual({ type: "password", title: "Wrong password", tooltip: "" })
-	})
-
 	test("(A1) generic import error uses the unified shape, not [object Object]", async () => {
 		profileApi.importMnemonic.mockRejectedValueOnce(new Error("boom"))
 		const { flow } = makeFlow()
@@ -195,11 +146,11 @@ describe("useProfileImportFlow", () => {
 		// regression that an end-state-only assertion would miss.
 		const { flow, opts } = makeFlow()
 		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "private_key"
+		flow.selectedImportOption.value = "seed"
 		flow.password.value = "password123"
 		flow.repeatedPassword.value = "password123"
-		flow.privateKey.value = "0xabc"
-		await flow.handleImportPrivateKey()
+		flow.seedPhrase.value = SEED_24
+		await flow.handleImportSeed()
 		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 		expect(opts.completeImport).toHaveBeenCalledWith({ id: "p1", name: "Imported", type: "password" })
 	})
