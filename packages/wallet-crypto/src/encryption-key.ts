@@ -33,13 +33,20 @@ export class EncryptionKey {
 	/**
 	 * Encrypts payload
 	 * @param payload - Bytes to be encrypted
+	 * @param aad - Optional additional authenticated data. Not stored in the frame: the DECRYPT
+	 * side must supply the identical bytes, which is the point — a ciphertext moved into a slot
+	 * with a different purpose/identity tag fails authentication instead of decrypting there.
 	 * @returns Encrypted bytes
 	 */
-	public async encrypt(payload: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+	public async encrypt(payload: Uint8Array<ArrayBuffer>, aad?: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
 		const iv = self.crypto.getRandomValues(new Uint8Array(12))
 		const salt = await self.crypto.subtle.digest("SHA-256", iv)
 		const key = await this.deriveKey(salt)
-		const buffer = await self.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, payload)
+		const buffer = await self.crypto.subtle.encrypt(
+			aad ? { name: "AES-GCM", iv, additionalData: aad } : { name: "AES-GCM", iv },
+			key,
+			payload,
+		)
 
 		const ct = new Uint8Array(buffer)
 		const result = new Uint8Array(13 + ct.length)
@@ -53,9 +60,11 @@ export class EncryptionKey {
 	/**
 	 * Decrypts payload
 	 * @param payload - Bytes to be decrypted
+	 * @param aad - Must byte-match the AAD the payload was encrypted under (or be omitted for
+	 * AAD-less ciphertexts); any mismatch fails AES-GCM authentication.
 	 * @returns Decrypted bytes
 	 */
-	public async decrypt(payload: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
+	public async decrypt(payload: Uint8Array<ArrayBuffer>, aad?: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
 		if (payload.length < 13) {
 			throw new Error("Invalid payload length")
 		}
@@ -68,7 +77,11 @@ export class EncryptionKey {
 
 		const salt = await self.crypto.subtle.digest("SHA-256", iv)
 		const key = await this.deriveKey(salt)
-		const buffer = await self.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct)
+		const buffer = await self.crypto.subtle.decrypt(
+			aad ? { name: "AES-GCM", iv, additionalData: aad } : { name: "AES-GCM", iv },
+			key,
+			ct,
+		)
 
 		return new Uint8Array(buffer)
 	}
