@@ -27,34 +27,36 @@ export async function deriveBip39Seed(words: string[], passphrase = ""): Promise
 	const sentence = canonicalizeMnemonic(words).join(" ")
 	const utf8 = new TextEncoder()
 	const sentenceBytes = utf8.encode(sentence)
+	const saltBytes = utf8.encode(`mnemonic${passphrase.normalize("NFKD")}`)
 	try {
 		const baseKey = await globalThis.crypto.subtle.importKey("raw", sentenceBytes, "PBKDF2", false, ["deriveBits"])
 		const bits = await globalThis.crypto.subtle.deriveBits(
-			{
-				name: "PBKDF2",
-				hash: "SHA-512",
-				salt: utf8.encode(`mnemonic${passphrase.normalize("NFKD")}`),
-				iterations: BIP39_ITERATIONS,
-			},
+			{ name: "PBKDF2", hash: "SHA-512", salt: saltBytes, iterations: BIP39_ITERATIONS },
 			baseKey,
 			512,
 		)
 		return new Uint8Array(bits)
 	} finally {
-		// The engine holds the sentence inside the non-extractable base key; the local copy is
-		// password-equivalent material and must not linger.
+		// The engine holds the sentence inside the non-extractable base key; the local sentence
+		// copy is password-equivalent material and the salt carries the passphrase — neither may
+		// linger. (The sentence STRING and Fr/CryptoKey internals are GC-managed and unwipeable —
+		// same posture as the passkey path.)
 		zeroize(sentenceBytes)
+		zeroize(saltBytes)
 	}
 }
 
 /** The wallet's 32-byte master secret for a mnemonic-origin profile. Caller owns + zeroes the result. */
 export async function deriveMasterFromMnemonic(words: string[], passphrase = ""): Promise<MasterSecretBytes> {
 	const seed64 = await deriveBip39Seed(words, passphrase)
+	const seed64Copy = Buffer.from(seed64)
 	try {
-		const masterFr = Fr.fromBufferReduce(Buffer.from(seed64))
+		const masterFr = Fr.fromBufferReduce(seed64Copy)
 		return asMasterSecretBytes(masterFr.toBuffer() as Buffer<ArrayBuffer>)
 	} finally {
-		// Fr made its own copy (pinned by the Fr.fromBufferReduce test in zeroize.test.ts).
+		// Fr made its own copy (pinned by the Fr.fromBufferReduce test in zeroize.test.ts); both
+		// recovery-equivalent 64-byte buffers are wiped, not just the original.
 		zeroize(seed64)
+		zeroize(seed64Copy)
 	}
 }

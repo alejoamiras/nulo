@@ -8,11 +8,11 @@
  *   (b) derive a passkey-wallet master secret from WebAuthn PRF +
  *       credentialId (`PasskeyCredential`),
  *   (c) derive the per-account signing key from the account seed
- *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v1 in
+ *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v2 in
  *       `@nulo/wallet-crypto`, the signing-key-root model adopted at
- *       Aztec 5.0.0; upstream's `deriveSigningKey` was removed and its
- *       construction vendored verbatim, reference-vectored in
- *       `implementations-plan/aztec-5.0.0-stable/reference/`).
+ *       Aztec 5.0.0; upstream's removed `deriveSigningKey` construction
+ *       under the dedicated Nulo separator, reference-vectored in
+ *       `implementations-plan/key-model-v2/reference/`).
  *
  * Any accidental drift in a refactor here, or a silent upstream change
  * in `@aztec/foundation` or `@aztec/stdlib`, fails one of these tests
@@ -22,7 +22,7 @@
  * ------------------------------------
  * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
  * V7a (`deriveSigningKeyFromSeed` = sha512-to-grumpkin-scalar + the
- * IVSK_M domain separator). When you bump `@aztec/foundation`,
+ * NULO_SIGNING_ROOT_SEP domain separator). When you bump `@aztec/foundation`,
  * `@aztec/stdlib`, or `@aztec/accounts`:
  *
  *   1. Run `bun run test`.
