@@ -128,7 +128,7 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 	/** Resume any tombstoned deletion after a restart. Called AFTER `services.start()`
 	 *  so it never blocks unrelated startup. Delegates to ProfileService (which owns
 	 *  the tombstone lifecycle); invalid tombstones stay reserved ("deletion pending"). */
-	public async resumePending(): Promise<void> {
-		await this.profiles.resumePendingDeletions()
+	public async resumePending(bootCutoff?: number): Promise<void> {
+		await this.profiles.resumePendingDeletions(bootCutoff)
 	}
 }

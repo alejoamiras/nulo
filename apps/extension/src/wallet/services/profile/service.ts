@@ -1011,8 +1011,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * Resume any deletion a prior SW left tombstoned (crashed mid-cleanup). Called
 	 * AFTER `services.start()` so it never blocks unrelated startup. Idempotent;
 	 * a corrupt tombstone stays reserved ("deletion pending"), never fails open.
+	 *
+	 * F-B24: when `bootCutoff` is supplied (the SW boot instant, captured BEFORE
+	 * `services.start()` — the B-03 discipline), also sweep TORN IMPORTS: a
+	 * restore-pending marker from a PREVIOUS lifetime (`at < bootCutoff`) whose
+	 * generation matches its row is a profile that can never be finalized
+	 * (unlock throws `RestoreTornError`) — the compensating delete the import's
+	 * rollback could not durably guarantee is completed here. Without a cutoff
+	 * the sweep is SKIPPED entirely: a marker written by an import racing
+	 * startup must never be reaped mid-flight.
 	 */
-	public async resumePendingDeletions(): Promise<void> {
+	public async resumePendingDeletions(bootCutoff?: number): Promise<void> {
 		const delegate = this.deletionDelegate
 		if (!delegate) return
 		// TELEMETRY: a corrupt tombstone reserves its id (fail-closed) but can't be
@@ -1051,6 +1060,43 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				})
 			} catch (err) {
 				this.logError(`resume deletion failed for ${t.profileId}`, getErrorMessage(err))
+			}
+		}
+
+		// F-B24 torn-import sweep — only with an explicit boot cutoff (see doc).
+		if (bootCutoff === undefined) return
+		const corruptMarkers = await this.restorePending.corruptIds()
+		if (corruptMarkers.length) {
+			// Fail CLOSED (tombstone doctrine): never delete what we can't decode —
+			// the marker stays, the row stays, unlock keeps refusing via its own
+			// corrupt-marker gate. Surfaced for manual recovery.
+			this.logError(`torn-import sweep: ${corruptMarkers.length} corrupt marker(s) left untouched`, corruptMarkers.join(","))
+		}
+		for (const marker of await this.restorePending.validMarkers()) {
+			if (marker.at >= bootCutoff) continue // this-lifetime import — live, untouchable
+			try {
+				const row = await this.repo.get(marker.profileId)
+				if (!row) {
+					// Row-write compensation already cleaned the row; the bare marker
+					// must not brand a future same-id profile.
+					await this.restorePending.delete(marker.profileId)
+					continue
+				}
+				if (row.pxeGeneration !== marker.pxeGeneration) {
+					// Stale leftover from a prior incarnation — the eager version of the
+					// lazy purge `openSessionVerified` already performs.
+					await this.restorePending.delete(marker.profileId)
+					continue
+				}
+				// A prior-lifetime marker matching its row = a torn import: finalize can
+				// never run (the flow's secret died with it). Complete the compensating
+				// delete through the full three-phase machinery — if THIS delete fails
+				// pre-tombstone the marker survives and the next boot retries; if it
+				// fails post-tombstone the tombstone loop above finishes it. Self-healing.
+				this.logError(`torn-import sweep: completing compensating delete for ${marker.profileId}`)
+				await this.deleteProfile(marker.profileId)
+			} catch (err) {
+				this.logError(`torn-import sweep failed for ${marker.profileId}`, getErrorMessage(err))
 			}
 		}
 	}

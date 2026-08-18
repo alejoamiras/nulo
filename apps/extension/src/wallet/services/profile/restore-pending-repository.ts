@@ -61,4 +61,44 @@ export class RestorePendingRepository {
 	public async delete(id: string): Promise<void> {
 		await this.storage.remove(this.key(id))
 	}
+
+	/** All decodable markers (tombstone `validPayloads` discipline: only valid
+	 *  rows drive cleanup; corrupt ones are surfaced separately, never dropped). */
+	public async validMarkers(): Promise<RestorePendingMarker[]> {
+		const all = await this.storage.get()
+		const prefix = `${RESTORE_PENDING_ROOT}@`
+		const out: RestorePendingMarker[] = []
+		for (const [k, v] of Object.entries(all)) {
+			if (!k.startsWith(prefix)) continue
+			if (typeof v !== "string") continue
+			try {
+				const parsed = RestorePendingSchema.safeParse(JSON.parse(v))
+				if (parsed.success) out.push(parsed.data)
+			} catch {
+				// corrupt — reported by corruptIds(), never acted on here
+			}
+		}
+		return out
+	}
+
+	/** TELEMETRY only: ids whose raw marker EXISTS but cannot be decoded — the
+	 *  torn-import sweep must fail CLOSED on these (leave marker + row; log). */
+	public async corruptIds(): Promise<string[]> {
+		const all = await this.storage.get()
+		const prefix = `${RESTORE_PENDING_ROOT}@`
+		const out: string[] = []
+		for (const [k, v] of Object.entries(all)) {
+			if (!k.startsWith(prefix)) continue
+			let valid = false
+			if (typeof v === "string") {
+				try {
+					valid = RestorePendingSchema.safeParse(JSON.parse(v)).success
+				} catch {
+					valid = false
+				}
+			}
+			if (!valid) out.push(k.slice(prefix.length))
+		}
+		return out
+	}
 }

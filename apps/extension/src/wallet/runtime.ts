@@ -259,10 +259,14 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		logger.log("wallet", LogLevel.Info, "Services started")
 
 		// Resume any profile deletion a prior SW left tombstoned (crashed
-		// mid-cleanup). Fire-and-forget so it never blocks startup; idempotent +
-		// single-flight; a corrupt tombstone stays reserved ("deletion pending").
+		// mid-cleanup) AND sweep torn imports (F-B24: a restore-pending marker
+		// from a PREVIOUS lifetime whose generation matches its row — the
+		// compensating delete the import's rollback couldn't durably guarantee).
+		// The cutoff is the same pre-`services.start()` instant as the journal's
+		// (B-03): a marker written by an import RPC racing startup has
+		// `at >= cutoff` and is never touched. Fire-and-forget; idempotent.
 		void deletionCoordinator
-			.resumePending()
+			.resumePending(journalBootCutoff)
 			.catch((error) => logger.log("wallet", LogLevel.Error, "resumePendingDeletions failed", getErrorMessage(error)))
 
 		// Phase 2 Week 4: durable-job reaper. Runs a chrome.alarms-driven
