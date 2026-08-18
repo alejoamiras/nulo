@@ -177,7 +177,7 @@ onBeforeUnmount(() => {
 						data-testid="reset-confirm-input"
 					/>
 					<Text size="12" weight="500" color="tertiary" height="150">
-						You will be able to recover your profile later if you have saved the seed phrase or secret key
+						You will be able to recover your profile later if you have saved your recovery phrase
 					</Text>
 				</div>
 			</Flex>

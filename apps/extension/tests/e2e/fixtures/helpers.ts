@@ -1580,33 +1580,6 @@ export async function revealSeedPhrase(page: Page, password: string): Promise<vo
 	await page.waitForSelector('[data-testid="reveal-content"]', { visible: true, timeout: 5_000 })
 }
 
-/** Drive the secret-key reveal flow. The "encrypted" variant is gateless
- *  (auto-fetches public key on selection — async, so wait for the input to
- *  receive a non-empty value). The "plain" variant goes through the same
- *  agree → unlock chain as the seed page. Caller asserts on
- *  `[data-testid="reveal-content"]` afterwards. */
-export async function revealSecretKey(page: Page, password: string, variant: "plain" | "encrypted"): Promise<void> {
-	await navigateByHash(page, "#/popup/settings/security/export/key")
-	await clickByTestId(page, `key-variant-${variant}-btn`)
-	if (variant === "plain") {
-		await clickByTestId(page, "agree-continue-btn")
-		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 5_000 })
-		await replaceInputValue(page, '[data-testid="unlock-password-input"]', password)
-		await clickByTestId(page, "unlock-submit-btn")
-	}
-	await page.waitForSelector('[data-testid="reveal-content"]', { visible: true, timeout: 5_000 })
-	// Wait for the inner input to actually have a value — the encrypted
-	// variant fetches its key in an async watcher.
-	await page.waitForFunction(
-		() => {
-			const scope = document.querySelector('[data-testid="reveal-content"]')
-			const input = scope?.querySelector("input") as HTMLInputElement | null
-			return !!input && input.value.length > 0
-		},
-		{ timeout: 10_000, polling: 100 },
-	)
-}
-
 // ── Auth + profile flows ────────────────────────────────────────────────
 
 /** From the auth screen, click "Reset Profile" to open the

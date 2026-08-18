@@ -37,15 +37,15 @@ import {
 	waitForProfilePurged,
 } from "../fixtures/helpers"
 import {
+	LOCAL_L1_CHAIN_ID,
 	POPUP_IMPORT_SHELL,
 	TEST_PASSWORD,
 	buildSyntheticBackup,
-	LOCAL_L1_CHAIN_ID,
 	deriveNuloAccountAddress,
 	gotoPopupImport,
 	importFullBackup,
-	importPlainKey,
-	makeRandomMasterBase64,
+	importSeed,
+	makeRecoveryTriple,
 	writeBackupToTemp,
 } from "../helpers/import-drivers"
 import { readProfileGen } from "../helpers/crash-truth"
@@ -83,11 +83,11 @@ async function waitForGasBalanceRendered(page: Page, ctx: Awaited<ReturnType<typ
 	}
 }
 
-/** Import a master secret through the real popup-import UI, land on general,
+/** Import a recovery phrase through the real popup-import UI, land on general,
  *  switch to the sandbox network, and wait for the active account to settle. */
-async function importAndSettle(ctx: Awaited<ReturnType<typeof launchExtension>>, masterB64: string): Promise<Page> {
+async function importAndSettle(ctx: Awaited<ReturnType<typeof launchExtension>>, words: string[]): Promise<Page> {
 	const page = await gotoPopupImport(ctx)
-	await importPlainKey(page, masterB64, TEST_PASSWORD, POPUP_IMPORT_SHELL)
+	await importSeed(page, words.join(" "), TEST_PASSWORD, POPUP_IMPORT_SHELL)
 	await waitForHash(page, "#/popup/general", 30_000)
 	await switchToLocalNetwork(page)
 	await page.waitForFunction(async () => !!(await chrome.storage.local.get("nulo:ui:activeAccount"))["nulo:ui:activeAccount"], {
@@ -106,11 +106,11 @@ test.skipIf(!hasConfig)(
 	{ timeout: 900_000 },
 	async () => {
 		const ctx = await launchExtension()
-		const master = await makeRandomMasterBase64()
+		const { masterBase64: master, entropyBase64 } = await makeRecoveryTriple()
 		// A derivation-consistent account row is mandatory: the integrity coordinator
 		// re-derives every account before activating an imported profile.
 		const accountAddress = await deriveNuloAccountAddress(master, LOCAL_L1_CHAIN_ID)
-		const backupPath = writeBackupToTemp(buildSyntheticBackup({ masterBase64: master, accountAddress }))
+		const backupPath = writeBackupToTemp(buildSyntheticBackup({ masterBase64: master, entropyBase64, accountAddress }))
 		try {
 			// ── 1. First incarnation: restore the backup, verify baseline health. ─
 			let page = await gotoPopupImport(ctx)
@@ -181,7 +181,7 @@ test.skipIf(!hasConfig)(
 		const ctx = await launchExtension()
 		try {
 			// ── 1. First incarnation (kept lean — its health is leg A's job) ────
-			let page = await importAndSettle(ctx, await makeRandomMasterBase64())
+			let page = await importAndSettle(ctx, (await makeRecoveryTriple()).words)
 			const firstAddress = await getAccountAddress(page)
 			const firstProfileId = await captureSoleProfileId(page)
 
@@ -192,7 +192,7 @@ test.skipIf(!hasConfig)(
 			await waitForProfilePurged(page, firstProfileId)
 			await page.close()
 
-			page = await importAndSettle(ctx, await makeRandomMasterBase64())
+			page = await importAndSettle(ctx, (await makeRecoveryTriple()).words)
 			expect(await getAccountAddress(page)).not.toBe(firstAddress)
 			expect(await captureSoleProfileId(page)).not.toBe(firstProfileId)
 

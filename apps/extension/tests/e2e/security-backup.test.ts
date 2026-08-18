@@ -2,7 +2,7 @@ import type { Page } from "puppeteer"
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue } from "./fixtures/extension"
-import { navigateByHash, revealSecretKey, revealSeedPhrase } from "./fixtures/helpers"
+import { navigateByHash, revealSeedPhrase } from "./fixtures/helpers"
 
 const PASSWORD = TEST_PASSWORD
 
@@ -26,36 +26,6 @@ test("seed phrase reveal returns 24 word-like tokens", async ({ registeredExtens
 	const tokens = (phrase as string).trim().split(/\s+/)
 	expect(tokens.length).toBe(24)
 	for (const token of tokens) expect(token).toMatch(/^[a-z]+$/)
-
-	expect(registeredExtension.consoleErrors).toEqual([])
-	expect(registeredExtension.pageErrors).toEqual([])
-}, 30_000)
-
-test("secret key plain variant reveals after unlock", async ({ registeredExtension }) => {
-	const page = await openPopup(registeredExtension)
-	await waitForHash(page, "#/popup/general")
-
-	await revealSecretKey(page, PASSWORD, "plain")
-
-	const key = await readRevealedValue(page)
-	expect(key).toBeTruthy()
-	expect((key as string).length).toBeGreaterThan(20)
-
-	expect(registeredExtension.consoleErrors).toEqual([])
-	expect(registeredExtension.pageErrors).toEqual([])
-}, 30_000)
-
-test("secret key encrypted variant reveals immediately", async ({ registeredExtension }) => {
-	const page = await openPopup(registeredExtension)
-	await waitForHash(page, "#/popup/general")
-
-	// Encrypted variant doesn't go through the unlock gate — it auto-fetches
-	// the public key on selection.
-	await revealSecretKey(page, PASSWORD, "encrypted")
-
-	const key = await readRevealedValue(page)
-	expect(key).toBeTruthy()
-	expect((key as string).length).toBeGreaterThan(20)
 
 	expect(registeredExtension.consoleErrors).toEqual([])
 	expect(registeredExtension.pageErrors).toEqual([])
