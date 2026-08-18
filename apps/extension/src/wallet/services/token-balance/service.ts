@@ -1,6 +1,6 @@
 import type { ILogger } from "@/wallet/logger"
-import { toRestoreError } from "@/utils/restore-error"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -403,24 +403,15 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 
 	public async restore(tokenBalances: TokenBalanceRaw[]): Promise<Restored<TokenBalanceRaw>[]> {
 		await this.ensureInitialized()
-		const result: Restored<TokenBalanceRaw>[] = []
-		for (const tb of tokenBalances) {
-			try {
-				const id = await this.allocateUnfencedId()
-				// Parse the exact persisted shape: an unvalidated restore row that fails
-				// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
-				// on read AND to a later getValues() cleanup). Parse here so a malformed
-				// backup row is recorded as restoreError, never written.
-				const row = TokenBalanceRawSchema.parse({ ...tb, id })
-				await this.repo.set(row)
-				result.push(row)
-			} catch (err) {
-				result.push({
-					...tb,
-					restoreError: toRestoreError(err),
-				})
-			}
-		}
-		return result
+		return await restoreRows(tokenBalances, async (tb) => {
+			const id = await this.allocateUnfencedId()
+			// Parse the exact persisted shape: an unvalidated restore row that fails
+			// the read-codec is KEPT-but-hidden by EntityStorage.decodeRow (invisible
+			// on read AND to a later getValues() cleanup). Parse here so a malformed
+			// backup row is recorded as restoreError, never written.
+			const row = TokenBalanceRawSchema.parse({ ...tb, id })
+			await this.repo.set(row)
+			return row
+		})
 	}
 }

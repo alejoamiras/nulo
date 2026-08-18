@@ -5,7 +5,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ConfigService } from "@/wallet/services/config/service"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { ValueStorage } from "@/wallet/storage"
-import { EventHandler, getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, EventHandler, getErrorMessage } from "@nulo/wallet-core/utils"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import { allCoingeckoIds, getSanityBand } from "./price-map"
 import {
@@ -72,7 +72,12 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	public readonly onQuotesUpdated = new EventHandler<PriceState>()
 
 	private readonly cache: ValueStorage<PriceState>
-	private readonly alarms: AlarmsPort
+	// Q-05: the named create/clear ritual is owned by the shared AlarmDispatcher.
+	// `dispatcher.listen()` is deliberately NOT used here: dispatch stays external
+	// (the module-scope shim in wallet/index.ts is the SINGLE dispatch path — MV3
+	// only delivers a wake-triggering alarm to synchronously-registered listeners),
+	// so this service only creates/clears the alarm and exposes `onAlarmTick`.
+	private readonly dispatcher: AlarmDispatcher
 	private readonly fetchFn: FetchLike
 	private readonly now: () => number
 
@@ -103,7 +108,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		this.cache = browserApi
 			? new ValueStorage<PriceState>(CACHE_STORAGE_KEY, browserApi.storage.local)
 			: new ValueStorage<PriceState>(CACHE_STORAGE_KEY, chrome.storage.local)
-		this.alarms = browserApi ? browserApi.alarms : new ChromeAlarmsFallback()
+		this.dispatcher = new AlarmDispatcher(PRICE_REFRESH_ALARM_NAME, browserApi ? browserApi.alarms : new ChromeAlarmsFallback())
 		this.fetchFn = opts?.fetchFn ?? ((input, init) => fetch(input, init))
 		this.now = opts?.now ?? (() => Date.now())
 	}
@@ -123,7 +128,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		if (enabled && profile) {
 			await this.ensureAlarm()
 		} else {
-			await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+			await this.dispatcher.clear()
 		}
 	}
 
@@ -175,14 +180,14 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 		if (!(await this.isEnabled())) {
 			// Reconcile: a stray alarm surviving a missed kill-switch cleanup
 			// must not tick forever.
-			await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+			await this.dispatcher.clear()
 			return
 		}
 		const profile = await this.profileService.getActiveProfile()
 		if (!profile) {
 			// Locked while the alarm survived (e.g. lock raced the clear) —
 			// reconcile instead of fetching.
-			await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+			await this.dispatcher.clear()
 			return
 		}
 		await this.refresh(gen).catch(() => {
@@ -200,7 +205,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 				await this.ensureAlarm()
 				await this.refresh(gen).catch(() => {})
 			} else {
-				await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+				await this.dispatcher.clear()
 			}
 		})().catch((err) => this.log(LogLevel.Warn, "profile-change handling failed", getErrorMessage(err)))
 	}
@@ -229,7 +234,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 				// truth, so skip this transition's storage/emit work wholesale.
 				if (this.generation !== myGen) return
 				if (!enable) {
-					await this.alarms.clear(PRICE_REFRESH_ALARM_NAME)
+					await this.dispatcher.clear()
 					await this.cache.delete()
 					this.emit("onQuotesUpdated", {})
 				} else {
@@ -250,7 +255,7 @@ export class PriceService extends Service<Methods, Events> implements ServiceSpe
 	}
 
 	private async ensureAlarm(): Promise<void> {
-		await this.alarms.create(PRICE_REFRESH_ALARM_NAME, { periodInMinutes: PRICE_REFRESH_PERIOD_MINUTES })
+		await this.dispatcher.create({ periodInMinutes: PRICE_REFRESH_PERIOD_MINUTES })
 	}
 
 	/** Read the cache and keep only entries that still validate and are fresh.

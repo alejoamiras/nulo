@@ -41,8 +41,8 @@
  */
 
 import type { JobStage } from "@nulo/wallet-core/jobs"
-import type { AlarmEvent, AlarmsPort, Unsubscribe } from "@nulo/wallet-core/ports"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import type { AlarmsPort } from "@nulo/wallet-core/ports"
+import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type { OperationJournalService } from "./service"
@@ -93,9 +93,12 @@ const LOG_SOURCE = "JournalReaper"
  */
 export class JournalReaper {
 	private readonly journal: OperationJournalService
-	private readonly alarms: AlarmsPort
 	private readonly logger: ILogger
-	private alarmUnsubscribe?: Unsubscribe
+	// Q-05: the name-guarded create/clear/dispatch ritual is owned by the shared
+	// AlarmDispatcher; the boot sweep (with its distinct `{unconditional,
+	// bootCutoff}` args) and the periodic no-arg tick stay local — the two call
+	// shapes genuinely differ, so the wrapper deliberately doesn't own them.
+	private readonly dispatcher: AlarmDispatcher
 	/** Per-instance now-source. Real `Date.now()` in production; injectable
 	 *  via the optional 4th ctor arg for unit tests using fake clocks. */
 	private readonly now: () => number
@@ -108,8 +111,8 @@ export class JournalReaper {
 
 	public constructor(journal: OperationJournalService, alarms: AlarmsPort, logger: ILogger, now?: () => number, bootCutoff?: number) {
 		this.journal = journal
-		this.alarms = alarms
 		this.logger = logger
+		this.dispatcher = new AlarmDispatcher(JOURNAL_REAPER_ALARM_NAME, alarms)
 		this.now = now ?? (() => Date.now())
 		this.bootCutoff = bootCutoff
 	}
@@ -127,8 +130,13 @@ export class JournalReaper {
 		// composition-root-supplied cutoff (captured before services.start(), so it
 		// also predates any popup-RPC replayed mid-startup).
 		const bootCutoff = this.bootCutoff ?? this.now()
-		this.alarmUnsubscribe = this.alarms.onAlarm(this.onAlarmFired)
-		await this.alarms.create(JOURNAL_REAPER_ALARM_NAME, { periodInMinutes: REAP_PERIOD_MINUTES })
+		// The caller owns the diagnostic, so this stays byte-identical to the
+		// pre-adoption `reap().catch(err => log("reap tick threw", …))`.
+		this.dispatcher.listen(
+			() => this.reap(),
+			(err) => this.logger.log(LOG_SOURCE, LogLevel.Error, "reap tick threw", getErrorMessage(err)),
+		)
+		await this.dispatcher.create({ periodInMinutes: REAP_PERIOD_MINUTES })
 
 		// Aggressive boot sweep: any non-terminal record at SW startup is
 		// from a previous SW lifetime by construction (a fresh SW has an
@@ -146,17 +154,7 @@ export class JournalReaper {
 	}
 
 	public async stop(): Promise<void> {
-		this.alarmUnsubscribe?.()
-		this.alarmUnsubscribe = undefined
-		await this.alarms.clear(JOURNAL_REAPER_ALARM_NAME)
-	}
-
-	private readonly onAlarmFired = (alarm: AlarmEvent): void => {
-		if (alarm.name !== JOURNAL_REAPER_ALARM_NAME) return
-		// Fire-and-forget; failures must not propagate to the alarm dispatcher.
-		this.reap().catch((err) => {
-			this.logger.log(LOG_SOURCE, LogLevel.Error, "reap tick threw", getErrorMessage(err))
-		})
+		await this.dispatcher.stop()
 	}
 
 	/**

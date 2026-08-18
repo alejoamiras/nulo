@@ -10,7 +10,7 @@ import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex } from "@/wallet/utils"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import {
 	type Events,
 	type Methods,
@@ -252,13 +252,10 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			}
 		}
 
-		let id: string
-		do {
-			// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
-			// codex round-1 (defense-in-depth against requestId / journal-id
-			// collisions once concurrent dApp interactions are possible).
-			id = getRandomHex(16)
-		} while (await this.storage.contains(id))
+		// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
+		// codex round-1 (defense-in-depth against requestId / journal-id
+		// collisions once concurrent dApp interactions are possible).
+		const id = await nextRandomId(this.storage, 16)
 
 		const now = Date.now()
 		const record: OperationRecord = {

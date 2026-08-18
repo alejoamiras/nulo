@@ -54,7 +54,7 @@ import type { ConfigProp, IConfig } from "@/wallet/config"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
-import { getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
 import { SessionSecretBox, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
@@ -96,6 +96,12 @@ export class SessionManager {
 	 *  sync. */
 	private strictSecurityMode: boolean
 	private readonly alarms?: AlarmsPort
+	// Q-05: the named create/clear ritual is owned by the shared AlarmDispatcher.
+	// The listener deliberately does NOT go through `dispatcher.listen()`: the
+	// staleness gate needs `alarm.scheduledTime` (the dispatcher's tick contract
+	// doesn't surface the event), and the handler's fire-and-forget `void`
+	// semantics must stay byte-identical.
+	private readonly dispatcher?: AlarmDispatcher
 	/** Facade-lock serializer injected by ProfileService. Serializes the
 	 *  alarm-driven TTL close against the facade-locked session writers
 	 *  (refresh/open/unlock) so a racing refresh writeback cannot resurrect a
@@ -139,6 +145,7 @@ export class SessionManager {
 		// behavior — proactive TTL lights up once the composition root
 		// passes a real `BrowserApi`.
 		this.alarms = browserApi?.alarms
+		this.dispatcher = this.alarms ? new AlarmDispatcher(SESSION_TTL_ALARM_NAME, this.alarms) : undefined
 		// Pass-through default keeps the lock-agnostic contract for callers
 		// that don't wire the alarm (legacy SW path / unit tests).
 		this.runExclusive = runExclusive ?? ((fn) => fn())
@@ -669,11 +676,11 @@ export class SessionManager {
 	 * reactive `isExpired` check is the safety net).
 	 */
 	private async scheduleLockAlarm(lockedAt: number | undefined): Promise<void> {
-		if (!this.alarms || this.sessionTtl === 0 || lockedAt === undefined || lockedAt <= Date.now()) {
+		if (!this.dispatcher || this.sessionTtl === 0 || lockedAt === undefined || lockedAt <= Date.now()) {
 			return
 		}
 		try {
-			await this.alarms.create(SESSION_TTL_ALARM_NAME, { when: lockedAt })
+			await this.dispatcher.create({ when: lockedAt })
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to schedule TTL alarm", getErrorMessage(error))
 		}
@@ -684,9 +691,9 @@ export class SessionManager {
 	 * when no alarm exists. No-op when alarms aren't wired.
 	 */
 	private async clearLockAlarm(): Promise<void> {
-		if (!this.alarms) return
+		if (!this.dispatcher) return
 		try {
-			await this.alarms.clear(SESSION_TTL_ALARM_NAME)
+			await this.dispatcher.clear()
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to clear TTL alarm", getErrorMessage(error))
 		}
