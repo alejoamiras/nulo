@@ -19,9 +19,10 @@ import { array_equals, canonicalizeMnemonic, getEntropy, getMnemonic } from "@nu
 import {
 	asBase64Ciphertext,
 	asMasterSecretBytes,
-	computeEntropyMac,
+	computeEnvelopeMac,
 	deriveMasterFromMnemonic,
 	EncryptionKey,
+	type MacEnvelope,
 	type MasterSecretBytes,
 	type Passhash,
 	PasswordSecretBox,
@@ -301,7 +302,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const words = await getMnemonic(entropy)
 		const secret = await deriveMasterFromMnemonic(words)
 		const { passhash, encrypted } = await this.secretBox.seal(password, secret, entropy)
-		const entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(encrypted.entropy))
+		const envelopeMac = await computeEnvelopeMac(secret, this.macEnvelope(encrypted))
 		try {
 			return await this.runExclusive(async () => {
 				const id = await this.nextUnreservedId()
@@ -314,7 +315,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					guard: encrypted.guard,
 					secret: encrypted.secret,
 					entropy: encrypted.entropy,
-					entropyMac,
+					envelopeMac,
 				}
 				await this.repo.set(id, profile)
 
@@ -378,16 +379,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const { secret, entropy } = unsealed
 		try {
 			// Pairing check at the entropy-decryption site: the stored words must still derive
-			// the stored master (deriveMasterFromMnemonic ≈ ms — BIP-39's 2048 iterations).
-			// A mismatch means a tampered/corrupted row whose exported recovery phrase would
-			// point at a DIFFERENT wallet — fail closed before any session opens.
-			const words = await getMnemonic(entropy)
-			const rederived = await deriveMasterFromMnemonic(words)
-			const paired = array_equals(rederived, secret)
-			zeroize(rederived)
-			if (!paired) {
-				throw new Error("Profile storage corrupted")
-			}
+			// the stored master. A mismatch means a tampered/corrupted/transplanted row whose
+			// exported recovery phrase would point at a DIFFERENT wallet — fail closed before any
+			// session opens.
+			await this.assertEntropyMasterPair(secret, entropy)
 			const passhash = await EncryptionKey.getPasshash(password)
 
 			// Phase 3 — re-enter lock, revalidate, open session.
@@ -738,9 +733,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// failure. `reseal` returns passhash + ciphertext but not the raw secret.
 			const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
 			const secret = unsealed?.secret ?? null
-			if (unsealed) zeroize(unsealed.entropy)
+			const entropy = unsealed?.entropy ?? null
 			try {
-				if (secret) {
+				if (secret && entropy) {
+					// Pairing check BEFORE the reseal is committed (P3 rider High): a change-password
+					// on a transplanted-entropy row must NOT launder the mismatch into a MAC-valid
+					// profile. reseal preserves the plaintext, so checking the freshly-sealed pair is
+					// equivalent to checking the pre-change one.
+					await this.assertEntropyMasterPair(secret, entropy)
 					// Pre-persist verify: on drift, nothing is committed (honest failure — the password
 					// is NOT changed). But a drift here means the CURRENT session is on a mismatched
 					// build, so close it too — a rejected change must not leave the blocked profile
@@ -757,13 +757,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 				// Dual reseal is atomic with this same pre-persist-verified commit (audit H2):
 				// guard, master, AND entropy re-encrypt together — entropy must never remain
-				// decryptable under the retired password — and the entropy MAC re-keys with the
-				// new ciphertext so the bearer-path check keeps holding.
+				// decryptable under the retired password — and the envelope MAC re-keys over the
+				// new ciphertexts so the bearer-path check keeps holding.
 				profile.guard = resealed.encrypted.guard
 				profile.secret = resealed.encrypted.secret
 				profile.entropy = resealed.encrypted.entropy
 				if (secret) {
-					profile.entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(resealed.encrypted.entropy))
+					profile.envelopeMac = await computeEnvelopeMac(secret, this.macEnvelope(resealed.encrypted))
 				}
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
@@ -790,6 +790,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 			} finally {
 				zeroize(secret)
+				zeroize(entropy)
 				zeroize(resealed.passhash)
 			}
 
@@ -1377,6 +1378,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 				throw new Error("Invalid profile id")
 			}
+			// Pairing check before EXPORT (P3 rider High): a backup built from a tampered/
+			// transplanted row would otherwise report success with an unrestorable pair.
+			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 			return {
 				masterKey: Buffer.from(unsealed.secret).toString("base64"),
 				entropy: Buffer.from(unsealed.entropy).toString("base64"),
@@ -1422,12 +1426,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// words that no longer derive the stored master would point at a DIFFERENT wallet —
 			// the split-brain recovery attack — so fail closed instead of handing them out.
 			const mnemonic = await getMnemonic(unsealed.entropy)
-			const rederived = await deriveMasterFromMnemonic(mnemonic)
-			const paired = array_equals(rederived, unsealed.secret)
-			zeroize(rederived)
-			if (!paired) {
-				throw new Error("Profile storage corrupted")
-			}
+			await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 			// Revalidate under the lock AFTER the async derivations — a delete interleaving
 			// during them must not let the erased profile's words escape (codex verify r4).
 			await this.runExclusive(async () => {
@@ -1446,6 +1445,28 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				zeroize(unsealed.entropy)
 			}
 		}
+	}
+
+	/**
+	 * The words↔master pairing check, run at every site that has decrypted BOTH the entropy and
+	 * the master: the stored recovery words MUST still derive the stored master. A mismatch means
+	 * a tampered or cross-profile-transplanted ciphertext (the backup checksum is integrity-not-
+	 * auth; purpose-AAD stops slot-swaps but not same-slot moves between same-password profiles).
+	 * Throws before any secret is revealed, persisted, or exported. Zeroizes its own scratch.
+	 */
+	private async assertEntropyMasterPair(secret: MasterSecretBytes, entropy: Uint8Array<ArrayBuffer>): Promise<void> {
+		const words = await getMnemonic(entropy)
+		const rederived = await deriveMasterFromMnemonic(words)
+		const paired = array_equals(rederived, secret)
+		zeroize(rederived)
+		if (!paired) {
+			throw new Error("Profile storage corrupted")
+		}
+	}
+
+	/** The whole-envelope MAC preimage for a sealed profile record. */
+	private macEnvelope(p: { guard: string; secret: string; entropy: string }): MacEnvelope {
+		return { guard: p.guard, secret: p.secret, entropy: p.entropy }
 	}
 
 	public async getProfileSecret(id: string): Promise<Fr> {
@@ -1487,7 +1508,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			return await this.runExclusive(async () => {
 				const id = await this.nextUnreservedId()
 				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret, entropy)
-				const entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(encrypted.entropy))
+				const envelopeMac = await computeEnvelopeMac(secret, this.macEnvelope(encrypted))
 				const profile: Profile = {
 					id,
 					name,
@@ -1496,7 +1517,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					guard: encrypted.guard,
 					secret: encrypted.secret,
 					entropy: encrypted.entropy,
-					entropyMac,
+					envelopeMac,
 				}
 				await this.repo.set(id, profile)
 				this.emit("onProfileAdded", this.getProfileInfo(profile))
@@ -1640,9 +1661,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 								plainEntropy,
 							)
 							passhash = sealed.passhash
-							const entropyMac = await computeEntropyMac(
+							const envelopeMac = await computeEnvelopeMac(
 								asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
-								asBase64Ciphertext(sealed.encrypted.entropy),
+								this.macEnvelope(sealed.encrypted),
 							)
 
 							let id = profile.id
@@ -1660,7 +1681,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 								guard: sealed.encrypted.guard,
 								secret: sealed.encrypted.secret,
 								entropy: sealed.encrypted.entropy,
-								entropyMac,
+								envelopeMac,
 							}
 
 							// Marker BEFORE row (fail-closed): a crash between the two writes
@@ -1853,6 +1874,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!unsealed) {
 					throw new InvalidPasswordError()
 				}
+				// Pairing check before the session opens (P3 rider): a tamper between restore()
+				// and finalize must not open a session whose recovery phrase is a lie.
+				await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 				const passhash = await EncryptionKey.getPasshash(password)
 				try {
 					await this.openSessionVerified(profile, unsealed.secret, passhash)

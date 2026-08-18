@@ -12,7 +12,7 @@
  *     expects.
  */
 
-import { asBase64Ciphertext, asMasterSecretBytes, asPasshash, computeEntropyMac, type MasterSecretBytes } from "@nulo/wallet-crypto"
+import { asMasterSecretBytes, asPasshash, computeEnvelopeMac, type MasterSecretBytes } from "@nulo/wallet-crypto"
 import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
@@ -68,7 +68,7 @@ const passwordProfile = (id = "pid"): Profile & { type: "password" } => ({
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
 	entropy: "ZW50cm9weQ==",
-	entropyMac: "bWFj",
+	envelopeMac: "bWFj",
 })
 
 const passkeyProfile = (id = "pid"): Profile & { type: "passkey" } => ({
@@ -91,11 +91,15 @@ function secretBuffer(): MasterSecretBytes {
  *  to the profile id — so `restore()` unwraps it the same way in production. */
 const bearerBox = new SessionSecretBox()
 
-/** Password profile whose entropyMac genuinely verifies against `secret` — the bearer path
- *  now checks the master-keyed MAC over the sealed entropy before committing a restore. */
+/** Password profile whose envelopeMac genuinely verifies against `secret` — the bearer path
+ *  now checks the master-keyed MAC over the whole sealed envelope before committing a restore. */
 async function passwordProfileFor(id = "pid", secret = secretBuffer()): Promise<Profile & { type: "password" }> {
 	const profile = passwordProfile(id)
-	profile.entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(profile.entropy))
+	profile.envelopeMac = await computeEnvelopeMac(secret, {
+		guard: profile.guard,
+		secret: profile.secret,
+		entropy: profile.entropy,
+	})
 	return profile
 }
 

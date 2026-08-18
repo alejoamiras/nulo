@@ -471,6 +471,58 @@ describe("ProfileService integration", () => {
 		}, 30_000)
 	})
 
+	describe("cross-profile transplant defenses (P3 rider High)", () => {
+		// Two profiles sharing a password: purpose-AAD does NOT stop moving a single authentic
+		// ciphertext between them, so the pairing checks + whole-envelope MAC must.
+		const profileRowKey = (id: string) => `nulo:core:profiles@${id}`
+		async function readRow(api: FakeBrowserApi, id: string) {
+			const all = await api.storage.local.get()
+			return JSON.parse(all[profileRowKey(id)] as string)
+		}
+		async function writeRow(api: FakeBrowserApi, id: string, row: unknown) {
+			await api.storage.local.set({ [profileRowKey(id)]: JSON.stringify(row) })
+		}
+
+		test("transplanting another profile's entropy is caught at unlock, and change-password can't launder it", async () => {
+			const { api, service } = await makeService()
+			const a = await service.createProfile("A", "shared-pass1")
+			await service.lockActiveProfile()
+			const b = await service.createProfile("B", "shared-pass1")
+			await service.lockActiveProfile()
+
+			const rowA = await readRow(api, a.id)
+			const rowB = await readRow(api, b.id)
+			await writeRow(api, a.id, { ...rowA, entropy: rowB.entropy }) // B's authentic entropy into A
+
+			// Unlock catches the pair mismatch.
+			await expect(service.unlockProfile(a.id, "shared-pass1")).rejects.toThrow()
+			// And change-password refuses too — it must NOT reseal + rewrite the MAC into a
+			// bearer-valid-but-unrecoverable profile.
+			await expect(service.changeProfilePassword(a.id, "shared-pass1", "new-pass12")).rejects.toThrow()
+		}, 30_000)
+
+		test("transplanting another profile's master (secret) is caught by the whole-envelope bearer MAC", async () => {
+			const { api, service } = await makeService() // non-strict → a bearer is persisted
+			const b = await service.createProfile("B", "shared-pass1")
+			await service.lockActiveProfile()
+			// Create A LAST so it is the active session with a persisted bearer at reboot.
+			const a = await service.createProfile("A", "shared-pass1")
+
+			const rowA = await readRow(api, a.id)
+			const rowB = await readRow(api, b.id)
+			// Move B's master ciphertext into A but keep A's entropy + A's (now-stale) envelope MAC.
+			await writeRow(api, a.id, { ...rowA, secret: rowB.secret })
+
+			// A fresh SW runs the passwordless bearer restore during start(); the envelope MAC
+			// (keyed by the master the bearer carries) no longer matches A's mutated envelope,
+			// so the session is silently closed rather than opened on a mismatched master.
+			const { service: rebooted } = await makeServiceFromExistingApi(api)
+			expect(await rebooted.getActiveProfile()).toBeUndefined()
+			// Password unlock also refuses via the pairing check.
+			await expect(rebooted.unlockProfile(a.id, "shared-pass1")).rejects.toThrow()
+		}, 30_000)
+	})
+
 	describe("recovery-phrase round trip (NULO-ACCOUNT-KDF v2)", () => {
 		test("create → export words → re-import → the SAME master secret", async () => {
 			const { service } = await makeService()

@@ -103,3 +103,26 @@ conditional approve (with conditions: authenticate the entropy carrier before si
 ### Low
 
 - `§A/Security` still says `GeneratorIndex`/“dual-enum,” contradicting revised I3. P4 still schedules encrypted-key deletion already assigned to P3.
+---
+
+# P3 crypto rider — consult (post-Phase-3, blocking gate)
+
+> Verdict: FAIL (1 High: cross-profile transplant). Fixes applied in the following commit; envelope-wide MAC + pairing checks at reseal/backup-export/finalize + zeroize-on-throw. Re-verdict appended after.
+
+fail (blocking findings: same-password cross-profile transplants can bypass or launder the recovery binding)
+
+## High
+
+- Purpose-only AAD blocks cross-slot swaps, but same-slot ciphertexts remain portable between profiles sharing a password. Replacing A’s entropy with B’s authentic entropy decrypts successfully. [`changeProfilePassword`](<apps/extension/src/wallet/services/profile/service.ts:739>) performs no pairing check, then rewrites the MAC at [service.ts:766](<apps/extension/src/wallet/services/profile/service.ts:766>), laundering the mismatch into a bearer-valid profile. Account integrity still passes because master A and its accounts remain unchanged. I reproduced: transplant decrypts, old MAC rejects, pair mismatches, rewritten MAC accepts.
+
+  Conversely, transplanting B’s `secret` leaves A’s entropy/MAC intact, so bearer restore accepts at [session-manager.ts:462](<apps/extension/src/wallet/services/profile/session-manager.ts:462>) because the MAC covers only entropy. Password unlock/export later fails, silently degrading recovery availability—the previously classified High harm. Pair-check before reseal, backup export, and finalize; MAC a canonical encoding of the entire ciphertext envelope, not entropy alone. The same missing check lets [exportBackupMaterial](<apps/extension/src/wallet/services/profile/service.ts:1367>) report success with an unrestorable pair.
+
+## Medium
+
+- The e2e derivation oracle still computes KDF v1—unseparated Poseidon over composite `chainId`—at [import-drivers.ts:223](<apps/extension/tests/e2e/helpers/import-drivers.ts:223>). Its backup fixture also stamps epoch 3 and omits entropy at [import-drivers.ts:297](<apps/extension/tests/e2e/helpers/import-drivers.ts:297>); the passkey fixture remains epoch 3 at [passkey-backup.test.ts:135](<apps/extension/tests/e2e/passkey-backup.test.ts:135>). These fixtures now test guaranteed rejection, not successful v2 restore.
+
+## Low
+
+- Exceptional-path zeroization is incomplete: locally derived passhashes can escape wiping when sealing/resealing throws ([password-secret-box.ts:94](<packages/wallet-crypto/src/password-secret-box.ts:94>), [password-secret-box.ts:167](<packages/wallet-crypto/src/password-secret-box.ts:167>)); create/restore/finalize also establish `finally` blocks after sensitive allocations. No plaintext logging was found.
+
+The KDF spec/digest/KATs otherwise match, with a ~253.5967-bit floor. Zero-salt HKDF is sound; MAC-field tampering only forces re-unlock. Restore validation precedes writes, and password reseal persists one atomic JSON row. A whole coherent quadruple transplant is intentionally indistinguishable without profile-ID binding; existing account rows normally catch it.

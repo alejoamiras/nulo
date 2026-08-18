@@ -55,7 +55,7 @@ import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
-import { asBase64Ciphertext, SessionSecretBox, verifyEntropyMac, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
+import { SessionSecretBox, verifyEnvelopeMac, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -460,15 +460,19 @@ export class SessionManager {
 				await this.silentClose()
 				return
 			}
-			// Entropy-MAC check: this passwordless path can never decrypt `entropy` to run the
-			// words↔master pairing check, so it verifies the master-keyed MAC over the sealed
-			// entropy instead — otherwise a long-lived bearer keeps the wallet operating while
-			// tampered entropy silently degrades recovery, surfacing exactly when the bearer is
-			// lost and recovery is needed. Mismatch blocks silent restore; the forced password
-			// unlock runs the full pairing check and surfaces the corruption honestly.
-			const entropyIntact = await verifyEntropyMac(secretBytes, asBase64Ciphertext(profile.entropy), profile.entropyMac)
-			if (!entropyIntact) {
-				this.logger.log(LOG_SOURCE, LogLevel.Error, "Sealed-entropy MAC mismatch → silentClose (password unlock will verify)")
+			// Envelope-MAC check: this passwordless path can never decrypt the sealed fields to
+			// run the words↔master pairing check, so it verifies the master-keyed MAC over the
+			// WHOLE sealed envelope (guard‖secret‖entropy) instead — catching both tampered
+			// entropy (silent recovery degradation) AND a single ciphertext transplanted from
+			// another same-password profile (which purpose-AAD alone does not stop). Mismatch
+			// blocks silent restore; the forced password unlock runs the full pairing check.
+			const envelopeIntact = await verifyEnvelopeMac(
+				secretBytes,
+				{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy },
+				profile.envelopeMac,
+			)
+			if (!envelopeIntact) {
+				this.logger.log(LOG_SOURCE, LogLevel.Error, "Sealed-envelope MAC mismatch → silentClose (password unlock will verify)")
 				await this.silentClose()
 				return
 			}

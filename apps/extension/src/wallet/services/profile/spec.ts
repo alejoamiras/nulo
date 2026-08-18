@@ -48,10 +48,11 @@ export type Profile = ProfileInfo & {
 				/** Sealed 32-byte BIP-39 entropy (AAD-bound, PasswordSecretBox v2) — the recovery
 				 *  phrase re-displays from THIS; the master derives one-way from the words. */
 				entropy: string
-				/** Master-keyed HMAC over the sealed-entropy ciphertext. The passwordless bearer
-				 *  restore verifies it (it cannot decrypt entropy to run the pairing check); a
-				 *  mismatch blocks silent restore and forces a password unlock. */
-				entropyMac: string
+				/** Master-keyed HMAC over the WHOLE sealed envelope (guard‖secret‖entropy). The
+				 *  passwordless bearer restore verifies it (it cannot decrypt to run the pairing
+				 *  check); a mismatch — a tampered OR cross-profile-transplanted ciphertext in any
+				 *  slot — blocks silent restore and forces a password unlock. */
+				envelopeMac: string
 		  }
 		| {
 				type: "passkey"
