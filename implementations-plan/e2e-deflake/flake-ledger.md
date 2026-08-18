@@ -410,3 +410,53 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
   record `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 min, and
   the base branch's protection config BEFORE pushing anything. Two arcs have now destroyed
   that state by remedying immediately.
+
+## deflake-round-4 (2026-08-18) — crash-truth findings
+
+### OPEN
+
+- **BUG-TRANSPORT — the designed crash rollback structurally cannot run.** After a
+  real mid-restore SW kill (rendezvous-anchored at `service-restore`, page alive),
+  the import page's catch dispatches the rollback but `deleteProfile` is rejected
+  <1s later with "Client disconnected": the messaging client flips to Connected on
+  doomed ports during the respawn gap (no backoff; `sleep(1000)` only guards a
+  THROWING connect) and `rejectAllPending` kills gap-issued calls. Reconnect churn
+  provably continues before/during/after the rejection (~50@811ms → 88@1536ms
+  across runs), so no worker existed to refuse the call — client-local transport
+  rejection, 4x metronomic reproduction (sinceKill 811/798/784/799ms). Orphan
+  profile + restore-pending marker survive; torn-unlock backstop holds (measured).
+  Evidence: deflake-round-4 `lessons/phase-1.md` runs 2-7. Skip anchor:
+  `network/backup-restore-sw-restart.test.ts` scenario A. **Fix arc in flight**
+  (deflake-round-4 `fix-plan.md`, PR-3: liveness-gated dispatch composing with
+  upstream's B-24 bounded rollback helper — the helper's retries run against a
+  live worker instead of burning into the respawn gap).
+- **BUG-FENCE — delete + same-id re-import left the wallet PXE-sync-dead:
+  UPSTREAM-FIXED mid-arc; hardening follow-up in this stack.** The offscreen
+  lifecycle map's `deleted(G1)` record made `assertGenerationCurrent` reject the
+  re-imported profile's fresh-G2 captures WITHOUT the `PXE_STORE_KEY_MISSING`
+  marker, so the client's provisioning retry never fired and `live(G2)` was
+  never installed — balance rows froze ("pxe op rejected: profile … is deleted
+  (generation superseded)") until the offscreen restarted. Reproduced with ZERO
+  crashes in this arc's run 7 (generation pair 6c9b…→7111… proved the fresh
+  mint); INDEPENDENTLY found via a user report and fixed on dev while this arc
+  was in audit — the shipped fix is the fall-through variant
+  (deleted(different-gen) captures pass to the runtime bind's natural
+  missing-key marker) with its own regression e2e
+  (`network/profile-reimport-matrix.test.ts`, same-offscreen tombstone-collision
+  matrix). Two sessions, one bug: the round-4 evidence found it first, the
+  user-report arc shipped first. This stack's PR-2 carries the audited
+  DEFENSE-IN-DEPTH the shipped fix lacks: capture-conditional provision
+  equality guard, readiness-once + already-ready-send authority-race closure
+  (pre-existing concurrency HIGH #1 residual), and key zeroization.
+  Evidence: deflake-round-4 `lessons/phase-1.md` runs 6-7.
+- **Crash-before-provision delete refusal (edge, fails closed).** With the map at
+  `deleted(G1)`, `clearProfileState(G2)` is REFUSED by the different-gen guard —
+  a crash after a re-import mints G2 but before provisioning leaves a state whose
+  delete fails to the torn backstop until offscreen restart. Behavior pinned
+  as-is in the fence-fix PR; full treatment belongs to the ledgered
+  transport-hardening follow-up (fable fresh-audit find).
+- **e2e consoleErrors capture cannot see app `console.*`.** Across all round-4
+  runs, the popup's own console.error calls never reached the CDP console stream
+  the fixture captures (browser-emitted entries arrive; console-API calls from
+  the extension page do not) — consoleErrors-based assertions are weaker than
+  they look. Diagnosed in `lessons/phase-1.md` run 7; needs its own infra arc.

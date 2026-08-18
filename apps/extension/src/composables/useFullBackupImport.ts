@@ -39,6 +39,31 @@ import { runImportChainSync } from "./importChainSync"
 
 export type RestoreStatus = "" | "progress" | "failed" | "finished" | null | undefined
 
+/**
+ * Phase marker for the restore leg, exposed to the import pages as
+ * `data-restore-stage`. OBSERVABILITY ONLY — no control flow reads it; it
+ * exists so a crash mid-restore is attributable to a NAMED phase (the
+ * `restoreStatus` field is flat "progress" across the whole leg). The
+ * `rolling-back` / `rolled-back` / `rollback-failed` values are the one
+ * genuinely new signal: a direct causal marker for the pre-finalize orphan
+ * rollback, instead of inferring it from storage side effects.
+ */
+export type RestoreStage =
+	| ""
+	| "picked"
+	| "restoring:profile"
+	| "restoring:networks"
+	| "restoring:tokens"
+	| "restoring:services"
+	| "finalizing"
+	| "restoring:account-state"
+	| "chain-sync"
+	| "finished"
+	| "failed"
+	| "rolling-back"
+	| "rolled-back"
+	| "rollback-failed"
+
 /** B-24: how many times to retry the compensating profile delete on rollback. */
 const ROLLBACK_MAX_ATTEMPTS = 3
 /** Shown when a partial import can't be rolled back — the profile row survives,
@@ -185,6 +210,7 @@ export interface UseFullBackupImportResult {
 	selectedBackup: Ref<BackupSelection | null>
 	decryptionPassword: Ref<string>
 	restoreStatus: Ref<RestoreStatus>
+	restoreStage: Ref<RestoreStage>
 	restoreErrorLog: Ref<Record<string, unknown[]>>
 	importedProfile: Ref<unknown>
 	isAllowedToImportBackup: Ref<boolean>
@@ -207,6 +233,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 	const selectedBackup = ref<BackupSelection | null>(null)
 	const decryptionPassword = ref("")
 	const restoreStatus = ref<RestoreStatus>("")
+	const restoreStage = ref<RestoreStage>("")
 	const restoreErrorLog = ref<Record<string, unknown[]>>({})
 	const importedProfile = ref<unknown>(null)
 	const parsedBackupName = ref<string | null>(null)
@@ -323,6 +350,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		if (!isAllowedToImportBackup.value) return
 		opts.clearError()
 		restoreStatus.value = "progress"
+		restoreStage.value = "restoring:profile"
 
 		const sel = selectedBackup.value as BackupSelection
 		// Q-02: integrity + compatibility gate + forward-migration, all before any
@@ -457,6 +485,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// the victim. Rewriting every `profileId` to `newProfile.id` closes it.
 			normalizeAllIds(data, "profileId", newProfile.id)
 
+			restoreStage.value = "restoring:networks"
 			const newNetworks = (await networkService.restore(data.network)) as Array<{
 				id: string
 				name: string
@@ -617,6 +646,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				accountService.disconnect()
 			}
 
+			restoreStage.value = "restoring:tokens"
 			const tokenService = new TokenServiceClient()
 			let tokenRestoreResult: unknown
 			try {
@@ -697,6 +727,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// mid-loop throw (or a non-array slice that skips a client's body) must
 			// still disconnect ALL of them — a per-iteration finally would only
 			// clean the client that threw, leaking the ones after it (P7).
+			restoreStage.value = "restoring:services"
 			try {
 				for (const { name, client } of backupServices) {
 					const sliceData = data[name]
@@ -715,6 +746,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// those see the imported data, not an empty profile that needs
 			// default seeding.
 			finalizeStarted = true
+			restoreStage.value = "finalizing"
 			try {
 				await profileService.finalizeRestore(newProfile.id, opts.password.value || undefined)
 			} catch (err) {
@@ -745,10 +777,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// chain-sync: the normalizer converts them into a violation record that
 			// lands on the errors screen. Gating on Array.isArray here would let a
 			// malformed slice auto-route past the Continue gate unrecorded.
+			restoreStage.value = "restoring:account-state"
 			const accountStateSlice = data[ACCOUNT_STATE_SERVICE_NAME]
 			if (accountStateSlice !== undefined) {
 				const accountStateService = new AccountStateServiceClient()
 				try {
+					restoreStage.value = "chain-sync"
 					await runImportChainSync({
 						slice: accountStateSlice,
 						createdNetworkIds: createdNetworks.map((n) => n.id),
@@ -762,6 +796,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 
 			restoreStatus.value = "finished"
+			restoreStage.value = "finished"
 			if (!isRestoreHasErrors.value) {
 				// AWAIT completeImport in an isolated try/catch (P7). At this point
 				// the import genuinely succeeded (data written, session opened via
@@ -783,13 +818,21 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// retry starts clean. Post-finalize errors keep the profile (see the
 			// bookkeeping note above); the finalize call itself has its own catch
 			// and never reaches here.
-			if (createdProfileId !== undefined && !finalizeStarted && !(await rollbackCreatedProfile(createdProfileId))) {
-				// The orphan couldn't be removed — surface an actionable message
-				// instead of the generic failure, and mark the import failed.
-				restoreStatus.value = "failed"
-				opts.fillError("full_backup", "Import incomplete", CLEANUP_PENDING_MESSAGE)
-				console.error((err as Error)?.message || err)
-				return
+			if (createdProfileId !== undefined && !finalizeStarted) {
+				restoreStage.value = "rolling-back"
+				if (await rollbackCreatedProfile(createdProfileId)) {
+					restoreStage.value = "rolled-back"
+				} else {
+					// The orphan couldn't be removed — surface an actionable message
+					// instead of the generic failure, and mark the import failed.
+					restoreStage.value = "rollback-failed"
+					restoreStatus.value = "failed"
+					opts.fillError("full_backup", "Import incomplete", CLEANUP_PENDING_MESSAGE)
+					console.error((err as Error)?.message || err)
+					return
+				}
+			} else {
+				restoreStage.value = "failed"
 			}
 			restoreStatus.value = ""
 			opts.fillError("full_backup", "Import failed", String((err as Error)?.message ?? err))
@@ -822,6 +865,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		selectedBackup,
 		decryptionPassword,
 		restoreStatus,
+		restoreStage,
 		restoreErrorLog,
 		importedProfile,
 		isAllowedToImportBackup,

@@ -1,68 +1,85 @@
 /**
- * The P3 fold from P2's diagnosis: an MV3 service-worker restart MID-RESTORE is
- * production-plausible, and contract registrations applied during the restore
- * must survive it — after the user's natural recovery (reopen + unlock), the
- * imported wallet must be fully on-chain functional (account address intact,
- * real token balance syncs), which is only possible if the account + token
- * contracts are (re)registered against the encrypted PXE store.
+ * Crash truth for the mid-restore service-worker kill.
  *
- * The kill lands deterministically MID-restore: after the import submit, the
- * test waits for the restored profile ROW to appear in raw chrome.storage
- * (restore started) and kills the SW before the import page's success
- * navigation (restore not finished). If the restore wins the race and finishes
- * first, the test degenerates to the plain reopen-recovery leg — still a valid
- * pass, logged for visibility.
+ * Two DETERMINISTIC scenarios, each killing the worker while a restore RPC is
+ * genuinely parked at a known phase (the `nulo:e2e:restore-gate` rendezvous —
+ * armed by the test, ACKNOWLEDGED by the SW-side handler, so "armed" is never
+ * mistaken for "reached"):
  *
- * The registration guarantee only applies when there ARE registrations to lose:
- * a kill landing PRE-finalize triggers the import composable's designed rollback
- * (the orphan profile is deleted so a retry starts clean) and registrations
- * haven't happened yet — the wallet legitimately resets to register. The test
- * therefore accepts three DESIGNED outcomes, asserting whichever occurred was
- * performed correctly: full recovery; a COMPLETED rollback (profile row +
- * deletion tombstone both purged, provenance-gated on the marker having seen
- * the row) followed by the product's designed retry (re-import, no kill); or a
- * TORN refusal — the kill landed inside the restore-pending window AND the
- * page closed before the rollback dispatch (browser-crash model), so the
- * reopened wallet refuses unlock with the torn explanation and the user's
- * designed recovery is the deliberate delete flow + re-import. All legs
- * converge on the same funded-address + on-chain-balance assertions, so the
- * load-bearing checks run on EVERY pass. What the test rejects is the state it
- * once flaked on: a silent park where the wallet is none of the three.
+ *  A. PRE-finalize crash (gate at `service-restore`, inside
+ *     `ContactService.restore`): the product defines this as rollback — the
+ *     import page's catch deletes the orphan profile (`useFullBackupImport`,
+ *     pre-finalize branch) and marks `data-restore-stage=rolled-back`. The
+ *     test then exercises the designed retry (a full re-import) and converges
+ *     on-chain. A stage stuck pre-finalize with the page alive is classified
+ *     by the disconnect probe: probe fired + no rollback = PRODUCT BUG
+ *     (rollback never dispatched/completed after a real crash); probe silent
+ *     = inconclusive kill/Port mechanics, reported as such — never a product
+ *     verdict.
+ *
+ *  B. POST-finalize crash (gate at `account-state`, inside
+ *     `AccountStateService.restore`): the product deliberately RETAINS the
+ *     profile (its data is fully in storage). The restore-pending marker is
+ *     asserted ABSENT before the kill (`finalizeRestore` clears it at entry),
+ *     NO rollback stage may ever appear, and the reopen path must land on
+ *     RECOVERY — a torn refusal here is a FAILURE (the marker is gone, so a
+ *     matching torn screen would mean corruption or a stale marker).
+ *
+ * History: the previous version of this test used `Runtime.terminateExecution`,
+ * which never terminated the worker (deflake-round-3 `lessons/phase-3.md`) —
+ * its fast-rollback leg was reachable only because a live worker serviced
+ * `deleteProfile` instantly, and its 300s re-import wait lapsed two
+ * certification campaigns from that leg. With a real kill the fork was never
+ * observed passively (five runs, up to 240s), which is WHY the rendezvous +
+ * stage classification exist (deflake-round-4 plan, codex-audited).
+ *
+ * @requires-proverless — the restore-gate rendezvous is constructed only
+ * under the statically-false-in-prod `NULO_E2E_PROVERLESS=1` branch (the
+ * STUB-test family contract, which is also what the CI network shards run).
+ * The agent runner greps for this marker and REFUSES a prover-ON invocation
+ * of this file before any build; prover-ON coverage of the delete/re-import
+ * surface lives in `profile-reimport-matrix.test.ts`, which has no gate
+ * dependence.
  */
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, inject } from "vitest"
+import type { Page, Target } from "puppeteer"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import {
 	clickByTestId,
 	launchExtension,
 	openPopup,
-	replaceInputValue,
 	test,
 	waitForHash,
+	withTimeoutMessage,
 	type ExtensionContext,
 } from "../fixtures/extension"
 import {
 	captureBalanceBaseline,
 	ensureUnlocked,
 	getAccountAddress,
-	navigateByHash,
-	resetProfile,
 	switchToLocalNetwork,
 	waitForFreshBalanceRow,
 	waitForTokenCardAmount,
 } from "../fixtures/helpers"
-import { armBackupDownloadCapture, readCapturedBackupDownload } from "../helpers/backup-export"
+import { armRestoreGate, clearRestoreGate, waitForRestoreGateHeld } from "../fixtures/restore-gate"
+import {
+	completeResetRitual,
+	driveImportToSubmit,
+	exportFundedBackup,
+	readStage,
+	reimportToTerminal,
+	ROLLBACK_BUDGET_MS,
+} from "../helpers/crash-truth"
 import {
 	gotoPopupImport,
 	importFullBackup,
 	POPUP_IMPORT_SHELL,
 	TEST_PASSWORD,
 	setInputs,
-	submitWhenEnabled,
 	waitForActiveAccount,
-	writeBackupToTemp,
 } from "../helpers/import-drivers"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -74,397 +91,419 @@ test("agent-runner contract: a live sandbox must be configured (no false skip)",
 	}
 })
 
-// Mirrors sw-restart-network.test.ts — kept inline per that file's precedent.
-// One deviation: an ABSENT service-worker target is a pass-through, not a failure.
-// The precedent tests kill the SW right after actively messaging it (guaranteed
-// awake); here the kill lands mid-restore, and under CI load Chrome's own MV3
-// reaper can take the SW down first — which IS the mid-restore SW death this
-// test exists to exercise, so proceed to the recovery leg instead of failing.
+/** Terminate the SW and wait for the ORIGINAL target's destruction —
+ *  `worker().close()` is Chrome's documented termination primitive; object
+ *  identity on `targetdestroyed` proves THIS worker died (a fast replacement
+ *  cannot be mistaken for it). `Runtime.terminateExecution` is not a kill:
+ *  it aborts the running script and leaves the worker alive. */
 async function stopServiceWorker(ctx: ExtensionContext): Promise<void> {
-	const swTarget = await ctx.browser
-		.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), { timeout: 5_000 })
-		.catch(() => null)
-	if (!swTarget) {
-		console.warn("[sw-restart-restore] no live SW target — Chrome already killed it; proceeding to recovery")
-		return
-	}
-	const swSession = await swTarget.createCDPSession()
-	try {
-		await swSession.send("Runtime.terminateExecution")
-	} catch {
-		// Session dies along with the SW; swallow disconnect noise.
-	}
+	const swTarget = await ctx.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ctx.extensionId), {
+		timeout: 15_000,
+	})
+	const destroyed = new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ctx.browser.off("targetdestroyed", onDestroyed)
+			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
+		}, 15_000)
+		function onDestroyed(target: Target) {
+			if (target !== swTarget) return
+			clearTimeout(timer)
+			ctx.browser.off("targetdestroyed", onDestroyed)
+			resolve()
+		}
+		ctx.browser.on("targetdestroyed", onDestroyed)
+	})
+	const worker = await swTarget.worker()
+	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
+	await worker.close()
+	await destroyed
 }
 
+/** Page-side disconnect probe: an owned port (the SW's service collection
+ *  claims "profile") whose `onDisconnect` timestamps the moment Chrome
+ *  actually delivered the worker's death to this page. Distinguishes "the
+ *  crash never reached the page" (inconclusive mechanics) from "the page saw
+ *  the crash and the rollback still never ran" (a product finding). */
+async function armDisconnectProbe(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const w = window as unknown as { __nuloDisconnectProbe?: { connectedAt: number; disconnectedAt: number | null } }
+		const port = chrome.runtime.connect({ name: "profile" })
+		w.__nuloDisconnectProbe = { connectedAt: Date.now(), disconnectedAt: null }
+		port.onDisconnect.addListener(() => {
+			if (w.__nuloDisconnectProbe) w.__nuloDisconnectProbe.disconnectedAt = Date.now()
+		})
+	})
+}
+
+async function readDisconnectProbe(page: Page): Promise<{ connectedAt: number; disconnectedAt: number | null } | null> {
+	return await page
+		.evaluate(() => {
+			const w = window as unknown as { __nuloDisconnectProbe?: { connectedAt: number; disconnectedAt: number | null } }
+			return w.__nuloDisconnectProbe ?? null
+		})
+		.catch(() => null)
+}
+
+// Budget for the SW handler to acknowledge the hold: the whole pre-hold
+// restore runs under CI proving load first (decrypt, migrate, profile,
+// networks, tokens for A; plus finalize's argon2 + session open for B).
+const HELD_BUDGET_A_MS = 180_000
+const HELD_BUDGET_B_MS = 300_000
+
+// SKIP — BUG-TRANSPORT, measured (not suspicion): the designed rollback
+// DISPATCHES after a real mid-restore kill, but its `deleteProfile` is
+// rejected <1s later — the messaging client flips to Connected on doomed
+// ports during the SW respawn gap with no backoff, and rejectAllPending
+// kills calls issued in the gap ("Client disconnected"); across runs the
+// reconnect churn provably continues before/during/after the rejection, so
+// no worker existed to refuse it. Reproduced 4x with metronomic timing
+// (sinceKill 811/798/784/799ms — deflake-round-4 `lessons/phase-1.md`, runs
+// 2-7; flake ledger `implementations-plan/e2e-deflake/flake-ledger.md`,
+// deflake-round-4 section, BUG-TRANSPORT). Un-skipped by the rollback fix
+// PR, where this scenario is the regression gate — restore
+// `test.skipIf(!hasConfig)` when un-skipping.
+test.skip("scenario A: a PRE-finalize crash rolls the orphan back, and the designed retry converges on-chain", {
+	timeout: 900_000,
+}, async ({ tokenReadyExtension }) => {
+	const { filePath, funded } = await exportFundedBackup(tokenReadyExtension)
+
+	const profileDir = mkdtempSync(join(tmpdir(), "nulo-sw-crash-pre-"))
+	const ctx2 = await launchExtension({ userDataDir: profileDir })
+	let gatePage: Page | null = null
+	try {
+		const page2 = await gotoPopupImport(ctx2)
+		gatePage = page2
+		// Unfiltered console tap — DIAGNOSTICS ONLY, and honest about its
+		// limits: run-7 evidence showed app `console.*` from the popup never
+		// reaches this CDP stream at all (ledger: consoleErrors blind spot),
+		// so `deleteRejectionTail` is expected EMPTY under that blind spot.
+		// The tap still earns its keep by counting the BROWSER-emitted
+		// reconnect-churn lines ("Receiving end does not exist"), whose
+		// monotone growth through the rejection window is the transport
+		// attribution's actual discriminator, and by catching any future
+		// capture-path change.
+		const rawErrors: string[] = []
+		page2.on("console", (msg) => {
+			if (msg.type() === "error") rawErrors.push(msg.text())
+		})
+		// A real export always emits the contact slice as an array
+		// (ContactService.backup returns getContacts()), so the per-service
+		// loop always calls ContactService.restore — the held-wait's failure
+		// diagnostic reads the stage to catch the "never reached" case anyway.
+		await armRestoreGate(page2, "service-restore")
+		await armDisconnectProbe(page2)
+		await driveImportToSubmit(page2, filePath)
+		await waitForRestoreGateHeld(page2, "service-restore", HELD_BUDGET_A_MS)
+
+		const probePre = await readDisconnectProbe(page2)
+		expect(probePre?.disconnectedAt ?? null).toBeNull()
+		const stageAtKill = await readStage(page2)
+		console.warn(`[sw-crash] A: killing while held at service-restore (stage=${stageAtKill})`)
+		const killAt = Date.now()
+		await stopServiceWorker(ctx2)
+
+		// The state machine: the page is alive and its catch owns the
+		// rollback. Terminal `rolled-back` is the designed outcome;
+		// `rolling-back` need not be observed (DOM sampling can skip it).
+		const outcome = await page2
+			.waitForFunction(
+				() => {
+					const s = document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage")
+					return s === "rolled-back" || s === "rollback-failed" ? s : null
+				},
+				{ timeout: ROLLBACK_BUDGET_MS, polling: 250 },
+			)
+			.then((h) => h.jsonValue())
+			.catch(() => "stuck")
+
+		if (outcome === "stuck") {
+			const probe = await readDisconnectProbe(page2)
+			const stage = await readStage(page2)
+			const store = await page2
+				.evaluate(async () => {
+					const all = await chrome.storage.local.get()
+					const keys = Object.keys(all)
+					return {
+						profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
+						pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
+					}
+				})
+				.catch(() => null)
+			const detail = `stage=${stage}, sinceKill=${Date.now() - killAt}ms, probe=${JSON.stringify(probe)}, store=${JSON.stringify(store)}`
+			if (probe?.disconnectedAt != null) {
+				throw new Error(
+					`PRODUCT BUG (pre-finalize crash, page alive): the disconnect reached the page but the designed ` +
+						`rollback never completed within ${ROLLBACK_BUDGET_MS}ms — the orphan profile and restore-pending ` +
+						`marker survive a crash the product defines as roll-back. ${detail}`,
+				)
+			}
+			throw new Error(
+				`INCONCLUSIVE (kill/Port mechanics): the page never observed the worker's disconnect, so no product ` +
+					`verdict is possible. ${detail}`,
+			)
+		}
+
+		if (outcome === "rollback-failed") {
+			// The rollback DISPATCHED (the catch ran) and deleteProfile threw.
+			// The raw tap above carries the rejection's actual text; settle
+			// briefly first — the catch's console.error races CDP event
+			// delivery, and this branch is diagnostics, not an assertion wait.
+			await new Promise((r) => setTimeout(r, 750))
+			const deleteRejectionTail = rawErrors.filter((t) => !t.includes("Receiving end does not exist")).slice(-6)
+			const churnCount = rawErrors.length - rawErrors.filter((t) => !t.includes("Receiving end does not exist")).length
+			const store = await page2
+				.evaluate(async () => {
+					const all = await chrome.storage.local.get()
+					const keys = Object.keys(all)
+					return {
+						profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
+						pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
+					}
+				})
+				.catch(() => null)
+			const sinceKill = Date.now() - killAt
+			// Before reporting, measure the DESIGNED BACKSTOP empirically: with
+			// the orphan + marker in place, a re-import must hit the duplicate
+			// branch, delete the orphan on the (now alive) worker, and retry to
+			// convergence. Clear the gate FIRST — the armed record lives in
+			// chrome.storage.session, which outlives the killed worker, and
+			// would park the recovery import at the same hold point.
+			await clearRestoreGate(page2)
+			await page2.close()
+			let recovery: string
+			try {
+				// The REAL designed path out of this state. The fresh-install
+				// import route is unreachable (the popup boots to auth for the
+				// surviving orphan): the unlock attempt must be REFUSED with the
+				// torn message, whose own copy instructs delete-below-and-
+				// re-import — so that is exactly what this probe drives.
+				const pageR = await openPopup(ctx2)
+				gatePage = pageR
+				await pageR.waitForSelector('[data-testid="auth-password-input"] input', { visible: true, timeout: 15_000 })
+				await setInputs(pageR, { '[data-testid="auth-password-input"] input': TEST_PASSWORD })
+				await clickByTestId(pageR, "auth-submit")
+				await pageR.waitForSelector('[data-testid="auth-restore-torn"]', { visible: true, timeout: 30_000 })
+				await clickByTestId(pageR, "auth-reset")
+				await pageR.waitForSelector('[data-testid="forgot-reset-btn"]', { visible: true, timeout: 10_000 })
+				await clickByTestId(pageR, "forgot-reset-btn")
+				await waitForHash(pageR, "#/popup/settings/security/reset", 10_000)
+				// This delete rides the SAME deleteProfile the rollback could not
+				// reach — on a live worker now.
+				await completeResetRitual(pageR)
+				const cleaned = await pageR.evaluate(async () => {
+					const all = await chrome.storage.local.get()
+					const keys = Object.keys(all)
+					return {
+						profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
+						pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
+					}
+				})
+				if (cleaned.profileRows.length > 0 || cleaned.pendingMarkers.length > 0) {
+					throw new Error(`reset left residue: ${JSON.stringify(cleaned)}`)
+				}
+				const skipErrors = await reimportToTerminal(pageR, filePath)
+				await waitForActiveAccount(pageR, funded)
+				const baselineR = await captureBalanceBaseline(pageR, funded, aztecConfig!.tokenAddress)
+				await waitForFreshBalanceRow(pageR, {
+					account: funded,
+					tokenContract: aztecConfig!.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baselineR,
+					timeoutMs: 210_000,
+				})
+				await waitForTokenCardAmount(pageR, "1,000", "TST")
+				recovery = skipErrors
+					? `torn-unlock, delete, re-import: CONVERGED WITH SKIP ERRORS — summary: ${JSON.stringify(skipErrors)}`
+					: "torn-unlock, delete, re-import: CONVERGED clean"
+			} catch (recoveryErr) {
+				// Where the probe died matters as much as that it died: the
+				// route, the import's stage attribute, and whether the errors
+				// screen (which never auto-routes) is what the success-hash
+				// wait was actually starving behind.
+				const diag = gatePage
+					? await gatePage
+							.evaluate(() => ({
+								hash: window.location.hash,
+								stage: document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage") ?? null,
+								errorsScreen: !!document.querySelector('[data-testid="import-full-backup-continue-btn"]'),
+							}))
+							.catch(() => null)
+					: null
+				recovery =
+					`torn-unlock, delete, re-import FAILED: ${(recoveryErr as Error)?.message ?? String(recoveryErr)} ` +
+					`diag=${JSON.stringify(diag)} probeConsole=${JSON.stringify(ctx2.consoleErrors.slice(0, 8))}`
+			}
+			throw new Error(
+				`PRODUCT FINDING (pre-finalize crash, page alive): the designed rollback dispatched but ` +
+					`deleteProfile FAILED — the orphan survives a crash the product defines as roll-back. ` +
+					`recovery-backstop=${JSON.stringify(recovery)} deleteRejection=${JSON.stringify(deleteRejectionTail)} ` +
+					`reconnectChurn=${churnCount} pageErrors=${JSON.stringify(
+						ctx2.pageErrors.map((e) => e.message),
+					)} store=${JSON.stringify(store)} sinceKill=${sinceKill}ms`,
+			)
+		}
+		expect(outcome).toBe("rolled-back")
+		// The rollback's storage effects, not just the stage: orphan gone,
+		// marker gone.
+		const store = await page2.evaluate(async () => {
+			const all = await chrome.storage.local.get()
+			const keys = Object.keys(all)
+			return {
+				profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
+				pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
+			}
+		})
+		expect(store.profileRows).toEqual([])
+		expect(store.pendingMarkers).toEqual([])
+		await clearRestoreGate(page2)
+		await page2.close()
+
+		// The designed retry — previously reachable only by race, now on
+		// every A run. importFullBackup's own success wait applies.
+		const page3 = await gotoPopupImport(ctx2)
+		gatePage = page3
+		await importFullBackup(page3, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
+		await waitForActiveAccount(page3, funded)
+
+		await switchToLocalNetwork(page3)
+		expect(await getAccountAddress(page3)).toBe(funded)
+		const baseline = await captureBalanceBaseline(page3, funded, aztecConfig!.tokenAddress)
+		await waitForFreshBalanceRow(page3, {
+			account: funded,
+			tokenContract: aztecConfig!.tokenAddress,
+			expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+			baselineUpdatedAt: baseline,
+			timeoutMs: 210_000,
+		})
+		await waitForTokenCardAmount(page3, "1,000", "TST")
+		expect(ctx2.pageErrors).toEqual([])
+	} finally {
+		if (gatePage) await clearRestoreGate(gatePage).catch(() => {})
+		await ctx2.browser.close().catch(() => {})
+		rmSync(profileDir, { recursive: true, force: true })
+	}
+})
+
 test.skipIf(!hasConfig)(
-	"a SW restart mid-restore recovers or rolls back cleanly then retries — either way the account syncs on-chain",
-	// 15 min: this test does export + fresh-import + mid-restore SW kill + full recovery + on-chain
-	// balance sync — more than any single-op network test, so it needs headroom for the generous
-	// inner waits above under CI proving load.
+	"scenario B: a POST-finalize crash retains the profile — no rollback, recovery only, never torn",
 	{ timeout: 900_000 },
 	async ({ tokenReadyExtension }) => {
-		// ── 1. Export a REAL backup from the funded wallet ────────────────
-		const page = await openPopup(tokenReadyExtension)
-		await waitForHash(page, "#/popup/general")
-		await navigateByHash(page, "#/popup/settings/security/export/full")
-		await clickByTestId(page, "agree-continue-btn")
-		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
-		await replaceInputValue(page, '[data-testid="unlock-password-input"]', TEST_PASSWORD)
-		await clickByTestId(page, "unlock-submit-btn")
-		await page.waitForFunction(
-			() => {
-				const btn = document.querySelector<HTMLButtonElement>('[data-testid="download-backup-btn"]')
-				return !!btn && !btn.disabled
-			},
-			{ timeout: 120_000, polling: 250 },
-		)
-		await armBackupDownloadCapture(page)
-		await clickByTestId(page, "download-backup-btn")
-		const exportedJson = await readCapturedBackupDownload(page)
-		await page.close()
-		const funded = tokenReadyExtension.accountAddress
-		const filePath = writeBackupToTemp(exportedJson)
+		const { filePath, funded } = await exportFundedBackup(tokenReadyExtension)
 
-		// ── 2. Import into a FRESH extension, killing the SW mid-restore ──
-		const profileDir = mkdtempSync(join(tmpdir(), "nulo-sw-restart-restore-"))
+		const profileDir = mkdtempSync(join(tmpdir(), "nulo-sw-crash-post-"))
 		const ctx2 = await launchExtension({ userDataDir: profileDir })
+		let gatePage: Page | null = null
 		try {
 			const page2 = await gotoPopupImport(ctx2)
-			// Inlined importFullBackup WITHOUT its success wait — the kill must
-			// land before the success navigation.
-			await page2.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 10_000 })
-			await clickByTestId(page2, "import-option-full-backup")
-			await page2.waitForSelector('[data-testid="import-full-backup-pick-file"]', { visible: true, timeout: 10_000 })
-			const [chooser] = await Promise.all([
-				page2.waitForFileChooser({ timeout: 10_000 }),
-				clickByTestId(page2, "import-full-backup-pick-file"),
-			])
-			await chooser.accept([filePath])
-			await page2.waitForSelector(`[data-testid="${POPUP_IMPORT_SHELL.submitTestId("full-backup")}"]`, {
-				visible: true,
-				timeout: 10_000,
-			})
-			await setInputs(page2, {
-				'[data-testid="import-full-backup-password-input"] input': TEST_PASSWORD,
-				'[data-testid="import-full-backup-password-confirm-input"] input': TEST_PASSWORD,
-			})
-			await submitWhenEnabled(page2, POPUP_IMPORT_SHELL.submitTestId("full-backup"))
+			gatePage = page2
+			await armRestoreGate(page2, "account-state")
+			await armDisconnectProbe(page2)
+			await driveImportToSubmit(page2, filePath)
+			await waitForRestoreGateHeld(page2, "account-state", HELD_BUDGET_B_MS)
 
-			// Mid-restore marker: the restored profile ROW exists (restore started)
-			// but the page hasn't navigated to success (restore not finished). Best-effort:
-			// under CI proving load the marker can be slow, and the kill+recovery below is the
-			// real assertion — a marker timeout must NOT fail the test, it just degrades to a
-			// post-import restart (still a valid recovery exercise).
-			const midRestore = await page2
-				.waitForFunction(
-					async () => {
-						if (window.location.hash.includes("general")) return "finished"
-						const all = await chrome.storage.local.get()
-						return Object.keys(all).some((k) => k.startsWith("nulo:core:profiles@")) ? "mid" : false
-					},
-					{ timeout: 120_000, polling: 100 },
-				)
-				.then((h) => h.jsonValue())
-				.catch(() => "timeout")
+			// Post-finalize preconditions, asserted BEFORE the kill:
+			// finalizeRestore cleared the pending marker at entry, so a torn
+			// screen after the crash cannot be a designed outcome.
+			const pre = await page2.evaluate(async () => {
+				const all = await chrome.storage.local.get()
+				const keys = Object.keys(all)
+				return {
+					profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")),
+					pendingMarkers: keys.filter((k) => k.startsWith("nulo:core:restore-pending@")),
+				}
+			})
+			expect(pre.profileRows.length).toBeGreaterThan(0)
+			expect(pre.pendingMarkers).toEqual([])
+			const probePre = await readDisconnectProbe(page2)
+			expect(probePre?.disconnectedAt ?? null).toBeNull()
 
-			if (midRestore !== "mid") {
-				console.warn(`[sw-restart-restore] marker=${midRestore}; killing anyway (post-import restart leg)`)
-			}
-			const killAt = Date.now()
+			console.warn("[sw-crash] B: killing while held at account-state (post-finalize)")
 			await stopServiceWorker(ctx2)
-			// The ROLLED-BACK outcome is dispatched by THIS page's catch: the SW kill
-			// rejects its in-flight restore RPC, the catch calls deleteProfile, and that
-			// call wakes the restarted SW. Closing the page immediately RACES that
-			// dispatch — when close wins, NEITHER designed outcome materializes:
-			// profile+account rows survive un-finalized with token/balance slices
-			// missing (observed live, census {tokenRows:0, accountRows:2}). That state
-			// used to masquerade as RECOVERED (a normal unlock succeeded into torn
-			// data); the restore-pending marker now survives the crash and the reopen's
-			// unlock is REFUSED with a typed RestoreTornError — so if this race ever
-			// re-manufactures the state, the timeout leg's dump names it
-			// (`nulo:core:restore-pending@` in localKeys + the torn message in
-			// lastUnlockErr) instead of a phantom recovery. A real SW restart leaves
-			// the page open (this test's scenario); close-before-dispatch models a
-			// browser CRASH — its detection now ships in-product. Hold the page until the post-kill fork is OBSERVABLE, then
-			// close — the SW-side deletion cascade, once dispatched, survives page
-			// close. chrome.storage is page-direct (not SW-routed), so these reads
-			// work with the SW down.
-			// Fork outcomes (audit-corrected): `general` AND `auth` are both designed
-			// completion routes of the in-page recovery (`needs-unlock` routes to auth);
-			// tombstone-present / zero-profile-rows mark a dispatched rollback. A fork
-			// that stays unobserved is NOT a test failure by itself — the import flow
-			// has a designed failure state that RETAINS the profile without a tombstone
-			// (post-finalize-start errors), and its validity is decided by the reopen
-			// path's on-chain assertions below, not pre-judged here. The hold's job is
-			// only to give the page's rollback/recovery a chance to dispatch before the
-			// close (the race that manufactured the phantom partial-restore state).
-			let forkErr = ""
-			const postKillFork = await page2
+			await clearRestoreGate(page2)
+
+			// The retain contract: no rollback stage may EVER appear. Bounded
+			// observation (an absence has no completion signal); the follow-on
+			// assertions are the real proof.
+			const sawRollback = await page2
 				.waitForFunction(
-					async () => {
-						const h = window.location.hash
-						if (h.includes("general") || h.includes("auth")) return "actionable-route"
-						const all = await chrome.storage.local.get()
-						const keys = Object.keys(all)
-						if (keys.some((k) => k.startsWith("nulo:core:profile-tombstones@"))) return "rollback-dispatched"
-						if (!keys.some((k) => k.startsWith("nulo:core:profiles@"))) return "rollback-row-deleted"
-						return false
+					() => {
+						const s = document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage")
+						return s === "rolling-back" || s === "rolled-back" || s === "rollback-failed" ? s : null
 					},
-					{ timeout: 45_000, polling: 200 },
+					{ timeout: 10_000, polling: 250 },
 				)
 				.then((h) => h.jsonValue())
-				.catch((e) => {
-					forkErr = e instanceof Error ? e.message : String(e)
-					return "fork-unobserved"
-				})
-			if (postKillFork === "fork-unobserved") {
-				const dump = await page2
-					.evaluate(async () => {
-						const all = await chrome.storage.local.get()
-						return {
-							hash: window.location.hash,
-							coreKeys: Object.keys(all)
-								.filter((k) => k.startsWith("nulo:core:"))
-								.slice(0, 30),
-						}
-					})
-					.catch((e) => ({ evalFailed: String(e) }))
-				console.warn(
-					`[sw-restart-restore] post-kill fork unobserved in 45s (designed retain-without-rollback state, or slow recovery); proceeding to reopen — the on-chain assertions decide. state: ${JSON.stringify(dump)}; waitErr: ${forkErr}`,
-				)
-			} else {
-				console.warn(`[sw-restart-restore] post-kill fork: ${postKillFork}`)
+				.catch(() => null)
+			expect(sawRollback).toBeNull()
+
+			// The import page finishes against the NEW worker (the in-flight
+			// account-state RPC rejects and is RECORDED as skip errors, not
+			// fatal). Accept either terminal shape: the errors screen's
+			// Continue, or a clean finish.
+			const terminal = await withTimeoutMessage(
+				page2
+					.waitForFunction(
+						() => {
+							if (document.querySelector('[data-testid="import-full-backup-continue-btn"]')) return "errors-continue"
+							const s = document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage")
+							return s === "finished" ? "finished" : null
+						},
+						{ timeout: 300_000, polling: 250 },
+					)
+					.then((h) => h.jsonValue()),
+				async () => `post-finalize crash: the import never reached a terminal state (stage=${await readStage(page2)})`,
+			)
+			if (terminal === "errors-continue") {
+				await clickByTestId(page2, "import-full-backup-continue-btn")
 			}
-			const closedSinceKillMs = Date.now() - killAt
+			// The retained profile must never present the torn screen: assert
+			// its testid absent once the route settles.
+			await page2.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000, polling: 200 }).catch(() => {})
+			const torn = await page2.evaluate(() => !!document.querySelector('[data-testid="auth-restore-torn"]')).catch(() => false)
+			expect(torn).toBe(false)
 			await page2.close()
 
-			// ── 3. The user's natural recovery: reopen + unlock ─────────────
-			// Three DESIGNED outcomes exist, decided by where the kill lands relative
-			// to finalizeRestore and whether the page's rollback dispatch won the
-			// close race (verified against useFullBackupImport + the restore-pending
-			// marker): recovered, rolled back, or TORN (marker survived, unlock
-			// refused, delete + re-import advertised on the auth screen).
-			//  - RECOVERED: kill landed post-finalize (session opened, registrations
-			//    applied) — reopen routes to auth, unlock re-derives the master and
-			//    boots the chain runtime, and the wallet lands on general.
-			//  - ROLLED BACK: kill landed pre-finalize — the import page's outer catch
-			//    deletes the just-created profile ("delete the orphan so a retry starts
-			//    clean"), so the reopened popup has ZERO profiles and legitimately routes
-			//    to register. Registrations only happen post-finalize, so this kill point
-			//    has none to lose. This leg asserts the rollback COMPLETED (profile row
-			//    gone AND its deletion tombstone cleared — the coordinator's
-			//    purge-complete signal), then exercises the product's designed retry:
-			//    re-import the same backup file, no kill, and converge into the same
-			//    on-chain assertions as the recovered leg. Scope note: this is profile
-			//    rollback — globally-written presentation config is deliberately outside
-			//    the coordinator's purge.
-			// A settle LOOP (not a one-shot unlock + single long wait) is required: the
-			// fresh popup can transiently show /popup (an index route that immediately
-			// pushes general) before the auth guard settles, and a one-shot hash sample
-			// taken in that window no-ops the unlock — after which nobody ever types the
-			// password and the old 240s wait parked silently.
-			let page3 = await openPopup(ctx2)
-			// Route-trajectory recorder: poll-based because vue-router's hash history
-			// navigates via pushState, which fires neither hashchange nor popstate. It
-			// can only observe from THIS point on — openPopup has already waited out the
-			// earliest boot transitions, hence the "sinceRecorderInstall" label.
-			await page3.evaluate(() => {
-				const w = window as unknown as { __nuloRouteTrace?: Array<{ t: number; h: string }> }
-				const trace: Array<{ t: number; h: string }> = [{ t: Date.now(), h: window.location.hash }]
-				w.__nuloRouteTrace = trace
-				setInterval(() => {
-					const h = window.location.hash
-					if (trace[trace.length - 1]?.h !== h) trace.push({ t: Date.now(), h })
-				}, 100)
-			})
-			await page3.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
-
-			let lastUnlockErr = ""
-			const collectParkedState = async () =>
-				await page3
-					.evaluate(async () => {
-						const w = window as unknown as { __nuloRouteTrace?: Array<{ t: number; h: string }> }
-						const local = await chrome.storage.local.get()
-						const session = await chrome.storage.session.get()
-						return {
-							traceSinceRecorderInstall: w.__nuloRouteTrace ?? "<recorder lost — page reloaded>",
-							hash: window.location.hash,
-							authFormVisible: document.querySelector('[data-testid="auth-password-input"]') !== null,
-							bodyText: document.body.innerText.replace(/\s+/g, " ").slice(0, 300),
-							localKeys: Object.keys(local).sort(),
-							sessionKeys: Object.keys(session).sort(),
-						}
-					})
-					.then((state) => ({ ...state, lastUnlockErr }))
-					.catch((evalErr) => ({ evalFailed: String(evalErr), lastUnlockErr }))
-
-			let leg: "recovered" | "rolled-back" | "torn" | "timeout" = "timeout"
-			const deadline = Date.now() + 240_000
-			while (Date.now() < deadline) {
-				const hash = await page3.evaluate(() => window.location.hash)
-				if (hash.includes("/popup/general")) {
-					leg = "recovered"
-					break
-				}
-				if (hash.includes("/popup/auth")) {
-					// Torn refusal is terminal-designed: the auth screen names the state
-					// (`auth-restore-torn`) and no unlock can succeed — stop attempting.
-					const torn = await page3.$('[data-testid="auth-restore-torn"]')
-					if (torn) {
-						leg = "torn"
-						break
-					}
-					// Fall through to the sleep below after an attempt — a transient
-					// auth/non-auth oscillation must not spin the loop hot. The last
-					// unlock error rides into the timeout diagnostics.
-					await ensureUnlocked(page3, TEST_PASSWORD).catch((err) => {
-						lastUnlockErr = String(err)
-					})
-				} else if (hash.includes("/popup/register")) {
-					// Register is terminal ONLY when the rollback has COMPLETED: the profile
-					// row is deleted in deleteProfile's phase 1, but the deletion tombstone
-					// is cleared only after the coordinator's purge of every profile-bearing
-					// root succeeds — tombstone-gone is the designed completion signal. A
-					// row-gone-tombstone-present window (purge in flight, or wedged) keeps
-					// polling; a wedged purge ends in the timeout leg, whose storage-key dump
-					// will show the lingering tombstone.
-					const remnants = await page3.evaluate(async () => {
-						const all = await chrome.storage.local.get()
-						const keys = Object.keys(all)
-						return {
-							profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")).length,
-							tombstones: keys.filter((k) => k.startsWith("nulo:core:profile-tombstones@")).length,
-						}
-					})
-					if (remnants.profileRows === 0 && remnants.tombstones === 0) {
-						// Provenance gate: a clean register end-state is only the DESIGNED
-						// rollback if the profile row demonstrably existed first (marker
-						// "mid") — the only row-remover is tombstone-fenced deleteProfile,
-						// so existed-then-fully-purged pins that path. Without the marker,
-						// register-with-clean-storage is merely consistent with a restore
-						// that crashed before creating anything — fail, don't absorb.
-						if (midRestore !== "mid") {
-							throw new Error(
-								`[sw-restart-restore] wallet reset to register but the mid-restore marker was "${midRestore}" — no evidence the designed rollback ran; state: ${JSON.stringify(await collectParkedState())}`,
-							)
-						}
-						leg = "rolled-back"
-						break
-					}
-				}
-				await new Promise((resolve) => setTimeout(resolve, 500))
-			}
-
-			if (leg === "timeout") {
-				throw new Error(
-					`[sw-restart-restore] recovery neither reached general nor rolled back within 240s; parked state: ${JSON.stringify(await collectParkedState())}`,
-				)
-			}
-
-			if (leg === "torn") {
-				// Provenance: the torn refusal is only the DESIGNED outcome when the
-				// surviving marker BELONGS to the surviving profile row — same profile
-				// id AND same pxeGeneration. A corrupt/stale/wrong-generation marker
-				// also renders the fail-closed torn UI, but that is a different bug,
-				// not this recovery path. The session must also actually be withheld.
-				const tornState = await page3.evaluate(async () => {
-					const local = await chrome.storage.local.get()
-					const session = await chrome.storage.session.get()
-					const parse = (v: unknown) => {
-						try {
-							return JSON.parse(v as string) as { id?: string; profileId?: string; pxeGeneration?: string }
-						} catch {
-							return null
-						}
-					}
-					const markerRaw = Object.entries(local).find(([k]) => k.startsWith("nulo:core:restore-pending@"))?.[1]
-					const profileRaw = Object.entries(local).find(([k]) => k.startsWith("nulo:core:profiles@"))?.[1]
-					return {
-						marker: markerRaw !== undefined ? parse(markerRaw) : null,
-						profile: profileRaw !== undefined ? parse(profileRaw) : null,
-						sessionWithheld: !Object.keys(session).some((k) => k.startsWith("nulo:core:session")),
-					}
-				})
-				const provenanceOk =
-					!!tornState.marker &&
-					!!tornState.profile &&
-					tornState.marker.profileId === tornState.profile.id &&
-					tornState.marker.pxeGeneration === tornState.profile.pxeGeneration &&
-					tornState.sessionWithheld
-				if (!provenanceOk) {
-					throw new Error(
-						`[sw-restart-restore] torn refusal without matching marker↔profile provenance (or with a live session); tornState: ${JSON.stringify(tornState)}; parked: ${JSON.stringify(await collectParkedState())}`,
-					)
-				}
-				// Masking guard: torn is the close-RACED-the-dispatch model only while
-				// the close landed BEFORE the popup→SW transport timeout (60s) — the
-				// in-flight restore RPC cannot reject (and so cannot dispatch the
-				// rollback) until that timeout fires, which is also why the 45s fork
-				// window elapsing proves nothing about the dispatcher. Past 60s a live
-				// dispatcher WOULD have fired with the page still open, so a torn
-				// end-state would instead indicate a broken/stalled rollback dispatch —
-				// fail loudly (this bites only if someone widens the fork hold).
-				if (closedSinceKillMs >= 60_000) {
-					throw new Error(
-						`[sw-restart-restore] torn end-state but the import page stayed open ${closedSinceKillMs}ms after the kill (>= the 60s transport timeout) — a live rollback dispatcher would have fired; suspect a broken dispatch, not the designed crash race`,
-					)
-				}
-				console.warn(
-					"[sw-restart-restore] marker-window kill + close-before-dispatch → torn refusal (designed); exercising the advertised recovery (delete profile + re-import)",
-				)
-				// The auth screen's advertised path: the reset route is reachable
-				// without a session (`isAuthRequired: false`) — same deliberate
-				// delete flow the forgot-password popup routes to.
-				await resetProfile(page3)
-				// Deletion completed = profile row, deletion tombstone AND the
-				// restore-pending marker all gone (deleteProfile clears the marker
-				// last among its fallible cleanups).
-				await page3.waitForFunction(
-					async () => {
-						const keys = Object.keys(await chrome.storage.local.get())
-						return (
-							!keys.some((k) => k.startsWith("nulo:core:profiles@")) &&
-							!keys.some((k) => k.startsWith("nulo:core:profile-tombstones@")) &&
-							!keys.some((k) => k.startsWith("nulo:core:restore-pending@"))
-						)
+			// Reopen: strict mode silentCloses the bearer-less session on the
+			// new worker, so recovery is an ordinary unlock — then the imported
+			// account proves usable on-chain.
+			const page3 = await openPopup(ctx2)
+			await ensureUnlocked(page3, TEST_PASSWORD)
+			await waitForActiveAccount(page3, funded)
+			// The restored active-network pointer was written during
+			// restoring:networks — BEFORE this scenario's kill point — so it is
+			// part of the retain contract: the wallet must REOPEN on Local
+			// Network, no switch. (Switching here would be a repeat switch,
+			// whose "address flips" disambiguation can never be satisfied —
+			// the target chain re-derives the address already active.) Wait
+			// for the header to render before asserting; the chip mounts
+			// empty for a beat on a fresh popup.
+			await withTimeoutMessage(
+				page3.waitForFunction(
+					() => {
+						const btn = document.querySelector('[data-testid="network-button"]')
+						return !!btn && (btn.textContent ?? "").trim().length > 0
 					},
-					{ timeout: 60_000, polling: 200 },
-				)
-			}
-
-			if (leg === "rolled-back" || leg === "torn") {
-				// Complete the product's own retry journey so the load-bearing on-chain
-				// assertions below run on EVERY path — a required gate must not stay
-				// green while the registration checks are skipped run after run.
-				console.warn(`[sw-restart-restore] ${leg} leg confirmed clean; exercising the designed retry (re-import, no kill)`)
-				await page3.close()
-				page3 = await gotoPopupImport(ctx2)
-				// Lands on general (the shell's successHash); the convergence wait then
-				// covers the post-import account setup exactly as the integrity test does.
-				await importFullBackup(page3, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
-				await waitForActiveAccount(page3, funded)
-			}
-
-			// ── 4. Both legs converge: the imported account syncs its REAL balance ──
-			// FRESHNESS-gated: the imported/re-imported backup already carries the
-			// funded rows with nonzero updatedAt, so a value-only wait could pass
-			// without any post-recovery sync. Baseline is captured here (post-recovery,
-			// pre-refresh) so only a projection that ran AFTER this point satisfies the
-			// wait; the exact raw row value + a card-scoped display assert replace the
-			// body-text scan (false-positive prone) and the 40× refresh spam (starves
-			// the popup thread, queues PXE readers). Same ~240s total envelope.
-			await switchToLocalNetwork(page3)
+					{ timeout: 30_000, polling: 250 },
+				),
+				async () => "post-crash reopen: the network header never rendered",
+			)
+			const activeNetwork = await page3.evaluate(() => {
+				const btn = document.querySelector('[data-testid="network-button"]')
+				return (btn?.textContent ?? "").trim()
+			})
+			expect(activeNetwork).toBe("Local Network")
 			expect(await getAccountAddress(page3)).toBe(funded)
-			const recoveryBaseline = await captureBalanceBaseline(page3, funded, aztecConfig!.tokenAddress)
+			const baseline = await captureBalanceBaseline(page3, funded, aztecConfig!.tokenAddress)
 			await waitForFreshBalanceRow(page3, {
 				account: funded,
 				tokenContract: aztecConfig!.tokenAddress,
 				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
-				baselineUpdatedAt: recoveryBaseline,
+				baselineUpdatedAt: baseline,
 				timeoutMs: 210_000,
 			})
 			await waitForTokenCardAmount(page3, "1,000", "TST")
 		} finally {
+			if (gatePage) await clearRestoreGate(gatePage).catch(() => {})
 			await ctx2.browser.close().catch(() => {})
 			rmSync(profileDir, { recursive: true, force: true })
 		}

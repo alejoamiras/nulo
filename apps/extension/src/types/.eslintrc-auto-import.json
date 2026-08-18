@@ -85,6 +85,7 @@
     "PropType": true,
     "ReceivedType": true,
     "Ref": true,
+    "RestoreStage": true,
     "RestoreStatus": true,
     "ShallowRef": true,
     "SliceStatus": true,

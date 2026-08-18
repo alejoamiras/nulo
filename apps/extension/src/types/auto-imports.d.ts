@@ -254,7 +254,7 @@ declare global {
   export type { FieldDef, FieldHandle, FormState } from '../composables/useFormState'
   import('../composables/useFormState')
   // @ts-ignore
-  export type { RestoreStatus, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
+  export type { RestoreStatus, RestoreStage, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
   // @ts-ignore
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'

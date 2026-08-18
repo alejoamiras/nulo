@@ -22,7 +22,7 @@
  */
 import { setActivePinia } from "pinia"
 import { createTestingPinia } from "@pinia/testing"
-import { ref } from "vue"
+import { ref, watch } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NodeStatus } from "@/wallet/services/network/spec"
 import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, EncryptionKey } from "@nulo/wallet-crypto"
@@ -1440,5 +1440,123 @@ describe("useFullBackupImport — parsedBackupName + typed-name override (F3)", 
 
 			expect(profileClient.restore.mock.calls[0][0]).toMatchObject({ name: "FromBackup" })
 		}
+	})
+})
+
+describe("restoreStage — phase observability", () => {
+	// A synchronous watcher records every transition, so ordering is asserted
+	// on the full history rather than on sampled snapshots.
+	function recordStages(c: ReturnType<typeof useFullBackupImport>) {
+		const seen: string[] = [c.restoreStage.value]
+		watch(
+			c.restoreStage,
+			(v) => {
+				seen.push(v)
+			},
+			{ flush: "sync" },
+		)
+		return seen
+	}
+
+	it("advances through the stages in order on a clean import, never backward", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+		const seen = recordStages(c)
+
+		await c.restoreBackup()
+
+		const order = [
+			"",
+			"restoring:profile",
+			"restoring:networks",
+			"restoring:tokens",
+			"restoring:services",
+			"finalizing",
+			"restoring:account-state",
+			"finished",
+		]
+		// The chain-sync stage only appears when the backup carries an
+		// account-state slice; assert the observed history is an ordered
+		// subsequence-superset of the required order.
+		const required = seen.filter((v) => order.includes(v))
+		expect(required).toEqual(order)
+		expect(c.restoreStage.value).toBe("finished")
+	})
+
+	it("a pre-finalize service failure lands rolled-back and deleteProfile was called", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		// The token restore rejecting is a pre-finalize failure that reaches the
+		// outer catch (unlike per-service loop errors, which are recorded).
+		tokenClient.restore.mockRejectedValue(new Error("boom mid-restore"))
+		const seen = recordStages(c)
+
+		await c.restoreBackup()
+
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(seen).toContain("rolling-back")
+		expect(c.restoreStage.value).toBe("rolled-back")
+		expect(profileClient.finalizeRestore).not.toHaveBeenCalled()
+	})
+
+	it("a post-finalize failure never enters rolling-back and keeps the profile", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		// The slice must EXIST (and its networkId must survive the remap) for
+		// the account-state leg to run at all — without it the rejection mock
+		// is never invoked and every assert passes vacuously (review finding,
+		// both lenses).
+		const backup = await buildBackup({
+			data: {
+				network: [{ id: "N1", name: "A", chainId: 1 }],
+				"account-state": [{ networkId: "N1", contracts: [], senders: [AS_SENDER] }],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "M1", name: "A", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+		// Post-finalize failures are RETAIN + record, never rollback: the
+		// chain-sync runner contractually converts this rejection into recorded
+		// skip errors (importChainSync's own catch) — the outer catch is
+		// UNREACHABLE from this boundary by design, which is exactly the
+		// contract this pin holds.
+		accountStateClient.restore.mockRejectedValue(new Error("post-finalize boom"))
+		const seen = recordStages(c)
+
+		await c.restoreBackup()
+
+		expect(accountStateClient.restore).toHaveBeenCalled()
+		expect(profileClient.finalizeRestore).toHaveBeenCalled()
+		expect(profileClient.deleteProfile).not.toHaveBeenCalled()
+		expect(seen).not.toContain("rolling-back")
+		expect(c.restoreStage.value).toBe("finished")
+	})
+
+	it("deleteProfile rejecting EVERY bounded attempt lands rollback-failed", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		tokenClient.restore.mockRejectedValue(new Error("boom mid-restore"))
+		profileClient.deleteProfile.mockRejectedValue(new Error("delete refused"))
+
+		await c.restoreBackup()
+
+		expect(c.restoreStage.value).toBe("rollback-failed")
+		// B-24 integration: the stage wraps the SHARED bounded rollback helper —
+		// all attempts ran before the failure was declared.
+		expect(profileClient.deleteProfile).toHaveBeenCalledTimes(3)
 	})
 })

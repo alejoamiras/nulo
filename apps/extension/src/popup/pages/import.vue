@@ -112,6 +112,7 @@ const {
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
+	restoreStage,
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
@@ -190,7 +191,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
+	<Flex direction="column" :class="$style.page" :data-restore-stage="restoreStage">
 		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper">
 			<SubPageHeader :backTo="backTo">
 				<template #title>

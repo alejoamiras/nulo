@@ -92,7 +92,7 @@ jobs:
           fail=0
           for d in apps/extension/dist/chrome apps/extension/dist/firefox; do
             [ -d "$d" ] || continue
-            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "NULO_E2E_PRICE_MAP_BUILD_STAMP" "nulo:e2e:proof-gate" "nulo:e2e:incoming-poll-hold" "nulo:e2e:incoming-poll-status" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "nulo:e2e:mig-fixture" "nulo:e2e:backup-mig-fixture"; do
+            for marker in "NULO_E2E_PROVERLESS_BUILD_STAMP" "NULO_E2E_PRICE_MAP_BUILD_STAMP" "nulo:e2e:proof-gate" "nulo:e2e:restore-gate" "nulo:e2e:incoming-poll-hold" "nulo:e2e:incoming-poll-status" "SHALLOW_PXE_FAKE_BUNDLE_MARKER" "nulo:e2e:mig-fixture" "nulo:e2e:backup-mig-fixture"; do
               if grep -rq "$marker" "$d"; then
                 echo "::error::test-only marker '$marker' leaked into $d" >&2
                 fail=1
