@@ -43,3 +43,7 @@ Extract Stage E instead (the least-coupled leg) — cheaper, but it characterize
 
 ## Process
 Mid tier: dual audit done (above) → end-diff codex pass. Validation: repo gates + audit:vue + **armed smoke** (arc-7 requirement).
+
+## End-of-arc codex diff pass: `conditional approve` → condition met → CONVERGED
+
+No blocking code findings. Verified: moved bodies semantically equivalent (formatting + one type-only cast noted); the `ReadonlySet` hoist safe on every path (D reads an empty Set only after a successful C with no qualifying accounts — matching prior behavior); the bare-Set return endorsed over its own earlier discriminated shape ("since duplicate classification never left the caller, a discriminated result would require moving behavior merely to recreate it"); **the new black-box pin verified REAL** ("removing chain membership makes the balance reach `tokenBalanceClient.restore` and removes the diagnostic, failing both assertions"); caller skeleton (clients, markers, catch scope, rollback ordering, disconnects, error identity) intact; nothing smuggled. Condition: commit the build-regenerated auto-import artifacts — done (`chore(types)` commit).
