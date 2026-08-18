@@ -111,6 +111,53 @@ describe("TokenService composition — in-process, no sandbox", () => {
 		await tokenService.parseTokenInterface(NETWORK.id, CONTRACT)
 		expect(fake.registerCalls).toHaveLength(0) // getContracts() already lists it → no register
 	})
+
+	// Characterization pins (F-Q09): getTokenInterface had ZERO coverage — its
+	// load-bearing identity is pinned here before any structural refactor.
+	describe("getTokenInterface (characterization)", () => {
+		const SENTINEL = { name: "sentinel_custom_fn", impl: 999 }
+		const seedRow = (over: Partial<Token> = {}): Token => ({
+			id: 7,
+			profileId: "p1",
+			chainId: 1,
+			contract: CONTRACT,
+			name: "Tok",
+			symbol: "TOK",
+			decimals: 18,
+			getNameFn: SENTINEL,
+			...over,
+		})
+
+		test("returns the STORED per-kind picks verbatim (never re-derives a default) + real candidates", async () => {
+			const { tokenService, api } = await makeHarness()
+			await api.storage.local.set({ "nulo:core:tokens@7": JSON.stringify(seedRow()) })
+
+			const ti = await tokenService.getTokenInterface(NETWORK.id, 7)
+
+			// The pick-source is the stored row's field — a fabricated impl no
+			// artifact-derived default would ever produce must round-trip as-is.
+			expect(ti.getNameFn).toEqual(SENTINEL)
+			// An absent stored pick stays absent (no getDefaultTokenFn fallback).
+			expect(ti.getSymbolFn).toBeUndefined()
+			// Candidates still come from the real artifact.
+			expect(ti.getNameFnCandidates.length).toBeGreaterThan(0)
+			expect(ti.transferPublicFnCandidates.length).toBeGreaterThan(0)
+			expect(ti.contract).toBe(CONTRACT)
+			expect(ti.chainId).toBe(1)
+		})
+
+		test("rejects a token owned by ANOTHER profile (ownership gate)", async () => {
+			const { tokenService, api } = await makeHarness()
+			await api.storage.local.set({ "nulo:core:tokens@7": JSON.stringify(seedRow({ profileId: "p2" })) })
+
+			await expect(tokenService.getTokenInterface(NETWORK.id, 7)).rejects.toThrow(/unknown token id/)
+		})
+
+		test("rejects an unknown token id", async () => {
+			const { tokenService } = await makeHarness()
+			await expect(tokenService.getTokenInterface(NETWORK.id, 999)).rejects.toThrow(/unknown token id/)
+		})
+	})
 })
 
 describe("TokenService.restore — shared numeric cursor (nextNumericId + restoreRows)", () => {

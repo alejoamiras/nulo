@@ -649,6 +649,118 @@ describe("NetworkService public API (M4.10)", () => {
 		})
 	})
 
+	describe("updateEndpoint", () => {
+		// Characterization pins (F-Q09): this method had ZERO coverage — every
+		// branch below is pinned as-is before any structural refactor touches it.
+		test("replaces the endpoint in place — same id, new url + label, array length unchanged; emits onNetworkUpdated", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			const updates: Network[] = []
+			service.onNetworkUpdated.add((n) => {
+				updates.push(n)
+				return Promise.resolve()
+			})
+
+			const updated = await service.updateEndpoint(network.id, ep.id, "Renamed", "https://rpc.test/3")
+
+			expect(updated.id).toBe(ep.id)
+			expect(updated.label).toBe("Renamed")
+			expect(updated.rpcUrl).toContain("rpc.test/3")
+			const after = await service.getNetwork(network.id)
+			expect(after.endpoints).toHaveLength(2)
+			expect(after.endpoints.find((e) => e.id === ep.id)?.rpcUrl).toContain("rpc.test/3")
+			expect(updates).toHaveLength(1)
+		})
+
+		test("an unchanged URL does NOT collide with itself (self-excluding predicate)", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+
+			const updated = await service.updateEndpoint(network.id, ep.id, "Label only", "https://rpc.test/2")
+
+			expect(updated.label).toBe("Label only")
+			expect(updated.rpcUrl).toContain("rpc.test/2")
+		})
+
+		test("rejects DUPLICATE_ENDPOINT when ANOTHER endpoint of this network uses the URL", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			await expect(service.updateEndpoint(network.id, ep.id, "Steal", "https://rpc.test/1")).rejects.toThrow(/DUPLICATE_ENDPOINT/)
+		})
+
+		test("rejects on an invalid endpoint id", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			await expect(service.updateEndpoint(network.id, "nope", "X", "https://rpc.test/1")).rejects.toThrow(/Invalid endpoint id/)
+		})
+
+		test("rejects ENDPOINT_CHAIN_MISMATCH when the new URL probes a different chain", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.other": nodeInfoForChain(99),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			await expect(service.updateEndpoint(network.id, network.primaryEndpointId, "Wrong", "https://rpc.other")).rejects.toThrow(
+				/ENDPOINT_CHAIN_MISMATCH/,
+			)
+		})
+
+		test("evicts the transient-node cache for the OLD url unconditionally", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			const transients = (service as any).transientNodes as Map<string, unknown>
+			const oldUrl = ep.rpcUrl
+			transients.set(oldUrl, { node: {}, failures: 0 })
+
+			await service.updateEndpoint(network.id, ep.id, "Moved", "https://rpc.test/3")
+
+			expect(transients.has(oldUrl)).toBe(false)
+		})
+
+		test("evicts the chain node cache ONLY when the edited endpoint is the primary", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			await service.getNode(50)
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			const nodes = (service as any).nodes as Map<number, unknown>
+			expect(nodes.has(50)).toBe(true)
+
+			// Non-primary edit: chain node cache retained.
+			await service.updateEndpoint(network.id, ep.id, "Moved", "https://rpc.test/3")
+			expect(nodes.has(50)).toBe(true)
+
+			// Primary edit: chain node cache evicted.
+			await service.updateEndpoint(network.id, network.primaryEndpointId, "Primary moved", "https://rpc.test/2")
+			expect(nodes.has(50)).toBe(false)
+		})
+	})
+
 	describe("setPrimaryEndpoint", () => {
 		test("updates primary, emits event, evicts AztecNode cache for that chainId", async () => {
 			const { service, factory } = setupServiceWithStorage({
