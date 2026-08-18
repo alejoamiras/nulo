@@ -24,10 +24,12 @@ import { AccountType } from "./spec"
 import { AccountService } from "./service"
 
 /** Run `fn` with a process-level unhandledRejection collector installed.
- *  Registering our own listener also makes vitest defer to it (it treats a
- *  second listener as user-handled), so the collected rejections don't fail
- *  the run — we ASSERT on them instead. The macrotask flush matters: Node
- *  emits unhandledRejection on the tick boundary, not the microtask queue. */
+ *  NOTE: vitest still reports collected rejections as run errors alongside any
+ *  assertion failure (it does NOT defer to user listeners) — that's fine here:
+ *  when the code under test emits none, there is nothing to report, and when
+ *  it regresses, the `seen` assertion is the primary signal. The macrotask
+ *  flush matters: Node emits unhandledRejection on the tick boundary, not the
+ *  microtask queue. */
 async function collectUnhandledRejections(fn: () => Promise<void>): Promise<unknown[]> {
 	const seen: unknown[] = []
 	const onRejection = (reason: unknown) => {

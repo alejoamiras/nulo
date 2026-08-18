@@ -138,6 +138,42 @@ describe("app.store.setupActiveAccount — stale-activation fence", () => {
 		expect(setSpy).not.toHaveBeenCalled()
 	})
 
+	test("(ABA) an A→B→A round trip must NOT let the original parked run land — scope IDs match again; only the epoch distinguishes it", async () => {
+		const store = useAppStore()
+		await scopeToProfileA(store)
+		store.accounts = [asAccount("0xA2")] as never // old A's list at park time
+
+		const release = armJournalGate() // journal read #2: old A's commit read
+		const oldRunA = store.setupActiveAccount() // epoch 1; captures (profile-a, net-1); first = 0xA2
+		await flush() // parked inside commitScopeChange → getOperations
+
+		// B activates and FULLY RUNS its own setupActiveAccount (bumps the epoch).
+		mockGetOperations.mockResolvedValueOnce([]) // #3: profile-b watch
+		store.profile = { id: "profile-b" } as never
+		store.accounts = [asAccount("0xB")] as never
+		await flush()
+		mockGetOperations.mockResolvedValueOnce([]) // #4: B's commit read
+		await expect(store.setupActiveAccount()).resolves.toBe(true)
+		expect(store.account?.address).toBe("0xB")
+
+		// A re-activates: profile AND network return to old A's captured values.
+		mockGetOperations.mockResolvedValueOnce([]) // #5: profile-a watch
+		store.profile = { id: "profile-a" } as never
+		store.accounts = [asAccount("0xA1")] as never // the fresh activation's list
+		await flush()
+		mockGetOperations.mockResolvedValueOnce([]) // #6: new A's commit read
+		await expect(store.setupActiveAccount()).resolves.toBe(true)
+		expect(store.account?.address).toBe("0xA1")
+
+		setSpy.mockClear() // only the parked run's writes are under test
+		release()
+		const result = await oldRunA
+
+		expect(store.account?.address).toBe("0xA1") // stale 0xA2 must NOT land — IDs match; the epoch is load-bearing
+		expect(result).toBe(false)
+		expect(setSpy).not.toHaveBeenCalled()
+	})
+
 	test("an un-superseded run still lands the first account and persists it (fence must not over-refuse)", async () => {
 		const store = useAppStore()
 		await scopeToProfileA(store)
