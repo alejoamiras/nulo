@@ -59,9 +59,22 @@ export const useAppStore = defineStore("app", () => {
 	 * through the guard. During bootstrap there is nothing in flight to protect
 	 * (the journal read comes back empty), so it proceeds normally; mid-send it
 	 * refuses rather than moving the account out from under the send.
+	 *
+	 * Stale-activation fence: the (profile, network) scope is captured at entry
+	 * and re-checked before EVERY account assignment and the durable pointer
+	 * write. A run superseded mid-await (rapid profile switch, network flip)
+	 * refuses instead of landing the loser's account after the winner's — and
+	 * instead of poisoning the global `nulo:ui:activeAccount` key, which
+	 * survives into the next bootstrap. `commitScopeChange` cannot express
+	 * this: it guards against in-flight SENDS, not superseded activations.
 	 */
 	const setupActiveAccount = async (): Promise<boolean> => {
+		const scopeProfileId = profile.value?.id
+		const scopeNetworkId = network.value?.id
+		const superseded = () => profile.value?.id !== scopeProfileId || network.value?.id !== scopeNetworkId
+
 		const activeAccountResult = await storageLocalGet("nulo:ui:activeAccount")
+		if (superseded()) return false
 		if ("nulo:ui:activeAccount" in activeAccountResult) {
 			const activeAccountAddress = activeAccountResult["nulo:ui:activeAccount"]
 			const remembered = accounts.value.find((a) => a.address === activeAccountAddress)
@@ -71,9 +84,16 @@ export const useAppStore = defineStore("app", () => {
 					account.value = remembered
 					return true
 				}
-				return commitScopeChange(() => {
+				// The fence re-check lives INSIDE the synchronous commit (the widest
+				// await is commitScopeChange's own refreshInFlight); `landed` keeps
+				// the returned boolean honest when the commit refuses as stale.
+				let landed = false
+				const admitted = await commitScopeChange(() => {
+					if (superseded()) return
 					account.value = remembered
+					landed = true
 				})
+				return admitted && landed
 			}
 		}
 
@@ -82,13 +102,19 @@ export const useAppStore = defineStore("app", () => {
 			account.value = first
 			return true
 		}
-		if (
-			!(await commitScopeChange(() => {
-				account.value = first
-			}))
-		) {
+		let landed = false
+		const admitted = await commitScopeChange(() => {
+			if (superseded()) return
+			account.value = first
+			landed = true
+		})
+		if (!admitted || !landed) {
 			return false
 		}
+		// Re-check across the await boundary between the commit and the durable
+		// write: a supersede landing in that gap must not let the loser stamp the
+		// global pointer (it outlives this run — the next bootstrap reads it).
+		if (superseded()) return false
 		await storageLocalSet({
 			"nulo:ui:activeAccount": account.value?.address,
 		})
