@@ -424,7 +424,13 @@ Continue alternation to ≥5 runs per mode; verify per-scenario sample sets
 **Gate**: sample-count table complete; zero pooling violations. Layers:
 network e2e (solo).
 
-### Phase 4 — Envelope table + classification close (B1 docs)
+### Phase 4 ✓ — Envelope table + classification close (B1 docs)
+
+> GATE PASSED 2026-08-18: codex `conditional approve` (session `01a01661`,
+> conditions applied — recorded in `audit-codex.md`); envelopes.md complete
+> with the codex-precise close; importFullBackup-300s ledger entry CLOSED
+> (edit-in-place, table row + disposition); skill lessons landed; owner
+> observations recorded; lint exit 0.
 
 Commit `envelopes.md` (stratified P50/max, seam, unobserved counts,
 caveats); codex xhigh consult confirming the close; re-disposition the
