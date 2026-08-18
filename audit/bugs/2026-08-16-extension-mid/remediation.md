@@ -47,3 +47,16 @@ Arc 0 (#383) committed this audit directory itself.
 - **F-B23 (serialized malformed-row repair)** — B-23's fix is the finding's own recommendation (stop the read-path delete; RETAIN + log). Purging/repairing a genuinely malformed row belongs in a serialized repair path, not the read path — owned follow-up.
 - **F-B24 (ProfileService durable deletion-status)** — B-24 surfaces a distinct "cleanup pending" error rather than a false success; a durable deletion-status field on the profile row (so a later unlock can resume the compensating delete) is an owned follow-up.
 - **F-B27 (`setupActiveAccount` generation fence)** — B-27's composable single-flight + generation fence close the finding's counter-example; a residual store-level race (`appStore.setupActiveAccount` assigns `account` without bootstrap-generation awareness) is a store-level follow-up.
+
+## Follow-up closure (2026-08-18)
+
+All four owned bug follow-ups executed as recon-first, codex-converged arcs (`implementations-plan/remediation-followups/plan.md`):
+
+| Item | Arc | PR | Status |
+|---|---|---|---|
+| F-B27 (`setupActiveAccount` store-level fence) | 1 fix-account-generation-fence | #399 | ✅ fixed — monotonic activation epoch + scope re-checks; ABA pinned |
+| F-B24 (durable deletion-status resume) | 2 fix-profile-deletion-status | #405 | ✅ fixed — torn-import sweep on boot resume via restore-pending markers (recon-REDIRECTED from a row-field; marker-tuple verification under lock; 7-day age floor) |
+| F-B23 (serialized malformed-row repair) | 3 fix-storage-row-repair | #406 | ✅ fixed via redirect — purge-blindness closed (key-attributed raw second pass in 9 purge paths + raw-augmented deletion snapshot); the boot/sweep repair subsystem REJECTED as over-engineering (codex-endorsed; no producer exists) |
+| F-B16 (queued-discovery SW-restart durability) | 4 fix-discovery-restart-durability | #407 | ✅ closed as NOT-DURABLE-BY-SDK-DESIGN (codex+fable-agreed deviation: tab-origin continuity unverifiable without a `tabs` permission; the SDK owns the pending map) — the durable harm (permanent ghost badge) fixed |
+
+New discoveries recorded for the owner (arc 4, out of scope): the cold-wake message-loss race (the SDK listener registers async at `runtime.start()`'s tail — dominates F-B16 in impact), the dead `tabs.onUpdated` origin guard (needs a `tabs` permission for arbitrary origins), popup orphaning across SW restart. Details: `implementations-plan/fix-discovery-restart-durability/plan.md`.
