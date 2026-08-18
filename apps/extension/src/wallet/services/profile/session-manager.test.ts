@@ -12,7 +12,7 @@
  *     expects.
  */
 
-import { asMasterSecretBytes, asPasshash, type MasterSecretBytes } from "@nulo/wallet-crypto"
+import { asBase64Ciphertext, asMasterSecretBytes, asPasshash, computeEntropyMac, type MasterSecretBytes } from "@nulo/wallet-crypto"
 import { describe, expect, test, vi } from "vitest"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
@@ -67,6 +67,8 @@ const passwordProfile = (id = "pid"): Profile & { type: "password" } => ({
 	pxeGeneration: "gen-test",
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
+	entropy: "ZW50cm9weQ==",
+	entropyMac: "bWFj",
 })
 
 const passkeyProfile = (id = "pid"): Profile & { type: "passkey" } => ({
@@ -88,6 +90,14 @@ function secretBuffer(): MasterSecretBytes {
  *  exactly what `open()` persists — a random-token-wrapped secret, AAD-bound
  *  to the profile id — so `restore()` unwraps it the same way in production. */
 const bearerBox = new SessionSecretBox()
+
+/** Password profile whose entropyMac genuinely verifies against `secret` — the bearer path
+ *  now checks the master-keyed MAC over the sealed entropy before committing a restore. */
+async function passwordProfileFor(id = "pid", secret = secretBuffer()): Promise<Profile & { type: "password" }> {
+	const profile = passwordProfile(id)
+	profile.entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(profile.entropy))
+	return profile
+}
 
 /** Produce a real bearer for `secret` bound to `profileId`. */
 async function makeBearer(profileId: string, secret = secretBuffer()): Promise<SessionWrappedSecret> {
@@ -382,7 +392,7 @@ describe("SessionManager", () => {
 	describe("restore (init-only, silent)", () => {
 		test("re-hydrates a valid password session without emitting", async () => {
 			const { api, emits, manager } = setup()
-			const profile = passwordProfile("abc")
+			const profile = await passwordProfileFor("abc")
 			await seedSession(api, {
 				profile: "abc",
 				bearer: await makeBearer("abc"),
@@ -408,11 +418,28 @@ describe("SessionManager", () => {
 				since: Date.now(),
 			})
 
-			await manager.restore(async () => passwordProfile("abc"))
+			await manager.restore(async () => passwordProfileFor("abc", secret))
 
 			const active = await manager.getActive()
 			expect(active).toBeDefined()
 			expect(Buffer.from(active?.secret.toBuffer() ?? new Uint8Array()).toString("hex")).toBe(Buffer.from(secret).toString("hex"))
+		})
+
+		test("sealed-entropy MAC mismatch blocks silent restore (tampered entropy → forced password unlock)", async () => {
+			// The passwordless bearer path cannot decrypt entropy to run the pairing check; the
+			// master-keyed MAC is its tamper detection. A profile whose entropy ciphertext no
+			// longer matches its MAC must NOT silently restore — otherwise a long-lived bearer
+			// keeps the wallet operating while recovery silently degrades.
+			const { api, manager } = setup()
+			await seedSession(api, {
+				profile: "abc",
+				bearer: await makeBearer("abc"),
+				since: Date.now(),
+			})
+			const tampered = await passwordProfileFor("abc")
+			tampered.entropy = "dGFtcGVyZWQtZW50cm9weQ=="
+			await manager.restore(async () => tampered)
+			expect(await manager.getActive()).toBeUndefined()
 		})
 
 		test("silently drops an expired session on restore", async () => {
@@ -798,7 +825,7 @@ describe("SessionManager", () => {
 			})
 
 			const { manager: m2 } = setupFromExistingApi(api, 1_800_000, false)
-			await m2.restore(async () => passwordProfile())
+			await m2.restore(async () => passwordProfileFor())
 
 			const active = await m2.getActive()
 			expect(active).toBeDefined()

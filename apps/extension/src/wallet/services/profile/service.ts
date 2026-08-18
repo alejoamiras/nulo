@@ -1,4 +1,4 @@
-import { Fr } from "@aztec/foundation/curves/bn254"
+import type { Fr } from "@aztec/foundation/curves/bn254"
 import { toRestoreError } from "@/utils/restore-error"
 import type { BrowserApi, StorageArea } from "@nulo/wallet-core/ports"
 import type { IConfig } from "@/wallet/config"
@@ -15,10 +15,12 @@ import { Lock } from "@/wallet/utils"
 import { ProfileRepository } from "./repository"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
-import { getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
+import { array_equals, canonicalizeMnemonic, getEntropy, getMnemonic } from "@nulo/wallet-core/utils"
 import {
 	asBase64Ciphertext,
 	asMasterSecretBytes,
+	computeEntropyMac,
+	deriveMasterFromMnemonic,
 	EncryptionKey,
 	type MasterSecretBytes,
 	type Passhash,
@@ -63,12 +65,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		"changeProfilePassword",
 		"confirmProfileOperation",
 		"deleteProfile",
-		"importEncrypted",
-		"importPlain",
 		"importPasskey",
 		"importMnemonic",
-		"exportEncrypted",
 		"exportPlain",
+		"exportBackupMaterial",
 		"exportMnemonic",
 		"restore",
 		"finalizeRestore",
@@ -292,8 +292,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 	public async createProfile(name: string, password: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
-		const secret = asMasterSecretBytes(Fr.random().toBuffer() as Buffer<ArrayBuffer>)
-		const { passhash, encrypted } = await this.secretBox.seal(password, secret)
+		// Entropy-originated (NULO-ACCOUNT-KDF v2): 32 CSPRNG bytes — plain random, NOT
+		// Fr.random(); entropy is pre-PBKDF2 and needs no field bound — encode to the recovery
+		// words, then derive the master one-way through the standard BIP-39 step. The row stores
+		// BOTH sealed (store-both): the bearer path can't re-run a mnemonic KDF, and unlock
+		// already pays one PBKDF2.
+		const entropy = crypto.getRandomValues(new Uint8Array(32)) as Uint8Array<ArrayBuffer>
+		const words = await getMnemonic(entropy)
+		const secret = await deriveMasterFromMnemonic(words)
+		const { passhash, encrypted } = await this.secretBox.seal(password, secret, entropy)
+		const entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(encrypted.entropy))
 		try {
 			return await this.runExclusive(async () => {
 				const id = await this.nextUnreservedId()
@@ -305,6 +313,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					pxeGeneration: mintPxeGeneration(),
 					guard: encrypted.guard,
 					secret: encrypted.secret,
+					entropy: encrypted.entropy,
+					entropyMac,
 				}
 				await this.repo.set(id, profile)
 
@@ -315,11 +325,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				return profile
 			})
 		} finally {
-			// zero secret + passhash after sessionManager has copied
+			// zero secret + entropy + passhash after sessionManager has copied
 			// what it needs (Fr.fromBuffer copies; passhash is base64-
 			// encoded into Session). Done after lock release so a thrown
 			// open()/repo.set() also gets the zeroize.
 			zeroize(secret)
+			zeroize(entropy)
 			zeroize(passhash)
 		}
 	}
@@ -353,48 +364,65 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 		// Phase 2 — crypto UNLOCKED. Caller pays ~1s PBKDF2 but the rest of
 		// the RPC surface stays responsive.
-		const secret = await this.secretBox.unseal(password, {
+		const unsealed = await this.secretBox.unseal(password, {
 			guard: asBase64Ciphertext(snapshot.guard),
 			secret: asBase64Ciphertext(snapshot.secret),
+			entropy: asBase64Ciphertext(snapshot.entropy),
 		})
-		if (!secret) {
+		if (!unsealed) {
 			// Can't tell wrong-password from storage corruption from this single
 			// null, but GUARD catches wrong-password first in practice. Auth UI
 			// matches on InvalidPasswordError (popup/pages/auth.vue:65-74).
 			throw new InvalidPasswordError()
 		}
-		const passhash = await EncryptionKey.getPasshash(password)
-
-		// Phase 3 — re-enter lock, revalidate, open session.
+		const { secret, entropy } = unsealed
 		try {
-			return await this.runExclusive(async () => {
-				const current = await this.repo.get(id)
-				if (!current) {
-					throw new Error("Invalid profile id")
-				}
-				// A deletion that began during the (lock-free) phase-2 unseal must
-				// abort the unlock — the id is now reserved even if the row lingers.
-				if (this.deletionState.isReserved(id)) {
-					throw new Error("Invalid profile id")
-				}
-				if (current.type !== "password") {
-					throw new Error("Profile requires passkey")
-				}
-				if (current.guard !== snapshot.guard || current.secret !== snapshot.secret) {
-					// Password changed under us. `secret` is for the OLD ciphertext;
-					// the passhash wouldn't unseal the current encrypted blob, so
-					// SessionManager.restore would silently close on the next SW
-					// suspension. Refuse and let the user retry with the new password.
-					throw new InvalidPasswordError()
-				}
-				await this.openSessionVerified(current, secret, passhash)
-				return this.getProfileInfo(current)
-			})
+			// Pairing check at the entropy-decryption site: the stored words must still derive
+			// the stored master (deriveMasterFromMnemonic ≈ ms — BIP-39's 2048 iterations).
+			// A mismatch means a tampered/corrupted row whose exported recovery phrase would
+			// point at a DIFFERENT wallet — fail closed before any session opens.
+			const words = await getMnemonic(entropy)
+			const rederived = await deriveMasterFromMnemonic(words)
+			const paired = array_equals(rederived, secret)
+			zeroize(rederived)
+			if (!paired) {
+				throw new Error("Profile storage corrupted")
+			}
+			const passhash = await EncryptionKey.getPasshash(password)
+
+			// Phase 3 — re-enter lock, revalidate, open session.
+			try {
+				return await this.runExclusive(async () => {
+					const current = await this.repo.get(id)
+					if (!current) {
+						throw new Error("Invalid profile id")
+					}
+					// A deletion that began during the (lock-free) phase-2 unseal must
+					// abort the unlock — the id is now reserved even if the row lingers.
+					if (this.deletionState.isReserved(id)) {
+						throw new Error("Invalid profile id")
+					}
+					if (current.type !== "password") {
+						throw new Error("Profile requires passkey")
+					}
+					if (current.guard !== snapshot.guard || current.secret !== snapshot.secret || current.entropy !== snapshot.entropy) {
+						// Password changed under us. `secret` is for the OLD ciphertext;
+						// the passhash wouldn't unseal the current encrypted blob, so
+						// SessionManager.restore would silently close on the next SW
+						// suspension. Refuse and let the user retry with the new password.
+						throw new InvalidPasswordError()
+					}
+					await this.openSessionVerified(current, secret, passhash)
+					return this.getProfileInfo(current)
+				})
+			} finally {
+				zeroize(passhash)
+			}
 		} finally {
 			// zero buffers after sessionManager has copied. Runs on
 			// success AND on the revalidate-failure throw path.
 			zeroize(secret)
-			zeroize(passhash)
+			zeroize(entropy)
 		}
 	}
 
@@ -698,6 +726,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const resealed = await this.secretBox.reseal(oldPassword, newPassword, {
 				guard: asBase64Ciphertext(profile.guard),
 				secret: asBase64Ciphertext(profile.secret),
+				entropy: asBase64Ciphertext(profile.entropy),
 			})
 			if (!resealed) {
 				throw new Error("Invalid profile old password")
@@ -707,7 +736,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// password is persisted. If the check throws (address drift), nothing is committed and
 			// the RPC failure is honest — the password is NOT durably changed under a reported
 			// failure. `reseal` returns passhash + ciphertext but not the raw secret.
-			const secret = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
+			const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
+			const secret = unsealed?.secret ?? null
+			if (unsealed) zeroize(unsealed.entropy)
 			try {
 				if (secret) {
 					// Pre-persist verify: on drift, nothing is committed (honest failure — the password
@@ -724,8 +755,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					}
 				}
 
+				// Dual reseal is atomic with this same pre-persist-verified commit (audit H2):
+				// guard, master, AND entropy re-encrypt together — entropy must never remain
+				// decryptable under the retired password — and the entropy MAC re-keys with the
+				// new ciphertext so the bearer-path check keeps holding.
 				profile.guard = resealed.encrypted.guard
 				profile.secret = resealed.encrypted.secret
+				profile.entropy = resealed.encrypted.entropy
+				if (secret) {
+					profile.entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(resealed.encrypted.entropy))
+				}
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
 
@@ -786,20 +825,24 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!password) {
 					throw new Error("Password is required")
 				}
-				const secret = await this.secretBox.unseal(password, {
+				const unsealed = await this.secretBox.unseal(password, {
 					guard: asBase64Ciphertext(snapshot.guard),
 					secret: asBase64Ciphertext(snapshot.secret),
+					entropy: asBase64Ciphertext(snapshot.entropy),
 				})
 				try {
-					if (!secret) {
+					if (!unsealed) {
 						// Wrapped by the catch below into a generic Error. Keeps the
 						// current "confirm rejects on wrong password" contract.
 						throw new InvalidPasswordError()
 					}
 				} finally {
-					// confirmation only checks decryptability — `secret`
-					// is the live master key but is never used. Zero it.
-					zeroize(secret)
+					// confirmation only checks decryptability — the secrets
+					// are live key material but never used. Zero both.
+					if (unsealed) {
+						zeroize(unsealed.secret)
+						zeroize(unsealed.entropy)
+					}
 				}
 			} else {
 				// Facade dispatches on profile.type — password path above goes
@@ -1177,86 +1220,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	public async importEncrypted(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		await this.ensureInitialized()
-		// Different shape from Profile.secret — this is a raw ciphertext the
-		// user pasted in, not a GUARD+secret pair. Decrypt directly through
-		// EncryptionKey; wrong password or corrupted ciphertext both surface
-		// as a thrown error, which we catch and map to "Invalid password".
-		const passhash = await EncryptionKey.getPasshash(password)
-		const key = await EncryptionKey.fromPasshash(passhash)
-		const _secret = Buffer.from(secret, "base64") as Uint8Array<ArrayBuffer>
-		let _plainSecret: Uint8Array<ArrayBuffer> | undefined
-		try {
-			_plainSecret = await key.decrypt(_secret)
-		} catch {
-			// Swallow — any decrypt failure means the user's blob + password
-			// don't match. Fall through to the null-guarded throw below.
-		}
-		if (!_plainSecret) {
-			// zero passhash on early-throw paths (importPasswordProfile
-			// won't run + take ownership).
-			zeroize(passhash)
-			throw new Error("Invalid password")
-		}
-		if (_plainSecret.byteLength !== 32) {
-			zeroize(_plainSecret)
-			zeroize(passhash)
-			throw new Error("Invalid secret length")
-		}
-		// importPasswordProfile takes ownership of `_plainSecret` + `passhash`.
-		return await this.importPasswordProfile(name, asMasterSecretBytes(_plainSecret as Uint8Array<ArrayBuffer>), passhash)
-	}
-
-	public async importPlain(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		await this.ensureInitialized()
-		const passhash = await EncryptionKey.getPasshash(password)
-		const _plainSecret = Buffer.from(secret, "base64")
-		if (_plainSecret.byteLength !== 32) {
-			zeroize(_plainSecret)
-			zeroize(passhash)
-			throw new Error("Invalid secret length")
-		}
-		return await this.importPasswordProfile(name, asMasterSecretBytes(_plainSecret as Uint8Array<ArrayBuffer>), passhash)
-	}
-
 	public async importMnemonic(name: string, mnemonic: string[], password: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
+		// Boundary validation BEFORE any persistence, on the CANONICAL form (the same
+		// normalizer the KDF applies — the same input can never validate one way and derive
+		// another): exactly 24 words, every word on the wordlist, checksum valid (`getEntropy`
+		// throws on unknown words and bad checksums).
+		const words = canonicalizeMnemonic(mnemonic)
+		if (words.length !== 24) {
+			throw new Error("Invalid mnemonic length")
+		}
+		const entropy = await getEntropy(words)
+		const secret = await deriveMasterFromMnemonic(words)
 		const passhash = await EncryptionKey.getPasshash(password)
-		const plain = await getEntropy(mnemonic)
-		// importPasswordProfile takes ownership of `plain` + `passhash`.
-		return await this.importPasswordProfile(name, asMasterSecretBytes(plain as Uint8Array<ArrayBuffer>), passhash)
-	}
-
-	public async exportEncrypted(id: string): Promise<string> {
-		await this.ensureInitialized()
-		return this.runExclusive(async () => {
-			// Auth gate (AUDIT A2): require the requested profile to be the
-			// currently-active (unlocked) one. The encrypted blob is already
-			// password-protected at rest, but leaking it to a caller whose only
-			// context is "I know the id" is a logged-out-but-popup-open exfil
-			// hole. Mirrors `SessionManager.getSecret`'s "Profile locked" check
-			// (session-manager.ts:170-174) so the error shape is consistent
-			// across the secret-access surface.
-			const session = await this.sessionManager.getActive()
-			if (session?.session.profile !== id) {
-				throw new Error("Profile locked")
-			}
-			// A tombstoned profile (mid-delete) must not export its encrypted blob —
-			// belt-and-suspenders with the gated session restore (a delete under this
-			// same facade lock closes the session + reserves before releasing).
-			if (this.deletionState.isReserved(id)) {
-				throw new Error("Invalid profile id")
-			}
-			const profile = await this.repo.get(id)
-			if (!profile) {
-				throw new Error("Invalid profile id")
-			}
-			if (profile.type === "passkey") {
-				throw new Error("Operation not supported for passkey profile")
-			}
-			return profile.secret
-		})
+		// importPasswordProfile takes ownership of `secret` + `entropy` + `passhash`.
+		return await this.importPasswordProfile(name, secret, entropy as Uint8Array<ArrayBuffer>, passhash)
 	}
 
 	public async exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
@@ -1330,12 +1308,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		// (including crypto-level failures) is flattened to a plain
 		// `Error(message)` so callers see a stable error shape.
 		try {
-			const secret = await this.secretBox.unseal(password, {
+			const unsealed = await this.secretBox.unseal(password, {
 				guard: asBase64Ciphertext(profile.guard),
 				secret: asBase64Ciphertext(profile.secret),
+				entropy: asBase64Ciphertext(profile.entropy),
 			})
 			try {
-				if (!secret) {
+				if (!unsealed) {
 					throw new InvalidPasswordError()
 				}
 				// Revalidate AFTER the slow unseal (codex verify): a delete that
@@ -1347,15 +1326,66 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
 				}
-				return Buffer.from(secret).toString("base64")
+				// Backup `master-key` semantics: ALWAYS the derived master, never entropy —
+				// restore() seals this value verbatim as the working master.
+				return Buffer.from(unsealed.secret).toString("base64")
 			} finally {
-				// zero secret after base64-encode escapes (the base64
+				// zero secrets after base64-encode escapes (the base64
 				// string is the wire format; we can't zero strings).
-				zeroize(secret)
+				if (unsealed) {
+					zeroize(unsealed.secret)
+					zeroize(unsealed.entropy)
+				}
 			}
 		} catch (error) {
 			this.logError("Failed to confirm operation", getErrorMessage(error))
 			throw new Error(getErrorMessage(error))
+		}
+	}
+
+	/**
+	 * Atomic paired export for the Full-Backup builder: master + entropy from ONE unseal, so
+	 * the two backup fields can never come from different row states (final-codex M1). Password
+	 * profiles only — passkey backups carry the credentialId via `exportPlain` and re-derive
+	 * the master from the passkey PRF at restore.
+	 */
+	public async exportBackupMaterial(id: string, password: string): Promise<{ masterKey: string; entropy: string }> {
+		await this.ensureInitialized()
+		const { profile, capturedEpoch } = await this.runExclusive(async () => {
+			const profile = await this.repo.get(id)
+			if (!profile) {
+				throw new Error("Invalid profile id")
+			}
+			if (this.deletionState.isReserved(id)) {
+				throw new Error("Invalid profile id")
+			}
+			return { profile, capturedEpoch: this.deletionState.capture(id) }
+		})
+		if (profile.type === "passkey") {
+			throw new Error("Operation not supported for passkey profile")
+		}
+		const unsealed = await this.secretBox.unseal(password, {
+			guard: asBase64Ciphertext(profile.guard),
+			secret: asBase64Ciphertext(profile.secret),
+			entropy: asBase64Ciphertext(profile.entropy),
+		})
+		try {
+			if (!unsealed) {
+				throw new InvalidPasswordError()
+			}
+			const still = await this.repo.get(id)
+			if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
+				throw new Error("Invalid profile id")
+			}
+			return {
+				masterKey: Buffer.from(unsealed.secret).toString("base64"),
+				entropy: Buffer.from(unsealed.entropy).toString("base64"),
+			}
+		} finally {
+			if (unsealed) {
+				zeroize(unsealed.secret)
+				zeroize(unsealed.entropy)
+			}
 		}
 	}
 
@@ -1376,22 +1406,30 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		if (profile.type === "passkey") {
 			throw new Error("Operation not supported for passkey profile")
 		}
-		const secret = await this.secretBox.unseal(password, {
+		const unsealed = await this.secretBox.unseal(password, {
 			guard: asBase64Ciphertext(profile.guard),
 			secret: asBase64Ciphertext(profile.secret),
+			entropy: asBase64Ciphertext(profile.entropy),
 		})
 		try {
-			if (!secret) {
+			if (!unsealed) {
 				// Identity-stable error message — the import flow expects this
 				// exact string for its wrong-password branch.
 				throw new Error("Invalid profile old password")
 			}
-			// Derive the words FIRST, THEN revalidate under the lock — getMnemonic
-			// awaits crypto.subtle.digest, so a check placed before it leaves a
-			// window where a delete interleaves during the digest and the erased
-			// profile's seed is still returned (codex verify r4). No async op runs
-			// after this critical section.
-			const mnemonic = await getMnemonic(secret)
+			// The recovery words come from the STORED ENTROPY (the master derives one-way from
+			// them and cannot be reversed). Pairing check before the words are ever revealed:
+			// words that no longer derive the stored master would point at a DIFFERENT wallet —
+			// the split-brain recovery attack — so fail closed instead of handing them out.
+			const mnemonic = await getMnemonic(unsealed.entropy)
+			const rederived = await deriveMasterFromMnemonic(mnemonic)
+			const paired = array_equals(rederived, unsealed.secret)
+			zeroize(rederived)
+			if (!paired) {
+				throw new Error("Profile storage corrupted")
+			}
+			// Revalidate under the lock AFTER the async derivations — a delete interleaving
+			// during them must not let the erased profile's words escape (codex verify r4).
 			await this.runExclusive(async () => {
 				if (!(await this.repo.get(id)) || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
@@ -1399,11 +1437,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			})
 			return mnemonic
 		} finally {
-			// zero secret after mnemonic words derived. The mnemonic
+			// zero secrets after mnemonic words derived. The mnemonic
 			// is itself sensitive (the user shows it on screen), but
-			// zeroing the underlying entropy buffer at least closes the
+			// zeroing the underlying buffers at least closes the
 			// in-memory window.
-			zeroize(secret)
+			if (unsealed) {
+				zeroize(unsealed.secret)
+				zeroize(unsealed.entropy)
+			}
 		}
 	}
 
@@ -1436,11 +1477,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * import* methods. Zeroes both in finally — runs on success, throw,
 	 * and re-throw paths.
 	 */
-	private async importPasswordProfile(name: string, secret: MasterSecretBytes, passhash: Passhash): Promise<Profile> {
+	private async importPasswordProfile(
+		name: string,
+		secret: MasterSecretBytes,
+		entropy: Uint8Array<ArrayBuffer>,
+		passhash: Passhash,
+	): Promise<Profile> {
 		try {
 			return await this.runExclusive(async () => {
 				const id = await this.nextUnreservedId()
-				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret)
+				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret, entropy)
+				const entropyMac = await computeEntropyMac(secret, asBase64Ciphertext(encrypted.entropy))
 				const profile: Profile = {
 					id,
 					name,
@@ -1448,6 +1495,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					pxeGeneration: mintPxeGeneration(),
 					guard: encrypted.guard,
 					secret: encrypted.secret,
+					entropy: encrypted.entropy,
+					entropyMac,
 				}
 				await this.repo.set(id, profile)
 				this.emit("onProfileAdded", this.getProfileInfo(profile))
@@ -1456,6 +1505,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			})
 		} finally {
 			zeroize(secret)
+			zeroize(entropy)
 			zeroize(passhash)
 		}
 	}
@@ -1551,6 +1601,29 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					zeroize(plainSecret)
 					throw new Error("Invalid master key length")
 				}
+				// Epoch-4 password backups REQUIRE entropy (passkey blobs must never carry it —
+				// enforced by the RestoreSecret discriminated shape + the backup reader). Pairing
+				// check BEFORE anything is sealed: the backup checksum is integrity-not-auth, so a
+				// doctored blob can carry a self-consistent-looking but mismatched pair — restoring
+				// it would mint a profile whose displayed recovery words derive a DIFFERENT master
+				// than the one in use (audit H3).
+				const plainEntropy = Buffer.from(secret.entropy, "base64") as Uint8Array<ArrayBuffer>
+				if (plainEntropy.byteLength !== 32) {
+					zeroize(plainSecret)
+					zeroize(plainEntropy)
+					throw new Error("Invalid entropy length")
+				}
+				{
+					const words = await getMnemonic(plainEntropy)
+					const rederived = await deriveMasterFromMnemonic(words)
+					const paired = array_equals(rederived, plainSecret as Uint8Array<ArrayBuffer>)
+					zeroize(rederived)
+					if (!paired) {
+						zeroize(plainSecret)
+						zeroize(plainEntropy)
+						throw new Error("Backup entropy does not derive the backup master key")
+					}
+				}
 
 				// Buffers declared outside try so the finally always runs
 				// against defined references. `passhash` is filled by `seal()`
@@ -1561,8 +1634,16 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				try {
 					return await this.runExclusive(async () => {
 						try {
-							const sealed = await this.secretBox.seal(password, asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>))
+							const sealed = await this.secretBox.seal(
+								password,
+								asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
+								plainEntropy,
+							)
 							passhash = sealed.passhash
+							const entropyMac = await computeEntropyMac(
+								asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
+								asBase64Ciphertext(sealed.encrypted.entropy),
+							)
 
 							let id = profile.id
 							while ((await this.repo.contains(id)) || this.deletionState.isReserved(id)) {
@@ -1578,6 +1659,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 								pxeGeneration: mintPxeGeneration(),
 								guard: sealed.encrypted.guard,
 								secret: sealed.encrypted.secret,
+								entropy: sealed.encrypted.entropy,
+								entropyMac,
 							}
 
 							// Marker BEFORE row (fail-closed): a crash between the two writes
@@ -1614,6 +1697,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					})
 				} finally {
 					zeroize(plainSecret)
+					zeroize(plainEntropy)
 					if (passhash) zeroize(passhash)
 				}
 			}
@@ -1761,20 +1845,22 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				}
 				// Re-derive: unseal the stored ciphertext with the supplied
 				// password. Mirrors `unlockProfile` Phase 3.
-				const secret = await this.secretBox.unseal(password, {
+				const unsealed = await this.secretBox.unseal(password, {
 					guard: asBase64Ciphertext(profile.guard),
 					secret: asBase64Ciphertext(profile.secret),
+					entropy: asBase64Ciphertext(profile.entropy),
 				})
-				if (!secret) {
+				if (!unsealed) {
 					throw new InvalidPasswordError()
 				}
 				const passhash = await EncryptionKey.getPasshash(password)
 				try {
-					await this.openSessionVerified(profile, secret, passhash)
+					await this.openSessionVerified(profile, unsealed.secret, passhash)
 					return this.getProfileInfo(profile)
 				} finally {
 					// zero buffers after sessionManager has copied.
-					zeroize(secret)
+					zeroize(unsealed.secret)
+					zeroize(unsealed.entropy)
 					zeroize(passhash)
 				}
 			}

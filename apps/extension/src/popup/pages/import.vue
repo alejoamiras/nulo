@@ -99,16 +99,12 @@ const {
 	onCeremonyReject,
 	selectedImportOption,
 	seedPhrase,
-	privateKey,
-	publicKey,
 	password,
 	repeatedPassword,
 	maxPasswordLength,
 	error,
 	isCopied,
 	isAllowedToImportBySeedPhrase,
-	isAllowedToImportByPrivateKey,
-	isAllowedToImportByPublicKey,
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
@@ -121,8 +117,6 @@ const {
 	restoreBackup,
 	showRestoreErrorLog,
 	handleImportSeed,
-	handleImportPrivateKey,
-	handleImportPublicKey,
 	handleImportPasskey,
 	handlePasswordInput,
 	handleSecretInput,
@@ -256,10 +250,8 @@ onBeforeUnmount(() => {
 				/>
 
 				<ImportSecretForm
-					v-if="selectedImportOption === 'seed' || selectedImportOption === 'private_key' || selectedImportOption === 'public_key'"
+					v-if="selectedImportOption === 'seed'"
 					v-model:seedPhrase="seedPhrase"
-					v-model:privateKey="privateKey"
-					v-model:publicKey="publicKey"
 					v-model:password="password"
 					v-model:repeatedPassword="repeatedPassword"
 					:method="selectedImportOption"
@@ -332,25 +324,7 @@ onBeforeUnmount(() => {
 					:disabled="!isAllowedToImportBySeedPhrase"
 					variant="cta"
 				>
-					Use Seed Phrase
-				</Button>
-				<Button
-					v-if="selectedImportOption === 'private_key'"
-					@click="handleImportPrivateKey"
-					data-testid="import-private-key-submit-btn"
-					:disabled="!isAllowedToImportByPrivateKey"
-					variant="cta"
-				>
-					Use Plain Key
-				</Button>
-				<Button
-					v-if="selectedImportOption === 'public_key'"
-					@click="handleImportPublicKey"
-					data-testid="import-public-key-submit-btn"
-					:disabled="!isAllowedToImportByPublicKey"
-					variant="cta"
-				>
-					Use Encrypted Key
+					Use Recovery Phrase
 				</Button>
 
 				<Button @click="handleBack" :disabled="restoreStatus === 'progress'" variant="cta_outline">Back</Button>
