@@ -1,25 +1,25 @@
 # key-model-v2 — recovery-phrase-centric key model + NULO-ACCOUNT-KDF v2
 
-**Status:** DRAFT — pending dual audit (codex + fable) and owner approval.
+**Status:** REVISED after dual audit (codex R1: reject → findings adopted; fable R1: conditional approve → all conditions adopted). Pending final fresh-context codex pass + owner approval.
 **Tier:** `/blueprint mid` (rubric: security sensitivity HIGH; novelty/blast/irreversibility/migration/external-coupling low-med — pre-production, no users, no migrations).
 **eli5_mode:** Artifact (URL recorded in § Seeds once published; source `eli5.html` in this dir).
-**Worktree/branch:** `key-model-v2` / `worktree-key-model-v2`. Recon: [recon.md](recon.md).
+**Worktree/branch:** `key-model-v2` / `worktree-key-model-v2`. Recon: [recon.md](recon.md) (see its post-audit Corrections section). Audits: [audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md).
 
 ## Summary
 
 Pre-production window, one coordinated break. Two halves:
 
-1. **Product model** — make the export taxonomy match the key hierarchy. Wallet level: the 24-word **Recovery Phrase** becomes the only secret export (plain "Secret Key" export + import deleted; Full Backup untouched). Account level: new **Export Account / Import Account** (Nulo-format JSON, encrypted + plaintext variants) for the per-account keys — the thing EVM users expect "private key" to mean.
-2. **NULO-ACCOUNT-KDF v2** — adopt the real BIP-39 PBKDF2 step (empty passphrase default; the words stop being a raw re-encoding of the master), derive the account seed from `l1ChainId` (not the XOR composite) under a dedicated Nulo domain tag, replace the borrowed `IVSK_M` separator in seed→signingKey with a Nulo constant, and validate mnemonic imports at the service boundary. Every derived address changes; this is the deliberate, licensed, one-time pre-launch baseline redefinition.
+1. **Product model** — make the export taxonomy match the key hierarchy. Wallet level: the 24-word **Recovery Phrase** becomes the only secret export (plain "Secret Key" export + import deleted; Full Backup untouched). Account level: new **Export Account / Import Account** (Nulo-format JSON, encrypted + plaintext variants) for the per-account ownership key — the thing EVM users expect "private key" to mean.
+2. **NULO-ACCOUNT-KDF v2** — adopt the real BIP-39 PBKDF2 step (empty passphrase default), derive the account seed from `l1ChainId` (not the XOR composite) under a dedicated Nulo domain tag, replace the borrowed `IVSK_M` separator in seed→signingKey with a Nulo constant, and validate mnemonic imports at the service boundary. Every derived address changes; this is the deliberate, licensed, one-time pre-launch baseline redefinition.
 
-Non-goals: passphrase ("25th word") UI (the KDF supports it with `""` default; adding UI later is non-breaking), foreign-account import (non-Nulo artifacts), BIP-32/SLIP-0010 (rejected — see ledger), any storage migration (pre-production: none are written), faucet/landing changes.
+Non-goals: passphrase ("25th word") UI (KDF supports it with `""` default; adding UI later is non-breaking), foreign-account import (non-Nulo artifacts), BIP-32/SLIP-0010 (rejected — ledger L9), storage migrations (pre-production: none), faucet/landing changes, redesign of the composite drift check.
 
 ## Success criteria
 
 - A fresh profile is entropy-originated; its 24 words re-display from stored entropy; the same words re-import to the same accounts (KAT-pinned end-to-end: words → entropy → master → seed → address).
 - Wallet-level UI offers exactly: Recovery Phrase, Full Backup. No plain/encrypted Secret Key export or import surfaces remain.
-- An account exported on machine A imports on machine B (same extension build) and can sign; a tampered export or tampered stored key fails closed.
-- All gates green: `bun run audit:vue`, `bun run test:e2e`, `bun run e2e:agent` (including the updated frozen-account canary, prover-ON).
+- An account exported on build A imports on build B (same regime) and **signs a live transaction** (P6 network leg); a tampered export, tampered stored key, or doctored backup fails closed at the right blast radius.
+- All gates green: `bun run audit:vue`, `bun run test:e2e`, `bun run e2e:agent` (including the updated frozen-account canary and profile-reimport matrix, prover-ON).
 
 ---
 
@@ -29,185 +29,202 @@ Non-goals: passphrase ("25th word") UI (the KDF supports it with `""` default; a
 
 ```
 entropy (32B CSPRNG) ⇄ 24 words                    existing codec, packages/wallet-core/src/utils/mnemonic.ts (unchanged)
-seed64  = PBKDF2-HMAC-SHA512(NFKD(words.join(" ")), "mnemonic" + passphrase(""), 2048, 64B)   [BIP-39 standard]
-master  = Fr.fromBufferReduce(seed64)               idiom precedent: passkey-credential.ts:75
+seed64  = PBKDF2-HMAC-SHA512(NFKD(canonical(words).join(" ")), "mnemonic" + passphrase(""), 2048, 64B)   [BIP-39 standard]
+master  = Fr.fromBufferReduce(seed64)               64-byte input — upstream-endorsed low-skew reduce
 account = poseidon2HashWithSeparator([master, l1ChainId, type, index], NULO_ACCOUNT_SEED_SEP)
 signing = sha512ToGrumpkinScalar([account, NULO_SIGNING_ROOT_SEP])          (was: DomainSeparator.IVSK_M)
 secret  = deriveSecretKeyFromSigningKey(signing)    upstream 5.0.1, one-way — hierarchy unchanged
 … deriveKeys(secret) → frozen artifact/descriptor → address                 (all unchanged)
 ```
 
-- **Constants**: `NULO_ACCOUNT_SEED_SEP` and `NULO_SIGNING_ROOT_SEP` are u32s derived as the first 4 bytes (big-endian) of `sha256("nulo:account-seed:v2")` / `sha256("nulo:signing-root:v2")` — reproducible provenance, values pinned in KATs. A unit test asserts neither collides with any exported upstream `DomainSeparator` value.
-- **PBKDF2 home**: new `packages/wallet-crypto/src/mnemonic-master.ts` (`deriveBip39Seed(words, passphrase="")` → 64B via `self.crypto.subtle.deriveBits`, and `deriveMasterFromMnemonic(words)` → `MasterSecretBytes`). wallet-core's `mnemonic.ts` stays a pure word codec (layer boundary: wallet-core → wallet-crypto). WebCrypto PBKDF2 already runs in the MV3 SW (encryption-key.ts:15-31); SHA-512 is a param change, no new dependency.
-- **2048 iterations is the BIP-39 spec constant**, not our brute-force defense — our entropy is 256-bit CSPRNG; the at-rest defense remains PBKDF2-SHA256/600k + AES-GCM (unchanged).
-- **Passkey path untouched** (independent HKDF chain; converges on the same `MasterSecretBytes` shape).
-- **Entropy-preservation analysis** (the owner's named concern): entropy source is 32 CSPRNG bytes (256-bit) — `Fr.random()` is no longer in the master path, so the master's input entropy *rises* from ~253.5 to 256 bits. PBKDF2 is entropy-preserving. `Fr.fromBufferReduce` on 512 uniform bits mod r (~2^253.5) has statistical bias ≤ 2^-258 — cryptographically negligible. No step narrows the keyspace; auditors are explicitly asked to attack this claim.
+- **One shared pure function** `deriveAccountSeed(master, l1ChainId, type, index)` (wallet-crypto) is the ONLY implementation of the account-seed formula, consumed by `AccountService` AND the integrity coordinator (which today duplicates the v1 formula in its `DeriveAddress` default, coordinator.ts:52-56, constructed in production WITHOUT an override — audit H1). The canary test keeps its deliberately independent hand-rolled recompute.
+- **Constants**: `NULO_ACCOUNT_SEED_SEP` and `NULO_SIGNING_ROOT_SEP` are u32s = first 4 bytes (BE) of `sha256("nulo:account-seed:v2")` / `sha256("nulo:signing-root:v2")` — reproducible provenance, values pinned in KATs. A unit test asserts non-collision against **both** upstream separator spaces — `DomainSeparator` (sha512 context) and `GeneratorIndex` (poseidon context) — plus mutual distinctness of the two Nulo constants (audit L1).
+- **Mnemonic canonicalization contract** (audit L6): one exported normalizer (trim, lowercase, collapse whitespace, NFKD) applied identically by import validation and `deriveBip39Seed` — the same user input can never validate one way and KDF another. `getEntropy` already rejects bad checksums (verified: mnemonic.ts:2150-2157).
+- **PBKDF2 home**: new `packages/wallet-crypto/src/mnemonic-master.ts` (`deriveBip39Seed(words, passphrase="")` → 64B via `self.crypto.subtle.deriveBits`; `deriveMasterFromMnemonic(words)` → `MasterSecretBytes`). wallet-core's `mnemonic.ts` stays a pure word codec. WebCrypto PBKDF2 already runs in the MV3 SW (encryption-key.ts:15-31); SHA-512 is a param change, no new dependency. 2048 iterations is the BIP-39 spec constant, not our brute-force defense; at-rest defense stays PBKDF2-SHA256/600k + AES-GCM.
+- **KATs**: fresh official BIP-39 (trezor) vectors asserted with passphrase `"TREZOR"` (that is how the official seed column is computed — audit M4; the single seed row currently in mnemonic.test.ts is truncated and unasserted), PLUS Nulo-generated `passphrase=""` vectors for the production path.
+- **Entropy accounting (honest version — audit M1/C5)**: the words encode 256 bits; the master is an `Fr`, so its keyspace is capped at log2(r) ≈ 253.6 bits in ANY design (Outline B included) — the mod-r reduce maps the 2^256 phrase space onto ~2^253.6 masters (~5.7 expected phrase-preimages per master; finding any collision is a ~2^253 search). Every subsequent value (poseidon output, Grumpkin scalar) is field-sized (~254 bits). Claim under audit: **effective keyspace ≥ ~253.5 bits at every step, reduce bias ≤ 2^-258 (64-byte input), no step reduces below the field's own security level.** Not claimed: "no narrowing" or "256-bit master".
+- **Passkey path untouched** (independent HKDF chain). Backlog note (out of scope): passkey-credential.ts:75 reduces a **256-bit** HKDF output — the higher-skew case upstream warns about; impact negligible, but worth aligning to a 64-byte expand at the next passkey-breaking change.
+- **Recorded trust-model property (audit M9)**: with standard BIP-39 parameters, a phrase reused from another wallet (MetaMask/BTC) yields the exact `seed64` those ecosystems compute and BIP-32 wallets store — such software could derive Nulo's master with no Nulo secrets. This is the standard BIP-39 model, accepted deliberately; import-screen copy will discourage phrase reuse ("use a phrase generated by Nulo").
 
 ### B. Chain identity in derivation
 
-- `Network` row gains a persisted **`l1ChainId`** field (spec + `_buildNetwork` seed paths + `addNetwork`/`addEndpoint`/`updateEndpoint` threading + `restore()` guard). `_getChainId()`'s XOR composite **stays** as the storage-scoping key everywhere (`Account.chainId`, `accountRowId`, purge fan-out, node cache, drift check) — recon §3.3/3.4: conflating the two ripples far outside scope.
-- `AccountService` resolves `l1ChainId` via a narrow injected lookup (`(chainIdComposite) => l1ChainId`, backed by NetworkService rows) at `deriveAccountSecret`/`getAccountContract` time — callers cannot feed a mismatched pair.
-- Local networks: `l1ChainId` is probed from the node at enrollment (anvil: 31337) instead of the composite-0 convention; the composite stays 0 for local scoping/drift-skip semantics. Rollup upgrades (version bumps) no longer re-derive accounts; testnet↔mainnet↔local stay separated by L1 id.
-- `chain-ids.ts`: promote the testnet L1/rollup pair to named exports; faucet's independent pin untouched (no wallet derivation there).
+- **`l1ChainId` lives in two places, written once at creation-time each**:
+  - `Network` row gains persisted `l1ChainId`. Seeded networks (incl. Local) get it **hardcoded in `DEFAULT_SEEDS`** (mainnet 1, testnet 11155111, local 31337 — pairs already documented in chain-ids.ts) — NEVER probed at seed time; seeding is offline-safe and load-bearing (audit M2, C6). Custom networks: `_getChainId` already calls `getNodeInfo()` on every path (network/service.ts:840-851), so `info.l1ChainId` is captured for free and persisted alongside the composite.
+  - **`Account` row gains persisted `l1ChainId`**, copied from the Network row at account creation (audit H1-alternative, adopted): the row becomes self-contained for re-derivation — `deriveAccountSeed(master, row.l1ChainId, row.type, row.index)` — which (a) lets the pre-session-open integrity coordinator re-derive without any NetworkService/session dependency, (b) deletes the injected-lookup abstraction from both call sites, and (c) fails closed under tampering exactly like a tampered `index` (a wrong `l1ChainId` re-derives a wrong address → mismatch → block).
+- The XOR composite **stays** as the storage-scoping key everywhere (`Account.chainId`, `accountRowId`, purge fan-out, node cache, drift check) — recon §3.4.
+- **Fail-closed on absence**: an Account row missing `l1ChainId`, or a non-canonical value (negative, non-integer, > 2^32-1), is an integrity error — never a silent 0 default (a 0 default would collapse the chain separation v2 exists to create).
+- Deliberate, owner-ratified property (Ask A3): two rollups on the same L1 (within one extension major, sharing the frozen artifact) derive the SAME keys/addresses — the EVM mental model; `rollupVersion` is excluded because it bumps on state-preserving upgrades (would silently re-derive accounts).
+- `chain-ids.ts`: promote the testnet L1/rollup pair to named exports; faucet's independent pin untouched.
 
-### C. Profile storage: store-both (sealed entropy + sealed master)
+### C. Profile storage: store-both, runtime-bound (audit H2/H3/High-1 adopted)
 
-- `Profile` (password variant) gains `entropy?: Base64Ciphertext` sealed under the same password box as `secret` (the derived master). Rationale (recon §3.7): unlock already pays one PBKDF2-600k; the silent bearer-restore path cannot re-run a mnemonic KDF; `exportMnemonic` reads entropy directly.
-- `createProfile`: generate 32B entropy (CSPRNG — plain random bytes, NOT `Fr.random()`; entropy is pre-PBKDF2 and needs no field bound) → derive master → seal both.
-- `importMnemonic`: service-boundary validation **before any persistence** — exactly 24 words, all on the wordlist, checksum valid → entropy → derive master → seal both.
-- `exportMnemonic`: words from stored entropy. Profiles without entropy (passkey; hypothetical legacy) → clear "not available" error; pre-production there are no legacy rows in the wild.
-- `exportPlain` continues returning the **derived master** (backup `master-key` semantics unchanged — recon §3.6); backup format gains an `entropy` slice/field so restored profiles keep phrase re-display; **`CURRENT_COMPAT_EPOCH` 3→4** (old blobs must reject: their account rows would fail integrity re-derivation under KDF v2).
-- Paired invariant test: for any stored profile, `deriveMasterFromMnemonic(getMnemonic(unsealed entropy)) == unsealed master`.
+- `Profile` (password variant): sealed `entropy` becomes **required** alongside the sealed master (`secret`). Both AES-GCM ciphertexts gain **AAD binding**: `EncryptionKey.encrypt/decrypt` grow an AAD parameter; profile fields bind `{purpose: "nulo:profile-master:v2" | "nulo:profile-entropy:v1", profileId}` — a swapped/transplanted ciphertext fails authentication instead of decrypting into the wrong slot.
+- **Runtime pairing verification** (not just a unit test): `deriveMasterFromMnemonic(getMnemonic(entropy)) == master` is checked (a) at unlock (PBKDF2/2048 ≈ ms-cheap), (b) at `exportMnemonic` before words are revealed, and (c) at **backup restore** whenever both fields are present — mismatch rejects the restore (audit H3: the backup checksum is integrity-not-auth; without this a doctored backup yields display-words that derive a different master than the one in use).
+- **`changeProfilePassword` reseals BOTH fields atomically** in its existing pre-persist-verify operation (service.ts:698-718) — otherwise entropy stays decryptable under the retired password (audit H2).
+- `createProfile`: 32B CSPRNG entropy (plain random bytes, not `Fr.random()`) → derive master → seal both. `importMnemonic`: boundary validation **before any persistence** — canonicalize, exactly 24 words, wordlist membership, checksum → derive → seal both. `exportMnemonic`: words from stored entropy (passkey profiles: existing "not supported" path).
+- `exportPlain` keeps returning the **derived master** (backup `master-key` semantics unchanged); backup gains the entropy carrier; **`CURRENT_COMPAT_EPOCH` 3→4** (pre-v2 blobs reject: their account rows would fail v2 re-derivation). Epoch literals hardcoded in e2e fixtures (`import-drivers.ts` `buildSyntheticBackup` "compat-epoch": 3; passkey-backup.test.ts:135) are updated in the same phase (audit M3).
 
 ### D. Product cuts (wallet level)
 
-- Delete `export/key.vue` wholesale + its nav row (`export/index.vue:47`) + `security/index.vue:203` copy; `exportPlain` **stays** as an internal service method (Full Backup dependency — recon §3.1). `exportEncrypted` service method + UI cut (pending Ask A1).
-- Delete `importPlain` end-to-end (service+spec+client+UI+tests — recon §3.2). Delete `importEncrypted` + `public_key` import surface (pending Ask A1).
-- `useProfileImportFlow` / `ImportMethodPicker` / `ImportSecretForm` / both `import.vue` shells trimmed to seed + full-backup + passkey.
-- Copy: "Seed Phrase" → "Recovery Phrase" across the SFCs recon mapped (no i18n layer; inline edits).
+- Delete `export/key.vue` wholesale + nav row + `security/index.vue:203` copy; `exportPlain` **stays** internal (Full Backup dependency). `exportEncrypted` method + UI cut per Ask A1.
+- Delete `importPlain` end-to-end; delete `importEncrypted` + `public_key` import surface per Ask A1.
+- `useProfileImportFlow` / `ImportMethodPicker` / `ImportSecretForm` / both `import.vue` shells trimmed to seed + full-backup + passkey. Copy: "Seed Phrase" → "Recovery Phrase" (inline SFC edits; no i18n layer). Import-screen copy discourages reusing phrases from other wallets (§A trust-model note).
 
 ### E. Export/Import Account (account level)
 
 - **Export JSON v1** (plaintext variant):
   ```json
-  { "format": "nulo-account-export", "version": 1, "regime": "<regime id>",
+  { "format": "nulo-account-export", "version": 1,
+    "artifactSha256": "…", "classId": "0x…", "descriptorDigest": "…", "kdfDigest": "…",
     "l1ChainId": 31337, "address": "0x…", "signingKey": "0x…64hex",
-    "secretKey": "0x…64hex", "checksum": "<sha256 of canonical payload>" }
+    "checksum": "<sha256 over the pinned canonical serialization>" }
   ```
-  Field elements as `0x`-hex **inside the typed envelope** (Aztec-native convention; the envelope prevents the bare-hex masquerade problem). `secretKey` is informational/interop (derivable from `signingKey`); import requires only `signingKey` and **verifies** `secretKey` if present. Checksum = integrity, not auth (backup-format framing).
-- **Encrypted variant**: same payload wrapped via `EncryptionKey.fromPassword` AES-GCM with a **new** guard constant (`ACCOUNT_EXPORT_GUARD` — never reuse `ENCRYPTION_GUARD`, recon reuse-map) + version byte. New branded types (`Base64AccountExportCiphertext` etc.) per secret-types convention.
-- **Import** (Nulo-format only): parse with size cap + schema validation (input is HOSTILE) → regime id must match the build's regime → recompute address from `signingKey` via `NuloAccount.fromSigningKey` + frozen descriptor → must equal the file's `address` → store.
-- **`NuloAccount.fromSigningKey(signingKey, logger)`** — new factory in `nulo-account.ts`: derives `secretKey` internally, then runs the existing key-agnostic tail (privacy keys, instance, CompleteAddress). The private ctor already accepts everything (recon reuse-map).
-- **Storage**: `AccountType.Imported = 1` (own index sequence — free, per-type index math). New root `nulo:core:imported-account-keys` (EntityStorage; row id mirrors `accountRowId`), value = signing key encrypted under `HKDF(master, "nulo:imported-account-key:v1")` AES-GCM — unlock-gated, travels inside Full Backup because master does. Registered in `BACKUP_SLICE_REGISTRY` as a normal root slice + footprint coverage (recon §3.8: unregistered roots are rejected/silently-lose-keys).
-- **Signing path**: `getAccountContract`'s type guard becomes a branch — `Nulo_v1` → derive (unchanged); `Imported` → load + decrypt key → `fromSigningKey` → **assert constructed address == row.address, else fail closed** via the `raiseRuntimeMismatch` pattern (recon §3.9 — the integrity coordinator deliberately skips imported rows, so this branch owns their tamper detection). `ensureDefaultAccount` excludes `Imported` from the candidate pool (recon §3.10).
-- **UI**: Export = 4th icon on Manage Accounts rows → popup (password confirm → variant pick → reveal/`downloadFile`); Import = sibling entry next to "Add account" → popup (paste/file + password if encrypted). Imported accounts get a persistent badge + copy: "Not covered by your recovery phrase — keep its export file safe."
+  Validity is discriminated by the **frozen digests**, not a bare regime label (the label is being redefined in place — audit M6). `secretKey` is **dropped** (redundant — derivable; and a privacy-root/ownership-key confusion magnet — audit L2 + codex Low). Field elements as `0x`-hex inside the typed envelope. Checksum canonicalization (field order, serialization) is pinned in a spec comment + KAT. Import **rejects** a non-canonical `signingKey` (≥ Fq modulus) — never reduces (audit L3).
+- **Encrypted variant**: the same payload wrapped via `EncryptionKey` AES-GCM with AAD `{purpose:"nulo:account-export:v1"}` and a version byte. **No inner guard constant** — AES-GCM authentication suffices; wrong password and corrupted file share one honest error (codex Low, adopted).
+- **Service-side authorization (codex High-3, adopted)**: the export RPC itself authenticates in the background — password profiles: the RPC takes the password and verifies by unsealing (the `exportMnemonic` pattern); passkey profiles: the RPC requires WebAuthn ceremony data (the `exportPlain(id, password, credentialData)` Full-Backup pattern). UI confirmation is presentation, not the gate.
+- **`NuloAccount.fromSigningKey(signingKey, logger)`** factory; the ctor (currently public — recon correction) is made **private**, with `new()` and `fromSigningKey()` sharing the key-agnostic tail.
+- **Storage & lifecycle (codex High-4, adopted)**: `AccountType.Imported = 1`. New root `nulo:core:imported-account-keys`, row id mirroring `accountRowId`; value = signing key encrypted AES-GCM under `HKDF(master, info = "nulo:imported-account-key:v1" || profileId || address)` — **per-row info** so a ciphertext transplanted between rows fails decryption, not just the later address assert (audit L4, mirroring pxe-store-key's salt-with-id shape). Lifecycle rules:
+  - **Write order + compensation**: key row first, Account row second; on failure delete the key row. Deletion: Account row first, key row second; a sweep on service init removes orphaned key rows.
+  - **Duplicate-address import is rejected** (row id `(profileId, chainId, address)` already exists → error; never overwrite a derived row).
+  - **Purge fan-out**: the imported-keys repository registers with the existing chain-purge subscribers AND the profile-deletion purge.
+  - **Index fix**: `createAccountInternal`'s next-index guard moves to the type-filtered list (today the `length > 0` check is cross-type and `array_max([])` returns 0, so the first Imported account would take index 1 — verified; audit M3-codex/L5-fable).
+  - **`ensureDefaultAccount` excludes `Imported`** from the candidate pool.
+- **Backup slice**: registered `optional: true` (a mandatory slice would reject every backup with no imported accounts — audit M5) + footprint coverage. Restore cross-slice consistency: an epoch-4 backup carrying a type-1 Account row with **no matching key entry** has that row dropped with a surfaced warning (never restored as a zombie that fails at signing).
+- **Signing path**: `getAccountContract` branches — `Nulo_v1` → derive (unchanged); `Imported` → load + decrypt → `fromSigningKey` → assert constructed address == row.address. **Every** failure (missing key row, malformed envelope, AAD/decrypt failure, non-canonical scalar, address mismatch) fails closed. Blast radius per Ask A4 (recommended: **quarantine the single imported account** — disabled + surfaced error; the profile-wide `raiseRuntimeMismatch` block stays reserved for derived rows, whose corruption implicates the master path).
+- **Import chain binding**: the imported row binds to the **currently-active network** (composite chainId + its l1ChainId); if the file's `l1ChainId` differs from the active network's, the UI warns and requires explicit confirmation (addresses are chain-independent; the file's value is provenance). Ledger L10.
+- **UI**: Export = 4th icon on Manage Accounts rows → popup (auth per above → variant pick, encrypted default → reveal/`downloadFile`); Import = sibling entry next to "Add account" → popup (paste/file + password when encrypted). Imported accounts get a persistent badge + copy: "Not covered by your recovery phrase — keep its export file safe."
 
 ### F. Freeze/vector reconciliation
 
-- **Regime record**: in-place redefinition of the launch baseline (pending Ask A2): `kdf: "nulo-account-kdf-v2"`, new **`kdfDigest`** field = sha256 of a canonical formula-spec string (committed alongside), threaded into the `ack` string; `address-freeze.test.ts` literals updated in the same reviewed commit. This closes recon §4's "no mechanical tripwire for KDF changes" gap.
-- **Vectors**: regenerate seed→signingKey reference vectors via a re-parameterized copy of the regime-b generator (published-tarball posture, Nulo separator injected — provenance documented in the reference dir). **New** KAT set: account-seed formula vectors `(master, l1ChainId, type, index) → seed` + one full-chain vector (words → address), generated by an independent script under `implementations-plan/key-model-v2/reference/`, never from the wallet's own helpers. BIP-39 trezor vectors now assert the seed64 column (mnemonic.test.ts already carries it unasserted).
-- **Canary** (`frozen-account-canary.test.ts`): stage-1 recompute updated to the v2 formula (l1ChainId=31337 local), and its master capture **reworked** — `revealSecretKey(plain)` dies with the UI; capture master + entropy from the Full Backup JSON instead.
+- **Regime record**: in-place redefinition of the launch baseline (Ask A2): `kdf: "nulo-account-kdf-v2"`, new **`kdfDigest`** = sha256 of a canonical formula-spec string (committed alongside), threaded into the `ack`; `address-freeze.test.ts` literals AND the module's own "editing is forbidden" rules text updated in the same reviewed commit (audit L7) — the text gains the one-time pre-launch-redefinition carve-out with this plan referenced.
+- **Vectors**: regenerate seed→signingKey reference vectors via a re-parameterized copy of the regime-b generator (published-tarball posture, Nulo separator injected, provenance documented). **New** KATs: `deriveAccountSeed` vectors + one full-chain vector (words → entropy → master → seed → address), generated by an independent script under `implementations-plan/key-model-v2/reference/`.
+- **Formula-coupled test surfaces — the complete list (recon corrected by audits H4/M3)**:
+  - `tests/e2e/network/frozen-account-canary.test.ts` — recompute line → v2 (l1ChainId 31337); master capture reworked to the Full-Backup JSON (its `revealSecretKey` helper dies in P4).
+  - `tests/e2e/helpers/import-drivers.ts:223-232` — `deriveNuloAccountAddress` hand-codes the v1 formula and feeds `import-paths`, `import-dead-rpc`, `backup-migration` tests → updated to v2 in the same phase as the formula change's smoke exposure; its `importPlainKey` + plain legs deleted with P4.
+  - `tests/e2e/network/profile-reimport-matrix.test.ts` — drives the deleted plain-key import UI and asserts via `deriveNuloAccountAddress` → re-based on mnemonic import + v2 helper (P4 edit, P6 run).
+  - Epoch-3 literals: `import-drivers.ts` `buildSyntheticBackup`, `passkey-backup.test.ts:135` → bumped with the epoch (P3/P4 as mapped in phases).
 
 ### G. Data & control flow (critical paths)
 
-- Create: onboarding → `createProfile` → entropy+master sealed → session opens with master Fr → accounts derive per B.
-- Re-import: words → validate → PBKDF2 → master → same addresses (KAT-pinned).
-- Import account: file → validate/decrypt → address recompute check → key sealed to imported-root → row written → signing loads via the Imported branch.
-- Restore: backup (epoch 4) → master-key + entropy slices → profile reseeded → derived accounts re-derive; imported accounts' key root restores as a slice.
+- Create: onboarding → `createProfile` → entropy+master sealed (AAD-bound) → session opens with master Fr → accounts derive via `deriveAccountSeed` with row-carried `l1ChainId`.
+- Re-import: words → canonicalize/validate → PBKDF2 → master → same addresses (KAT + reimport-matrix e2e).
+- Unlock: unseal both → pairing check → session.
+- Import account: file → schema/size validation → digests match build → decrypt (if encrypted) → signingKey canonical → address recompute == file address → key row → Account row (+l1ChainId, active composite) → signing via Imported branch.
+- Restore: epoch-4 backup → master-key + entropy (pairing-verified) → profile reseeded → derived accounts re-derive; imported slice (optional) restores key rows; type-1 rows without keys dropped + surfaced.
 
 ### H. File-level change map (net)
 
 | Area | Files |
 |---|---|
-| wallet-crypto | + `mnemonic-master.ts`(+test), + `nulo-separators.ts`(+non-collision test), ~ `account-derivation.ts`(+test/vectors), + account-export envelope module(+test), ~ `secret-types.ts` (new brands) |
-| wallet-core | ~ `mnemonic.test.ts` (checksum-rejection + trezor seed column), codec itself unchanged |
-| aztec-runtime | ~ `nulo-account.ts` (`fromSigningKey`), ~ `address-freeze.ts`+test (kdf label, kdfDigest, ack), derivation-vectors regenerated |
-| extension: network | ~ `network/spec.ts` (+`l1ChainId`), ~ `network/service.ts` (threading), ~ `utils/chain-ids.ts` |
-| extension: account | ~ `account/spec.ts` (`Imported=1`, import RPC), ~ `account/service.ts` (seed v2, lookup dep, import/export RPCs, branch, default-pool), + imported-keys repository, ~ client.ts |
-| extension: profile | ~ `profile/spec.ts` (+entropy), ~ `profile/service.ts` (create/importMnemonic/exportMnemonic; − importPlain; − exportEncrypted per A1), ~ client.ts |
-| extension: backup | ~ registry (epoch 4, entropy handling, imported-keys slice), ~ footprint coverage |
+| wallet-crypto | + `mnemonic-master.ts`(+trezor/"" KATs), + `nulo-separators.ts`(+dual-enum non-collision test), + `derive-account-seed.ts`(+KAT), ~ `account-derivation.ts`(v2 separator, +vectors), + account-export envelope module(+test), ~ `encryption-key.ts` (AAD param), ~ `secret-types.ts` (new brands) |
+| wallet-core | ~ `mnemonic.test.ts` (checksum-rejection test; canonicalizer + tests), codec unchanged |
+| aztec-runtime | ~ `nulo-account.ts` (`fromSigningKey`, ctor→private), ~ `address-freeze.ts`+test (kdf v2 label, kdfDigest, ack, rules text), derivation-vectors regenerated |
+| extension: integrity | ~ `account-integrity/coordinator.ts` (shared `deriveAccountSeed`, row-carried l1ChainId) + coordinator tests exercising the REAL default deriver |
+| extension: network | ~ `network/spec.ts` (+`l1ChainId`), ~ `network/service.ts` (DEFAULT_SEEDS constants, custom-network capture, threading), ~ `utils/chain-ids.ts` |
+| extension: account | ~ `account/spec.ts` (`Imported=1`, `l1ChainId` on row, import/export RPCs), ~ `account/service.ts` (seed v2 via shared fn, l1ChainId at creation, index-guard fix, import/export RPCs + service-side auth, Imported signing branch + quarantine, default-pool exclusion, orphan sweep, purge hooks), + imported-keys repository, ~ client.ts |
+| extension: profile | ~ `profile/spec.ts` (entropy required for password profiles), ~ `profile/service.ts` (create/importMnemonic/exportMnemonic, pairing checks, `changeProfilePassword` dual reseal; − importPlain; − exportEncrypted per A1), ~ client.ts |
+| extension: backup | ~ registry (epoch 4, entropy carrier + restore pairing check, imported-keys optional slice, type-1 orphan drop), ~ footprint coverage |
 | extension: UI | − `export/key.vue`; ~ export/index, security/index, ImportMethodPicker, ImportSecretForm, useProfileImportFlow, both import.vue; + AccountExportPopup, + AccountImportPopup, ~ accounts/index.vue, ~ NewAccountPopup footer copy |
-| tests/e2e | ~ canary (formula + capture), − plain/encrypted import-export legs, + account export/import smoke, ~ helpers (`revealSecretKey` retired, `importPlainKey` deleted) |
-| docs | CLAUDE.md (§ freeze note pointer), ARCHITECTURE.md (KDF v2, profile row), UPDATE.md if touched, `implementations-plan/index.md` |
+| tests/e2e | ~ canary (formula + capture), ~ `import-drivers.ts` (v2 helper, plain legs deleted, epoch literal), ~ `profile-reimport-matrix.test.ts` (mnemonic-based), ~ `passkey-backup.test.ts` (epoch literal), − plain/encrypted import-export legs, + account export/import smoke, + P6 imported-account signing leg |
+| docs | ARCHITECTURE.md (KDF v2, profile row, imported accounts), CLAUDE.md pointer updates, `implementations-plan/index.md` |
 
 ### I. Trade-offs & alternatives not taken
 
-1. **PBKDF2 vs entropy-as-master** — see Competing Outline B below; chosen for standard semantics + free future passphrase + dissolving the ≥r import bug. Cost: profile schema fork (entropy field), one-way words.
-2. **Store-both vs derive-on-unlock** — store-both chosen (bearer-restore path structurally can't re-KDF; unlock latency already budgeted once).
-3. **l1ChainId persisted vs reverse-lookup vs re-probe** — persisted field chosen (general; the lookup table breaks custom networks; re-probe makes account creation network-dependent).
-4. **Dedicated signing-root separator vs keeping IVSK_M** — dedicated chosen: this plan already re-derives every address, and it's the only chance to get clean domain separation; cost is regenerating seed→signingKey reference vectors with a re-parameterized generator (published-tarball posture retained). Keeping IVSK_M preserved third-party provenance but froze the wart permanently.
-5. **In-place regime redefinition vs append-new-id** — in-place recommended (nothing shipped under nulo-v5; append implies a rotation that never happened). Ask A2.
-6. **Imported-key storage: own root + HKDF(master) envelope vs rows on the Account entity** — own root chosen (Account rows stay secret-free; backup slice granularity; footprint discipline).
-7. **BIP-32/SLIP-0010** — rejected (xpub semantics don't map to Aztec's address model; hardened-only ≈ our poseidon fan-out; no ecosystem standard exists to conform to; published KATs are our interop story).
+1. **PBKDF2 vs entropy-as-master** — Outline B below; both audits picked A conditional on closing the dual-secret consistency surface (§C does). Honest note per fable: H2/H3-class attacks do not exist under B (single field); A's costs are one-time inside a licensed break, B's (nonstandard semantics, no passphrase ever, ~82% foreign-phrase rejection) compound forever.
+2. **Store-both vs derive-on-unlock** — store-both (bearer restore can't re-KDF; unlock latency budgeted once), now with runtime binding.
+3. **l1ChainId on the Account row vs injected lookup vs reverse table vs re-probe** — row-carried adopted (self-contained re-derivation, works pre-session-open, tamper fails closed); seeds hardcoded, customs captured from the existing probe.
+4. **Dedicated signing-root separator vs keeping IVSK_M** — dedicated; reference vectors regenerated with documented provenance.
+5. **In-place regime redefinition vs append** — in-place recommended (Ask A2), now including the module's rules-text carve-out.
+6. **Imported-key store: own root + per-row-bound envelope vs rows on Account entity** — own root; AAD/per-row HKDF info added.
+7. **BIP-32/SLIP-0010** — rejected (ledger L9).
+8. **Imported-tamper blast radius: quarantine vs profile-wide block** — owner call (Ask A4), quarantine recommended.
 
 ---
 
-## Competing Outline B — "minimal-crypto" (for the audits to weigh)
+## Competing Outline B — "minimal-crypto" (retained for the record)
 
-Same product model (cuts + Export/Import Account), same l1ChainId + domain tags + validation + regime/kdfDigest work, but **no PBKDF2**: entropy stays the master verbatim (words ⇄ master bijection preserved).
-
-- Pros: no profile schema change (no entropy field), `exportMnemonic` keeps working for any password profile, smaller P3, one fewer KDF in the spec.
-- Cons: mnemonic semantics stay nonstandard ("looks like BIP-39, isn't"); no passphrase option ever without another address-breaking change; the ≥-modulus import rejection (~81% of foreign 24-word phrases; and a validity constraint even on our own space) must be re-added and lived with; master input entropy stays ~253.5 bits (vs 256).
-- Shared costs either way: compat-epoch bump (addresses change from the seed-formula change alone), vectors/canary/regime work identical.
-
-Draft's position: Outline A (PBKDF2). The audits are asked to argue this fork explicitly.
+Same product model, same l1ChainId + tags + validation + regime work, **no PBKDF2** (entropy stays the master verbatim). Pros: single sealed secret — the H2/H3 consistency surface never exists; words re-display for any password profile; smaller P3; no trezor-KAT sourcing. Cons: nonstandard semantics forever; no passphrase without a second address-breaking event; the ≥-modulus rejection (~82% of foreign 24-word phrases) returns; `createProfile` must keep field-bounded generation. Security equal (~253.5-bit ceiling either way). **Both auditors picked A conditional on §C's runtime binding; the draft concurs.**
 
 ---
 
 ## Phases
 
 ### Phase 1 — KDF v2 primitives (packages)
-`mnemonic-master.ts` (PBKDF2-SHA512 + trezor-vector tests), `nulo-separators.ts` (+ upstream non-collision test), `account-derivation.ts` v2 separator + regenerated reference vectors (re-parameterized generator, provenance documented), wallet-core checksum-rejection tests (verify + enforce `getEntropy` checksum behavior — Inference I1), regime record + kdfDigest + address-freeze test literals.
-**Validation gate** — commands: `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0, new KATs green with pinned values committed. Layers: lint/typecheck/unit.
+`mnemonic-master.ts` (+ official trezor KATs at passphrase `"TREZOR"`, + Nulo `""` KATs), canonicalizer (wallet-core) + checksum-rejection test, `nulo-separators.ts` + dual-enum non-collision test, `derive-account-seed.ts` + KAT + independent generator under `reference/`, `account-derivation.ts` v2 separator + regenerated reference vectors, `encryption-key.ts` AAD param (+tests), regime record (label, kdfDigest, ack, rules text) + address-freeze test literals.
+**Gate** — `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0; all new KATs green with pinned values committed. Layers: lint/typecheck/unit.
 
-### Phase 2 — chain identity + account-seed v2 (extension services)
-Network `l1ChainId` field + threading; chain-ids exports; AccountService seed formula v2 + l1ChainId lookup dependency; new account-seed KAT + full-chain vector (+ generator under `reference/`); canary recompute line updated (runs in P6).
-**Validation gate** — commands: `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0; account/network unit+integration suites green; full-chain KAT green. Layers: lint/typecheck/unit/integration.
+### Phase 2 — chain identity + shared formula (extension services)
+Network `l1ChainId` (DEFAULT_SEEDS hardcoded constants; custom-network capture; threading; fail-closed validation), Account row `l1ChainId` (spec + creation write), AccountService switches to shared `deriveAccountSeed`, **integrity coordinator switches to the same shared function reading row-carried l1ChainId** — with a coordinator test exercising the REAL default deriver (the existing tests inject fakes and would miss a stale default — audit H1), full-chain KAT wired, canary + `import-drivers.ts` recompute lines updated to v2 (run later).
+**Gate** — `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0; coordinator real-deriver test green; account/network suites green. Layers: lint/typecheck/unit/integration.
 
 ### Phase 3 — profile entropy model
-Entropy-originated `createProfile`; `importMnemonic` boundary validation (24 words/wordlist/checksum, pre-persistence) + PBKDF2 + store-both; `exportMnemonic` from entropy; profile spec field; paired invariant test; backup entropy handling + `CURRENT_COMPAT_EPOCH` 4; restore path.
-**Validation gate** — commands: `bun run lint && bun run typecheck:all && bun run test` (includes `profile/service.integration.test.ts`). Pass: exit 0; create→export-words→re-import→same-address integration test green; epoch-3 blob rejection test green. Layers: lint/typecheck/unit/integration.
+Entropy-originated `createProfile`; `importMnemonic` boundary validation + PBKDF2 + store-both (AAD-bound); unlock + export pairing checks; `changeProfilePassword` dual reseal (atomic with its pre-persist verify) + test; tamper tests (swapped-ciphertext, stale-entropy-after-password-change); `exportMnemonic` from entropy; backup entropy carrier + **restore pairing check** + `CURRENT_COMPAT_EPOCH` 4 + epoch-3-rejection test; e2e fixture epoch literals bumped (`import-drivers.ts` buildSyntheticBackup, `passkey-backup.test.ts`).
+**Gate** — `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0; create→export-words→re-import→same-address integration green; tamper + reseal + epoch tests green. Layers: lint/typecheck/unit/integration.
 
 ### Phase 4 — product cuts + copy
-Delete `export/key.vue` + importPlain end-to-end (+ encrypted-key surface per A1); flow/composable trims; copy renames; unit/component test rewrites; e2e helper retirement + smoke-test updates.
-**Validation gate** — commands: `bun run audit:vue && bun run test:e2e`. Pass: both exit 0; smoke suite green with the reworked backup/import specs. Layers: typecheck/unit/component/build + smoke e2e.
+Delete `export/key.vue` + `importPlain` end-to-end (+ encrypted-key surface per A1); flow/composable trims; copy renames + phrase-reuse discouragement; unit/component test rewrites; e2e helper surgery (`revealSecretKey` retired, `importPlainKey` + plain legs deleted, `profile-reimport-matrix.test.ts` re-based on mnemonic import, canary capture switched to Full-Backup JSON).
+**Gate** — `bun run audit:vue && bun run test:e2e`. Pass: both exit 0; reworked smoke suite green. Layers: typecheck/unit/component/build + smoke e2e.
 
 ### Phase 5 — Export/Import Account
-`NuloAccount.fromSigningKey`; export envelope (plaintext + encrypted, new guard); `AccountType.Imported`; imported-keys root + HKDF envelope; import/export RPCs; signing branch with fail-closed address assert; default-pool exclusion; backup slice + footprint coverage; UI popups + badge + copy; component tests; new smoke e2e (export→import round-trip in fresh profile, tamper rejection).
-**Validation gate** — commands: `bun run audit:vue && bun run test:e2e`. Pass: both exit 0; round-trip + tamper smoke green. Layers: typecheck/unit/component/build + smoke e2e.
+`NuloAccount.fromSigningKey` + private ctor; export envelope (digest discriminators, no secretKey, pinned canonicalization, encrypted variant AAD, no inner guard); service-side auth (password unseal / passkey ceremony); `AccountType.Imported`; imported-keys root (per-row HKDF info) + repository + orphan sweep + purge hooks; import RPC (schema/size/digests/canonical-scalar/address-recompute, duplicate rejection, active-network binding + l1ChainId-mismatch confirm); index-guard fix; signing branch + quarantine (per A4); default-pool exclusion; backup optional slice + type-1 orphan drop + footprint coverage; UI popups + badge + copy; component tests; smoke e2e (export→import round-trip, tamper rejection, duplicate rejection).
+**Gate** — `bun run audit:vue && bun run test:e2e`. Pass: both exit 0; round-trip + tamper + duplicate smoke green. Layers: typecheck/unit/component/build + smoke e2e.
 
 ### Phase 6 — reconciliation + network e2e
-Canary rework (Full-Backup capture path, v2 recompute, prover-ON); docs (ARCHITECTURE.md KDF section, CLAUDE.md pointer updates, index.md); full network suite.
-**Validation gate** — commands: `bun run e2e:agent` then `bun run audit:vue`. Pass: network suite green including `tests/e2e/network/frozen-account-canary.test.ts` prover-ON; audit:vue exit 0. Layers: full e2e-live-network + fast layers. (Per owner memory: run the network suite solo on the host; re-run before triaging any failure.)
+Canary run (v2 recompute, Full-Backup capture, prover-ON); reimport-matrix run; **new network leg: import an exported account into a fresh profile and send a live transaction from it** (audit M8); docs; full suite.
+**Gate** — `bun run e2e:agent` then `bun run audit:vue`. Pass: network suite green incl. canary, reimport matrix, imported-account signing leg; audit:vue exit 0. Layers: full e2e-live-network + fast layers. (Owner memory: run the network suite solo on the host; re-run before triaging failures.)
 
 ---
 
 ## Security & Adversarial Considerations
 
-- **Threat model**: attacker-supplied account-export files and backup blobs (parse with size caps + schema validation, treat as HOSTILE per migration-framework convention); tampered `chrome.storage.local` rows (imported-key branch fail-closes on address mismatch; derived rows keep coordinator coverage); clipboard exfil of revealed secrets (reuse F-14 scrub composables); malicious/drifted RPC endpoint (existing composite drift check retained; its XOR-collision limitation documented — protocol-level tx binding via `chainInfoFrom` keeps exact-pair replay protection; out of scope to redesign here); a compromised popup calling service RPCs (boundary validation lives service-side, not UI-side).
-- **Entropy preservation (owner's named ask)**: 256-bit CSPRNG entropy → PBKDF2 (preserving) → reduce bias ≤ 2^-258. No user-chosen entropy anywhere; no silent keyspace narrowing. Auditors: attack this chain specifically.
-- **Cryptography**: WebCrypto (`self.crypto.subtle`) PBKDF2-HMAC-SHA512 — platform-native, no new library; `@aztec/foundation` 5.0.1 (exact-pinned) poseidon2/sha512ToGrumpkinScalar/Fr; AES-GCM via existing `EncryptionKey`. **No new dependencies** → supply-chain surface unchanged (7-day min-age + frozen lockfile regime untouched).
-- **Domain separation**: all new hash uses carry dedicated Nulo constants with documented derivation; non-collision vs upstream separators mechanically tested; new AES-GCM envelope gets its own guard constant (never reuse `ENCRYPTION_GUARD`).
-- **Input validation at trust boundaries**: mnemonic import (word count/wordlist/checksum, pre-persistence); account import (schema, size cap, regime match, address recompute, checksum, optional-secretKey consistency); backup import (existing checksum→epoch→version gate; epoch bump rejects pre-v2 blobs).
-- **Secret handling**: zeroize-in-`finally` conventions for all new intermediates (seed64, entropy buffers, decrypted signing keys); secrets never logged; plaintext export variant gated behind password confirm + explicit warnings; encrypted variant is the default-selected path.
-- **Least privilege / CI**: no workflow or token changes; no new endpoints.
+- **Threat model**: attacker-supplied account-export files and backup blobs (HOSTILE: size caps, schema validation, digest discrimination, canonical-scalar rejection, restore pairing check, type-1 orphan drop); tampered `chrome.storage.local` (AAD-bound profile ciphertexts; per-row-bound imported-key envelopes; row-carried l1ChainId fails closed; imported-branch full failure taxonomy; derived rows keep coordinator coverage); ciphertext-swap within a row (AAD purpose tags — the split-brain recovery attack from audit H3/High-1 is closed at unlock/export/restore); clipboard exfil (F-14 scrub reuse); compromised popup (ALL authorization service-side: password-unseal or passkey ceremony in the RPC itself); drifted RPC endpoint (existing composite drift check retained; XOR-collision limitation documented — protocol-level `chainInfoFrom` exact-pair binding covers replay; redesign out of scope).
+- **Entropy accounting (owner's named ask — honest form)**: ≥ ~253.5-bit effective keyspace at every step; reduce bias ≤ 2^-258 (64-byte input); no step below the field's own security level. The 2^256→~2^253.6 phrase→master compression is inherent to Fr in any design. Auditors attacked this chain twice; the wording above is the surviving claim.
+- **BIP-39 phrase-reuse trust model**: a phrase shared with another BIP-39/BIP-32 wallet lets that software derive Nulo's master (standard-model property, deliberate; UI copy discourages reuse).
+- **Cryptography**: WebCrypto PBKDF2-HMAC-SHA512 + AES-GCM(+AAD) + HKDF — platform-native; `@aztec/foundation` 5.0.1 exact-pinned poseidon2/sha512ToGrumpkinScalar/Fr. **No new dependencies**; supply-chain posture unchanged.
+- **Domain separation**: dedicated Nulo constants, documented derivation, dual-enum non-collision + mutual-distinctness tests; per-purpose AAD strings; per-row HKDF info; no guard-constant reuse.
+- **Input validation**: mnemonic (canonicalize → 24 words → wordlist → checksum, pre-persistence); account import (schema, size, digests, scalar canonicality, address recompute, duplicate rejection); backup (checksum → epoch 4 → version → pairing check → orphan drop).
+- **Secret handling**: zeroize-in-`finally` for all new intermediates (seed64, entropy, decrypted signing keys); no secrets in logs; plaintext export behind service-side auth + explicit warnings, encrypted variant default.
+- **Least privilege / CI**: no workflow, token, or endpoint changes.
 
 ## Assumptions
 
-**Facts** (verified — recon.md carries file:line for each): the full current derivation chain (§1); `exportPlain`'s Full-Backup dependency and `importPlain`'s deletability (§3.1-2); `l1ChainId` not persisted, XOR non-invertible (§3.3); coordinator's non-Nulo_v1 skip and `getAccountContract`'s type throw; `NuloAccount`'s key-agnostic ctor; PBKDF2 already in the SW via WebCrypto; existing KATs pin only seed→address (§4); no hardcoded mnemonics/addresses in tests (parent sweep); canary's formula recompute + `revealSecretKey` capture; store-both rationale (bearer restore, unlock phasing); backup epoch/registry mechanics.
+**Facts** (verified; recon.md + audit corrections): everything in recon §1/§3 EXCEPT as corrected — `NuloAccount` ctor is **public** today (made private by P5); `createAccountInternal`'s index guard is cross-type (`array_max([])`=0 → first new-type account gets index 1); the coordinator's production `DeriveAddress` default duplicates the v1 formula (coordinator.ts:52-56, runtime.ts constructs without override); formula-coupled test surfaces are FOUR (canary, `import-drivers.ts:223-232`, `profile-reimport-matrix.test.ts`, plus epoch literals in two fixtures) — not one; `getEntropy` rejects bad checksums (mnemonic.ts:2150-2157); `_getChainId` probes `getNodeInfo()` on all paths but **seeded** networks never call it (`_buildNetwork` from `DEFAULT_SEEDS`, offline-safe); trezor official vectors use passphrase `"TREZOR"` and the one seed row in mnemonic.test.ts is truncated/unasserted; foreign-phrase over-modulus probability ≈ 82.3% (1 − r/2^256).
 
-**Inferences** (unverified — auditors, attack these):
-- **I1**: `getEntropy` may not reject a bad checksum today (round-trip tests only). P1 verifies and enforces.
-- **I2**: local-network enrollment can probe `l1ChainId` (anvil 31337) — the local path may currently skip node probing entirely. P2 verifies; fallback is probe-at-first-account-creation.
-- **I3**: upstream `DomainSeparator` enum is importable for the non-collision test.
-- **I4**: `mnemonic.test.ts`'s carried trezor seed-column values are usable as-is for the PBKDF2 KAT.
-- **I5**: `gh stack` extension is installed (checked at delivery; install if missing).
+**Inferences** (remaining):
+- I3 (upstream `DomainSeparator`/`GeneratorIndex` enums importable): verified for DomainSeparator; GeneratorIndex assumed exported from `@aztec/constants` — P1 verifies.
+- I5 (`gh stack` installed): operational; checked at delivery, installed if missing.
 
-**Asks** (owner decision at approval — nothing else is silently assumed):
-- **A1**: Cut the "Encrypted Key" surface (`exportEncrypted` UI+method, `importEncrypted`/`public_key` import) together with the Secret Key page. **Recommended: yes** (third mechanism, redundant with Full Backup, semantics murkier under store-both).
-- **A2**: Regime record handling: in-place redefinition of the `nulo-v5` entry (+ test literals, one reviewed commit) vs appending a new regime id. **Recommended: in-place** (nothing shipped; append implies a rotation that never happened).
+**Asks** (owner decisions at approval — nothing else silently assumed):
+- **A1**: Cut the "Encrypted Key" surface (`exportEncrypted` UI+method, `importEncrypted`/`public_key` import) with the Secret Key page. **Recommended: yes** (both auditors concur; the raw profile-secret ciphertext's semantics turn genuinely murky once the row is dual-secret).
+- **A2**: Regime record: in-place redefinition of `nulo-v5` (+ test literals + the module's own rules-text carve-out, one reviewed commit) vs appending a new id. **Recommended: in-place.** Framing per codex: ratify that no build, backup, or exported artifact created under KDF v1 needs to keep working (pre-production; dev-only artifacts are disposable).
+- **A3**: Ratify same-L1-rollup key/address reuse as intentional (two rollups on one L1, same extension major → identical accounts; `rollupVersion` deliberately excluded from derivation). **Recommended: yes** (EVM mental model; upgrade-footgun avoidance).
+- **A4**: Imported-account tamper blast radius: **quarantine the single account (recommended)** vs the profile-wide integrity block used for derived rows.
 
-Settled by owner in-conversation (recorded, not asks): 24-word-only import; Nulo-format-only account import; encrypted + plaintext export variants; network e2e final gate + smoke on UI phases; no `/harden` scheduled; no passphrase UI this plan; Export/Import Account in scope.
+Settled by owner in-conversation (recorded): 24-word-only import; Nulo-format-only account import; encrypted + plaintext export variants; network e2e final gate + smoke on UI phases; no `/harden` scheduled; no passphrase UI this plan; Export/Import Account in scope.
 
 ## Decision ledger
 
 | # | Decision | Source | Status |
 |---|---|---|---|
-| L1 | PBKDF2 adopted (Outline A over B) | draft; owner direction "real BIP-39" | pending audit |
-| L2 | Store-both (entropy + master) | recon §3.7 | pending audit |
-| L3 | l1ChainId persisted on Network row; composite stays the scoping key | recon §3.3-3.4 | pending audit |
-| L4 | Dedicated signing-root separator (drop IVSK_M) + regenerated reference vectors | draft trade-off I.4 | pending audit |
-| L5 | kdfDigest added to regime; in-place baseline redefinition | recon §4; Ask A2 | pending owner |
-| L6 | Imported accounts: own root, HKDF(master) envelope, backup slice registered, fail-closed signing branch, default-pool exclusion | recon §3.8-3.10 | pending audit |
-| L7 | Account-export field elements as 0x-hex inside typed envelope; wallet-level secrets never bare hex | prior owner discussion | settled |
-| L8 | Owner's class-ID observation: cross-rollup address collision is implausible across protocol generations (different circuits ⇒ different class IDs), but WITHIN one extension major the frozen artifact is shared across compatible chains (sandbox+testnet) — which is exactly what l1ChainId-in-KDF separates. rollupVersion excluded (upgrade footgun). | owner + recon §6 | settled |
+| L1 | PBKDF2 adopted (A over B) | draft; both audits concur conditional on §C binding | adopted |
+| L2 | Store-both, **runtime-bound** (AAD + unlock/export/restore pairing + password-change reseal) | codex High-1, fable H2/H3/C2/C3 | adopted |
+| L3 | l1ChainId: DEFAULT_SEEDS hardcoded + custom-probe capture; **persisted on Account row**; composite stays scoping key; fail-closed on absence | fable H1-alt/M2/C6 (supersedes draft's injected lookup; codex's (profileId,composite) lookup keying moot) | adopted |
+| L4 | Dedicated signing-root separator + regenerated reference vectors; dual-enum non-collision tests | draft + fable L1 | adopted |
+| L5 | kdfDigest + in-place baseline redefinition incl. rules-text carve-out | recon §4 + fable L7; Ask A2 | pending owner |
+| L6 | Imported accounts: own root, per-row-bound envelope, optional backup slice + orphan drop, ordered writes + compensation + sweep, purge hooks, duplicate rejection, index-guard fix, default-pool exclusion, service-side auth | codex High-3/High-4, fable M5/M6/L3/L4/L5 | adopted |
+| L7 | Account-export: 0x-hex inside typed envelope; **secretKey dropped**; digest discriminators; no inner guard | owner discussion + codex Low + fable L2/M6 | adopted |
+| L8 | Owner's class-ID observation + same-L1 reuse property | owner + recon §6 → Ask A3 | pending owner |
 | L9 | BIP-32/SLIP-0010 rejected | prior codex-backed analysis | settled |
+| L10 | Import binds to active network; l1ChainId mismatch → warn + explicit confirm | fable M6 | adopted |
+| L11 | Entropy claim restated honestly (≥253.5-bit floor; no "no-narrowing"/"256-bit master" claims) | codex M1 + fable M1/C5 | adopted |
+| L12 | Imported-tamper quarantine vs profile block | fable M7 (codex High-4 preferred durable block) → Ask A4 | pending owner |
+| L13 | P6 imported-account live signing leg; P5 smoke proves import/UI only | codex gates + fable M8 | adopted |
+| L14 | BIP-39 phrase-reuse trust model documented + UI discouragement | fable M9 | adopted |
+| L15 | Passkey 256-bit-reduce skew: backlog note only (out of scope) | fable M1 side note | adopted (deferred) |
 
-(Audit outcomes appended here: adopted/rejected per finding, plus final verdicts.)
+**Audit verdicts (R1)** — codex: `reject` (blocking findings all addressed above; full transcript audit-codex.md). fable: `conditional approve` (C1–C7 all adopted; full transcript audit-fable.md). Final fresh-context codex verdict: pending (recorded below when in).
 
 ## Delivery — arcs → stacked PRs
-
-Multi-arc, `gh stack`, base `dev`:
 
 | Arc | Branch | Phases | Stacks on |
 |---|---|---|---|
@@ -215,14 +232,14 @@ Multi-arc, `gh stack`, base `dev`:
 | 2 `profile-entropy-cuts` | `key-model-v2-profile` | P3 + P4 | arc 1 |
 | 3 `account-export-import` | `key-model-v2-accounts` | P5 + P6 | arc 2 |
 
-`gh stack init --adopt` at start; `gh stack add` at each arc boundary; `gh stack submit --draft --auto` early so CI runs per arc; PR titles as Conventional Commits ≤93 chars; ready after the post-impl loop converges. `gh stack merge` is the owner's call, never autonomous.
+`gh stack init --adopt` at start; `gh stack add` at boundaries; `gh stack submit --draft --auto` early; Conventional-Commit titles ≤93 chars; ready after the post-impl loop converges; `gh stack merge` is the owner's call, never autonomous.
 
 ## Post-implementation (self-contained — the implementing session executes THIS, in order)
 
-1. Run `/code-review max --fix` on the full implementation diff. Skim the applied fixes for unintended changes, then commit them **separately** from implementation commits (identifiable as code-review-applied).
-2. Codex post-impl audit (`/codex` at xhigh): send (a) the net diff from the plan baseline (before code-review cleanups), (b) a separate summary of the code-review-applied commits, (c) this plan.md + decision ledger, (d) the adversarial/security ask — including the entropy-preservation attack ask — and (e) this rule verbatim: *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*
-3. Iterative fix loop: verify codex's factual claims against the repo before acting; apply accepted fixes; commit; log consult + verdict in `implementations-plan/key-model-v2/lessons/`; RESUME the same codex session with the fix diff for re-review. Repeat until a round yields no new material findings (rejected nitpicks ≠ churn). Still material after 3 rounds → stop and surface to the owner (scope smell).
-4. Delivery per the Delivery section: `gh stack submit`/`sync`, `gh pr edit` proper bodies (Conventional-Commit titles, ≤93 chars), mark arc PRs ready. Merging is the owner's call. Update `implementations-plan/index.md`.
+1. Run `/code-review max --fix` on the full implementation diff. Skim the applied fixes for unintended changes, then commit them **separately** from implementation commits.
+2. Codex post-impl audit (`/codex` at xhigh): send (a) the net diff from the plan baseline (pre-code-review), (b) a separate summary of the code-review-applied commits, (c) this plan.md + decision ledger, (d) the adversarial/security ask including the entropy-accounting attack, and (e) verbatim: *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*
+3. Iterative fix loop: verify codex's factual claims against the repo first; apply accepted fixes; commit; log consult + verdict in `implementations-plan/key-model-v2/lessons/`; RESUME the same codex session with the fix diff. Repeat until a round yields no new material findings. Still material after 3 rounds → stop and surface (scope smell).
+4. Delivery per the Delivery section; update `implementations-plan/index.md`.
 
 ## Seeds (DRAFT — finalized after approval; run inside this worktree)
 
