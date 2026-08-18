@@ -84,3 +84,22 @@ A2 — Agree, conditional on ratifying that no prior build, backup, or artifact 
 A3 — Agree, provided cross-rollup address linkage is explicitly accepted.
 
 A4 — Agree; single-account quarantine is appropriate, with durable status and repair/deletion UX.
+---
+
+# Codex re-verdict on rev 3 (resumed session)
+
+conditional approve (with conditions: authenticate the entropy carrier before silent-session activation; independently source/verify l1ChainId at account creation; specify the imported-key backup slice owner and ordering)
+
+### High
+
+- `§C/L16` — A harm path survives. Tampered entropy can remain undetected while a no-TTL bearer repeatedly restores the wallet, allowing continued deposits and operation after the locally redisplayable recovery phrase has become unusable. Failure may surface only when the bearer is lost—precisely when recovery is needed. No false words or exfiltration occurs, but recovery availability silently degrades. A master-keyed MAC over the entropy ciphertext would detect mutation during silent restore without decrypting entropy or versioning the bearer.
+
+- `§B/L18` — `DEFAULT_SEEDS` only initializes the mutable Network row; it is not the trust root when AccountService later copies `row.l1ChainId`. Direct pre-creation tampering therefore still creates a coordinator-valid but clean-reimport-inconsistent account, including for seeded networks. Compare seeded rows against immutable constants; live-probe custom networks at account creation, or explicitly obtain owner acceptance of this recovery-poisoning risk.
+
+### Medium
+
+- `§E/L17; backup-migration-registry.ts; full.vue; useFullBackupImport.ts` — The new root still lacks a concrete slice owner. The registry maps one service to one descriptor, while AccountService already owns the Account root and export/import use fixed client lists. Specify a new service/client or multi-root descriptor, with key restoration completed before orphan reconciliation and session activation.
+
+### Low
+
+- `§A/Security` still says `GeneratorIndex`/“dual-enum,” contradicting revised I3. P4 still schedules encrypted-key deletion already assigned to P3.
