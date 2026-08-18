@@ -44,3 +44,16 @@ Enumerated every numeric literal in `git diff origin/dev...HEAD --
 
 **No existing timeout increased; `300_000` remains the only import
 success-wait ceiling.**
+
+## Post-review refresh (codex post-impl, session `01a01691`)
+
+The code-review F1 fix (landed AFTER the enumeration above) added ONE new
+numeric: `FINAL_READ_BUDGET_MS = 10_000` — a bound on a NEW post-settle
+diagnostic read, not a change to any existing wait. Codex's independent
+re-enumeration of the final diff confirms: same-literal 300_000 (wrapped);
++10_000 new-read bound; −4×10_000 crash-truth dedup (values retained in the
+shared helper); probe-only settle/poll numerics (opt-in); fixture data.
+Verdict unchanged: **no existing timeout increased; `300_000` remains the
+sole success-hash wait ceiling; F1's `10_000` is exclusively a post-settle
+diagnostic-read ceiling.** Consequence for reachability: the labeled
+diagnostic needs ≥ ~310s of caller budget (300s + the bounded read).

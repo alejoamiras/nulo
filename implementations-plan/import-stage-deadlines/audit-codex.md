@@ -254,3 +254,89 @@ Session: 01a01661-de94-7da3-acd4-e6a0e235fa71. Verdict: **conditional approve** 
 Recommended close wording:
 
 > Measured (30-import stratified table, both proving modes); the settled classification rule yielded no stage warranting an e2e early-fail window. `chain-sync`—the only stage with an absolute product-owned budget relevant to this classification—measured 13.7–14.2s in the 10 applicable integrity imports against its 45s budget (~3.2× headroom); its designed timeout/probe/restore rejection paths degrade to skip records and continue. The hardcoded 300s remains the sole overall e2e success-wait criterion. Diagnostics improved through a pre-submit trajectory recorder, labeled trajectory diagnostics on 300s lapse, and env-gated measurement records. No per-stage deadline or early-exit mechanism shipped.
+
+# POST-IMPL audit — round 1 (new session)
+
+Session: 01a01691-307e-7253-98d1-fa568fe82b8c. Verdict: **conditional approve** — 3 conditions, ALL APPLIED: (1) stale-baseline label fence in the formatter + pin (moderate — the `?? final.stage` fallback could label a prior attempt's terminal as this attempt's failure); (2) console-truth docs narrowed (sniffer = popup/onboarding/offscreen entry pages only; 'BOTH' = the two fixture arrays; ledger CLOSED entry moved out of ### OPEN; skill's stale OPEN mention pointed forward); (3) gate artifacts refreshed (certification.md post-review timeout table incl. F1's new 10_000; plan wording; unit-coverage claim corrected). Fault-identity + recorder behavior + the timeout gate verified clean by codex independently.
+## Verdict: conditional approve
+
+No security blocker and no existing timeout increased. Approval conditions are small and targeted:
+
+1. Fix the stale-baseline diagnostic misclassification and add a formatter pin.
+2. Reconcile the ledger/skill/fixture wording with the actual console channels and entry points.
+3. Refresh the mechanical-timeout record to include F1’s new `10_000` bound and correct the unsupported unit-test claim.
+
+## Findings
+
+### 1. Moderate — stale baseline can become a false current-attempt failure
+
+[import-stage-timing.ts](apps/extension/tests/e2e/helpers/import-stage-timing.ts:131) calculates:
+
+```ts
+const lastStage = final.events.filter((e) => !e.baseline).at(-1)?.stage ?? final.stage
+```
+
+If the baseline is stale `"failed"` and the new attempt produces no transition, `final.stage` is still `"failed"`. The headline becomes `IMPORT FAILED — product terminal "failed" reached`, even though only the baseline carried that value.
+
+That contradicts `plan.md`’s statement that labels consider only post-baseline entries. Current callers appear to use fresh mounts, which limits present exposure, but the explicit attempt-fence contract is not actually implemented.
+
+Smallest fix: use `final.stage` only when there is no baseline-seeded trace at all; otherwise keep the generic “success hash never observed” label when there are no post-baseline events. Add the corresponding formatter test.
+
+### 2. Low — shipped console “truth” contains direct contradictions
+
+Several claims should be narrowed:
+
+- The skill first says the issue is “Ledgered as an OPEN infra item,” then immediately says it is permanently closed.
+- The ledger places the `CLOSED` console entry under `### OPEN`.
+- “The first module script in every extension page” is false: `src/setup/index.html` contains only `index.ts`, with no console sniffer. The probe pins popup ordering only.
+- “A caught error that merely logs is invisible on BOTH channels” conflicts with the probe and surrounding text showing that `readSwLogTrail` receives app logs. Presumably “both” means the two fixture arrays, `consoleErrors` and `pageErrors`; it should say that explicitly.
+
+These are documentation defects rather than fixture behavior defects, but they matter because the skill is operational guidance.
+
+### 3. Low — gate artifacts overclaim their final state
+
+The final diff contradicts two recorded statements:
+
+- `certification.md` says `import-drivers.ts` had net-zero timeout additions/removals. F1 added `FINAL_READ_BUDGET_MS = 10_000`.
+- `plan.md` says every numeric timeout was untouched.
+- The plan also says unit tests cover non-timeout identity preservation. The 16 helper tests do not test `withTimeoutMessage`; the implementation is correct, but the coverage claim is not.
+
+Refresh the record or add the promised identity pin.
+
+## Fault identity and recorder behavior
+
+`withTimeoutMessage` correctly preserves non-timeout identity: it executes `throw err`, rethrowing the exact object. Only Puppeteer `TimeoutError` is replaced, and the original is retained as `cause`. `importFullBackup` correctly recognizes both direct and cause-wrapped timeouts.
+
+F1 also works as intended:
+
+- The final read is capped at 10 seconds.
+- The promise itself is memoized, including rejection, so `finally` cannot launch a second 10-second read.
+- Recording/read failures degrade to a tombstone or log.
+- `waitOutcome` now distinguishes successful, timed-out, and errored trace-loss.
+
+Residual: the awaited final read can still delay propagation by up to 10 seconds. Therefore the ledger’s reachability rule is more precisely “at least 310 seconds of remaining caller budget,” not merely “caller timeout exceeds 300 seconds.” This is not currently blocking with the intended 900-second network callers, but the “test unaffected” wording is absolute when the code only bounds the effect.
+
+The recorder does technically add work, but not materially: one pre-submit evaluation, a filtered MutationObserver callback per rendered transition, and one final read. There is no page-evaluation polling loop, and persistence happens after the final page timestamp. The measured finished-to-success seam still includes the existing 200ms hash-poll observation latency and final CDP scheduling; the envelope document describes it as an observation and derives no deadline from it.
+
+## Mechanical timeout gate
+
+Executable timeout changes under the plan’s `apps/extension/tests/**` scope:
+
+| Numeric wait | Diff | Result |
+|---|---:|---|
+| Full-backup success hash `300_000` | `-1 / +1` | Same literal, now wrapped by `withTimeoutMessage` |
+| Final diagnostic read `10_000` | `+1` | New bound on a new read; no prior timeout increased |
+| Crash submit selectors/file chooser `10_000` | `-4` | Duplicate code removed; delegated shared helper retains the same four bounds |
+| Probe settle `1_500` | `+2` | New, opt-in probe only |
+| Probe ring poll `20 × 500` | `+1` loop | New, opt-in probe; up to 10 seconds |
+| Probe scheduling `setTimeout(..., 0)` | `+2` | New, opt-in probe only |
+
+The two added `300_000` values in `import-stage-timing.test.ts`, along with its `10_000`, `1_000`, and other millisecond values, are trajectory fixture data, not waits. The formatter’s `1000` is only an ms/s display threshold.
+
+Therefore:
+
+- No existing timeout increased.
+- Within the scoped `importFullBackup` success path, `300_000` remains the sole success-hash wait ceiling.
+- F1’s `10_000` is exclusively a post-settle diagnostic-read ceiling.
+
+`git diff --check` passed. I could not independently rerun Vitest because the read-only sandbox prevented creation of Vitest’s cache directory; the existing logs record the 16 helper pins, 111-test smoke run, and fixed 3/3 console probe as green.

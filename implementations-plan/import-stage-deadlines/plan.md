@@ -173,8 +173,10 @@ knob; **300_000 hardcoded** as the only import success-wait ceiling.
    test at `tests/e2e/import-stage-timing.test.ts` — picked up by the SMOKE
    config's `tests/e2e/*.test.ts` glob, no browser launch, no config change.
    Covers: disabled ⇒ no writes; coalesced stages reported unobserved;
-   censoring math; non-timeout errors keep their identity (formatter is
-   TIMEOUT-only via `withTimeoutMessage` semantics).
+   censoring math; stale-baseline label fence. (Non-timeout error-identity
+   preservation is `withTimeoutMessage`'s own contract in
+   `fixtures/extension.ts` — verified by the post-impl audit reading the
+   implementation, NOT pinned by these pure tests.)
 
 ### B1 measurement campaign (Phases 2–3)
 
@@ -258,8 +260,10 @@ export async function importFullBackup(page, filePath, password, shell,
 - Plan artifacts: `plan.md`, `recon.md`, `audit-codex.md`, `audit-fable.md`,
   `envelopes.md`, `certification.md`, `lessons/`.
 - NOT touched: ALL product code; the crash file's raw stage reads;
-  RestoreGate; every `consoleErrors` assertion; every numeric timeout
-  (mechanical gate proves it).
+  RestoreGate; every `consoleErrors` assertion; every EXISTING numeric
+  timeout (mechanical gate proves none increased; the code-review F1 fix
+  later added ONE new 10s bound on a NEW post-settle diagnostic read —
+  recorded in `certification.md`'s post-review refresh).
 
 ### Non-obvious mechanics
 
