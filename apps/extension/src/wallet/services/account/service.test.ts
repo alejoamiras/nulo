@@ -14,6 +14,7 @@ import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { svc } from "../composition-harness"
 import { AccountService } from "./service"
+import { accountRowId } from "./spec"
 
 const mkAccount = (address: string, over: Record<string, unknown> = {}) =>
 	({ profileId: "p1", chainId: 1, address, index: 0, type: 0, name: "A", visible: true, ...over }) as never
@@ -106,6 +107,34 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(second?.restoreError).toBeUndefined()
 		expect(await accountService.getAccount("p1", 1, "0xshared")).toMatchObject({ profileId: "p1", name: "P1" })
 		expect(await accountService.getAccount("p2", 1, "0xshared")).toMatchObject({ profileId: "p2", name: "P2" })
+	})
+
+	test("(F-B23) purgeForProfile removes a MALFORMED row the profile owns; spares another profile's malformed row", async () => {
+		await api.storage.local.set({
+			"nulo:core:accounts@junk-p1": JSON.stringify({ profileId: "p1", junk: 1 }),
+			"nulo:core:accounts@junk-p2": JSON.stringify({ profileId: "p2", junk: 1 }),
+		})
+
+		await accountService.purgeForProfile("p1")
+
+		const raw = await api.storage.local.get(null)
+		expect(raw["nulo:core:accounts@junk-p1"]).toBeUndefined()
+		expect(raw["nulo:core:accounts@junk-p2"]).toBeDefined()
+	})
+
+	test("(F-B23) a concurrent restore of ANOTHER profile survives the purge's raw pass (restoreLock + compare-and-delete)", async () => {
+		// The malformed bytes claim p1 but sit at the canonical key p2's restore
+		// legitimately writes (the aliased-key hazard). Whichever order the
+		// restoreLock grants: purge-first deletes the stale bytes, then restore
+		// rewrites; restore-first makes the predicate read profileId p2 → no
+		// match. Either way p2's fresh valid row must survive.
+		await api.storage.local.set({
+			[`nulo:core:accounts@${accountRowId("p2", 1, "0xalias")}`]: JSON.stringify({ profileId: "p1", junk: 1 }),
+		})
+
+		await Promise.all([accountService.purgeForProfile("p1"), accountService.restore([mkAccount("0xalias", { profileId: "p2" })])])
+
+		expect(await accountService.getAccount("p2", 1, "0xalias")).toMatchObject({ profileId: "p2", address: "0xalias" })
 	})
 
 	test("(H3) purgeForProfile removes rows but emits NO onAccountDeleted (coordinator awaits dependents directly)", async () => {

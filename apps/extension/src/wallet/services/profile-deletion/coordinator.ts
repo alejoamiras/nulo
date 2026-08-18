@@ -79,16 +79,21 @@ export class ProfileDeletionCoordinator implements IService, ProfileDeletionDele
 		this.profiles.setDeletionDelegate(this)
 	}
 
-	/** Lock-free profileId reads only (safe under ProfileService's facade lock). */
+	/** Lock-free profileId reads only (safe under ProfileService's facade lock).
+	 *  F-B23: the typed reads are codec-filtered, so a MALFORMED parent row's
+	 *  address/token id would be omitted and its dependent tx/authwit/balance
+	 *  rows would survive the cascade — the raw harvests close that gap. */
 	public async snapshot(profileId: string): Promise<ProfileDeletionRows> {
-		const [accounts, tokens, networks] = await Promise.all([
+		const [accounts, tokens, networks, rawAddresses, rawTokenIds] = await Promise.all([
 			this.accounts.getAccountsRaw(profileId),
 			this.tokens.getTokensRaw(profileId),
 			this.networks.getNetworksRaw(profileId),
+			this.accounts.rawAddressesForProfile(profileId),
+			this.tokens.rawTokenIdsForProfile(profileId),
 		])
 		return {
-			addresses: accounts.map((a) => a.address),
-			tokenIds: tokens.map((t) => t.id),
+			addresses: [...new Set([...accounts.map((a) => a.address), ...rawAddresses])],
+			tokenIds: [...new Set([...tokens.map((t) => t.id), ...rawTokenIds])],
 			networkIds: networks.map((n) => n.id),
 		}
 	}

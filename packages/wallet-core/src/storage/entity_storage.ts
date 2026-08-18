@@ -169,4 +169,27 @@ export class EntityStorage<T> {
 		}
 		return out
 	}
+
+	/** Raw STRING values by id, no parsing — the compare-and-delete surface for
+	 *  the purge second pass (F-B23): the exact stored bytes are what a CAS
+	 *  re-read must equal before a delete may fire. Non-string values skipped. */
+	public async rawStringEntries(): Promise<Array<[string, string]>> {
+		const path = `${this.root}@`
+		const res = await this.storage.get()
+		const out: Array<[string, string]> = []
+		for (const [k, v] of Object.entries(res)) {
+			if (!k.startsWith(path)) continue
+			if (typeof v !== "string") continue
+			out.push([k.substring(path.length), v])
+		}
+		return out
+	}
+
+	/** The raw stored string for one id (undefined when absent or non-string). */
+	public async rawValue(id: string): Promise<string | undefined> {
+		const key = `${this.root}@${id}`
+		const res = await this.storage.get(key)
+		const v = res[key]
+		return typeof v === "string" ? v : undefined
+	}
 }

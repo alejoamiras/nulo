@@ -108,4 +108,23 @@ describe("ProfileDeletionCoordinator.purge — awaited order contract", () => {
 		expect(a).toBe(b)
 		await a
 	})
+
+	test("(F-B23) snapshot unions the typed reads with RAW harvests — a malformed parent's address/token id still cascades", async () => {
+		const coord = await build([])
+		;(coord as unknown as { accounts: unknown }).accounts = {
+			getAccountsRaw: async () => [{ address: "0xok" }],
+			rawAddressesForProfile: async () => ["0xok", "0xmalformed"],
+		}
+		;(coord as unknown as { tokens: unknown }).tokens = {
+			getTokensRaw: async () => [{ id: 1 }],
+			rawTokenIdsForProfile: async () => [1, 7],
+		}
+		;(coord as unknown as { networks: unknown }).networks = { getNetworksRaw: async () => [{ id: "n1" }] }
+
+		const snap = await coord.snapshot("p1")
+
+		expect([...snap.addresses].sort()).toEqual(["0xmalformed", "0xok"])
+		expect([...snap.tokenIds].sort()).toEqual([1, 7])
+		expect(snap.networkIds).toEqual(["n1"])
+	})
 })

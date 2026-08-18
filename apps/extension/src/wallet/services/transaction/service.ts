@@ -9,7 +9,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock, sleep } from "@/wallet/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -298,6 +298,22 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 					return this.txs.delete(tx.hash)
 				},
 				(tx) => this.emit("onTransactionDeleted", tx),
+			)
+			// F-B23: raw second pass, same lock hold, mirroring the typed rules —
+			// a malformed row scoped to another profile is left; an UNSCOPED
+			// malformed row is deleted only under sole ownership (it cannot be
+			// marked ambiguous like a typed row — rewriting bytes the codec cannot
+			// read would launder garbage into a "valid" write — so the non-sole
+			// case leaves it, fail-closed and codec-hidden as before).
+			await purgeMalformedRows(
+				this.txs,
+				(raw) => {
+					if (typeof raw.account !== "string" || !set.has(raw.account)) return false
+					if (profileId === undefined) return true
+					if (raw.profileId !== undefined) return raw.profileId === profileId
+					return soleOwner
+				},
+				(id) => this.logDebug(`purged malformed tx row ${id}`),
 			)
 		})
 	}

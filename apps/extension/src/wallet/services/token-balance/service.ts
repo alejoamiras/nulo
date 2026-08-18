@@ -331,6 +331,14 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
 		}
+		// F-B23: raw second pass — a validation-failed balance row for a purged
+		// token is invisible to getAll() and would otherwise survive forever.
+		// No service-wide write lock exists here; the helper's compare-and-delete
+		// is the containment against a concurrent projector write.
+		await this.repo.purgeMalformed(
+			(raw) => typeof raw.token === "number" && set.has(raw.token),
+			(id) => this.logDebug(`purged malformed balance row ${id}`),
+		)
 		for (const id of set) this.tokens.delete(id)
 	}
 

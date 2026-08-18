@@ -30,24 +30,40 @@ export async function purgeRows<T>(rows: readonly T[], remove: (row: T) => Promi
  * enumerates through the codec (`getValues()`/`getAll()`), which KEEPS-but-hides
  * a validation-failed row — so a malformed row belonging to the purged
  * profile/account would survive the privacy-erasing delete forever. This pass
- * lists RAW entries (no codec), matches the predicate on the raw parsed object,
- * and deletes by the TRUE storage id. Run it AFTER the typed pass, inside the
- * SAME lock hold: everything still matching is a row the codec could not see
- * (or an aliased copy) — deleted silently, no events (it was never visible to
- * consumers). JSON-syntax-broken rows are skipped by `rawEntries()` itself
- * (no readable predicate field) — unattributable by construction, fail-closed.
- * Pattern lifted from `dapp-session/mac-storage.rowsForProfile` and
+ * lists RAW string entries (no codec), matches the predicate on the parsed
+ * object, and deletes by the TRUE storage id — but only after a
+ * **compare-and-delete**: the key's current raw bytes are re-read and must
+ * still equal the snapshotted bytes, so a concurrent legitimate write landing
+ * on the same key between snapshot and delete (e.g. a restore reusing an
+ * aliased key — codex audit) is never destroyed. Run it AFTER the typed pass,
+ * inside the store's write-serializing hold where one exists; the CAS is the
+ * containment where none does. Deleted silently, no events (the row was never
+ * visible to consumers). JSON-syntax-broken values fail the parse and are
+ * skipped — unattributable by construction, fail-closed. Pattern lifted from
+ * `dapp-session/mac-storage.rowsForProfile` and
  * `incoming-transfer/repository.deleteKeysWhere`.
  */
 export async function purgeMalformedRows(
-	storage: { rawEntries(): Promise<Array<[string, unknown]>>; delete(id: string): Promise<void> },
+	storage: {
+		rawStringEntries(): Promise<Array<[string, string]>>
+		rawValue(id: string): Promise<string | undefined>
+		delete(id: string): Promise<void>
+	},
 	matchesRaw: (raw: Record<string, unknown>) => boolean,
 	onPurged?: (storageId: string) => void,
 ): Promise<number> {
 	let purged = 0
-	for (const [storageId, raw] of await storage.rawEntries()) {
+	for (const [storageId, rawString] of await storage.rawStringEntries()) {
+		let raw: unknown
+		try {
+			raw = JSON.parse(rawString)
+		} catch {
+			continue // syntax-broken — no readable predicate field; fail-closed
+		}
 		if (typeof raw !== "object" || raw === null) continue
 		if (!matchesRaw(raw as Record<string, unknown>)) continue
+		// CAS: only delete the exact bytes the decision was made about.
+		if ((await storage.rawValue(storageId)) !== rawString) continue
 		await storage.delete(storageId)
 		onPurged?.(storageId)
 		purged++

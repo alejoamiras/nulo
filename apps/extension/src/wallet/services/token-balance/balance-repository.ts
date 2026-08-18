@@ -11,6 +11,7 @@
 
 import { array_max } from "@/wallet/utils"
 import { EntityStorage } from "@/wallet/storage"
+import { purgeMalformedRows } from "@/wallet/services/purge-rows"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { TOKEN_BALANCE_STORAGE_ROOT, TokenBalanceRawSchema, type TokenBalanceRaw } from "./spec"
 
@@ -50,5 +51,14 @@ export class BalanceRepository {
 	public async existsByTokenAndAccount(tokenId: number, account: string): Promise<boolean> {
 		const all = await this.storage.getValues()
 		return all.some((x) => x.token === tokenId && x.account === account)
+	}
+
+	/** F-B23 raw second pass over the balance rows — the codec-hidden complement
+	 *  of `delete`, kept here so storage stays repository-private. */
+	public async purgeMalformed(
+		matchesRaw: (raw: Record<string, unknown>) => boolean,
+		onPurged?: (storageId: string) => void,
+	): Promise<number> {
+		return purgeMalformedRows(this.storage, matchesRaw, onPurged)
 	}
 }

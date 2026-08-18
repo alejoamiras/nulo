@@ -84,7 +84,8 @@ describe("EntityStorage", () => {
 	/**
 	 * Resilience: a single malformed row used to throw from `JSON.parse` inside
 	 * `get`/`getAll`/`getValues`, poisoning every reader of the namespace. The
-	 * primitive now logs the bad payload, deletes the row, and skips it.
+	 * primitive now logs the bad payload, RETAINS the row (B-23 — the read path
+	 * never deletes), and skips it.
 	 */
 	describe("malformed row resilience", () => {
 		let errorSpy: ReturnType<typeof vi.spyOn>
@@ -238,6 +239,26 @@ describe("EntityStorage", () => {
 			]
 			for (const [id, u] of corpus) await s.set(id, u)
 			for (const [id, u] of corpus) expect(await s.get(id)).toEqual(u)
+		})
+	})
+
+	/** The compare-and-delete surface for the F-B23 purge second pass. */
+	describe("raw string accessors", () => {
+		test("rawStringEntries returns the EXACT stored strings, including syntax-broken and validation-failed rows", async () => {
+			await storage.set("alice", { name: "Alice", age: 30 })
+			await api.storage.local.set({ "users@broken": "{not json", "users@drifted": JSON.stringify({ name: "NoAge" }) })
+			const entries = Object.fromEntries(await storage.rawStringEntries())
+			expect(entries).toEqual({
+				alice: JSON.stringify({ name: "Alice", age: 30 }),
+				broken: "{not json",
+				drifted: JSON.stringify({ name: "NoAge" }),
+			})
+		})
+
+		test("rawValue returns the stored string for one id; undefined when absent", async () => {
+			await api.storage.local.set({ "users@broken": "{not json" })
+			expect(await storage.rawValue("broken")).toBe("{not json")
+			expect(await storage.rawValue("nobody")).toBeUndefined()
 		})
 	})
 })

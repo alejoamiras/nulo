@@ -91,6 +91,33 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 		expect(remaining).toEqual(["0xp2-tx"])
 	})
 
+	test("(F-B23) purgeForAccounts removes a malformed row scoped to the deleted profile; spares the survivor's and multi-owner unscoped ones", async () => {
+		await api.storage.local.set({
+			"nulo:core:txs@badp1": JSON.stringify({ account: ACCOUNT, profileId: "p1", junk: 1 }),
+			"nulo:core:txs@badp2": JSON.stringify({ account: ACCOUNT, profileId: "p2", junk: 1 }),
+			"nulo:core:txs@badunscoped": JSON.stringify({ account: ACCOUNT, junk: 1 }),
+		})
+
+		await service.purgeForAccounts([ACCOUNT], "p1")
+
+		const raw = await api.storage.local.get(null)
+		expect(raw["nulo:core:txs@badp1"]).toBeUndefined()
+		expect(raw["nulo:core:txs@badp2"]).toBeDefined()
+		// ACCOUNT has two owners → an unscoped malformed row is unattributable and
+		// cannot be marked ambiguous (rewriting unreadable bytes would launder
+		// them) — left in place, fail-closed and codec-hidden.
+		expect(raw["nulo:core:txs@badunscoped"]).toBeDefined()
+	})
+
+	test("(F-B23) an unscoped malformed row IS purged when the profile is the address's sole owner", async () => {
+		// "0xsolo" resolves to no other owner in the account stub → soleOwner.
+		await api.storage.local.set({ "nulo:core:txs@badsolo": JSON.stringify({ account: "0xsolo", junk: 1 }) })
+
+		await service.purgeForAccounts(["0xsolo"], "p1")
+
+		expect((await api.storage.local.get(null))["nulo:core:txs@badsolo"]).toBeUndefined()
+	})
+
 	test("a row marked unattributable is not re-armed for polling after a restart", async () => {
 		const fence = { profileId: "p1", epoch: deletionState.capture("p1") }
 		await add("0xmarked", fence, "net-1")

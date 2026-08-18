@@ -301,6 +301,20 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return (await this.liveRows()).filter((x) => x.profileId === profileId)
 	}
 
+	/** F-B23: addresses harvested from RAW rows (codec-hidden included) owned by
+	 *  `profileId` — feeds the deletion snapshot so a malformed parent's dependent
+	 *  tx/authwit/balance rows still cascade. Read-only; unreadable fields skipped. */
+	public async rawAddressesForProfile(profileId: string): Promise<string[]> {
+		const out = new Set<string>()
+		for (const [, raw] of await this.storage.rawEntries()) {
+			if (typeof raw !== "object" || raw === null) continue
+			const r = raw as Record<string, unknown>
+			if (r.profileId !== profileId) continue
+			if (typeof r.address === "string" && r.address.length > 0) out.add(r.address)
+		}
+		return [...out]
+	}
+
 	/** Awaited profile-scoped account purge, called by the deletion coordinator.
 	 *  (Relocated from the removed fire-and-forget `onProfileDeleted` subscriber so
 	 *  deletion is awaited end-to-end — finding D.) Idempotent: delete-of-gone is a
@@ -323,10 +337,16 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		)
 		// F-B23: raw second pass — a validation-failed row this profile owns is
 		// invisible to liveRows() and would otherwise survive the purge forever.
-		await purgeMalformedRows(
-			this.storage,
-			(raw) => raw.profileId === profileId,
-			(id) => this.logDebug(`purged malformed account row ${id}`),
+		// Under the restoreLock: a concurrent restore() is the writer that can
+		// legitimately land a DIFFERENT profile's valid row on a key this pass
+		// snapshotted (aliased key), and the helper's compare-and-delete re-read
+		// is only race-free against it while that writer is excluded.
+		await this.restoreLock.withLock(() =>
+			purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed account row ${id}`),
+			),
 		)
 	}
 
