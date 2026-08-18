@@ -28,6 +28,7 @@ import { DappSessionService } from "./services/dapp-session/service"
 import { ExecutionService } from "./services/execution/service"
 import { E2E_PROVERLESS } from "@/e2e/config"
 import { ChromeStorageProofGate } from "@/e2e/chrome-storage-proof-gate"
+import { ChromeStorageRestoreGate } from "@/e2e/chrome-storage-restore-gate"
 import { ChromeStorageIncomingPollGate } from "@/e2e/chrome-storage-incoming-poll-gate"
 import { FpcService } from "./services/fpc/service"
 import { LogViewerService } from "./services/log-viewer/service"
@@ -168,11 +169,15 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// convention only — actual startup ordering is determined by
 		// `ServiceCollection.start()`'s topological phases.
 		services.add(new AccountService(logger, browserApi))
-		services.add(new AccountStateService(logger))
+		// Same tree-shake contract as the proof gate: constructed only under the
+		// statically-false E2E_PROVERLESS constant, so prod builds carry neither
+		// the class nor the nulo:e2e:restore-gate key (negative grep enforced).
+		const restoreGate = E2E_PROVERLESS ? new ChromeStorageRestoreGate() : undefined
+		services.add(new AccountStateService(logger, restoreGate))
 		services.add(new AuthRegistryService(logger, browserApi))
 		services.add(new ConfigService(config, logger))
 		const windowManager = new WindowManager(browserApi.windows, clock, logger)
-		services.add(new ContactService(logger, browserApi))
+		services.add(new ContactService(logger, browserApi, restoreGate))
 		services.add(new DappInteractionService(logger, windowManager))
 		services.add(new DappSessionService(logger, browserApi))
 		// E2E_PROVERLESS injects a chrome.storage-backed proof gate into the SW

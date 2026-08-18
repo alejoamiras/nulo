@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { type RestoreGate, NOOP_RESTORE_GATE } from "@/e2e/restore-gate"
 import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -44,7 +45,10 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 	private pxeService: PxeServiceClient = null!
 	private networkService: NetworkService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(
+		logger: ILogger,
+		private readonly restoreGate: RestoreGate = NOOP_RESTORE_GATE,
+	) {
 		super(ACCOUNT_STATE_SERVICE_NAME, logger)
 	}
 
@@ -238,6 +242,11 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		networks: Network[],
 		deadlineMs?: number,
 	): Promise<Restored<BackupAccountState>[]> {
+		// E2e hold point: "account-state" parks a POST-finalize import RPC here
+		// (this service restores only after finalizeRestore), so a crash test can
+		// kill the worker at a known post-finalize phase. Production resolves
+		// immediately.
+		await this.restoreGate.waitAt("account-state")
 		// The absolute deadline starts at ENTRY — init wait time counts against
 		// it, never extends it (the caller's clock started at dispatch).
 		const clamped =

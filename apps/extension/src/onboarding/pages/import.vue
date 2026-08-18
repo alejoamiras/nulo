@@ -79,6 +79,7 @@ const {
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
+	restoreStage,
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
@@ -138,7 +139,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<OnboardingPage :gap="24">
+	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
 		<button
 			type="button"
 			:class="$style.back"

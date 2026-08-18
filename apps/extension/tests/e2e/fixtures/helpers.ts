@@ -343,6 +343,19 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
  * page and tap "Set as active".
  */
 export async function switchToNetwork(page: Page, networkName: string): Promise<void> {
+	// The BEFORE snapshot below disambiguates real vs repeat switch, so it
+	// must read a RENDERED header: on a freshly-opened popup the chip mounts
+	// with empty text for a beat, and an empty read misclassifies an
+	// already-on-target wallet as a real switch — whose "address flips" wait
+	// below can then never be satisfied, because the target chain re-derives
+	// the address the wallet already shows. Wait for the render signal.
+	await page.waitForFunction(
+		() => {
+			const btn = document.querySelector('[data-testid="network-button"]')
+			return !!btn && (btn.textContent ?? "").trim().length > 0
+		},
+		{ timeout: 15_000, polling: 200 },
+	)
 	// Snapshot the BEFORE state. The header text identifies the chain the
 	// popup is currently on; the activeAccount key identifies the address
 	// `setupActiveAccount` last wrote. Both are needed to disambiguate

@@ -8,6 +8,7 @@ import { purgeRows } from "@/wallet/services/purge-rows"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
+import { type RestoreGate, NOOP_RESTORE_GATE } from "@/e2e/restore-gate"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
 import { getInitials, sanitizeString } from "@/utils"
@@ -47,7 +48,11 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	 *        directly (legacy behavior). Passed explicitly by the composition
 	 *        root and by tests via FakeBrowserApi.
 	 */
-	public constructor(logger: ILogger, browserApi?: BrowserApi) {
+	public constructor(
+		logger: ILogger,
+		browserApi?: BrowserApi,
+		private readonly restoreGate: RestoreGate = NOOP_RESTORE_GATE,
+	) {
 		super(CONTACT_SERVICE_NAME, logger)
 		this.storage = browserApi
 			? new EntityStorage<Contact>(CONTACT_STORAGE_ROOT, browserApi.storage.local, (raw) => ContactSchema.parse(raw))
@@ -252,6 +257,11 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	}
 
 	public async restore(contacts: Contact[]): Promise<Restored<Contact>[]> {
+		// E2e hold point: "service-restore" parks a PRE-finalize import RPC here
+		// (this service restores inside the per-service loop, before
+		// finalizeRestore), so a crash test can kill the worker at a known
+		// pre-finalize phase. Production resolves immediately.
+		await this.restoreGate.waitAt("service-restore")
 		await this.ensureInitialized()
 
 		return await this.lock.withLock(async () => {
