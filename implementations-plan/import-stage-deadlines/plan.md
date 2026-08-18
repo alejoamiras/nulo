@@ -408,7 +408,11 @@ tests/e2e/network/profile-reimport-matrix.test.ts`.
 complete attributed record (or an explicit traceLost). Layers: network e2e
 (solo).
 
-### Phase 3 — Campaign completion
+### Phase 3 ✓ — Campaign completion
+
+> GATE PASSED 2026-08-18: per-scenario sample sets complete — 5×integrity +
+> 5×matrix-first + 5×matrix-reimport per mode, stratified in `envelopes.md`
+> (no pooling; scenario + ordinal carried on every record).
 
 Continue alternation to ≥5 runs per mode; verify per-scenario sample sets
 (integrity×mode, matrix-first×mode, matrix-reimport×mode) are complete.
