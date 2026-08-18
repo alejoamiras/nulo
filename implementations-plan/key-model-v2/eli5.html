@@ -1,0 +1,136 @@
+<title>Key Model v2</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #FAF8F4; --ink: #1C2333; --brass: #A87B2D; --line: #E3DFD6;
+    --muted: #6A6E7A; --panel: #F3EFE6; --code-bg: #EFEBE1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #151A26; --ink: #E8E6E0; --brass: #C9A050; --line: #2A3040;
+      --muted: #9AA0AE; --panel: #1C2230; --code-bg: #10141E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #151A26; --ink: #E8E6E0; --brass: #C9A050; --line: #2A3040;
+    --muted: #9AA0AE; --panel: #1C2230; --code-bg: #10141E;
+  }
+  body {
+    background: var(--paper); color: var(--ink);
+    font-family: "Public Sans", -apple-system, "Segoe UI", sans-serif;
+    font-size: 1rem; line-height: 1.65;
+    max-width: 46rem; margin: 0 auto; padding: 3rem 1.25rem 5rem;
+  }
+  h1, h2 {
+    font-family: "Newsreader", Georgia, serif; font-weight: 600;
+    line-height: 1.15; text-wrap: balance; margin: 0 0 0.75rem;
+  }
+  h1 { font-size: 2.4rem; }
+  h2 { font-size: 1.45rem; margin-top: 3rem; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem; }
+  p { margin: 0 0 1rem; }
+  .eyebrow {
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.09em;
+    color: var(--brass); font-weight: 600; margin-bottom: 0.5rem;
+  }
+  .lede { font-size: 1.08rem; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 2.5rem; }
+  .phase {
+    border-left: 2px solid var(--brass); padding: 0.15rem 0 0.15rem 1.15rem;
+    margin: 1.4rem 0; display: flex; flex-direction: column; gap: 0.1rem;
+  }
+  .phase .num {
+    font-family: "IBM Plex Mono", monospace; font-size: 0.78rem;
+    color: var(--brass); letter-spacing: 0.06em;
+  }
+  .phase p { margin: 0.25rem 0 0.35rem; }
+  .gate { color: var(--muted); font-size: 0.88rem; }
+  .gate strong { color: var(--ink); font-weight: 500; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1.35rem 1.5rem; margin: 1.75rem 0;
+  }
+  .panel h2 { margin-top: 0; font-size: 1.3rem; }
+  .panel ol, .panel ul { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+  .panel li { margin-bottom: 0.6rem; }
+  .rec { color: var(--brass); font-weight: 600; }
+  ul.qs { padding-left: 1.2rem; }
+  ul.qs li { margin-bottom: 0.9rem; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 1rem 1.15rem; overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.8rem;
+    line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  }
+  code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.88em; }
+  .warn { color: var(--brass); font-weight: 600; font-size: 0.92rem; }
+  .verdicts { font-size: 0.92rem; color: var(--muted); }
+  .verdicts strong { color: var(--ink); }
+  a { color: var(--brass); }
+  :focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+</style>
+
+<p class="eyebrow">Blueprint · mid tier · pending your approval</p>
+<h1>Key Model v2</h1>
+<p class="lede">One coordinated, pre-launch change to how Nulo creates keys and what it lets you export — so "recovery phrase" and "private key" finally mean what every wallet user expects them to mean.</p>
+<p class="meta">Plan lives at <code>implementations-plan/key-model-v2/plan.md</code> · worktree <code>key-model-v2</code></p>
+
+<h2>The problem, in one paragraph</h2>
+<p>Today the Settings → Backup screen offers a "Seed Phrase" and a "Secret Key" — but they are the <em>same secret</em> in two costumes, and neither changes when you switch accounts. On Ethereum, "private key" means <em>one account</em> and "seed phrase" means <em>everything</em>. Nulo's words also aren't real BIP-39: they're a raw re-encoding of the master secret with the standard key-stretching step skipped, which quietly rejects ~82% of phrases generated elsewhere and closes the door on ever adding an optional passphrase. Since nothing has shipped to real users yet, we can fix the model once, now, instead of living with it forever.</p>
+
+<h2>What changes for you</h2>
+<p><strong>Backup gets simple:</strong> one Recovery Phrase (24 words — the real, standard kind) and one Full Backup file. The confusing base64 "Secret Key" export and its import disappear. <strong>Accounts get portable:</strong> each account gains its own Export / Import — a small, checksummed file (password-protected by default) that moves exactly one account between installs, which is what "export private key" should have meant all along. <strong>Under the hood:</strong> key derivation gets dedicated Nulo domain tags, chain separation keyed to the L1 chain id (so a rollup upgrade can never silently change your addresses), and strict validation on every import. Every derived address changes — the deliberate, one-time cost of doing this before launch.</p>
+
+<h2>Why this tier</h2>
+<p>Scored against the blueprint rubric: security sensitivity is the one HIGH dimension (this is key generation). Blast radius, irreversibility, and migration cost are all low <em>because</em> we're pre-production — no users, no data to migrate. That's one HIGH → <code>mid</code>: one plan, a competing alternative, and three independent adversarial audits, with the audit muscle deliberately over-weighted on the crypto per your instruction.</p>
+
+<h2>The phases</h2>
+<div class="phase"><span class="num">PHASE 1</span><h3>New crypto primitives</h3>
+<p>The standard BIP-39 step, the Nulo domain tags, and the new derivation constants — each pinned by known-answer tests, including the official BIP-39 test vectors.</p>
+<p class="gate">Proves itself by: <strong>lint + typecheck + the full unit suite</strong>, with every new vector committed.</p></div>
+<div class="phase"><span class="num">PHASE 2</span><h3>Chain identity done right</h3>
+<p>The L1 chain id gets stored where derivation needs it, and the one true seed formula becomes a single shared function — fixing a hidden duplicate that would otherwise have bricked profiles at unlock.</p>
+<p class="gate">Proves itself by: <strong>unit + integration suites</strong>, including a new test that exercises the real (not mocked) integrity check.</p></div>
+<div class="phase"><span class="num">PHASE 3</span><h3>Profiles built on entropy</h3>
+<p>New profiles start from real entropy; the words re-display from storage; passwords, backups, and restores all verify that the words and the working key still agree — so a tampered backup can't hand you a lying recovery phrase.</p>
+<p class="gate">Proves itself by: <strong>unit + integration suites</strong>, including create → export words → re-import → same address, plus tamper tests.</p></div>
+<div class="phase"><span class="num">PHASE 4</span><h3>The product cuts</h3>
+<p>The Secret Key page and plain-key import are deleted, copy becomes "Recovery Phrase", and every test that leaned on the old surfaces is reworked.</p>
+<p class="gate">Proves itself by: <strong>the full pre-PR gate + smoke browser tests</strong> on the reworked flows.</p></div>
+<div class="phase"><span class="num">PHASE 5</span><h3>Export / Import Account</h3>
+<p>The per-account file format (encrypted by default), the import checks that refuse anything tampered or foreign, and the UI. Imported accounts are clearly badged: your recovery phrase does not cover them.</p>
+<p class="gate">Proves itself by: <strong>the full pre-PR gate + smoke browser tests</strong>: round-trip, tamper rejection, duplicate rejection.</p></div>
+<div class="phase"><span class="num">PHASE 6</span><h3>Prove it on a live network</h3>
+<p>The full network suite, including the frozen-account canary with real proving and a new leg: import an exported account into a fresh install and send an actual transaction from it.</p>
+<p class="gate">Proves itself by: <strong>the network e2e suite green</strong>, then the fast gates once more.</p></div>
+
+<h2>What the auditors said</h2>
+<p class="verdicts">Three independent adversarial reviews. <strong>Codex round 1: reject</strong> — four serious findings (a hidden formula duplicate, a password-change gap, missing service-side authorization, storage lifecycle holes), every one now folded into the plan. <strong>Independent Claude audit: conditional approve</strong> — seven conditions, including two more hidden breakage points and an honest restatement of the entropy math; all adopted. <strong>Final fresh-context Codex pass: <span data-verdict>pending — recorded here before you approve</span></strong>. The full transcripts are committed next to the plan.</p>
+
+<h2>Open questions — your call</h2>
+<ul class="qs">
+  <li><strong>A1 — Delete the "Encrypted Key" export/import too?</strong> It's a third mechanism (a raw ciphertext blob), redundant with the Full Backup. Both auditors and the plan say <span class="rec">yes, cut it</span>.</li>
+  <li><strong>A2 — Rewrite the frozen "regime" record in place?</strong> The address-freeze rules say append-only, but nothing has ever shipped under the current entry. Recommendation: <span class="rec">rewrite in place, one reviewed commit</span> — and you're ratifying that no old build, backup, or exported file needs to keep working.</li>
+  <li><strong>A3 — Same keys on two rollups that share an L1?</strong> Deliberate consequence of keying derivation to the L1 chain id (it's what makes upgrades safe). Recommendation: <span class="rec">yes, accept it</span> — it matches how every EVM wallet behaves.</li>
+  <li><strong>A4 — If an imported account's stored key is tampered with, how loud is the alarm?</strong> Recommendation: <span class="rec">quarantine just that account</span> (disable it, show why) rather than locking the whole profile the way we do for derived accounts.</li>
+</ul>
+
+<div class="panel">
+  <h2>Approval decision needed from you</h2>
+  <ol>
+    <li>Confirm the scope: both halves (product model + KDF v2), Export/Import Account included, addresses reset once.</li>
+    <li>Confirm the tier (<code>mid</code>) given the rubric above.</li>
+    <li>Answer A1–A4 (or accept all four recommendations as written).</li>
+    <li>Confirm the validation plan: fast gates every phase, smoke tests on the UI phases, network suite as the final gate. (No <code>/harden</code> scheduled — your earlier call.)</li>
+    <li>Confirm delivery: three stacked PRs (crypto core → profile model + cuts → account export/import).</li>
+    <li>Reply with: <strong>approve</strong>, <strong>conditional approve</strong> (with conditions), or <strong>reject</strong> (with blockers).</li>
+  </ol>
+</div>
+
+<h2>Implementation seeds</h2>
+<p>For the autonomous implementation session, started inside the plan's worktree. Drafts until you approve — finalized right after.</p>
+<p class="warn">Use exactly one per session — they don't compose; setting one replaces the other.</p>
+<h3>Recommended: /goal <span style="font-weight:400">(completion is fully checkable from the transcript)</span></h3>
+<pre><code>/goal All six phases marked ✓ in implementations-plan/key-model-v2/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as defined in plan.md reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/key-model-v2/lessons/phase-N.md in the transcript; /code-review max --fix complete with fixes committed separately; the codex post-impl fix loop converged (a resumed codex pass reporting no new material findings, quoted in the transcript); the three-arc gh stack exists on GitHub with arc PRs ready (gh stack view output in the transcript); bun run audit:vue, bun run test:e2e, and bun run e2e:agent all report exit 0 in the transcript.</code></pre>
+<h3>Alternative: /loop 15m</h3>
+<pre><code>/loop 15m Drive implementations-plan/key-model-v2 forward. Never idle waiting for my input. Each firing: (1) Read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if PRs exist, gh stack view + gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine if it's progressing (gh run watch up to 10 min; stuck → log as blocked in lessons). Use waits to review the diff or prep the next phase. (3) No task in hand? Pick the next pending step from plan.md. After each meaningful edit run bun run lint + the touched package's tests; commit; gh stack push / gh stack sync as needed. (4) Stuck or facing a decision you'd normally bring to me? Call /codex at xhigh, reach a defensible decision, act, log consult + verdict in lessons/phase-N.md. Hard limits stay hard: never merge, publish, deploy, or expand scope beyond plan.md — surface and hold. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase green = its validation gate as written in plan.md passes; paste the result, mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/key-model-v2/lessons/phase-N.md, advance; at arc boundaries gh stack add per the Delivery table. (7) All phases ✓? Execute plan.md's Post-implementation section verbatim, then write the wrap-up report and stop. Keep the ASCII checklist visible each firing (plan.md is the source of truth).</code></pre>
