@@ -43,3 +43,44 @@ Pick A, conditionally. Real BIP-39 semantics, acceptance of every valid 24-word 
 ## What looks fine
 
 Keeping the XOR composite for storage scope, persisting exact L1 identity separately, dedicated separators with pinned vectors, the compat-epoch bump, hostile-input size/schema checks, and deriving privacy keys one-way from the signing root are sound.
+---
+
+# Codex audit — key-model-v2 (Final fresh-context pass on rev 2, gpt-5.6-sol xhigh, new session)
+
+> Verdict on rev 2: reject — all findings adopted into rev 3 (ledger L16–L23). Resumed re-verdict on rev 3 appended below when received.
+
+reject (with blocking findings: silent restore bypasses entropy/master binding; imported-key backups break after profile-ID remapping; L1 identity is not end-to-end bound; plaintext tamper detection is impossible as claimed)
+
+### High
+
+- `plan.md §C/P3; profile/service.ts:231; session-manager.ts:392` — Silent bearer restoration unwraps only the master and has no password with which to decrypt entropy. Therefore the promised unlock-time pairing check cannot run: tampered/lost entropy can coexist with an active wallet. Version the bearer to carry and verify entropy too, or disable silent restoration for password profiles.
+
+- `plan.md §E backup; useFullBackupImport.ts:487` — Per-row HKDF includes `profileId`, but restore routinely remaps profile IDs before restoring slices. Backed-up ciphertext then cannot decrypt under the new ID; moreover accounts restore before generic slices/finalization, so the orphan-drop rule can discard valid imported accounts. Use a stable logical binding such as `(master, chainId, address)`, or define a portable rewrap format and explicit restore order. Add collision-remap and passkey-backup signing tests.
+
+- `plan.md §B; network/service.ts:_getChainId` — Account-carried `l1ChainId` solves the coordinator’s pre-session constraint and detects direct Account-row tampering, but Network-row tampering before account creation produces a self-consistent poisoned account that the coordinator accepts. Endpoint add/update currently validates only the XOR composite; a different `(l1ChainId, rollupVersion)` pair can collide. Require exact L1 equality on endpoint mutation and Account↔Network consistency on restore/creation.
+
+- `plan.md Success criteria/§E` — A plaintext export checksum is not authentication. An attacker can replace `signingKey`, recompute its address and checksum, and create a fully valid attacker-controlled file. Treat the checksum as accidental-corruption detection only; require prominent derived-address confirmation and narrow “tampered export fails closed” to encrypted exports or non-self-consistent mutations.
+
+### Medium
+
+- `plan.md §C/H/P3; password-secret-box.ts` — The AAD retrofit omits the required `PasswordSecretBox` API refactor and final-ID-before-seal ordering. Create/import/restore currently choose or remap IDs after sealing. Also, P3 makes `exportEncrypted` ciphertext non-importable before P4 deletes that surface. Co-land A1’s cut with AAD activation and add one atomic backup-material export returning paired master+entropy.
+
+- `plan.md §C restore` — “Whenever both fields are present” is too weak: epoch-4 password backups must require entropy; passkey backups must reject entropy. Otherwise required password rows cannot be constructed consistently.
+
+- `plan.md Phases P1–P3` — P1 changes signing derivation and the regime record before P2/P3 activate the remaining formula, leaving mergeable hybrid KDFs. Keep runtime switches and freeze-record mutation dormant until one atomic phase/arc.
+
+- `plan.md §A` — The `≤2^-258` bias bound assumes uniform 512-bit input; PBKDF2 over the mnemonic domain only supports a PRF-model claim. Mean phrase preimages are approximately 5.29, not 5.7. The passphrase must also be NFKD-normalized; add a Unicode-passphrase KAT.
+
+### Low
+
+- `plan.md I3` — `GeneratorIndex` is not exported by the installed Aztec 5.0.1 tree. Replace this inference with an inventory of actual separator namespaces.
+
+- `plan.md §E/A4` — Durable quarantine needs an authenticated repair or deletion path; duplicate rejection otherwise makes a quarantined imported account permanently unrecoverable.
+
+A1 — Agree; cut it atomically with P3’s AAD change.
+
+A2 — Agree, conditional on ratifying that no prior build, backup, or artifact remains supported.
+
+A3 — Agree, provided cross-rollup address linkage is explicitly accepted.
+
+A4 — Agree; single-account quarantine is appropriate, with durable status and repair/deletion UX.
