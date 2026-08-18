@@ -489,6 +489,10 @@ only after certification + the owner-gate conditions.
 
 ## Seeds
 
+ELI5 Artifact: https://claude.ai/code/artifact/ce1cd30f-a72a-4f9f-bd29-d9cd46ee9fd5
+(source: `implementations-plan/import-stage-deadlines/eli5.html` — redeploying
+the same file path updates the same URL).
+
 (DRAFT — finalized after the approval gate; recommended `/goal`.)
 
 ```
