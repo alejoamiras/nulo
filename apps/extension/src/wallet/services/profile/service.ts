@@ -1034,6 +1034,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 		await delegate.runFor(id, snapshot)
 
+		// F-B24: a TORN reap keeps the tombstone (skips phase 3). In the wall-clock
+		// corner (clock jump / multi-day suspension) the reaped import's popup may
+		// still land slice writes AFTER this purge — slice restores don't consult
+		// deletion state — so the cleanup must be re-runnable after the loser
+		// quiesces (codex audit round 3): the retained tombstone makes the NEXT
+		// boot's resume re-purge idempotently (catching any late rows), then clear
+		// + release there. Cost: the id stays reserved until that boot — a dead
+		// import's id, unreused for one SW lifetime.
+		if (tornGuard !== undefined) {
+			return profile
+		}
+
 		await this.runExclusive(async () => {
 			await this.tombstones.clearIfSame(id, epoch)
 			this.deletionState.release(id)
@@ -1150,14 +1162,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// the marker under that same lock, so a reap can never fire after a
 				// finalize; a same-id re-import mints a new generation. If THIS delete
 				// fails pre-tombstone the marker survives and the next boot retries;
-				// post-tombstone, the tombstone loop above finishes it. Self-healing.
-				// ACCEPTED RESIDUAL (documented; SIMPLER-wins vs a multi-boot candidate
-				// protocol): `at`/`bootCutoff` are wall-clock — a forward clock jump or
-				// a multi-day suspension mid-import can age a still-continuing import
-				// past the floor; if its finalize then loses the lock race to the reap,
-				// the import fails RETRYABLY ("Invalid profile id" → the composable's
-				// error path) with the backup file still the source of truth. No
-				// in-use profile can be deleted (the marker guard above).
+				// post-tombstone, the tombstone loop above finishes it. A torn reap
+				// also RETAINS its tombstone (phase 3 skipped), so the next boot
+				// re-purges idempotently — any slice rows a wall-clock-corner loser
+				// (forward clock jump / multi-day suspension) lands AFTER this purge
+				// are swept once it has quiesced. The loser's own finalize fails
+				// RETRYABLY with the backup file still the source of truth; no in-use
+				// profile can be deleted (the marker guard above).
 				this.logError(`torn-import sweep: completing compensating delete for ${marker.profileId}`)
 				await this.deleteProfile(marker.profileId, { pxeGeneration: marker.pxeGeneration, markerAt: marker.at })
 			} catch (err) {

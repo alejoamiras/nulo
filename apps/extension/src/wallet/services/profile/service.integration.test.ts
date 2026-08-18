@@ -1473,6 +1473,46 @@ describe("F-B24 — torn-import sweep on boot resume", () => {
 		expect(await markerRaw(api, second.id)).toBeUndefined()
 	}, 30_000)
 
+	test("a torn reap RETAINS its tombstone; the next boot re-purges (late-row cleanup) then releases", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		await ageMarker(api, orphan.id)
+
+		const cutoff2 = Date.now()
+		const { service: boot2 } = await makeServiceFromExistingApi(api)
+		const boot2Purges: string[] = []
+		boot2.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async (id: string) => {
+				boot2Purges.push(id)
+			},
+		})
+		await boot2.resumePendingDeletions(cutoff2)
+		expect(boot2Purges).toContain(orphan.id)
+		// Phase 3 was skipped: the tombstone survives, so a wall-clock-corner
+		// loser's late slice writes get re-purged once it has quiesced.
+		const tombKeys = Object.keys(await api.storage.local.get()).filter((k) => k.startsWith("nulo:core:profile-tombstones@"))
+		expect(tombKeys).toContain(`nulo:core:profile-tombstones@${orphan.id}`)
+
+		// Next boot: the tombstone loop re-purges idempotently, then releases.
+		const { service: boot3 } = await makeServiceFromExistingApi(api)
+		const boot3Purges: string[] = []
+		boot3.setDeletionDelegate({
+			snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }),
+			runFor: async (id: string) => {
+				boot3Purges.push(id)
+			},
+		})
+		await boot3.resumePendingDeletions(Date.now())
+		expect(boot3Purges).toContain(orphan.id)
+		const tombKeysAfter = Object.keys(await api.storage.local.get()).filter((k) => k.startsWith("nulo:core:profile-tombstones@"))
+		expect(tombKeysAfter).not.toContain(`nulo:core:profile-tombstones@${orphan.id}`)
+		// Fully settled: a fresh delete lifecycle still works end-to-end.
+		const q = await boot3.createProfile("B", "password123")
+		await boot3.deleteProfile(q.id)
+		expect((await boot3.getProfiles()).map((p) => p.id)).not.toContain(q.id)
+	}, 30_000)
+
 	test("a finalize that lands BEFORE the reap wins: the marker guard refuses the delete (finalized profile survives)", async () => {
 		const { api, service: boot1 } = await makeService()
 		const orphan = await tornRestore(boot1)
