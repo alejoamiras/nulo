@@ -6,3 +6,9 @@
 - **bb.js jsdom limitation hit exactly as documented:** the new `account-seed-vectors.test.ts` (poseidon2HashWithSeparator) crashed with `BBApiException: std::bad_cast` when the extension vitest project globbed it — the SAME limitation the config's exclude list already documents for `derivation-vectors.test.ts`. Fix: added it to the existing exclude block; it runs in aztec-runtime's own node-env suite via `test:all`. Root `bun run test` = the extension project only; `test:all` is the aggregate that exercises package-native envs — the gate runs both.
 - **Regime record deliberately NOT touched** (final-codex M3): the freeze flips in P3 when the full v2 chain is live. Current intra-arc state (v2 separators live, master path still raw-entropy) is the documented transitional state.
 - Gate: `bun run lint` (exit 0, pre-existing warnings only), `bun run typecheck:all` (exit 0), `bun run test` (4373 passed), `bun run test:all` (exit 0, all packages).
+
+## Crypto adversarial rider — consult 1 (post-P1, blocking gate)
+
+- **Codex xhigh on commit 8a5bec4f. Verdict: `pass` — zero High, zero Medium.** Codex independently recomputed every reference vector in Python (PBKDF2 rows, separators, master reduction, signing KATs) and confirmed byte-for-byte; found no derivation divergence, no keyspace narrowing (~253.6-bit Fr/Fq floor holds), confirmed lowercase canonicalization is safe for the ASCII wordlist (locale-independent), and confirmed AAD omission is NOT a strip attack (AAD-sealed ciphertext fails decryption without it — pinned by test).
+- Two Low findings, both fixed in the follow-up commit: (1) zeroize the intermediate `Buffer.from(seed64)` copy + the passphrase-bearing salt allocation in `mnemonic-master.ts` (defense-in-depth; strings/CryptoKey/Fr internals stay GC-managed — passkey-path posture); (2) stale "v1"/IVSK_M wording in key-vectors.test.ts file-level docs.
+- wallet-crypto suite re-run green (48 passed) after the zeroize fix.
