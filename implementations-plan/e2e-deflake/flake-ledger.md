@@ -398,9 +398,10 @@ stage bound (up to 6 sequential 60s RPC ceilings); the activation/recovery seam 
 aggregate bound; `restoring:account-state` rendered in 0/30 imports. Verdicts: phase-4
 codex `conditional approve` (conditions applied — session `01a01661`), on top of the
 arc's three-leg plan audit. Reachability note (arc code-review): the labeled-trajectory
-lapse diagnostic surfaces where the caller's TEST budget exceeds the 300s wait — the
-900s network callers; the smoke callers' 90s test budgets kill the runner first
-(a pre-existing budget inversion, unchanged by this arc). Evidence:
+lapse diagnostic surfaces where the caller's TEST budget leaves ≥ ~310s (the 300s wait
++ the 10s-bounded post-settle read) — the 900s network callers; the smoke callers' 90s
+test budgets kill the runner first (a pre-existing budget inversion, unchanged by this
+arc). Evidence:
 `implementations-plan/import-stage-deadlines/{envelopes.md,lessons/phase-2.md}`.
 
 ### OPEN
@@ -498,8 +499,34 @@ lapse diagnostic surfaces where the caller's TEST budget exceeds the 300s wait �
   delete fails to the torn backstop until offscreen restart. Behavior pinned
   as-is in the fence-fix PR; full treatment belongs to the ledgered
   transport-hardening follow-up (fable fresh-audit find).
-- **e2e consoleErrors capture cannot see app `console.*`.** Across all round-4
-  runs, the popup's own console.error calls never reached the CDP console stream
-  the fixture captures (browser-emitted entries arrive; console-API calls from
-  the extension page do not) — consoleErrors-based assertions are weaker than
-  they look. Diagnosed in `lessons/phase-1.md` run 7; needs its own infra arc.
+### CLOSED (by later arcs)
+
+- **e2e consoleErrors capture cannot see app `console.*` — CLOSED
+  (import-stage-deadlines arc, 2026-08-18): root-caused, PERMANENT BY
+  DESIGN.** The mechanism (probe-verified, `_probe-console-capture.test.ts`
+  under `NULO_E2E_CONSOLE_PROBE=1`): `utils/console-sniffer.ts` — the first
+  module script in the popup/onboarding/offscreen entry pages (the setup
+  page carries no sniffer) — monkeypatches `console.*` and
+  reroutes calls over LoggerService RPC to the SW realm; the native page
+  console never fires on the success path, so CDP's `consoleAPICalled`
+  never emits and `page.on("console")` structurally cannot see app console
+  output. Browser-emitted entries (Chrome's own bindings hold a pre-patch
+  console reference) bypass the patch — exactly the observed asymmetry.
+  This is the product's deliberate centralized SW-owned logging; no fixture
+  wiring bug exists (listener-before-navigation, correct targets, no
+  iframes — all verified). Accepted residuals, permanently documented:
+  (1) an error the app CATCHES and merely logs is invisible to BOTH fixture
+  arrays (`consoleErrors` AND `pageErrors` — it DOES reach the SW log ring)
+  — `pageerror` reliably captures only uncaught throws + unhandled
+  rejections (both probe-verified); (2) `readSwLogTrail` (the SW's
+  session-storage ring) is the app-log evidence channel but is delayed
+  (2s flush debounce) + bounded, not lossless; (3) the sniffer's pre-wire
+  `pendingLogs` buffer flushes through whichever console method FIRST fires
+  post-wiring — early entries can replay at the wrong severity, and are
+  lost entirely if wiring never completes; (4) approval sub-windows
+  (`fixtures/popups.ts` `waitForPopup`) carry no console/pageerror
+  listeners at all (recorded, deferred); (5) the one deliberate pre-sniffer
+  script (`theme-boot.js`, render-blocking pre-paint) is console-free and
+  the probe pins it stays that way. Fixture comment blocks + the
+  e2e-testing skill carry the same truth. Evidence:
+  `implementations-plan/import-stage-deadlines/lessons/phase-5.md`.

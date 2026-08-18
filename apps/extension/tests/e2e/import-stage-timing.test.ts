@@ -158,6 +158,18 @@ describe("formatTrajectoryDiagnostic", () => {
 		expect(msg).toContain("activation didn't")
 	})
 
+	test("a stale baseline terminal with zero transitions never labels the attempt failed", () => {
+		// The fence at the label layer: baseline "failed" (prior attempt), no
+		// post-baseline transitions, DOM still showing "failed" — the headline
+		// must stay generic, not "IMPORT FAILED" (codex post-impl round 1).
+		const msg = formatTrajectoryDiagnostic(
+			makeFinal([{ stage: "failed", tMs: 0, baseline: true }], { hash: "#/popup/import", stage: "failed" }),
+			SUCCESS_HASH,
+		)
+		expect(msg).not.toContain("IMPORT FAILED")
+		expect(msg).toContain("never observed")
+	})
+
 	test("unobserved stages are named in the message", () => {
 		const msg = formatTrajectoryDiagnostic(
 			makeFinal(

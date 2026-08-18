@@ -93,12 +93,17 @@ test.skipIf(!PROBE_ENABLED)("uncaught throw and unhandled rejection each reach p
 	ctx.pageErrors.length = 0
 })
 
-test.skipIf(!PROBE_ENABLED)("built popup HTML keeps the sniffer script before the entry script", () => {
+test.skipIf(!PROBE_ENABLED)("built popup HTML keeps the sniffer before every app script", () => {
 	const html = readFileSync(path.join(EXTENSION_PATH, "src/popup/index.html"), "utf8")
 	const scripts = [...html.matchAll(/<script\b[^>]*src="([^"]+)"[^>]*>/g)].map((m) => m[1])
 	const snifferIdx = scripts.findIndex((s) => /sniffer/i.test(s))
-	const entryIdx = scripts.findIndex((s) => !/sniffer/i.test(s))
+	// The ONE deliberate pre-sniffer script is the render-blocking theme boot
+	// (source HTML documents it; it must not regress into a console caller —
+	// anything it logged would hit the native console pre-patch).
+	const appIdx = scripts.findIndex((s) => !/sniffer|theme-boot/i.test(s))
 	expect(snifferIdx, `no sniffer script found in built HTML — scripts: ${JSON.stringify(scripts)}`).toBeGreaterThanOrEqual(0)
-	expect(entryIdx, `no entry script found in built HTML — scripts: ${JSON.stringify(scripts)}`).toBeGreaterThanOrEqual(0)
-	expect(snifferIdx, `sniffer must precede the entry script — scripts in order: ${JSON.stringify(scripts)}`).toBeLessThan(entryIdx)
+	expect(appIdx, `no app script found in built HTML — scripts: ${JSON.stringify(scripts)}`).toBeGreaterThanOrEqual(0)
+	expect(snifferIdx, `sniffer must precede every app script — order: ${JSON.stringify(scripts.slice(0, 5))}…`).toBeLessThan(appIdx)
+	const themeBoot = readFileSync(path.join(EXTENSION_PATH, "theme-boot.js"), "utf8")
+	expect(themeBoot.includes("console."), "theme-boot (the one pre-sniffer script) must stay console-free").toBe(false)
 })

@@ -173,8 +173,10 @@ knob; **300_000 hardcoded** as the only import success-wait ceiling.
    test at `tests/e2e/import-stage-timing.test.ts` — picked up by the SMOKE
    config's `tests/e2e/*.test.ts` glob, no browser launch, no config change.
    Covers: disabled ⇒ no writes; coalesced stages reported unobserved;
-   censoring math; non-timeout errors keep their identity (formatter is
-   TIMEOUT-only via `withTimeoutMessage` semantics).
+   censoring math; stale-baseline label fence. (Non-timeout error-identity
+   preservation is `withTimeoutMessage`'s own contract in
+   `fixtures/extension.ts` — verified by the post-impl audit reading the
+   implementation, NOT pinned by these pure tests.)
 
 ### B1 measurement campaign (Phases 2–3)
 
@@ -258,8 +260,10 @@ export async function importFullBackup(page, filePath, password, shell,
 - Plan artifacts: `plan.md`, `recon.md`, `audit-codex.md`, `audit-fable.md`,
   `envelopes.md`, `certification.md`, `lessons/`.
 - NOT touched: ALL product code; the crash file's raw stage reads;
-  RestoreGate; every `consoleErrors` assertion; every numeric timeout
-  (mechanical gate proves it).
+  RestoreGate; every `consoleErrors` assertion; every EXISTING numeric
+  timeout (mechanical gate proves none increased; the code-review F1 fix
+  later added ONE new 10s bound on a NEW post-settle diagnostic read —
+  recorded in `certification.md`'s post-review refresh).
 
 ### Non-obvious mechanics
 
@@ -440,7 +444,15 @@ written.
 **Gate**: `bun run lint` exit 0; codex verdict recorded in `audit-codex.md`.
 Layers: lint + docs review.
 
-### Phase 5 — B2 probe + documentation landing
+### Phase 5 ✓ — B2 probe + documentation landing
+
+> GATE PASSED 2026-08-18: probe 3/3 green (nonce absent page-side + present
+> in the SW ring past the 2s debounce; throw + rejection each in pageerror;
+> built-HTML sniffer-before-app order + console-free theme-boot belt) —
+> evidence quoted in `lessons/phase-5.md`; both fixture comment copies
+> upgraded; consoleErrors ledger entry CLOSED permanent-by-design with five
+> residuals; lint 0 / typecheck 0; full armed smoke 27 files / 111 tests
+> EXIT:0.
 
 Three-channel probe (console nonce ABSENT page-side, PRESENT in
 `readSwLogTrail` polled past the 2s debounce; throw + rejection each in
@@ -452,7 +464,13 @@ residuals.
 typecheck` exit 0; `bun run test:e2e` full smoke green. Layers:
 lint/typecheck + smoke e2e.
 
-### Phase 6 — Certification (3× solo) + mechanical timeout gate + wrap
+### Phase 6 ✓ — Certification (3× solo) + mechanical timeout gate + wrap
+
+> GATE PASSED 2026-08-18: 3× consecutive solo proverless runs — 3 files /
+> 8 tests each, all attempt-1, zero retries (retry=0), zero exit-86, frozen
+> tree; mechanical no-timeout-change record clean (300_000 sole ceiling,
+> unchanged). Full record: `certification.md`. Fast layers at stack top:
+> lint 0 / typecheck 0 / `bun run test` in the delivery checks below.
 
 3× consecutive solo `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run
 e2e:agent tests/e2e/network/backup-restore-sw-restart.test.ts

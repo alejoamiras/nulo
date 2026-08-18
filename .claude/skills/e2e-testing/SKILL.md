@@ -448,14 +448,16 @@ assuming "transient".
 - **The e2e consoleErrors capture cannot see app `console.*`** (popup-side
   console API calls never reach the fixture's CDP stream; browser-emitted
   entries do) — consoleErrors-based assertions are weaker than they look.
-  Ledgered as an OPEN infra item; prefer DOM/storage/stage evidence surfaces.
+  Since root-caused and CLOSED permanent-by-design — see the
+  Import-stage-deadlines lessons below for the mechanism + channels.
 
 
 ## Import-stage-deadlines lessons (2026-08-18, `implementations-plan/import-stage-deadlines/`)
 
 - **`consoleErrors` is structurally blind to app `console.*` — permanent, by
-  product design.** The console-sniffer (first module script in every
-  extension page) reroutes `console.*` over LoggerService RPC to the SW
+  product design.** The console-sniffer (first module script in the popup/
+  onboarding/offscreen entry pages; the setup page carries none) reroutes
+  `console.*` over LoggerService RPC to the SW
   realm; the native page console never fires on the success path, so
   `page.on("console")` sees only BROWSER-emitted entries (Chrome's bindings
   hold a pre-patch reference). Never "fix" a test by hunting page console
@@ -464,7 +466,8 @@ assuming "transient".
   `pageerror` for uncaught throws + unhandled rejections; `readSwLogTrail`
   (`fixtures/journal.ts`) for app logs — delayed 2s (flush debounce) and
   bounded, so POLL past the debounce. Residual: an error the app catches and
-  merely logs is invisible on BOTH channels — assert on DOM/storage/stage
+  merely logs is invisible to BOTH fixture arrays (`consoleErrors` AND
+  `pageErrors`; it does reach the SW log ring) — assert on DOM/storage/stage
   evidence instead. Full residual list: the flake-ledger's closed
   consoleErrors entry.
 - **Observe stage markers with a pre-armed MutationObserver + ONE final
