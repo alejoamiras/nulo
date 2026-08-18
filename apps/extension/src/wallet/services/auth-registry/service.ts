@@ -8,7 +8,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
@@ -421,6 +421,13 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				authwits,
 				(authwit) => this.authwits.delete(`${authwit.id}`),
 				(authwit) => this.emit("onAuthwitDeleted", authwit),
+			)
+			// F-B23: raw second pass — a validation-failed row for a purged account
+			// is invisible to getValues() and would otherwise survive forever.
+			await purgeMalformedRows(
+				this.authwits,
+				(raw) => typeof raw.account === "string" && set.has(raw.account),
+				(id) => this.logDebug(`purged malformed authwit row ${id}`),
 			)
 			for (const addr of set) {
 				if (await this.statuses.contains(addr)) await this.statuses.delete(addr)

@@ -220,6 +220,29 @@ describe("ContactService (port-migrated)", () => {
 			profile.setActiveProfile(profileB)
 			expect(await contactService.getContacts()).toHaveLength(1)
 		})
+
+		test("(F-B23) a MALFORMED row owned by the purged profile is removed by the raw second pass", async () => {
+			await contactService.addContact("Alice", "0xa")
+			// A validation-failed row (B-23 retain: hidden from reads, kept on
+			// disk). The typed purge pass can't see it — pre-fix it survived the
+			// privacy-erasing profile purge forever.
+			await api.storage.local.set({
+				"nulo:core:contacts@zz-malformed": JSON.stringify({ profileId: profileA.id, broken: true }),
+			})
+			// Another profile's malformed row must NOT be touched.
+			await api.storage.local.set({
+				"nulo:core:contacts@zz-other": JSON.stringify({ profileId: profileB.id, broken: true }),
+			})
+			// A JSON-syntax-broken row is unattributable — fail-closed, left alone.
+			await api.storage.local.set({ "nulo:core:contacts@zz-syntax": "{not json" })
+
+			await contactService.purgeForProfile(profileA.id)
+
+			const raw = await api.storage.local.get(null)
+			expect(raw["nulo:core:contacts@zz-malformed"]).toBeUndefined() // purged with its profile
+			expect(raw["nulo:core:contacts@zz-other"]).toBeDefined() // other profile: untouched
+			expect(raw["nulo:core:contacts@zz-syntax"]).toBeDefined() // unattributable: fail-closed
+		})
 	})
 
 	describe("backup/restore", () => {

@@ -7,7 +7,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys, KeyedLock, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -320,6 +320,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			accounts,
 			(account) => this.storage.delete(accountRowIdOf(account)),
 			() => {},
+		)
+		// F-B23: raw second pass — a validation-failed row this profile owns is
+		// invisible to liveRows() and would otherwise survive the purge forever.
+		await purgeMalformedRows(
+			this.storage,
+			(raw) => raw.profileId === profileId,
+			(id) => this.logDebug(`purged malformed account row ${id}`),
 		)
 	}
 

@@ -14,7 +14,7 @@ import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
@@ -721,6 +721,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			// that reuses the highest token id (audit H3).
 			await this._deleteTokenById(token.id, false)
 		}
+		// F-B23: raw second pass — a validation-failed row this profile owns is
+		// invisible to getValues() and would otherwise survive the purge forever.
+		await purgeMalformedRows(
+			this.tokens,
+			(raw) => raw.profileId === profileId,
+			(id) => this.logDebug(`purged malformed token row ${id}`),
+		)
 	}
 
 	public async backup(): Promise<Token[]> {

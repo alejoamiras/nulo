@@ -1,0 +1,21 @@
+# Arc 3 — fix-storage-row-repair (F-B23: purge-blind malformed rows)
+
+[light] tier of the 2026-08-16 remediation follow-ups ([spec](../remediation-followups/plan.md)). Recon-first; single codex audit; prove-first. Validation: repo gates + `audit:vue` + **armed smoke** + **SOLO proverless network e2e**.
+
+## Recon verdict (against `dev@52c065a7`) — the arc REDIRECTS to purge-blindness; the sweep subsystem is REJECTED
+
+1. **Repair-on-next-write already exists.** `EntityStorage.set(id, v)` is a whole-key overwrite of the malformed raw — shipped, pinned (`entity_storage.test.ts:151` "(B-23) a valid write to a key survives a prior malformed read"). Roughly half the stores self-repair through it (account's deterministic `accountRowIdOf` + `ensureDefaultAccount` recreate; activity-protocol mints-on-miss under its KeyedLock; transaction's `addTx` guards with `get` not `contains` and overwrites; auth-registry's values-derived cursor collides onto and overwrites the malformed key). The remaining "immortal" stores are random/cursor-id stores where immortality costs one wasted id.
+2. **No producer exists on current dev.** Every restore path `Schema.parse`s BEFORE writing (hostile backups yield `restoreError` rows, never stored malformed rows); pre-production no-migration rule means no version skew for users; `JSON.parse` failures require chrome/LevelDB corruption or a raw non-string write (zero key collisions repo-wide). The realistic future producer (a degraded post-production migration) doesn't exist yet.
+3. **The one durable harm: profile-purge blindness.** `deleteProfile` is contractually privacy-erasing (finding D), but **7 of 9** `purgeForProfile` paths enumerate through the codec (`getValues()`/`liveRows()`/`_loadAllValidated()`), so a malformed row with `profileId = <deleted>` survives the purge permanently — a data-retention leak. **Two paths already solved this**: dapp-session's `mac-storage.ts:75-83` (`rawEntries()` second pass, with a doc comment naming exactly this hazard) and incoming-transfer's `deleteKeysWhere` (`repository.ts:190-200`, "survives a row that failed codec validation … where a value-predicate sweep would silently skip it"). This is also exactly what arc 6 deferred (`fix-ui-storage/plan.md:31`: "so a profile purge iterating liveRows() also removes malformed rows — separate follow-up work").
+
+## Decisions
+
+- **REJECT (documented deviation): the boot/sweep repair subsystem (R2).** No producer, no consumer harm beyond purge-blindness, re-introduces the delete-vs-concurrent-write class B-23 retired for stores without a service-wide write lock, and both prior plan auditors already flagged auto-repair of undecodable rows as unsafe (tombstone doctrine). Repair-on-next-write is a property `set()` already has, not a thing to build.
+- **SHIP (the fix): R1 — malformed-aware profile purges.** Extend the codec-blind `purgeForProfile` paths with a raw second pass matching the raw row's `profileId`, deleting by TRUE storage id, inside each service's existing serialized purge context — adopting the two shipped patterns (ANTI-OVERENGINEERING: adopt, don't invent; if ≥3 sites share the identical raw-pass shape, hoist it next to the existing shared `purgeRows` helper). JSON-syntax-broken rows in stores whose keys don't carry the profileId are **unattributable by construction** — accepted + logged (fail-closed; never delete what can't be attributed).
+- **Doc-drift fixes** (assert removed behavior; mislead the next reader): `storage-codecs.test.ts:6` header ("JSON-SYNTAX failure → row dropped" — false since B-23) and `tombstone-repository.ts:29-32` ("decodeRow … asynchronously REMOVES a syntax-invalid row" — false since B-23; the raw-key rationale stays, the justification updates).
+
+## Prove-first
+RED per adopted store: seed a valid profile-bearing dataset + one validation-malformed row for the same profile (raw write), run `purgeForProfile(profileId)`, assert TODAY the malformed raw KEY survives (RED), post-fix it is gone; plus a guard pin that another profile's malformed row is NOT touched, and an unattributable syntax-broken row is left (fail-closed) where applicable.
+
+## Codex audit (single, light tier) over complete arc diff — bounded (initial + max 2 resumes)
+_pending._

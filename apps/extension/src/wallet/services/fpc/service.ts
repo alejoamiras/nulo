@@ -6,7 +6,7 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -409,6 +409,13 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					return this.storage.delete(fpc.id)
 				},
 				(fpc) => this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(fpc.chainId))),
+			)
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed fpc row ${id}`),
 			)
 		})
 	}

@@ -26,12 +26,14 @@ export type Tombstone = z.infer<typeof TombstoneSchema>
 /**
  * Durable delete-in-progress markers over RAW `storage.local`.
  *
- * Deliberately NOT an `EntityStorage`: its `getValues()`/`get()` call `decodeRow`,
- * which asynchronously REMOVES a syntax-invalid row — so a truncated/corrupt
- * tombstone would vanish and its id would stop being reserved (id-reuse fails
- * OPEN → successor-clobber). This repo NEVER removes a row it can't decode:
- * `reservedIds()` derives ids from RAW keys (no decode), so a corrupt tombstone
- * still reserves its id; only `validPayloads()` (valid rows) drive cleanup.
+ * Deliberately NOT an `EntityStorage`: a corrupt tombstone must still RESERVE
+ * its id, and `EntityStorage`'s codec-filtered reads (`getValues()`/`get()`)
+ * hide an undecodable row — its id would stop being reserved (id-reuse fails
+ * OPEN → successor-clobber). (Historically `decodeRow` also deleted such rows;
+ * B-23 removed that, but the hiding alone still disqualifies it here.) This
+ * repo NEVER removes a row it can't decode: `reservedIds()` derives ids from
+ * RAW keys (no decode), so a corrupt tombstone still reserves its id; only
+ * `validPayloads()` (valid rows) drive cleanup.
  */
 export class TombstoneRepository {
 	public constructor(private readonly storage: StorageArea) {}

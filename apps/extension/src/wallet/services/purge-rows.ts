@@ -24,3 +24,33 @@ export async function purgeRows<T>(rows: readonly T[], remove: (row: T) => Promi
 		emitDeleted(row)
 	}
 }
+
+/**
+ * F-B23: the raw SECOND pass of a lifecycle purge. The typed pass above
+ * enumerates through the codec (`getValues()`/`getAll()`), which KEEPS-but-hides
+ * a validation-failed row — so a malformed row belonging to the purged
+ * profile/account would survive the privacy-erasing delete forever. This pass
+ * lists RAW entries (no codec), matches the predicate on the raw parsed object,
+ * and deletes by the TRUE storage id. Run it AFTER the typed pass, inside the
+ * SAME lock hold: everything still matching is a row the codec could not see
+ * (or an aliased copy) — deleted silently, no events (it was never visible to
+ * consumers). JSON-syntax-broken rows are skipped by `rawEntries()` itself
+ * (no readable predicate field) — unattributable by construction, fail-closed.
+ * Pattern lifted from `dapp-session/mac-storage.rowsForProfile` and
+ * `incoming-transfer/repository.deleteKeysWhere`.
+ */
+export async function purgeMalformedRows(
+	storage: { rawEntries(): Promise<Array<[string, unknown]>>; delete(id: string): Promise<void> },
+	matchesRaw: (raw: Record<string, unknown>) => boolean,
+	onPurged?: (storageId: string) => void,
+): Promise<number> {
+	let purged = 0
+	for (const [storageId, raw] of await storage.rawEntries()) {
+		if (typeof raw !== "object" || raw === null) continue
+		if (!matchesRaw(raw as Record<string, unknown>)) continue
+		await storage.delete(storageId)
+		onPurged?.(storageId)
+		purged++
+	}
+	return purged
+}
