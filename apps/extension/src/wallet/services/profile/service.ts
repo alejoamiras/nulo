@@ -301,9 +301,12 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		const entropy = crypto.getRandomValues(new Uint8Array(32)) as Uint8Array<ArrayBuffer>
 		const words = await getMnemonic(entropy)
 		const secret = await deriveMasterFromMnemonic(words)
-		const { passhash, encrypted } = await this.secretBox.seal(password, secret, entropy)
-		const envelopeMac = await computeEnvelopeMac(secret, this.macEnvelope(encrypted))
+		let passhash: Passhash | undefined
 		try {
+			const sealed = await this.secretBox.seal(password, secret, entropy)
+			passhash = sealed.passhash
+			const encrypted = sealed.encrypted
+			const envelopeMac = await computeEnvelopeMac(secret, this.macEnvelope(encrypted))
 			return await this.runExclusive(async () => {
 				const id = await this.nextUnreservedId()
 
@@ -731,10 +734,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// password is persisted. If the check throws (address drift), nothing is committed and
 			// the RPC failure is honest — the password is NOT durably changed under a reported
 			// failure. `reseal` returns passhash + ciphertext but not the raw secret.
-			const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
-			const secret = unsealed?.secret ?? null
-			const entropy = unsealed?.entropy ?? null
+			let secret: MasterSecretBytes | null = null
+			let entropy: Uint8Array<ArrayBuffer> | null = null
 			try {
+				// Inside the try so a throw in the unseal still hits the finally that wipes
+				// resealed.passhash (memory hygiene — P3 rider Low).
+				const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
+				secret = unsealed?.secret ?? null
+				entropy = unsealed?.entropy ?? null
 				if (secret && entropy) {
 					// Pairing check BEFORE the reseal is committed (P3 rider High): a change-password
 					// on a transplanted-entropy row must NOT launder the mismatch into a MAC-valid
@@ -1874,11 +1881,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!unsealed) {
 					throw new InvalidPasswordError()
 				}
-				// Pairing check before the session opens (P3 rider): a tamper between restore()
-				// and finalize must not open a session whose recovery phrase is a lie.
-				await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
-				const passhash = await EncryptionKey.getPasshash(password)
+				let passhash: Passhash | undefined
 				try {
+					// Pairing check before the session opens (P3 rider): a tamper between restore()
+					// and finalize must not open a session whose recovery phrase is a lie. Inside
+					// the try so a pairing throw still wipes the unsealed buffers (rider Low).
+					await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
+					passhash = await EncryptionKey.getPasshash(password)
 					await this.openSessionVerified(profile, unsealed.secret, passhash)
 					return this.getProfileInfo(profile)
 				} finally {

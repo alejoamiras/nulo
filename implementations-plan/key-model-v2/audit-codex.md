@@ -126,3 +126,14 @@ fail (blocking findings: same-password cross-profile transplants can bypass or l
 - Exceptional-path zeroization is incomplete: locally derived passhashes can escape wiping when sealing/resealing throws ([password-secret-box.ts:94](<packages/wallet-crypto/src/password-secret-box.ts:94>), [password-secret-box.ts:167](<packages/wallet-crypto/src/password-secret-box.ts:167>)); create/restore/finalize also establish `finally` blocks after sensitive allocations. No plaintext logging was found.
 
 The KDF spec/digest/KATs otherwise match, with a ~253.5967-bit floor. Zero-salt HKDF is sound; MAC-field tampering only forces re-unlock. Restore validation precedes writes, and password reseal persists one atomic JSON row. A whole coherent quadruple transplant is intentionally indistinguishable without profile-ID binding; existing account rows normally catch it.
+### P3 rider re-verdict (resumed session, on the transplant fixes)
+
+pass
+
+No surviving High. The envelope MAC and pairing checks are complementary, not conflicting: the bearer master authenticates the exact ciphertext envelope, while pairing authenticates its decrypted semantics. Single-slot and mixed-field transplants fail one or both checks; reseal cannot launder them before persistence.
+
+Low — service-level exceptional cleanup remains incomplete. In `finalizeRestore`, a pairing failure occurs before the cleanup `try/finally`, leaving both unsealed buffers unwiped ([service.ts:1879](<apps/extension/src/wallet/services/profile/service.ts:1879>)). Likewise, `createProfile` computes the envelope MAC before its cleanup block, and `changeProfilePassword` calls `unsealWithPasshash` before entering its cleanup block. These are defense-in-depth memory-hygiene issues, not cryptographic bypasses.
+
+The e2e fixture Medium can remain Phase-4 scope, but it blocks Phase 4’s `test:e2e` completion—not Phase 4’s start.
+
+Whole coherent quadruple transplant remains acceptable: an existing A bearer rejects B’s envelope via the master-keyed MAC; password unlock reaches account-integrity verification. If there are no derived accounts—or all dependent state is coherently replaced—the substitution is intentionally indistinguishable without profile-ID binding. ProfileId-AAD specifically prevents transplanting B’s bearer too.
