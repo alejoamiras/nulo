@@ -255,7 +255,7 @@ Settled by owner in-conversation (recorded): 24-word-only import; Nulo-format-on
 
 ## Seeds (DRAFT — finalized after approval; run inside this worktree)
 
-ELI5 Artifact: (URL recorded here at publish; source `eli5.html` in this dir.)
+ELI5 Artifact: https://claude.ai/code/artifact/a550115a-bcf7-40df-af37-2b0c9f600068 (source: `eli5.html` in this dir — redeploying that file from the publishing session keeps this URL).
 
 ### Recommended: /goal
 ```
