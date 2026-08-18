@@ -180,14 +180,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	// it that way so this stays byte-for-byte equivalent (Q-08 audit).
 	private readonly tupleLocks = new KeyedLock({ maxHoldMs: null })
 	private serializePerTuple<T>(profileId: string, chainId: number, type: AccountType, op: () => Promise<T>): Promise<T> {
-		const next = this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
-		// (BUG PIN) Preserve the prior hand-rolled chain's `void next.finally(...)`
-		// branch VERBATIM: when `op` rejects, this un-awaited derived promise
-		// re-raises and surfaces as an `unhandledrejection` (the sibling FIFO catch
-		// doesn't cover it). Repo bug-pinning rule — a zero-delta dedup keeps the
-		// behavior; removing the emission is a behavior fix tracked as a follow-up.
-		void next.finally(() => {})
-		return next
+		return this.tupleLocks.withLock(`${profileId}:${chainId}:${type}`, op)
 	}
 
 	public async changeAccountName(profileId: string, chainId: number, address: string, name: string): Promise<Account | undefined> {
