@@ -411,3 +411,42 @@ assuming "transient".
   `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 minutes, and the
   base branch's protection config — because two arcs have now destroyed that state by
   remedying immediately, and the round-2 blocks remain unexplained.
+
+## Deflake-round-4 lessons (2026-08-18, `implementations-plan/deflake-round-4/`)
+
+- **Deterministic kill anchoring: the RestoreGate rendezvous.** "Kill the SW
+  mid-restore" is only a real test if the kill provably lands while a restore
+  RPC is in flight at a KNOWN phase. The pattern (sibling of the proof gate):
+  a `chrome.storage.session` record armed by the test (`{at}`), ACKNOWLEDGED
+  by the SW-side handler (`{at, held:true}`), and only then killed — "armed"
+  must never be mistaken for "reached". The gate's own safety timer dies with
+  the killed worker, so the TEST's `finally` owns cleanup; the armed record
+  survives in session storage and will re-park the next import if left behind.
+- **A PR with ABSENT (not red) Actions is a mergeability symptom.** GitHub
+  builds no merge ref for a CONFLICTING PR and therefore runs no
+  `pull_request` workflows at all — zero check-runs, no failure anywhere.
+  Check `gh pr view --json mergeable,mergeStateStatus` before debugging CI.
+- **Terminal predicates over pages that can navigate must count
+  "already-routed" as terminal.** A clean import flips its stage attribute and
+  auto-routes between two polls; the attribute unmounts with the page, so a
+  predicate watching only in-page state starves against a COMPLETED flow
+  (`stage=<unbound>` in the diagnostics = the page moved on).
+- **Guard variables rot silently — grep the runner.** Two agent-contract
+  tests checked an env var NOTHING sets (`NULO_E2E_REQUIRE_CONFIG` vs the
+  runner's actual `E2E_REQUIRE_SETUP=1`) and were inert across seven evidence
+  runs. When copying a guard pattern, grep the runner/script for the exact
+  variable name it exports.
+- **De-vacuize failure-path pins.** A rejection mock proves nothing unless
+  the test also proves the mocked call RAN (`toHaveBeenCalled`) — a fixture
+  missing the slice that routes execution to the mock makes every assert pass
+  trivially. Both review lenses independently caught the same vacuous pin.
+- **`@requires-proverless` marks gate-dependent files.** The agent runner
+  refuses prover-ON invocations of marked files pre-build (exit 2) instead of
+  letting them hang at a held-wait for minutes. Any test whose mechanism is
+  compiled out of prover-ON builds needs the marker; keep a prover-capable
+  sibling file carrying the surface's prover-ON coverage.
+- **The e2e consoleErrors capture cannot see app `console.*`** (popup-side
+  console API calls never reach the fixture's CDP stream; browser-emitted
+  entries do) — consoleErrors-based assertions are weaker than they look.
+  Ledgered as an OPEN infra item; prefer DOM/storage/stage evidence surfaces.
+

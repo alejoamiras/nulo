@@ -370,6 +370,14 @@ flat at `"progress"` for the whole leg). It is therefore carried as an OPEN item
 design already settled, rather than half-done under time pressure. **Trigger:** the next
 time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
 
+**deflake-round-4 disposition (2026-08-18): the OBSERVABILITY HALF SHIPPED** — `restoreStage`
+now advances at real stage boundaries (`useFullBackupImport`, exposed as
+`data-restore-stage`, incl. the rollback fork), which is exactly the "expose a restoreStage
+ref" precondition this entry's settled design was waiting on. The per-stage envelope
+measurement + stage-scoped deadlines remain UNDONE (diagnostics-only today; the unchanged
+300s stays the sole failure criterion) — the design's remaining half re-arms on this
+entry's original trigger, now with the stage data to measure against.
+
 ### OPEN
 
 - **`wallet-locked-mid-session` — "Expected no popup but 1 new popup target(s) appeared"
@@ -383,7 +391,11 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
   assuming either.
 
 
-- **Two network tests still use the primitive that does not kill.**
+- **Two network tests still use the primitive that does not kill — NOW ONE
+  (deflake-round-4): `backup-restore-sw-restart.test.ts` was rewritten on the real kill
+  (`worker().close()` + `targetdestroyed` identity) with a rendezvous-anchored kill phase,
+  and both its scenarios are green regression gates in the fix stack.
+  `frozen-account-canary.test.ts` stage 5 REMAINS on the fake primitive.**
   `network/frozen-account-canary.test.ts` (stage 5) and
   `network/backup-restore-sw-restart.test.ts` — the latter's entire premise is a
   mid-restore crash which therefore never happens. Converting them to `worker().close()`
@@ -413,9 +425,9 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
 
 ## deflake-round-4 (2026-08-18) — crash-truth findings
 
-### OPEN
+### CLOSED (by this arc's fix stack, PRs #400-#404)
 
-- **BUG-TRANSPORT — the designed crash rollback structurally cannot run.** After a
+- **BUG-TRANSPORT — FIXED (this arc's fix stack, PR #403): the designed crash rollback structurally could not run.** After a
   real mid-restore SW kill (rendezvous-anchored at `service-restore`, page alive),
   the import page's catch dispatches the rollback but `deleteProfile` is rejected
   <1s later with "Client disconnected": the messaging client flips to Connected on
@@ -425,11 +437,15 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
   across runs), so no worker existed to refuse the call — client-local transport
   rejection, 4x metronomic reproduction (sinceKill 811/798/784/799ms). Orphan
   profile + restore-pending marker survive; torn-unlock backstop holds (measured).
-  Evidence: deflake-round-4 `lessons/phase-1.md` runs 2-7. Skip anchor:
-  `network/backup-restore-sw-restart.test.ts` scenario A. **Fix arc in flight**
-  (deflake-round-4 `fix-plan.md`, PR-3: liveness-gated dispatch composing with
-  upstream's B-24 bounded rollback helper — the helper's retries run against a
-  live worker instead of burning into the respawn gap).
+  Evidence: deflake-round-4 `lessons/phase-1.md` runs 2-7. FIX (shipped in the
+  round-4 stack): the composable's catch classifies disconnect failures and
+  gates B-24's bounded rollback helper on the SW's own liveness signal
+  advancing (`utils/background-liveness.ts` — sole writer is the runtime,
+  written only after full service wiring), so the delete runs against a live
+  worker; a gate failure (ceiling or read) fails closed to cleanup-pending +
+  the torn-marker backstop. REGRESSION GATE: scenario A un-skipped —
+  first-ever end-to-end green 2026-08-18 (58.8s: kill at service-restore →
+  rolled-back → designed retry → on-chain convergence).
 - **BUG-FENCE — delete + same-id re-import left the wallet PXE-sync-dead:
   UPSTREAM-FIXED mid-arc; hardening follow-up in this stack.** The offscreen
   lifecycle map's `deleted(G1)` record made `assertGenerationCurrent` reject the
@@ -449,6 +465,8 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
   equality guard, readiness-once + already-ready-send authority-race closure
   (pre-existing concurrency HIGH #1 residual), and key zeroization.
   Evidence: deflake-round-4 `lessons/phase-1.md` runs 6-7.
+### OPEN
+
 - **Crash-before-provision delete refusal (edge, fails closed).** With the map at
   `deleted(G1)`, `clearProfileState(G2)` is REFUSED by the different-gen guard —
   a crash after a re-import mints G2 but before provisioning leaves a state whose

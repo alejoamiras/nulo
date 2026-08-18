@@ -1,9 +1,10 @@
 /**
- * Shared machinery for the crash-truth pair:
+ * Shared machinery for the crash-truth surface:
  * `network/backup-restore-sw-restart.test.ts` (mid-restore SW kill; proverless
- * rendezvous) and `network/pxe-fence-reimport.test.ts` (no-crash delete +
- * same-id re-import control; prover-capable). Extracted so the control file
- * never imports a test module and nothing is duplicated.
+ * rendezvous) and `network/profile-reimport-matrix.test.ts` (the no-crash
+ * delete + same-id re-import matrix, prover-capable — it imports
+ * `readProfileGen` for its generation pin). Extracted so no test file ever
+ * imports another test module and nothing is duplicated.
  */
 import type { Page } from "puppeteer"
 import { clickByTestId, openPopup, replaceInputValue, waitForHash, withTimeoutMessage, type ExtensionContext } from "../fixtures/extension"
@@ -11,11 +12,12 @@ import { getActiveProfileName, navigateByHash } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./backup-export"
 import { POPUP_IMPORT_SHELL, TEST_PASSWORD, setInputs, submitWhenEnabled, writeBackupToTemp } from "./import-drivers"
 
-// The rollback/delete budget is STRUCTURAL, not sampled: the page's catch
-// entry is bounded by the in-flight RPC's own 60s transport timeout, and
-// `deleteProfile` against a cold-booting worker carries its own 60s ceiling.
-// 60s + 60s + 30s margin. Shared: the reset ritual rides the same
-// deleteProfile purge.
+// The rollback/delete budget is STRUCTURAL, not sampled: the crash path's
+// worst case is the liveness gate's 60s ceiling followed by one deleteProfile
+// under its 60s transport ceiling, plus margin — 60 + 60 + 30. A
+// multi-pathology serialization (timeout-shaped catch entry + full ceiling +
+// repeated slow deletes) exceeds this deliberately: that state IS the stuck
+// tripwire. Shared: the reset ritual rides the same deleteProfile purge.
 export const ROLLBACK_BUDGET_MS = 150_000
 
 export async function readStage(page: Page): Promise<string> {

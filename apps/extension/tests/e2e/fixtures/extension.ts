@@ -164,6 +164,10 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		// account switch). Prod already treats it as benign (offscreen
 		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
+		// KNOWN BLIND SPOT (deflake-round-4 ledger): app-side `console.*` calls
+		// from extension pages never reach this CDP stream at all — only
+		// browser-emitted entries arrive — so consoleErrors assertions are
+		// weaker than they look; prefer DOM/storage/stage evidence surfaces.
 		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
@@ -1100,6 +1104,10 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		// account switch). Prod already treats it as benign (offscreen
 		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
+		// KNOWN BLIND SPOT (deflake-round-4 ledger): app-side `console.*` calls
+		// from extension pages never reach this CDP stream at all — only
+		// browser-emitted entries arrive — so consoleErrors assertions are
+		// weaker than they look; prefer DOM/storage/stage evidence surfaces.
 		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}

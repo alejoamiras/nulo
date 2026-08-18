@@ -118,3 +118,19 @@ comment + finished-stage assert); codex verified and APPROVED. The
 independent second-lens review (fable-role) converged on the same pin,
 verdicted conditional-approve, and its three Lows were folded (honest
 console-tap comment, skipIf-restoration notes, "across runs" qualifier).
+
+## 8. Collision consult + per-PR reviews (resumed; summary)
+
+- Upstream-collision re-scope: agree ×3 (adopt shipped fall-through fence;
+  PR-2 = hardening delta; PR-3 composes with B-24; control e2e dropped for the
+  upstream matrix + generation pin; PR-1-first rebase order) + the
+  BaseServiceClient-refactor warning that shaped the bypass re-implementation.
+- PR-2 review: reject (async ensureTransportReady reopened the microtask gap)
+  → void-signature fix + sync-send pin → **approve** ("PR-2 is merge-ready").
+- PR-3 review: conditional approve (4 conditions: baseline-read escape → one
+  fail-closed handler; poll-leg unhandled rejection → swallow + reschedule;
+  resolution-side cleanup pin; stale generated artifacts → moved into PR-3)
+  → all folded → **approve** ("PR-3 is merge-ready. The new pins are
+  substantive, and no new rollback, retry, or observer race was introduced.")
+- Net: PR-1, PR-2, PR-3 all codex-APPROVED; PR-4 is docs-only.
+

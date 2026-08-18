@@ -364,17 +364,17 @@ active /goal, merging each green+approved PR and `gh stack merge` at the top
 3. Iterative fix loop: verify claims against the repo → apply accepted fixes
    → commit → RESUME the same codex session with the fix diff → repeat until
    no new material findings (>3 rounds = surface and stop).
-4. Certification at stack top, frozen tree: 3× consecutive solo
-   `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run e2e:agent
-   tests/e2e/network/backup-restore-sw-restart.test.ts
-   tests/e2e/network/pxe-fence-reimport.test.ts` — attempt-1 green, zero
-   retries, zero exit-86; then ONE prover-ON pass
-   (`NULO_E2E_RETRY=0 bun run e2e:agent
-   tests/e2e/network/pxe-fence-reimport.test.ts`) — the control file IS the
-   goal's prover-ON leg: the crash file's rendezvous is proverless-only by
-   construction (statically tree-shaken; the runner refuses it prover-ON via
-   the marker), so the control carries the prover-ON coverage of the shipped
-   fixes.
+4. Certification at stack top, frozen tree (POST-COLLISION command set —
+   the control's role passed to upstream's matrix test, ledger row 14):
+   3× consecutive solo `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run
+   e2e:agent tests/e2e/network/backup-restore-sw-restart.test.ts
+   tests/e2e/network/profile-reimport-matrix.test.ts` — attempt-1 green,
+   zero retries, zero exit-86; then ONE prover-ON pass (`NULO_E2E_RETRY=0
+   bun run e2e:agent tests/e2e/network/profile-reimport-matrix.test.ts`) —
+   the matrix IS the goal's prover-ON leg: the crash file's rendezvous is
+   proverless-only by construction (statically tree-shaken; the runner
+   refuses it prover-ON via the marker), so the matrix carries the prover-ON
+   coverage of the shipped fixes.
 5. Mark PRs ready bottom-up; merge per authority; owner report (shipped /
    consults / decisions / open items).
 
