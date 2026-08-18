@@ -22,7 +22,8 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
 import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
-import { UserRejectedError } from "@nulo/extension-messaging/errors"
+import { isClientDisconnectRejection, RpcDisconnectedError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
 import type { PasskeyCredentialData } from "@nulo/wallet-crypto"
 import type { PasskeyRequest } from "@/wallet/services/passkey/spec"
 import {
@@ -66,6 +67,13 @@ export type RestoreStage =
 
 /** B-24: how many times to retry the compensating profile delete on rollback. */
 const ROLLBACK_MAX_ATTEMPTS = 3
+
+// Ceiling for the crash-rollback liveness gate. Structural, never the success
+// mechanism: the SW heartbeat re-writes liveness every 10s and a booting
+// worker writes immediately after full wiring, so a healthy respawn resolves
+// in seconds; 60s (the transport RPC ceiling) bounds the pathological case,
+// after which the rollback fails CLOSED to the cleanup-pending path.
+const LIVENESS_CEILING_MS = 60_000
 /** Shown when a partial import can't be rolled back — the profile row survives,
  *  so tell the user how to remove it rather than hiding the failure. */
 const CLEANUP_PENDING_MESSAGE =
@@ -820,7 +828,28 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// and never reaches here.
 			if (createdProfileId !== undefined && !finalizeStarted) {
 				restoreStage.value = "rolling-back"
-				if (await rollbackCreatedProfile(createdProfileId)) {
+				// A DISCONNECT-classified failure means the service worker died
+				// mid-restore (MV3 respawn gap): any delete issued now — including
+				// every bounded attempt below — rejects in milliseconds against
+				// doomed ports, before a worker exists to refuse it. Gate the
+				// rollback on the worker's own liveness signal advancing (written
+				// only after full service wiring, so the deletion coordinator is
+				// guaranteed registered); the ceiling fails CLOSED to the same
+				// cleanup-pending path, backed by the restore-pending marker's
+				// torn-unlock refusal. Non-disconnect failures keep the immediate
+				// path — the worker is alive; waiting would only add latency.
+				let workerReady = true
+				if (isClientDisconnectRejection(err) || err instanceof RpcDisconnectedError) {
+					const baseline = await readLiveness()
+					workerReady = await awaitLivenessAdvance(baseline, LIVENESS_CEILING_MS).then(
+						() => true,
+						(gateErr) => {
+							console.error("[full-backup] rollback liveness gate expired:", gateErr)
+							return false
+						},
+					)
+				}
+				if (workerReady && (await rollbackCreatedProfile(createdProfileId))) {
 					restoreStage.value = "rolled-back"
 				} else {
 					// The orphan couldn't be removed — surface an actionable message

@@ -22,6 +22,7 @@ declare module 'vue' {
     Button: typeof import('./../components/ui/Button.vue')['default']
     CapabilityDetailPanel: typeof import('./../components/composite/capabilities/CapabilityDetailPanel.vue')['default']
     Checkbox: typeof import('@nulo/design')['Checkbox']
+    DappApprovalFooter: typeof import('./../components/composite/DappApprovalFooter.vue')['default']
     DappCancelledOverlay: typeof import('./../components/composite/DappCancelledOverlay.vue')['default']
     DappIdentityBlock: typeof import('./../components/composite/DappIdentityBlock.vue')['default']
     DappStatusStrip: typeof import('./../components/composite/DappStatusStrip.vue')['default']

@@ -89,6 +89,7 @@ declare global {
   const inject: typeof import('vue').inject
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
   const isInFlightSend: typeof import('../utils/in-flight-send').isInFlightSend
+  const isPopupSubmitKey: typeof import('../composables/usePopupEntity').isPopupSubmitKey
   const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
@@ -213,6 +214,7 @@ declare global {
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
   const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
+  const validateAndMigrateBackup: typeof import('../composables/useFullBackupImport').validateAndMigrateBackup
   const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
   const walletChainId: typeof import('../utils/chain-ids').walletChainId
   const watch: typeof import('vue').watch
@@ -254,7 +256,7 @@ declare global {
   export type { FieldDef, FieldHandle, FormState } from '../composables/useFormState'
   import('../composables/useFormState')
   // @ts-ignore
-  export type { RestoreStatus, RestoreStage, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
+  export type { RestoreStatus, RestoreStage, FullBackupEnvelope, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
   // @ts-ignore
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
@@ -419,6 +421,7 @@ declare module 'vue' {
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
     readonly isInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['isInFlightSend']>
+    readonly isPopupSubmitKey: UnwrapRef<typeof import('../composables/usePopupEntity')['isPopupSubmitKey']>
     readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
@@ -542,6 +545,7 @@ declare module 'vue' {
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
     readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
+    readonly validateAndMigrateBackup: UnwrapRef<typeof import('../composables/useFullBackupImport')['validateAndMigrateBackup']>
     readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
     readonly walletChainId: UnwrapRef<typeof import('../utils/chain-ids')['walletChainId']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>
