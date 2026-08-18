@@ -41,6 +41,10 @@ import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { ProofGate } from "@/e2e/proof-gate"
 import type { ExecutionLane } from "./execution-lane"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
+import { EmbeddedStrategy } from "./fee/embedded-strategy"
+import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
+import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
+import { FpcStrategy } from "./fee/fpc-strategy"
 import {
 	fingerprintBaseFee,
 	fingerprintFeeSettings,
@@ -411,4 +415,57 @@ describe("ExecutionService composition — profile-switch gas-cache invalidation
 		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
 		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(before) // cold → recompute
 	}, 15_000)
+})
+
+describe("ExecutionService composition — fee-strategy map through real init (Q-04 pilot pins)", () => {
+	// Characterization pins written BEFORE the buildFeeStrategies extraction.
+	// Nothing else in the repo pins this field: the reuse fast paths and
+	// executor mocks bypass the dispatch, so an init that never assigned
+	// `feeStrategies` passed every prior test.
+	test("init builds the four-kind strategy map in insertion order, each kind paired to its class", async () => {
+		const { service } = await makeHarness()
+		const map = (service as unknown as { feeStrategies: Map<string, unknown> }).feeStrategies
+		expect([...map.keys()]).toEqual(["fj", "fjwc", "fpc", "embedded"])
+		expect(map.get("fj")).toBeInstanceOf(FeeJuiceStrategy)
+		expect(map.get("fjwc")).toBeInstanceOf(FeeJuiceWithClaimStrategy)
+		expect(map.get("fpc")).toBeInstanceOf(FpcStrategy)
+		expect(map.get("embedded")).toBeInstanceOf(EmbeddedStrategy)
+	})
+
+	test("an unknown payment-method kind rejects with 'Invalid fee payment method' at the map lookup", async () => {
+		const { service } = await makeHarness()
+		const dispatch = service as unknown as {
+			buildAndEstimateTxRequest: (op: unknown, feeSettings: unknown) => Promise<unknown>
+		}
+
+		await expect(
+			dispatch.buildAndEstimateTxRequest(
+				{ networkId: NETWORK.id, accountAddress: ACCOUNT.toString(), actions: [] },
+				{ paymentMethod: { kind: "bogus" } },
+			),
+		).rejects.toThrow("Invalid fee payment method")
+	})
+
+	test("a known kind dispatches to ITS strategy with a CLONED op (spy on the initialized 'fj' entry)", async () => {
+		const { service } = await makeHarness()
+		const map = (service as unknown as { feeStrategies: Map<string, { buildAndEstimate: (ctx: { op: unknown }) => Promise<unknown> }> })
+			.feeStrategies
+		const fj = map.get("fj")
+		if (!fj) throw new Error("fj strategy missing")
+		const spy = vi.spyOn(fj, "buildAndEstimate").mockResolvedValue({ marker: "dispatched" } as never)
+		const dispatch = service as unknown as {
+			buildAndEstimateTxRequest: (op: unknown, feeSettings: unknown) => Promise<unknown>
+		}
+
+		const inputOp = { networkId: NETWORK.id, accountAddress: ACCOUNT.toString(), actions: [] }
+		const result = await dispatch.buildAndEstimateTxRequest(inputOp, { paymentMethod: { kind: "fj" } })
+
+		expect(result).toEqual({ marker: "dispatched" })
+		expect(spy).toHaveBeenCalledTimes(1)
+		// The dispatcher clones op + actions before handing them to a strategy
+		// (fjwc/fpc mutate op.actions; a leaked reference breaks repeat estimates).
+		const ctxOp = spy.mock.calls[0][0].op as { actions: unknown[] }
+		expect(ctxOp).not.toBe(inputOp)
+		expect(ctxOp.actions).not.toBe(inputOp.actions)
+	})
 })

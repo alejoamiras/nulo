@@ -68,10 +68,7 @@ import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee/fee-strategy"
-import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
-import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
-import { FpcStrategy } from "./fee/fpc-strategy"
-import { EmbeddedStrategy } from "./fee/embedded-strategy"
+import { buildFeeStrategies } from "./fee/build-fee-strategies"
 import { ExecutionCoordinator } from "./execution-coordinator"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
@@ -325,6 +322,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logError: (msg, ...rest) => this.logError(msg, ...rest),
 		})
+		// The deps literal stays HERE (Q-04 pilot): every eager `this.*` read and
+		// the lazy coordinator closure keep their capture point at the root.
 		const feeDeps: FeeStrategyDeps = {
 			txBuilder: this.txBuilder,
 			simulateTxTask: (pxe, req, opts, parentTask) => this.coordinator.simulateTxTask(pxe, req, opts, parentTask),
@@ -332,12 +331,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			tasks: this.taskService,
 			logger: this.logger,
 		}
-		this.feeStrategies = new Map<FeeSettings["paymentMethod"]["kind"], FeeStrategy>([
-			["fj", new FeeJuiceStrategy(feeDeps)],
-			["fjwc", new FeeJuiceWithClaimStrategy(feeDeps)],
-			["fpc", new FpcStrategy(feeDeps)],
-			["embedded", new EmbeddedStrategy(feeDeps)],
-		])
+		this.feeStrategies = buildFeeStrategies(feeDeps)
 
 		// Invalidate gas balance cache when a transaction settles
 		this.transactionService.onTransactionUpdated.add((tx) => {

@@ -11,12 +11,13 @@ const hasConfig = aztecConfig !== undefined
  * Test #42 — cross-origin navigation terminates the wallet-sdk transport
  * session but does NOT delete the persisted DappSession.
  *
- * Per `background.ts:238-257` (`chrome.tabs.onUpdated` cross-origin filter),
- * navigation to a different origin tears down the secure-channel transport but
- * keeps the DappSession record in storage. On reconnect (from any tab on the
- * playground origin), the canonical flow per `background.ts:295-298`
- * auto-approves discover and re-pops verify (since `trustedVerification=false`
- * for the default `approveVerify` fixture path).
+ * Per `wireTabLifecycle` (`wallet-sdk/tab-lifecycle.ts`: the
+ * `chrome.tabs.onUpdated` cross-origin filter), navigation to a different
+ * origin tears down the secure-channel transport but keeps the DappSession
+ * record in storage. On reconnect (from any tab on the playground origin), the
+ * canonical flow (`handleDiscovery`'s returning-session auto-approve in
+ * `background.ts`) auto-approves discover and re-pops verify (since
+ * `trustedVerification=false` for the default `approveVerify` fixture path).
  *
  * Same-origin SPA hash navigations do NOT terminate (per the upstream PR #56
  * comment block in `background.ts`); only true cross-origin navs do.
