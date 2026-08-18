@@ -47,6 +47,7 @@ import {
 	makeRandomMasterBase64,
 	writeBackupToTemp,
 } from "../helpers/import-drivers"
+import { readProfileGen } from "../helpers/crash-truth"
 import type { Page } from "puppeteer-core"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -118,6 +119,7 @@ test.skipIf(!hasConfig)(
 			// explicitly (the synthetic row is named "Local Network").
 			await switchToLocalNetwork(page)
 			const firstProfileId = await captureSoleProfileId(page)
+			const firstGen = await readProfileGen(page)
 			expect(await getAccountAddress(page)).toBe(accountAddress)
 			await waitForGasBalanceRendered(page, ctx)
 
@@ -139,6 +141,14 @@ test.skipIf(!hasConfig)(
 			// restore ever stops reusing a free backup id, this leg silently stops
 			// exercising the fence — fail loudly instead.
 			expect(await captureSoleProfileId(page)).toBe(firstProfileId)
+			// Fresh-mint precondition (the fence's OTHER input): the successor
+			// carries a DIFFERENT pxeGeneration than the erased incarnation — a
+			// restore that ever reused the generation would sail past the
+			// tombstone as a same-gen replay instead of exercising the
+			// deleted(different-gen) pass-through this leg exists for.
+			const secondGen = await readProfileGen(page)
+			expect(secondGen?.gen).toBeTruthy()
+			expect(secondGen?.gen).not.toBe(firstGen?.gen)
 
 			// ── 4. The regression assertions. Un-fixed, the fence rejected every
 			//      op without the retryable marker: the gas READ stuck on "— FJ"
