@@ -17,7 +17,7 @@ import { getRandomHex, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { CHAIN_IDS } from "@/utils/chain-ids"
+import { CHAIN_IDS, LOCAL_L1_CHAIN_ID, MAINNET_L1_CHAIN_ID, TESTNET_L1_CHAIN_ID } from "@/utils/chain-ids"
 import {
 	type ChainKind,
 	ERR_ACTIVE_NETWORK,
@@ -50,10 +50,22 @@ export * from "./spec"
 const ACTIVE_KEY_PREFIX = "nulo:core:active-network@"
 const activeKey = (profileId: string) => `${ACTIVE_KEY_PREFIX}${profileId}`
 
+/** Immutable L1 identities for the seeded kinds — the trust root `getL1ChainIdStored` validates
+ *  seeded rows against (a row is mutable storage; these constants ship in code). Custom/devnet
+ *  kinds have no constant and are probe-verified at account creation instead. */
+const SEED_L1_BY_KIND: Partial<Record<ChainKind, number>> = {
+	mainnet: MAINNET_L1_CHAIN_ID,
+	testnet: TESTNET_L1_CHAIN_ID,
+	local: LOCAL_L1_CHAIN_ID,
+}
+
 interface DefaultSeed {
 	name: string
 	rpcUrl: string
 	chainId: number
+	/** Hardcoded L1 identity — NEVER probed at seed time (seeding is offline-safe and
+	 *  load-bearing for fresh profiles with the node down). Key derivation consumes it. */
+	l1ChainId: number
 	kind: ChainKind
 	isPrimaryActive: boolean
 	/** Provider label stamped on the seeded endpoint (Settings shows it instead of the raw URL). */
@@ -87,6 +99,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		name: "Alpha V5",
 		rpcUrl: "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 		chainId: CHAIN_IDS.MAINNET, // (MAINNET_L1_CHAIN_ID ^ MAINNET_ROLLUP_VERSION) >>> 0 — single-sourced in @/utils/chain-ids
+		l1ChainId: MAINNET_L1_CHAIN_ID,
 		kind: "mainnet",
 		isPrimaryActive: !E2E_DEFAULT_ACTIVE_TESTNET,
 		endpointLabel: "dRPC",
@@ -95,6 +108,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		name: "Testnet",
 		rpcUrl: "https://lb.drpc.live/aztec-testnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k",
 		chainId: CHAIN_IDS.TESTNET,
+		l1ChainId: TESTNET_L1_CHAIN_ID,
 		kind: "testnet",
 		isPrimaryActive: E2E_DEFAULT_ACTIVE_TESTNET,
 		endpointLabel: "dRPC",
@@ -103,6 +117,7 @@ const DEFAULT_SEEDS: DefaultSeed[] = [
 		name: "Local Network",
 		rpcUrl: LOCAL_NETWORK_RPC_URL,
 		chainId: 0,
+		l1ChainId: LOCAL_L1_CHAIN_ID,
 		kind: "local",
 		isPrimaryActive: false,
 	},
@@ -223,6 +238,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 						seed.name,
 						seed.rpcUrl,
 						seed.chainId,
+						seed.l1ChainId,
 						seed.kind,
 						seed.endpointLabel,
 					)
@@ -263,6 +279,50 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	public async getNetworksRaw(profileId: string, chainId?: number): Promise<Network[]> {
 		await this.ensureInitialized()
 		return (await this.storage.getValues()).filter((n) => n.profileId === profileId && (chainId === undefined || n.chainId === chainId))
+	}
+
+	/**
+	 * The stored, seeded-constant-validated `l1ChainId` for `(profileId, chainId)` — the
+	 * key-derivation chain input. NO network probe (safe for restore-time cross-checks and
+	 * offline reads). For seeded kinds the row value must equal the immutable in-code constant:
+	 * `DEFAULT_SEEDS` only INITIALIZES a mutable row, so a tampered seeded row must fail here
+	 * rather than mint a self-consistent poisoned account. Lock-free, no requireActiveProfile.
+	 */
+	public async getL1ChainIdStored(profileId: string, chainId: number): Promise<number> {
+		await this.ensureInitialized()
+		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
+		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
+		const seeded = SEED_L1_BY_KIND[network.kind ?? "custom"]
+		if (seeded !== undefined && network.l1ChainId !== seeded) {
+			throw new Error(`Seeded network L1 identity mismatch: stored ${network.l1ChainId}, expected ${seeded}`)
+		}
+		if (!Number.isSafeInteger(network.l1ChainId) || network.l1ChainId < 0 || network.l1ChainId > 0xffffffff) {
+			throw new Error(`Non-canonical stored l1ChainId: ${network.l1ChainId}`)
+		}
+		return network.l1ChainId
+	}
+
+	/**
+	 * `getL1ChainIdStored` plus, for NON-seeded kinds (custom/devnet), a live-probe confirmation
+	 * that the node still reports the stored L1 identity — required at ACCOUNT CREATION so a
+	 * poisoned custom-network row cannot mint a wrong-chain account. Seeded kinds are already
+	 * bound to in-code constants and stay offline-creatable; custom networks are online-configured
+	 * by nature, so an unreachable node fails creation with a clear error.
+	 */
+	public async resolveVerifiedL1ChainId(profileId: string, chainId: number): Promise<number> {
+		const stored = await this.getL1ChainIdStored(profileId, chainId)
+		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
+		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
+		const kind = network.kind ?? "custom"
+		if (SEED_L1_BY_KIND[kind] === undefined) {
+			const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId) ?? network.endpoints[0]
+			if (!primary) throw new Error("Network has no endpoint to verify its L1 identity against")
+			const probed = await this._probeChainIdentity(primary.rpcUrl, kind)
+			if (probed.l1ChainId !== stored) {
+				throw new Error(`Custom network L1 identity mismatch: stored ${stored}, node reports ${probed.l1ChainId}`)
+			}
+		}
+		return stored
 	}
 
 	public async getNetwork(id: string): Promise<Network> {
@@ -311,7 +371,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		validateParams(NetworkMethodSchemas.addNetwork.params, [name, rpcUrl], "addNetwork")
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		const chainId = await this._getChainId(rpcUrl)
+		const { chainId, l1ChainId } = await this._probeChainIdentity(rpcUrl)
 		return await this.lock.withLock(async () => {
 			const existingForProfile = (await this.storage.getValues()).filter((n) => n.profileId === profile.id)
 			const sameChain = existingForProfile.find((n) => n.chainId === chainId)
@@ -321,7 +381,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			if (existingForProfile.some((n) => n.name === name)) {
 				throw new Error(`Name '${name}' already in use.`)
 			}
-			const network = await this._buildNetwork(profile.id, name, rpcUrl, chainId, "custom")
+			const network = await this._buildNetwork(profile.id, name, rpcUrl, chainId, l1ChainId, "custom")
 			await this.storage.set(network.id, network)
 			this.emit("onNetworkAdded", network)
 			return network
@@ -412,12 +472,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// for `kind === "local"` regardless of how the URL was edited. The lock-
 		// guarded re-read below handles the (rare) deletion race.
 		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
-		const probedChainId = await this._getChainId(rpcUrl, peek.kind)
+		const probed = await this._probeChainIdentity(rpcUrl, peek.kind)
 		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
-			if (probedChainId !== network.chainId) {
+			if (probed.chainId !== network.chainId) {
 				throw new Error(
-					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probedChainId}, but this network is chain ${network.chainId}.`,
+					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probed.chainId}, but this network is chain ${network.chainId}.`,
+				)
+			}
+			// The XOR composite alone is collision-prone: a different (l1ChainId, rollupVersion)
+			// pair can XOR to the same value, and l1ChainId feeds key derivation — so endpoint
+			// mutations require EXACT L1 equality, not just composite equality.
+			if (probed.l1ChainId !== network.l1ChainId) {
+				throw new Error(
+					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports L1 chain ${probed.l1ChainId}, but this network is L1 chain ${network.l1ChainId}.`,
 				)
 			}
 			const normalized = normalizeRpcUrl(rpcUrl)
@@ -450,14 +518,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		// `kind === "local"` regardless of how the URL was edited.
 		const peek = requireOwnedRow(await this.storage.get(networkId), profile.id)
 		// Probe outside the lock when URL changes (network call).
-		let probedChainId: number | undefined
 		// We probe regardless to keep semantics simple — chainId could have shifted on the same URL.
-		probedChainId = await this._getChainId(rpcUrl, peek.kind)
+		const probed = await this._probeChainIdentity(rpcUrl, peek.kind)
 		return await this.lock.withLock(async () => {
 			const network = requireOwnedRow(await this.storage.get(networkId), profile.id)
-			if (probedChainId !== undefined && probedChainId !== network.chainId) {
+			if (probed.chainId !== network.chainId) {
 				throw new Error(
-					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probedChainId}, but this network is chain ${network.chainId}.`,
+					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports chainId ${probed.chainId}, but this network is chain ${network.chainId}.`,
+				)
+			}
+			// Exact L1 equality — see addEndpoint: the composite is XOR-collision-prone and
+			// l1ChainId feeds key derivation.
+			if (probed.l1ChainId !== network.l1ChainId) {
+				throw new Error(
+					`${ERR_ENDPOINT_CHAIN_MISMATCH}: This RPC reports L1 chain ${probed.l1ChainId}, but this network is L1 chain ${network.l1ChainId}.`,
 				)
 			}
 			const idx = network.endpoints.findIndex((e) => e.id === endpointId)
@@ -795,6 +869,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		name: string,
 		rpcUrl: string,
 		chainId: number,
+		l1ChainId: number,
 		kind: ChainKind,
 		endpointLabel?: string,
 	): Promise<Network> {
@@ -809,6 +884,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 			id: networkId,
 			profileId,
 			chainId,
+			l1ChainId,
 			name,
 			primaryEndpointId: endpointId,
 			endpoints: [endpoint],
@@ -838,12 +914,20 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 * obviously the local chain.
 	 */
 	private async _getChainId(rpcUrl: string, kindHint?: ChainKind): Promise<number> {
+		return (await this._probeChainIdentity(rpcUrl, kindHint)).chainId
+	}
+
+	/** One probe, both identities: the XOR composite (storage scoping) AND the exact `l1ChainId`
+	 *  (key derivation). The local carve-outs zero only the COMPOSITE — the probed l1ChainId is
+	 *  reported as-is, because derivation must never receive a synthetic 0. */
+	private async _probeChainIdentity(rpcUrl: string, kindHint?: ChainKind): Promise<{ chainId: number; l1ChainId: number }> {
 		try {
 			const rpc = this.nodeFactory.createNode(rpcUrl)
 			const info = await rpc.getNodeInfo()
-			if (kindHint === "local") return 0
-			if (sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)) return 0
-			return (info.l1ChainId ^ info.rollupVersion) >>> 0
+			const l1ChainId = info.l1ChainId
+			if (kindHint === "local") return { chainId: 0, l1ChainId }
+			if (sameLocalNetworkUrl(rpcUrl, LOCAL_NETWORK_RPC_URL)) return { chainId: 0, l1ChainId }
+			return { chainId: (info.l1ChainId ^ info.rollupVersion) >>> 0, l1ChainId }
 		} catch (error) {
 			this.logError("Failed to fetch node info", getErrorMessage(error))
 			throw new Error("Failed to fetch node info")
@@ -868,6 +952,10 @@ function isNewShapeNetwork(value: unknown): value is Network {
 		typeof v.id === "string" &&
 		typeof v.profileId === "string" &&
 		typeof v.chainId === "number" &&
+		typeof v.l1ChainId === "number" &&
+		Number.isSafeInteger(v.l1ChainId) &&
+		v.l1ChainId >= 0 &&
+		v.l1ChainId <= 0xffffffff &&
 		typeof v.name === "string" &&
 		typeof v.primaryEndpointId === "string" &&
 		Array.isArray(v.endpoints) &&

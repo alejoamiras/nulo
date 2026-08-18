@@ -1,10 +1,10 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
 import { restoreRows } from "@/wallet/services/restore-rows"
-import { poseidon2Hash } from "@aztec/foundation/crypto/poseidon"
+import { deriveAccountSeed } from "@nulo/wallet-crypto"
 import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
-import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
+import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
@@ -52,6 +52,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	private readonly restoreLock = new Lock()
 
 	private profileService: ProfileService = null!
+	private networkService: NetworkService = null!
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
@@ -82,8 +83,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		this.profileService = services.get(ProfileService.name)
 		// Profile-delete cleanup is now the coordinator's awaited `purgeForProfile`,
 		// NOT a fire-and-forget `onProfileDeleted` subscriber (finding D).
-		const networkService = services.get(NetworkService.name) as NetworkService
-		networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
+		this.networkService = services.get(NetworkService.name) as NetworkService
+		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 	}
 
 	/**
@@ -149,12 +150,24 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	}
 
 	private async createAccountInternal(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
-		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
-		const index = accounts.length > 0 ? array_max(accounts.filter((x) => x.type === type).map((x) => +x.index)) + 1 : 0
-		const secret = await this.deriveAccountSecret(profileId, chainId, type, index)
 		if (type !== AccountType.Nulo_v1) {
 			throw new Error("unsupported account type")
 		}
+		// Auth gate FIRST — an unauthorized caller must never trigger the custom-network probe
+		// inside resolveVerifiedL1ChainId below.
+		const master = await this.profileService.getProfileSecret(profileId)
+		if (!master) {
+			throw new Error("unauthorized")
+		}
+		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+		// Next index over the SAME-TYPE rows only: the guard must sit on the filtered list, or the
+		// first account of a new type starts at 1 (`array_max([]) + 1` — the cross-type guard bug).
+		const sameType = accounts.filter((x) => x.type === type)
+		const index = sameType.length > 0 ? array_max(sameType.map((x) => +x.index)) + 1 : 0
+		// The derivation chain input is the verified EXACT L1 id, never the composite: seeded rows
+		// are checked against in-code constants, custom rows against a live probe (fail-closed).
+		const l1ChainId = await this.networkService.resolveVerifiedL1ChainId(profileId, chainId)
+		const secret = await deriveAccountSeed(master, l1ChainId, type, index)
 		const address = (await NuloAccount.new(secret, this.logger)).address.toString()
 		const account: Account = {
 			profileId,
@@ -162,6 +175,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			address,
 			index,
 			type,
+			l1ChainId,
 			name,
 			visible: true,
 		}
@@ -224,7 +238,10 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (account.type !== AccountType.Nulo_v1) {
 			throw new Error("unknown account type")
 		}
-		const secret = await this.deriveAccountSecret(profileId, chainId, account.type, account.index)
+		// Re-derivation reads the ROW-CARRIED l1ChainId (self-contained; a tampered value derives
+		// a different address and fails closed below). `deriveAccountSeed` rejects non-canonical
+		// values — never a silent default.
+		const secret = await this.deriveAccountSecret(profileId, account.l1ChainId, account.type, account.index)
 		const accountContract: IAccountContract = await NuloAccount.new(secret, this.logger)
 		if (accountContract.address.toString() !== address) {
 			await this.raiseRuntimeMismatch(profileId, chainId, account.index, address, accountContract.address.toString())
@@ -275,12 +292,14 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		throw new AccountAddressInconsistencyError(undefined, { profileId, chainId, accountIndex })
 	}
 
-	private async deriveAccountSecret(profileId: string, chainId: number, type: number, index: number): Promise<Fr> {
+	private async deriveAccountSecret(profileId: string, l1ChainId: number, type: number, index: number): Promise<Fr> {
 		const master = await this.profileService.getProfileSecret(profileId)
 		if (!master) {
 			throw new Error("unauthorized")
 		}
-		return poseidon2Hash([master, chainId, type, index])
+		// The ONE shared formula (NULO-ACCOUNT-KDF v2) — also consumed by the integrity
+		// coordinator; a second implementation is the drift class that bricks at unlock.
+		return deriveAccountSeed(master, l1ChainId, type, index)
 	}
 
 	/**
@@ -385,6 +404,14 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			return await restoreRows(accounts, async (account) => {
 				// H: validate + canonicalize the persisted shape (mirror the read codec).
 				const parsed = AccountSchema.parse(account)
+				// Account↔Network chain-identity cross-check: the backup checksum is integrity-not-
+				// auth, so a doctored blob can carry a self-consistent (chainId, l1ChainId) pair.
+				// Networks restore BEFORE accounts in the full-backup order, so the stored
+				// (seeded-constant-validated) row is the reference; mismatch rejects the row.
+				const expectedL1 = await this.networkService.getL1ChainIdStored(parsed.profileId, parsed.chainId)
+				if (parsed.l1ChainId !== expectedL1) {
+					throw new Error(`account/network chain identity mismatch: ${parsed.l1ChainId} vs ${expectedL1}`)
+				}
 				// F: reject an empty/whitespace address. "Successfully restored" must NOT
 				// mean "set() didn't throw" for a blank address — a blank-account row
 				// would otherwise join the imported-account allow-set and let a tx/authwit

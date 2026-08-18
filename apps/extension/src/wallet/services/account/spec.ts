@@ -10,8 +10,8 @@ export const ACCOUNT_STORAGE_ROOT = "nulo:core:accounts"
  * Storage id for an account row: `(profileId, chainId, address)`, not the bare
  * address.
  *
- * The address derives from `poseidon2Hash([profileSecret, chainId, type, index])`,
- * so two profiles restored from the same mnemonic derive the SAME address — under
+ * The address derives from `deriveAccountSeed(master, l1ChainId, type, index)` (NULO-ACCOUNT-KDF
+ * v2), so two profiles restored from the same mnemonic derive the SAME address — under
  * an address-only key they collide on one row and the later write takes ownership
  * of the earlier profile's account. Including the profile in the id lets both
  * coexist.
@@ -63,9 +63,9 @@ export enum AccountType {
 }
 
 export type Account = {
-	/** Profile Id (part of the derivation path). */
+	/** Profile Id (row scoping; selects the master secret the derivation starts from). */
 	profileId: string
-	/** Chain Id (part of the derivation path). */
+	/** Composite chain id — STORAGE SCOPING ONLY, never a derivation input. */
 	chainId: number
 	/** Address of the account contract. */
 	address: string
@@ -73,6 +73,11 @@ export type Account = {
 	index: number
 	/** Type of the account contract (part of the derivation path). */
 	type: AccountType
+	/** The EXACT L1 chain id this account derives under (part of the derivation path). Written
+	 *  once at creation from the verified Network row; self-contained so re-derivation (signing,
+	 *  the integrity coordinator's pre-session verify) never needs a network lookup — and a
+	 *  tampered value re-derives a different address and fails closed like a tampered index. */
+	l1ChainId: number
 	/** Display name */
 	name: string
 	/** Flag, determining whether the account is active or hidden. */
@@ -90,6 +95,9 @@ export const AccountSchema: z.ZodType<Account> = z.object({
 	// Bound it to a nonnegative safe integer whose `+ 1` is still exactly representable.
 	index: z.number().int().nonnegative().lt(Number.MAX_SAFE_INTEGER),
 	type: z.nativeEnum(AccountType),
+	// Derivation chain input — canonical u32, bounded like `index` (a hostile backup must not
+	// smuggle a value the derivation would reject or truncate).
+	l1ChainId: z.number().int().nonnegative().max(0xffffffff),
 	name: z.string(),
 	visible: z.boolean(),
 })

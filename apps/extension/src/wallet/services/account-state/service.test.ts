@@ -221,6 +221,7 @@ describe("AccountStateService.restore (bounded)", () => {
 		id: "net-a",
 		profileId: "p1",
 		chainId: 1,
+		l1ChainId: 1,
 		name: "Net net-a",
 		endpoints: [{ id: "primary", rpcUrl: "http://localhost:9" }],
 		primaryEndpointId: "primary",

@@ -362,7 +362,7 @@ describe("cross-profile isolation (standing gate)", () => {
 		const A1 = "0xa1-p1"
 		const A2 = "0xa2-p2"
 		const mkAccount = (address: string, profileId: string) =>
-			({ profileId, chainId: 1, address, index: 0, type: 0, name: address, visible: true }) as never
+			({ profileId, chainId: 1, address, index: 0, type: 0, l1ChainId: 1, name: address, visible: true }) as never
 		const mkTx = (hash: string, account: string) =>
 			({
 				chainId: 1,
