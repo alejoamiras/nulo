@@ -11,10 +11,11 @@ const hasConfig = aztecConfig !== undefined
  * Test #41 — closing the dApp tab terminates the wallet-sdk transport session
  * but does NOT delete the persisted DappSession.
  *
- * Per `background.ts:230-232` (`chrome.tabs.onRemoved` → `handler.terminateForTab`),
- * close-handling tears down the secure-channel transport but keeps the
- * DappSession record in storage. On reconnect from a fresh tab, the canonical
- * flow per `background.ts:295-298` auto-approves discover (DappSession exists
+ * Per `wireTabLifecycle` (`wallet-sdk/tab-lifecycle.ts`: `chrome.tabs.onRemoved`
+ * → `terminateForTab`), close-handling tears down the secure-channel transport
+ * but keeps the DappSession record in storage. On reconnect from a fresh tab,
+ * the canonical flow (`handleDiscovery`'s returning-session auto-approve in
+ * `background.ts`) auto-approves discover (DappSession exists
  * for origin + unlocked + non-expired) and re-pops verify only if
  * `trustedVerification=false`. The default `dappConnectedExtension` /
  * `approveVerify(...)` fixture path never sets `alwaysTrust=true`, so verify

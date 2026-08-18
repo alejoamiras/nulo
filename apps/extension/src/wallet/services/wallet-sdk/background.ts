@@ -50,6 +50,7 @@ import { approveOrRollbackDiscoverySession } from "./discovery-approval"
 import { tryCreateQueuedJournal } from "./queued-journal"
 import { createSessionBaton } from "./session-baton"
 import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
+import { wireTabLifecycle } from "./tab-lifecycle"
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@/wallet/logger"
 
@@ -413,34 +414,14 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		}
 	})
 
-	// Terminate sessions when a tab is closed
-	chrome.tabs.onRemoved.addListener((tabId) => {
-		handler.terminateForTab(tabId)
-	})
-
-	// Terminate sessions when a tab navigates to a different origin.
-	// SPA navigations (e.g. Next.js router.push) fire tabs.onUpdated with
-	// status "loading" but stay on the same origin — these must NOT kill
-	// the session. (backport of upstream #56)
-	chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-		if (changeInfo.status === "loading" && changeInfo.url) {
-			try {
-				const newOrigin = new URL(changeInfo.url).origin
-				const sessions = handler.getActiveSessions().filter((s) => s.tabId === tabId)
-				for (const session of sessions) {
-					if (session.origin !== newOrigin) {
-						logger.log(
-							"wallet-sdk",
-							LogLevel.Info,
-							`Tab ${tabId} navigated to ${newOrigin}, terminating session ${session.sessionId}`,
-						)
-						handler.terminateSession(session.sessionId)
-					}
-				}
-			} catch {
-				handler.terminateForTab(tabId)
-			}
-		}
+	// Tab lifecycle (close + cross-origin navigation → session termination)
+	// lives in `tab-lifecycle.ts` (Q-04 pilot); it MUST stay registered before
+	// `handler.initialize()`. Handler methods are arrow-wrapped to keep `this`.
+	wireTabLifecycle({
+		terminateForTab: (tabId) => handler.terminateForTab(tabId),
+		terminateSession: (sessionId) => handler.terminateSession(sessionId),
+		getActiveSessions: () => handler.getActiveSessions(),
+		logger,
 	})
 
 	handler.initialize()
