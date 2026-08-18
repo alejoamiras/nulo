@@ -141,6 +141,7 @@ declare global {
   const receivedLabel: typeof import('../utils/received-display').receivedLabel
   const ref: typeof import('vue').ref
   const refreshBalances: typeof import('../utils/core').refreshBalances
+  const relinkRestoredTokenBalances: typeof import('../composables/useFullBackupImport').relinkRestoredTokenBalances
   const remapByMap: typeof import('../utils/full-backup-helpers').remapByMap
   const requireAccount: typeof import('../utils/core').requireAccount
   const requireNetwork: typeof import('../utils/core').requireNetwork
@@ -149,6 +150,7 @@ declare global {
   const resolveFromDisplay: typeof import('../utils/received-display').resolveFromDisplay
   const resolveReceivedType: typeof import('../utils/received-display').resolveReceivedType
   const resolveRestoredActiveNetworkId: typeof import('../utils/full-backup-helpers').resolveRestoredActiveNetworkId
+  const restoreAccountsAndFilterOwnedSlices: typeof import('../composables/useFullBackupImport').restoreAccountsAndFilterOwnedSlices
   const runImportChainSync: typeof import('../composables/importChainSync').runImportChainSync
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
@@ -475,6 +477,7 @@ declare module 'vue' {
     readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>
     readonly ref: UnwrapRef<typeof import('vue')['ref']>
     readonly refreshBalances: UnwrapRef<typeof import('../utils/core')['refreshBalances']>
+    readonly relinkRestoredTokenBalances: UnwrapRef<typeof import('../composables/useFullBackupImport')['relinkRestoredTokenBalances']>
     readonly remapByMap: UnwrapRef<typeof import('../utils/full-backup-helpers')['remapByMap']>
     readonly requireAccount: UnwrapRef<typeof import('../utils/core')['requireAccount']>
     readonly requireNetwork: UnwrapRef<typeof import('../utils/core')['requireNetwork']>
@@ -483,6 +486,7 @@ declare module 'vue' {
     readonly resolveFromDisplay: UnwrapRef<typeof import('../utils/received-display')['resolveFromDisplay']>
     readonly resolveReceivedType: UnwrapRef<typeof import('../utils/received-display')['resolveReceivedType']>
     readonly resolveRestoredActiveNetworkId: UnwrapRef<typeof import('../utils/full-backup-helpers')['resolveRestoredActiveNetworkId']>
+    readonly restoreAccountsAndFilterOwnedSlices: UnwrapRef<typeof import('../composables/useFullBackupImport')['restoreAccountsAndFilterOwnedSlices']>
     readonly runImportChainSync: UnwrapRef<typeof import('../composables/importChainSync')['runImportChainSync']>
     readonly sanitizeJournalSubtitle: UnwrapRef<typeof import('../utils/journal-state')['sanitizeJournalSubtitle']>
     readonly sanitizeString: UnwrapRef<typeof import('../utils/string')['sanitizeString']>
