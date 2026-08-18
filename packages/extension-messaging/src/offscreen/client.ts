@@ -92,10 +92,38 @@ export abstract class ServiceClient<
 		// no-op by default
 	}
 
+	/** One-call `onReady` bypass for {@link requestAlreadyReady}. Consumed
+	 *  SYNCHRONOUSLY: `request()` invokes `ensureTransportReady()` in the same
+	 *  call stack before its first await, so the flag can never remain set when
+	 *  a concurrent ordinary request runs — those always take `onReady`. */
+	private bypassReadyOnce = false
+
+	/**
+	 * PROTECTED, deliberately narrow: send a request WITHOUT running `onReady`
+	 * first, for a caller that has ALREADY awaited readiness and must not allow
+	 * a second readiness pass (which can recreate the offscreen document and
+	 * reset its in-memory state) between an authority check and the wire. Full
+	 * request machinery — correlation, readiness-inclusive deadline,
+	 * serialization, telemetry, send-error settlement — is reused unchanged.
+	 * Never expose publicly: a generic readiness bypass would let arbitrary
+	 * calls race the transport.
+	 */
+	protected requestAlreadyReady<T extends keyof TRequests>(
+		method: T,
+		...params: Parameters<TRequests[T]>
+	): Promise<Awaited<ReturnType<TRequests[T]>>> {
+		this.bypassReadyOnce = true
+		return super.request(method, ...params)
+	}
+
 	// ── Transport hooks ─────────────────────────────────────────────────
 
 	protected async ensureTransportReady(): Promise<void> {
 		if (!this.connected) this.connect()
+		if (this.bypassReadyOnce) {
+			this.bypassReadyOnce = false
+			return
+		}
 		await this.onReady()
 	}
 

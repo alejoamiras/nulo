@@ -40,6 +40,10 @@ class TestClient extends ServiceClient<Methods> {
 		return this.request("echo", val)
 	}
 
+	public echoAlreadyReady(val: string): Promise<string> {
+		return this.requestAlreadyReady("echo", val)
+	}
+
 	public multiply(a: number, b: number): Promise<number> {
 		return this.request("multiply", a, b)
 	}
@@ -554,5 +558,57 @@ describe("leak guards for the unified correlator (single pending entry)", () => 
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+describe("requestAlreadyReady (internal readiness bypass)", () => {
+	// The bypass exists for a caller that already awaited readiness and must
+	// not allow a SECOND readiness pass (offscreen recreation window) between
+	// an authority check and the wire. The flag is consumed synchronously —
+	// `request()` invokes `ensureTransportReady()` in the same call stack — so
+	// concurrent ordinary requests can never inherit it.
+
+	test("skips onReady, reuses the full request machinery", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const p = client.echoAlreadyReady("hi")
+		await flush()
+		expect(client.readyHook).not.toHaveBeenCalled()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "hi"))
+		await expect(p).resolves.toBe("hi")
+	})
+
+	test("a concurrent ordinary request issued in the same tick still runs onReady", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const a = client.echoAlreadyReady("bypass")
+		const b = client.echo("ordinary")
+		await flush()
+		expect(client.readyHook).toHaveBeenCalledTimes(1)
+		const sendMessageMock = captureMessage()
+		for (const call of sendMessageMock.mock.calls) {
+			const [request] = call as [{ content: { requestId: number }; from: string }]
+			emitMessage(makeResponse(request.content.requestId, request.from, "done"))
+		}
+		await expect(a).resolves.toBe("done")
+		await expect(b).resolves.toBe("done")
+	})
+
+	test("the bypass is one-call: the next ordinary request runs onReady again", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const a = client.echoAlreadyReady("first")
+		await flush()
+		let { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "first"))
+		await expect(a).resolves.toBe("first")
+
+		const b = client.echo("second")
+		await flush()
+		expect(client.readyHook).toHaveBeenCalledTimes(1)
+		;({ requestId, fromUid } = getLastRequest())
+		emitMessage(makeResponse(requestId, fromUid, "second"))
+		await expect(b).resolves.toBe("second")
 	})
 })
