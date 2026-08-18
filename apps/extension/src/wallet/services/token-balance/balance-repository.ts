@@ -9,8 +9,8 @@
  *   `array_max((await balances.getKeys()).map((x) => +x)) + 1`.
  */
 
-import { array_max } from "@/wallet/utils"
 import { EntityStorage } from "@/wallet/storage"
+import { nextNumericId } from "@/wallet/services/id-allocators"
 import { purgeMalformedRows } from "@/wallet/services/purge-rows"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { TOKEN_BALANCE_STORAGE_ROOT, TokenBalanceRawSchema, type TokenBalanceRaw } from "./spec"
@@ -42,7 +42,7 @@ export class BalanceRepository {
 
 	/** Allocate a fresh numeric id: `max(existing ids) + 1`. */
 	public async allocateId(): Promise<number> {
-		return array_max((await this.storage.getKeys()).map((x) => +x)) + 1
+		return nextNumericId(this.storage)
 	}
 
 	/** Check whether a persisted balance exists for (token, account).

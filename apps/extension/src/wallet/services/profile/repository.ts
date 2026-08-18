@@ -16,7 +16,7 @@
 
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex } from "@/wallet/utils"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import type { Profile } from "./spec"
 
 /** Storage root for profile records. Frozen: renaming detaches every
@@ -99,10 +99,6 @@ export class ProfileRepository {
 	 * re-verify becomes a no-op but costs nothing.
 	 */
 	public async generateUniqueId(): Promise<string> {
-		let id: string
-		do {
-			id = getRandomHex(PROFILE_ID_HEX_LENGTH)
-		} while (await this.contains(id))
-		return id
+		return nextRandomId(this, PROFILE_ID_HEX_LENGTH)
 	}
 }
