@@ -74,10 +74,16 @@ export function awaitLivenessAdvance(baseline: number, ceilingMs: number): Promi
 		}
 		const poll = (): void => {
 			if (settled) return
-			void readLiveness().then((v) => {
-				consider(v)
-				if (!settled) pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
-			})
+			void readLiveness()
+				.then((v) => consider(v))
+				.catch(() => {
+					// A transient storage read failure must not kill the poll leg
+					// (an unhandled rejection here would silently disable polling);
+					// the ceiling stays authoritative for persistent failure.
+				})
+				.finally(() => {
+					if (!settled) pollTimer = setTimeout(poll, POLL_INTERVAL_MS)
+				})
 		}
 
 		const ceilingTimer = setTimeout(() => settle(undefined), ceilingMs)

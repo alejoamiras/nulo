@@ -1628,6 +1628,26 @@ describe("crash-rollback liveness gate", () => {
 		expect(c.restoreStage.value).toBe("rolled-back")
 	})
 
+	it("a rejected baseline READ also fails closed — zero deletes, rollback-failed", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		primeHappyRestore()
+		tokenClient.restore.mockRejectedValue(new Error("Client disconnected"))
+		vi.mocked(readLiveness).mockRejectedValueOnce(new Error("session storage unavailable"))
+
+		await c.restoreBackup()
+
+		// The rejection must NOT escape the catch (stage stuck at rolling-back,
+		// status stuck at progress was the failure mode) — same fail-closed
+		// path as a ceiling expiry.
+		expect(awaitLivenessAdvance).not.toHaveBeenCalled()
+		expect(profileClient.deleteProfile).not.toHaveBeenCalled()
+		expect(c.restoreStage.value).toBe("rollback-failed")
+		expect(c.restoreStatus.value).toBe("failed")
+	})
+
 	it("a liveness ceiling expiry SKIPS the delete helper and fails closed to rollback-failed", async () => {
 		const opts = makeOpts()
 		const c = useFullBackupImport(opts)

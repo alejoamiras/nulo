@@ -840,14 +840,19 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				// path — the worker is alive; waiting would only add latency.
 				let workerReady = true
 				if (isClientDisconnectRejection(err) || err instanceof RpcDisconnectedError) {
-					const baseline = await readLiveness()
-					workerReady = await awaitLivenessAdvance(baseline, LIVENESS_CEILING_MS).then(
-						() => true,
-						(gateErr) => {
-							console.error("[full-backup] rollback liveness gate expired:", gateErr)
-							return false
-						},
-					)
+					// One failure handler spans BOTH the baseline read and the advance
+					// wait: a rejected storage read must fail CLOSED to the same
+					// cleanup-pending path, never escape this catch with the stage
+					// stuck at rolling-back.
+					workerReady = await readLiveness()
+						.then((baseline) => awaitLivenessAdvance(baseline, LIVENESS_CEILING_MS))
+						.then(
+							() => true,
+							(gateErr) => {
+								console.error("[full-backup] rollback liveness gate failed:", gateErr)
+								return false
+							},
+						)
 				}
 				if (workerReady && (await rollbackCreatedProfile(createdProfileId))) {
 					restoreStage.value = "rolled-back"

@@ -28,6 +28,7 @@ declare global {
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
+  const awaitLivenessAdvance: typeof import('../utils/background-liveness').awaitLivenessAdvance
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
   const browser: typeof import('webextension-polyfill')
   const buildActivityRows: typeof import('../utils/activity-rows').buildActivityRows
@@ -134,6 +135,7 @@ declare global {
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
+  const readLiveness: typeof import('../utils/background-liveness').readLiveness
   const readonly: typeof import('vue').readonly
   const realSleep: typeof import('../composables/importPreflight').realSleep
   const receivedLabel: typeof import('../utils/received-display').receivedLabel
@@ -360,6 +362,7 @@ declare module 'vue' {
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
+    readonly awaitLivenessAdvance: UnwrapRef<typeof import('../utils/background-liveness')['awaitLivenessAdvance']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
     readonly browser: UnwrapRef<typeof import('webextension-polyfill')>
     readonly buildActivityRows: UnwrapRef<typeof import('../utils/activity-rows')['buildActivityRows']>
@@ -466,6 +469,7 @@ declare module 'vue' {
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
+    readonly readLiveness: UnwrapRef<typeof import('../utils/background-liveness')['readLiveness']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
     readonly realSleep: UnwrapRef<typeof import('../composables/importPreflight')['realSleep']>
     readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>

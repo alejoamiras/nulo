@@ -43,14 +43,33 @@ describe("awaitLivenessAdvance", () => {
 		expect(await readLiveness()).toBe(0)
 	})
 
-	it("resolves on a strictly-later onChanged write", async () => {
+	it("resolves on a strictly-later onChanged write, tearing down BOTH observers and the ceiling", async () => {
+		vi.useFakeTimers()
 		store["nulo:liveness"] = 100
 		const p = awaitLivenessAdvance(100, 60_000)
-		await Promise.resolve()
+		await vi.advanceTimersByTimeAsync(0)
 		write(101)
 		await expect(p).resolves.toBe(101)
-		// Cleanup: the listener is removed on resolution.
+		// Resolution-side cleanup: listener removed AND no timers survive
+		// (poll + ceiling both cleared) — the leak pin's success half.
 		expect(listeners).toHaveLength(0)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("a rejected poll read does not kill the poll leg", async () => {
+		vi.useFakeTimers()
+		store["nulo:liveness"] = 100
+		const getMock = vi.mocked(chrome.storage.session.get)
+		const p = awaitLivenessAdvance(100, 60_000)
+		await vi.advanceTimersByTimeAsync(0)
+		// Next poll sample rejects (transient storage failure)…
+		getMock.mockRejectedValueOnce(new Error("storage transient"))
+		store["nulo:liveness"] = 175
+		await vi.advanceTimersByTimeAsync(1_100)
+		// …and the leg reschedules and observes the advance on the sample after.
+		await vi.advanceTimersByTimeAsync(1_100)
+		await expect(p).resolves.toBe(175)
 	})
 
 	it("a value equal to the baseline does not resolve; a later one does", async () => {
