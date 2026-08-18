@@ -1473,6 +1473,39 @@ describe("F-B24 — torn-import sweep on boot resume", () => {
 		expect(await markerRaw(api, second.id)).toBeUndefined()
 	}, 30_000)
 
+	test("a finalize that lands BEFORE the reap wins: the marker guard refuses the delete (finalized profile survives)", async () => {
+		const { api, service: boot1 } = await makeService()
+		const orphan = await tornRestore(boot1)
+		await ageMarker(api, orphan.id) // aged past the floor → sweep-eligible
+
+		// The popup's finalize arrives first (auto-reconnect continuation): it
+		// clears the marker under the facade lock and opens the session. The
+		// generation is UNCHANGED — only the marker guard can save the profile.
+		await boot1.finalizeRestore(orphan.id, "pass1234")
+
+		const bootCutoff = Date.now()
+		await boot1.resumePendingDeletions(bootCutoff)
+
+		// The just-finalized profile must survive the sweep.
+		expect((await boot1.getProfiles()).map((p) => p.id)).toContain(orphan.id)
+		expect((await boot1.getActiveProfile())?.id).toBe(orphan.id)
+	}, 30_000)
+
+	test("the tornGuard itself refuses when the marker changed after the sweep's observation (finalize won the race)", async () => {
+		const { api, service } = await makeService()
+		const orphan = await tornRestore(service)
+		// The sweep observed this tuple…
+		const observed = JSON.parse((await markerRaw(api, orphan.id)) as string)
+		// …then finalize landed (clears the marker under the lock; generation unchanged).
+		await service.finalizeRestore(orphan.id, "pass1234")
+
+		// A reap decided on the stale observation must refuse UNDER THE LOCK.
+		await expect(service.deleteProfile(orphan.id, { pxeGeneration: observed.pxeGeneration, markerAt: observed.at })).rejects.toThrow(
+			/marker changed/,
+		)
+		expect((await service.getProfiles()).map((p) => p.id)).toContain(orphan.id)
+	}, 30_000)
+
 	test("a generation-MISMATCHED stale marker is purged without touching the row", async () => {
 		const { api, service } = await makeService()
 		const p = await service.createProfile("Kept", "password123")
