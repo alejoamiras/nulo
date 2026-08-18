@@ -440,6 +440,8 @@ export async function claimFeeJuice(
  * derivation). Both public + private FeeJuice balances are pre-funded on-chain.
  */
 export interface PreFundedAccount {
+	/** The 24-word recovery phrase the fixture extension imports (KDF v2 — plain-key import is gone). */
+	words: string[]
 	masterBase64: string
 	accountAddress: AztecAddress
 }
@@ -476,25 +478,27 @@ export async function setupPreFundedAccount(
 	} = {},
 ): Promise<PreFundedAccount> {
 	// Mirrors Nulo's KDF v2 derivation exactly. Constants verified against source-of-truth:
-	const ACCOUNT_TYPE_NULO_V1 = 0 // account/spec.ts:5 — SECURITY: NEVER change
+	const ACCOUNT_TYPE_NULO_V1 = 0 // account/spec.ts — SECURITY: NEVER change
 	const LOCAL_L1_CHAIN_ID = 31337 // anvil — the EXACT L1 id KDF v2 derives under (NOT the composite 0)
 	const ACCOUNT_INDEX = 0 // first account
 	const publicAmount = opts.publicAmount ?? 1000n * 10n ** 18n
 	const privateAmount = opts.privateAmount ?? 1000n * 10n ** 18n
 
 	// Lazy imports: heavy aztec deps + workspace pkg, only needed when fixture runs.
-	const { deriveAccountSeed, deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
+	const { getMnemonic } = await import("@nulo/wallet-core/utils")
+	const { deriveAccountSeed, deriveMasterFromMnemonic, deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 	const { createLogger } = await import("@aztec/foundation/log")
 	const logger = createLogger("setup-pre-funded-account")
 
-	// Step 1 — Derive identity via KDF v2's shared seed fn: the extension now derives the
-	// Local-chain account under the REAL l1ChainId (31337), so the script side must too or the
-	// pre-funded address and the imported profile's address silently diverge.
-	// Use Fr.random for the master so the 32-byte buffer stays within BN254 modulus
-	// (Fr.fromBuffer is strict — see session-manager.ts:210).
-	const master = Fr.random()
+	// Step 1 — Derive identity via the SAME recovery-phrase path the extension imports through:
+	// random entropy → 24 words → PBKDF2 master → deriveAccountSeed(master, l1ChainId, type, index).
+	const entropy = crypto.getRandomValues(new Uint8Array(32))
+	const words = await getMnemonic(entropy)
+	const masterBytes = await deriveMasterFromMnemonic(words)
+	const master = Fr.fromBuffer(Buffer.from(masterBytes))
 	const accountSeed = await deriveAccountSeed(master, LOCAL_L1_CHAIN_ID, ACCOUNT_TYPE_NULO_V1, ACCOUNT_INDEX)
+	// Signing-key-root model (NULO-ACCOUNT-KDF v2): seed → signing key (root) → privacy secret.
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(accountSeed)
 
 	// Sanity check the derived address against NuloAccount's path so the fixture
@@ -616,7 +620,7 @@ export async function setupPreFundedAccount(
 	logger.info(`PrivateFPC.balance_of(account) = ${privateBal}`)
 
 	const masterBase64 = Buffer.from(master.toBuffer()).toString("base64")
-	return { masterBase64, accountAddress: expectedAddress }
+	return { words, masterBase64, accountAddress: expectedAddress }
 }
 
 /**

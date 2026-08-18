@@ -20,7 +20,7 @@ import {
 	gotoPopupImport,
 	importFullBackup,
 	LOCAL_L1_CHAIN_ID,
-	makeRandomMasterBase64,
+	makeRecoveryTriple,
 	POPUP_IMPORT_SHELL,
 	readActiveAccount,
 	TEST_PASSWORD,
@@ -45,12 +45,13 @@ test("fixture-arming contract: unarmed runs are allowed ONLY against a release a
 test.skipIf(!HAS_FIXTURE)(
 	"a v1 backup migrates forward through the real import UI and restores current-shape rows",
 	async ({ freshExtensionPerTest }) => {
-		const masterBase64 = await makeRandomMasterBase64()
+		const { masterBase64, entropyBase64 } = await makeRecoveryTriple()
 		const filePath = writeBackupToTemp(
 			buildSyntheticBackup({
 				masterBase64,
-				// Derivation-consistent with the master under the REAL L1 id (the KDF v2 input) —
-				// the integrity coordinator blocks a mismatched import at finalize.
+				entropyBase64,
+				// Derivation-consistent with the master (l1ChainId 31337 = the synthetic Local
+				// Network) — the integrity coordinator blocks a mismatched import at finalize.
 				accountAddress: await deriveNuloAccountAddress(masterBase64, LOCAL_L1_CHAIN_ID),
 				extraData: {
 					// PRE-shape contact row: carries `legacyName`, no `name` — exactly
@@ -97,10 +98,11 @@ test.skipIf(!HAS_FIXTURE)(
 test.skipIf(!HAS_FIXTURE)(
 	"a pre-baseline blob (legacy schema-version, no new fields) rejects with the re-export copy",
 	async ({ freshExtensionPerTest }) => {
-		const masterBase64 = await makeRandomMasterBase64()
+		const { masterBase64, entropyBase64 } = await makeRecoveryTriple()
 		const filePath = writeBackupToTemp(
 			buildSyntheticBackup({
 				masterBase64,
+				entropyBase64,
 				bodyOverrides: { "compat-epoch": undefined, "backup-schema-version": undefined, "schema-version": 2 },
 			}),
 		)

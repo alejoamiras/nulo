@@ -64,7 +64,7 @@ describe("AccountIntegrityBarrier", () => {
 		expect(blocked(w)).toBe(true)
 		expect(w.text()).toContain("ACCOUNT VERIFICATION FAILED")
 		expect(w.text()).toContain("derives a different address")
-		expect(w.text()).toContain("seed phrase still derives your accounts")
+		expect(w.text()).toContain("recovery phrase still derives your accounts")
 		expect(w.text()).not.toContain("funds are safe")
 	})
 

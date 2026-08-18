@@ -91,9 +91,9 @@ onBeforeUnmount(() => {
 
 <template>
 	<SecretExportLayout
-		heroMain="Seed"
+		heroMain="Recovery"
 		heroSub="Phrase"
-		collapsingLabel="Seed Phrase"
+		collapsingLabel="Recovery Phrase"
 		backTo="/popup/settings/security/export"
 	>
 		<!-- Agreement gate -->
@@ -102,11 +102,11 @@ onBeforeUnmount(() => {
 				<span class="export_section_label">Before you continue</span>
 				<Flex direction="column" gap="8">
 					<Text size="13" height="150" color="body">
-						Seed phrase is direct and full access to your entire profile, once you lose it you will not
+						Your recovery phrase is direct and full access to your entire profile, once you lose it you will not
 						be able to regain access to your profile.
 					</Text>
 					<Text size="13" height="150" color="body">
-						Ensure that seed phrase is securely stored.
+						Ensure that your recovery phrase is securely stored.
 					</Text>
 					<Text size="13" height="150" color="body">
 						By continuing you agree to all risks and responsibilities.
@@ -134,10 +134,10 @@ onBeforeUnmount(() => {
 		<!-- Revealed phrase -->
 		<template v-else>
 			<div class="export_section">
-				<span class="export_section_label">Your seed phrase</span>
+				<span class="export_section_label">Your recovery phrase</span>
 				<SecretRevealCard
 					:value="phrase"
-					label="Seed Phrase"
+					label="Recovery Phrase"
 					testId="reveal-content"
 					:isCopied="isCopied"
 					@copy="handleCopy"
@@ -150,21 +150,21 @@ onBeforeUnmount(() => {
 					<Flex gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
-							Some applications on your PC can have access to your clipboard and read a seed phrase
+							Some applications on your PC can have access to your clipboard and read a recovery phrase
 						</Text>
 					</Flex>
 
 					<Flex gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
-							Storing a text file with sensitive information like a seed phrase can be dangerous
+							Storing a text file with sensitive information like a recovery phrase can be dangerous
 						</Text>
 					</Flex>
 
 					<Flex gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
-							Storing a seed phrase in your notebook or in any other physical form can be considered one of
+							Storing a recovery phrase in your notebook or in any other physical form can be considered one of
 							the safest methods, but a paper can be easily lost or destroyed (by water or fire)
 						</Text>
 					</Flex>
@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
 				variant="cta"
 				data-testid="unlock-submit-btn"
 			>
-				Retrieve Seed Phrase
+				Retrieve Recovery Phrase
 			</Button>
 
 			<SecretCountdownClose
