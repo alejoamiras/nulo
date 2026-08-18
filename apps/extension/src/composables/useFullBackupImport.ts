@@ -180,6 +180,134 @@ export async function validateAndMigrateBackup(fullBackup: FullBackupEnvelope): 
 	return { kind: "ok", data: migrationResult.data as ValidatedBackup["data"], backup }
 }
 
+/**
+ * Q-02 stage 2a: restore the account slice and drop every account-owned row
+ * (transaction, auth-registry, token-balance) whose account was not
+ * SUCCESSFULLY imported by THIS restore. Mutates `data` in place. Returns the
+ * `${chainId}:${address}` allow-set of imported accounts — the token-balance
+ * re-link (stage 2b) REQUIRES it for its chain-equality cross-check, and
+ * threading it explicitly is the Q-02 verifier's constraint: the check must
+ * never be re-derived or silently dropped. Client lifecycle, the
+ * duplicate-account catch, and stage markers stay with the CALLER at their
+ * original positions; every throw propagates with its identity intact (the
+ * caller matches `.message`; the outer catch classifies disconnect
+ * rejections).
+ */
+export async function restoreAccountsAndFilterOwnedSlices(
+	data: ValidatedBackup["data"],
+	accountService: AccountServiceClient,
+	recordRestoreErrors: (serviceName: string, rows: unknown) => void,
+): Promise<Set<string>> {
+	const importedChainAddress = new Set<string>()
+	const newAccounts = await accountService.restore(data.account)
+	recordRestoreErrors(ACCOUNT_SERVICE_NAME, newAccounts)
+
+	// Provenance filter for EVERY account-owned slice (tx, auth-registry,
+	// token-balance). Each service writes rows verbatim and reads them by
+	// `account`, so a backup row whose `account` is NOT an account
+	// SUCCESSFULLY imported by THIS restore could surface in a victim
+	// profile (auth-registry corrupts its revocation index; a balance
+	// grafts under the victim). "Account exists in storage" is NOT
+	// sufficient (a crafted backup could name a pre-existing foreign
+	// account); the allow-set is exactly this restore's accounts. Drop
+	// BEFORE the restore loop below writes them.
+	const importedAddresses = new Set<string>()
+	for (const a of newAccounts as Array<{ address?: unknown; chainId?: unknown; restoreError?: unknown }>) {
+		if (a.restoreError || typeof a.address !== "string") continue
+		importedAddresses.add(a.address)
+		if (typeof a.chainId === "number") importedChainAddress.add(`${a.chainId}:${a.address}`)
+	}
+	// Drop-and-record via console.warn, NOT restoreErrorLog: a filtered row
+	// is a security action (foreign/corrupt account, nothing the user did or
+	// can fix), so it must not flip a clean import into the "finished with
+	// errors" UX. A failed-account row is already surfaced by its account's
+	// own restoreError above.
+	const filterByAccount = (name: string, keep: (row: Record<string, unknown>) => boolean, label: string) => {
+		const slice = (data as Record<string, unknown>)[name]
+		if (!Array.isArray(slice)) return
+		let dropped = 0
+		;(data as Record<string, unknown>)[name] = (slice as Array<Record<string, unknown>>).filter((row) => {
+			const ok = keep(row)
+			if (!ok) dropped++
+			return ok
+		})
+		if (dropped > 0) {
+			console.warn(`[full-backup-import] dropped ${dropped} ${label} referencing an account not imported from this backup`)
+		}
+	}
+	// tx carries its OWN chainId → key by the (chainId, account) tuple so a
+	// tx can't reference an imported address on a DIFFERENT chain (F).
+	filterByAccount(
+		TRANSACTION_SERVICE_NAME,
+		(tx) => typeof tx.account === "string" && typeof tx.chainId === "number" && importedChainAddress.has(`${tx.chainId}:${tx.account}`),
+		"transaction(s)",
+	)
+	// auth-registry + token-balance carry `account` but no independently
+	// forgeable chainId (addresses are chain-distinct), so address membership
+	// is sufficient. (token-balance ALSO gets token-ownership + chain-equality
+	// in the re-link step below.)
+	filterByAccount(AUTH_REGISTRY_SERVICE_NAME, (aw) => typeof aw.account === "string" && importedAddresses.has(aw.account), "authwit(s)")
+	filterByAccount(
+		TOKEN_BALANCE_SERVICE_NAME,
+		(tb) => typeof tb.account === "string" && importedAddresses.has(tb.account),
+		"token-balance(s)",
+	)
+	return importedChainAddress
+}
+
+/**
+ * Q-02 stage 2b: re-link restored token-balance rows to THIS restore's tokens
+ * by result index and enforce the token/account chain-equality cross-check
+ * against the allow-set stage 2a returned. Mutates `data["token-balance"]` in
+ * place; returns the dropped rows (restoreError-tagged) — the CALLER owns
+ * appending them to the error log, preserving today's append point and
+ * insertion order.
+ */
+export function relinkRestoredTokenBalances(
+	data: ValidatedBackup["data"],
+	newTokens: Array<{ id: unknown; chainId: number; contract: string; restoreError?: string }>,
+	importedChainAddress: ReadonlySet<string>,
+): unknown[] {
+	// Pair each restored token to its source by RESULT INDEX
+	// (`TokenService.restore` returns one ordered result per input, same as
+	// networks). This REPLACES the (chainId,contract) composite key: no
+	// cross-chain collapse, no ambiguity heuristic, and one duplicate token
+	// FAILING no longer drops a surviving token's balance. The index also
+	// gives token-OWNERSHIP for free — a balance's token maps only to a
+	// token THIS restore created.
+	const oldTokens = data.token as Array<{ id: unknown; chainId: number }>
+	// NB (dup-token-id): the index-paired maps below key on `old.id`, so two
+	// backup tokens sharing an id would last-wins-collapse. That case is
+	// UNREACHABLE here — backup normalization rejects a slice with a duplicate
+	// row id up front (backup-migration-registry.ts "duplicate row id"), so a
+	// dup-token-id backup fails before restore. No composable guard needed.
+	const oldIdToNew = new Map<unknown, unknown>()
+	const oldIdToChain = new Map<unknown, number>()
+	for (let i = 0; i < newTokens.length; i++) {
+		const old = oldTokens[i]
+		if (!old) continue
+		oldIdToChain.set(old.id, old.chainId)
+		if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
+	}
+	const droppedBalances: unknown[] = []
+	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap((tb: Record<string, unknown>) => {
+		const newId = oldIdToNew.get(tb.token)
+		// token/account chain-equality (final pass): the balance's account
+		// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
+		// chain-distinct, so this rejects a balance pairing an imported
+		// account with a token on a chain that account wasn't imported on.
+		const tokenChain = oldIdToChain.get(tb.token)
+		const chainOk =
+			tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
+		if (newId === undefined || !chainOk) {
+			droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
+			return []
+		}
+		return [{ ...tb, token: newId }]
+	})
+	return droppedBalances
+}
+
 export interface UseFullBackupImportOptions {
 	password: Ref<string>
 	repeatedPassword: Ref<string>
@@ -559,72 +687,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 
 			// Hoisted above the account try so the token re-link's chain-equality
-			// check (after the try) can see which (chainId, address) pairs were imported.
-			const importedChainAddress = new Set<string>()
+			// check (after the try) can see which (chainId, address) pairs were
+			// imported — stage 2a RETURNS the allow-set; stage 2b requires it.
+			let importedChainAddress: ReadonlySet<string> = new Set()
 			const accountService = new AccountServiceClient()
 			try {
-				const newAccounts = await accountService.restore(data.account)
-				recordRestoreErrors(ACCOUNT_SERVICE_NAME, newAccounts)
-
-				// Provenance filter for EVERY account-owned slice (tx, auth-registry,
-				// token-balance). Each service writes rows verbatim and reads them by
-				// `account`, so a backup row whose `account` is NOT an account
-				// SUCCESSFULLY imported by THIS restore could surface in a victim
-				// profile (auth-registry corrupts its revocation index; a balance
-				// grafts under the victim). "Account exists in storage" is NOT
-				// sufficient (a crafted backup could name a pre-existing foreign
-				// account); the allow-set is exactly this restore's accounts. Drop
-				// BEFORE the restore loop below writes them.
-				const importedAddresses = new Set<string>()
-				for (const a of newAccounts as Array<{ address?: unknown; chainId?: unknown; restoreError?: unknown }>) {
-					if (a.restoreError || typeof a.address !== "string") continue
-					importedAddresses.add(a.address)
-					if (typeof a.chainId === "number") importedChainAddress.add(`${a.chainId}:${a.address}`)
-				}
-				// Drop-and-record via console.warn, NOT restoreErrorLog: a filtered row
-				// is a security action (foreign/corrupt account, nothing the user did or
-				// can fix), so it must not flip a clean import into the "finished with
-				// errors" UX. A failed-account row is already surfaced by its account's
-				// own restoreError above.
-				const filterByAccount = (name: string, keep: (row: Record<string, unknown>) => boolean, label: string) => {
-					const slice = (data as Record<string, unknown>)[name]
-					if (!Array.isArray(slice)) return
-					let dropped = 0
-					;(data as Record<string, unknown>)[name] = (slice as Array<Record<string, unknown>>).filter((row) => {
-						const ok = keep(row)
-						if (!ok) dropped++
-						return ok
-					})
-					if (dropped > 0) {
-						console.warn(
-							`[full-backup-import] dropped ${dropped} ${label} referencing an account not imported from this backup`,
-						)
-					}
-				}
-				// tx carries its OWN chainId → key by the (chainId, account) tuple so a
-				// tx can't reference an imported address on a DIFFERENT chain (F).
-				filterByAccount(
-					TRANSACTION_SERVICE_NAME,
-					(tx) =>
-						typeof tx.account === "string" &&
-						typeof tx.chainId === "number" &&
-						importedChainAddress.has(`${tx.chainId}:${tx.account}`),
-					"transaction(s)",
-				)
-				// auth-registry + token-balance carry `account` but no independently
-				// forgeable chainId (addresses are chain-distinct), so address membership
-				// is sufficient. (token-balance ALSO gets token-ownership + chain-equality
-				// in the re-link step below.)
-				filterByAccount(
-					AUTH_REGISTRY_SERVICE_NAME,
-					(aw) => typeof aw.account === "string" && importedAddresses.has(aw.account),
-					"authwit(s)",
-				)
-				filterByAccount(
-					TOKEN_BALANCE_SERVICE_NAME,
-					(tb) => typeof tb.account === "string" && importedAddresses.has(tb.account),
-					"token-balance(s)",
-				)
+				importedChainAddress = await restoreAccountsAndFilterOwnedSlices(data, accountService, recordRestoreErrors)
 			} catch (err) {
 				// `AccountService` throws `new Error("Duplicate account")` when an
 				// imported row collides with one already in storage. Rows are keyed
@@ -669,45 +737,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				restoreError?: string
 			}>
 			if (data["token-balance"]?.length) {
-				// Pair each restored token to its source by RESULT INDEX
-				// (`TokenService.restore` returns one ordered result per input, same as
-				// networks). This REPLACES the (chainId,contract) composite key: no
-				// cross-chain collapse, no ambiguity heuristic, and one duplicate token
-				// FAILING no longer drops a surviving token's balance. The index also
-				// gives token-OWNERSHIP for free — a balance's token maps only to a
-				// token THIS restore created.
-				const oldTokens = data.token as Array<{ id: unknown; chainId: number }>
-				// NB (dup-token-id): the index-paired maps below key on `old.id`, so two
-				// backup tokens sharing an id would last-wins-collapse. That case is
-				// UNREACHABLE here — backup normalization rejects a slice with a duplicate
-				// row id up front (backup-migration-registry.ts "duplicate row id"), so a
-				// dup-token-id backup fails before restore. No composable guard needed.
-				const oldIdToNew = new Map<unknown, unknown>()
-				const oldIdToChain = new Map<unknown, number>()
-				for (let i = 0; i < newTokens.length; i++) {
-					const old = oldTokens[i]
-					if (!old) continue
-					oldIdToChain.set(old.id, old.chainId)
-					if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
-				}
-				const droppedBalances: unknown[] = []
-				data["token-balance"] = data["token-balance"].flatMap((tb: Record<string, unknown>) => {
-					const newId = oldIdToNew.get(tb.token)
-					// token/account chain-equality (final pass): the balance's account
-					// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
-					// chain-distinct, so this rejects a balance pairing an imported
-					// account with a token on a chain that account wasn't imported on.
-					const tokenChain = oldIdToChain.get(tb.token)
-					const chainOk =
-						tokenChain !== undefined &&
-						typeof tb.account === "string" &&
-						importedChainAddress.has(`${tokenChain}:${tb.account}`)
-					if (newId === undefined || !chainOk) {
-						droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
-						return []
-					}
-					return [{ ...tb, token: newId }]
-				})
+				const droppedBalances = relinkRestoredTokenBalances(data, newTokens, importedChainAddress)
 				if (droppedBalances.length) {
 					restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] = [
 						...(restoreErrorLog.value[TOKEN_BALANCE_SERVICE_NAME] ?? []),

@@ -177,7 +177,12 @@ vi.mock("@/wallet/storage/migrations", async () => {
 })
 
 // Imported AFTER mocks are registered.
-import { useFullBackupImport, validateAndMigrateBackup } from "./useFullBackupImport"
+import {
+	relinkRestoredTokenBalances,
+	restoreAccountsAndFilterOwnedSlices,
+	useFullBackupImport,
+	validateAndMigrateBackup,
+} from "./useFullBackupImport"
 import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -274,6 +279,84 @@ describe("validateAndMigrateBackup — exact reject copy (Q-02)", () => {
 		if (r.kind === "ok") {
 			expect(r.backup).not.toHaveProperty("checksum")
 			expect(r.data.profile?.id).toBe("src-profile-id")
+		}
+	})
+})
+
+// Direct-call contract pins for the stage-2 units (F-Q02). The seam — the
+// `${chainId}:${address}` allow-set — is now an explicit return/parameter, so
+// its contract is pinned HERE at the unit level; the black-box suites below
+// remain the end-to-end proof.
+describe("restoreAccountsAndFilterOwnedSlices — stage 2a contract (Q-02)", () => {
+	const fakeAccountService = (rows: unknown) => ({ restore: vi.fn(async () => rows) }) as never
+
+	it("returns the allow-set from SUCCESSFUL accounts only and filters every account-owned slice in place", async () => {
+		const data = {
+			account: [{ address: "0xa", chainId: 1 }],
+			transaction: [
+				{ account: "0xa", chainId: 1, hash: "keep" },
+				{ account: "0xa", chainId: 2, hash: "wrong-chain" },
+				{ account: "0xevil", chainId: 1, hash: "foreign" },
+			],
+			"auth-registry": [{ account: "0xa" }, { account: "0xevil" }],
+			"token-balance": [
+				{ account: "0xa", id: 1 },
+				{ account: "0xevil", id: 2 },
+			],
+		} as never
+		const recorder = vi.fn()
+
+		const set = await restoreAccountsAndFilterOwnedSlices(
+			data,
+			fakeAccountService([
+				{ address: "0xa", chainId: 1 },
+				{ address: "0xfail", chainId: 1, restoreError: "boom" },
+			]),
+			recorder,
+		)
+
+		expect([...set]).toEqual(["1:0xa"]) // failed accounts never enter the allow-set
+		const d = data as Record<string, Array<Record<string, unknown>>>
+		expect(d.transaction.map((t) => t.hash)).toEqual(["keep"])
+		expect(d["auth-registry"].map((a) => a.account)).toEqual(["0xa"])
+		expect(d["token-balance"].map((b) => b.id)).toEqual([1])
+		expect(recorder).toHaveBeenCalledWith("account", expect.anything())
+	})
+
+	it("propagates a restore rejection with its IDENTITY intact (the caller matches .message; the outer catch classifies)", async () => {
+		const boom = new Error("Duplicate account")
+		const failing = { restore: vi.fn(async () => Promise.reject(boom)) } as never
+
+		await expect(restoreAccountsAndFilterOwnedSlices({ account: [] } as never, failing, vi.fn())).rejects.toBe(boom)
+	})
+})
+
+describe("relinkRestoredTokenBalances — stage 2b contract (Q-02)", () => {
+	it("re-links by result index, drops failed-token and chain-mismatched balances, mutates in place, returns the dropped rows", () => {
+		const data = {
+			token: [
+				{ id: 1, chainId: 1 },
+				{ id: 2, chainId: 2 },
+				{ id: 3, chainId: 1 },
+			],
+			"token-balance": [
+				{ id: 10, token: 1, account: "0xa" }, // ok → n1
+				{ id: 11, token: 2, account: "0xa" }, // account not imported on chain 2 → dropped
+				{ id: 12, token: 3, account: "0xa" }, // token failed restore → dropped
+			],
+		} as never
+		const newTokens = [
+			{ id: "n1", chainId: 1, contract: "0xT" },
+			{ id: "n2", chainId: 2, contract: "0xU" },
+			{ id: 3, chainId: 1, contract: "0xV", restoreError: "boom" },
+		]
+
+		const dropped = relinkRestoredTokenBalances(data, newTokens, new Set(["1:0xa"]))
+
+		expect((data as Record<string, unknown>)["token-balance"]).toEqual([{ id: 10, token: "n1", account: "0xa" }])
+		expect(dropped).toHaveLength(2)
+		for (const row of dropped as Array<Record<string, unknown>>) {
+			expect(row.restoreError).toBe("Token balance could not be re-linked to a restored token")
 		}
 	})
 })
@@ -1010,6 +1093,33 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 		await c.restoreBackup()
 
 		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xa" }])
+	})
+
+	it("drops a balance whose account was imported on a DIFFERENT chain than the token (chain-equality cross-check)", async () => {
+		// The seam pin the prior suite lacked: every earlier test imported the
+		// address on BOTH chains, so deleting the chain-equality check kept them
+		// green. Here 0xa is imported ONLY on chain 1, while the balance's token
+		// lives on chain 2 — the cross-check (fed by the stage-2a allow-set) must
+		// drop it with a diagnostic.
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup({
+			data: {
+				token: [{ id: 2, chainId: 2, contract: "0xT" }],
+				"token-balance": [{ id: 11, token: 2, account: "0xa" }],
+			},
+		})
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xa", chainId: 1 }])
+		tokenClient.restore.mockResolvedValue([{ id: "n2", chainId: 2, contract: "0xT" }])
+
+		await c.restoreBackup()
+
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
+		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
 	})
 
 	it("detects OLD-side ambiguity: two old tokens share (chainId,contract), one FAILS restore → balance NOT grafted onto survivor", async () => {
