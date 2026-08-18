@@ -36,6 +36,7 @@ const mkAccount = (profileId: string, over: Record<string, unknown> = {}) =>
 		address: SHARED_ADDRESS,
 		index: 0,
 		type: 0,
+		l1ChainId: 1,
 		name: `${profileId} account`,
 		visible: true,
 		...over,
@@ -50,7 +51,7 @@ describe("AccountService — composite storage key", () => {
 		api.reset()
 		const services = new ServiceCollection()
 		services.add(svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler() }))
-		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {} }))
+		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
 		accountService = new AccountService(new LoggerStore(new ConfigStore()), api)
 		services.add(accountService)
 		await services.start()

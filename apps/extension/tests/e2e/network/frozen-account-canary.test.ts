@@ -116,11 +116,17 @@ test.skipIf(!hasConfig)(
 		const { createLogger } = await import("@aztec/foundation/log")
 		const logger = createLogger("frozen-account-canary")
 		const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
-		// Same formula as the wallet's account service: poseidon2Hash([master, chainId, type, index])
-		// with Local Network chainId=0 and AccountType.Nulo_v1=0.
+		// DELIBERATELY INDEPENDENT recompute of the wallet's NULO-ACCOUNT-KDF v2 account-seed
+		// formula (poseidon2HashWithSeparator = separator unshifted as Fr):
+		// poseidon2Hash([SEP, master, l1ChainId, type, index]) with SEP = NULO_ACCOUNT_SEED_SEP
+		// (0xa22f2a02 = sha256("nulo:account-seed:v2")[0..4]), Local Network l1ChainId = 31337
+		// (anvil), AccountType.Nulo_v1 = 0. Hand-rolled ON PURPOSE — never import the wallet's
+		// deriveAccountSeed here; this test is the external cross-check.
+		const NULO_ACCOUNT_SEED_SEP = 2720999938
+		const LOCAL_L1_CHAIN_ID = 31337
 		const derived = await Promise.all(
 			[0, 1].map(async (index) => {
-				const seed = poseidon2Hash([master, new Fr(0), new Fr(0), new Fr(index)])
+				const seed = poseidon2Hash([new Fr(NULO_ACCOUNT_SEED_SEP), master, new Fr(LOCAL_L1_CHAIN_ID), new Fr(0), new Fr(index)])
 				const account = await NuloAccount.new(seed, logger)
 				const instance = (account as unknown as { instance: { initializationHash: InstanceType<typeof Fr> } }).instance
 				const initNullifier = await computeSiloedPrivateInitializationNullifier(account.address, instance.initializationHash)
