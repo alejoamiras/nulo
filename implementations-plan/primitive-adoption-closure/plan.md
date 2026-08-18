@@ -35,4 +35,6 @@
 
 ## Codex audit (single, light tier) over complete arc diff — bounded (initial + max 2 resumes)
 
-_pending._
+**Initial pass: `reject`** — three blocking findings that were all one claim: an extracted async helper adds a Promise-reaction (microtask) checkpoint versus directly awaiting the port, therefore "scheduling is not byte-identical". The pass explicitly endorsed every rejection decision (network/config/task, popups, auth-registry, session-listener; called `wallet/index.ts` conservative-but-valid) and confirmed nothing was smuggled.
+
+**Resume 1 (pushback): findings WITHDRAWN → `approve — converged after pushback`.** The pushback argued: (1) the standard indicts the nine codex-converged prior adoptions (gc.ts, six restoreRows sites, estimate-reuse) that define these very remediation items — it cancels its own charter; (2) no observable contract depends on checkpoint counts around Chrome port promises (ordering guarantees in this codebase come from locks, fences, and explicit serialization; code depending on tick counts would already break across Chrome versions); (3) the repo's operational zero-delta bar — all characterization + concurrency pins green unmodified (4354 tests) — is met. Codex's withdrawal states it "found no concrete call site where the additional Promise reaction changes an outcome protected by an existing contract" and that the stricter standard "would contradict the accepted precedents that define these remediation items."
