@@ -79,12 +79,13 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 		}),
 	)
 	collection.add(svc(AccountService.name, {}))
-	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
+	const startNewTask = vi.fn(() => fakeTask)
+	collection.add(svc(TaskService.name, { startNewTask }))
 	collection.add(svc(OperationJournalService.name, {}))
 	const tokenService = new TokenService(logger, api, () => fake.client)
 	collection.add(tokenService)
 	await collection.start()
-	return { tokenService, fake, api }
+	return { tokenService, fake, api, fakeTask, startNewTask }
 }
 
 describe("TokenService composition — in-process, no sandbox", () => {
@@ -110,6 +111,100 @@ describe("TokenService composition — in-process, no sandbox", () => {
 
 		await tokenService.parseTokenInterface(NETWORK.id, CONTRACT)
 		expect(fake.registerCalls).toHaveLength(0) // getContracts() already lists it → no register
+	})
+
+	// Characterization pins (F-Q09): getTokenInterface had ZERO coverage — its
+	// load-bearing identity is pinned here before any structural refactor.
+	describe("getTokenInterface (characterization)", () => {
+		const SENTINEL = { name: "sentinel_custom_fn", impl: 999 }
+		/** One distinct sentinel per kind so a computed-key assembly that crosses
+		 *  two kinds' wires (or drops one) reds instead of passing on a lone example. */
+		const KINDS = [
+			"getName",
+			"getSymbol",
+			"getDecimals",
+			"balanceOfPublic",
+			"balanceOfPrivate",
+			"transferPublic",
+			"transferPrivate",
+			"transferPublicToPrivate",
+			"transferPrivateToPublic",
+		] as const
+		const sentinelFor = (kind: string, i: number) => ({ name: `sentinel_${kind}`, impl: 1000 + i })
+		const seedRow = (over: Partial<Token> = {}): Token => ({
+			id: 7,
+			profileId: "p1",
+			chainId: 1,
+			contract: CONTRACT,
+			name: "Tok",
+			symbol: "TOK",
+			decimals: 18,
+			getNameFn: SENTINEL,
+			...over,
+		})
+
+		test("returns the STORED per-kind picks verbatim (never re-derives a default) + real candidates", async () => {
+			const { tokenService, api } = await makeHarness()
+			await api.storage.local.set({ "nulo:core:tokens@7": JSON.stringify(seedRow()) })
+
+			const ti = await tokenService.getTokenInterface(NETWORK.id, 7)
+
+			// The pick-source is the stored row's field — a fabricated impl no
+			// artifact-derived default would ever produce must round-trip as-is.
+			expect(ti.getNameFn).toEqual(SENTINEL)
+			// An absent stored pick stays absent (no getDefaultTokenFn fallback).
+			expect(ti.getSymbolFn).toBeUndefined()
+			// Candidates still come from the real artifact.
+			expect(ti.getNameFnCandidates.length).toBeGreaterThan(0)
+			expect(ti.transferPublicFnCandidates.length).toBeGreaterThan(0)
+			expect(ti.contract).toBe(CONTRACT)
+			expect(ti.chainId).toBe(1)
+		})
+
+		test("ALL NINE stored picks round-trip distinctly; all nine candidate arrays are plain-object arrays; isComplete true", async () => {
+			const { tokenService, api } = await makeHarness()
+			const allPicks = Object.fromEntries(KINDS.map((k, i) => [`${k}Fn`, sentinelFor(k, i)]))
+			await api.storage.local.set({ "nulo:core:tokens@7": JSON.stringify(seedRow(allPicks as Partial<Token>)) })
+
+			const ti = await tokenService.getTokenInterface(NETWORK.id, 7)
+
+			for (const [i, kind] of KINDS.entries()) {
+				expect(ti[`${kind}Fn`], kind).toEqual(sentinelFor(kind, i))
+				const candidates = ti[`${kind}FnCandidates`]
+				expect(Array.isArray(candidates), kind).toBe(true)
+				// Candidate elements are plain {name, impl} data (postMessage-safe),
+				// never Fn instances — the mapping-timing merge hazard.
+				for (const c of candidates) {
+					expect(Object.keys(c).sort()).toEqual(["impl", "name"])
+				}
+			}
+			// isComplete derives from all nine picks being present.
+			expect(ti.isComplete).toBe(true)
+		})
+
+		test("isComplete is FALSE when any pick is missing; no task is started or subtasked", async () => {
+			const { tokenService, api, fakeTask, startNewTask } = await makeHarness()
+			await api.storage.local.set({ "nulo:core:tokens@7": JSON.stringify(seedRow()) })
+
+			const ti = await tokenService.getTokenInterface(NETWORK.id, 7)
+
+			expect(ti.isComplete).toBe(false)
+			// getTokenInterface has NO task instrumentation (unlike parseTokenInterface).
+			expect(startNewTask).not.toHaveBeenCalled()
+			expect(fakeTask.startSubtask).not.toHaveBeenCalled()
+		})
+
+		test("rejects a token owned by ANOTHER profile (ownership gate)", async () => {
+			const { tokenService, api } = await makeHarness()
+			await api.storage.local.set({ "nulo:core:tokens@7": JSON.stringify(seedRow({ profileId: "p2" })) })
+
+			await expect(tokenService.getTokenInterface(NETWORK.id, 7)).rejects.toThrow(/unknown token id/)
+		})
+
+		test("rejects an unknown token id", async () => {
+			const { tokenService } = await makeHarness()
+			await expect(tokenService.getTokenInterface(NETWORK.id, 999)).rejects.toThrow(/unknown token id/)
+		})
 	})
 })
 
