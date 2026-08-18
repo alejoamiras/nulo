@@ -28,6 +28,7 @@ declare global {
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
+  const awaitLivenessAdvance: typeof import('../utils/background-liveness').awaitLivenessAdvance
   const balanceFormatted: typeof import('../utils/amount').balanceFormatted
   const browser: typeof import('webextension-polyfill')
   const buildActivityRows: typeof import('../utils/activity-rows').buildActivityRows
@@ -89,6 +90,7 @@ declare global {
   const inject: typeof import('vue').inject
   const isBackgroundConnected: typeof import('../utils/core').isBackgroundConnected
   const isInFlightSend: typeof import('../utils/in-flight-send').isInFlightSend
+  const isPopupSubmitKey: typeof import('../composables/usePopupEntity').isPopupSubmitKey
   const isPrefersDarkScheme: typeof import('../utils/general').isPrefersDarkScheme
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
@@ -133,6 +135,7 @@ declare global {
   const purgeNumber: typeof import('../utils/amount').purgeNumber
   const reactive: typeof import('vue').reactive
   const readBackupFile: typeof import('../utils/full-backup-helpers').readBackupFile
+  const readLiveness: typeof import('../utils/background-liveness').readLiveness
   const readonly: typeof import('vue').readonly
   const realSleep: typeof import('../composables/importPreflight').realSleep
   const receivedLabel: typeof import('../utils/received-display').receivedLabel
@@ -213,6 +216,7 @@ declare global {
   const useTicker: typeof import('../composables/ticker').useTicker
   const useToast: typeof import('../composables/toast.js').useToast
   const userMethodsOf: typeof import('../utils/primary-method').userMethodsOf
+  const validateAndMigrateBackup: typeof import('../composables/useFullBackupImport').validateAndMigrateBackup
   const waitForProfileActive: typeof import('../composables/waitForProfileActive').waitForProfileActive
   const walletChainId: typeof import('../utils/chain-ids').walletChainId
   const watch: typeof import('vue').watch
@@ -254,7 +258,7 @@ declare global {
   export type { FieldDef, FieldHandle, FormState } from '../composables/useFormState'
   import('../composables/useFormState')
   // @ts-ignore
-  export type { RestoreStatus, RestoreStage, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
+  export type { RestoreStatus, RestoreStage, FullBackupEnvelope, UseFullBackupImportOptions, UseFullBackupImportResult } from '../composables/useFullBackupImport'
   import('../composables/useFullBackupImport')
   // @ts-ignore
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
@@ -358,6 +362,7 @@ declare module 'vue' {
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>
+    readonly awaitLivenessAdvance: UnwrapRef<typeof import('../utils/background-liveness')['awaitLivenessAdvance']>
     readonly balanceFormatted: UnwrapRef<typeof import('../utils/amount')['balanceFormatted']>
     readonly browser: UnwrapRef<typeof import('webextension-polyfill')>
     readonly buildActivityRows: UnwrapRef<typeof import('../utils/activity-rows')['buildActivityRows']>
@@ -419,6 +424,7 @@ declare module 'vue' {
     readonly inject: UnwrapRef<typeof import('vue')['inject']>
     readonly isBackgroundConnected: UnwrapRef<typeof import('../utils/core')['isBackgroundConnected']>
     readonly isInFlightSend: UnwrapRef<typeof import('../utils/in-flight-send')['isInFlightSend']>
+    readonly isPopupSubmitKey: UnwrapRef<typeof import('../composables/usePopupEntity')['isPopupSubmitKey']>
     readonly isPrefersDarkScheme: UnwrapRef<typeof import('../utils/general')['isPrefersDarkScheme']>
     readonly isProxy: UnwrapRef<typeof import('vue')['isProxy']>
     readonly isReactive: UnwrapRef<typeof import('vue')['isReactive']>
@@ -463,6 +469,7 @@ declare module 'vue' {
     readonly purgeNumber: UnwrapRef<typeof import('../utils/amount')['purgeNumber']>
     readonly reactive: UnwrapRef<typeof import('vue')['reactive']>
     readonly readBackupFile: UnwrapRef<typeof import('../utils/full-backup-helpers')['readBackupFile']>
+    readonly readLiveness: UnwrapRef<typeof import('../utils/background-liveness')['readLiveness']>
     readonly readonly: UnwrapRef<typeof import('vue')['readonly']>
     readonly realSleep: UnwrapRef<typeof import('../composables/importPreflight')['realSleep']>
     readonly receivedLabel: UnwrapRef<typeof import('../utils/received-display')['receivedLabel']>
@@ -542,6 +549,7 @@ declare module 'vue' {
     readonly useTicker: UnwrapRef<typeof import('../composables/ticker')['useTicker']>
     readonly useToast: UnwrapRef<typeof import('../composables/toast.js')['useToast']>
     readonly userMethodsOf: UnwrapRef<typeof import('../utils/primary-method')['userMethodsOf']>
+    readonly validateAndMigrateBackup: UnwrapRef<typeof import('../composables/useFullBackupImport')['validateAndMigrateBackup']>
     readonly waitForProfileActive: UnwrapRef<typeof import('../composables/waitForProfileActive')['waitForProfileActive']>
     readonly walletChainId: UnwrapRef<typeof import('../utils/chain-ids')['walletChainId']>
     readonly watch: UnwrapRef<typeof import('vue')['watch']>

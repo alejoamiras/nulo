@@ -26,7 +26,7 @@ import { ref, watch } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NodeStatus } from "@/wallet/services/network/spec"
 import { asBase64CredentialId, asBase64SecretPrf, asHexUserHandle, EncryptionKey } from "@nulo/wallet-crypto"
-import { UserRejectedError } from "@nulo/extension-messaging/errors"
+import { RpcDisconnectedError, UserRejectedError } from "@nulo/extension-messaging/errors"
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -133,6 +133,10 @@ vi.mock("@/wallet/services/account/spec", () => ({
 	accountRowId: (profileId: string, chainId: number, address: string) => JSON.stringify(["account", profileId, chainId, address]),
 }))
 vi.mock("@/wallet/services/account-state/spec", () => ({ ACCOUNT_STATE_SERVICE_NAME: "account-state" }))
+vi.mock("@/utils/background-liveness", () => ({
+	readLiveness: vi.fn(async () => 100),
+	awaitLivenessAdvance: vi.fn(async () => 101),
+}))
 vi.mock("@/wallet/services/auth-registry/spec", () => ({
 	AUTH_REGISTRY_SERVICE_NAME: "auth-registry",
 	AUTH_REGISTRY_STORAGE_ROOT: "nulo:core:auth-registry",
@@ -174,6 +178,7 @@ vi.mock("@/wallet/storage/migrations", async () => {
 
 // Imported AFTER mocks are registered.
 import { useFullBackupImport, validateAndMigrateBackup } from "./useFullBackupImport"
+import { awaitLivenessAdvance, readLiveness } from "@/utils/background-liveness"
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1558,5 +1563,106 @@ describe("restoreStage — phase observability", () => {
 		// B-24 integration: the stage wraps the SHARED bounded rollback helper —
 		// all attempts ran before the failure was declared.
 		expect(profileClient.deleteProfile).toHaveBeenCalledTimes(3)
+	})
+})
+
+describe("crash-rollback liveness gate", () => {
+	// The MV3 respawn gap: a disconnect-classified pre-finalize failure means
+	// the worker died mid-restore — the rollback must wait for the NEW
+	// worker's liveness signal before the bounded delete helper runs, or every
+	// attempt burns into doomed ports in milliseconds (deflake-round-4
+	// BUG-TRANSPORT; fix-plan Decision 1 + ledger row 15).
+	function primeHappyRestore() {
+		profileClient.restore.mockResolvedValue({ id: "new-id", name: "Imported", type: "password" })
+		networkClient.restore.mockResolvedValue([{ id: "new-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }])
+		accountClient.restore.mockResolvedValue([{ address: "0xaaaa" }])
+	}
+
+	it("a disconnect-classified failure awaits the liveness advance, THEN rolls back", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		primeHappyRestore()
+		tokenClient.restore.mockRejectedValue(new Error("Client disconnected"))
+
+		await c.restoreBackup()
+
+		expect(readLiveness).toHaveBeenCalledTimes(1)
+		expect(awaitLivenessAdvance).toHaveBeenCalledTimes(1)
+		expect(awaitLivenessAdvance).toHaveBeenCalledWith(100, 60_000)
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		// Ordering: the gate resolves BEFORE the first delete attempt.
+		expect(vi.mocked(awaitLivenessAdvance).mock.invocationCallOrder[0]).toBeLessThan(
+			profileClient.deleteProfile.mock.invocationCallOrder[0],
+		)
+		expect(c.restoreStage.value).toBe("rolled-back")
+	})
+
+	it("an RpcDisconnectedError send-failure shape is gated too", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		primeHappyRestore()
+		tokenClient.restore.mockRejectedValue(new RpcDisconnectedError("RPC 'restore' aborted: port disconnected", {}))
+
+		await c.restoreBackup()
+
+		expect(awaitLivenessAdvance).toHaveBeenCalledTimes(1)
+		expect(c.restoreStage.value).toBe("rolled-back")
+	})
+
+	it("a NON-disconnect failure rolls back immediately — no liveness wait", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		primeHappyRestore()
+		tokenClient.restore.mockRejectedValue(new Error("boom mid-restore"))
+
+		await c.restoreBackup()
+
+		expect(awaitLivenessAdvance).not.toHaveBeenCalled()
+		expect(profileClient.deleteProfile).toHaveBeenCalledWith("new-id")
+		expect(c.restoreStage.value).toBe("rolled-back")
+	})
+
+	it("a rejected baseline READ also fails closed — zero deletes, rollback-failed", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		primeHappyRestore()
+		tokenClient.restore.mockRejectedValue(new Error("Client disconnected"))
+		vi.mocked(readLiveness).mockRejectedValueOnce(new Error("session storage unavailable"))
+
+		await c.restoreBackup()
+
+		// The rejection must NOT escape the catch (stage stuck at rolling-back,
+		// status stuck at progress was the failure mode) — same fail-closed
+		// path as a ceiling expiry.
+		expect(awaitLivenessAdvance).not.toHaveBeenCalled()
+		expect(profileClient.deleteProfile).not.toHaveBeenCalled()
+		expect(c.restoreStage.value).toBe("rollback-failed")
+		expect(c.restoreStatus.value).toBe("failed")
+	})
+
+	it("a liveness ceiling expiry SKIPS the delete helper and fails closed to rollback-failed", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		const backup = await buildBackup()
+		c.selectedBackup.value = { name: "x.json", backup, type: "plain", profileType: "password" }
+		primeHappyRestore()
+		tokenClient.restore.mockRejectedValue(new Error("Client disconnected"))
+		vi.mocked(awaitLivenessAdvance).mockRejectedValueOnce(new Error("liveness never advanced past 100"))
+
+		await c.restoreBackup()
+
+		// Fail-closed: NO delete attempts against a worker that never proved
+		// itself; the torn-marker backstop stays authoritative.
+		expect(profileClient.deleteProfile).not.toHaveBeenCalled()
+		expect(c.restoreStage.value).toBe("rollback-failed")
+		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import incomplete", expect.stringContaining("Delete it in Settings"))
 	})
 })
