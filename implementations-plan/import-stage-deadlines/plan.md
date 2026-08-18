@@ -460,7 +460,13 @@ residuals.
 typecheck` exit 0; `bun run test:e2e` full smoke green. Layers:
 lint/typecheck + smoke e2e.
 
-### Phase 6 — Certification (3× solo) + mechanical timeout gate + wrap
+### Phase 6 ✓ — Certification (3× solo) + mechanical timeout gate + wrap
+
+> GATE PASSED 2026-08-18: 3× consecutive solo proverless runs — 3 files /
+> 8 tests each, all attempt-1, zero retries (retry=0), zero exit-86, frozen
+> tree; mechanical no-timeout-change record clean (300_000 sole ceiling,
+> unchanged). Full record: `certification.md`. Fast layers at stack top:
+> lint 0 / typecheck 0 / `bun run test` in the delivery checks below.
 
 3× consecutive solo `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run
 e2e:agent tests/e2e/network/backup-restore-sw-restart.test.ts
