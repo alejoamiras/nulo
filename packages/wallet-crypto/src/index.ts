@@ -16,6 +16,9 @@
  */
 
 export { deriveNuloAccountKeys, deriveSigningKeyFromSeed } from "./account-derivation"
+export { assertCanonicalL1ChainId, deriveAccountSeed } from "./derive-account-seed"
+export { deriveBip39Seed, deriveMasterFromMnemonic } from "./mnemonic-master"
+export { NULO_ACCOUNT_SEED_SEP, NULO_SEPARATOR_LABELS, NULO_SIGNING_ROOT_SEP } from "./nulo-separators"
 export { derivePxeStoreKey, PXE_STORE_KDF_LABEL } from "./pxe-store-key"
 export { EncryptionKey } from "./encryption-key"
 export { PasswordSecretBox, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"

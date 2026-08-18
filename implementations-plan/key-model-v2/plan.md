@@ -150,7 +150,7 @@ Same product model, same l1ChainId + tags + validation + regime work, **no PBKDF
 
 ## Phases
 
-### Phase 1 — KDF v2 primitives (packages)
+### Phase 1 — KDF v2 primitives (packages) ✓ (gate passed 2026-08-18: lint 0 / typecheck:all 0 / test 4373✓ / test:all 0; crypto-rider consult below)
 `mnemonic-master.ts` (+ official trezor KATs at passphrase `"TREZOR"`, + Nulo `""` KATs, + a Unicode-passphrase NFKD KAT), canonicalizer (wallet-core) + checksum-rejection test, `nulo-separators.ts` + separator-namespace inventory + non-collision tests (I3: enumerate what the installed 5.0.1 tree actually exports — `GeneratorIndex` may not be), `derive-account-seed.ts` + KAT + independent generator under `reference/`, `account-derivation.ts` v2 separator + regenerated reference vectors, `encryption-key.ts` AAD param (+tests). (Regime-record edit deliberately deferred to P3 — §F timing.)
 **Gate** — `bun run lint && bun run typecheck:all && bun run test`. Pass: exit 0; all new KATs green with pinned values committed. Layers: lint/typecheck/unit.
 
