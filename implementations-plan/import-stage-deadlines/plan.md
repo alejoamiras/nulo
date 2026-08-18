@@ -440,7 +440,15 @@ written.
 **Gate**: `bun run lint` exit 0; codex verdict recorded in `audit-codex.md`.
 Layers: lint + docs review.
 
-### Phase 5 — B2 probe + documentation landing
+### Phase 5 ✓ — B2 probe + documentation landing
+
+> GATE PASSED 2026-08-18: probe 3/3 green (nonce absent page-side + present
+> in the SW ring past the 2s debounce; throw + rejection each in pageerror;
+> built-HTML sniffer-before-app order + console-free theme-boot belt) —
+> evidence quoted in `lessons/phase-5.md`; both fixture comment copies
+> upgraded; consoleErrors ledger entry CLOSED permanent-by-design with five
+> residuals; lint 0 / typecheck 0; full armed smoke 27 files / 111 tests
+> EXIT:0.
 
 Three-channel probe (console nonce ABSENT page-side, PRESENT in
 `readSwLogTrail` polled past the 2s debounce; throw + rejection each in
