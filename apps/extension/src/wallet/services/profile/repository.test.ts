@@ -26,7 +26,7 @@ const samplePasswordProfile = (id: string): Profile => ({
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
 	entropy: "ZW50cm9weQ==",
-	entropyMac: "bWFj",
+	envelopeMac: "bWFj",
 })
 
 describe("ProfileRepository", () => {

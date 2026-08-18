@@ -93,9 +93,16 @@ export class PasswordSecretBox {
 	 *  the immediate session-open. */
 	public async seal(password: string, secret: MasterSecretBytes, entropy: Uint8Array<ArrayBuffer>): Promise<Sealed> {
 		const passhash = await EncryptionKey.getPasshash(password)
-		const key = await EncryptionKey.fromPasshash(passhash)
-		const encrypted = await this.sealInternal(key, secret, entropy)
-		return { passhash, encrypted }
+		try {
+			const key = await EncryptionKey.fromPasshash(passhash)
+			const encrypted = await this.sealInternal(key, secret, entropy)
+			// `passhash` ESCAPES to the caller on success (session-open fast path). Only wipe it
+			// on the throw path, where the caller never receives it.
+			return { passhash, encrypted }
+		} catch (err) {
+			zeroize(passhash)
+			throw err
+		}
 	}
 
 	/** Fast path for flows where the caller already has a passhash.
@@ -165,9 +172,15 @@ export class PasswordSecretBox {
 			if (!unsealed) return null
 
 			const newPasshash = await EncryptionKey.getPasshash(newPassword)
-			const newKey = await EncryptionKey.fromPasshash(newPasshash)
-			const newEncrypted = await this.sealInternal(newKey, unsealed.secret, unsealed.entropy)
-			return { passhash: newPasshash, encrypted: newEncrypted }
+			try {
+				const newKey = await EncryptionKey.fromPasshash(newPasshash)
+				const newEncrypted = await this.sealInternal(newKey, unsealed.secret, unsealed.entropy)
+				// newPasshash ESCAPES on success (caller owns it); wipe it only if sealing throws.
+				return { passhash: newPasshash, encrypted: newEncrypted }
+			} catch (err) {
+				zeroize(newPasshash)
+				throw err
+			}
 		} finally {
 			zeroize(oldPasshash)
 			if (unsealed) {
