@@ -5,7 +5,7 @@ import { normalizeError } from "@nulo/wallet-core/jobs"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import type { OperationContext } from "@/wallet/services/operation-journal/spec"
+import type { OperationContext, OperationOrigin } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -183,10 +183,49 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		opContext: OperationContext,
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
+		// Phase 2.5: the journal entry is created up-front (title=undefined) so
+		// the tokens-view TokenImportRow pops in immediately after approval,
+		// carrying the "Requested by <origin>" subtitle; `persistToken` backfills
+		// the title once the live fetch resolves the symbol.
+		return await this.persistToken({
+			profileId,
+			networkId,
+			tokenInterface,
+			journal: {
+				origin: opContext.origin,
+				accountAddress,
+				title: undefined,
+				subtitle: opContext.origin === "dapp" ? `Requested by ${opContext.dappOrigin}` : "Adding token…",
+			},
+			metadata: {
+				kind: "live",
+				fetch: () => this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface),
+			},
+		})
+	}
+
+	/**
+	 * The shared token-persist machine behind `addToken` (live) and
+	 * `addSeededToken` (seeded). The metadata source is a DISCRIMINATED value,
+	 * not an open callback: the seeded arm carries only already-validated data
+	 * and structurally cannot fetch — preserving the seeder's no-refetch TOCTOU
+	 * fix by construction. The live arm's fetch (and its title backfill) runs
+	 * INSIDE the token lock, in the not-yet-persisted branch only.
+	 */
+	private async persistToken(input: {
+		profileId: string
+		networkId: string
+		tokenInterface: TokenInterface
+		journal: { origin: OperationOrigin; accountAddress: string; title: string | undefined; subtitle: string }
+		metadata:
+			| { kind: "seeded"; name: string; symbol: string; decimals: number }
+			| { kind: "live"; fetch: () => Promise<[string, string, number]> }
+	}): Promise<TokenInfo> {
+		const { profileId, networkId, tokenInterface, metadata } = input
 
 		// Fast idempotency short-circuit (Opus H2 / codex DEFERRED).
 		// If the token is already on this profile+chain, return without
-		// creating a new journal entry or running fetchTokenMetadata.
+		// creating a new journal entry or running a live metadata fetch.
 		// Without this guard, a malicious or buggy dApp could spam
 		// registerToken with the same contract address and force a PXE
 		// round-trip + journal write per attempt. The lock still protects
@@ -196,22 +235,15 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			return getTokenInfo(existing)
 		}
 
-		// Phase 2.5: durable journal entry for the import. Created up-front
-		// (title=undefined) so the tokens-view TokenImportRow pops in
-		// immediately after approval, carrying the "Requested by <origin>"
-		// subtitle. The title gets backfilled with the resolved symbol once
-		// fetchTokenMetadata returns (via `setOperationMeta`) — without this
-		// backfill the row would show the short contract address as a
-		// fallback (TokenImportRow.vue:30-33).
 		const journalOp = await this.journal.createOperation({
 			kind: "token_import",
-			origin: opContext.origin,
+			origin: input.journal.origin,
 			profileId,
-			accountAddress,
+			accountAddress: input.journal.accountAddress,
 			networkId,
 			contractAddress: tokenInterface.contract,
-			title: undefined,
-			subtitle: opContext.origin === "dapp" ? `Requested by ${opContext.dappOrigin}` : "Adding token…",
+			title: input.journal.title,
+			subtitle: input.journal.subtitle,
 		})
 
 		// The catch stays INSIDE the locked section: the journal's "failed"
@@ -222,12 +254,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
 				let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
 				if (!token) {
-					const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
-					// Backfill the title with the resolved symbol so the in-flight
-					// TokenImportRow stops falling back to the short contract
-					// address. Safe to call even if the row has already vanished
-					// (setOperationMeta tolerates terminal records).
-					await this.journal.setOperationMeta(journalOp.id, { title: symbol })
+					let name: string
+					let symbol: string
+					let decimals: number
+					if (metadata.kind === "live") {
+						;[name, symbol, decimals] = await metadata.fetch()
+						// Backfill the title with the resolved symbol so the in-flight
+						// TokenImportRow stops falling back to the short contract
+						// address. Safe to call even if the row has already vanished
+						// (setOperationMeta tolerates terminal records).
+						await this.journal.setOperationMeta(journalOp.id, { title: symbol })
+					} else {
+						;({ name, symbol, decimals } = metadata)
+					}
 					token = {
 						id: await nextNumericId(this.tokens),
 						profileId,
@@ -291,61 +330,12 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}): Promise<TokenInfo> {
 		await this.ensureInitialized()
 		const { profileId, networkId, accountAddress, tokenInterface, name, symbol, decimals } = input
-
-		const existing = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-		if (existing) {
-			return getTokenInfo(existing)
-		}
-
-		const journalOp = await this.journal.createOperation({
-			kind: "token_import",
-			origin: "seed",
+		return await this.persistToken({
 			profileId,
-			accountAddress,
 			networkId,
-			contractAddress: tokenInterface.contract,
-			title: symbol,
-			subtitle: "Default token",
-		})
-
-		// Catch stays INSIDE the locked section — see addToken (audit D3).
-		return await this.lock.withLock(async () => {
-			try {
-				await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
-				let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-				if (!token) {
-					token = {
-						id: await nextNumericId(this.tokens),
-						profileId,
-						chainId: tokenInterface.chainId,
-						contract: tokenInterface.contract,
-						name,
-						symbol,
-						decimals,
-						getNameFn: tokenInterface.getNameFn,
-						getSymbolFn: tokenInterface.getSymbolFn,
-						getDecimalsFn: tokenInterface.getDecimalsFn,
-						balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-						balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-						transferPublicFn: tokenInterface.transferPublicFn,
-						transferPrivateFn: tokenInterface.transferPrivateFn,
-						transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-						transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
-					}
-					await this.tokens.set(`${token.id}`, token)
-					this.emit("onTokenAdded", getTokenInfo(token))
-				}
-				const result = getTokenInfo(token)
-				await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
-				return result
-			} catch (error) {
-				await this.journal.transitionOperation(
-					journalOp.id,
-					{ stage: "failed" },
-					normalizeError(error, classifyTokenImportError(error)),
-				)
-				throw error
-			}
+			tokenInterface,
+			journal: { origin: "seed", accountAddress, title: symbol, subtitle: "Default token" },
+			metadata: { kind: "seeded", name, symbol, decimals },
 		})
 	}
 

@@ -759,6 +759,40 @@ describe("NetworkService public API (M4.10)", () => {
 			await service.updateEndpoint(network.id, network.primaryEndpointId, "Primary moved", "https://rpc.test/2")
 			expect(nodes.has(50)).toBe(false)
 		})
+
+		test("evictions happen BEFORE onNetworkUpdated fires (subscribers observe post-eviction caches)", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			const transients = (service as any).transientNodes as Map<string, unknown>
+			transients.set(ep.rpcUrl, { node: {}, failures: 0 })
+
+			let transientAtEmit: boolean | undefined
+			service.onNetworkUpdated.add(() => {
+				transientAtEmit = transients.has(ep.rpcUrl)
+				return Promise.resolve()
+			})
+
+			await service.updateEndpoint(network.id, ep.id, "Moved", "https://rpc.test/3")
+
+			expect(transientAtEmit).toBe(false)
+		})
+
+		test("guard precedence: unknown endpoint id + wrong-chain URL throws CHAIN_MISMATCH, not invalid id", async () => {
+			// The chain-mismatch guard runs BEFORE the endpoint-id lookup; a shared
+			// pipeline that hoists idx-resolution would flip this precedence.
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.other": nodeInfoForChain(99),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			await expect(service.updateEndpoint(network.id, "nope", "X", "https://rpc.other")).rejects.toThrow(/ENDPOINT_CHAIN_MISMATCH/)
+		})
 	})
 
 	describe("setPrimaryEndpoint", () => {
