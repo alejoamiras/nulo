@@ -120,6 +120,14 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  before its await). */
 	private static readonly PENDING_RESTORE_TTL_MS = 30 * 60 * 1000
 
+	/** F-B24: a restore-pending marker must be at least this old before the boot
+	 *  sweep may treat the import as ABANDONED and reap it. A marker only proves
+	 *  incompleteness — a password import whose SW died can still finalize via
+	 *  the popup's auto-reconnect — so abandonment is proven by age. Generous
+	 *  multiple of any plausible import (slice RPCs are seconds; a passkey
+	 *  ceremony is minutes; PENDING_RESTORE_TTL is 30 min). */
+	public static readonly TORN_IMPORT_MIN_AGE_MS = 24 * 60 * 60 * 1000
+
 	/** Zeroize + drop stale pending-restore secrets. MUST be called under the
 	 *  facade lock (`runExclusive`) so it can't zeroize an entry another op holds
 	 *  a live reference to. Optionally skips `exceptId` (the id being finalized). */
@@ -926,8 +934,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 *  2. OUTSIDE the lock: the coordinator's awaited purge of EVERY profile-bearing
 	 *     root. A failure leaves the tombstone → resume retries; the id stays reserved.
 	 *  3. UNDER the lock: clear the tombstone (epoch-guarded) + release the reservation.
+	 *
+	 * `expectedGeneration` (F-B24 torn-import sweep only): when supplied, phase 1
+	 * refuses UNDER THE LOCK unless the row's `pxeGeneration` still matches — a
+	 * same-id re-import that landed between the sweep's observation and this call
+	 * must never be deleted by a decision made about its predecessor.
 	 */
-	public async deleteProfile(id: string): Promise<ProfileInfo> {
+	public async deleteProfile(id: string, expectedGeneration?: string): Promise<ProfileInfo> {
 		await this.ensureInitialized()
 		const delegate = this.deletionDelegate
 		if (!delegate) throw new Error("deletion coordinator not ready")
@@ -937,6 +950,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			const profile = await this.repo.get(id)
 			if (!profile || this.deletionState.isReserved(id)) {
 				throw new Error("Invalid profile id")
+			}
+			if (expectedGeneration !== undefined && profile.pxeGeneration !== expectedGeneration) {
+				throw new Error("profile generation changed since the deletion was decided")
 			}
 			// Fail FAST on a pre-fence row (no persisted pxeGeneration): proceeding
 			// would half-execute — the tombstone write drops the undefined field, its
@@ -1013,13 +1029,20 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * a corrupt tombstone stays reserved ("deletion pending"), never fails open.
 	 *
 	 * F-B24: when `bootCutoff` is supplied (the SW boot instant, captured BEFORE
-	 * `services.start()` — the B-03 discipline), also sweep TORN IMPORTS: a
-	 * restore-pending marker from a PREVIOUS lifetime (`at < bootCutoff`) whose
-	 * generation matches its row is a profile that can never be finalized
-	 * (unlock throws `RestoreTornError`) — the compensating delete the import's
-	 * rollback could not durably guarantee is completed here. Without a cutoff
-	 * the sweep is SKIPPED entirely: a marker written by an import racing
-	 * startup must never be reaped mid-flight.
+	 * `services.start()` — the B-03 discipline), also sweep TORN IMPORTS. A
+	 * restore-pending marker only proves the restore is INCOMPLETE, not
+	 * abandoned: a PASSWORD import whose SW died mid-flow can still legitimately
+	 * `finalizeRestore` against this new SW (the popup auto-reconnects; finalize
+	 * re-derives from the durable row + the popup-held password — codex audit).
+	 * Abandonment is therefore proven by AGE: only markers older than
+	 * {@link TORN_IMPORT_MIN_AGE_MS} are reaped — no live import plausibly spans
+	 * it, and the popup flow is an unbroken RPC chain whose failure paths run
+	 * the composable's own rollback. The reap runs the real `deleteProfile`
+	 * pinned to the observed `pxeGeneration`, so it can never land on a newer
+	 * same-id incarnation. Accepted risk (blast-radius note): unlike the journal
+	 * reaper's metadata-only boot sweep, this destroys a profile — the age floor
+	 * + generation pin + tuple compare-and-delete are the containment. Without a
+	 * cutoff the sweep is SKIPPED entirely.
 	 */
 	public async resumePendingDeletions(bootCutoff?: number): Promise<void> {
 		const delegate = this.deletionDelegate
@@ -1078,23 +1101,33 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				const row = await this.repo.get(marker.profileId)
 				if (!row) {
 					// Row-write compensation already cleaned the row; the bare marker
-					// must not brand a future same-id profile.
-					await this.restorePending.delete(marker.profileId)
+					// must not brand a future same-id profile. Compare-and-delete: a
+					// same-id restore may have written a FRESH marker since we listed.
+					await this.restorePending.deleteIfSame(marker)
 					continue
 				}
 				if (row.pxeGeneration !== marker.pxeGeneration) {
 					// Stale leftover from a prior incarnation — the eager version of the
-					// lazy purge `openSessionVerified` already performs.
-					await this.restorePending.delete(marker.profileId)
+					// lazy purge `openSessionVerified` already performs. Tuple-guarded
+					// for the same reason as above.
+					await this.restorePending.deleteIfSame(marker)
 					continue
 				}
-				// A prior-lifetime marker matching its row = a torn import: finalize can
-				// never run (the flow's secret died with it). Complete the compensating
-				// delete through the full three-phase machinery — if THIS delete fails
-				// pre-tombstone the marker survives and the next boot retries; if it
-				// fails post-tombstone the tombstone loop above finishes it. Self-healing.
+				if (bootCutoff - marker.at < ProfileService.TORN_IMPORT_MIN_AGE_MS) {
+					// Incomplete, but not provably ABANDONED: a password import whose SW
+					// died can still finalize through the popup's auto-reconnect. Leave
+					// it; it stays unlock-refused (RestoreTornError) and is reaped once
+					// it ages past the floor.
+					continue
+				}
+				// Aged past any plausible live import = abandoned. Complete the
+				// compensating delete through the full three-phase machinery, pinned to
+				// the observed generation so it can never land on a newer same-id
+				// incarnation — if THIS delete fails pre-tombstone the marker survives
+				// and the next boot retries; post-tombstone, the tombstone loop above
+				// finishes it. Self-healing.
 				this.logError(`torn-import sweep: completing compensating delete for ${marker.profileId}`)
-				await this.deleteProfile(marker.profileId)
+				await this.deleteProfile(marker.profileId, marker.pxeGeneration)
 			} catch (err) {
 				this.logError(`torn-import sweep failed for ${marker.profileId}`, getErrorMessage(err))
 			}
