@@ -2,481 +2,496 @@
 
 Execute the SETTLED design of the flake-ledger's `importFullBackup`-300s entry
 (the remaining half: per-stage envelope measurement in both proving modes +
-stage-scoped early-fail only where a product-owned deadline exists), and
-close the consoleErrors blind-spot entry on the root cause recon already
-established (the console-sniffer reroute). Both OPEN ledger entries
-re-dispositioned. Delivered as a 2-PR `gh stack` into dev.
+the early-fail classification), and close the consoleErrors blind-spot entry
+on its root cause (the console-sniffer reroute — found and confirmed at
+recon). Both OPEN ledger entries re-dispositioned. Delivered as a 2-PR
+`gh stack` into dev.
 
-`eli5_mode: artifact` (owner is active in-session; gate presented explicitly).
+**Consolidation state**: dual audit round 1 complete — codex `reject`
+(session `01a01612`, findings folded), fable `conditional approve`
+(conditions C1–C5 folded). One disputed row (decision ledger row 3) goes to
+the final fresh-context codex pass + the owner gate. `eli5_mode: artifact`.
 
 ## Clarifying answers (Phase 0 — self-answered from the goal + committed artifacts)
 
-- **Success criterion**: (a) a committed per-stage envelope table from ≥5 solo
-  measurement runs per proving mode, read off the shipped `data-restore-stage`
-  markers; (b) `importFullBackup` reshaped: stage-scoped early-fail ONLY for
-  stages with a product-owned deadline, all other stages diagnostics-only, the
-  unchanged 300s remaining the SOLE overall failure criterion; (c) reshaped
-  waits green 3× consecutive solo (`NULO_E2E_RETRY=0`); (d) BOTH ledger
-  entries re-dispositioned (importFullBackup-300s closed; consoleErrors closed
-  or re-ledgered as permanent with the mechanism documented); (e) fixture
-  comment + e2e-testing skill carry the console-capture truth; (f) PRs green
-  on `quality-status`/`smoke-e2e-status`/`network-e2e-status`, codex
-  iterate-until-approve + `/code-review max --fix` before codex, stack merged.
-- **Scope IN**: e2e-side per-stage timing instrumentation; the measurement
-  campaign (both proving modes); the wait reshaping in
-  `tests/e2e/helpers/import-drivers.ts`; the consoleErrors empirical
-  confirmation + capture decision (fix or document-permanent); ledger/skill/
-  fixture-comment updates; the parked-ARC-A preservation docs already
-  committed on this branch (ride PR-1).
-- **Scope OUT**: product-side stage-deadline ENFORCEMENT (new product budgets
-  are a user-visible behavior change — written up as owner asks, never
-  implemented here); the REJECTED variants (blind 240/60 split;
-  `restoreStatus` stall detector); any timeout/bound RAISE (BANNED); product
-  code changes of any kind (incl. the dead `"picked"` union member — noted,
-  not fixed); transport work (ARC A parked); folding a new console tap into
-  the ~50 existing `consoleErrors` assertions (burst-of-reds risk — if a tap
-  lands, it is diagnostics-first; assertion promotion is a separate future
-  campaign).
-- **Constraints**: network e2e SOLO with `NULO_E2E_RETRY=0`, nothing else
-  local during suites; long runs in tmux; measurement is wall-clock heavy
-  (plan for hours, unattended-safe); commit signing on; merge authority per
-  the goal but the approval gate below goes to the ACTIVE owner first.
-- **Quality bar**: production test-infra — the suite is the repo's merge
-  gate; a wrong early-fail classification would flake every PR.
-- **Validation layers** (real tooling): `bun run lint` + `bun run typecheck`;
-  `bun run test` for touched unit surfaces; `bun run test:e2e` (smoke) when
-  the shared driver/fixtures change; `bun run e2e:agent
-  tests/e2e/network/<file>` solo for measurement + certification.
-- **Decisions surfaced vs delegated**: the stage classification
-  (product-owned-deadline or not) is decided WITH codex against the
-  measurement data and recorded in the decision ledger; B2's fix-vs-document
-  fork likewise. Owner gate before implementation; product-budget proposals
-  surface as asks.
-- **Post-impl hardening**: `/harden` not scheduled (test-infra arc).
+- **Success criterion**: (a) a committed per-stage envelope table
+  (`envelopes.md`) from ≥5 solo measurement runs per proving mode, read off
+  `data-restore-stage`, stratified by scenario (never pooled), with the
+  solo-local-baseline caveat; (b) `importFullBackup`'s wait reshaped:
+  trajectory diagnostics for every consumer, structured lapse errors, the
+  unchanged hardcoded 300s as the SOLE overall criterion, and — if row 3
+  survives its gate — terminal-failure early-exit; NO per-stage deadline
+  mechanism ships (classification outcome: none qualifies — see row 2);
+  (c) reshaped waits green 3× consecutive solo (`NULO_E2E_RETRY=0`);
+  (d) BOTH ledger entries re-dispositioned; (e) fixture comments +
+  e2e-testing skill carry the console-capture truth incl. the accepted
+  residuals; (f) PRs green on all three status gates, codex
+  iterate-until-approve + `/code-review max --fix`, stack merged.
+- **Scope IN**: submit-half extraction (converging the crash-truth
+  duplication); the internal stage-aware wait + recorder; the measurement
+  campaign; the B2 confirmation probe + documentation; ledger/skill/fixture
+  updates; the parked-ARC-A docs already on this branch.
+- **Scope OUT**: product code changes of ANY kind (incl. `resetBackupState`
+  not resetting `restoreStage`, the dead `"picked"` member, and any
+  attempt-fence product change — all recorded as owner-visible follow-ups);
+  product-side stage budgets (owner asks only); the REJECTED variants (blind
+  240/60 split; `restoreStatus` stall detector); any timeout/bound RAISE
+  (BANNED — and a no-timeout-change diff gate proves it at post-impl); a
+  fixture SW CDP console tap (rejected — `readSwLogTrail` already exists);
+  folding new capture into the ~50 `consoleErrors` assertions;
+  instrumenting `waitForPopup` approval windows (gap recorded, deferred).
+- **Constraints**: network e2e SOLO with `NULO_E2E_RETRY=0`; long runs in
+  tmux; frozen tree between certification runs; commit signing on; the
+  approval gate goes to the ACTIVE owner before implementation.
+- **Quality bar**: production test-infra (the suite gates every PR).
+- **Validation layers**: `bun run lint` + `bun run typecheck`; `bun run
+  test:e2e` (smoke) whenever the shared driver/fixtures change; `bun run
+  e2e:agent tests/e2e/network/<file>` solo for measurement + certification.
+- **Decisions surfaced vs delegated**: row 3 (terminal early-exit) is
+  DISPUTED between the auditors — resolved by the final fresh-context codex
+  pass + the owner at the gate; everything else converged (ledger below).
+- **Post-impl hardening**: `/harden` not scheduled.
 
 ## Tier call (Phase 0.5)
 
-Rubric: novelty LOW-MODERATE (CDP capture internals — now already
-root-caused at recon), blast radius MODERATE (e2e infra gates every PR),
+Novelty LOW-MODERATE, blast radius MODERATE (e2e infra gates every PR),
 irreversibility LOW, migration NONE, external coupling LOW, security LOW.
-0–1 HIGH → **mid**. Matches the goal's "expect mid".
+0–1 HIGH → **mid**.
 
-## Normative spec (committed — do NOT re-derive)
+## Normative spec (committed — do NOT re-derive; precision fixed per audits)
 
-The settled design (three codex rounds, ledger verbatim): expose a
-`restoreStage` ref advancing at real stage boundaries **(SHIPPED, round 4:
-`data-restore-stage`, incl. the rollback fork)**; measure per-stage envelopes
-in both proving modes; grant an early-fail window ONLY to stages with a
-product-owned deadline — every other stage diagnostics-only, the unchanged
-300s as the sole failure criterion. REJECTED variants (stay rejected): blind
-240/60 split; `restoreStatus`-based stall detector ("a shorter timeout in
-disguise").
+Settled design (ledger verbatim anchor): measure per-stage envelopes in both
+proving modes; grant an early-fail window ONLY to stages with a
+product-owned deadline — every other stage diagnostics-only; unchanged 300s
+as the sole overall criterion. REJECTED variants stay rejected (blind 240/60
+split; `restoreStatus` stall detector). **The spec grants the window only
+WHERE a product-owned deadline exists — it nowhere requires granting one;
+"diagnostics-only everywhere" is a fully spec-compliant close** (both
+auditors, independently).
+
+Code truth about the one candidate: `chain-sync`'s 45s is one ABSOLUTE
+budget (`importChainSync.ts:29`; preflight capped 21s inside it :31/:69;
+registration min(30s, remaining) :89) and it **degrades-and-continues** —
+overruns become skip records, the import proceeds to `finished`
+(`:90-109`); it NEVER throws. An e2e mirror could fire only when the product
+mechanism is broken, and that regression already reds the unchanged 300s
+with a chain-sync-shaped trajectory.
 
 consoleErrors OPEN entry (verbatim): "e2e consoleErrors capture cannot see
 app `console.*` … browser-emitted entries arrive; console-API calls from the
-extension page do not … Diagnosed in `lessons/phase-1.md` run 7; needs its
-own infra arc."
+extension page do not … needs its own infra arc." Root cause (recon,
+confirmed reading `console-sniffer.ts:25-30`): the sniffer's SUCCESS path
+never invokes the native page console — ordinary app `console.*` forwards
+over RPC to the SW realm (`logger/utils.ts:115-135`). Precision (codex): the
+catch path DOES call the page original, and `popup/app.vue:192` calls
+`console._log` directly — the accurate claim is "successful ordinary
+forwarding never invokes the native page console".
 
-## Architecture & Implementation (Outline 1 — MAIN)
+## Architecture & Implementation (CONSOLIDATED — the audited hybrid)
 
-### B1: converge the drivers, measure through the shared wait
+### B1: submit-half convergence + internal stage-aware wait
 
-**Shape**: split `importFullBackup` into the two halves the codebase already
-proves (recon §A: `crash-truth.ts`'s `driveImportToSubmit` +
-`reimportToTerminal`), and make the wait half stage-aware for EVERY consumer:
+**Public surface: unchanged.** `importFullBackup(page, filePath, password,
+shell, { expectError?: boolean | string })` keeps its exact signature and
+its 6 consumers untouched. No new exported wait API, no `RestoreOutcome`
+type (dead API at ship — fable), no `overallCeilingMs` knob (a caller-visible
+handle on the sole criterion — codex); **300_000 is hardcoded**.
 
-1. **`submitFullBackupImport(page, filePath, password, shell)`** — the
-   pick-file→password→submit half (extracted verbatim from
-   `import-drivers.ts:142-…`; `crash-truth.ts:141-156` converges onto it).
-2. **`awaitRestoreOutcome(page, shell, opts)`** — the wait half, replacing
-   the bare `waitForHash(…, 300_000)`:
-   - Polls BOTH `window.location.hash` AND `data-restore-stage` (same 200ms
-     cadence as today's `waitForHash`) via one `page.waitForFunction`
-     returning a composite `{hash, stage}` snapshot; the driver records every
-     stage TRANSITION with a monotonic timestamp (the envelope recorder —
-     always-on, zero-cost when nothing changes).
-   - **Success criterion unchanged**: resolve when `hash === successHash`;
-     overall ceiling unchanged at 300s.
-   - **Terminal-failure early-exit** (causal signal, not a deadline): stage
-     ∈ {`failed`, `rollback-failed`} (and `rolled-back` when the caller did
-     not expect an error) → throw IMMEDIATELY with a structured message
-     embedding the full stage trajectory + timings. Today these terminals
-     burn the remaining 300s and then throw a bare TimeoutError.
-   - **Lapse diagnostics**: on the 300s ceiling, throw with the trajectory +
-     current stage (never a bare TimeoutError again).
-   - **Stage-scoped early-fail, product-owned only**: wired as a DATA-DRIVEN
-     table `PRODUCT_OWNED_STAGE_DEADLINES: Partial<Record<RestoreStage,
-     number>>` — EMPTY at phase 1. Candidates enter it only in phase 4, only
-     with a code-verified product budget behind them (recon finds exactly
-     one: `chain-sync`, product budget 45s), only with codex sign-off, only
-     with envelope-informed margins. All other stages: diagnostics-only,
-     forever, per the settled design.
-   - `expectError` flows keep their current semantics (assert the failure
-     surface; terminal-failure early-exit inverts into the expected path).
-3. **`importFullBackup` remains as the composed convenience** (submit +
-   await) so the 6 existing consumers keep their one-line call; crash-truth's
-   duplicated halves become re-exports/thin wrappers of the new shared halves
-   (its `reimportToTerminal` keeps its own terminal predicate — it treats
-   MORE states as terminal by design).
-4. **Envelope JSONL**: each `awaitRestoreOutcome` appends per-stage records
-   `{file, test, mode, stage, enteredAtMs, durMs}` to
-   `/tmp/nulo-probes-import-stages.jsonl` (the reserved CI artifact slot,
-   `_network-e2e.yml:352`) — `appendFileSync`, mirrored to console on
-   failure only (pool:forks swallows pass-stdout; recon §A precedents).
-   Proving mode read from the build stamp env the runner already sets.
+1. **`submitFullBackupImport(page, filePath, password, shell)`** (exported):
+   the pick-file→password→submit half, extracted verbatim;
+   `crash-truth.ts`'s `driveImportToSubmit` becomes a thin re-export
+   (verified near-verbatim duplication). `reimportToTerminal` KEEPS its own
+   terminal predicate (its terminal set genuinely differs — crash flows).
+2. **The wait half (internal to `importFullBackup`)** replaces the bare
+   `waitForHash`:
+   - **Recorder**: armed BEFORE submit (repo precedent:
+     `backup-roundtrip.test.ts:124`) — a page-side `MutationObserver` on
+     `[data-restore-stage]` pushing `{stage, tMs: performance.now()}` into a
+     window-scoped array (no transition can be missed, incl. sub-200ms
+     stages); Node drains the array every 200ms alongside a `{hash,
+     errorsScreen}` snapshot via one `page.evaluate` (single Node clock for
+     envelopes; rAF-throttle-immune — same rationale as `waitForHash`'s
+     `polling: 200`). At most one drain window is lost at success-navigation;
+     terminals drain on prior polls. The `finished→success` seam is measured
+     Node-side (last `finished` drain → hash observed).
+   - **Attempt fence (mechanical — codex's stale-marker hazard)**: the
+     pre-submit arm reads the CURRENT stage as baseline; terminal
+     classification requires a transition OBSERVED AFTER arming. A stale
+     pre-submit terminal (possible because `resetBackupState` does not reset
+     `restoreStage` — `useFullBackupImport.ts:889ff`) can never classify.
+     The fresh-mount invariant is ALSO documented ("assumes a fresh
+     import-page mount; reusing a page across attempts reintroduces stale
+     reads pre-arm") — today every driver consumer fresh-mounts (verified).
+   - **Success**: hash === successHash → resolve (unchanged criterion).
+   - **Terminal-failure early-exit** (row 3 — DISPUTED, ships only if its
+     gate survives): observed-after-arm transition into `failed`,
+     `rollback-failed`, or `rolled-back` (plain flows only), OR the
+     errors-screen Continue button rendered (the chain-sync-degraded outcome
+     that never auto-routes — `reimportToTerminal` already treats it as
+     terminal, `crash-truth.ts:91`) → throw IMMEDIATELY with the trajectory.
+     Coverage is PARTIAL and documented: status-only failures (validation
+     reject freezes stage at `restoring:profile`; duplicate-account rollback
+     writes no stage) still ride to the ceiling — with better diagnostics.
+     If row 3 falls, these terminals become lapse-diagnostics labels instead
+     (the recorder and structured errors ship regardless).
+   - **expectError flows: UNTOUCHED stage-wise** (fable C2): the existing
+     banner-text predicate remains the sole expectError criterion — the
+     expectError failure paths never set terminal stages, so the stage
+     machinery ignores them by construction.
+   - **Lapse diagnostics**: on the 300s ceiling, the existing
+     `withTimeoutMessage` helper (`fixtures/extension.ts:1019` — TIMEOUT-only
+     relabeling, preserves frame-detach/CDP-disconnect/page-crash
+     identities) wraps the wait with a diagnostic naming the full trajectory
+     + current stage, with special copy for the two silent-burn shapes:
+     `finished`+errors-screen ("import degraded, Continue-gated") and
+     `finished`+`#/popup/auth` ("import finished, activation didn't" —
+     `popup/pages/import.vue:77-89`).
+3. **Envelope JSONL (env-gated)**: `NULO_E2E_STAGE_LOG=1` enables; path
+   `NULO_E2E_STAGE_LOG_OUT` defaulting to
+   `path.join(os.tmpdir(), "nulo-probes-import-stages.jsonl")` —
+   TMPDIR-aware (real disk on the dev box; `/tmp` in CI where the reserved
+   harvest glob `_network-e2e.yml:352-357` matches). ONE atomic JSON object
+   per import appended at import end: `{runId (pid+startTs), file, test,
+   importOrdinal, attempt, mode, trajectory: [{stage, atMs, durMs}],
+   outcome, rightCensored}`. Campaign runs truncate at start (per-run file
+   via runId in the name); disabled ⇒ zero filesystem writes. Formatting +
+   record-building live as small pure helpers beside the driver
+   (`import-stage-timing.ts` — either location fine; the draft's "cycle"
+   rationale was false and is retracted).
 
-**Measurement campaign** (no product code, no new test files): ≥5 solo runs
-per proving mode of the UNMARKED importFullBackup drivers —
-`backup-restore-integrity.test.ts` (1 import/run) +
-`profile-reimport-matrix.test.ts` (2 imports/run) — under
-`NULO_E2E_RETRY=0`, each mode via its `NULO_E2E_PROVERLESS` setting. The
-crash file's retry-leg samples are recorded but annotated (post-crash
-context, not primary envelope input). Envelope table committed to
-`implementations-plan/import-stage-deadlines/envelopes.md` + cited by the
-ledger close.
+### B1 measurement campaign (Phases 2–3)
 
-### B2: confirm the mechanism, then document (fix-fork decided with codex)
+≥5 solo runs per proving mode of `backup-restore-integrity.test.ts` +
+`profile-reimport-matrix.test.ts`, `NULO_E2E_RETRY=0`, **modes alternated**
+(not all-proverless-then-all-prover-ON), tree frozen. Reported BY SCENARIO ×
+import ordinal, never pooled: integrity (real funded backup, tampered slices
+labeled, chain-sync PRESENT), matrix leg A first import (synthetic, NO
+account-state slice ⇒ chain-sync SKIPPED — codex), matrix same-lifetime
+re-import (tombstone context). Crash-file legs: annotated context only.
+Committed table (`envelopes.md`) carries: per-stage P50/max per scenario per
+mode, sample counts, the `finished→success` seam, and the caveats — 
+solo-local baseline (the original lapses were load-dependent CI-shard
+events; these maxima are NOT a CI tail estimate and no deadline derives from
+them), 200ms drain quantization (sub-cadence stages measured by observer
+timestamps, drained late), tampered-slice labeling.
 
-Recon root-caused the blind spot (console-sniffer reroutes `console.*` over
-RPC to the SW realm; native page console never invoked; CDP
-`consoleAPICalled` never fires; browser-emitted entries bypass the patch).
-Remaining work is confirmation + the capture decision:
+### B1 classification outcome (Phase 4)
 
-1. **Empirical confirmation** (throwaway, env-gated, not landed as a gate):
-   drive a popup, `page.evaluate(() => console.error("NULO-PROBE-<nonce>"))`,
-   assert absent from `page.on('console')`; attach a CDP session to the SW
-   target (template `frozen-account-canary.test.ts:52`) and observe the
-   routed line arrive there. Plus the 2-minute built-artifact check that
-   `dist/chrome/src/popup/index.html` preserves sniffer-before-bundle order.
-2. **The fork** (codex-argued, decision ledger): (a) fixture-side SW-target
-   console tap as a DIAGNOSTICS-ONLY stream (recovers post-RPC app logs;
-   pre-connect calls stay lossy), OR (b) document-as-permanent — the
-   product's centralized SW-owned logging is deliberate; `pageErrors` is the
-   reliable app-error channel (recon: very likely NOT blind — verify in the
-   probe); stage/DOM evidence is the assertion surface. EITHER WAY: the two
-   fixture comment blocks (`extension.ts:161-174`, `:1101-1114`) and the
-   crash file's tap caveat get the mechanism truth; the e2e-testing skill
-   gains a dated section; the ledger entry is re-dispositioned (root-caused +
-   fixed | root-caused + permanent-by-design). The `waitForPopup`
-   no-listeners gap is RECORDED (ledger note) either way; instrumenting it
-   is explicitly deferred (scope).
+**No deadline mechanism ships.** Both auditors independently: `chain-sync`
+(the only code-verified product-owned budget) stays OUT — it cannot throw,
+degrades internally, and its regression already reds the unchanged 300s with
+a named trajectory; an e2e mirror adds a false-fire surface (CI event-loop
+starvation stretches OBSERVED stage time past 45s while the product budget
+held) for zero unique detection. The ledger entry closes as: **"measured;
+the settled classification rule yielded no stage warranting an e2e
+early-fail window; 300s unchanged as the sole criterion; diagnostics
+improved (trajectory + structured errors [+ terminal early-exit per row
+3])."** Any stage whose envelope suggests a candidate PRODUCT budget is
+written as an owner ask in the close-out — never implemented here.
+
+### B2: confirmation probe → document-as-designed (no CDP tap)
+
+1. **Probe** (throwaway, evidence into `lessons/`): on a fixture-opened
+   popup — (a) `console.error("NULO-PROBE-<nonce>")` → assert ABSENT from
+   `page.on('console')` AND PRESENT via the existing `readSwLogTrail`
+   (`fixtures/journal.ts:217` — the SW's session-storage log ring; no CDP,
+   no new lifecycle); (b) an uncaught throw AND a separate unhandled
+   rejection → each PRESENT in `pageErrors` (distinguishing the three
+   channels); (c) built-artifact check: `dist/chrome/src/popup/index.html`
+   preserves sniffer-before-entry script order.
+2. **Documentation landing**: the two fixture comment blocks
+   (`extension.ts:161-174`, `:1101-1114`) + the crash file's tap caveat get
+   the mechanism truth; the e2e-testing skill gains a dated section; the
+   ledger entry re-dispositions as **root-caused + permanent-by-design**,
+   explicitly carrying the residuals: (i) a caught-and-`console.error`'d app
+   error is invisible on BOTH channels (pageErrors sees only thrown/unhandled
+   — the accepted weakened posture); (ii) pre-connect `pendingLogs` buffering
+   flushes only on the next post-wire call and is lost if wiring never
+   completes; (iii) approval windows (`waitForPopup`) carry no listeners
+   (recorded, deferred); (iv) per-page array resets. Diagnostics guidance:
+   `readSwLogTrail` is the app-log evidence channel.
+3. **No fixture SW CDP tap** (codex; fable concurs on cost): MV3
+   worker-replacement reattach lifecycle for a diagnostics stream the log
+   ring already provides.
 
 ### Key interfaces
 
 ```ts
-// helpers/import-drivers.ts (all e2e-internal; loose types fine)
+// helpers/import-drivers.ts — public surface UNCHANGED except the new export:
 export async function submitFullBackupImport(page, filePath, password, shell): Promise<void>
-export interface RestoreOutcome {
-  terminal: "success" | RestoreStage       // success = successHash reached
-  trajectory: Array<{ stage: string; atMs: number; durMs: number }>
-}
-export async function awaitRestoreOutcome(page, shell, opts?: {
-  expectError?: boolean
-  overallCeilingMs?: 300_000               // NEVER overridden upward by callers
-}): Promise<RestoreOutcome>
-export async function importFullBackup(page, filePath, password, shell, opts?): Promise<void> // composed
-const PRODUCT_OWNED_STAGE_DEADLINES: Partial<Record<string, number>> = {} // phase-4 gated
+export async function importFullBackup(page, filePath, password, shell,
+  { expectError = false }: { expectError?: boolean | string } = {}): Promise<void>
+// wait half internal; 300_000 hardcoded; trajectory in errors + env-gated JSONL
 ```
-
-### Data & control flow (critical path)
-
-test → `importFullBackup` → submit half → `awaitRestoreOutcome` → one
-`waitForFunction` snapshot loop (hash + stage) → transitions recorded →
-[terminal-failure? throw structured] / [product-owned deadline exceeded?
-(phase-4 table only) throw structured] / [hash reached? resolve + append
-JSONL] / [300s? throw structured with trajectory].
 
 ### File-level change map
 
-- `apps/extension/tests/e2e/helpers/import-drivers.ts` — the split + wait
-  rework (MODIFY).
-- `apps/extension/tests/e2e/helpers/crash-truth.ts` — converge
-  `driveImportToSubmit` onto the shared submit half (MODIFY, thin).
-- `apps/extension/tests/e2e/helpers/import-stage-timing.ts` — NEW: JSONL
-  appender + trajectory formatting (kept out of import-drivers so
-  crash-truth can reuse formatting without cycles).
-- `apps/extension/tests/e2e/fixtures/extension.ts` — comment-truth updates
-  (both console blocks); optional SW-tap if fork (a) wins (MODIFY).
+- `tests/e2e/helpers/import-drivers.ts` — submit-half extraction + internal
+  stage-aware wait (MODIFY).
+- `tests/e2e/helpers/crash-truth.ts` — `driveImportToSubmit` → re-export of
+  the shared submit half (MODIFY, thin; `reimportToTerminal` untouched).
+- `tests/e2e/helpers/import-stage-timing.ts` — NEW (~30 lines): pure
+  trajectory/record helpers + env-gated appender.
+- `tests/e2e/backup-migration.test.ts` — +1 red-path case (fable C3): a
+  crafted mid-restore failure (malformed networks slice → outer catch →
+  `rolled-back`) asserting the structured throw + trajectory content —
+  proves the early-exit FIRES (or, if row 3 falls, asserts the lapse
+  diagnostic's terminal label).
+- `tests/e2e/fixtures/extension.ts` — comment-truth updates only (both
+  console blocks) (MODIFY).
 - `.claude/skills/e2e-testing/SKILL.md` — dated lessons section (MODIFY).
 - `implementations-plan/e2e-deflake/flake-ledger.md` — both entries
-  re-dispositioned (MODIFY, edit-in-place per convention).
-- `implementations-plan/import-stage-deadlines/{plan,recon,envelopes}.md`,
-  `lessons/` — plan artifacts.
-- NOT touched: `useFullBackupImport.ts` (product), the raw
-  `data-restore-stage` reads in `backup-restore-sw-restart.test.ts`, the
-  RestoreGate, all `consoleErrors` assertions.
+  re-dispositioned, edit-in-place (MODIFY).
+- Plan artifacts: `plan.md`, `recon.md`, `audit-codex.md`, `audit-fable.md`,
+  `envelopes.md`, `certification.md`, `lessons/`.
+- NOT touched: `useFullBackupImport.ts` + ALL product code; the crash file's
+  raw stage reads; RestoreGate; every `consoleErrors` assertion; every
+  numeric timeout (post-impl diff gate proves it).
 
 ### Non-obvious mechanics
 
-- The stage poll must tolerate the marker element not existing yet (early
-  routes) and the `""` initial stage — trajectory records only real
-  transitions; `readStage`'s accessor is the model (`crash-truth.ts:23-27`).
-- Mode detection for the JSONL: `process.env.NULO_E2E_PROVERLESS` in the
-  TEST process (the runner exports it; the build stamp is the belt for the
-  wallet build itself — recon §A).
-- The post-`finished` seam (30s `completeImportWithRecovery`, recon §A) means
-  `finished` → successHash has its own gap: the trajectory records
-  `finished→success` duration explicitly so the campaign measures that seam
-  instead of hiding it.
-- `rolled-back` under `expectError:false` is a product-terminal for the
-  DESIGNED-retry flows in the crash file only — which does not use this wait
-  half (its `reimportToTerminal` predicate stays authoritative there). For
-  plain imports, `rolled-back` = failure → early-exit.
+- The observer array dies with the document on success-navigation — drains
+  on the 200ms cadence bound the loss to one window; terminal states are
+  always drained before any navigation they gate.
+- Baseline-fenced classification: `terminalObservedAfterArm =
+  transitions.some(t => TERMINALS.has(t.stage))` — a stale pre-arm terminal
+  never appears in `transitions`.
+- Mode label for JSONL: `process.env.NULO_E2E_PROVERLESS` in the test
+  process (set by the invoker; agent.sh consumes + stamp-verifies the build
+  side).
+- `errorsScreen` detection reuses the exact selector `reimportToTerminal`
+  uses for its continue-button terminal (`crash-truth.ts:91`) — one source.
 
 ### Trade-offs & alternatives not taken
 
-- **Probe-file-only campaign** (Outline 2 below) — rejected as primary:
-  envelopes measured by a bespoke loop diverge from real-test conditions
-  (fixture state, funded backups, real assertions); the settled design's
-  intent is envelopes of the REAL flows. Kept as fallback if run-count
-  economics force it.
-- **Per-stage deadlines for all stages** — violates the settled design
-  (blind-split-adjacent); only product-owned budgets qualify.
-- **`restoreStatus` stall detector** — REJECTED in the ledger; stays out.
-- **Raising any bound** — BANNED.
-- **Fixing the console monkeypatch product-side** (calling the native
-  original in the page realm too) — product behavior change (double
-  logging, perf) + touches every entry point; out of scope; noted as an
-  owner-visible option in the close-out.
-
-## Competing outline (Outline 2 — probe-first, minimal driver churn)
-
-For the audits to weigh against Outline 1:
-
-1. Leave `importFullBackup` intact except: swap the bare `waitForHash` for
-   `Promise.race([hashWait, terminalStageWait])` + a trajectory dump in both
-   error paths (no split, no crash-truth convergence).
-2. Add `_probe-import-stages.test.ts` (underscore, `NULO_E2E_PROBE=1`-gated,
-   modeled on `_probe-warmup-effect.test.ts`): per boot, loop
-   export→delete→re-import N times recording envelopes → 1 boot per proving
-   mode yields N samples each; campaign = 2 boots instead of ≥10 runs.
-3. Stage-deadline table + ledger close as in Outline 1.
-- **Pros**: far less shared-code churn (the 6 consumers see zero interface
-  change); campaign wall-clock collapses (~2 boots vs ~10+ runs); probe
-  loops give more samples.
-- **Cons**: envelopes measured off a synthetic loop (state accumulation
-  across iterations, warm caches — recon's `_probe-warmup-effect` exists
-  precisely because warmup skews); the crash-truth duplication REMAINS (two
-  wait implementations, one stage-aware one not — the exact drift recon
-  flagged); the always-on trajectory diagnostics (the biggest debuggability
-  win) don't reach the real tests; "5+ solo runs per proving mode" of the
-  settled design is arguably not satisfied by 1 probe boot per mode.
+- **Composite single `waitForFunction`** (draft) — INVALID (resolves once;
+  cannot stream) — both auditors; replaced by observer+drain.
+- **Public `awaitRestoreOutcome` API** — dead API at ship (one caller);
+  internal instead.
+- **`PRODUCT_OWNED_STAGE_DEADLINES` table (even empty)** — dead
+  configuration implying future authority this arc does not have (codex);
+  mechanism only ever added on evidence, which Phase 4 concluded against.
+- **Probe-file synthetic campaign** (Outline 2) — synthetic-loop envelopes
+  diverge from real flows; duplication unconverged; kept as fallback only.
+- **Fixture SW CDP console tap** — lifecycle cost without unique value
+  (`readSwLogTrail` exists).
+- **`restoreStatus` watching** — adjacent to the REJECTED stall detector's
+  data source; stays out; status-only failures remain ceiling-bound with
+  better lapse copy.
+- **Raising any bound** — BANNED (diff gate at post-impl).
 
 ## Security & Adversarial Considerations
 
-- **Threat surface**: test-infra only; no product trust boundary moves. The
-  real adversarial risk is SELF-INFLICTED FLAKE: a wrong early-fail
-  classification converts a healthy suite into a PR-blocking flake source.
-  Mitigations: the deadline table ships EMPTY; entries require a
-  code-verified product budget + measured envelope + codex sign-off; the
-  300s ceiling and success predicate are unchanged; terminal-failure
-  early-exit reacts only to explicit product terminal states.
-- **Measurement integrity**: solo runs, retry=0, frozen tree between runs;
-  proving mode recorded per sample; the JSONL lands in the reserved CI
-  artifact slot (no new upload surface, `contents: read` untouched — no
-  workflow permission changes at all).
-- **Supply chain / crypto / secrets**: none touched. No new deps.
-- **Console tap (if adopted)**: reads the SW target's console via CDP in
-  TESTS only; no product logging change; diagnostics-only so no assertion
-  semantics move; the tap must not weaken the existing "never blanket-benign"
-  filter rule (skill Gotchas :45).
-- **Prompt-injection/log-content risk**: JSONL content is stage names +
-  timings only — no user data, no secrets, no backup contents.
+- **Self-inflicted flake is the threat**: mitigations — public API + success
+  criterion + 300s unchanged; classification requires observed-after-arm
+  transitions (stale-marker hazard fenced mechanically); terminal set is
+  explicit product-terminal states only; the red-path case proves fire; the
+  full smoke suite + 3× solo certification prove no-false-fire; retry-budget
+  nuance stated honestly (a fast red leaves more retry budget than a 300s
+  burn — PR network gates run retry=0 so exposure is local/smoke defaults
+  only; certification runs retry=0).
+- **Measurement integrity**: solo, retry=0, frozen tree, alternated modes,
+  per-scenario stratification, run-attributed records; JSONL is env-gated
+  (disabled ⇒ no writes), TMPDIR-aware, run-unique (no cross-worktree
+  interleaving, no predictable-path symlink exposure beyond what tmpdir
+  already implies), content is stage names + timings only.
+- **No workflow/permission changes**; no new deps; no product trust boundary
+  moves; the B2 probe runs against a local fixture build only.
 
 ## Assumptions
 
-**Facts** (verified in recon, file:line in recon.md):
+**Facts** (verified; corrections from audits folded):
 1. The 300s wait is `import-drivers.ts:182` via hash-only `waitForHash`
    (`fixtures/extension.ts:1194-1196`); lapse = bare TimeoutError.
-2. `data-restore-stage` is live on both import pages
-   (`popup/pages/import.vue:194`, `onboarding/pages/import.vue:142`);
-   accessor precedent `crash-truth.ts:23-27`.
-3. Exactly one stage has a product-owned aggregate deadline: `chain-sync`
-   (`importChainSync.ts:29,31,34` — 45s = 21s + 30s; clamp
-   `account-state/service.ts:253`).
-4. `backup-restore-integrity.test.ts` + `profile-reimport-matrix.test.ts` +
-   `backup-migration-roundtrip.test.ts` are prover-capable importFullBackup
-   drivers; the crash file is proverless-only (runner-refused).
-5. `/tmp/nulo-probes-*.jsonl` is a reserved, currently-unwritten CI artifact
-   glob (`_network-e2e.yml:352-357`, `if: failure()`).
-6. The console blind spot's mechanism: `console-sniffer.ts:25-30` never
-   calls the native original on success; sniffer loads first in all three
-   entry HTMLs; the saved original fires only in the SW realm
-   (`logger/utils.ts:115-135`). ~50 `consoleErrors` assertions exist.
-7. The stage-sequence unit pin is `useFullBackupImport.test.ts:1466-1494`;
-   the crash file reads the marker raw at :213,:433,:451.
-8. `"picked"` is a dead union member (never assigned).
+2. Both import pages expose `data-restore-stage`
+   (`popup/pages/import.vue:194`, `onboarding/pages/import.vue:142`).
+3. `chain-sync`'s 45s is one ABSOLUTE budget with internal caps
+   (`importChainSync.ts:29,31,69,89`) and it degrades-and-continues (skip
+   records, `:90-109`) — it never throws.
+4. Prover-capable importFullBackup drivers: integrity, matrix,
+   migration-roundtrip; the crash file is proverless-only (runner-refused).
+5. `/tmp/nulo-probes-*.jsonl` is a failure-only harvest glob
+   (`_network-e2e.yml:344-357`) — an artifact path, not a run-isolated
+   facility (hygiene is ours).
+6. The console blind spot's mechanism: sniffer success path never calls the
+   native page console (`console-sniffer.ts:25-30`); catch path does;
+   `popup/app.vue:192` calls `console._log` directly; the routed original
+   fires in the SW realm (`logger/utils.ts:115-135`). ~50 `consoleErrors`
+   assertions exist. `readSwLogTrail` (`fixtures/journal.ts:217`) reads the
+   SW log ring test-side.
+7. Stage-sequence unit pin `useFullBackupImport.test.ts:1466-1494`; crash
+   file reads the marker raw (:213,:433,:451); `expectError` is
+   `boolean | string`; `withTimeoutMessage` preserves non-timeout error
+   identities (`extension.ts:1013-1030`).
+8. `"picked"` is dead in the union; `resetBackupState` does not reset
+   `restoreStage`; expectError failure paths never set terminal stages
+   (validation reject freezes `restoring:profile`; duplicate-account writes
+   no stage); terminal stage assignments are strictly forward within an
+   attempt with no resume-to-success path (`useFullBackupImport.ts:807-873`).
 
 **Inferences** (attackable):
-1. `pageErrors` is NOT similarly blind (native uncaught path preserved) —
-   to be verified by the B2 probe before the ledger close states it.
-2. Envelope variance between proving modes will be concentrated in
-   `chain-sync` + the post-`finished` seam; local stages (profile/tokens/
-   services) should be mode-insensitive. The campaign tests this.
-3. The terminal-failure early-exit cannot mask a product bug: every
-   early-exit path throws (never passes), so it can only make red runs
-   faster + better-diagnosed. (Audits: attack this.)
-4. Integrity + matrix runs are undisturbed imports (no kill), so their
-   samples are clean envelopes.
+1. `pageErrors` reliably captures UNCAUGHT throws + unhandled rejections on
+   fixture-opened pages (default path not suppressed) — verified by B2 probe
+   before the ledger close asserts it; it is NOT a general app-error channel
+   (caught-and-logged errors invisible on both — stated as the residual).
+2. Envelope variance concentration is UNKNOWN (hypotheses: chain-sync, the
+   finished→success seam, `restoring:services`' 6 sequential RPCs,
+   `finalizing`'s argon2) — the campaign measures; no prediction is load-bearing.
+3. The terminal early-exit, as fenced (observed-after-arm), cannot fire on a
+   healthy run: terminals are forward-only within an attempt; the red-path
+   case + full smoke + 3× certification are the empirical backstop. At suite
+   level it cannot turn red green; the retry-budget nuance is stated, not
+   waved away.
+4. Integrity + matrix runs are kill-free real flows (fresh mounts verified);
+   their samples are valid per-scenario envelopes with the labeled caveats.
 
-**Asks** (to the owner at the gate):
-1. Approve the terminal-failure early-exit as within the settled design's
-   spirit (causal product-state signal; NOT a deadline, NOT a split, NOT a
-   stall detector). It changes red-run behavior only.
-2. Approve the empty-until-evidenced deadline table (possibly staying empty
-   if codex + data say `chain-sync`'s e2e early-fail adds no coverage —
-   "close the entry with diagnostics-only everywhere" is an acceptable
-   outcome of the settled design).
-3. Approve the B2 posture: confirmation probe → document-as-designed as the
-   default outcome, SW-tap only if codex argues it earns its keep
-   (diagnostics-only either way).
+**Asks** (owner, at the gate):
+1. **Row 3 — terminal-failure early-exit** (THE disputed call): codex reads
+   the settled spec as excluding it (early-fail = product-owned-deadline
+   stages only) and would drop it this arc; fable argues it is a causal
+   product-terminal reaction (not a deadline/split/detector), pure waste
+   today (terminal at t+X, bare TimeoutError at 300s), and safe once fenced
+   + red-path-proven. The consolidated plan ships it ONLY with the mechanical
+   fence + red-path gate + smoke/cert evidence; dropping it costs little
+   (trajectory diagnostics remain). Final fresh-context codex weighs in;
+   the owner decides.
+2. Accept "diagnostics-only everywhere, no deadline mechanism" as the
+   classification outcome closing the importFullBackup-300s entry.
+3. Accept B2's document-as-designed posture + residuals (incl. that
+   caught-and-logged app errors stay invisible to e2e assertions), with
+   `readSwLogTrail` as the diagnostics channel and no SW tap.
+4. Product follow-ups recorded (not implemented): `resetBackupState` not
+   resetting `restoreStage` (enables page-reuse retries later); the
+   errors-screen/auth-route silent-burn UX; the dead `"picked"` member.
 
 ## Decision ledger
 
-(Filled during the audit rounds; current state:)
-
 | # | Decision | Chosen | Rejected (why) | Source |
 |---|---|---|---|---|
-| 1 | B1 shape | Outline 1: driver split + shared stage-aware wait | Outline 2 probe-first (synthetic-loop envelopes diverge from real flows; duplication remains; diagnostics don't reach real tests) — kept as fallback | main; audits pending |
-| 2 | Deadline table | Empty at ship; `chain-sync` only with envelope + codex sign-off; possibly empty forever | Pre-wiring all stages (blind-split-adjacent, violates settled design) | main; audits pending |
-| 3 | Terminal early-exit | In scope as causal product-state reaction | Treating it as out-of-design (it is not a deadline/split/detector) | main; audits pending |
-| 4 | B2 fork | Confirmation probe → document-as-designed default; SW-tap only if it earns its keep, diagnostics-only | Folding a tap into the ~50 assertions (burst-of-reds); product-side monkeypatch change (product behavior) | main; audits pending |
-| 5 | Campaign source | Real tests (integrity + matrix, both modes) | Probe-file loop (synthetic conditions) | main; audits pending |
+| 1 | B1 shape | Hybrid: Outline 1's submit-half convergence + stage-aware internals; Outline 2's zero public-surface change; observer+drain recorder | Composite waitForFunction (INVALID — resolves once); public wait API (dead at ship); probe-first campaign (synthetic loop); full driver split with new return type | codex+fable convergent |
+| 2 | Deadline mechanism | NONE ships; classification documented: chain-sync stays out (cannot throw; degrades internally; 300s+trajectory already catches its regression); "diagnostics-only everywhere" is the spec-compliant close | Empty table + enforcement (dead config implying unearned authority); pre-wiring all stages (blind-split-adjacent) | codex+fable convergent |
+| 3 | Terminal early-exit | **DISPUTED** — plan ships it WITH mechanical attempt fence (observed-after-arm), expectError exclusion, errors-screen terminal, red-path gate, cert evidence; falls back to trajectory-labels-only if the final pass or owner rejects | codex: exceeds settled spec + stale-marker hazard + partial coverage → drop this arc; fable: approve with conditions (all adopted) | → final codex + owner |
+| 4 | B2 fork | Probe → document-as-designed; residuals stated; `readSwLogTrail` = diagnostics channel; no SW CDP tap | Fixture CDP tap (MV3 reattach cost, no unique value); folding into assertions (burst-of-reds); product-side sniffer change (product behavior) | codex+fable convergent |
+| 5 | Campaign | Real flows, both modes alternated, per-scenario stratification, run-attributed env-gated JSONL, solo-local labeling | Probe-file loop; pooled samples; fixed always-on /tmp path (TMPDIR-blind, unattributed) | codex+fable convergent |
+| 6 | Lapse/terminal diagnostics scope | Trajectory + structured errors for every consumer; silent-burn copy for finished+errors-screen and finished+auth-route | Leaving the bare TimeoutError; watching `restoreStatus` (adjacent to the rejected stall detector's source) | fable find; codex idiom |
 
 ## Phases & validation gates
 
-### Phase 1 — Driver split + stage-aware wait + diagnostics (B1 code)
+### Phase 1 — Submit-half convergence + stage-aware wait + red-path (B1 code)
 
-Split `importFullBackup`; implement `awaitRestoreOutcome` (trajectory
-recording, terminal-failure early-exit, structured lapse errors, empty
-deadline table); converge `crash-truth.ts`'s submit half; JSONL appender in
-`import-stage-timing.ts`.
+Extract `submitFullBackupImport`; implement the internal wait (observer+drain
+recorder, fence, terminal set per row 3's standing state, structured
+lapse/terminal errors via `withTimeoutMessage`, hardcoded 300s, env-gated
+JSONL); converge crash-truth's submit half; add the red-path smoke case.
 
-**Validation gate**: `bun run lint && bun run typecheck` exit 0;
-`bun run test:e2e` — full smoke suite green (exercises the driver via
-`backup-migration.test.ts` + `import-paths.test.ts` incl. the `expectError`
-path); layers: lint/typecheck + smoke e2e.
+**Gate**: `bun run lint && bun run typecheck` exit 0; `bun run test:e2e`
+full smoke green (incl. the new red-path case + the expectError path).
+Layers: lint/typecheck + smoke e2e.
 
-### Phase 2 — Proverless measurement leg (≥5 solo runs)
+### Phase 2 — Measurement campaign leg 1 (alternating, ≥5 per mode total)
 
-In tmux, solo, frozen tree: `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run
-e2e:agent tests/e2e/network/backup-restore-integrity.test.ts
-tests/e2e/network/profile-reimport-matrix.test.ts` × ≥5 (yields ≥15
-proverless import samples: 5×1 + 5×2).
+In tmux, solo, frozen tree, `NULO_E2E_RETRY=0`, `NULO_E2E_STAGE_LOG=1`:
+alternate `NULO_E2E_PROVERLESS=1` and prover-ON runs of
+`tests/e2e/network/backup-restore-integrity.test.ts
+tests/e2e/network/profile-reimport-matrix.test.ts` until ≥5 runs per mode
+(≥15 imports per mode across the three scenarios).
 
-**Validation gate**: all runs attempt-1 green (retry=0), zero exit-86; ≥15
-samples present in the JSONL with stage-complete trajectories; layers:
-network e2e (solo).
+**Gate**: all runs attempt-1 green, zero exit-86; every import has a
+complete, attributed JSONL record. Layers: network e2e (solo).
 
-### Phase 3 — Prover-ON measurement leg (≥5 solo runs)
+### Phase 3 — Campaign completion + integrity of samples
 
-Same two files × ≥5 without `NULO_E2E_PROVERLESS`.
+Continue alternation to target counts; verify per-scenario sample sets are
+complete (integrity×mode, matrix-first×mode, matrix-reimport×mode).
 
-**Validation gate**: same criteria, prover-ON build stamps verified by
-agent.sh's own grep; layers: network e2e (solo).
+**Gate**: sample-count table complete; zero pooling violations (records
+carry scenario + ordinal). Layers: network e2e (solo).
 
-### Phase 4 — Envelope table + deadline decisions + ledger close (B1 docs)
+### Phase 4 — Envelope table + classification close (B1 docs)
 
-Commit `envelopes.md` (per-stage P50/max per mode, sample counts, the
-`finished→success` seam split out); codex xhigh consult on the deadline
-table (chain-sync in or empty) + any product-budget proposals (written as
-owner asks only); re-disposition the importFullBackup-300s ledger entry
-(edit-in-place); skill lessons.
+Commit `envelopes.md` (stratified P50/max, seam, caveats); codex xhigh
+consult confirming the classification close (no e2e deadline; row 3
+disposition per its gate); re-disposition the importFullBackup-300s entry
+(edit-in-place); skill lessons; owner asks written.
 
-**Validation gate**: `bun run lint` exit 0 (docs + any table wiring);
-if the table gains `chain-sync`: 1 extra solo proverless run of the two
-files green with the deadline armed; codex verdict recorded in
-`audit-codex.md`; layers: lint + conditional network e2e.
+**Gate**: `bun run lint` exit 0; codex verdict recorded in `audit-codex.md`.
+Layers: lint + docs review.
 
-### Phase 5 — B2 confirmation probe + capture decision + truth landing
+### Phase 5 — B2 probe + documentation landing
 
-Empirical probe (PROBE console.error absent from page stream, present via
-SW-target session; pageErrors probe; built-artifact script-order check —
-evidence into `lessons/phase-5.md`); codex xhigh on the fork; land the
-outcome: fixture comment blocks (both copies), skill dated section,
-consoleErrors ledger re-disposition, `waitForPopup` gap note; SW-tap only if
-codex-argued (diagnostics-only).
+Run the three-channel probe + built-artifact order check (evidence into
+`lessons/phase-5.md`); land fixture comments, skill section, ledger
+re-disposition with residuals.
 
-**Validation gate**: `bun run lint && bun run typecheck` exit 0; `bun run
-test:e2e` full smoke green (fixture comments/tap touch the shared fixture);
-probe evidence quoted in lessons; layers: lint/typecheck + smoke e2e.
+**Gate**: probe evidence quoted in lessons (nonce absent page-side / present
+in `readSwLogTrail`; throw + rejection each in pageErrors; dist order
+verified); `bun run lint && bun run typecheck` exit 0; `bun run test:e2e`
+full smoke green. Layers: lint/typecheck + smoke e2e.
 
 ### Phase 6 — Certification (3× solo) + wrap
 
 3× consecutive solo `NULO_E2E_RETRY=0 NULO_E2E_PROVERLESS=1 bun run
 e2e:agent tests/e2e/network/backup-restore-sw-restart.test.ts
 tests/e2e/network/backup-restore-integrity.test.ts
-tests/e2e/network/profile-reimport-matrix.test.ts` — every test attempt-1
-green, zero retries, zero exit-86, frozen tree (the reshaped wait running
-inside the two trigger files + the matrix). Record in `certification.md`.
-3 consecutive failures → STOP AND SURFACE.
+tests/e2e/network/profile-reimport-matrix.test.ts` — attempt-1 green, zero
+retries, zero exit-86, frozen tree. (Certification is proverless; the
+reshaped wait's prover-ON coverage comes from Phases 2–3's ≥5 prover-ON
+runs — stated for honesty.) Record `certification.md`. 3 consecutive
+failures → STOP AND SURFACE.
 
-**Validation gate**: the 3× record + `bun run lint && bun run typecheck &&
-bun run test` exit 0 at stack top; layers: network e2e (solo) + fast layers.
+**Gate**: the 3× record + `bun run lint && bun run typecheck && bun run
+test` exit 0 at stack top. Layers: network e2e (solo) + fast layers.
 
 ## Delivery
 
 `gh stack` into dev, 2 arcs:
 
 - **PR-1 `test(e2e): stage-aware import wait + envelope campaign`** — Phases
-  1–4 (+ the already-committed parked-ARC-A docs + this plan's artifacts).
-  Independently revertable: driver split + measurement + ledger close B1.
-- **PR-2 `test(e2e): console-capture truth`** — Phase 5 (+ certification
-  record from Phase 6 lands here as the stack-top docs commit).
-  Stacks on PR-1 (shares fixture comment context; keeps each PR one-sitting
-  reviewable).
+  1–4 + the parked-ARC-A docs + plan artifacts. Independently revertable.
+- **PR-2 `test(e2e): console-capture truth`** — Phase 5; Phase 6's
+  certification record lands here as the stack-top docs commit.
 
-`gh stack init --adopt worktree-import-stage-deadlines` (rename to
-`isd/stage-wait` as arc 1), `gh stack add isd/console-truth` at the arc
-boundary, `gh stack submit --draft --auto` early, `gh stack sync` to
-cascade. Merge: only after certification + owner-authorized (goal grants
-stack-merge authority once the ENTIRE stack + certification is green;
-approval-gate conditions may narrow this).
+`gh stack init --adopt` the worktree branch as arc 1 (rename to
+`isd/stage-wait`), `gh stack add isd/console-truth` at the boundary,
+`gh stack submit --draft --auto` early, `gh stack sync` to cascade. Merge
+only after certification + the owner-gate conditions.
 
-## Post-implementation (self-contained — the implementing session executes THIS)
+## Post-implementation (self-contained)
 
-1. Run `/code-review max --fix` on the full implementation diff. Skim the
-   applied fixes for unintended changes; commit them SEPARATELY from
-   implementation commits (identifiable as code-review-applied).
-2. Codex post-impl audit (`/codex xhigh`, NEW session): provide (a) the net
-   diff from the plan baseline (implementation commits only), (b) a summary
-   of the code-review-applied commits as a distinct artifact, (c) this
-   plan.md + decision ledger, (d) the adversarial/security ask ("what could
-   go wrong; what are we trusting that we shouldn't; could any early-exit
-   mask a product bug or flake a healthy suite"), and (e) verbatim: "Report
-   bugs and small, targeted improvements only. Do not propose speculative
-   abstractions, extra configuration surface, new layers, or rewrites — the
-   smallest change that fixes each real problem. If code works and is clear,
-   leave it alone."
-3. Iterative fix loop: verify codex's factual claims against the repo first;
-   apply accepted fixes; commit; log the round (consult + verdict) in
-   `lessons/`; RESUME the same codex session with the fix diff for
-   re-review. Repeat until a round yields no new material findings. Still
-   churning after 3 rounds → stop and surface to the owner.
-4. Delivery: `gh stack sync`; mark PR-1 then PR-2 ready; per-PR CI green on
-   `quality-status`/`smoke-e2e-status`/`network-e2e-status`; then the
-   certification (Phase 6) if not yet recorded; then merge per authority.
-5. Close-out: `implementations-plan/index.md` completed marker; agent-worktree
-   status updates; owner report (shipped, consults + verdicts, open asks).
+1. `/code-review max --fix` on the implementation diff → skim → commit the
+   applied fixes SEPARATELY.
+2. Codex post-impl audit (`/codex xhigh`, NEW session): net diff from plan
+   baseline; separate summary of code-review commits; this plan + ledger;
+   the adversarial ask ("could any early-exit fire on a healthy run; does
+   any diagnostic change mask identity of real faults; enumerate every
+   touched numeric timeout and prove none changed" — the no-timeout-change
+   diff gate); verbatim: "Report bugs and small, targeted improvements only.
+   Do not propose speculative abstractions, extra configuration surface, new
+   layers, or rewrites — the smallest change that fixes each real problem.
+   If code works and is clear, leave it alone."
+3. Iterative fix loop: verify claims against the repo; apply accepted fixes;
+   commit; log round in `lessons/`; RESUME the same session with the fix
+   diff. Repeat until no new material findings; 3 churning rounds → surface.
+4. Delivery per above; per-PR CI green on the three status gates; then
+   certification (Phase 6) if not recorded; merge per authority.
+5. Close-out: index.md completed marker; manifest status; owner report
+   (shipped, consults + verdicts, the recorded product follow-ups).
 
 ## Seeds
 
-(DRAFT — finalized after the approval gate.)
-
-Recommended: `/goal` (completion is transcript-observable).
+(DRAFT — finalized after the approval gate; recommended `/goal`.)
 
 ```
 /goal ARC B complete: all six phases marked ✓ in
 implementations-plan/import-stage-deadlines/plan.md, each backed by its
-validation gate passing in the transcript (phase 2/3: ≥5 solo retry=0 runs
-per proving mode with samples in the JSONL; phase 6: the 3× consecutive solo
-certification record); envelopes.md committed; BOTH flake-ledger entries
-re-dispositioned; /code-review max --fix applied+committed; codex post-impl
-fix loop converged (resumed pass with no new material findings quoted);
-gh stack PRs ready + green on quality-status/smoke-e2e-status/
-network-e2e-status; bun run test and bun run lint exit 0 in the transcript.
+validation gate passing in the transcript (phases 2-3: alternated solo
+retry=0 runs, ≥5 per proving mode, attributed JSONL samples; phase 6: the 3×
+consecutive solo certification record); envelopes.md committed with the
+stratified table + caveats; BOTH flake-ledger entries re-dispositioned;
+/code-review max --fix applied+committed; codex post-impl fix loop converged
+(resumed pass with no new material findings quoted); gh stack PRs ready +
+green on quality-status/smoke-e2e-status/network-e2e-status; bun run test
+and bun run lint exit 0 in the transcript.
 ```
 
-Fallback `/loop 15m`: reality-check plan.md + lessons/, drive the next
-pending phase, gates as written, codex xhigh at forks, 5-failure stop rule,
-never idle. (Full loop text synced post-approval.)
+Fallback `/loop 15m` synced post-approval.
