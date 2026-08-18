@@ -81,7 +81,8 @@ async function readBadgeText(page: Page): Promise<string> {
  * queued while locked does NOT survive a service-worker kill — durable replay
  * was rejected in audit (tab-origin continuity is unverifiable without a
  * `tabs` permission expansion; the SDK owns the pending map; the dApp times
- * out locally at 60s and re-broadcasts). What the wallet MUST do instead:
+ * out locally at 60s and can reissue on user/app retry). What the wallet MUST
+ * do instead:
  * reconcile the toolbar badge at boot, so the surviving Chrome-level badge
  * never ghosts a count over an empty queue (before this fix the ghost was
  * permanent — even unlocking never cleared it, because the empty-queue drain
