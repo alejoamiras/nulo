@@ -118,13 +118,18 @@ export abstract class ServiceClient<
 
 	// ── Transport hooks ─────────────────────────────────────────────────
 
-	protected async ensureTransportReady(): Promise<void> {
+	// Deliberately NOT async: the consumed bypass must return `void` — not a
+	// resolved Promise — so the correlator's `if (ready) await …` never
+	// suspends and the request runs synchronously to the wire send with zero
+	// microtask gap between the caller's authority check and `sendMessage`
+	// (the gap is exactly where an offscreen recreation could land).
+	protected ensureTransportReady(): void | Promise<void> {
 		if (!this.connected) this.connect()
 		if (this.bypassReadyOnce) {
 			this.bypassReadyOnce = false
 			return
 		}
-		await this.onReady()
+		return this.onReady()
 	}
 
 	protected async sendEnvelope(content: unknown): Promise<void> {

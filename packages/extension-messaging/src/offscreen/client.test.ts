@@ -568,12 +568,16 @@ describe("requestAlreadyReady (internal readiness bypass)", () => {
 	// `request()` invokes `ensureTransportReady()` in the same call stack — so
 	// concurrent ordinary requests can never inherit it.
 
-	test("skips onReady, reuses the full request machinery", async () => {
+	test("skips onReady and reaches the wire SYNCHRONOUSLY (zero microtask gap)", async () => {
 		const client = new TestClient(new MemoryTelemetrySink())
 		client.connect()
 		const p = client.echoAlreadyReady("hi")
-		await flush()
+		// The authority-to-wire guarantee: sendMessage has ALREADY been invoked
+		// when control returns to the caller — a resolved-Promise readiness
+		// would defer the send by a microtask, reopening the recreation gap.
+		expect(captureMessage()).toHaveBeenCalledTimes(1)
 		expect(client.readyHook).not.toHaveBeenCalled()
+		await flush()
 		const { requestId, fromUid } = getLastRequest()
 		emitMessage(makeResponse(requestId, fromUid, "hi"))
 		await expect(p).resolves.toBe("hi")
