@@ -38,8 +38,10 @@
    same-render coalescing hides one.
 4. **The `finished→success` seam is measured separately** (last `finished`
    entry → the success-hash observation): it contains the post-composable
-   activation/recovery leg (`completeImportWithRecovery`, ≤30s product
-   budget) + routing.
+   activation leg + routing. Precision (phase-4 codex): the popup's 30s
+   bounds only the INITIAL activation wait — the recovery that can follow
+   has no aggregate ceiling, and the healthy samples here (110–214ms) never
+   exercised that slow path.
 5. **Sample sizes support means/medians, not tails.** 5 runs/mode ⇒ 5
    integrity + 5 matrix-first + 5 matrix-reimport imports per mode.
    Acceptable ONLY because nothing gates on these numbers.
@@ -99,13 +101,24 @@ activation-recovery leg never engaged on a healthy solo run.
    CI shards) live in a different regime entirely, which is precisely why
    no deadline derives from these numbers.
 
-## Classification outcome (Phase 4)
+## Classification outcome (Phase 4 — codex `conditional approve`, conditions applied; session 01a01661)
 
-Pre-registered per the audited plan (all three audit legs, convergent): the
-settled rule — "early-fail ONLY where a product-owned deadline exists" —
-yields NO qualifying stage. `chain-sync` (the sole product-owned budget,
-45s absolute) degrades-and-continues by design and cannot produce a
-terminal; its regression already reds the unchanged 300s with a
-chain-sync-shaped trajectory. The measurement below either corroborates the
-stage picture or surfaces product-budget CANDIDATES (written as owner asks
-only). The 300s ceiling is unchanged either way.
+Measured (30-import stratified table, both proving modes); the settled
+classification rule yielded no stage warranting an e2e early-fail window.
+`chain-sync` — the only stage with an ABSOLUTE stage-level product budget
+relevant to this classification — measured 13.7–14.2s in the 10 applicable
+integrity imports against its 45s budget (~3.2× headroom); its designed
+timeout/probe/restore rejection paths degrade to skip records and continue.
+The hardcoded 300s remains the sole overall e2e success-wait criterion.
+Diagnostics improved: pre-submit trajectory recorder, labeled trajectory
+diagnostics on 300s lapse, env-gated measurement records. No per-stage
+deadline or early-exit mechanism shipped.
+
+**Owner observations surfaced (nothing implemented)**: (a) MATERIAL —
+`restoring:services` runs up to six sequential 60s-ceiling RPCs with no
+aggregate stage bound (healthy measurement 1–9ms; the worst case is
+architectural, not observed); (b) the activation/recovery seam likewise has
+no aggregate bound (the 30s bounds only the initial wait); (c) LOW —
+`restoring:account-state` rendered in 0/30 imports (no practical DOM
+observability; do NOT force a render for e2e's sake); (d) do NOT resize the
+45s chain-sync budget from these data — the campaign is not a tail estimate.

@@ -230,3 +230,27 @@ Two material findings were missed previously:
 
 1. The Continue screen is not chain-sync-specific. `restoreErrorLog` also receives network, account, token, and six service-loop errors ([useFullBackupImport.ts:543](apps/extension/src/composables/useFullBackupImport.ts:543), [useFullBackupImport.ts:718](apps/extension/src/composables/useFullBackupImport.ts:718), [useFullBackupImport.ts:738](apps/extension/src/composables/useFullBackupImport.ts:738)). The planned wording and early-exit semantics therefore cover a broader class of partial-success outcomes than stated.
 2. `console-sniffer.ts` has one shared `pendingLogs` array containing only arguments. Whichever console method first fires after wiring flushes every buffered entry through that method’s handler ([console-sniffer.ts:2](apps/extension/src/utils/console-sniffer.ts:2), [console-sniffer.ts:14](apps/extension/src/utils/console-sniffer.ts:14)). A pre-wire `console.error` can therefore be replayed at the wrong severity. That residual belongs in the permanent console-capture documentation.
+
+# Phase-4 consult — classification close (executing arc)
+
+Session: 01a01661-de94-7da3-acd4-e6a0e235fa71. Verdict: **conditional approve** (documentation-precision conditions — seam-budget wording, 'stage-level absolute product budget' phrasing — applied to envelopes.md + the ledger close). No data changed the pre-registered outcome; recommended close wording adopted verbatim; owner observations recorded (services aggregate bound MATERIAL; seam unbounded; account-state 0/30 renders; no 45s resizing).
+
+1. **Conditional approve**, with documentation-only precision fixes:
+
+   - In [envelopes.md]((implementations-plan/import-stage-deadlines/envelopes.md:39>), remove the claim that the entire `finished→success` seam has a ≤30s budget. The popup’s 30s only bounds the initial activation wait; recovery follows and has no aggregate 30s ceiling.
+   - Say “only stage-level absolute product budget” and “labeled trajectory diagnostics on 300s timeout,” rather than the broader “only product-owned budget” and “structured errors.”
+
+2. **No data changes the pre-registered outcome.** `chain-sync` was 13.7–14.2s in the 10 applicable integrity imports, with ample headroom against 45s. Its designed timeout/probe/restore failures already degrade to skip records and continue. Mirroring that budget in e2e adds no unique detection. Sub-second healthy stages do not justify tighter windows, especially from solo-local, five-per-mode samples.
+
+3. **OWNER-ASKS:**
+
+   - Worth surfacing: `restoring:services` has up to six sequential 60s RPC ceilings but no aggregate stage bound—architecturally material despite healthy measurements of 1–9ms.
+   - Worth noting, low priority: `restoring:account-state` was unobserved in 30/30 and has no practical DOM-observability value. Do not force a render merely for e2e.
+   - Do not propose resizing the 45s chain-sync budget from these data; the campaign is not a tail estimate.
+   - Correctly characterize the activation/recovery seam as lacking an aggregate bound; the 110–214ms healthy samples did not exercise its slow path.
+
+4. **Normative alignment is otherwise sound.** No rejected blind split or `restoreStatus` stall detector returns, and no early exit or deadline mechanism shipped.
+
+Recommended close wording:
+
+> Measured (30-import stratified table, both proving modes); the settled classification rule yielded no stage warranting an e2e early-fail window. `chain-sync`—the only stage with an absolute product-owned budget relevant to this classification—measured 13.7–14.2s in the 10 applicable integrity imports against its 45s budget (~3.2× headroom); its designed timeout/probe/restore rejection paths degrade to skip records and continue. The hardcoded 300s remains the sole overall e2e success-wait criterion. Diagnostics improved through a pre-submit trajectory recorder, labeled trajectory diagnostics on 300s lapse, and env-gated measurement records. No per-stage deadline or early-exit mechanism shipped.

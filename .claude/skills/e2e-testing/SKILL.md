@@ -450,3 +450,41 @@ assuming "transient".
   entries do) — consoleErrors-based assertions are weaker than they look.
   Ledgered as an OPEN infra item; prefer DOM/storage/stage evidence surfaces.
 
+
+## Import-stage-deadlines lessons (2026-08-18, `implementations-plan/import-stage-deadlines/`)
+
+- **`consoleErrors` is structurally blind to app `console.*` — permanent, by
+  product design.** The console-sniffer (first module script in every
+  extension page) reroutes `console.*` over LoggerService RPC to the SW
+  realm; the native page console never fires on the success path, so
+  `page.on("console")` sees only BROWSER-emitted entries (Chrome's bindings
+  hold a pre-patch reference). Never "fix" a test by hunting page console
+  output that cannot exist. Channels that DO work (probe-verified,
+  `_probe-console-capture.test.ts` under `NULO_E2E_CONSOLE_PROBE=1`):
+  `pageerror` for uncaught throws + unhandled rejections; `readSwLogTrail`
+  (`fixtures/journal.ts`) for app logs — delayed 2s (flush debounce) and
+  bounded, so POLL past the debounce. Residual: an error the app catches and
+  merely logs is invisible on BOTH channels — assert on DOM/storage/stage
+  evidence instead. Full residual list: the flake-ledger's closed
+  consoleErrors entry.
+- **Observe stage markers with a pre-armed MutationObserver + ONE final
+  read — never a poll loop.** `importFullBackup` arms an observer on
+  `[data-restore-stage]` BEFORE submit (baseline-seeded, so a stale
+  pre-submit value can't read as this attempt's transition) and reads the
+  buffer once when the unchanged 300s hash wait settles. A 200ms evaluate
+  loop would add ~1,500 page evaluations per wait and perturb the timing it
+  measures; the success route is a HASH route (same window), so the buffer
+  survives to the final read. Stages Vue coalesces into one render produce
+  NO mutation — report them unobserved, never as 0ms rows
+  (`restoring:account-state` rendered in 0/30 campaign imports).
+- **A 300s lapse now reports the labeled stage trajectory** (failure
+  terminals, the Continue-gated DEGRADED-partial-success screen — which is
+  NOT a failure state — and the `finished`+`#/popup/auth` activation
+  fallback) instead of a bare TimeoutError. Labels only, never early exits:
+  the settled classification (measured, both proving modes) yielded no
+  stage warranting an e2e early-fail window.
+- **The armed-build discipline applies to SMOKE, not just the network
+  runner**: a plain `bun run build:chrome` fails backup-migration's
+  arming-contract test by design. Mirror `_smoke-e2e.yml`
+  (`VITE_NULO_E2E_MIGRATION_FIXTURE=1` + `VITE_NULO_E2E_DEFAULT_NET=testnet`
+  at build, `NULO_E2E_MIGRATION_FIXTURE=1` at run) for local smoke.
