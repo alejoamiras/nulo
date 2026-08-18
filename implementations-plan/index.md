@@ -2,7 +2,7 @@
 
 Format: `- [plan-name](plan-name/plan.md) — status — one-line hook`
 
-- [key-model-v2](key-model-v2/plan.md) — awaiting approval — recovery-phrase-centric key model + NULO-ACCOUNT-KDF v2 (pre-launch baseline redefinition)
+- [key-model-v2](key-model-v2/plan.md) — approved, implementing — recovery-phrase-centric key model + NULO-ACCOUNT-KDF v2 (pre-launch baseline redefinition)
 
 - [faucet-bridge](faucet-bridge/plan.md) — completed (mega-deep) — L1↔L2 Portal bridge shipped into the faucet (public PR #76, private PR #78); swap/fuel remains a future arc
 - [bridge-ux-trust](bridge-ux-trust/plan.md) — implemented (deep), awaiting manual testnet validation — swap-style bridge form + in-flight journal + seal-trust cache; PV5 HIGHs folded in
