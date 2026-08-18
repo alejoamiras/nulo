@@ -164,10 +164,19 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		// account switch). Prod already treats it as benign (offscreen
 		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
-		// KNOWN BLIND SPOT (deflake-round-4 ledger): app-side `console.*` calls
-		// from extension pages never reach this CDP stream at all — only
-		// browser-emitted entries arrive — so consoleErrors assertions are
-		// weaker than they look; prefer DOM/storage/stage evidence surfaces.
+		// STRUCTURAL BLIND SPOT — root-caused + probe-verified (flake-ledger:
+		// consoleErrors entry, closed permanent-by-design): the console-sniffer
+		// (`utils/console-sniffer.ts`, first module script in every extension
+		// page) reroutes app `console.*` over LoggerService RPC to the SW realm;
+		// the native page console never fires on the success path, so CDP's
+		// consoleAPICalled never emits and this listener structurally cannot see
+		// app console output. Browser-emitted entries (e.g. "Unchecked
+		// runtime.lastError") bypass the patch and DO arrive. App-log evidence
+		// channel: `fixtures/journal.ts` readSwLogTrail (SW session-storage
+		// ring, 2s flush debounce). `pageerror` below IS reliable for uncaught
+		// throws + unhandled rejections (probe-verified) — an error the app
+		// catches and merely logs is invisible on BOTH channels; prefer
+		// DOM/storage/stage evidence for app-level failures.
 		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
@@ -1104,10 +1113,19 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
 		// account switch). Prod already treats it as benign (offscreen
 		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
-		// KNOWN BLIND SPOT (deflake-round-4 ledger): app-side `console.*` calls
-		// from extension pages never reach this CDP stream at all — only
-		// browser-emitted entries arrive — so consoleErrors assertions are
-		// weaker than they look; prefer DOM/storage/stage evidence surfaces.
+		// STRUCTURAL BLIND SPOT — root-caused + probe-verified (flake-ledger:
+		// consoleErrors entry, closed permanent-by-design): the console-sniffer
+		// (`utils/console-sniffer.ts`, first module script in every extension
+		// page) reroutes app `console.*` over LoggerService RPC to the SW realm;
+		// the native page console never fires on the success path, so CDP's
+		// consoleAPICalled never emits and this listener structurally cannot see
+		// app console output. Browser-emitted entries (e.g. "Unchecked
+		// runtime.lastError") bypass the patch and DO arrive. App-log evidence
+		// channel: `fixtures/journal.ts` readSwLogTrail (SW session-storage
+		// ring, 2s flush debounce). `pageerror` below IS reliable for uncaught
+		// throws + unhandled rejections (probe-verified) — an error the app
+		// catches and merely logs is invisible on BOTH channels; prefer
+		// DOM/storage/stage evidence for app-level failures.
 		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
