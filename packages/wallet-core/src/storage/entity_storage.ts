@@ -170,9 +170,12 @@ export class EntityStorage<T> {
 		return out
 	}
 
-	/** Raw STRING values by id, no parsing — the compare-and-delete surface for
-	 *  the purge second pass (F-B23): the exact stored bytes are what a CAS
-	 *  re-read must equal before a delete may fire. Non-string values skipped. */
+	/** Raw STRING values by id, no parsing — the snapshot surface for the purge
+	 *  second pass (F-B23): a guarded delete re-reads `rawValue` and refuses
+	 *  unless the bytes still equal this snapshot. The re-read is NOT atomic
+	 *  with the delete (the storage API has no compare-and-delete) — it shrinks
+	 *  the race window; exclusion comes from the caller's key-attribution or
+	 *  lock. Non-string values skipped. */
 	public async rawStringEntries(): Promise<Array<[string, string]>> {
 		const path = `${this.root}@`
 		const res = await this.storage.get()

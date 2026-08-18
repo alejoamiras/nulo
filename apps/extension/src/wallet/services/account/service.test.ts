@@ -122,12 +122,33 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(raw["nulo:core:accounts@junk-p2"]).toBeDefined()
 	})
 
-	test("(F-B23) a concurrent restore of ANOTHER profile survives the purge's raw pass (restoreLock + compare-and-delete)", async () => {
-		// The malformed bytes claim p1 but sit at the canonical key p2's restore
-		// legitimately writes (the aliased-key hazard). Whichever order the
-		// restoreLock grants: purge-first deletes the stale bytes, then restore
-		// rewrites; restore-first makes the predicate read profileId p2 → no
-		// match. Either way p2's fresh valid row must survive.
+	test("(F-B23) KEY ownership beats the value's claim — a malformed row at ANOTHER profile's canonical key is never deleted", async () => {
+		// Deterministic, no race needed: whatever the bytes claim, a row at p2's
+		// canonical key is p2's junk. Deleting it here is exactly the aliased-key
+		// hazard (a concurrent p2 create/restore legitimately targets this key);
+		// it is erased when p2 itself is deleted.
+		const p2Key = `nulo:core:accounts@${accountRowId("p2", 1, "0xalias")}`
+		await api.storage.local.set({ [p2Key]: JSON.stringify({ profileId: "p1", junk: 1 }) })
+
+		await accountService.purgeForProfile("p1")
+
+		expect((await api.storage.local.get(p2Key))[p2Key]).toBeDefined()
+	})
+
+	test("(F-B23) a row at the DELETED profile's canonical key IS deleted even when its bytes claim another profile", async () => {
+		const p1Key = `nulo:core:accounts@${accountRowId("p1", 1, "0xmine")}`
+		await api.storage.local.set({ [p1Key]: JSON.stringify({ profileId: "p9", junk: 1 }) })
+
+		await accountService.purgeForProfile("p1")
+
+		expect((await api.storage.local.get(p1Key))[p1Key]).toBeUndefined()
+	})
+
+	test("(F-B23) a concurrent restore of ANOTHER profile survives the purge's raw pass (key-attribution + restoreLock)", async () => {
+		// End-state guard for the aliased-key hazard under real concurrency: the
+		// malformed bytes claim p1 but sit at the canonical key p2's restore
+		// legitimately writes. Key-attribution means the purge never targets p2's
+		// key at all; p2's fresh valid row must survive either interleaving.
 		await api.storage.local.set({
 			[`nulo:core:accounts@${accountRowId("p2", 1, "0xalias")}`]: JSON.stringify({ profileId: "p1", junk: 1 }),
 		})
@@ -135,6 +156,22 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		await Promise.all([accountService.purgeForProfile("p1"), accountService.restore([mkAccount("0xalias", { profileId: "p2" })])])
 
 		expect(await accountService.getAccount("p2", 1, "0xalias")).toMatchObject({ profileId: "p2", address: "0xalias" })
+	})
+
+	test("(F-B23) rawAddressesForProfile harvests identity from canonical KEYS only — a foreign key's value claim donates nothing", async () => {
+		await api.storage.local.set({
+			// p1-keyed, malformed value (even the claim disagrees): address comes from the KEY.
+			[`nulo:core:accounts@${accountRowId("p1", 1, "0xfromkey")}`]: JSON.stringify({ profileId: "p9", junk: 1 }),
+			// p1-keyed, syntax-broken value: still attributable by key.
+			[`nulo:core:accounts@${accountRowId("p1", 1, "0xbroken")}`]: "{not json",
+			// p2-keyed bytes claiming p1 with a stealable address: must NOT donate
+			// p2's address to p1's cascade (it would purge p2's authwits/txs).
+			[`nulo:core:accounts@${accountRowId("p2", 1, "0xsteal")}`]: JSON.stringify({ profileId: "p1", address: "0xsteal" }),
+			// Non-canonical key claiming p1: no trustworthy identity — not harvested.
+			"nulo:core:accounts@legacy": JSON.stringify({ profileId: "p1", address: "0xlegacy" }),
+		})
+
+		expect((await accountService.rawAddressesForProfile("p1")).sort()).toEqual(["0xbroken", "0xfromkey"])
 	})
 
 	test("(H3) purgeForProfile removes rows but emits NO onAccountDeleted (coordinator awaits dependents directly)", async () => {

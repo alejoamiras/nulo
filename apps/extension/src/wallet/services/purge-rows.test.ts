@@ -10,7 +10,7 @@ import { EntityStorage } from "@nulo/wallet-core/storage"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { describe, expect, test } from "vitest"
 import { z } from "zod"
-import { purgeMalformedRows, purgeRows } from "./purge-rows"
+import { canonicalNumericStorageId, purgeMalformedRows, purgeRows } from "./purge-rows"
 
 describe("purgeRows", () => {
 	test("deletes each row THEN emits, in row order (the load-bearing delete-before-emit order)", async () => {
@@ -96,6 +96,18 @@ describe("purgeMalformedRows (F-B23)", () => {
 		expect((await api.storage.local.get("t:rows@num"))["t:rows@num"]).toBeDefined()
 	})
 
+	test("the predicate receives the TRUE storage id (key-attribution surface)", async () => {
+		const { api, storage } = makeStore()
+		await api.storage.local.set({
+			"t:rows@keep": JSON.stringify({ profileId: "p1" }),
+			"t:rows@drop": JSON.stringify({ profileId: "p1" }),
+		})
+		expect(await purgeMalformedRows(storage, (_raw, id) => id === "drop")).toBe(1)
+		const raw = await api.storage.local.get(null)
+		expect(raw["t:rows@keep"]).toBeDefined()
+		expect(raw["t:rows@drop"]).toBeUndefined()
+	})
+
 	test("CAS: a concurrent legitimate write landing between snapshot and delete is NEVER destroyed", async () => {
 		// The aliased-key hazard (codex audit): profile A's malformed bytes sit
 		// under a key a concurrent restore for profile B legitimately reuses. The
@@ -136,5 +148,20 @@ describe("purgeMalformedRows (F-B23)", () => {
 		).toBe(1)
 		expect(seen).toEqual(["bad"])
 		expect(Object.keys(await api.storage.local.get(null)).filter((k) => k.startsWith("t:rows@"))).toEqual([])
+	})
+})
+
+describe("canonicalNumericStorageId", () => {
+	test("accepts only suffixes that round-trip: String(Number(id)) === id", () => {
+		expect(canonicalNumericStorageId("0")).toBe(0)
+		expect(canonicalNumericStorageId("7")).toBe(7)
+		expect(canonicalNumericStorageId("12345")).toBe(12345)
+	})
+
+	test("rejects aliases Number() would collapse onto a DIFFERENT id, and non-allocatable shapes", () => {
+		// "01" → Number 1 would purge valid token 1's balances from a junk key.
+		for (const id of ["01", " 1", "1 ", "1e3", "0x10", "1.5", "-1", "", "NaN", "Infinity", "abc"]) {
+			expect(canonicalNumericStorageId(id), `id=${JSON.stringify(id)}`).toBeUndefined()
+		}
 	})
 })

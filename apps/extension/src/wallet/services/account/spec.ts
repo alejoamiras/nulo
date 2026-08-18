@@ -28,6 +28,29 @@ export function accountRowIdOf(account: Pick<Account, "profileId" | "chainId" | 
 	return accountRowId(account.profileId, account.chainId, account.address)
 }
 
+/**
+ * Inverse of `accountRowId`: the scope tuple a canonical row key encodes, or
+ * undefined for a non-canonical key (legacy/foreign shapes).
+ *
+ * The KEY is the trustworthy identity of a row whose VALUE cannot be decoded:
+ * only this profile's own writers ever produce this profile's canonical keys,
+ * while the value's self-reported fields are whatever the malformed bytes
+ * happen to claim. Purge attribution and cascade harvesting must key off THIS,
+ * never off the value.
+ */
+export function parseAccountRowId(id: string): { profileId: string; chainId: number; address: string } | undefined {
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(id)
+	} catch {
+		return undefined
+	}
+	if (!Array.isArray(parsed) || parsed.length !== 4 || parsed[0] !== "account") return undefined
+	const [, profileId, chainId, address] = parsed
+	if (typeof profileId !== "string" || typeof chainId !== "number" || typeof address !== "string") return undefined
+	return { profileId, chainId, address }
+}
+
 export enum AccountType {
 	// SECURITY: Numeric value is used in poseidon2Hash for key derivation. NEVER change it.
 	/** Upstream-canonical Schnorr account (Aztec `@aztec/accounts/schnorr`). */

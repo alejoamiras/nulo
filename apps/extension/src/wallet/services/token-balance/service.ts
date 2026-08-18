@@ -333,8 +333,10 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		}
 		// F-B23: raw second pass — a validation-failed balance row for a purged
 		// token is invisible to getAll() and would otherwise survive forever.
-		// No service-wide write lock exists here; the helper's compare-and-delete
-		// is the containment against a concurrent projector write.
+		// No service-wide write lock exists here, but no legitimate writer can
+		// target a matched key either: the projector only rewrites ids it read
+		// through the codec, and a valid row cannot coexist with the malformed
+		// bytes at the same key. The helper's guarded re-read covers the rest.
 		await this.repo.purgeMalformed(
 			(raw) => typeof raw.token === "number" && set.has(raw.token),
 			(id) => this.logDebug(`purged malformed balance row ${id}`),

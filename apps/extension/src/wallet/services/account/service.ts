@@ -22,6 +22,7 @@ import {
 	AccountType,
 	accountRowId,
 	accountRowIdOf,
+	parseAccountRowId,
 	type Account,
 	type Events,
 	type Methods,
@@ -303,14 +304,16 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	/** F-B23: addresses harvested from RAW rows (codec-hidden included) owned by
 	 *  `profileId` — feeds the deletion snapshot so a malformed parent's dependent
-	 *  tx/authwit/balance rows still cascade. Read-only; unreadable fields skipped. */
+	 *  tx/authwit/balance rows still cascade. Identity comes ONLY from the
+	 *  canonical storage key, never from the value: malformed bytes at another
+	 *  profile's key can claim any profileId/address, and harvesting that claim
+	 *  would cascade-delete the OTHER profile's address-keyed rows (codex audit).
+	 *  Keys-only also covers syntax-broken values. Read-only. */
 	public async rawAddressesForProfile(profileId: string): Promise<string[]> {
 		const out = new Set<string>()
-		for (const [, raw] of await this.storage.rawEntries()) {
-			if (typeof raw !== "object" || raw === null) continue
-			const r = raw as Record<string, unknown>
-			if (r.profileId !== profileId) continue
-			if (typeof r.address === "string" && r.address.length > 0) out.add(r.address)
+		for (const [id] of await this.storage.rawStringEntries()) {
+			const key = parseAccountRowId(id)
+			if (key !== undefined && key.profileId === profileId && key.address.length > 0) out.add(key.address)
 		}
 		return [...out]
 	}
@@ -337,14 +340,22 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		)
 		// F-B23: raw second pass — a validation-failed row this profile owns is
 		// invisible to liveRows() and would otherwise survive the purge forever.
-		// Under the restoreLock: a concurrent restore() is the writer that can
-		// legitimately land a DIFFERENT profile's valid row on a key this pass
-		// snapshotted (aliased key), and the helper's compare-and-delete re-read
-		// is only race-free against it while that writer is excluded.
+		// KEY ownership beats the value's claim: a row at another profile's
+		// canonical key is NEVER deleted here whatever its bytes claim (it is that
+		// profile's junk, erased when THAT profile is deleted) — so no live writer
+		// (another profile's restore/create) can legitimately target a key this
+		// pass deletes, and the delete races nobody. Rows at non-canonical keys
+		// (legacy shapes, which no writer ever produces) fall back to the value's
+		// profileId claim. The restoreLock hold additionally excludes concurrent
+		// restores outright while the pass runs.
 		await this.restoreLock.withLock(() =>
 			purgeMalformedRows(
 				this.storage,
-				(raw) => raw.profileId === profileId,
+				(raw, id) => {
+					const key = parseAccountRowId(id)
+					if (key !== undefined) return key.profileId === profileId
+					return raw.profileId === profileId
+				},
 				(id) => this.logDebug(`purged malformed account row ${id}`),
 			),
 		)

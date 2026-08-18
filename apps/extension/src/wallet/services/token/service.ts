@@ -14,7 +14,7 @@ import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
-import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
+import { canonicalNumericStorageId, purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
@@ -707,15 +707,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	/** F-B23: token ids harvested from RAW rows (codec-hidden included) owned by
 	 *  `profileId` — feeds the deletion snapshot so a malformed parent's dependent
 	 *  balance rows still cascade. The id comes from the TRUE storage key, never
-	 *  the row's self-reported field. Read-only. */
+	 *  the row's self-reported field, and only when the key CANONICALLY encodes
+	 *  it: `Number("01") === 1`, so a non-canonical alias key must not donate a
+	 *  DIFFERENT valid token's id to the cascade (codex audit) — and no balance
+	 *  row can reference a non-canonical key anyway (its `token` field is a
+	 *  number). Read-only. */
 	public async rawTokenIdsForProfile(profileId: string): Promise<number[]> {
 		const out = new Set<number>()
 		for (const [id, raw] of await this.tokens.rawEntries()) {
 			if (typeof raw !== "object" || raw === null) continue
 			const r = raw as Record<string, unknown>
 			if (r.profileId !== profileId) continue
-			const n = Number(id)
-			if (Number.isInteger(n)) out.add(n)
+			const n = canonicalNumericStorageId(id)
+			if (n !== undefined) out.add(n)
 		}
 		return [...out]
 	}
