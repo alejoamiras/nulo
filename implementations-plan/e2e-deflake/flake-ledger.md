@@ -370,6 +370,14 @@ flat at `"progress"` for the whole leg). It is therefore carried as an OPEN item
 design already settled, rather than half-done under time pressure. **Trigger:** the next
 time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
 
+**deflake-round-4 disposition (2026-08-18): the OBSERVABILITY HALF SHIPPED** — `restoreStage`
+now advances at real stage boundaries (`useFullBackupImport`, exposed as
+`data-restore-stage`, incl. the rollback fork), which is exactly the "expose a restoreStage
+ref" precondition this entry's settled design was waiting on. The per-stage envelope
+measurement + stage-scoped deadlines remain UNDONE (diagnostics-only today; the unchanged
+300s stays the sole failure criterion) — the design's remaining half re-arms on this
+entry's original trigger, now with the stage data to measure against.
+
 ### OPEN
 
 - **`wallet-locked-mid-session` — "Expected no popup but 1 new popup target(s) appeared"
@@ -383,7 +391,11 @@ time `backup-restore-sw-restart` or `backup-restore-integrity` lapses that wait.
   assuming either.
 
 
-- **Two network tests still use the primitive that does not kill.**
+- **Two network tests still use the primitive that does not kill — NOW ONE
+  (deflake-round-4): `backup-restore-sw-restart.test.ts` was rewritten on the real kill
+  (`worker().close()` + `targetdestroyed` identity) with a rendezvous-anchored kill phase,
+  and both its scenarios are green regression gates in the fix stack.
+  `frozen-account-canary.test.ts` stage 5 REMAINS on the fake primitive.**
   `network/frozen-account-canary.test.ts` (stage 5) and
   `network/backup-restore-sw-restart.test.ts` — the latter's entire premise is a
   mid-restore crash which therefore never happens. Converting them to `worker().close()`
