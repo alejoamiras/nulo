@@ -47,9 +47,12 @@ export async function purgeRows<T>(rows: readonly T[], remove: (row: T) => Promi
  *      malformed row's key there (see each site's comment).
  *
  * Deleted silently, no events (the row was never visible to consumers).
- * JSON-syntax-broken values fail the parse and are skipped — unattributable by
- * construction, fail-closed. Pattern lifted from
- * `dapp-session/mac-storage.rowsForProfile` and
+ * JSON-syntax-broken values fail the parse and are skipped, fail-closed. For
+ * value-attributed stores they are unattributable by construction; for a
+ * key-attributed store (account) the KEY could attribute them — such a parent
+ * row currently survives (only its value is unreadable; its dependents still
+ * cascade via the key-based harvest), an accepted gap owned as a follow-up.
+ * Pattern lifted from `dapp-session/mac-storage.rowsForProfile` and
  * `incoming-transfer/repository.deleteKeysWhere`.
  */
 export async function purgeMalformedRows(

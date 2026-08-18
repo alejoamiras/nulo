@@ -108,11 +108,13 @@ describe("purgeMalformedRows (F-B23)", () => {
 		expect(raw["t:rows@drop"]).toBeUndefined()
 	})
 
-	test("CAS: a concurrent legitimate write landing between snapshot and delete is NEVER destroyed", async () => {
+	test("guarded re-read: a write landing between snapshot and re-read is not destroyed", async () => {
 		// The aliased-key hazard (codex audit): profile A's malformed bytes sit
 		// under a key a concurrent restore for profile B legitimately reuses. The
 		// purge decided on the OLD bytes; by delete time the key holds B's fresh
-		// valid row. The compare-and-delete must refuse.
+		// valid row. The re-read sees changed bytes and refuses. (Not atomic —
+		// the re-read→delete gap remains; exclusion is the caller's job via
+		// key-attribution or a lock. This pins the guard layer only.)
 		const { api, storage } = makeStore()
 		await api.storage.local.set({ "t:rows@aliased": JSON.stringify({ profileId: "p1", junk: 1 }) })
 		const staleSnapshot = await storage.rawStringEntries()

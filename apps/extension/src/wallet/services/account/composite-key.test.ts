@@ -131,6 +131,12 @@ describe("AccountService — composite storage key", () => {
 			JSON.stringify(["account", 1, CHAIN, "0xa"]), // wrong profile type
 			JSON.stringify(["account", "p1", "1", "0xa"]), // wrong chain type
 			JSON.stringify({ profileId: "p1" }),
+			// Parse-equivalent but NOT byte-canonical: no writer emits these, and
+			// accepting one as ownership evidence would let a crafted key donate
+			// an arbitrary address to a purge cascade.
+			'[ "account","p1",1,"0xa" ]', // whitespace variant
+			'["\\u0061ccount","p1",1,"0xa"]', // escaped-string variant of "account"
+			'["account","p1",-0,"0xa"]', // -0 re-encodes as 0
 		]) {
 			expect(parseAccountRowId(bad), bad).toBeUndefined()
 		}

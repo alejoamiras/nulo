@@ -48,6 +48,11 @@ export function parseAccountRowId(id: string): { profileId: string; chainId: num
 	if (!Array.isArray(parsed) || parsed.length !== 4 || parsed[0] !== "account") return undefined
 	const [, profileId, chainId, address] = parsed
 	if (typeof profileId !== "string" || typeof chainId !== "number" || typeof address !== "string") return undefined
+	// Ownership evidence must be BYTE-canonical: JSON.parse also accepts
+	// whitespace/escape/-0 variants no writer ever emits, and accepting one
+	// would let a crafted key donate an arbitrary address to a purge cascade
+	// (the unscoped auth purge would then delete a real account's authwits).
+	if (accountRowId(profileId, chainId, address) !== id) return undefined
 	return { profileId, chainId, address }
 }
 
