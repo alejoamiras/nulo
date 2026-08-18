@@ -397,7 +397,11 @@ non-timeout identity preservation).
 full smoke green (runs the new unit tests + the existing driver consumers
 incl. the expectError path). Layers: lint/typecheck + unit + smoke e2e.
 
-### Phase 2 — Measurement campaign leg 1 (alternating modes)
+### Phase 2 ✓ — Measurement campaign leg 1 (alternating modes)
+
+> GATE PASSED 2026-08-18: 10/10 alternated solo runs attempt-1 green
+> (retry=0), zero exit-86; 30/30 imports with complete attributed records,
+> zero trace-lost. Evidence: `lessons/phase-2.md`, `envelopes.md`.
 
 In tmux, solo, frozen tree, `NULO_E2E_RETRY=0 NULO_E2E_STAGE_LOG=1`:
 alternate proverless / prover-ON runs of
