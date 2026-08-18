@@ -346,7 +346,7 @@ enumerated and excluded rather than counted as findings.
 | `import-paths.test.ts` | hand-rolled in-page `setTimeout` poll duplicating `revealSecretKey`'s pattern | **FIXED** — bounded `waitForFunction`, value taken from the wait that proved it |
 | `onboarding-tab.test.ts` | `while(true)` poll with no deadline of its own | **FIXED** — 20s deadline + named failure |
 | `sw-resilience.test.ts` / `sw-restart-network.test.ts` / canary — post-kill liveness | strictly-newer heartbeat believed to prove a respawn | **CORRECTED** — it does not (see round-3 findings); gates kept, claims fixed, real kill primitive adopted in the first two |
-| `helpers/import-drivers.ts` `importFullBackup` | single undifferentiated 300s route wait spanning restore + activation | **DEFERRED — see below** |
+| `helpers/import-drivers.ts` `importFullBackup` | single undifferentiated 300s route wait spanning restore + activation | **CLOSED (import-stage-deadlines arc, 2026-08-18) — see below** |
 
 **`importFullBackup`'s 300s wait — SECOND OCCURRENCE, now the blocking item.** It lapsed
 again on deflake-round-3's own close-out PR (#370 content run, shard 3,
@@ -377,6 +377,31 @@ ref" precondition this entry's settled design was waiting on. The per-stage enve
 measurement + stage-scoped deadlines remain UNDONE (diagnostics-only today; the unchanged
 300s stays the sole failure criterion) — the design's remaining half re-arms on this
 entry's original trigger, now with the stage data to measure against.
+
+**import-stage-deadlines disposition (2026-08-18): CLOSED — the remaining half executed;
+classification yielded no e2e deadline.** Measured (30-import stratified table, both
+proving modes — `implementations-plan/import-stage-deadlines/envelopes.md`); the settled
+classification rule yielded no stage warranting an e2e early-fail window. `chain-sync` —
+the only stage with an absolute stage-level product budget relevant to this
+classification — measured 13.7–14.2s in the 10 applicable integrity imports against its
+45s budget (~3.2× headroom); its designed timeout/probe/restore rejection paths degrade
+to skip records and continue. The hardcoded 300s remains the sole overall e2e
+success-wait criterion. Diagnostics improved: pre-submit trajectory recorder in the
+shared `importFullBackup` wait (a lapse now reports the full labeled stage trajectory
+instead of a bare TimeoutError; the crash-truth submit half converged onto one
+implementation), plus env-gated per-import measurement records
+(`NULO_E2E_STAGE_LOG=1`). No per-stage deadline or early-exit mechanism shipped — the
+rejected variants stay rejected, and product-terminal early-exit remains a possible
+FUTURE normative amendment (owner option, recorded in the arc's plan). Owner
+observations surfaced (nothing implemented): `restoring:services` has no aggregate
+stage bound (up to 6 sequential 60s RPC ceilings); the activation/recovery seam has no
+aggregate bound; `restoring:account-state` rendered in 0/30 imports. Verdicts: phase-4
+codex `conditional approve` (conditions applied — session `01a01661`), on top of the
+arc's three-leg plan audit. Reachability note (arc code-review): the labeled-trajectory
+lapse diagnostic surfaces where the caller's TEST budget exceeds the 300s wait — the
+900s network callers; the smoke callers' 90s test budgets kill the runner first
+(a pre-existing budget inversion, unchanged by this arc). Evidence:
+`implementations-plan/import-stage-deadlines/{envelopes.md,lessons/phase-2.md}`.
 
 ### OPEN
 

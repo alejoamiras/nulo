@@ -11,10 +11,88 @@
 import { createHash } from "node:crypto"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
-import type { Page } from "puppeteer"
-import { clickByTestId, type ExtensionContext, openOnboarding, openPopup, waitForHash } from "../fixtures/extension"
+import { basename, join } from "node:path"
+import { type Page, TimeoutError } from "puppeteer"
+import { expect } from "vitest"
+import { clickByTestId, type ExtensionContext, openOnboarding, openPopup, waitForHash, withTimeoutMessage } from "../fixtures/extension"
+import {
+	appendImportRecord,
+	buildImportRecord,
+	buildTraceLostRecord,
+	type FinalObservation,
+	formatTrajectoryDiagnostic,
+	type ImportStageRecord,
+	type StageEvent,
+} from "./import-stage-timing"
 export { TEST_PASSWORD } from "../fixtures/constants"
+
+/** Per-fork measurement identity (vitest runs one fork per test file). */
+const RUN_ID = `${process.pid}-${Date.now()}`
+let importCounter = 0
+
+interface StageTraceWindow {
+	__nuloStageTrace?: { events: StageEvent[]; observer: MutationObserver | null }
+}
+
+/** Arm the page-side stage recorder BEFORE submit: a MutationObserver on
+ *  `[data-restore-stage]` pushing `{stage, tMs}` into a window-scoped buffer,
+ *  seeded with the current (baseline) value. The baseline seed is the attempt
+ *  fence: a stale pre-submit stage can never be mistaken for this attempt's
+ *  transition (`resetBackupState` deliberately does not reset `restoreStage`). */
+async function armStageTrace(page: Page): Promise<void> {
+	await page.evaluate(() => {
+		const w = window as unknown as StageTraceWindow
+		w.__nuloStageTrace?.observer?.disconnect()
+		const read = () => document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage") ?? ""
+		const trace: NonNullable<StageTraceWindow["__nuloStageTrace"]> = {
+			events: [{ stage: read(), tMs: performance.now(), baseline: true }],
+			observer: null,
+		}
+		const observer = new MutationObserver(() => {
+			const stage = read()
+			const last = trace.events[trace.events.length - 1]
+			if (last?.stage !== stage) trace.events.push({ stage, tMs: performance.now() })
+		})
+		observer.observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ["data-restore-stage"] })
+		trace.observer = observer
+		w.__nuloStageTrace = trace
+	})
+}
+
+/** ONE post-settle read (success or timeout): the buffer + final hash/stage/
+ *  continue-screen, all stamped on the page's own `performance.now()` clock.
+ *  Idempotent — disconnects the observer but keeps the events, so the lapse
+ *  diagnostic and the measurement record share one observation. */
+async function readStageTraceFinal(page: Page): Promise<FinalObservation> {
+	return await page.evaluate(() => {
+		const w = window as unknown as StageTraceWindow
+		w.__nuloStageTrace?.observer?.disconnect()
+		return {
+			events: w.__nuloStageTrace?.events ?? [],
+			finalTMs: performance.now(),
+			hash: window.location.hash,
+			stage: document.querySelector("[data-restore-stage]")?.getAttribute("data-restore-stage") ?? "",
+			continueScreen: !!document.querySelector('[data-testid="import-full-backup-continue-btn"]'),
+		}
+	})
+}
+
+/** Bound the post-settle read: on a WEDGED renderer a bare `page.evaluate`
+ *  hangs the full protocolTimeout (300s, `fixtures/extension.ts` launch
+ *  options) — stacked onto an already-lapsed 300s wait that converts the
+ *  labeled TimeoutError into a caller test-timeout and LOSES the trajectory.
+ *  A lost race leaves the evaluate dangling harmlessly on a page that is
+ *  already beyond diagnosis; callers fall into the degraded paths
+ *  (`<diagnostic failed…>` text / the trace-lost tombstone). This is a NEW
+ *  bound on a NEW read — no existing timeout changed. */
+const FINAL_READ_BUDGET_MS = 10_000
+function readStageTraceFinalBounded(page: Page): Promise<FinalObservation> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const deadline = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error("final stage-trace read timed out (renderer wedged?)")), FINAL_READ_BUDGET_MS)
+	})
+	return Promise.race([readStageTraceFinal(page), deadline]).finally(() => clearTimeout(timer))
+}
 
 /** Canonical BIP39 24-word zero-entropy vector. Stable across Aztec versions
  *  and BIP39 dictionary changes. Sourced from `mnemonic.test.ts:24`. */
@@ -135,17 +213,11 @@ export async function importSeed(page: Page, seed: string, password: string, she
 	await waitForHash(page, shell.successHash, 30_000)
 }
 
-/** Drive the full-backup import. Lands on the shell's success hash, or — when
- *  `expectError` — waits for the inline error banner + disabled submit
- *  (`true` expects the default "Can't import" copy; a string expects that
- *  exact banner title — a content assertion, not a click target). */
-export async function importFullBackup(
-	page: Page,
-	filePath: string,
-	password: string,
-	shell: ImportShell,
-	{ expectError = false }: { expectError?: boolean | string } = {},
-): Promise<void> {
+/** Drive the popup/onboarding full-backup flow up to (and including) submit,
+ *  WITHOUT any completion wait. Shared with the crash-truth suite (its
+ *  `driveImportToSubmit` delegates here) so the two halves of the flow have
+ *  exactly one implementation. */
+export async function submitFullBackupImport(page: Page, filePath: string, password: string, shell: ImportShell): Promise<void> {
 	await page.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 10_000 })
 	await clickByTestId(page, "import-option-full-backup")
 
@@ -162,8 +234,32 @@ export async function importFullBackup(
 	})
 
 	await submitWhenEnabled(page, shell.submitTestId("full-backup"))
+}
 
+/** Drive the full-backup import. Lands on the shell's success hash, or — when
+ *  `expectError` — waits for the inline error banner + disabled submit
+ *  (`true` expects the default "Can't import" copy; a string expects that
+ *  exact banner title — a content assertion, not a click target).
+ *
+ *  LEDGER ENTRY importFullBackup-300s (e2e-deflake) FIX: the success wait is
+ *  the UNCHANGED 300s hash wait — the sole overall criterion, hardcoded so no
+ *  caller can move it. What changed: a stage recorder armed before submit
+ *  feeds (a) a full trajectory diagnostic on lapse (labels for failure
+ *  terminals, the Continue-gated degraded screen, and the auth-route
+ *  fallback — none of which EXIT early; per the settled design only
+ *  product-owned-deadline stages could, and none qualifies) and (b) an
+ *  env-gated per-import measurement record (`NULO_E2E_STAGE_LOG=1`).
+ *  Assumes a fresh import-page mount per attempt (every consumer does);
+ *  the baseline seed fences stale pre-submit stage values either way. */
+export async function importFullBackup(
+	page: Page,
+	filePath: string,
+	password: string,
+	shell: ImportShell,
+	{ expectError = false }: { expectError?: boolean | string } = {},
+): Promise<void> {
 	if (expectError) {
+		await submitFullBackupImport(page, filePath, password, shell)
 		const expectedText = typeof expectError === "string" ? expectError : "Can't import"
 		await page.waitForFunction(
 			(id: string, wanted: string) => {
@@ -175,11 +271,49 @@ export async function importFullBackup(
 			shell.submitTestId("full-backup"),
 			expectedText,
 		)
-	} else {
+		return
+	}
+
+	const importOrdinal = ++importCounter
+	await armStageTrace(page)
+	await submitFullBackupImport(page, filePath, password, shell)
+
+	let outcome: ImportStageRecord["outcome"] = "success"
+	// Memoize the PROMISE, not the value: a rejected first read must stay
+	// cached so the finally below cannot re-hang a second evaluate against
+	// the same wedged renderer (arc code-review F1).
+	let finalPromise: Promise<FinalObservation> | null = null
+	const readFinal = (): Promise<FinalObservation> => (finalPromise ??= readStageTraceFinalBounded(page))
+	try {
 		// The import flow is restore + (possibly) the app's OWN bounded 30s recovery wait before it
 		// routes (import.vue completeImportWithRecovery) - a 30s clock expired structurally whenever
 		// the recovery leg ran. Sized to the recovery envelope + slow-runner restore + margin.
-		await waitForHash(page, shell.successHash, 300_000)
+		await withTimeoutMessage(waitForHash(page, shell.successHash, 300_000), async () =>
+			formatTrajectoryDiagnostic(await readFinal(), shell.successHash),
+		)
+	} catch (err) {
+		outcome = err instanceof TimeoutError || (err instanceof Error && err.cause instanceof TimeoutError) ? "timeout" : "error"
+		throw err
+	} finally {
+		// Measurement never masks the wait's outcome: a dead page yields an
+		// explicit trace-lost record; any recording fault degrades to a log line.
+		try {
+			const state = expect.getState()
+			const attribution = {
+				runId: RUN_ID,
+				file: basename(state.testPath ?? "unknown"),
+				test: state.currentTestName ?? "unknown",
+				importOrdinal,
+			}
+			const observed = await readFinal().catch(() => null)
+			appendImportRecord(
+				observed
+					? buildImportRecord({ ...attribution, final: observed, outcome })
+					: buildTraceLostRecord({ ...attribution, waitOutcome: outcome }),
+			)
+		} catch (recordErr) {
+			console.log(`[import-stage-timing] attribution failed (measurement lost, test unaffected): ${String(recordErr)}`)
+		}
 	}
 }
 
