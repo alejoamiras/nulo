@@ -425,9 +425,9 @@ entry's original trigger, now with the stage data to measure against.
 
 ## deflake-round-4 (2026-08-18) — crash-truth findings
 
-### OPEN
+### CLOSED (by this arc's fix stack, PRs #400-#404)
 
-- **BUG-TRANSPORT — the designed crash rollback structurally cannot run.** After a
+- **BUG-TRANSPORT — FIXED (this arc's fix stack, PR #403): the designed crash rollback structurally could not run.** After a
   real mid-restore SW kill (rendezvous-anchored at `service-restore`, page alive),
   the import page's catch dispatches the rollback but `deleteProfile` is rejected
   <1s later with "Client disconnected": the messaging client flips to Connected on
@@ -437,11 +437,15 @@ entry's original trigger, now with the stage data to measure against.
   across runs), so no worker existed to refuse the call — client-local transport
   rejection, 4x metronomic reproduction (sinceKill 811/798/784/799ms). Orphan
   profile + restore-pending marker survive; torn-unlock backstop holds (measured).
-  Evidence: deflake-round-4 `lessons/phase-1.md` runs 2-7. Skip anchor:
-  `network/backup-restore-sw-restart.test.ts` scenario A. **Fix arc in flight**
-  (deflake-round-4 `fix-plan.md`, PR-3: liveness-gated dispatch composing with
-  upstream's B-24 bounded rollback helper — the helper's retries run against a
-  live worker instead of burning into the respawn gap).
+  Evidence: deflake-round-4 `lessons/phase-1.md` runs 2-7. FIX (shipped in the
+  round-4 stack): the composable's catch classifies disconnect failures and
+  gates B-24's bounded rollback helper on the SW's own liveness signal
+  advancing (`utils/background-liveness.ts` — sole writer is the runtime,
+  written only after full service wiring), so the delete runs against a live
+  worker; a gate failure (ceiling or read) fails closed to cleanup-pending +
+  the torn-marker backstop. REGRESSION GATE: scenario A un-skipped —
+  first-ever end-to-end green 2026-08-18 (58.8s: kill at service-restore →
+  rolled-back → designed retry → on-chain convergence).
 - **BUG-FENCE — delete + same-id re-import left the wallet PXE-sync-dead:
   UPSTREAM-FIXED mid-arc; hardening follow-up in this stack.** The offscreen
   lifecycle map's `deleted(G1)` record made `assertGenerationCurrent` reject the
@@ -461,6 +465,8 @@ entry's original trigger, now with the stage data to measure against.
   equality guard, readiness-once + already-ready-send authority-race closure
   (pre-existing concurrency HIGH #1 residual), and key zeroization.
   Evidence: deflake-round-4 `lessons/phase-1.md` runs 6-7.
+### OPEN
+
 - **Crash-before-provision delete refusal (edge, fails closed).** With the map at
   `deleted(G1)`, `clearProfileState(G2)` is REFUSED by the different-gen guard —
   a crash after a re-import mints G2 but before provisioning leaves a state whose

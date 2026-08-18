@@ -12,11 +12,12 @@ import { getActiveProfileName, navigateByHash } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./backup-export"
 import { POPUP_IMPORT_SHELL, TEST_PASSWORD, setInputs, submitWhenEnabled, writeBackupToTemp } from "./import-drivers"
 
-// The rollback/delete budget is STRUCTURAL, not sampled: the page's catch
-// entry is bounded by the in-flight RPC's own 60s transport timeout, and
-// `deleteProfile` against a cold-booting worker carries its own 60s ceiling.
-// 60s + 60s + 30s margin. Shared: the reset ritual rides the same
-// deleteProfile purge.
+// The rollback/delete budget is STRUCTURAL, not sampled: the crash path's
+// worst case is the liveness gate's 60s ceiling followed by one deleteProfile
+// under its 60s transport ceiling, plus margin — 60 + 60 + 30. A
+// multi-pathology serialization (timeout-shaped catch entry + full ceiling +
+// repeated slow deletes) exceeds this deliberately: that state IS the stuck
+// tripwire. Shared: the reset ritual rides the same deleteProfile purge.
 export const ROLLBACK_BUDGET_MS = 150_000
 
 export async function readStage(page: Page): Promise<string> {

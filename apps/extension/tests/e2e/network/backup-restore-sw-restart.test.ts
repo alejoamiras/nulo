@@ -150,7 +150,8 @@ async function readDisconnectProbe(page: Page): Promise<{ connectedAt: number; d
 const HELD_BUDGET_A_MS = 180_000
 const HELD_BUDGET_B_MS = 300_000
 
-// REGRESSION GATE for BUG-TRANSPORT (fixed in this PR): after a real
+// REGRESSION GATE for BUG-TRANSPORT (fixed by the liveness-gated rollback
+// dispatch in useFullBackupImport): after a real
 // mid-restore kill, the rollback's `deleteProfile` used to be rejected <1s
 // later — the messaging client flips to Connected on doomed ports during the
 // SW respawn gap and rejectAllPending kills gap-issued calls ("Client
