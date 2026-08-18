@@ -120,6 +120,11 @@ test.skipIf(!hasConfig)(
 			await switchToLocalNetwork(page)
 			const firstProfileId = await captureSoleProfileId(page)
 			const firstGen = await readProfileGen(page)
+			// The pin's own precondition: the predecessor generation must EXIST and
+			// belong to this profile — without this, the later not-equal assert
+			// passes vacuously against undefined.
+			expect(firstGen?.id).toBe(firstProfileId)
+			expect(firstGen?.gen).toBeTruthy()
 			expect(await getAccountAddress(page)).toBe(accountAddress)
 			await waitForGasBalanceRendered(page, ctx)
 
