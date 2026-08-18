@@ -145,3 +145,88 @@ No repository changes or test executions were needed for this read-only audit.
 ---
 
 _Session: 01a01612-7543-7721-a104-f8a315a6e4d6 (round 1, plan-audit, reject). Final fresh-context pass recorded below when run._
+
+
+# FINAL fresh-context pass — round 2 (consolidated-plan audit)
+
+Session: 01a01621-32fe-7302-8535-11ce21ac56af. Verdict: **conditional approve** (5 conditions, ALL folded into plan.md). Row-3 RULING: **OUT** — trajectory-labels-only.
+
+## 1. VERDICT
+
+**Conditional approve**, with these conditions:
+
+1. Adopt the row-3 **OUT** fallback: no terminal-stage or errors-screen early exit. Remove the red-path e2e case; under the fallback it would deliberately consume the full 300 seconds.
+2. Simplify the recorder to a page-side `MutationObserver` buffer read once when the unchanged `waitForHash(..., 300_000)` settles. Remove the 200ms Node drain loop.
+3. Specify and test the measurement contract: clock source, stage entry/exit, DOM-coalesced/missing stages, censoring, cleanup, test/attempt attribution, and per-fork output ownership.
+4. Make the B2 probe poll through the SW log ring’s 2-second persistence debounce, and correct the `pendingLogs` residual described below.
+5. Add a mechanical final gate proving no existing timeout value increased and that `300_000` remains the only import success-wait ceiling.
+
+With those changes, the plan is the smallest implementation that satisfies the settled spec.
+
+## 2. RULING ON DECISION-LEDGER ROW 3
+
+**OUT — trajectory-labels-only fallback.**
+
+The competing positions are both fairly represented:
+
+- Codex argued that terminal exits exceed the settled design, have partial coverage, and introduce stale-attempt hazards ([audit-codex.md:23](implementations-plan/import-stage-deadlines/audit-codex.md:23)).
+- Fable argued that a product terminal is causal rather than time-based, that current consumers fresh-mount, and that an observed-after-arm fence plus a red-path test makes the shortcut safe ([audit-fable.md:34](implementations-plan/import-stage-deadlines/audit-fable.md:34)).
+
+The normative text controls: early-fail windows are permitted **only** for stages with product-owned deadlines; every other stage is diagnostics-only; the unchanged 300 seconds remains the sole failure criterion ([flake-ledger.md:361](implementations-plan/e2e-deflake/flake-ledger.md:361)). `failed`, `rolled-back`, and `rollback-failed` are not deadline-owned stages. Reacting to them may be reasonable in a future amendment, but it is not part of this settled arc.
+
+The code reinforces OUT:
+
+- Terminal-stage coverage is incomplete. Validation, profile-restore, finalize, and duplicate-account failures can leave a nonterminal stage while changing only status/error state ([useFullBackupImport.ts:378](apps/extension/src/composables/useFullBackupImport.ts:378), [useFullBackupImport.ts:479](apps/extension/src/composables/useFullBackupImport.ts:479), [useFullBackupImport.ts:638](apps/extension/src/composables/useFullBackupImport.ts:638), [useFullBackupImport.ts:759](apps/extension/src/composables/useFullBackupImport.ts:759)).
+- The Continue screen is not a failure terminal. The product sets `restoreStatus="finished"`, retains `importedProfile`, and lets the user continue ([useFullBackupImport.ts:806](apps/extension/src/composables/useFullBackupImport.ts:806)). `reimportToTerminal` treats it as an actionable terminal and then clicks Continue; it does not throw ([crash-truth.ts:91](apps/extension/tests/e2e/helpers/crash-truth.ts:91), [crash-truth.ts:101](apps/extension/tests/e2e/helpers/crash-truth.ts:101)).
+- The proposed shortcut therefore adds complexity and changed failure timing without satisfying the measurement/deadline requirement. Trajectory diagnostics deliver the required value without that semantic expansion.
+
+If the owner wants IN, the normative ledger should first be amended as a separate decision.
+
+## 3. STANDARD PACKET
+
+### Adversarial
+
+The observer fixes round one’s invalid streaming design, but the periodic drain introduces new hazards:
+
+- The success route is a Vue hash route, not a document navigation. `createWebHashHistory` keeps the same `window` alive ([popup/index.ts:50](apps/extension/src/popup/index.ts:50)). The plan’s claim that the window array dies at success navigation is false. A final read is sufficient.
+- A 200ms drain adds roughly 1,500 extra page evaluations during a 300-second wait, competing with the existing Puppeteer poll and perturbing the timing being measured.
+- Its cancellation, cleanup, `page.evaluate` failure behavior, and interaction with the exact 300-second ceiling are unspecified.
+- The clock description conflicts: events use page `performance.now()`, while the plan claims a single Node clock. Use one page monotonic clock, including the final success observation.
+- A DOM observer catches sub-200ms rendered mutations, but not Vue-coalesced assignments. For example, `restoring:account-state` can advance immediately to `chain-sync` or `finished` in one render turn ([useFullBackupImport.ts:788](apps/extension/src/composables/useFullBackupImport.ts:788)). Missing stages must be reported as unobserved, not assigned a zero-duration envelope.
+
+The observed-after-arm fence is sound for stale **stage values** in the current topology: the stale baseline is excluded, and current consumers fresh-mount. Indeed, that means the plan’s additional assertion that a fresh mount is still required is stronger than the mechanism requires.
+
+There is a hole in the IN design, however: the Continue button is tested as a level, not an observed false→true transition. It is not covered by the stage-transition fence. OUT eliminates that problem.
+
+### Assumption attack
+
+Facts 1, 2, 4, 5, and 7 are sound.
+
+Corrections still needed:
+
+- Fact 3 should say chain-sync’s designed timeout/probe/restore rejection paths degrade to records. “It never throws” is too absolute; unexpected normalization, recorder, or orchestration faults can still escape. The relevant truth is that the product-owned 45-second deadline does not intentionally throw ([importChainSync.ts:89](apps/extension/src/composables/importChainSync.ts:89)).
+- Fact 6 is correct about ordinary successful forwarding, but `readSwLogTrail` is delayed and bounded diagnostics, not an immediate lossless channel. Persistence is debounced for two seconds ([logger/store.ts:80](apps/extension/src/wallet/logger/store.ts:80)).
+- Fact 8 should scope “expectError failure paths never set terminal stages” to the current expectError consumer. The public option does not inherently prevent a future caller from expecting some other failure shape.
+- Inference 3 is unsafe and should disappear with row 3. In particular, a Continue-gated import can be healthy-but-degraded from the product’s perspective.
+- Inference 4 is acceptable only as “valid named workloads.” The matrix imports are correlated within one lifetime, and solo samples remain non-tail measurements.
+
+### Implementation critique and gates
+
+The submit-half extraction, unchanged public `importFullBackup` API, internal recorder, `withTimeoutMessage`, no deadline table, and B2 document-as-designed posture are appropriately small.
+
+Still under-specified:
+
+- The default JSONL filename and “runId in the name” contradict each other.
+- Vitest uses a fresh fork per test file ([vitest.e2e.network.config.ts:23](apps/extension/vitest.e2e.network.config.ts:23)); the plan must say whether each fork writes a unique file or how multiple forks safely share/truncate one campaign file.
+- The unchanged driver API does not explain how `file`, `test`, and retry `attempt` are obtained.
+- Recorder cleanup, output-write failure behavior, missing traces after page crashes, and right-censor calculations need exact rules.
+- The focused pure-helper tests requested in round one are still absent from Phase 1. Smoke does not prove disabled logging performs no writes, Vue-coalesced stages are handled honestly, or non-timeout errors retain their identity.
+
+The six gates are real but not sufficient as written. Phase 1 needs focused recorder/formatter/output tests; Phase 5 must poll the SW ring; and Phase 6 must include the explicit numeric-timeout diff gate. The remaining campaign and certification gates are adequate.
+
+## 4. NEW MATERIAL FINDINGS
+
+Two material findings were missed previously:
+
+1. The Continue screen is not chain-sync-specific. `restoreErrorLog` also receives network, account, token, and six service-loop errors ([useFullBackupImport.ts:543](apps/extension/src/composables/useFullBackupImport.ts:543), [useFullBackupImport.ts:718](apps/extension/src/composables/useFullBackupImport.ts:718), [useFullBackupImport.ts:738](apps/extension/src/composables/useFullBackupImport.ts:738)). The planned wording and early-exit semantics therefore cover a broader class of partial-success outcomes than stated.
+2. `console-sniffer.ts` has one shared `pendingLogs` array containing only arguments. Whichever console method first fires after wiring flushes every buffered entry through that method’s handler ([console-sniffer.ts:2](apps/extension/src/utils/console-sniffer.ts:2), [console-sniffer.ts:14](apps/extension/src/utils/console-sniffer.ts:14)). A pre-wire `console.error` can therefore be replayed at the wrong severity. That residual belongs in the permanent console-capture documentation.
