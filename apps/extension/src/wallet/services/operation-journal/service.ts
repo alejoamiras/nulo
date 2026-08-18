@@ -8,7 +8,7 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex } from "@/wallet/utils"
 import {
@@ -197,6 +197,13 @@ export class OperationJournalService extends Service<Methods, Events> implements
 				records,
 				(record) => this.storage.delete(record.id),
 				(record) => this.emit("onOperationDeleted", record),
+			)
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to _loadAllValidated() and would otherwise survive forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed journal row ${id}`),
 			)
 		})
 	}

@@ -106,6 +106,31 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 	})
 })
 
+describe("TokenBalanceService.purgeForTokens — F-B23 raw second pass", () => {
+	test("removes a malformed balance row for a purged token; spares another token's malformed row", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const seedRepo = new BalanceRepository(api)
+		const service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
+		// purgeForTokens gates on ensureInitialized; init() wires the projector +
+		// event subs, none of which the storage purge touches — flip the flag
+		// instead of stubbing seven services for one purge pin.
+		;(service as unknown as { initialized: boolean }).initialized = true
+		await seedRepo.set(balance(1, 5))
+		await api.storage.local.set({
+			"nulo:core:token-balances@98": JSON.stringify({ token: 5, junk: true }),
+			"nulo:core:token-balances@99": JSON.stringify({ token: 6, junk: true }),
+		})
+
+		await service.purgeForTokens([5])
+
+		const raw = await api.storage.local.get(null)
+		expect(raw["nulo:core:token-balances@98"]).toBeUndefined()
+		expect(raw["nulo:core:token-balances@99"]).toBeDefined()
+		expect(await seedRepo.getAll()).toEqual([])
+	})
+})
+
 describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 	let service: TokenBalanceService
 	let seedRepo: BalanceRepository

@@ -169,4 +169,30 @@ export class EntityStorage<T> {
 		}
 		return out
 	}
+
+	/** Raw STRING values by id, no parsing — the snapshot surface for the purge
+	 *  second pass (F-B23): a guarded delete re-reads `rawValue` and refuses
+	 *  unless the bytes still equal this snapshot. The re-read is NOT atomic
+	 *  with the delete (the storage API has no compare-and-delete) — it shrinks
+	 *  the race window; exclusion comes from the caller's key-attribution or
+	 *  lock. Non-string values skipped. */
+	public async rawStringEntries(): Promise<Array<[string, string]>> {
+		const path = `${this.root}@`
+		const res = await this.storage.get()
+		const out: Array<[string, string]> = []
+		for (const [k, v] of Object.entries(res)) {
+			if (!k.startsWith(path)) continue
+			if (typeof v !== "string") continue
+			out.push([k.substring(path.length), v])
+		}
+		return out
+	}
+
+	/** The raw stored string for one id (undefined when absent or non-string). */
+	public async rawValue(id: string): Promise<string | undefined> {
+		const key = `${this.root}@${id}`
+		const res = await this.storage.get(key)
+		const v = res[key]
+		return typeof v === "string" ? v : undefined
+	}
 }

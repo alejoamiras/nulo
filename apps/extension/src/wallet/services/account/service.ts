@@ -7,7 +7,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys, KeyedLock, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
@@ -22,6 +22,7 @@ import {
 	AccountType,
 	accountRowId,
 	accountRowIdOf,
+	parseAccountRowId,
 	type Account,
 	type Events,
 	type Methods,
@@ -301,6 +302,22 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return (await this.liveRows()).filter((x) => x.profileId === profileId)
 	}
 
+	/** F-B23: addresses harvested from RAW rows (codec-hidden included) owned by
+	 *  `profileId` — feeds the deletion snapshot so a malformed parent's dependent
+	 *  tx/authwit/balance rows still cascade. Identity comes ONLY from the
+	 *  canonical storage key, never from the value: malformed bytes at another
+	 *  profile's key can claim any profileId/address, and harvesting that claim
+	 *  would cascade-delete the OTHER profile's address-keyed rows (codex audit).
+	 *  Keys-only also covers syntax-broken values. Read-only. */
+	public async rawAddressesForProfile(profileId: string): Promise<string[]> {
+		const out = new Set<string>()
+		for (const [id] of await this.storage.rawStringEntries()) {
+			const key = parseAccountRowId(id)
+			if (key !== undefined && key.profileId === profileId && key.address.length > 0) out.add(key.address)
+		}
+		return [...out]
+	}
+
 	/** Awaited profile-scoped account purge, called by the deletion coordinator.
 	 *  (Relocated from the removed fire-and-forget `onProfileDeleted` subscriber so
 	 *  deletion is awaited end-to-end — finding D.) Idempotent: delete-of-gone is a
@@ -320,6 +337,27 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			accounts,
 			(account) => this.storage.delete(accountRowIdOf(account)),
 			() => {},
+		)
+		// F-B23: raw second pass — a validation-failed row this profile owns is
+		// invisible to liveRows() and would otherwise survive the purge forever.
+		// KEY ownership beats the value's claim: a row at another profile's
+		// canonical key is NEVER deleted here whatever its bytes claim (it is that
+		// profile's junk, erased when THAT profile is deleted) — so no live writer
+		// (another profile's restore/create) can legitimately target a key this
+		// pass deletes, and the delete races nobody. Rows at non-canonical keys
+		// (legacy shapes, which no writer ever produces) fall back to the value's
+		// profileId claim. The restoreLock hold additionally excludes concurrent
+		// restores outright while the pass runs.
+		await this.restoreLock.withLock(() =>
+			purgeMalformedRows(
+				this.storage,
+				(raw, id) => {
+					const key = parseAccountRowId(id)
+					if (key !== undefined) return key.profileId === profileId
+					return raw.profileId === profileId
+				},
+				(id) => this.logDebug(`purged malformed account row ${id}`),
+			),
 		)
 	}
 

@@ -10,6 +10,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
+import { purgeMalformedRows } from "@/wallet/services/purge-rows"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { EntityStorage } from "@/wallet/storage"
 import { getRandomHex, Lock } from "@/wallet/utils"
@@ -776,6 +777,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 				await this.storage.delete(network.id)
 				this.emit("onNetworkDeleted", network)
 			}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed network row ${id}`),
+			)
 			await this.browserApi.storage.local.remove(activeKey(profileId))
 		})
 	}

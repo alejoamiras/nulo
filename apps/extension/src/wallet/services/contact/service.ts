@@ -4,7 +4,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -244,6 +244,13 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 					return this.storage.delete(contact.id)
 				},
 				(contact) => this.emit("onContactDeleted", contact),
+			)
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed contact row ${id}`),
 			)
 		})
 	}

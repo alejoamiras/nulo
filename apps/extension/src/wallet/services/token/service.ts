@@ -14,7 +14,7 @@ import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { canonicalNumericStorageId, purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
@@ -428,15 +428,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * them). The public `deleteToken` RPC does the ownership check first.
 	 */
 	private async _deleteTokenById(id: number, emit = true): Promise<TokenInfo> {
-		return await this.lock.withLock(async () => {
-			const token = await this.tokens.get(`${id}`)
-			if (!token) {
-				throw new Error("unknown token id")
-			}
-			await this.tokens.delete(`${id}`)
-			if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
-			return getTokenInfo(token)
-		})
+		return await this.lock.withLock(() => this._deleteTokenByIdHoldingLock(id, emit))
+	}
+
+	/** Body of `_deleteTokenById`. The caller MUST already hold `this.lock`
+	 *  (the lock is not reentrant — taking it again here would deadlock). */
+	private async _deleteTokenByIdHoldingLock(id: number, emit = true): Promise<TokenInfo> {
+		const token = await this.tokens.get(`${id}`)
+		if (!token) {
+			throw new Error("unknown token id")
+		}
+		await this.tokens.delete(`${id}`)
+		if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
+		return getTokenInfo(token)
 	}
 
 	public async getTokenInterface(networkId: string, tokenId: number): Promise<TokenInterface> {
@@ -700,6 +704,26 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return tokens.find((token) => token.profileId === profileId && token.chainId === chainId && token.contract === contract)
 	}
 
+	/** F-B23: token ids harvested from RAW rows (codec-hidden included) owned by
+	 *  `profileId` — feeds the deletion snapshot so a malformed parent's dependent
+	 *  balance rows still cascade. The id comes from the TRUE storage key, never
+	 *  the row's self-reported field, and only when the key CANONICALLY encodes
+	 *  it: `Number("01") === 1`, so a non-canonical alias key must not donate a
+	 *  DIFFERENT valid token's id to the cascade (codex audit) — and no balance
+	 *  row can reference a non-canonical key anyway (its `token` field is a
+	 *  number). Read-only. */
+	public async rawTokenIdsForProfile(profileId: string): Promise<number[]> {
+		const out = new Set<number>()
+		for (const [id, raw] of await this.tokens.rawEntries()) {
+			if (typeof raw !== "object" || raw === null) continue
+			const r = raw as Record<string, unknown>
+			if (r.profileId !== profileId) continue
+			const n = canonicalNumericStorageId(id)
+			if (n !== undefined) out.add(n)
+		}
+		return [...out]
+	}
+
 	/** Awaited profile-scoped token purge, called by the deletion coordinator
 	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
 	 *  Idempotent. `_deleteTokenById` emits `onTokenDeleted` with the authoritative
@@ -714,13 +738,25 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// further commits, so an idempotent journal re-purge here catches
 		// exactly that window.
 		await this.journal.purgeForProfile(profileId)
-		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
-			// SILENT (emit=false): the deletion coordinator awaits token-balance +
-			// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
-			// redundant and its fire-and-forget consumer could clobber a successor
-			// that reuses the highest token id (audit H3).
-			await this._deleteTokenById(token.id, false)
-		}
+		// ONE lock hold across snapshot + typed deletes + raw pass: restore()
+		// writes under this same lock, so it can neither land a row between the
+		// two passes nor after either snapshot was taken.
+		await this.lock.withLock(async () => {
+			for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
+				// SILENT (emit=false): the deletion coordinator awaits token-balance +
+				// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
+				// redundant and its fire-and-forget consumer could clobber a successor
+				// that reuses the highest token id (audit H3).
+				await this._deleteTokenByIdHoldingLock(token.id, false)
+			}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.tokens,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed token row ${id}`),
+			)
+		})
 	}
 
 	public async backup(): Promise<Token[]> {

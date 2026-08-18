@@ -2,11 +2,12 @@
  * Round-trip corpus + drift-policy pins for the durable-store codecs.
  * Each store now injects its zod row schema into `EntityStorage` (the
  * operation-journal precedent), which gives it the wallet-core `decodeRow`
- * guarantees:
- *   - JSON-SYNTAX failure → legacy policy (row dropped);
+ * guarantees (B-23: the read path NEVER deletes):
+ *   - JSON-SYNTAX failure → row KEPT on disk, read as undefined;
  *   - CODEC-VALIDATION failure → row KEPT on disk, read as undefined
  *     ("present but unreadable") — NEVER deleted. A too-strict schema can
- *     hide a row but can never destroy it.
+ *     hide a row but can never destroy it. Removal happens only in the
+ *     serialized purge second pass (`purgeMalformedRows`, F-B23).
  *
  * Per store: (a) a full-fidelity corpus row and a minimal row (optionals
  * absent) survive write→read byte-equal; (b) a drifted row (wrong type /

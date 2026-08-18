@@ -23,7 +23,7 @@ import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { svc } from "../composition-harness"
 import { AccountService } from "./service"
-import { accountRowId } from "./spec"
+import { accountRowId, parseAccountRowId } from "./spec"
 
 const CHAIN = 1
 /** The address both same-mnemonic profiles derive at index 0. */
@@ -115,5 +115,30 @@ describe("AccountService — composite storage key", () => {
 
 		expect(await accountService.getAccount("profile-1", CHAIN, SHARED_ADDRESS)).toBeUndefined()
 		expect(await accountService.getAccount("profile-2", CHAIN, SHARED_ADDRESS)).toMatchObject({ profileId: "profile-2" })
+	})
+
+	test("parseAccountRowId inverts accountRowId and rejects every non-canonical shape", () => {
+		expect(parseAccountRowId(accountRowId("p1", CHAIN, SHARED_ADDRESS))).toEqual({
+			profileId: "p1",
+			chainId: CHAIN,
+			address: SHARED_ADDRESS,
+		})
+		for (const bad of [
+			"legacy-address-key",
+			"{not json",
+			JSON.stringify(["account", "p1", CHAIN]), // wrong arity
+			JSON.stringify(["contact", "p1", CHAIN, "0xa"]), // wrong tag
+			JSON.stringify(["account", 1, CHAIN, "0xa"]), // wrong profile type
+			JSON.stringify(["account", "p1", "1", "0xa"]), // wrong chain type
+			JSON.stringify({ profileId: "p1" }),
+			// Parse-equivalent but NOT byte-canonical: no writer emits these, and
+			// accepting one as ownership evidence would let a crafted key donate
+			// an arbitrary address to a purge cascade.
+			'[ "account","p1",1,"0xa" ]', // whitespace variant
+			'["\\u0061ccount","p1",1,"0xa"]', // escaped-string variant of "account"
+			'["account","p1",-0,"0xa"]', // -0 re-encodes as 0
+		]) {
+			expect(parseAccountRowId(bad), bad).toBeUndefined()
+		}
 	})
 })
