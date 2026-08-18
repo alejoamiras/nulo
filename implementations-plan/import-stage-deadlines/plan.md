@@ -378,7 +378,13 @@ export async function importFullBackup(page, filePath, password, shell,
 
 ## Phases & validation gates
 
-### Phase 1 — Submit-half convergence + read-once recorder + unit tests (B1 code)
+### Phase 1 ✓ — Submit-half convergence + read-once recorder + unit tests (B1 code)
+
+> GATE PASSED 2026-08-18: `bun run lint` exit 0; `bun run typecheck` exit 0;
+> armed smoke suite (`VITE_NULO_E2E_MIGRATION_FIXTURE=1` build +
+> `NULO_E2E_MIGRATION_FIXTURE=1` run) — 27 files / 111 tests passed, EXIT:0,
+> incl. `import-stage-timing.test.ts` (16 pins) and the armed
+> `backup-migration` expectError path. Evidence: `lessons/phase-1.md`.
 
 Extract `submitFullBackupImport`; implement the internal wait (observer
 buffer + final read, labels, structured lapse errors via
