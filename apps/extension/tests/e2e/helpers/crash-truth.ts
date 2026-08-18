@@ -10,7 +10,7 @@ import type { Page } from "puppeteer"
 import { clickByTestId, openPopup, replaceInputValue, waitForHash, withTimeoutMessage, type ExtensionContext } from "../fixtures/extension"
 import { getActiveProfileName, navigateByHash } from "../fixtures/helpers"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./backup-export"
-import { POPUP_IMPORT_SHELL, TEST_PASSWORD, setInputs, submitWhenEnabled, writeBackupToTemp } from "./import-drivers"
+import { POPUP_IMPORT_SHELL, submitFullBackupImport, submitWhenEnabled, TEST_PASSWORD, writeBackupToTemp } from "./import-drivers"
 
 // The rollback/delete budget is STRUCTURAL, not sampled: the crash path's
 // worst case is the liveness gate's 60s ceiling followed by one deleteProfile
@@ -137,20 +137,8 @@ export async function exportFundedBackup(
 }
 
 /** Drive the popup import flow up to (and including) submit, WITHOUT the
- *  success wait. */
+ *  success wait. Thin delegate — the one shared implementation lives in
+ *  `import-drivers.ts` (`submitFullBackupImport`). */
 export async function driveImportToSubmit(page: Page, filePath: string): Promise<void> {
-	await page.waitForSelector('[data-testid="import-option-full-backup"]', { visible: true, timeout: 10_000 })
-	await clickByTestId(page, "import-option-full-backup")
-	await page.waitForSelector('[data-testid="import-full-backup-pick-file"]', { visible: true, timeout: 10_000 })
-	const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-full-backup-pick-file")])
-	await chooser.accept([filePath])
-	await page.waitForSelector(`[data-testid="${POPUP_IMPORT_SHELL.submitTestId("full-backup")}"]`, {
-		visible: true,
-		timeout: 10_000,
-	})
-	await setInputs(page, {
-		'[data-testid="import-full-backup-password-input"] input': TEST_PASSWORD,
-		'[data-testid="import-full-backup-password-confirm-input"] input': TEST_PASSWORD,
-	})
-	await submitWhenEnabled(page, POPUP_IMPORT_SHELL.submitTestId("full-backup"))
+	await submitFullBackupImport(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
 }
