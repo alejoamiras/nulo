@@ -23,6 +23,32 @@ function makeHandler(pending: (id: string) => PendingDiscovery | undefined): Bac
 const pendingRow = (id: string): PendingDiscovery =>
 	({ requestId: id, origin: "x", status: "pending", timestamp: Date.now() }) as unknown as PendingDiscovery
 
+describe("DiscoveryQueue — F-B16 boot badge reconciliation", () => {
+	test("construction repaints the badge from the (empty) queue — clears a ghost count left by a killed SW", () => {
+		// The badge survives an SW kill; the queue does not. A fresh queue at boot
+		// must reconcile the badge to its actual (empty) contents, or the pre-kill
+		// count ghosts forever (the empty-queue drain early-returns badge-untouched).
+		new DiscoveryQueue(
+			makeHandler(() => undefined),
+			noopLogger,
+		)
+		// biome-ignore lint/suspicious/noExplicitAny: reading the minimal chrome stub
+		const setBadgeText = (globalThis as any).chrome.action.setBadgeText
+		expect(setBadgeText).toHaveBeenCalledWith({ text: "" })
+	})
+
+	test("construction after a non-empty lifetime still paints the live count on the next enqueue", () => {
+		const q = new DiscoveryQueue(
+			makeHandler(() => undefined),
+			noopLogger,
+		)
+		q.enqueue("r1", "https://a.com", "1")
+		// biome-ignore lint/suspicious/noExplicitAny: reading the minimal chrome stub
+		const setBadgeText = (globalThis as any).chrome.action.setBadgeText
+		expect(setBadgeText).toHaveBeenLastCalledWith({ text: "1" })
+	})
+})
+
 describe("DiscoveryQueue — F-04 flood caps", () => {
 	test("coalesces a duplicate (origin,chainId)", () => {
 		const q = new DiscoveryQueue(
