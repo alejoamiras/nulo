@@ -40,3 +40,7 @@ re-running on both PRs).
 ## Round 2 — codex post-impl (new session)
 
 (recorded on completion)
+
+## Round 2 — codex (resumed, post-fix)
+
+**approve, zero new material findings** (quoted: "All three round-1 conditions are correctly applied. No new material findings exist."). The post-impl fix loop converged in ONE round of fixes.

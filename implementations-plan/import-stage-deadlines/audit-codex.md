@@ -340,3 +340,7 @@ Therefore:
 - F1’s `10_000` is exclusively a post-settle diagnostic-read ceiling.
 
 `git diff --check` passed. I could not independently rerun Vitest because the read-only sandbox prevented creation of Vitest’s cache directory; the existing logs record the 16 helper pins, 111-test smoke run, and fixed 3/3 console probe as green.
+
+# POST-IMPL audit — round 2 (resumed session)
+
+Verdict: **approve** — "All three round-1 conditions are correctly applied. No new material findings exist." Timeout gate re-verified across the whole arc (no existing timeout increased; 300_000 the scoped ceiling; F1's 10_000 a new-read bound). Loop CONVERGED.
