@@ -54,6 +54,10 @@ export interface ImportStageRecord {
 	trajectory: TrajectoryEntry[]
 	unobservedStages: string[]
 	outcome: "success" | "timeout" | "error" | "trace-lost"
+	/** On a trace-lost tombstone: what the WAIT itself concluded — a lost
+	 *  trace on a successful import must stay distinguishable from a lost
+	 *  trace on a dead-page timeout (arc code-review F2). */
+	waitOutcome?: "success" | "timeout" | "error"
 	rightCensored: boolean
 	finalHash?: string
 	continueScreen?: boolean
@@ -172,9 +176,15 @@ export function buildImportRecord(opts: {
 	}
 }
 
-/** The record written when the page died before the buffer could be read —
- *  an explicit tombstone, never silence. */
-export function buildTraceLostRecord(opts: { runId: string; file: string; test: string; importOrdinal: number }): ImportStageRecord {
+/** The record written when the page died (or the bounded read lapsed) before
+ *  the buffer could be read — an explicit tombstone, never silence. */
+export function buildTraceLostRecord(opts: {
+	runId: string
+	file: string
+	test: string
+	importOrdinal: number
+	waitOutcome: "success" | "timeout" | "error"
+}): ImportStageRecord {
 	return {
 		runId: opts.runId,
 		file: opts.file,
@@ -185,6 +195,7 @@ export function buildTraceLostRecord(opts: { runId: string; file: string; test: 
 		trajectory: [],
 		unobservedStages: [],
 		outcome: "trace-lost",
+		waitOutcome: opts.waitOutcome,
 		rightCensored: true,
 	}
 }

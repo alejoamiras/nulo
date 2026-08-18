@@ -215,7 +215,7 @@ describe("records + persistence", () => {
 
 	test("a write failure degrades to a status, never a throw", () => {
 		process.env.NULO_E2E_STAGE_LOG = "1"
-		// A directory path that cannot exist as a parent (a FILE in the middle).
+		// An output dir whose nested parents don't exist — appendFileSync ENOENTs.
 		const dir = mkdtempSync(join(tmpdir(), "nulo-stage-log-"))
 		process.env.NULO_E2E_STAGE_LOG_OUT = join(dir, "definitely", "missing", "nested")
 		const record = buildImportRecord({ ...attribution, final: makeFinal(HAPPY_EVENTS), outcome: "timeout" })
@@ -224,9 +224,9 @@ describe("records + persistence", () => {
 		expect(existsSync(stageLogPath(attribution.runId))).toBe(false)
 	})
 
-	test("trace-lost is an explicit tombstone record", () => {
-		const record = buildTraceLostRecord(attribution)
-		expect(record).toMatchObject({ outcome: "trace-lost", rightCensored: true, trajectory: [] })
+	test("trace-lost is an explicit tombstone that keeps the wait outcome", () => {
+		const record = buildTraceLostRecord({ ...attribution, waitOutcome: "success" })
+		expect(record).toMatchObject({ outcome: "trace-lost", waitOutcome: "success", rightCensored: true, trajectory: [] })
 	})
 
 	test("timeout outcome right-censors the record's last trajectory entry", () => {

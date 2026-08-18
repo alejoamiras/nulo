@@ -397,7 +397,10 @@ observations surfaced (nothing implemented): `restoring:services` has no aggrega
 stage bound (up to 6 sequential 60s RPC ceilings); the activation/recovery seam has no
 aggregate bound; `restoring:account-state` rendered in 0/30 imports. Verdicts: phase-4
 codex `conditional approve` (conditions applied — session `01a01661`), on top of the
-arc's three-leg plan audit. Evidence:
+arc's three-leg plan audit. Reachability note (arc code-review): the labeled-trajectory
+lapse diagnostic surfaces where the caller's TEST budget exceeds the 300s wait — the
+900s network callers; the smoke callers' 90s test budgets kill the runner first
+(a pre-existing budget inversion, unchanged by this arc). Evidence:
 `implementations-plan/import-stage-deadlines/{envelopes.md,lessons/phase-2.md}`.
 
 ### OPEN

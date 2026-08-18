@@ -77,6 +77,23 @@ async function readStageTraceFinal(page: Page): Promise<FinalObservation> {
 	})
 }
 
+/** Bound the post-settle read: on a WEDGED renderer a bare `page.evaluate`
+ *  hangs the full protocolTimeout (300s, `fixtures/extension.ts` launch
+ *  options) — stacked onto an already-lapsed 300s wait that converts the
+ *  labeled TimeoutError into a caller test-timeout and LOSES the trajectory.
+ *  A lost race leaves the evaluate dangling harmlessly on a page that is
+ *  already beyond diagnosis; callers fall into the degraded paths
+ *  (`<diagnostic failed…>` text / the trace-lost tombstone). This is a NEW
+ *  bound on a NEW read — no existing timeout changed. */
+const FINAL_READ_BUDGET_MS = 10_000
+function readStageTraceFinalBounded(page: Page): Promise<FinalObservation> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+	const deadline = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error("final stage-trace read timed out (renderer wedged?)")), FINAL_READ_BUDGET_MS)
+	})
+	return Promise.race([readStageTraceFinal(page), deadline]).finally(() => clearTimeout(timer))
+}
+
 /** Canonical BIP39 24-word zero-entropy vector. Stable across Aztec versions
  *  and BIP39 dictionary changes. Sourced from `mnemonic.test.ts:24`. */
 export const CANONICAL_SEED_24 =
@@ -262,11 +279,11 @@ export async function importFullBackup(
 	await submitFullBackupImport(page, filePath, password, shell)
 
 	let outcome: ImportStageRecord["outcome"] = "success"
-	let final: FinalObservation | null = null
-	const readFinal = async (): Promise<FinalObservation> => {
-		final ??= await readStageTraceFinal(page)
-		return final
-	}
+	// Memoize the PROMISE, not the value: a rejected first read must stay
+	// cached so the finally below cannot re-hang a second evaluate against
+	// the same wedged renderer (arc code-review F1).
+	let finalPromise: Promise<FinalObservation> | null = null
+	const readFinal = (): Promise<FinalObservation> => (finalPromise ??= readStageTraceFinalBounded(page))
 	try {
 		// The import flow is restore + (possibly) the app's OWN bounded 30s recovery wait before it
 		// routes (import.vue completeImportWithRecovery) - a 30s clock expired structurally whenever
@@ -290,7 +307,9 @@ export async function importFullBackup(
 			}
 			const observed = await readFinal().catch(() => null)
 			appendImportRecord(
-				observed ? buildImportRecord({ ...attribution, final: observed, outcome }) : buildTraceLostRecord(attribution),
+				observed
+					? buildImportRecord({ ...attribution, final: observed, outcome })
+					: buildTraceLostRecord({ ...attribution, waitOutcome: outcome }),
 			)
 		} catch (recordErr) {
 			console.log(`[import-stage-timing] attribution failed (measurement lost, test unaffected): ${String(recordErr)}`)
