@@ -44,7 +44,15 @@ export class DiscoveryQueue {
 	constructor(
 		private handler: BackgroundConnectionHandler,
 		private logger: ILogger,
-	) {}
+	) {
+		// F-B16: reconcile the badge at construction (= every SW boot). The badge
+		// is Chrome-level state that SURVIVES a service-worker kill, while this
+		// queue is in-memory and boots empty — without this, a worker killed with
+		// a non-empty queue leaves a permanent ghost count (the empty-queue drain
+		// below early-returns without touching the badge, so even unlocking never
+		// clears it). The queue is authoritative: paint what it actually holds.
+		this.updateBadge()
+	}
 
 	get size(): number {
 		return this.queue.length
