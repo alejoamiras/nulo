@@ -487,6 +487,18 @@ only after certification + the owner-gate conditions.
    (shipped, consults + verdicts, the recorded product follow-ups + the
    row-3 amendment option).
 
+## Approval
+
+**Approved via the goal's standing authorization** (owner confirmed
+autonomous execution in-session, 2026-08-18: "didn't we make our /goal to
+run independently…"). The gate's four asks resolve to the audit-converged
+defaults: (1) row-3 OUT accepted (labels, no early exits; the
+normative-ledger amendment stays a recorded future option); (2) the
+no-deadline classification close accepted; (3) B2 document-as-designed +
+residuals accepted; (4) the three product follow-ups stay recorded, not
+implemented. Implementation proceeds; merge still requires the full Phase-6
+certification per the goal's merge authority.
+
 ## Seeds
 
 ELI5 Artifact: https://claude.ai/code/artifact/ce1cd30f-a72a-4f9f-bd29-d9cd46ee9fd5
