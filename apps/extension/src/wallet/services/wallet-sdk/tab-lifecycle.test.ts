@@ -56,12 +56,13 @@ describe("wireTabLifecycle", () => {
 		expect(deps.terminateForTab).toHaveBeenCalledWith(42)
 	})
 
-	test("cross-origin navigation terminates ONLY the matching tab's session (three-session matrix)", () => {
+	test("cross-origin navigation terminates ONLY the matching tab's session (three-session matrix); logs exactly once", () => {
 		const deps = makeDeps([
 			{ sessionId: "hit", origin: "https://old.example", tabId: 7 },
 			{ sessionId: "same-origin", origin: "https://new.example", tabId: 7 },
 			{ sessionId: "other-tab", origin: "https://old.example", tabId: 9 },
 		])
+		const logSpy = vi.spyOn(deps.logger, "log")
 		wireTabLifecycle(deps)
 
 		updatedListeners[0](7, { status: "loading", url: "https://new.example/page" })
@@ -69,6 +70,10 @@ describe("wireTabLifecycle", () => {
 		expect(deps.terminateSession).toHaveBeenCalledTimes(1)
 		expect(deps.terminateSession).toHaveBeenCalledWith("hit")
 		expect(deps.terminateForTab).not.toHaveBeenCalled()
+		// Logging is part of the moved surface: exactly one entry, for the
+		// terminated session only.
+		expect(logSpy).toHaveBeenCalledTimes(1)
+		expect(String(logSpy.mock.calls[0][2])).toContain("hit")
 	})
 
 	test("same-origin SPA navigation spares the session (the upstream #56 carve-out)", () => {
