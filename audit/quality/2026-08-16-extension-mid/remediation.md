@@ -40,3 +40,18 @@ Arc 0 (#383) committed this audit directory itself.
 - **F-Q08** — the `sessionQueues` early-release baton (concurrent-sendtx invariant) onto a split-release primitive; drop `serializePerTuple`'s pinned unhandledrejection in a classified behavior arc.
 - **F-Q09** — token `getTokenInterface`/`parseTokenInterface` 9-way iteration + `persistToken` + network `resolveEndpointWrite`.
 - **F-Q11** — `BlockingBarrierFrame` for the 2 blocking barriers (visual-only; distinct staleness guards stay per-component).
+
+## Follow-up closure (2026-08-18)
+
+All owned quality follow-ups executed as characterization-pinned, zero-behavior-change arcs (`implementations-plan/remediation-followups/plan.md`):
+
+| Item | Arc | PR | Status |
+|---|---|---|---|
+| F-Q05 (AlarmDispatcher ×3) | 5 primitive-adoption-closure | #408 | ✅ adopted — reaper (full ritual), session-manager + price (create/clear only; the listener constraints documented per site) |
+| F-Q07 (restoreRows capability-or-reject) | 5 primitive-adoption-closure | #408 | ✅ resolved — network/config/task REJECTED as correctly-deferred (documented per-site reasons); the missed token-balance site ADOPTED |
+| (helper sweep) | 5 primitive-adoption-closure | #408 | ✅ 3 id-allocator adoptions (byte-identical bodies); all other candidates rejected with reasons; KeyedLock/SingleShotTtlCache already fully adopted; popup Enter-handlers flagged as an owner follow-up (adoption would be a behavior change) |
+| F-Q09 (row-service method families) | 6 row-service-method-families | #412 | ✅ persistToken extracted (discriminated metadata source — the seed path cannot fetch by construction); token 9-way REJECTED (`getTokenInterface` has zero production callers — owner ask: delete it from the RPC surface); endpoint pipeline REJECTED (both audit legs); updateEndpoint + getTokenInterface pinned from zero coverage |
+| F-Q02 (restore stage 2) | 7 restore-stage-2 | #413 | ✅ stages C+D extracted separately with the `importedChainAddress` allow-set threaded explicitly (the codex redesign); the false-coverage hole in the chain-equality check closed; B+G (`createdNetworks`) recorded as the next stage |
+| Q-04 (composition-root pilot) | 8 composition-root-pilot | #415 | ✅ pilot shipped (buildFeeStrategies + wireTabLifecycle, pins first) + STOP honored; findings + the DAG-first owner recommendation in `implementations-plan/composition-root-pilot/pilot-findings.md` |
+
+Arc 9 + the remaining god-services: written recommendation only, per the OWNER-GATED charter — `implementations-plan/remediation-followups/arc9-recommendation.md`. The REJECTED list (`sessionQueues` split-release; `BlockingBarrierFrame`) stands.
