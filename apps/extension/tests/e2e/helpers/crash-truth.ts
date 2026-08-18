@@ -1,9 +1,10 @@
 /**
- * Shared machinery for the crash-truth pair:
+ * Shared machinery for the crash-truth surface:
  * `network/backup-restore-sw-restart.test.ts` (mid-restore SW kill; proverless
- * rendezvous) and `network/pxe-fence-reimport.test.ts` (no-crash delete +
- * same-id re-import control; prover-capable). Extracted so the control file
- * never imports a test module and nothing is duplicated.
+ * rendezvous) and `network/profile-reimport-matrix.test.ts` (the no-crash
+ * delete + same-id re-import matrix, prover-capable — it imports
+ * `readProfileGen` for its generation pin). Extracted so no test file ever
+ * imports another test module and nothing is duplicated.
  */
 import type { Page } from "puppeteer"
 import { clickByTestId, openPopup, replaceInputValue, waitForHash, withTimeoutMessage, type ExtensionContext } from "../fixtures/extension"
