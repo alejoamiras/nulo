@@ -59,9 +59,32 @@ export const useAppStore = defineStore("app", () => {
 	 * through the guard. During bootstrap there is nothing in flight to protect
 	 * (the journal read comes back empty), so it proceeds normally; mid-send it
 	 * refuses rather than moving the account out from under the send.
+	 *
+	 * Stale-activation fence: a monotonic activation epoch plus the (profile,
+	 * network) scope captured at entry, re-checked before EVERY account
+	 * assignment and the durable pointer write. A run superseded mid-await
+	 * (rapid profile switch, network flip) refuses instead of landing the
+	 * loser's account after the winner's — and instead of poisoning the global
+	 * `nulo:ui:activeAccount` key, which survives into the next bootstrap.
+	 * The epoch is the load-bearing half: scope IDs alone are ABA-unsafe (an
+	 * A→B→A flip makes the parked run's capture match again — codex audit); any
+	 * LATER entry into this action supersedes every parked one. The id checks
+	 * still catch a flip whose own activation hasn't re-entered this action yet.
+	 * `commitScopeChange` cannot express either: it guards in-flight SENDS,
+	 * not superseded activations.
 	 */
+	let activationEpoch = 0
 	const setupActiveAccount = async (): Promise<boolean> => {
+		const myEpoch = ++activationEpoch
+		const scopeProfileId = profile.value?.id
+		const scopeNetworkId = network.value?.id
+		const superseded = () => activationEpoch !== myEpoch || profile.value?.id !== scopeProfileId || network.value?.id !== scopeNetworkId
+
 		const activeAccountResult = await storageLocalGet("nulo:ui:activeAccount")
+		// INVARIANT: no await between this check and the two re-point early-return
+		// assignments below — that synchronous span is what lets them skip their
+		// own superseded() re-check. Inserting an await in it reopens the race.
+		if (superseded()) return false
 		if ("nulo:ui:activeAccount" in activeAccountResult) {
 			const activeAccountAddress = activeAccountResult["nulo:ui:activeAccount"]
 			const remembered = accounts.value.find((a) => a.address === activeAccountAddress)
@@ -71,9 +94,16 @@ export const useAppStore = defineStore("app", () => {
 					account.value = remembered
 					return true
 				}
-				return commitScopeChange(() => {
+				// The fence re-check lives INSIDE the synchronous commit (the widest
+				// await is commitScopeChange's own refreshInFlight); `landed` keeps
+				// the returned boolean honest when the commit refuses as stale.
+				let landed = false
+				const admitted = await commitScopeChange(() => {
+					if (superseded()) return
 					account.value = remembered
+					landed = true
 				})
+				return admitted && landed
 			}
 		}
 
@@ -82,13 +112,19 @@ export const useAppStore = defineStore("app", () => {
 			account.value = first
 			return true
 		}
-		if (
-			!(await commitScopeChange(() => {
-				account.value = first
-			}))
-		) {
+		let landed = false
+		const admitted = await commitScopeChange(() => {
+			if (superseded()) return
+			account.value = first
+			landed = true
+		})
+		if (!admitted || !landed) {
 			return false
 		}
+		// Re-check across the await boundary between the commit and the durable
+		// write: a supersede landing in that gap must not let the loser stamp the
+		// global pointer (it outlives this run — the next bootstrap reads it).
+		if (superseded()) return false
 		await storageLocalSet({
 			"nulo:ui:activeAccount": account.value?.address,
 		})
@@ -274,6 +310,11 @@ export const useAppStore = defineStore("app", () => {
 	 *
 	 * Callers do their async preparation FIRST (RPCs, service calls), then hand
 	 * over a function that only assigns.
+	 *
+	 * `true` means the guard ADMITTED the commit and ran it — not that the
+	 * callback changed anything. A conditional commit (one that can refuse
+	 * internally, e.g. a staleness fence) must track its own `landed` flag and
+	 * combine it with this return; see `setupActiveAccount`.
 	 */
 	const commitScopeChange = async (commit: () => void): Promise<boolean> => {
 		if (hasInFlightSend.value) return false
