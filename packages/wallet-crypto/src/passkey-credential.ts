@@ -66,10 +66,14 @@ export class PasskeyCredential {
 	}
 
 	public async deriveMasterSecret(): Promise<MasterSecretBytes> {
+		// 512-bit expand before the field reduce — HKDF-Expand output is IND-random, so a
+		// 64-byte input gives reduce bias ≤ ~2^-258 (the same low-skew form the mnemonic path
+		// uses in mnemonic-master.ts). A 256-bit expand was rejected: reducing 32 bytes mod Fr
+		// leaves a ~2^-1.6-scale relative bias (the high-skew case upstream warns about).
 		const masterBits = await globalThis.crypto.subtle.deriveBits(
 			{ name: "HKDF", hash: "SHA-256", salt: this.salt, info: PASSKEY_MASTER_LABEL },
 			this.baseKey,
-			256,
+			512,
 		)
 		try {
 			const masterFr = Fr.fromBufferReduce(Buffer.from(new Uint8Array(masterBits)))
