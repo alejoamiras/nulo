@@ -196,17 +196,14 @@ describe("EditProfilePopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
-	test("(BUG PIN) Enter submits the UNCHANGED name before any edit — the isStartedEditing gate is button-only", async () => {
-		// Pre-existing behavior preserved verbatim by the migration: the submit
-		// button is disabled until isStartedEditing, but handleUpdateProfile
-		// (the Enter path) checks only isAvailableToUpdateProfile, whose
-		// isUnchanged/isCollision guards BOTH require isStartedEditing — so an
-		// Enter right after opening submits the unchanged name. Tracked for a
-		// separate fix; this pin documents, not endorses.
+	test("Enter before any edit does NOT submit — isStartedEditing gates the shared submit-validity source", async () => {
+		// Regression pin (was a BUG PIN): isAvailableToUpdateProfile now gates
+		// on isStartedEditing itself, so the Enter path and the button agree by
+		// construction and a pre-edit Enter cannot submit the unchanged name.
 		const w = await mountShown()
 		pressEnterOnInput()
 		await flushPromises()
-		expect(profileServiceMock.changeProfileName).toHaveBeenCalledWith("p1", "Main")
+		expect(profileServiceMock.changeProfileName).not.toHaveBeenCalled()
 		await dispose(w)
 	})
 

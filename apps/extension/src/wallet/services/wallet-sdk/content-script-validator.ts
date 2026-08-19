@@ -32,16 +32,21 @@ import { z } from "zod"
  *
  * Mirrors `@aztec/wallet-sdk/extension/handlers.InternalMessageType`'s
  * content-script-to-background subset (DISCOVERY_REQUEST,
- * KEY_EXCHANGE_REQUEST, SECURE_MESSAGE, DISCONNECT_REQUEST). If the
- * upstream enum gains a new content-script→background message type,
- * extend this set.
+ * KEY_EXCHANGE_REQUEST, SECURE_MESSAGE, DISCONNECT_REQUEST, PING). If
+ * the upstream enum gains a new content-script→background message
+ * type, extend this set.
+ *
+ * PING is the dApp's unencrypted in-flight liveness probe; the upstream
+ * handler answers PONG. Omitting it here silently degraded the dApp to
+ * its legacy-peer path (dead-wallet detection waits for the full dead
+ * window instead of a heartbeat round-trip).
  *
  * Background-to-content-script types (DISCOVERY_APPROVED,
  * KEY_EXCHANGE_RESPONSE, etc.) are NOT in this set — they appear with
  * `origin: "background"` and are filtered out by the origin check
  * before reaching the type validator.
  */
-const CONTENT_SCRIPT_MESSAGE_TYPES = ["discovery-request", "key-exchange-request", "secure-message", "disconnect-request"] as const
+const CONTENT_SCRIPT_MESSAGE_TYPES = ["discovery-request", "key-exchange-request", "secure-message", "disconnect-request", "ping"] as const
 
 const ContentScriptMessageSchema = z.object({
 	origin: z.literal("content-script"),

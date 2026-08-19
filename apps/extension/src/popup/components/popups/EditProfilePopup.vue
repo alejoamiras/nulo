@@ -44,6 +44,11 @@ const isCollision = computed(() => {
 	return otherProfileNames.value.includes(normalized)
 })
 const isAvailableToUpdateProfile = computed(() => {
+	// The single submit-validity source for BOTH the button and the Enter path.
+	// isStartedEditing must gate here (not only on the button): isUnchanged and
+	// isCollision both require it, so without this gate a pre-edit Enter would
+	// submit the unchanged name.
+	if (!isStartedEditing.value) return
 	if (!nameTerm.value?.length) return
 	if (isUnchanged.value) return
 	if (isCollision.value) return
@@ -156,7 +161,7 @@ usePopupEntity(() => props.show, {
 						wide
 						variant="primary"
 						size="medium"
-						:disabled="!isAvailableToUpdateProfile || !isStartedEditing"
+						:disabled="!isAvailableToUpdateProfile"
 						:loading="isProfileUpdateInProgress"
 						data-testid="edit-profile-submit"
 					>
