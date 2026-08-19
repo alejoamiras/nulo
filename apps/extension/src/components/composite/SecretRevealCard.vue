@@ -1,17 +1,16 @@
 <script setup>
 /**
- * Reveal-on-click card for sensitive plaintext (private keys, seed
- * phrases, encrypted backups). Wraps the existing `<Input>` primitive
- * with show/hide + copy chip-style action buttons.
+ * Reveal-on-click card for sensitive plaintext (recovery phrases,
+ * account exports). Wraps the existing `<Input>` primitive with
+ * show/hide + copy chip-style action buttons.
  *
- * Used by `pages/settings/security/export/key.vue` and
- * `.../export/seed.vue`. NOT suitable for `full.vue` — that page is a
+ * Used by `pages/settings/security/export/seed.vue` and the
+ * account-export popup. NOT suitable for `full.vue` — that page is a
  * backup pipeline (encryption + download), not a reveal+copy widget,
  * per decisions.md decision 4.
  *
- * Auto-close logic stays at the page level (each page picks its own
- * AUTO_CLOSE_MS — key uses 2 min, seed uses 5 min). The card is purely
- * the "show me / copy me" widget.
+ * Auto-close logic stays at the consumer level (each picks its own
+ * lifetime). The card is purely the "show me / copy me" widget.
  */
 
 defineProps({

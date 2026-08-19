@@ -1,10 +1,10 @@
 <script setup>
 /** Utils */
 import { managers } from "@/utils/core"
-import { copyToClipboard } from "@/utils/clipboard"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useSecretClipboardCopy } from "@/composables/useSecretClipboardCopy"
 const { openToast } = useToast()
 
 /** Store */
@@ -54,12 +54,8 @@ const handleExport = async () => {
 	}
 }
 
-const handleCopy = () => {
-	void copyToClipboard(result.value, openToast, {
-		success: { label: "Export copied" },
-		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
-	})
-}
+const { copySecret } = useSecretClipboardCopy({ toastLabel: "Export copied", openToast })
+const handleCopy = () => copySecret(result.value)
 
 usePopupEntity(() => props.show, { submit: handleExport, onHide: reset })
 </script>

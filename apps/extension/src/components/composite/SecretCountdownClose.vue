@@ -1,7 +1,7 @@
 <script setup>
 /**
  * Close button with optional countdown progress overlay + "Disable
- * auto-close" ghost link. Used by the export pages (key.vue + seed.vue)
+ * auto-close" ghost link. Used by the recovery-phrase export page
  * after the secret is revealed; the absolutely-positioned progress bar
  * is the reason the underlying element stays a raw `<button>` rather
  * than the `<Button>` primitive.

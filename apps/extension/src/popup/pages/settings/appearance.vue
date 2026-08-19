@@ -60,7 +60,8 @@ const settings = {
 	},
 	incomingTransfersVisible: {
 		title: "Show incoming transfers",
-		description: "Hide if you run the same seed on multiple devices and don't want one device's outgoing to appear as incoming here",
+		description:
+			"Hide if you run the same recovery phrase on multiple devices and don't want one device's outgoing to appear as incoming here",
 		model: isIncomingTransfersVisible,
 	},
 	showFiatValues: {
