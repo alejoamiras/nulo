@@ -1,8 +1,10 @@
 # key-model-v2-hardening — DEK isolation, duplicate-phrase guard, passkey 512-bit reduce, missing e2e
 
-**Rev 2** — dual-audit conditions integrated (codex conditional-approve + fable conditional-approve,
-round 1; transcripts in `audit-codex.md` / `audit-fable.md`; adopted/rejected in the decision
-ledger).
+**Rev 4** — round-1 dual audit (codex + fable, both conditional-approve → rev 2), final
+fresh-context codex pass (reject: clone-divergence blocker → rev 3), re-verdict (conditional
+approve → rev 4: rewrap-handoff lifetime defined, rev-2 leftovers swept). Transcripts in
+`audit-codex.md` / `audit-fable.md`; every adoption/rejection in the decision ledger. Open at the
+approval gate: owner ratification of the KDF-spec amendment (the re-verdict's third condition).
 
 **Tier**: `/blueprint mid` (rubric: security sensitivity HIGH; novelty LOW — extends code the
 key-model-v2 stack just built; blast radius MODERATE, pre-production; irreversibility LOW;
@@ -137,12 +139,22 @@ imported-key rows (root swap, envelope shape unchanged):
   would be destroyed under the house discipline); `ActiveSession.dek` zeroized on
   close/replace/expiry. **NINE `openSessionVerified`/`open` call sites** (corrected count),
   including the password-change reopen and both `finalizeRestore` branches.
-- **`pendingRestoreSecrets` (audit HIGH/MEDIUM, both auditors)**: the passkey restore→
-  `finalizeRestore` stash extends from master-only to `{secret, dek}` — carrying the freshly
-  minted DESTINATION DEK (TTL-zeroized as today) — otherwise the first post-restore session is
-  dek-less and every restored imported account quarantines until the next full unlock. Dedicated
-  integration leg: "restore a passkey backup carrying an imported account → the account signs
-  BEFORE any re-unlock."
+- **Restore rewrap context (re-verdict HIGH — the rewrap needs an implementable ownership path)**:
+  `ProfileService.restore()` runs BEFORE `AccountService.restoreImportedKeys()`, so the source DEK
+  cannot be zeroized inside `restore()` itself. `restore()` stashes a **TTL-bound, memory-only
+  rewrap context** — `{sourceDek, destinationDek}` per pending restore, both profile types —
+  mirroring the existing `pendingRestoreSecrets` discipline (same TTL, same zeroize-on-expiry).
+  `restoreImportedKeys` consumes it atomically (rewraps every row source→destination, then
+  zeroizes `sourceDek` immediately; `destinationDek` survives for `finalizeRestore`'s session
+  open). Named edge cases, each a test: empty slice (context still cleaned), partial rewrap
+  failure (rollback per the existing restore rollback — no half-rewrapped slice persists),
+  context expiry before consumption (imported rows dropped with the existing orphan taxonomy,
+  never silently kept undecryptable), abandoned restore + SW death (TTL zeroize).
+- **`pendingRestoreSecrets` (round-1 both auditors)**: the passkey restore→`finalizeRestore` stash
+  extends from master-only to `{secret, dek}` — carrying the DESTINATION DEK (TTL-zeroized as
+  today) — otherwise the first post-restore session is dek-less and every restored imported
+  account quarantines until the next full unlock. Dedicated integration leg: "restore a passkey
+  backup carrying an imported account → the account signs BEFORE any re-unlock."
 - **Degradation state machine (final-audit condition — replaces rev 2's underspecified fail-soft
   bullet; a dek-less session has no MAC key, so the two failure modes must be defined together)**:
   1. `guard`/`secret`/`entropy` decrypt failure, or pairing failure → **unlock BLOCKS** (as
@@ -183,8 +195,8 @@ imported-key rows (root swap, envelope shape unchanged):
   backups carry the SOURCE DEK plaintext beside `master-key`/`entropy`; passkey backups carry the
   **sealed row blob verbatim** (the restore ceremony re-derives the same wrap key to unseal it —
   `recoverFromCredentialData` + credentialId assert, service.ts:1746-1755). Either way the source
-  DEK is used ONLY to rewrap the imported-key rows to the freshly minted destination DEK during
-  restore, then zeroized — it never persists on the restored profile. Export goes through ONE
+  DEK exists only inside the TTL-bound rewrap context (above) until `restoreImportedKeys` consumes
+  it — it never persists on the restored profile. Export goes through ONE
   authenticated, discriminated `exportBackupMaterial` result carrying
   credentialId/master/entropy/DEK atomically (codex: no cross-call races). Epoch: **no bump** —
   epoch 4 exists only on unmerged PRs; the DEK field joins its required shape (password: required
@@ -293,8 +305,9 @@ master-holder forgery attempt) · ✎ `session-secret-box.ts` (master||dek, vers
 (Profile.dekSealed + walletFingerprint both variants, RestoreSecret, exportBackupMaterial shape)
 · ✎ **`packages/extension-messaging/src/errors.ts` (+ transport test)** — DuplicateWalletError
 registration · ✎ `profile/service.ts` (SIX row sites, unlock/create/import/restore/
-changeProfilePassword/exportBackupMaterial/getProfileDek/fingerprint checks/throwing-zone dup
-check/passkey rethrow + retry stash) · ✎ `profile/session-manager.ts` (ActiveSession.dek, copy
+changeProfilePassword/exportBackupMaterial/getProfileDek/fingerprint checks/locked dup
+check+commit with explicit typed-error rethrow/rewrap context/credentialId scan) ·
+✎ `profile/session-manager.ts` (ActiveSession.dek, copy
 accessor, zeroize on close/replace, bearer v2, MAC verify at unlock + restore, dek-less no-bearer
 rule) · ✎ `passkey-recovery-coordinator.ts` (4 methods + PasskeyRecovery.dekWrapKey) ·
 ✎ `account/service.ts` (getProfileDek at load/import; fresh-auth dek unseal at export) ·
@@ -363,12 +376,15 @@ path reaching an imported key with master-only material?), wrap-key domain separ
 keying + preimage, bearer wrap, zeroization. No unresolved High.
 
 **P4 — service threading + fingerprint + backup carriage.**
-ActiveSession.dek (copy accessor, zeroize on close/replace) + NINE open() call sites; unlock
-unseal-and-thread + MAC-v2 verify at unlock; fail-soft dek-less semantics + no-bearer rule;
-bearer v2; `pendingRestoreSecrets` → `{secret, dek}`; `changeProfilePassword` DEK reseal;
-atomic discriminated `exportBackupMaterial`; restore reseal pre-commit (SAME bytes);
-`getProfileDek` facade; account-service swaps (fresh-auth export path); `walletFingerprint` at
-ALL SIX row sites; dup check in the restore throwing zone + passkey rethrow/stash;
+ActiveSession.dek (copy accessor, zeroize on close/replace/expiry) + NINE open() call sites;
+unlock unseal-and-thread + the degradation state machine (derived-only + visible warning +
+no-bearer on DEK/MAC failure); bearer v2; fresh destination DEK at restore + the TTL-bound rewrap
+context consumed by `restoreImportedKeys` (source→destination rewrap; edge cases per §B);
+`pendingRestoreSecrets` → `{secret, dek}`; `changeProfilePassword` DEK reseal; atomic
+discriminated `exportBackupMaterial`; `getProfileDek` facade; account-service swaps (fresh-auth
+export path); `walletFingerprint` at ALL SIX row sites; fingerprint check + row commit under one
+`runExclusive` lock with the flatten-catch explicitly rethrowing `DuplicateWalletError`;
+UI-held-credentialData retry (no stash, no second ceremony); passkey credentialId dup scan;
 `allowDuplicate` params.
 **Gate**: `bun run audit:vue` — exit 0 — AND these NAMED integration criteria green (audit
 conditions absorbed as pass criteria): (a) all-six-creation-paths test asserts `dekSealed` +
@@ -384,8 +400,10 @@ MAC-forgery; (g) dup-guard check + `allowDuplicate` override on import AND resto
 the lock (concurrent same-phrase restores: exactly one dup verdict, no double-commit);
 (h) **clone divergence**: restore A's backup as B (different password) while A exists, A imports a
 NEW account afterward, assert B's material cannot decrypt it; (i) absent-`userHandle`
-same-credential passkey import is rejected by the credentialId scan. Layers:
-typecheck/unit/integration/component/lint/build.
+same-credential passkey import is rejected by the credentialId scan; (j) rewrap-context edges:
+empty slice cleans the context, partial rewrap failure rolls back (no half-rewrapped slice
+persists), context expiry drops imported rows via the orphan taxonomy (never silently kept
+undecryptable). Layers: typecheck/unit/integration/component/lint/build.
 **Rider (blocking)**: resumed codex session re-attack on P3+P4 together — transplant matrix
 end-to-end, backup carriage, restore reseal, bearer restore, dek-less semantics. No unresolved
 High.
@@ -583,4 +601,10 @@ the same file from the owning session keeps the URL; other sessions pass the URL
   DEK lets an allowed backup clone defeat per-profile isolation; plus the degradation state
   machine, dup-check TOCTOU, passkey userHandle hole, deriveKey usage, fact narrowings). ALL
   adopted → rev 3. Both disagreement resolutions endorsed.
-- **Final pass re-verdict (resumed, on rev 3)**: _(pending)_
+- **Final pass re-verdict (resumed, on rev 3)**: `conditional approve` (conditions: (1) define the
+  transient source-DEK rewrap handoff/lifetime — HIGH, `restore()` runs before
+  `restoreImportedKeys()` so the source DEK must survive in a TTL-bound memory-only context, not
+  be zeroized inside restore → ADOPTED (rev 4, §B rewrap context + P4 criterion (j));
+  (2) remove contradictory rev-2 instructions (header, file map, P4 body still described the
+  rejected designs) → ADOPTED (rev 4 sweep); (3) owner ratifies the KDF-spec amendment → OPEN, it
+  IS the approval-gate ask). No other unresolved findings.
