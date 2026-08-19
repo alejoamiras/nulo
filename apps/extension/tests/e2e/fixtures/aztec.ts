@@ -444,6 +444,9 @@ export interface PreFundedAccount {
 	words: string[]
 	masterBase64: string
 	accountAddress: AztecAddress
+	/** The account's Schnorr signing key (0x hex) — for building an account-export file to
+	 *  exercise the IMPORT-account flow against a pre-funded on-chain account. */
+	signingKeyHex: string
 }
 
 /**
@@ -620,7 +623,7 @@ export async function setupPreFundedAccount(
 	logger.info(`PrivateFPC.balance_of(account) = ${privateBal}`)
 
 	const masterBase64 = Buffer.from(master.toBuffer()).toString("base64")
-	return { words, masterBase64, accountAddress: expectedAddress }
+	return { words, masterBase64, accountAddress: expectedAddress, signingKeyHex: signingKey.toString() }
 }
 
 /**
