@@ -94,17 +94,23 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	let heartbeatHandle: TimerHandle | undefined
 	let reaper: JournalReaper | undefined
 	let journalGc: JournalGC | undefined
-	// Flips right before the first `services.add`. Boot failures BEFORE this
-	// point (migration gate, config load, Barretenberg init) left no partial
-	// state — every step in that zone is re-runnable (bb.js's initSingleton
-	// even self-resets on failure) — so the single-flight memo may retry.
-	// Failures AFTER it must NOT re-enter the registration zone:
-	// `ServiceCollection.add` throws on duplicates, and the tabs/pxe-provider
-	// registrations are not re-entrant. There the rejected memo is kept and a
-	// fresh SW lifetime is the retry.
-	let registrationsBegun = false
+	// Retry classification for the single-flight memo. `retrySafe` starts true
+	// on every attempt and is vetoed at the three points where a re-run is
+	// pointless or harmful:
+	//   - a TERMINAL migration block (re-running explicitly terminal work on
+	//     every surviving alarm tick would burn the engine's durable attempts
+	//     meant for SW-respawn cadence; retryable blocks stay retryable);
+	//   - a Barretenberg init failure (`BarretenbergSync.initSingleton` memoizes
+	//     its REJECTED promise upstream — verified in the vendored source — so
+	//     an in-lifetime retry can only re-observe the same error);
+	//   - the registration zone (`ServiceCollection.add` throws on duplicates,
+	//     and the tabs/pxe-provider registrations are not re-entrant).
+	// A vetoed failure keeps the rejected memo: callers observe the rejection,
+	// and a fresh SW lifetime — fresh module state — is the retry.
+	let retrySafe = true
 
 	const doStart = async (): Promise<void> => {
+		retrySafe = true
 		// Uninstall URL comes first — zero-cost and covers the user experience
 		// even if the rest of startup fails.
 		try {
@@ -146,6 +152,9 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				detail: migration.reason,
 				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
 			}
+			// A terminal block vetoes in-lifetime retry — only a retryable one
+			// may be re-attempted by a later start() call.
+			if (blocked.terminal) retrySafe = false
 			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
 			throw new Error(`storage migration blocked: ${migration.kind}`)
 		}
@@ -161,20 +170,32 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])
 		}
 
-		// Config + Barretenberg can load in parallel — neither depends on the other.
-		await Promise.all([
+		// Config + Barretenberg load in parallel — neither depends on the other.
+		// allSettled, NOT all: a fast rejection in one leg must not settle this
+		// promise (and reset the single-flight memo) while the other leg is
+		// still running — a retry would then re-run migration/config
+		// CONCURRENTLY with the first attempt's unfinished work. Both legs
+		// settle before any rethrow, so a reset memo implies quiescence.
+		const [configResult, bbResult] = await Promise.allSettled([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
 			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH }).then(() =>
 				logger.log("wallet", LogLevel.Info, "Barretenberg initialized"),
 			),
 		])
+		if (bbResult.status === "rejected") {
+			// initSingleton memoizes its rejected promise upstream — an
+			// in-lifetime retry can only re-observe this same error.
+			retrySafe = false
+			throw bbResult.reason
+		}
+		if (configResult.status === "rejected") throw configResult.reason
 
 		// Service graph. Services migrated to ports accept `browserApi`;
 		// remaining services still reach into `chrome.*` directly until
 		// their migration lands. Registration order here is a visual
 		// convention only — actual startup ordering is determined by
 		// `ServiceCollection.start()`'s topological phases.
-		registrationsBegun = true
+		retrySafe = false
 		services.add(new AccountService(logger, browserApi))
 		// Same tree-shake contract as the proof gate: constructed only under the
 		// statically-false E2E_PROVERLESS constant, so prod builds carry neither
@@ -340,7 +361,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		}, HEARTBEAT_INTERVAL_MS)
 	}
 
-	const start = createSingleFlightStart(doStart, () => !registrationsBegun)
+	const start = createSingleFlightStart(doStart, () => retrySafe)
 
 	const stop = (): void => {
 		if (heartbeatHandle !== undefined) {

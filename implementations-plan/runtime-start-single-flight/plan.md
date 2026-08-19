@@ -15,16 +15,21 @@ RED evidence (`runtime.test.ts`, both red pre-fix with the predicted signatures)
 
 `createSingleFlightStart(doStart, canRetryAfterFailure)` (`single-flight-start.ts`, 5 unit pins): concurrent callers share ONE in-flight boot; success memoizes; failure re-throws to every waiter and resets the memo ONLY when retry is safe.
 
-**The retry-zone latch is the design's core** (and the answer to the goal's idempotency-audit clause): `registrationsBegun` flips right before the first `services.add`. 
+**Retry classification is the design's core** (and the answer to the goal's idempotency-audit clause) — `retrySafe` starts true each attempt and is vetoed at three points; a vetoed failure keeps the rejected memo (callers observe the rejection; a fresh SW lifetime is the retry):
 
-- **Pre-registration zone** (uninstall URL → migration gate → config.load + BB init): every step is re-runnable — setUninstallURL is caught; the migration engine is contractually re-runnable (its status writes are idempotent); config.load re-reads; bb.js's `initSingleton` self-resets on failure (verified in the vendored source). Failures here reset the memo → the next call retries for real.
-- **Registration zone and later**: `ServiceCollection.add` THROWS on duplicates (verified), and the pxe-provider/tab-lifecycle registrations are not re-entrant. Failures here KEEP the rejected memo: callers observe the same rejection (instead of the old silent void-resolve), and a fresh SW lifetime — fresh module state — is the retry. **No new registered-guards were added**: the zone latch makes re-entry impossible, which is strictly stronger than sprinkling per-registration guards (documented refinement of the goal's letter, consistent with its intent).
+1. **Barretenberg init failure** — `BarretenbergSync.initSingleton` memoizes its REJECTED promise upstream with no reset (verified in the vendored SOURCE; the initial draft claimed self-reset after misreading the async `Barretenberg` class's catch — codex caught this and verified empirically). An in-lifetime retry could only re-observe the same error.
+2. **TERMINAL migration block** (`blocked.terminal`) — a surviving recurring alarm must not re-run explicitly terminal engine work and burn durable attempts meant for SW-respawn cadence. A RETRYABLE block stays retryable (the engine's next-boot resume is designed for it).
+3. **The registration zone** (from the first `services.add`) — `ServiceCollection.add` THROWS on duplicates (verified), and the pxe-provider/tab-lifecycle registrations are not re-entrant. No per-registration guards were added: the veto makes re-entry impossible, strictly stronger than sprinkling guards.
+
+**Quiescence before retry** (codex blocking find): the config/BB parallel init uses `Promise.allSettled`, not `Promise.all` — a fast rejection in one leg must not settle `doStart()` (and reset the memo) while the other leg is still running, or a retry would re-run migration/config CONCURRENTLY with the first attempt's unfinished work. Both legs settle before any rethrow, so a reset memo implies quiescence.
+
+Retryable failures in the remaining pre-registration steps ARE truly re-runnable: setUninstallURL is caught; the migration engine is contractually re-runnable with idempotent status writes; config.load re-reads.
 
 **Call-site audit** (the rethrow must add no unhandled-rejection noise): `runtime.start()` has exactly two callers, both in `wallet/index.ts`, both already `.catch()`-guarded (the price-alarm shim and the boot kick). No changes needed.
 
 ## Validation
 
-- RED→GREEN: `runtime.test.ts` 2/2 (was 0/2 pre-fix) + `single-flight-start.test.ts` 5/5 (incl. the post-registration latch case the runtime-level pins can't reach without booting the real graph).
+- RED→GREEN: `runtime.test.ts` 5/5 — the two original RED pins (concurrent-share, failed-boot-retry via a config failure) + three audit-forged pins (no-overlap quiescence, BB veto, terminal-vs-retryable migration classification) — plus `single-flight-start.test.ts` 5/5 (incl. the post-registration latch case the runtime-level pins can't reach without booting the real graph).
 - `bun run audit:vue` green.
 - SOLO `NULO_E2E_PROVERLESS=1 bun run e2e:agent` (boot path touched; sw-resilience is the canary) — see ledger.
 - Mid tier: dual audit (codex xhigh + fable) on plan+diff, then codex end-diff convergence — see ledger.
@@ -33,4 +38,4 @@ RED evidence (`runtime.test.ts`, both red pre-fix with the predicted signatures)
 
 ## Audit ledger
 
-(appended as legs complete)
+- **Codex xhigh (mid-tier leg 1): `reject` with three blocking findings — ALL ACCEPTED and fixed.** (1) BB does NOT self-reset (the draft misread the wrong class's catch; codex verified empirically that `BarretenbergSync.initSingleton` retains its rejected promise) → BB failures now veto retry, pinned; (2) `Promise.all` rejected fast while the other leg still ran, so a reset memo could overlap unfinished work → `allSettled` quiescence, pinned (config-hangs-while-BB-fails); (3) terminal migration blocks were retry-enabled, letting a surviving alarm re-run terminal engine work → `blocked.terminal` vetoes, pinned both directions. Also fixed per codex: the stale `started`-flag reference in the relay's doc comment. Codex confirmed: the post-registration KEEP policy is conservative and correct; the alarm fail-closed trade is preferable; stop() semantics unchanged; no Ready-handshake contact.
