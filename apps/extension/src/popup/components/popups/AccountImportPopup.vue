@@ -81,6 +81,13 @@ const handleConfirmImport = async () => {
 	}
 }
 
+// A confirmed address is only valid for the exact body+password it was previewed
+// from. Any edit invalidates it so the user must re-preview (the service also
+// recomputes and rejects a stale confirmation, but this keeps the UI honest).
+watch([fileBody, password], () => {
+	previewAddress.value = ""
+})
+
 usePopupEntity(() => props.show, {
 	submit: () => (needsConfirm.value ? handleConfirmImport() : handlePreview()),
 	onHide: reset,

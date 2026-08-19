@@ -65,7 +65,7 @@ const handleUnlock = async () => {
 
 // F-14 scrub + honest copy toast live in useSecretClipboardCopy (shared with
 // the key page — the block was previously duplicated word for word here).
-const { isCopied, copySecret } = useSecretClipboardCopy({ toastLabel: "Seed phrase is copied", openToast })
+const { isCopied, copySecret } = useSecretClipboardCopy({ toastLabel: "Recovery phrase copied", openToast })
 const handleCopy = () => {
 	copySecret(phrase.value)
 }
