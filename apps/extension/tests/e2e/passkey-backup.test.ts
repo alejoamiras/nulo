@@ -128,7 +128,11 @@ type RegisteredAccountRow = { address: string; chainId: number; l1ChainId: numbe
  *  `master-key`. The account row mirrors the register-time row exactly
  *  (see `RegisteredAccountRow`); this also keeps the `Duplicate address`
  *  check semantics of the pre-integrity version. */
-function buildSyntheticPasskeyBackup(credentialId: string, accountRow: RegisteredAccountRow): string {
+function buildSyntheticPasskeyBackup(
+	credentialId: string,
+	accountRow: RegisteredAccountRow,
+	networkRow: { l1ChainId: number; kind: string },
+): string {
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
@@ -143,11 +147,13 @@ function buildSyntheticPasskeyBackup(credentialId: string, accountRow: Registere
 				{
 					id: "syn-network-id",
 					profileId: "syn-profile-id",
-					name: "Local Network",
+					name: "Imported Network",
 					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
 					chainId: accountRow.chainId,
-					l1ChainId: accountRow.l1ChainId,
-					kind: "local",
+					// Real (l1ChainId, kind) from the wallet's own network row, so the epoch-4 restore
+					// cross-check validates against the correct seeded constant (or none, for custom).
+					l1ChainId: networkRow.l1ChainId,
+					kind: networkRow.kind,
 					endpoints: [
 						{
 							id: "syn-endpoint-id",
@@ -443,8 +449,21 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 			throw new Error(`no account row found for ${addr}`)
 		}, addressBefore)
 
+		// Capture the account's REAL network row (kind + l1ChainId): the synthetic backup's network
+		// must be coherent with what the wallet stored, or the epoch-4 restore's Account↔Network
+		// l1ChainId cross-check (validated against the seeded constant for the kind) rejects it.
+		const networkRow = await page.evaluate(async (chainId: number) => {
+			const all = await chrome.storage.local.get()
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:networks@")) continue
+				const row = JSON.parse(v as string) as { chainId: number; l1ChainId: number; kind?: string }
+				if (row.chainId === chainId) return { l1ChainId: row.l1ChainId, kind: row.kind ?? "custom" }
+			}
+			throw new Error(`no network row found for chain ${chainId}`)
+		}, accountRow.chainId)
+
 		// 2. Build the synthetic backup file with that exact credentialId.
-		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, accountRow))
+		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, accountRow, networkRow))
 
 		// 3. Reset the wallet via the in-app reset flow — the same pattern
 		//    `passkey-paths.test.ts:140-172` uses.

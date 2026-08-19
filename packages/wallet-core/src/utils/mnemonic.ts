@@ -2069,7 +2069,7 @@ export const getMnemonic = async (entropy: Uint8Array<ArrayBuffer>): Promise<str
 		throw new Error("Invalid entropy length")
 	}
 
-	const hash = await self.crypto.subtle.digest("SHA-256", entropy)
+	const hash = await globalThis.crypto.subtle.digest("SHA-256", entropy)
 	const hashBits = bytesToBits(new Uint8Array(hash))
 
 	var entropyBits = bytesToBits(entropy)
@@ -2159,7 +2159,7 @@ export const getEntropy = async (mnemonic: string[]): Promise<Uint8Array<ArrayBu
 			(concatBits[i * 8 + 7] << 0)
 	}
 
-	const hash = await self.crypto.subtle.digest("SHA-256", entropy)
+	const hash = await globalThis.crypto.subtle.digest("SHA-256", entropy)
 	const hashBits = bytesToBits(new Uint8Array(hash))
 
 	for (let i = 0; i < checksumBitsCnt; ++i) {
