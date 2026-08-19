@@ -13,7 +13,7 @@ export class EncryptionKey {
 	private constructor(private baseKey: CryptoKey) {}
 
 	private deriveKey(salt: ArrayBuffer): Promise<CryptoKey> {
-		return self.crypto.subtle.deriveKey(
+		return globalThis.crypto.subtle.deriveKey(
 			{
 				name: "PBKDF2",
 				salt,
@@ -39,10 +39,10 @@ export class EncryptionKey {
 	 * @returns Encrypted bytes
 	 */
 	public async encrypt(payload: Uint8Array<ArrayBuffer>, aad?: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> {
-		const iv = self.crypto.getRandomValues(new Uint8Array(12))
-		const salt = await self.crypto.subtle.digest("SHA-256", iv)
+		const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
+		const salt = await globalThis.crypto.subtle.digest("SHA-256", iv)
 		const key = await this.deriveKey(salt)
-		const buffer = await self.crypto.subtle.encrypt(
+		const buffer = await globalThis.crypto.subtle.encrypt(
 			aad ? { name: "AES-GCM", iv, additionalData: aad } : { name: "AES-GCM", iv },
 			key,
 			payload,
@@ -75,9 +75,9 @@ export class EncryptionKey {
 		const iv = payload.subarray(1, 13)
 		const ct = payload.subarray(13, payload.length)
 
-		const salt = await self.crypto.subtle.digest("SHA-256", iv)
+		const salt = await globalThis.crypto.subtle.digest("SHA-256", iv)
 		const key = await this.deriveKey(salt)
-		const buffer = await self.crypto.subtle.decrypt(
+		const buffer = await globalThis.crypto.subtle.decrypt(
 			aad ? { name: "AES-GCM", iv, additionalData: aad } : { name: "AES-GCM", iv },
 			key,
 			ct,
@@ -110,7 +110,7 @@ export class EncryptionKey {
 	 * @returns New instance of EncryptionKey
 	 */
 	public static async fromPasshash(passhash: Passhash): Promise<EncryptionKey> {
-		const baseKey = await self.crypto.subtle.importKey("raw", passhash, "PBKDF2", false, ["deriveKey"])
+		const baseKey = await globalThis.crypto.subtle.importKey("raw", passhash, "PBKDF2", false, ["deriveKey"])
 		return new EncryptionKey(baseKey)
 	}
 
@@ -121,7 +121,7 @@ export class EncryptionKey {
 	 */
 	public static async getPasshash(password: string): Promise<Passhash> {
 		const utf8 = new TextEncoder()
-		return asPasshash(await self.crypto.subtle.digest("SHA-256", utf8.encode(password)))
+		return asPasshash(await globalThis.crypto.subtle.digest("SHA-256", utf8.encode(password)))
 	}
 
 	/**
@@ -132,7 +132,7 @@ export class EncryptionKey {
 	public static async getHashHex(input: string): Promise<string> {
 		const encoder = new TextEncoder()
 		const data = encoder.encode(input)
-		const hashBuffer = await self.crypto.subtle.digest("SHA-256", data)
+		const hashBuffer = await globalThis.crypto.subtle.digest("SHA-256", data)
 		const hashArray = new Uint8Array(hashBuffer)
 
 		return bytesToHex(hashArray)

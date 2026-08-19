@@ -14,6 +14,7 @@ export * from "./fee-options"
 export * from "./address-freeze"
 export * from "./frozen-artifact"
 export * from "./instantiation-descriptor"
+export * from "./account-export"
 
 export interface IAccountContract {
 	readonly address: AztecAddress
