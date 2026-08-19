@@ -602,16 +602,37 @@ Three MEDIUMs shared one root cause: **only the unlock path verified MAC v2**, s
 `changeProfilePassword` and both fresh-auth export RPCs trusted a DEK the stored MAC no longer
 covered. Worst case: a password change re-MACs a transplanted `dekSealed` that unlock had
 quarantined, laundering the tamper into a valid envelope. Fixed by hoisting the invariant into
-`envelopeMacValid` and calling it at every DEK-trusting site; an uncovered DEK now falls into the
-existing mint-fresh self-heal. Fourth MEDIUM: `consumeDekRewrapContext` swept stale entries
-*excluding* the id it popped, so the TTL never applied to it. All four ship tests verified to fail
-without the fix. Commit `442fe16c`.
+`envelopeMacValid`. Fourth MEDIUM: `consumeDekRewrapContext` swept stale entries *excluding* the
+id it popped, so the TTL never applied to it. Every fix ships a test verified to fail without it.
+Commit `442fe16c`.
+
+**Round 3 — codex caught a defect in round 2's own fix.** Round 2 first responded to an uncovered
+DEK by minting a fresh one; codex's rebuttal is decisive: *a MAC failure cannot distinguish slot
+replacement from corruption of the MAC field alone*, so self-healing silently destroys still-
+recoverable imported keys — and the accompanying test corrupted only the MAC, encoding the
+destructive branch as expected on exactly the input where it is wrong. Corrected in `7e96828f`:
+
+- `changeProfilePassword` **refuses** (destroys nothing, blesses nothing).
+- Round 1's export gating is **reversed** — it was wrong on its own terms (exporting under an
+  unverified DEK cannot leak; a foreign DEK just fails its rows into the restore-side orphan
+  taxonomy) and it removed the only non-destructive repair, which is what makes the refusal
+  survivable: derived-only unlock → export → restore (fresh destination DEK + rewrap) → usable
+  imported accounts. Codex verified that path end to end.
+- `exportPlain` now proves a passkey profile's `dekSealed` opens, using the wrap key the ceremony
+  already holds — the blob carries that slot verbatim, so a corrupt one previously yielded a
+  backup that reported success and failed only at restore. A TOCTOU window versus the popup's
+  `getProfileDekSealed` is accepted (a concurrent storage writer can only break a backup, never
+  expose a key); the atomic fix is named in-code.
+- `session-manager` wipes the intermediate master copy in a `finally`.
+
+**Round 3 verdict — CONVERGED**: *"no unhandled material defect remains beyond the explicitly
+accepted backup-DEK forward-reach risk."*
 
 **Accepted, not fixed** (both documented in-code):
 
 | Finding | Why accepted |
 |---|---|
-| HIGH — a password full-backup carries the long-lived profile DEK, granting forward reach to imported-key rows created after the export | Password blobs only (passkey blobs carry it sealed under the PRF wrap key); the same blob already carries the plaintext master, so the marginal leak is only *forward*; realising it needs a SECOND independent compromise (later storage read); it does not weaken sibling-profile isolation. The clean fix — a per-backup transfer key — needs an export-side cross-service handshake mirroring `pendingDekRewraps` in reverse. **Follow-up arc.** |
+| HIGH — a full backup carries the long-lived profile DEK, granting forward reach to imported-key rows created after the export | The same blob already carries the plaintext master, so the marginal leak is only *forward*, and it needs later access to those rows' ciphertext. Scoped honestly after codex falsified two claims in the first write-up: that access is NOT a separate compromise for an ongoing storage-reader, and a clone created by RESTORING the backup DOES receive the source DEK (only a sibling created by re-importing the phrase never sees it; passkey blobs resist a blob-only thief but not an authorized clone). The clean fix — a per-backup transfer key — needs an export-side cross-service handshake mirroring `pendingDekRewraps` in reverse, plus crash consistency. **Follow-up arc.** |
 | LOW — the wallet fingerprint is an offline confirmation oracle (23 known words ⇒ exactly 8 checksum-valid completions) | Inherent: the duplicate check runs pre-unlock against profiles whose credentials are unavailable, so the comparand must be computable from the candidate master alone. Cost-hardening cannot help an 8-candidate space. Header doc rewritten to state it plainly. |
 
 ## Delivery

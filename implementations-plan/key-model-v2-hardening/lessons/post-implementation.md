@@ -51,10 +51,6 @@ unseals there. The whole-envelope MAC is the only check that sees it. The worst 
 unlock had already quarantined into a freshly-valid envelope, after which the profile silently
 adopts the attacker's key and every subsequently imported account seals to it.
 
-The fix discards an uncovered DEK into the pre-existing mint-fresh self-heal rather than
-refusing the password change: a slot the attacker replaced is already dead, so refusing would
-deny a security operation over material that is unrecoverable either way.
-
 **Lesson: a policy enforced at one gate is not a policy.** The degradation state machine was
 specified per-path and implemented per-path; the invariant "never trust a DEK the stored MAC does
 not cover" was never hoisted into a single helper. It is one now (`envelopeMacValid`), which is
@@ -64,9 +60,50 @@ The fourth MEDIUM was a lifetime bug of the same family — `consumeDekRewrapCon
 entries *excluding* the id it was about to pop, so the TTL never applied to the one entry that
 mattered and an abandoned restore's raw source DEK stayed consumable for the whole SW lifetime.
 
-**Every one of the three MEDIUM fixes ships a test that was verified to fail without it** (the
-laundering check was reverted, the test watched go red, then restored). A regression test written
-after the fix and never seen red is an assumption.
+**Every one of the fixes ships a test that was verified to fail without it** (the laundering
+check was reverted, the test watched go red, then restored). A regression test written after the
+fix and never seen red is an assumption.
+
+## Round 3 — codex caught a defect in the round-2 FIX
+
+The most valuable finding of the whole loop, and it was a defect *this round introduced*:
+
+> A MAC failure cannot distinguish slot replacement from MAC-only corruption.
+
+Round 2's first attempt discarded an uncovered DEK into the pre-existing mint-fresh self-heal,
+reasoning that "a slot the attacker replaced is already dead". That reasoning silently assumed
+the cause. When only the `envelopeMac` FIELD is corrupt — bit rot, a partial write, a tamper
+aimed at the MAC alone — the DEK is intact and every imported key is still recoverable, and
+minting fresh destroys them. **And the test shipped alongside it corrupted only the MAC**, i.e.
+it asserted the destructive branch as the expected behaviour on precisely the input where it is
+wrong.
+
+**Lesson: a test written from the same assumption as the fix cannot falsify the fix.** Seeing it
+go red before the change (which was done here) proves it detects the *bug*; it proves nothing
+about whether the *chosen response* is right. That second question needs an adversary.
+
+The corrected design refuses the password change: destroys nothing, blesses nothing. Refusal is
+only acceptable because it isn't a dead end — which is why the same round **reversed** round 1's
+export gating.
+
+**Lesson: check whether a "fix" removes the escape hatch that makes another fix survivable.**
+Gating the exports on the MAC was wrong on its own terms: exporting under an unverified DEK
+cannot leak (a planted DEK is the attacker's own key; a genuine one makes the backup correct),
+and a foreign DEK just fails its rows into the restore-side orphan taxonomy — handled and
+visible. Its only real effect was removing the sole non-destructive repair. Codex confirmed the
+end-to-end path: derived-only unlock → export → restore (fresh destination DEK + source→
+destination rewrap) → usable imported accounts.
+
+Round 3 also closed a genuine gap: a passkey backup carries `dekSealed` verbatim and **nothing
+downstream ever proved it opens**, so a corrupt slot produced a backup that reported success and
+failed only at restore, when the source profile may be long gone. Fixed inside `exportPlain`,
+where the ceremony's wrap key is already in hand — no new RPC, no second WebAuthn prompt. A
+TOCTOU window remains between that probe and the popup's `getProfileDekSealed`; accepted (a
+concurrent storage writer mid-export can only produce a broken backup, never expose a key), with
+the atomic fix named in case that guarantee is ever required.
+
+**Round 3 verdict: converged** — *"no unhandled material defect remains beyond the explicitly
+accepted backup-DEK forward-reach risk."*
 
 ## Accepted, not fixed — and why
 
@@ -81,6 +118,14 @@ per-backup transfer key (rewrap every row at export under a fresh key, carry tha
 needs an export-side cross-service handshake mirroring `pendingDekRewraps` in reverse. That is a
 follow-up arc, and the in-code note says so.
 
+Two claims in the first write-up of this acceptance were **falsified by codex and corrected**:
+"a second independent compromise" (wrong — the ongoing storage-reader this design targets already
+has continuing row access) and "a same-phrase sibling still cannot reach it" (wrong for a clone
+created by RESTORING the backup, which receives the source DEK by construction; true only for a
+sibling created by re-importing the phrase). Passkey blobs resist a blob-only thief but not an
+authorized clone. **Lesson: an acceptance argument is a technical claim and gets audited like
+one** — the temptation is to write it persuasively rather than accurately.
+
 **LOW: the wallet fingerprint is an offline confirmation oracle.** Verified the arithmetic
 independently — 23 known words leave exactly 8 checksum-valid completions (the 24th word carries
 3 entropy bits + the 8 checksum bits), and the fingerprint picks the right one instantly. Not
@@ -88,9 +133,13 @@ fixed because it is **inherent**: the duplicate check runs pre-unlock against pr
 credentials are unavailable, so the comparand must be computable from the candidate master alone.
 Cost-hardening the hash would not help — it is the 8-candidate search space, not the per-guess
 cost, that makes that case cheap. The header doc now says this outright instead of the earlier
-softer claim that it "only confirms a master the holder already possesses".
+softer claim that it "only confirms a master the holder already possesses". Codex's round-3 answer
+confirmed there is no escape given the constraint, naming only a theoretical one — key it with a
+persistent device-global secret held outside `storage.local` (OS keychain / non-extractable
+`CryptoKey`) — which buys a new trust anchor and recovery complexity for a partial-phrase case
+that is already catastrophic.
 
-**Lesson: when a finding is inherent to the design, the deliverable is an honest doc, not a
+**Lesson: when a finding is inherent to the design, the deliverable is an honest doc, not
 mitigation theatre.** The previous wording was not false, but it was written from the
 designer's threat model and would have let a future reader skip the partial-phrase case.
 
