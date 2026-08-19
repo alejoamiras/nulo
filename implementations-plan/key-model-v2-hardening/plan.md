@@ -418,7 +418,10 @@ undecryptable). Layers: typecheck/unit/integration/component/lint/build.
 end-to-end, backup carriage, restore reseal, bearer restore, dek-less semantics. No unresolved
 High.
 
-**P5 — dup-guard UI + copy.**
+**P5 — dup-guard UI + copy.** ✓ (gate 2026-08-19: audit:vue's typecheck/unit/lint/build legs green
+— 4449 tests, lint 0 after the formatting fix — and the smoke suite green on P5's code; the shared
+catch-confirm-retry helper is pinned by 4 component tests. Re-confirmed by the final combined
+gate below — lessons/phase-5.md)
 Typed-error catch in `useProfileImportFlow` + `useFullBackupImport` → `cacheStore.confirm` →
 retry; copy per the frontend addendum; component tests for catch-confirm-retry.
 **Gate**: `bun run audit:vue && bun run test:e2e` — both exit 0 (smoke solo; armed build for the
