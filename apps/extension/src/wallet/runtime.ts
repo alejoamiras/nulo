@@ -16,6 +16,7 @@
 import { BarretenbergSync } from "@aztec/bb.js"
 import type { BrowserApi, ClockPort, TimerHandle } from "@nulo/wallet-core/ports"
 import { ServiceCollection } from "./base"
+import { createSingleFlightStart } from "./single-flight-start"
 import type { ConfigStore } from "./config"
 import { LogLevel, type LoggerStore } from "./logger"
 import { AccountService } from "./services/account/service"
@@ -73,9 +74,19 @@ export interface WalletRuntimeDeps {
 
 /** Handle returned by `createWalletRuntime`. Lifecycle-controlled, not singleton. */
 export interface WalletRuntime {
-	/** Kick off config load, BB init, migrations, service-graph startup, heartbeat. Idempotent. */
+	/** Kick off migrations, config load, BB init, service-graph startup,
+	 *  heartbeat. Single-flight: concurrent callers share ONE in-flight boot
+	 *  and resolve only when it genuinely finishes. REJECTS on boot failure —
+	 *  callers must handle it; a retry-vetoed failure (migration-blocked, BB
+	 *  init, registration zone) rejects for the SW's remaining lifetime, a
+	 *  retryable one is re-attempted by the next call. */
 	start(): Promise<void>
-	/** Stop the heartbeat. Services are not disposed (no mechanism yet). */
+	/** Stop the heartbeat. Services are not disposed (no mechanism yet), and
+	 *  the start memo is NOT reset — after a COMPLETED boot, a later start()
+	 *  returns the settled memo and the heartbeat stays disarmed. stop()
+	 *  during an in-flight boot does NOT cancel it — the boot's tail will
+	 *  still arm the heartbeat. Same semantics as the pre-memo `started`
+	 *  flag; zero production callers today. */
 	stop(): void
 	/** Exposed so shell code + tests can inspect / drive the graph. */
 	readonly services: ServiceCollection
@@ -93,12 +104,25 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	let heartbeatHandle: TimerHandle | undefined
 	let reaper: JournalReaper | undefined
 	let journalGc: JournalGC | undefined
-	let started = false
+	// Retry classification for the single-flight memo. `retrySafe` is vetoed at
+	// the three points where an in-lifetime re-run is pointless or harmful:
+	//   - ANY migration-blocked throw (every `Migrator.run()` on a failing
+	//     migration bumps the DURABLE attempt counter whose cadence is
+	//     next-boot by design — an in-lifetime retry loop driven by the price
+	//     alarm would burn the whole cross-boot budget in minutes);
+	//   - a Barretenberg init failure (`BarretenbergSync.initSingleton`
+	//     memoizes its REJECTED promise upstream with no reset — verified in
+	//     the vendored source — so a retry can only re-observe the same error);
+	//   - the registration zone (`ServiceCollection.add` throws on duplicates,
+	//     and the tabs/pxe-provider registrations are not re-entrant).
+	// A vetoed failure keeps the rejected memo: callers observe the rejection,
+	// and a fresh SW lifetime — fresh module state — is the retry. What
+	// remains genuinely retryable: transient storage writes — the schema-status
+	// sets/removes and config.load's own apply() write, all of which can
+	// throw transiently and re-run safely.
+	let retrySafe = true
 
-	const start = async (): Promise<void> => {
-		if (started) return
-		started = true
-
+	const doStart = async (): Promise<void> => {
 		// Uninstall URL comes first — zero-cost and covers the user experience
 		// even if the rest of startup fails.
 		try {
@@ -140,6 +164,12 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				detail: migration.reason,
 				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
 			}
+			// EVERY blocked outcome vetoes in-lifetime retry — not just terminal
+			// ones: the engine's durable attempt counter bumps on each run, and
+			// its retry cadence is next-boot (SW respawn) by construction. An
+			// in-lifetime retry loop would consume the cross-boot budget and
+			// flip a recoverable block to terminal without a single real boot.
+			retrySafe = false
 			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
 			throw new Error(`storage migration blocked: ${migration.kind}`)
 		}
@@ -155,12 +185,23 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])
 		}
 
-		// Config + Barretenberg can load in parallel — neither depends on the other.
+		// Config + Barretenberg load in parallel — neither depends on the other.
+		// Plain Promise.all (not allSettled): a BB failure vetoes the memo so
+		// no retry can overlap a still-pending config leg, and a config
+		// rejection (its apply() storage write can throw) settles that leg
+		// itself before the retry re-runs it — while allSettled would leave the
+		// boot promise silently pending forever when a leg hangs after the
+		// other failed, which is the defect class this arc exists to remove.
 		await Promise.all([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
-			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH }).then(() =>
-				logger.log("wallet", LogLevel.Info, "Barretenberg initialized"),
-			),
+			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH })
+				.then(() => logger.log("wallet", LogLevel.Info, "Barretenberg initialized"))
+				.catch((err) => {
+					// initSingleton memoizes its rejected promise upstream — an
+					// in-lifetime retry can only re-observe this same error.
+					retrySafe = false
+					throw err
+				}),
 		])
 
 		// Service graph. Services migrated to ports accept `browserApi`;
@@ -168,6 +209,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// their migration lands. Registration order here is a visual
 		// convention only — actual startup ordering is determined by
 		// `ServiceCollection.start()`'s topological phases.
+		retrySafe = false
 		services.add(new AccountService(logger, browserApi))
 		// Same tree-shake contract as the proof gate: constructed only under the
 		// statically-false E2E_PROVERLESS constant, so prod builds carry neither
@@ -332,6 +374,8 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				.catch((error) => logger.log("wallet", LogLevel.Error, "Heartbeat failed", getErrorMessage(error)))
 		}, HEARTBEAT_INTERVAL_MS)
 	}
+
+	const start = createSingleFlightStart(doStart, () => retrySafe)
 
 	const stop = (): void => {
 		if (heartbeatHandle !== undefined) {

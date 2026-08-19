@@ -20,10 +20,11 @@ import { isSubframeSender, validateContentScriptMessage } from "./content-script
  * duplicate secure-message would double-journal a sendTx. The transport must
  * therefore attach here instead of registering its own chrome listener.
  *
- * Drain is keyed on ATTACH, never on `runtime.start()`'s promise — the
- * `started` flag is set before any await and never reset on failure, so that
- * promise can resolve before (or without) the handler ever attaching. If boot
- * never reaches attachment the bounded buffer dies with the unusable worker.
+ * Drain is keyed on ATTACH, never on `runtime.start()`'s promise — even under
+ * the single-flight memo (which settles only when the boot genuinely finishes
+ * or fails), a failed boot resolves nothing and the handler may never attach.
+ * If boot never reaches attachment the bounded buffer dies with the unusable
+ * worker.
  *
  * Pre-attach admission is deliberately STRICTER than the live path: only a
  * validated, top-frame `discovery-request` may occupy a buffer slot.
