@@ -1,0 +1,9 @@
+{
+	"name": "key-model-v2-hardening-reference-vectors",
+	"private": true,
+	"type": "module",
+	"description": "Self-contained passkey-master reference vector. Run: bun install && bun passkey-master-vector.ts > passkey-master-vector.json — from THIS directory. Imports ONLY the published 5.0.1 @aztec/foundation plus node:crypto (a deliberately DIFFERENT HKDF implementation than the wallet's WebCrypto, so a consistently mis-wired wallet HKDF cannot self-consistently pass); never the repo's own helpers.",
+	"dependencies": {
+		"@aztec/foundation": "5.0.1"
+	}
+}

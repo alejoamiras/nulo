@@ -72,5 +72,19 @@ describe("zeroize", () => {
 			const recovered = fr.toBuffer()
 			expect(Buffer.compare(recovered, original)).toBe(0)
 		})
+
+		it("Fr.fromBufferReduce copies a 64-byte input too (the production reduce width)", () => {
+			// Both production reduce sites (mnemonic-master, passkey-credential) feed 64 bytes.
+			// A 64-byte value with only a tiny low limb reduces to itself, so the round-trip
+			// comparison against the low 32 bytes stays exact.
+			const original = new Uint8Array(64)
+			original[63] = 0x09
+			const input = Buffer.from(original)
+			const fr = Fr.fromBufferReduce(input)
+			zeroize(input)
+			const recovered = fr.toBuffer()
+			expect(Buffer.compare(recovered, Buffer.from(original.subarray(32)))).toBe(0)
+			expect(recovered[31]).toBe(0x09)
+		})
 	})
 })
