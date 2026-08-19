@@ -390,6 +390,10 @@ export function buildSyntheticBackup({
 		"master-key": masterBase64,
 		// Epoch-4 password blobs REQUIRE entropy (restore verifies words(entropy) derives master).
 		entropy: entropyBase64,
+		// Epoch-4 password blobs also REQUIRE the plaintext imported-keys DEK carrier (the
+		// service feeds it into the source→destination rewrap context; any 32 bytes is valid
+		// for a synthetic backup with no imported-key rows).
+		"imported-keys-dek": Buffer.from(new Uint8Array(32).fill(0x33)).toString("base64"),
 		data: {
 			profile: { id: "syn-profile-id", name: profileName, type: "password" },
 			network: [

@@ -99,9 +99,11 @@ async function readActiveAccount(page: Page): Promise<string> {
 	})
 }
 
-/** Read the registered profile's stored record (id + name + type + credentialId).
+/** Read the registered profile's stored record (id + credentialId + the SEALED dek blob —
+ *  the backup's `imported-keys-dek-sealed` field is the row blob verbatim: the restore ceremony
+ *  re-derives the same PRF wrap key, so the register-time seal is exactly what restore opens).
  *  EntityStorage rows live under `nulo:core:profiles@<id>`. */
-async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; credentialId: string }> {
+async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; credentialId: string; dekSealed: string }> {
 	return await page.evaluate(async () => {
 		const all = await chrome.storage.local.get(null)
 		for (const key of Object.keys(all)) {
@@ -109,7 +111,7 @@ async function readRegisteredPasskeyProfile(page: Page): Promise<{ id: string; c
 			const raw = (all as Record<string, unknown>)[key]
 			const profile = typeof raw === "string" ? JSON.parse(raw) : raw
 			if (profile && profile.type === "passkey") {
-				return { id: profile.id as string, credentialId: profile.credentialId as string }
+				return { id: profile.id as string, credentialId: profile.credentialId as string, dekSealed: profile.dekSealed as string }
 			}
 		}
 		throw new Error("No passkey profile found in storage")
@@ -130,6 +132,7 @@ type RegisteredAccountRow = { address: string; chainId: number; l1ChainId: numbe
  *  check semantics of the pre-integrity version. */
 function buildSyntheticPasskeyBackup(
 	credentialId: string,
+	dekSealed: string,
 	accountRow: RegisteredAccountRow,
 	networkRow: { l1ChainId: number; kind: string },
 ): string {
@@ -141,6 +144,9 @@ function buildSyntheticPasskeyBackup(
 		// Passkey blobs carry the credentialId as master-key and NEVER an entropy field
 		// (the master re-derives from the passkey PRF at restore).
 		"master-key": credentialId,
+		// Epoch-4 passkey blobs REQUIRE the SEALED dek carrier (the register-time row blob
+		// verbatim — the restore ceremony re-derives the same PRF wrap key to open it).
+		"imported-keys-dek-sealed": dekSealed,
 		data: {
 			profile: { id: "syn-profile-id", name: "Imported PK", type: "passkey" },
 			network: [
@@ -432,7 +438,7 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		await registerPasskeyProfile(page)
 		const addressBefore = await readActiveAccount(page)
 		expect(addressBefore.startsWith("0x")).toBe(true)
-		const { credentialId } = await readRegisteredPasskeyProfile(page)
+		const { credentialId, dekSealed } = await readRegisteredPasskeyProfile(page)
 		expect(credentialId.length).toBeGreaterThan(0)
 
 		// Capture the FULL account row (chainId/index/type, not just the address): the imported
@@ -463,7 +469,7 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		}, accountRow.chainId)
 
 		// 2. Build the synthetic backup file with that exact credentialId.
-		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, accountRow, networkRow))
+		const filePath = writeBackupToTemp(buildSyntheticPasskeyBackup(credentialId, dekSealed, accountRow, networkRow))
 
 		// 3. Reset the wallet via the in-app reset flow — the same pattern
 		//    `passkey-paths.test.ts:140-172` uses.
