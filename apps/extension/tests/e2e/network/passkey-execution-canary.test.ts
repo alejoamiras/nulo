@@ -194,13 +194,14 @@ test.skipIf(!hasConfig)(
 				preKillLiveness,
 			)
 			step("SW rebooted; driving the passkey re-unlock in the SAME FrameTreeNode")
-			// Passkey sessions are never silently restored — the profile is locked now. Navigate
-			// the STILL-OPEN anchor popup (same FTN = same virtual authenticator = same credential)
-			// to the auth screen and run the ceremony, mirroring passkey-paths' lock+unlock leg.
-			await anchorPopup.evaluate(() => {
-				window.location.hash = "#/popup/auth"
-			})
-			await waitForHash(anchorPopup, "#/popup/auth", 10_000)
+			// Passkey sessions are never silently restored — the SW-side session is gone. But the
+			// anchor popup's IN-MEMORY store is stale (isLogined still true), so a bare
+			// `location.hash = "#/popup/auth"` gets bounced by the router before auth mounts
+			// (observed on the first live run). Drive the app's own lock path instead — it flips
+			// the local store first, exactly like passkey-paths' lock+unlock leg; the popup stays
+			// open (same FTN = same virtual authenticator = same credential).
+			await clickByTestId(anchorPopup, "header-lock")
+			await waitForHash(anchorPopup, "#/popup/auth", 15_000)
 			await anchorPopup.waitForSelector('[data-testid="auth-submit"]', { visible: true, timeout: 15_000 })
 			await anchorPopup.waitForFunction(
 				() => {
