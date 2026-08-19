@@ -161,7 +161,7 @@ describe("useProfileImportFlow", () => {
 	// Duplicate-recovery-phrase warn-and-confirm (owner policy: warned choice, never a hard block).
 	describe("duplicate-phrase confirm", () => {
 		/** Drive the ConfirmPopup the way the real popup does: invoke the stashed callback. */
-		async function confirmDialog(flow: ReturnType<typeof useProfileImportFlow>) {
+		async function confirmDialog() {
 			const { useCacheStore } = await import("@/stores/cache.store")
 			const confirm = useCacheStore().confirm as { callback?: () => void; title?: string; description?: string }
 			expect(confirm.title).toBeTruthy()
@@ -186,7 +186,7 @@ describe("useProfileImportFlow", () => {
 
 			const p = flow.handleImportSeed()
 			await tick()
-			const confirm = await confirmDialog(flow)
+			const confirm = await confirmDialog()
 			// The dialog NAMES the colliding profile (never key material).
 			expect(String(confirm.description)).toContain("Main")
 			await p
@@ -226,7 +226,7 @@ describe("useProfileImportFlow", () => {
 			await tick()
 			flow.onCeremonyResolve(fakeCred)
 			await tick()
-			await confirmDialog(flow)
+			await confirmDialog()
 			await p
 
 			expect(profileApi.importPasskey).toHaveBeenCalledTimes(2)
