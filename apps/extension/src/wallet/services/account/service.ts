@@ -411,14 +411,16 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			// (the compensation below only covers the Account row).
 			const l1ChainId = await this.networkService.getL1ChainIdStored(profileId, chainId)
 
-			const skBytes = signingKey.toBuffer() as Uint8Array<ArrayBuffer>
-			const masterBuf = master.toBuffer() as Uint8Array<ArrayBuffer>
+			let skBytes: Uint8Array<ArrayBuffer> | undefined
+			let masterBuf: Uint8Array<ArrayBuffer> | undefined
 			let sealed: string
 			try {
+				skBytes = signingKey.toBuffer() as Uint8Array<ArrayBuffer>
+				masterBuf = master.toBuffer() as Uint8Array<ArrayBuffer>
 				sealed = await sealImportedSigningKey(masterBuf, chainId, recomputed, skBytes)
 			} finally {
-				zeroize(skBytes)
-				zeroize(masterBuf)
+				if (skBytes) zeroize(skBytes)
+				if (masterBuf) zeroize(masterBuf)
 			}
 			// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
 			// leaves an orphan key (swept on init) rather than an Account that cannot sign.
