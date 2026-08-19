@@ -48,4 +48,17 @@ Buffer inside the EXISTING `index.ts` sync listener (extend `:36-48`) instead of
 
 Fable also **corrected the plan's "fire-and-forget" wording** (the content script returns the promise and the SDK discards it un-awaited; "Receiving end does not exist" is not today's failure mode because `index.ts:36` already registers a listener — the relay changes nothing there), and raised the decisive **TLA ask**: a module-type SW only guarantees wake-event delivery to module-scope listeners if the ENTIRE static graph is top-level-await-free. **Verified: 113 chunks in the built SW graph parsed with the TS API — zero top-level await.** (A small guard test keeping the SW graph TLA-free is proposed for the diff; codex to weigh.) Non-blocking notes adopted: the relay registers immediately after `index.ts:48` (before `createWalletRuntime()`, so a construction throw cannot leave it unregistered; logger-free); a boot hang strands the buffer boundedly (log it); the `sendToTab`-to-a-closed-tab unhandled rejection is a pre-existing class, newly reachable — noted, not fixed.
 
-**Codex plan audit:** _pending._
+**Codex: `conditional approve`** — three conditions, CONVERGENT with fable's, all adopted:
+
+1. **Pre-attach admission** (= fable C2, sharpened): the plan's "buffer every content message" contradicted its own "only discovery is worth buffering" — before attach, admit ONLY a validated, policy-allowed (top-frame) `discovery-request`, with the F-04 caps (4/origin, 32 global, reject-new); live attached traffic keeps today's forwarding path unchanged.
+2. **Arrival-age preservation** (= fable C1): the SDK stamps `discovery.timestamp` at flush, so the 55s cutoff does not govern relay residence — store `receivedAt`, drop+log entries older than 55s before forwarding.
+3. **RED wake-isolation**: recurring alarms survive the kill (the journal reaper fires every minute into the module-scope alarm listener) and could warm the worker between kill and click, false-greening the pre-fix run — clear alarms before the kill and assert no SW target immediately before the click. (Spec updated.)
+
+Codex also settled the open design points: idempotent replacement on re-attach (safer than throwing — pinned); snapshot/clear the queue BEFORE flush callbacks (a synchronous throw must not replay); reject-new confirmed over drop-oldest; the buffer dying with a boot that never attaches is acceptable and must NOT couple to the broken `start()` promise; no legitimate SDK message fails the origin prefilter (the discriminator is written verbatim by every SDK content path); double delivery has no credible production path once the relay owns the only listener; the separate module beats extending the toolbar listener; nothing here enters the parked Ready-handshake.
+
+**Implementation landed per the converged design** (relay + index.ts registration before any construction + transport attach swap + 7 unit pins).
+
+**RED→GREEN evidence:**
+- Original spec on pre-fix dev: RED (discover-popup timeout after a real `worker().close()` kill with the connect click as the wake; retried ×2).
+- **C3-hardened spec, source-swap RED**: with the two wired files reverted to `origin/dev` (relay present but never registered/attached), the spec red again — 60s discover timeout, with alarms cleared pre-kill, the SW asserted dead at click time, and the replacement worker's boot PROVEN complete (strictly-newer liveness) before the judgment. The loss is the listener gap, not slow boot.
+- Post-fix GREEN: _recorded below on completion._

@@ -2,6 +2,7 @@ import type { Page, Target } from "puppeteer"
 import { expect, inject } from "vitest"
 import type { AztecTestConfig } from "../fixtures/aztec"
 import { type ExtensionContext, openPopup, test, waitForHash } from "../fixtures/extension"
+import { ensureUnlocked } from "../fixtures/helpers"
 import { clickPgButton, openPlayground } from "../fixtures/playground"
 import { approveDiscover, approveVerify, waitForPopup } from "../fixtures/popups"
 
@@ -114,12 +115,16 @@ test.skipIf(!hasConfig)(
 		// popup itself cannot resurrect a lost message.
 		const probe = await openPopup(ext)
 		await waitForLivenessOn(probe, baseline)
+
+		// Strict security mode (default ON) means an SW kill drops the session:
+		// the replayed discovery lands on a LOCKED wallet and is QUEUED, not
+		// popped (the sw-resilience pins prove cold-restore never re-derives
+		// the bearer). Unlock to drain the queue — pre-fix there is nothing
+		// queued (the waking message was dropped before any listener existed),
+		// so no popup ever appears; post-fix the relayed discovery drains here.
+		await ensureUnlocked(probe)
 		await probe.close()
 
-		// Pre-fix: the waking message was dropped before any listener existed,
-		// so even with the SW fully booted this wait TIMES OUT (RED). Post-fix:
-		// the module-scope relay buffered it until the SDK listener attached,
-		// and the discover popup appears.
 		const discoverPage = await discoverP
 		await approveDiscover(discoverPage)
 
