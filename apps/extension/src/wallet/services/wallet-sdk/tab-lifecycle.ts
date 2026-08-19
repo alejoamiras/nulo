@@ -18,21 +18,26 @@ export interface TabLifecycleDeps {
  * (nothing tears down in a service worker); MUST be called before
  * `handler.initialize()`, at the same position the inline block held.
  *
- * URL visibility: the manifest declares NO "tabs" permission and
- * `host_permissions` covers only nulo.sh + 127.0.0.1 — yet `changeInfo.url` IS
- * populated for ordinary web origins, because the content script's all-URLs
- * `matches` pattern is itself an effective host-access grant and that grant
- * class gates `changeInfo.url`. Pinned empirically by the tabs-onUpdated leg
- * of tests/e2e/network/session-tabNavigate.test.ts, which observes the URL for
- * a localhost origin covered by neither of the other two grants.
+ * URL visibility — the onUpdated guard below is MOSTLY DEAD, verified
+ * empirically (the two-sided pin in
+ * tests/e2e/network/session-tabNavigate.test.ts): `changeInfo.url` is
+ * permission-gated on "tabs" (not declared) or an EXPLICIT `host_permissions`
+ * match for the tab's new URL (only nulo.sh + 127.0.0.1). The content script's
+ * all-URLs `matches` pattern does NOT count — tabs-API scrubbing checks
+ * explicit hosts, not scriptable hosts. So for a navigation to an ordinary web
+ * origin the cross-origin branch never sees a URL and cannot fire; it executes
+ * only when the DESTINATION is an explicitly host-permitted origin. Making it
+ * live for all origins would require adding the "tabs" permission — a
+ * store-listing-visible manifest change, owner-gated, deliberately NOT shipped
+ * here.
  *
- * Classification: bookkeeping hygiene + reconnect UX, NOT a security control.
- * Navigation already destroys both MessagePort ends (per-document realms), the
- * sessionId is an unguessable crypto.randomUUID the page never sees, and the
- * ECDH sharedKey never leaves the two parties — a stale ActiveSession is inert
- * memory. Cleanup holds even where URL visibility doesn't: tabs.onRemoved
- * (fires without any URL grant), SW eviction, the DappSession deletion sweep,
- * and the 7-day TTL.
+ * That is acceptable because the guard is bookkeeping hygiene + reconnect UX,
+ * NOT a security control. Navigation already destroys both MessagePort ends
+ * (per-document realms), the sessionId is an unguessable crypto.randomUUID the
+ * page never sees, and the ECDH sharedKey never leaves the two parties — a
+ * stale ActiveSession is inert memory. Cleanup holds without URL visibility:
+ * tabs.onRemoved (fires without any URL grant), SW eviction, the DappSession
+ * deletion sweep, and the 7-day TTL.
  */
 export function wireTabLifecycle(deps: TabLifecycleDeps): void {
 	// Terminate sessions when a tab is closed

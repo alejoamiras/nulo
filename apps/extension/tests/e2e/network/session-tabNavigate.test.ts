@@ -35,15 +35,18 @@ test.skipIf(!hasConfig)(
 		await approveVerify(verifyPage)
 		await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 
-		// Navigate the same tab to a REAL cross-origin destination — the aztec node
-		// on another localhost port (guaranteed alive for the whole suite). This
-		// used to be about:blank, which the content-script pattern does not match,
-		// so Chrome withheld changeInfo.url and the guard's cross-origin branch
-		// never executed — the transport died only via realm teardown and the test
-		// was blind to the guard it cites. A localhost:<other-port> URL is matched,
-		// cross-origin vs the playground, and the guard branch runs for real.
+		// Navigate the same tab to a REAL cross-origin destination the guard can
+		// SEE: the aztec node reached via 127.0.0.1 (an explicit host_permissions
+		// grant, so changeInfo.url is delivered; match patterns ignore ports).
+		// This used to be about:blank, where Chrome withholds changeInfo.url and
+		// the guard's cross-origin branch never executed — the transport died only
+		// via realm teardown and the test was blind to the guard it cites. A
+		// localhost destination would be equally blind (see the visibility pin
+		// below); 127.0.0.1:<node-port> is cross-origin vs the playground AND
+		// URL-visible, so the guard branch runs for real.
 		if (!aztecConfig) throw new Error("unreachable: guarded by skipIf(!hasConfig)")
-		await dappPage.goto(`${aztecConfig.nodeUrl}/status`, { waitUntil: "domcontentloaded" })
+		const nodePort = new URL(aztecConfig.nodeUrl).port
+		await dappPage.goto(`http://127.0.0.1:${nodePort}/status`, { waitUntil: "domcontentloaded" })
 
 		// Open a fresh playground tab to reconnect. Snapshot existing targets so we
 		// can assert no NEW discover popup opened during the reconnect window.
@@ -70,42 +73,89 @@ test.skipIf(!hasConfig)(
 )
 
 /**
- * Empirical pin for the origin guard's URL-visibility premise (see the
- * `wireTabLifecycle` header in `wallet-sdk/tab-lifecycle.ts`): with NO "tabs"
- * permission and localhost absent from `host_permissions`, `changeInfo.url`
- * must still reach `chrome.tabs.onUpdated` for a localhost navigation — the
- * grant can only come from the content script's all-URLs `matches` pattern. If
- * a manifest change ever drops that grant class, this reds and the guard's
- * cross-origin branch is genuinely dead code.
+ * Two-sided empirical pin for the origin guard's URL-visibility rule (see the
+ * `wireTabLifecycle` header in `wallet-sdk/tab-lifecycle.ts`). With NO "tabs"
+ * permission, `changeInfo.url` is delivered ONLY when the tab's new URL matches
+ * an explicit `host_permissions` grant — the content script's all-URLs
+ * `matches` pattern does NOT count (tabs-API scrubbing checks explicit hosts,
+ * not scriptable hosts; this pin originally asserted the opposite and Chrome
+ * falsified it).
+ *
+ * Leg 1 (delivered): navigate to 127.0.0.1 (explicit grant; match patterns
+ * ignore ports) → the URL arrives, and its event captures the tab's id.
+ * Leg 2 (withheld): navigate the SAME tab to a localhost origin (no grant) →
+ * status events still flow for that tab, but no event satisfies the guard's
+ * own `status === "loading" && url` predicate with the localhost URL — the
+ * guard's cross-origin branch is genuinely dead for ordinary web origins.
+ * If a manifest change ever alters either grant class, one leg reds.
  */
 test.skipIf(!hasConfig)(
-	"tabs.onUpdated delivers changeInfo.url for a non-host-permitted origin (content-script grant)",
+	"tabs.onUpdated url visibility — delivered for host-permitted 127.0.0.1, withheld for localhost",
 	{ timeout: 60_000 },
 	async ({ registeredExtensionPerTest }) => {
 		if (!aztecConfig) throw new Error("unreachable: guarded by skipIf(!hasConfig)")
 		const dappPage = await openPlayground(registeredExtensionPerTest)
 
-		// An extension page registers the SAME event the guard listens on.
+		// An extension page records the SAME event stream the guard listens on.
 		const popup = await openPopup(registeredExtensionPerTest)
 		await popup.evaluate(() => {
-			const w = window as unknown as { __navUrls: string[] }
-			w.__navUrls = []
-			chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-				if (changeInfo.url) w.__navUrls.push(changeInfo.url)
+			const w = window as unknown as { __navEvents: Array<{ tabId: number; status?: string; url?: string }> }
+			w.__navEvents = []
+			chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+				w.__navEvents.push({ tabId, status: changeInfo.status, url: changeInfo.url })
 			})
 		})
 
-		const nodeOrigin = new URL(aztecConfig.nodeUrl).origin
-		await dappPage.goto(`${aztecConfig.nodeUrl}/status`, { waitUntil: "domcontentloaded" })
+		const nodePort = new URL(aztecConfig.nodeUrl).port
+		const permittedOrigin = `http://127.0.0.1:${nodePort}`
+		const unpermittedOrigin = new URL(aztecConfig.nodeUrl).origin
 
-		await popup.waitForFunction(
+		// Leg 1: host-permitted destination → changeInfo.url is delivered.
+		await dappPage.goto(`${permittedOrigin}/status`, { waitUntil: "domcontentloaded" })
+		const dappTabIdHandle = await popup.waitForFunction(
 			(origin: string) => {
-				const w = window as unknown as { __navUrls?: string[] }
-				return (w.__navUrls ?? []).some((u) => u.startsWith(origin))
+				const w = window as unknown as { __navEvents?: Array<{ tabId: number; url?: string }> }
+				const hit = (w.__navEvents ?? []).find((e) => e.url?.startsWith(origin))
+				return hit ? hit.tabId : false
 			},
 			{ timeout: 15_000 },
-			nodeOrigin,
+			permittedOrigin,
 		)
+		const dappTabId = (await dappTabIdHandle.jsonValue()) as number
+
+		// Leg 2: same tab, localhost destination (covered by neither "tabs" nor
+		// host_permissions) → events flow, but the URL is withheld.
+		const marker = await popup.evaluate(() => {
+			const w = window as unknown as { __navEvents: unknown[] }
+			return w.__navEvents.length
+		})
+		await dappPage.goto(`${unpermittedOrigin}/status`, { waitUntil: "domcontentloaded" })
+		// The tab's events for this navigation did arrive (status flows without
+		// any URL grant)…
+		await popup.waitForFunction(
+			(tabId: number, from: number) => {
+				const w = window as unknown as { __navEvents?: Array<{ tabId: number; status?: string }> }
+				return (w.__navEvents ?? []).slice(from).some((e) => e.tabId === tabId && e.status !== undefined)
+			},
+			{ timeout: 15_000 },
+			dappTabId,
+			marker,
+		)
+		// …but none satisfies the guard's own firing predicate with the localhost
+		// URL: the cross-origin branch cannot run for an ordinary origin.
+		const leakedUrls = await popup.evaluate(
+			(tabId: number, from: number, origin: string) => {
+				const w = window as unknown as { __navEvents: Array<{ tabId: number; status?: string; url?: string }> }
+				return w.__navEvents
+					.slice(from)
+					.filter((e) => e.tabId === tabId && e.status === "loading" && e.url?.startsWith(origin))
+					.map((e) => e.url)
+			},
+			dappTabId,
+			marker,
+			unpermittedOrigin,
+		)
+		expect(leakedUrls).toEqual([])
 
 		await popup.close()
 		await dappPage.close()
