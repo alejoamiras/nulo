@@ -1,0 +1,73 @@
+<title>Popup Submit Re-entrancy</title>
+<style>
+  :root {
+    --bg: #faf9f6; --surface: #ffffff; --ink: #1a1d21; --muted: #5c636b;
+    --accent: #0f6f5c; --accent-soft: #e3f0ec; --line: #e4e1da;
+    --warn: #8a5a00; --warn-soft: #fdf3df; --code: #f0eee9;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a; --surface: #1c1f24; --ink: #e8e6e1; --muted: #9aa0a8;
+      --accent: #4dbfa4; --accent-soft: #1e2f2a; --line: #2a2e34;
+      --warn: #e0b45c; --warn-soft: #2c2417; --code: #23262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161a; --surface: #1c1f24; --ink: #e8e6e1; --muted: #9aa0a8;
+    --accent: #4dbfa4; --accent-soft: #1e2f2a; --line: #2a2e34;
+    --warn: #e0b45c; --warn-soft: #2c2417; --code: #23262c;
+  }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.65 system-ui, sans-serif; margin: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 4px; text-wrap: balance; }
+  .kicker { color: var(--accent); font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .sub { color: var(--muted); margin: 0 0 36px; }
+  h2 { font-size: 1.15rem; margin: 36px 0 10px; }
+  p { margin: 0 0 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 0 0 16px; }
+  .ask { background: var(--warn-soft); border-color: var(--warn); }
+  .ask strong { color: var(--warn); }
+  ul { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  code, pre { background: var(--code); border-radius: 6px; font-size: .85em; }
+  code { padding: 2px 6px; }
+  pre { padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  a { color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  td, th { border-bottom: 1px solid var(--line); padding: 8px 10px 8px 0; text-align: left; vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+</style>
+<main>
+  <div class="kicker">Blueprint · light</div>
+  <h1>Popup Submit Re-entrancy</h1>
+  <p class="sub">One held-down Enter key shouldn't create two accounts.</p>
+
+  <h2>What's wrong</h2>
+  <p>Most of the wallet's little forms (rename profile, add contact, add sender, add network…) show a spinner while they save — but they never actually <em>refuse a second submit</em> while the first one is still running. Pressing Enter again (or holding it — keyboards auto-repeat), or tabbing to the button and pressing Enter there, starts the same save <em>again, in parallel</em>. Worst case found: the "create account" form can produce <strong>two accounts with the same name</strong> from a single intent. The audit also caught this in the dApp <strong>capability-approval window</strong> — an approval surface.</p>
+
+  <h2>The fix, in one sentence</h2>
+  <p class="card">Every save-button gets one shared rule: <strong>"while a save is running, the form is closed"</strong> — enforced in the code that runs the save (so every route is covered) <em>and</em> on the button itself (so it's genuinely disabled, not just dimmed).</p>
+
+  <h2>Why the review round mattered</h2>
+  <ul>
+    <li>Two forms would have <strong>locked up forever after one failed save</strong> under the naive fix — their "saving…" flag never resets on error. Now repaired first.</li>
+    <li>One form drops its flag <em>mid-save</em> (network add keeps working after the flag clears) — the guard would have had a hole in the middle. Now spans the whole save.</li>
+    <li>Two surfaces we thought were safe <strong>weren't</strong> — one of them hidden by its own test's stub. Both pulled into scope.</li>
+  </ul>
+
+  <h2>What you'll see</h2>
+  <p>Nothing, in normal use — except that mashing Enter now does exactly one thing. Tests: every fix class gets a pin that hangs a fake save and re-presses, proving one call; the existing end-to-end flows (rename, endpoints, accounts, contacts, senders) re-run as regression checks.</p>
+
+  <div class="card ask">
+    <strong>One decision for you:</strong> while a save runs, the button will now look <em>disabled-dim</em> under its spinner (including the slow multi-second network probes). Accept that look, or should the spinner suppress the dimming (a small design-package CSS tweak)?
+  </div>
+
+  <h2>Where the details live</h2>
+  <p class="muted">Plan: <a href="plan.md">plan.md</a> · Evidence: <a href="recon.md">recon.md</a> · The audit verdict + all five adopted findings are in the plan's ledger.</p>
+
+  <h2>Seeds (draft — finalized on approval)</h2>
+  <pre>/goal Execute the approved popup-submit-reentrancy plan (implementations-plan/popup-submit-reentrancy/plan.md — the invariant, the 4 repair classes incl. RevokeAuthwits + capabilities, the audit-shaped test set): one green codex-converged PR into dev, autonomously until merged or rejected via codex-agreed documented deviation. PROCESS/VALIDATION inherited verbatim from implementations-plan/remediation-followups/plan.md (prove-first RED pins where harnesses exist; never weaken a gate; never --admin; squash-merge authorized; ONE codex xhigh end-diff pass, max 2 resumes, SIMPLER wins). Validation: audit:vue → local armed smoke → SOLO network senders-advanced spec → PR with e2e:smoke label → babysit → merge. DONE WHEN: PR merged; implementations-plan/index.md updated; audit:vue green on post-merge dev; owner report (incl. the visual-acceptance decision as applied).</pre>
+  <pre>/loop Continue the popup-submit-reentrancy arc to the next incomplete step of implementations-plan/popup-submit-reentrancy/plan.md; babysit any in-flight gates; stop when the PR is merged and closure recorded.</pre>
+</main>
