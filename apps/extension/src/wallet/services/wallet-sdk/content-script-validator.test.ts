@@ -89,6 +89,17 @@ describe("validateContentScriptMessage", () => {
 		expect(result.kind).toBe("valid")
 	})
 
+	it("validates a ping envelope (the dApp's in-flight liveness probe)", () => {
+		// Regression pin: "ping" was missing from the enum, so every heartbeat
+		// died at this boundary and the dApp degraded to its legacy-peer path.
+		const result = validateContentScriptMessage({
+			origin: "content-script",
+			type: "ping",
+			sessionId: "sess-1",
+		})
+		expect(result.kind).toBe("valid")
+	})
+
 	it("rejects content-script envelope with unknown type", () => {
 		const result = validateContentScriptMessage({
 			origin: "content-script",
