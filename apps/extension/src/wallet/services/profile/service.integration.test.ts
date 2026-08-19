@@ -23,6 +23,7 @@ import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	AccountAddressInconsistencyError,
+	DuplicateWalletError,
 	InvalidPasswordError,
 	ProfileIdConflictError,
 	RestoreTornError,
@@ -2217,5 +2218,148 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			vi.spyOn(api.storage.session, "remove").mockRejectedValue(new Error("session remove failed"))
 			await expect(service.lockActiveProfile()).rejects.toThrow(/did not persist/)
 		}, 30_000)
+	})
+
+	// P4 named integration criteria for the imported-keys DEK (plan §"Phases & validation gates").
+	describe("imported-keys DEK lifecycle", () => {
+		/** Read a persisted profile row straight from storage. */
+		async function readRow(api: FakeBrowserApi, id: string): Promise<Record<string, unknown>> {
+			const key = `nulo:core:profiles@${id}`
+			const raw = (await api.storage.local.get(key))[key]
+			return typeof raw === "string" ? JSON.parse(raw) : (raw as Record<string, unknown>)
+		}
+
+		// (a) every creation path stamps dekSealed + walletFingerprint, both profile types.
+		test("(a) createProfile stamps dekSealed + walletFingerprint", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const row = await readRow(api, p.id)
+			expect(typeof row.dekSealed).toBe("string")
+			expect((row.dekSealed as string).length).toBeGreaterThan(0)
+			expect(typeof row.walletFingerprint).toBe("string")
+			expect((row.walletFingerprint as string).length).toBe(64) // sha256 hex
+		})
+
+		test("(a) importMnemonic + createPasskeyProfile both stamp the two fields", async () => {
+			const { api, service } = await makeService()
+			const words = await wordsForFill(0x21)
+			const imported = await service.importMnemonic("M", words, "pass1234")
+			const importedRow = await readRow(api, imported.id)
+			expect(typeof importedRow.dekSealed).toBe("string")
+			expect(typeof importedRow.walletFingerprint).toBe("string")
+
+			const pk = await service.createPasskeyProfile("PK", fakeCredentialData("cred-pk-a", "uh-pk-a"))
+			const pkRow = await readRow(api, pk.id)
+			expect(typeof pkRow.dekSealed).toBe("string")
+			expect(typeof pkRow.walletFingerprint).toBe("string")
+		})
+
+		// getProfileDek returns the session dek; getProfileDekSealed returns the row blob.
+		test("getProfileDek returns a live dek; a locked profile has none", async () => {
+			const { service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			expect(await service.getProfileDek(p.id)).toBeDefined()
+			const sealed = await service.getProfileDekSealed(p.id)
+			expect(typeof sealed).toBe("string")
+			await service.lockActiveProfile()
+			await expect(service.getProfileDek(p.id)).rejects.toThrow(/locked/)
+		})
+
+		// (d) degraded unlock: a corrupt dek slot opens derived-only, emits the event, no bearer.
+		test("(d) a corrupt dekSealed slot → derived-only unlock, onImportedKeysDegraded, no bearer", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			await service.lockActiveProfile()
+			// Tamper the dek slot at rest.
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.dekSealed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			const degraded: string[] = []
+			service.onImportedKeysDegraded.add((info) => degraded.push(info.id))
+			await service.unlockProfile(p.id, "pass1234")
+			// Session is open (derived-only) but carries NO dek and persisted NO bearer.
+			expect((await service.getActiveProfile())?.id).toBe(p.id)
+			expect(await service.getProfileDek(p.id)).toBeUndefined()
+			expect(degraded).toContain(p.id)
+			const bearerKey = SESSION_STORAGE_ROOT
+			const rawSession = (await api.storage.session.get(bearerKey))[bearerKey]
+			const session = typeof rawSession === "string" ? JSON.parse(rawSession) : rawSession
+			expect(session.bearer).toBeUndefined()
+		})
+
+		// A password change RESEALS the dek — it survives + still round-trips.
+		test("changeProfilePassword reseals the dek (still usable under the new password)", async () => {
+			const { service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const before = await service.getProfileDek(p.id)
+			await service.changeProfilePassword(p.id, "pass1234", "newpass9")
+			const after = await service.getProfileDek(p.id)
+			expect(Array.from(after!)).toEqual(Array.from(before!))
+			// Lock + unlock under the NEW password: the dek unseals (no degradation).
+			await service.lockActiveProfile()
+			await service.unlockProfile(p.id, "newpass9")
+			expect(await service.getProfileDek(p.id)).toBeDefined()
+		})
+
+		// (e)+bearer: SW-restart silent restore recovers the dek via the v2 pair bearer.
+		test("(e) SW-restart silent restore recovers BOTH master and dek", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const dekBefore = await service.getProfileDek(p.id)
+			// Fresh service on the same storage = MV3 SW restart.
+			const { service: restarted } = await makeServiceFromExistingApi(api)
+			expect((await restarted.getActiveProfile())?.id).toBe(p.id)
+			const dekAfter = await restarted.getProfileDek(p.id)
+			expect(Array.from(dekAfter!)).toEqual(Array.from(dekBefore!))
+		})
+
+		// (g) the duplicate-phrase guard: same phrase → DuplicateWalletError unless allowDuplicate.
+		test("(g) importMnemonic rejects a duplicate phrase, then accepts it with allowDuplicate", async () => {
+			const { service } = await makeService()
+			const words = await wordsForFill(0x31)
+			await service.importMnemonic("First", words, "pass1234")
+			await expect(service.importMnemonic("Second", words, "pass1234")).rejects.toBeInstanceOf(DuplicateWalletError)
+			const dup = await service.importMnemonic("Second", words, "pass1234", true)
+			expect(dup.id).toBeDefined()
+		})
+
+		// (h) clone divergence: a fresh destination dek — B cannot equal A's session dek.
+		test("(h) restoring a backup mints a FRESH dek (clone divergence — differs from the source)", async () => {
+			const { service } = await makeService()
+			// Source profile, capture its dek.
+			const src = await service.createProfile("Src", "pass1234")
+			const srcDek = await service.getProfileDek(src.id)
+			await service.lockActiveProfile()
+			// Restore a backup carrying the SAME source dek as its carrier, under a NEW password.
+			const pair = await restorePairFor(0x41)
+			const restored = await service.restore(
+				{ id: "clone", name: "Clone", type: "password" },
+				{
+					type: "password",
+					masterKey: asBase64MasterSecret(pair.masterKey),
+					entropy: pair.entropy,
+					importedKeysDek: Buffer.from(srcDek!).toString("base64"),
+				},
+				"otherpass",
+				undefined,
+				true, // same phrase as nothing here; allowDuplicate keeps the test focused on the dek
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			await service.finalizeRestore(restored.id, "otherpass")
+			const cloneDek = await service.getProfileDek(restored.id)
+			// The restored row's dek is freshly minted — NOT the source dek it carried.
+			expect(Array.from(cloneDek!)).not.toEqual(Array.from(srcDek!))
+		})
+
+		// (i) same-credential passkey duplicate is a HARD reject (no allowDuplicate escape).
+		test("(i) a same-credential passkey import is hard-rejected", async () => {
+			const { service } = await makeService()
+			await service.createPasskeyProfile("PK", fakeCredentialData("cred-dup", "uh-dup"))
+			await service.lockActiveProfile()
+			// importPasskey with the same credential id — even allowDuplicate can't bypass it.
+			await expect(service.importPasskey("PK2", fakeCredentialData("cred-dup", "uh-dup2"), true)).rejects.toThrow(/already exists/)
+		})
 	})
 })
