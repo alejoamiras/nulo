@@ -35,11 +35,16 @@ function reset() {
 }
 
 const handlePickFile = async () => {
-	const picked = await pickFile()
-	if (typeof picked === "string") {
-		fileBody.value = picked.trim()
+	// `pickFile` resolves a File (never a string) — read its text. The previous
+	// `typeof picked === "string"` guard was always false, so the button silently did nothing.
+	try {
+		const picked = await pickFile()
+		if (!picked) return
+		fileBody.value = (await picked.text()).trim()
 		previewAddress.value = ""
 		error.value = ""
+	} catch {
+		// Cancelled picker (`pickFile` rejects with "No file selected") — leave the form as-is.
 	}
 }
 
