@@ -16,6 +16,7 @@
 import { BarretenbergSync } from "@aztec/bb.js"
 import type { BrowserApi, ClockPort, TimerHandle } from "@nulo/wallet-core/ports"
 import { ServiceCollection } from "./base"
+import { createSingleFlightStart } from "./single-flight-start"
 import type { ConfigStore } from "./config"
 import { LogLevel, type LoggerStore } from "./logger"
 import { AccountService } from "./services/account/service"
@@ -93,12 +94,17 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	let heartbeatHandle: TimerHandle | undefined
 	let reaper: JournalReaper | undefined
 	let journalGc: JournalGC | undefined
-	let started = false
+	// Flips right before the first `services.add`. Boot failures BEFORE this
+	// point (migration gate, config load, Barretenberg init) left no partial
+	// state — every step in that zone is re-runnable (bb.js's initSingleton
+	// even self-resets on failure) — so the single-flight memo may retry.
+	// Failures AFTER it must NOT re-enter the registration zone:
+	// `ServiceCollection.add` throws on duplicates, and the tabs/pxe-provider
+	// registrations are not re-entrant. There the rejected memo is kept and a
+	// fresh SW lifetime is the retry.
+	let registrationsBegun = false
 
-	const start = async (): Promise<void> => {
-		if (started) return
-		started = true
-
+	const doStart = async (): Promise<void> => {
 		// Uninstall URL comes first — zero-cost and covers the user experience
 		// even if the rest of startup fails.
 		try {
@@ -168,6 +174,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// their migration lands. Registration order here is a visual
 		// convention only — actual startup ordering is determined by
 		// `ServiceCollection.start()`'s topological phases.
+		registrationsBegun = true
 		services.add(new AccountService(logger, browserApi))
 		// Same tree-shake contract as the proof gate: constructed only under the
 		// statically-false E2E_PROVERLESS constant, so prod builds carry neither
@@ -332,6 +339,8 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				.catch((error) => logger.log("wallet", LogLevel.Error, "Heartbeat failed", getErrorMessage(error)))
 		}, HEARTBEAT_INTERVAL_MS)
 	}
+
+	const start = createSingleFlightStart(doStart, () => !registrationsBegun)
 
 	const stop = (): void => {
 		if (heartbeatHandle !== undefined) {
