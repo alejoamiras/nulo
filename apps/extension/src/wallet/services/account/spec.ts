@@ -1,4 +1,5 @@
 import { z } from "zod"
+import type { Restored } from "@/wallet/base"
 
 export const ACCOUNT_SERVICE_NAME = "account"
 
@@ -214,6 +215,15 @@ export type Methods = {
 	 * `password` decrypts an encrypted file (omit/empty for plaintext).
 	 */
 	importAccount(profileId: string, chainId: number, fileBody: string, expectedAddress: string, password: string): Account
+
+	/** Backup the active profile's imported-account encrypted key rows (the dedicated slice). */
+	backupImportedKeys(): ImportedAccountKey[]
+
+	/** Restore imported-account key rows (before reconcile; ciphertext is master+chain+address-bound). */
+	restoreImportedKeys(rows: ImportedAccountKey[]): Restored<ImportedAccountKey>[]
+
+	/** At restore finalize: drop imported Account rows with no matching key row; returns their addresses. */
+	reconcileImportedAccounts(profileId: string): string[]
 }
 
 export type Events = {

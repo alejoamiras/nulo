@@ -2,7 +2,7 @@ import { computed, ref, type Ref } from "vue"
 import { asBase64CredentialId, asBase64MasterSecret, EncryptionKey } from "@nulo/wallet-crypto"
 import { sanitizeString } from "@/utils/string"
 import { AccountServiceClient } from "@/wallet/services/account/client"
-import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
+import { ACCOUNT_SERVICE_NAME, IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
 import { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 import { ACCOUNT_STATE_SERVICE_NAME } from "@/wallet/services/account-state/spec"
 import { AuthRegistryServiceClient } from "@/wallet/services/auth-registry/client"
@@ -706,6 +706,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			const accountService = new AccountServiceClient()
 			try {
 				importedChainAddress = await restoreAccountsAndFilterOwnedSlices(data, accountService, recordRestoreErrors)
+
+				// Imported-account key rows restore RIGHT AFTER the account rows and BEFORE
+				// reconciliation/finalize (final-codex ordering). The ciphertext is HKDF-bound to
+				// (master, chainId, address) — not profileId — so it survives the id remap.
+				const importedKeySlice = (data as Record<string, unknown>)[IMPORTED_KEYS_SERVICE_NAME]
+				if (Array.isArray(importedKeySlice)) {
+					recordRestoreErrors(IMPORTED_KEYS_SERVICE_NAME, await accountService.restoreImportedKeys(importedKeySlice as never))
+				}
 			} catch (err) {
 				// `AccountService` throws `new Error("Duplicate account")` when an
 				// imported row collides with one already in storage. Rows are keyed
@@ -796,6 +804,18 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// `ensureDefaultAccount`. Running it now (after the restore) means
 			// those see the imported data, not an empty profile that needs
 			// default seeding.
+			// Reconcile imported accounts BEFORE activation: an epoch-4 backup carrying a type-1
+			// Account row with no matching key row would restore as a zombie that fails at signing —
+			// drop it now (both slices have landed).
+			try {
+				const droppedImported = await accountService.reconcileImportedAccounts(newProfile.id)
+				if (droppedImported.length > 0) {
+					console.warn(`[import] dropped ${droppedImported.length} imported account(s) with no key row:`, droppedImported)
+				}
+			} catch (err) {
+				console.warn("[import] imported-account reconciliation failed (non-fatal):", err)
+			}
+
 			finalizeStarted = true
 			restoreStage.value = "finalizing"
 			try {

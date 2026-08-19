@@ -21,7 +21,13 @@
 import type { StorageRef } from "@nulo/wallet-core/migration"
 import { SCHEMA_RESERVED_PREFIX } from "@nulo/wallet-core/migration"
 import type { Account } from "@/wallet/services/account/spec"
-import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, accountRowId } from "@/wallet/services/account/spec"
+import {
+	ACCOUNT_SERVICE_NAME,
+	ACCOUNT_STORAGE_ROOT,
+	IMPORTED_KEYS_SERVICE_NAME,
+	IMPORTED_KEYS_STORAGE_ROOT,
+	accountRowId,
+} from "@/wallet/services/account/spec"
 import { ACCOUNT_STATE_SERVICE_NAME } from "@/wallet/services/account-state/spec"
 import type { Authwit } from "@/wallet/services/auth-registry/spec"
 import {
@@ -191,6 +197,9 @@ function configStoredToSlice(stored: unknown): { ok: true; slice: unknown[] } | 
 export const BACKUP_SLICE_REGISTRY: Readonly<Record<string, SliceDescriptor>> = {
 	[PROFILE_SERVICE_NAME]: { kind: "block-listed", root: PROFILE_STORAGE_ROOT },
 	[ACCOUNT_SERVICE_NAME]: { kind: "root", root: ACCOUNT_STORAGE_ROOT, idOf: accountAnchor },
+	// Imported accounts' encrypted signing keys — own root, own owner. Optional: a backup with no
+	// imported accounts carries no slice, and that must not be a required-slice rejection.
+	[IMPORTED_KEYS_SERVICE_NAME]: { kind: "root", root: IMPORTED_KEYS_STORAGE_ROOT, idOf: accountAnchor, optional: true },
 	[NETWORK_SERVICE_NAME]: { kind: "root", root: NETWORK_STORAGE_ROOT, idOf: stringAnchor("id") },
 	[TOKEN_SERVICE_NAME]: { kind: "root", root: TOKEN_STORAGE_ROOT, idOf: numberAnchor("id") },
 	[TOKEN_BALANCE_SERVICE_NAME]: { kind: "root", root: TOKEN_BALANCE_STORAGE_ROOT, idOf: numberAnchor("id") },
