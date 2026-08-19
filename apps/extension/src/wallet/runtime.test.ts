@@ -63,7 +63,7 @@ function makeDeps() {
 	} as unknown as ClockPort
 	const configLoad = vi.fn(async () => {})
 	const config = { load: configLoad } as unknown as ConfigStore
-	return { browserApi, clock, config, configLoad, logger: noopLogger }
+	return { deps: { browserApi, clock, config, logger: noopLogger }, configLoad }
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 10))
@@ -81,7 +81,7 @@ describe("runtime.start() single-flight contract", () => {
 		let releaseBb!: () => void
 		bbImpl = () => new Promise((r) => (releaseBb = () => r({})))
 		void releaseBb // never released — the boot stays in flight for the whole test
-		const runtime = createWalletRuntime(makeDeps())
+		const runtime = createWalletRuntime(makeDeps().deps)
 
 		const p1 = runtime.start()
 		p1.catch(() => {})
@@ -101,7 +101,7 @@ describe("runtime.start() single-flight contract", () => {
 			bbCalls++
 			return Promise.reject(new Error("bb down"))
 		}
-		const deps = makeDeps()
+		const { deps, configLoad } = makeDeps()
 		const runtime = createWalletRuntime(deps)
 
 		await expect(runtime.start()).rejects.toThrow("bb down")
@@ -111,6 +111,6 @@ describe("runtime.start() single-flight contract", () => {
 		// not void-resolve against the half-booted runtime.
 		await expect(runtime.start()).rejects.toThrow("bb down")
 		expect(bbCalls).toBe(2)
-		expect(deps.configLoad).toHaveBeenCalledTimes(2)
+		expect(configLoad).toHaveBeenCalledTimes(2)
 	})
 })
