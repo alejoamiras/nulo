@@ -318,9 +318,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const dek = await this.profileService.getProfileDek(profileId)
 		if (!dek) throw new ImportedAccountUnusableError(account.address, "imported keys unavailable — unlock again")
 		let skBytes: Uint8Array<ArrayBuffer> | undefined
+		let skCopy: Buffer | undefined
 		try {
 			skBytes = await unsealImportedSigningKeyV2(dek, account.chainId, account.address, keyRow.encryptedSigningKey)
-			const signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
+			// `fromBuffer` copies, so wipe the intermediate too — an anonymous `Buffer.from(skBytes)`
+			// leaves a second plaintext signing key alive until GC even though `skBytes` is wiped.
+			skCopy = Buffer.from(skBytes)
+			const signingKey = GrumpkinScalar.fromBuffer(skCopy)
 			const contract = await NuloAccount.fromSigningKey(signingKey, this.logger)
 			if (contract.address.toString() !== account.address) {
 				throw new ImportedAccountUnusableError(account.address, "address mismatch")
@@ -332,6 +336,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		} finally {
 			zeroize(dek)
 			if (skBytes) zeroize(skBytes)
+			if (skCopy) zeroize(skCopy)
 		}
 	}
 
@@ -361,15 +366,22 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			// password directly — session-independent, deletion-guarded — never via SessionManager.
 			const dek = await this.profileService.exportImportedKeysDek(profileId, password)
 			let skBytes: Uint8Array<ArrayBuffer> | undefined
+			let skCopy: Buffer | undefined
 			try {
 				skBytes = await unsealImportedSigningKeyV2(dek, chainId, address, keyRow.encryptedSigningKey)
-				signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
+				// See loadImportedAccountContract: `fromBuffer` copies, so the intermediate is a
+				// second plaintext signing key and needs its own wipe.
+				skCopy = Buffer.from(skBytes)
+				signingKey = GrumpkinScalar.fromBuffer(skCopy)
 			} finally {
 				if (skBytes) zeroize(skBytes)
+				if (skCopy) zeroize(skCopy)
 				zeroize(dek)
 			}
 		} else if (account.type === AccountType.Nulo_v1) {
-			const masterFr = Fr.fromBuffer(Buffer.from(master, "base64"))
+			const masterCopy = Buffer.from(master, "base64")
+			const masterFr = Fr.fromBuffer(masterCopy)
+			zeroize(masterCopy)
 			const seed = await deriveAccountSeed(masterFr, account.l1ChainId, account.type, account.index)
 			signingKey = deriveSigningKeyFromSeed(seed)
 		} else {

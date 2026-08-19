@@ -253,7 +253,12 @@ export class SessionManager {
 			// contract is that a broken chrome.storage write at unlock still leaves
 			// the in-memory secret usable for this SW lifetime (degraded success:
 			// not persisted, but usable).
-			const secret = Fr.fromBuffer(Buffer.from(secretBuffer))
+			// Named + wiped: `Fr.fromBuffer` copies, so an anonymous `Buffer.from(...)` here would
+			// leave a second master-equivalent buffer alive until GC (same class of leak as the
+			// passkey OKM copy).
+			const secretCopy = Buffer.from(secretBuffer)
+			const secret = Fr.fromBuffer(secretCopy)
+			zeroize(secretCopy)
 			// Wipe a replaced session's DEK before dropping the reference (close/replace/expiry
 			// discipline); store a COPY of the caller-owned dek.
 			zeroize(this.activeSession?.dek)
@@ -511,10 +516,11 @@ export class SessionManager {
 			// BN254 field modulus still throws in `Fr.fromBuffer`. A crafted/corrupt
 			// bearer must `silentClose`, not crash service init.
 			let secret: Fr
+			const masterCopy = Buffer.from(pair.master)
 			try {
 				// Fr.fromBuffer copies into Fr's internal field-element rep
 				// (verified by zeroize.test.ts). Safe to zero the pair after.
-				secret = Fr.fromBuffer(Buffer.from(pair.master))
+				secret = Fr.fromBuffer(masterCopy)
 			} catch (err) {
 				this.logger.log(
 					LOG_SOURCE,
@@ -524,6 +530,10 @@ export class SessionManager {
 				)
 				await this.silentClose()
 				return
+			} finally {
+				// The intermediate copy is master-equivalent — wipe it on BOTH the success and the
+				// out-of-range path, not just when the pair itself is wiped below.
+				zeroize(masterCopy)
 			}
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session restored")
 			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)) }

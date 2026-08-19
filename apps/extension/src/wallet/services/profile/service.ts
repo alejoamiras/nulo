@@ -191,10 +191,19 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	): Promise<{ sourceDek: ImportedKeysDek; destinationDek: ImportedKeysDek } | undefined> {
 		await this.ensureInitialized()
 		return this.runExclusive(async () => {
-			this.sweepStalePendingRestore(Date.now(), profileId)
+			const now = Date.now()
+			this.sweepStalePendingRestore(now, profileId)
 			const entry = this.pendingDekRewraps.get(profileId)
 			if (!entry) return undefined
 			this.pendingDekRewraps.delete(profileId)
+			// The sweep above EXCLUDES this id (it must not free the entry mid-consume), so the TTL
+			// has to be enforced here or it never applies to the one entry that matters: an
+			// abandoned restore's raw SOURCE DEK would stay consumable for the whole SW lifetime.
+			if (now - entry.capturedAt >= ProfileService.PENDING_RESTORE_TTL_MS) {
+				zeroize(entry.sourceDek)
+				zeroize(entry.destinationDek)
+				return undefined
+			}
 			return { sourceDek: entry.sourceDek, destinationDek: entry.destinationDek }
 		})
 	}
@@ -913,6 +922,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// already-dead material.
 				oldPasshash = await EncryptionKey.getPasshash(oldPassword)
 				dek = await this.unsealDekWithPasshash(oldPasshash, profile.dekSealed)
+				// A recovered DEK is not yet a TRUSTED one: without this check a password change
+				// re-MACs whatever sits in the slot, so a transplanted `dekSealed` that unlock had
+				// quarantined (derived-only) gets laundered into a freshly-valid envelope — the
+				// profile silently "recovers" onto an attacker-chosen key and every subsequently
+				// imported account is sealed to it. Discard a DEK the stored MAC does not cover and
+				// fall into the same self-heal below: the suspect key is destroyed, not blessed.
+				if (dek && !(await this.envelopeMacValid(profile, secret, dek))) {
+					this.logger.log(this.name, LogLevel.Error, "envelope MAC does not cover the DEK slot at password change", id)
+					zeroize(dek)
+					dek = null
+				}
 				if (!dek) {
 					this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — minting fresh", id)
 					dek = generateImportedKeysDek()
@@ -1573,8 +1593,29 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// any backup already carries jointly-sufficient material). An unrecoverable slot fails
 			// the export LOUDLY — the epoch-4 shape requires the field, and a password change
 			// self-heals the slot for a retry.
+			//
+			// KNOWN LIMITATION, accepted: this is the LONG-LIVED profile DEK, not a per-backup
+			// transfer key, and a password change rewraps rather than rotates it. So a password
+			// backup grants forward reach — someone holding the blob who LATER also gains read
+			// access to this profile's storage can decrypt imported-key rows created after the
+			// export. It is strictly narrower than what the same blob already gives up (the
+			// plaintext master = every derived account plus every imported key existing at export
+			// time), it needs a second independent compromise, and it does not touch the isolation
+			// the DEK exists for (a same-phrase sibling profile still cannot reach this DEK).
+			// Passkey blobs are unaffected — they carry the DEK sealed under the PRF wrap key.
+			// Closing it means a per-backup transfer key: rewrap every row at export under a fresh
+			// key and carry THAT, which the restore side would consume exactly where it consumes
+			// the source DEK today.
 			passhash = await EncryptionKey.getPasshash(password)
 			dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
+			// Honour the degradation policy here too. This RPC is password-gated and
+			// session-independent, so it bypasses the unlock-time gate entirely: without this a
+			// profile quarantined for a failed MAC still exports, writing a DEK the profile does
+			// not own into the backup and silently stranding every imported account at restore.
+			if (dek && !(await this.envelopeMacValid(profile, unsealed.secret, dek))) {
+				zeroize(dek)
+				dek = null
+			}
 			if (!dek) {
 				throw new Error("Imported-keys key unrecoverable — change the profile password to repair, then retry the backup")
 			}
@@ -1638,6 +1679,13 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			passhash = await EncryptionKey.getPasshash(password)
 			const dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
+			// Same bypass as `exportBackupMaterial`: fresh-auth, session-independent, so the
+			// unlock-time MAC gate never ran. A DEK the stored MAC does not cover is not this
+			// profile's — refuse rather than hand it to the account-export path.
+			if (dek && !(await this.envelopeMacValid(profile, unsealed.secret, dek))) {
+				zeroize(dek)
+				throw new Error("Imported-keys key unrecoverable")
+			}
 			if (!dek) {
 				throw new Error("Imported-keys key unrecoverable")
 			}
@@ -1736,6 +1784,22 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	/** The whole-envelope MAC v2 preimage for a sealed profile record (all four slots). */
 	private macEnvelopeV2(p: { guard: string; secret: string; entropy: string }, dekSealed: string): MacEnvelopeV2 {
 		return { guard: p.guard, secret: p.secret, entropy: p.entropy, dek: dekSealed }
+	}
+
+	/**
+	 * Does the stored MAC still cover this exact record? EVERY site that is about to trust the DEK
+	 * must ask — not just the unlock path. The DEK slot's AAD is a purpose constant, not
+	 * profile-bound, so a same-password sibling's `dekSealed` transplants cleanly into another
+	 * profile's row and unseals there; the whole-envelope MAC is the only check that catches it.
+	 * A site that skips this either blesses the planted slot (laundering the tamper into a
+	 * freshly-valid MAC) or exports material sealed to a key the profile does not own.
+	 */
+	private async envelopeMacValid(
+		p: { guard: string; secret: string; entropy: string; dekSealed: string; envelopeMac: string },
+		secret: MasterSecretBytes,
+		dek: ImportedKeysDek,
+	): Promise<boolean> {
+		return verifyEnvelopeMacV2(secret, dek, this.macEnvelopeV2(p, p.dekSealed), p.envelopeMac)
 	}
 
 	/** Seal the imported-keys DEK under the password credential (EncryptionKey — the audited

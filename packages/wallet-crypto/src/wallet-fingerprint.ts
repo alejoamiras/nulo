@@ -9,8 +9,19 @@
  * Honest properties (documented, owner-accepted): one-way (sha256 preimage over a ~253.6-bit
  * secret); NEGLIGIBLE-marginal — not zero — same-device linkability (same-phrase profiles with
  * populated same-network account rows already expose identical plaintext addresses, but
- * zero-account or disjoint-network profiles do not); a stable equality oracle that only confirms
- * a master the holder already possesses. Never a secret; never reduces any secret's entropy.
+ * zero-account or disjoint-network profiles do not). Never a secret; never reduces any secret's
+ * entropy.
+ *
+ * It IS an offline confirmation oracle over CANDIDATE phrases, and that is inherent, not an
+ * oversight: the duplicate check runs pre-unlock against profiles whose credentials are unavailable,
+ * so the comparand must be computable from the candidate master alone. The sharp case is a partial
+ * phrase — someone holding 23 of the 24 words faces exactly 8 checksum-valid completions (the last
+ * word carries 3 entropy bits + the 8 checksum bits), and this value picks the right one instantly
+ * and offline. Cost-hardening the hash would not help: it is the 8-candidate search space, not the
+ * per-guess cost, that makes that case cheap. The security argument is therefore that a
+ * near-complete phrase is already a catastrophic compromise (the same 8 candidates are testable
+ * against public chain state), and that against an UNKNOWN phrase the preimage space is the full
+ * master entropy.
  */
 import type { MasterSecretBytes } from "./secret-types"
 import { zeroize } from "./zeroize"
