@@ -29,6 +29,9 @@ const te = new TextEncoder()
 // produces different keys and invalidates every existing passkey wallet.
 const PASSKEY_KDF_LABEL = te.encode("nulo:kdf:v1")
 const PASSKEY_MASTER_LABEL = te.encode("nulo:master:v1")
+// Separate expand-info for the imported-keys-DEK wrap key: same HKDF extract (baseKey + salt),
+// a DISTINCT expand, so the wrap key never coincides with (or leaks) the master derivation.
+const PASSKEY_DEK_WRAP_LABEL = te.encode("nulo:dek-wrap:v1")
 
 export class PasskeyCredential {
 	public readonly id: Base64CredentialId
@@ -48,7 +51,9 @@ export class PasskeyCredential {
 		try {
 			const credential = fromBase64(params.id)
 			const saltInput = Buffer.concat([PASSKEY_KDF_LABEL, credential])
-			const baseKey = await globalThis.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"])
+			// "deriveKey" alongside "deriveBits": deriveMasterSecret uses deriveBits; the
+			// imported-keys-DEK wrap key below is derived as a non-extractable CryptoKey.
+			const baseKey = await globalThis.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits", "deriveKey"])
 			const salt = await globalThis.crypto.subtle.digest("SHA-256", saltInput)
 			return new PasskeyCredential(
 				asBase64CredentialId(params.id),
@@ -91,5 +96,23 @@ export class PasskeyCredential {
 			zeroize(masterBits)
 			zeroize(masterBitsCopy)
 		}
+	}
+
+	/**
+	 * Derive the AES-GCM wrap key for this profile's imported-keys DEK slot
+	 * (`imported-keys-dek-box`). Same HKDF extract as `deriveMasterSecret`, a distinct expand
+	 * (`nulo:dek-wrap:v1`) — the wrap key and the master derivation can never coincide. The key is
+	 * non-extractable and lives only while the ceremony's credential is in scope; re-running the
+	 * ceremony with the SAME credential reproduces it exactly (deterministic salt + info), which
+	 * is what lets a passkey backup carry the SEALED dek blob verbatim.
+	 */
+	public async deriveDekWrapKey(): Promise<CryptoKey> {
+		return globalThis.crypto.subtle.deriveKey(
+			{ name: "HKDF", hash: "SHA-256", salt: this.salt, info: PASSKEY_DEK_WRAP_LABEL },
+			this.baseKey,
+			{ name: "AES-GCM", length: 256 },
+			false,
+			["encrypt", "decrypt"],
+		)
 	}
 }

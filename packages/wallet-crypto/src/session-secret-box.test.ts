@@ -1,9 +1,10 @@
 import { describe, expect, test } from "vitest"
-import { asMasterSecretBytes, type MasterSecretBytes } from "./secret-types"
+import { asImportedKeysDek, asMasterSecretBytes, type ImportedKeysDek, type MasterSecretBytes } from "./secret-types"
 import { SessionSecretBox, type SessionWrappedSecret } from "./session-secret-box"
 
 const box = new SessionSecretBox()
 const secret = (): MasterSecretBytes => asMasterSecretBytes(new Uint8Array(32).fill(7))
+const dek = (): ImportedKeysDek => asImportedKeysDek(new Uint8Array(32).fill(0x11))
 
 describe("SessionSecretBox (F-11 session bearer)", () => {
 	test("wrap/unwrap round-trips the secret under the same aad", async () => {
@@ -61,5 +62,46 @@ describe("SessionSecretBox (F-11 session bearer)", () => {
 		expect(await box.unwrap(await box.wrap(short, "profile-p1"), "profile-p1")).toBeNull()
 		const long = new Uint8Array(33).fill(9) as unknown as MasterSecretBytes
 		expect(await box.unwrap(await box.wrap(long, "profile-p1"), "profile-p1")).toBeNull()
+	})
+})
+
+describe("SessionSecretBox v2 pair bearer (master || dek)", () => {
+	test("wrapPair/unwrapPair round-trips BOTH secrets atomically under the same aad", async () => {
+		const w = await box.wrapPair(secret(), dek(), "profile-p1")
+		expect(w.v).toBe(2)
+		const out = await box.unwrapPair(w, "profile-p1")
+		expect(out).not.toBeNull()
+		expect(Array.from(out!.master)).toEqual(Array.from(secret()))
+		expect(Array.from(out!.dek)).toEqual(Array.from(dek()))
+	})
+
+	test("a legacy v1 bearer → null (silentClose → full re-unlock; NEVER a dek-less session)", async () => {
+		const v1 = await box.wrap(secret(), "profile-p1")
+		expect(await box.unwrapPair(v1, "profile-p1")).toBeNull()
+	})
+
+	test("a v2 bearer is rejected by the v1 unwrap too (no downgrade path)", async () => {
+		const v2 = await box.wrapPair(secret(), dek(), "profile-p1")
+		expect(await box.unwrap(v2, "profile-p1")).toBeNull()
+	})
+
+	test("wrong aad → null (no cross-profile replay)", async () => {
+		const w = await box.wrapPair(secret(), dek(), "profile-p1")
+		expect(await box.unwrapPair(w, "profile-OTHER")).toBeNull()
+	})
+
+	test("tampered ciphertext → null, never throws", async () => {
+		const w = await box.wrapPair(secret(), dek(), "profile-p1")
+		const bytes = Buffer.from(w.wrappedSecret, "base64")
+		bytes[bytes.length - 1] ^= 0xff
+		expect(await box.unwrapPair({ ...w, wrappedSecret: bytes.toString("base64") }, "profile-p1")).toBeNull()
+	})
+
+	test("a wrong-length plaintext → null (a 32-byte master-only payload can't masquerade as a pair)", async () => {
+		const shortPair = new Uint8Array(32).fill(9) as unknown as MasterSecretBytes
+		// Craft a v2-versioned bearer whose plaintext is 32 bytes, via the v1 wrap + version stamp.
+		const v1 = await box.wrap(shortPair, "profile-p1")
+		const crafted: SessionWrappedSecret = { ...v1, v: 2 }
+		expect(await box.unwrapPair(crafted, "profile-p1")).toBeNull()
 	})
 })
