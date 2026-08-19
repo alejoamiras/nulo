@@ -363,7 +363,10 @@ e2e-live-network.
 
 ### Arc 5 — `feat/kdf-v2-dek-isolation` (stacks on arc 4)
 
-**P3 — DEK crypto primitives (wallet-crypto + messaging).**
+**P3 — DEK crypto primitives (wallet-crypto + messaging).** ✓ (gate passed 2026-08-19 on commit
+8432bd07: lint 0, wallet-crypto typecheck 0 + 94/94, messaging typecheck 0 + 188/188,
+typecheck:all 0 + extension 4425 on the untouched surfaces; rider: FAIL — unenforced 32-byte
+contracts — fixed → re-verdict PASS; lessons/phase-3.md)
 `ImportedKeysDek` brand (APIs accept only the brand); `imported-keys-dek-box` (AAD
 `nulo:profile-imported-dek:v1`, wrap under EncryptionKey / PRF-derived key);
 `PasskeyCredential.deriveDekWrapKey` (info `nulo:dek-wrap:v1`); `imported-account-key-box` root

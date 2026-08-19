@@ -70,3 +70,18 @@ Everything else survived attack: full 64-byte big-endian reduction is wired; man
 Relevant typechecks passed. Vitest could not start because the read-only sandbox rejected its cache/temp writes.
 ---
 _P1 rider round 1 (FAIL: un-wiped 64-byte OKM copy) — fixed 987cd239; re-verdict: PASS. Absolute sandbox paths in the finding links refer to passkey-credential.ts lines 71/79 pre-fix._
+FAIL (blocking: v2 primitives do not enforce their fixed-size secret contracts)
+
+- MEDIUM / `session-secret-box.ts:99` / `wrapPair` accepts malformed component lengths. A 1-byte DEK is silently zero-padded and later returned as a valid branded 32-byte DEK. The test checks only decrypted total length, so misses this. Fix: reject unless `master.length === 32 && dek.length === 32`; test 31/33-byte inputs.
+
+- MEDIUM / `entropy-mac.ts:78` / The claimed unambiguous `master || dek` boundary is not enforced. Brands erase at runtime and the exported mint helpers accept arbitrary lengths, allowing distinct `(master, dek)` splits of identical bytes to derive the same MAC key. Healthy current origins are 32 bytes, so this does not enable a master-holder forgery today, but the primitive’s security contract is incomplete. Fix: reject non-32-byte inputs before concatenation and add boundary tests.
+
+- LOW / `session-secret-box.ts:100` / The secret pair is populated before entering `try/finally`; an overlong `set()` or RNG failure leaves the copied secret unzeroized. Fix: validate first and place all copying/allocation after entry into the protected block.
+
+The hierarchy, HKDF labels, AAD, v1↔v2 key domains, constant-time verification, and independent Node/WebCrypto derivations otherwise checked out. Direct probes reproduced both independent KATs and master-with-wrong-DEK rejection.
+PASS
+
+No new material findings.
+
+---
+_P3 rider round 1 (FAIL: fixed-size contracts unenforced in wrapPair + macKeyV2, pair copy outside the protected block) — all fixed 8432bd07 (32-byte guards + boundary tests + copy inside try); re-verdict: PASS._
