@@ -22,7 +22,7 @@ The hand-rolled EditProfile/NewSender watches added their keydown listener AFTER
 ## Validation
 
 - `bun run audit:vue` green (typecheck:all → unit+component tests → lint → build), 22/22 new pins.
-- Armed smoke: local `bun run test:e2e` + the PR carries the `e2e:smoke` label so the smoke gate runs armed in CI.
+- Armed smoke: local run GREEN armed (fixture-stamped build via `VITE_NULO_E2E_MIGRATION_FIXTURE=1` + `NULO_E2E_MIGRATION_FIXTURE=1`, mirroring `_smoke-e2e.yml`): 112 passed / 6 skipped. A first unarmed attempt was correctly REJECTED by the fixture-arming contract test — the suite polices its own arming. The PR carries the `e2e:smoke` label so the CI smoke gate runs armed too.
 - Single codex xhigh end-diff pass (light tier) — see ledger.
 
 ## Audit ledger
