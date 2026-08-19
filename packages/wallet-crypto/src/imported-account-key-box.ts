@@ -54,11 +54,15 @@ export async function unsealImportedSigningKey(
 	sealed: string,
 ): Promise<Uint8Array<ArrayBuffer>> {
 	const bytes = fromBase64(sealed)
-	if (bytes.length < 13 || bytes[0] !== 1) throw new Error("Invalid imported-key envelope")
-	const iv = bytes.subarray(1, 13)
-	const ct = bytes.subarray(13)
-	const key = await rowKey(master, chainId, address)
-	const pt = new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct)) as Uint8Array<ArrayBuffer>
-	zeroize(bytes)
-	return pt
+	try {
+		if (bytes.length < 13 || bytes[0] !== 1) throw new Error("Invalid imported-key envelope")
+		const iv = bytes.subarray(1, 13)
+		const ct = bytes.subarray(13)
+		const key = await rowKey(master, chainId, address)
+		return new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct)) as Uint8Array<ArrayBuffer>
+	} finally {
+		// Wipe the decoded envelope on every path — including the wrong-master /
+		// transplant / corruption throw, which is the common adversarial case.
+		zeroize(bytes)
+	}
 }

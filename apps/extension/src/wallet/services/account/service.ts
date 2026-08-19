@@ -315,13 +315,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const master = await this.profileService.getProfileSecret(profileId)
 		if (!master) throw new Error("unauthorized")
 		let skBytes: Uint8Array<ArrayBuffer> | undefined
+		const masterBuf = master.toBuffer() as Uint8Array<ArrayBuffer>
 		try {
-			skBytes = await unsealImportedSigningKey(
-				master.toBuffer() as Uint8Array<ArrayBuffer>,
-				account.chainId,
-				account.address,
-				keyRow.encryptedSigningKey,
-			)
+			skBytes = await unsealImportedSigningKey(masterBuf, account.chainId, account.address, keyRow.encryptedSigningKey)
 			const signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
 			const contract = await NuloAccount.fromSigningKey(signingKey, this.logger)
 			if (contract.address.toString() !== account.address) {
@@ -332,6 +328,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			if (err instanceof ImportedAccountUnusableError) throw err
 			throw new ImportedAccountUnusableError(account.address, "signing key could not be recovered")
 		} finally {
+			zeroize(masterBuf)
 			if (skBytes) zeroize(skBytes)
 		}
 	}
@@ -408,12 +405,20 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			const sameType = rows.filter((x) => x.type === AccountType.Imported)
 			const index = sameType.length > 0 ? array_max(sameType.map((x) => +x.index)) + 1 : 0
 
+			// Imported accounts bind to the ACTIVE network's L1 identity (they don't derive from it,
+			// but the row must carry a coherent value for the Account↔Network cross-check). Resolve
+			// it BEFORE the key row is written — a throw here would otherwise orphan a sealed key row
+			// (the compensation below only covers the Account row).
+			const l1ChainId = await this.networkService.getL1ChainIdStored(profileId, chainId)
+
 			const skBytes = signingKey.toBuffer() as Uint8Array<ArrayBuffer>
+			const masterBuf = master.toBuffer() as Uint8Array<ArrayBuffer>
 			let sealed: string
 			try {
-				sealed = await sealImportedSigningKey(master.toBuffer() as Uint8Array<ArrayBuffer>, chainId, recomputed, skBytes)
+				sealed = await sealImportedSigningKey(masterBuf, chainId, recomputed, skBytes)
 			} finally {
 				zeroize(skBytes)
+				zeroize(masterBuf)
 			}
 			// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
 			// leaves an orphan key (swept on init) rather than an Account that cannot sign.
@@ -424,9 +429,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				address: recomputed,
 				index,
 				type: AccountType.Imported,
-				// Imported accounts bind to the ACTIVE network's L1 identity (they don't derive from
-				// it, but the row must carry a coherent value for the Account↔Network cross-check).
-				l1ChainId: await this.networkService.getL1ChainIdStored(profileId, chainId),
+				l1ChainId,
 				name: "Imported account",
 				visible: true,
 			}
