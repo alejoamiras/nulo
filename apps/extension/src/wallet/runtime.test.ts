@@ -18,7 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import type { BrowserApi, ClockPort } from "@nulo/wallet-core/ports"
-import type { ILogger } from "@/wallet/logger"
+import type { LoggerStore } from "@/wallet/logger"
 
 let bbImpl: () => Promise<unknown>
 vi.mock("@aztec/bb.js", () => ({
@@ -30,7 +30,7 @@ vi.mock("@aztec/bb.js", () => ({
 import { createWalletRuntime } from "./runtime"
 import type { ConfigStore } from "./config"
 
-const noopLogger = { log: () => {} } as unknown as ILogger
+const noopLogger = { log: () => {} } as unknown as LoggerStore
 
 /** Minimal chrome.storage-shaped area backed by a Map — enough for the
  *  Migrator's fresh-install stamp and the schema-status writes. */
