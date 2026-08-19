@@ -25,6 +25,7 @@ vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => {
 })
 
 import { buildAccountExport, serializeAccountExport } from "@nulo/aztec-runtime/account"
+import { asImportedKeysDek } from "@nulo/wallet-crypto"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
@@ -35,6 +36,7 @@ import { AccountService } from "./service"
 import { AccountType, ImportedAccountUnusableError } from "./spec"
 
 const MASTER_B64 = Buffer.from(new Uint8Array(32).fill(9)).toString("base64")
+const dekOf = (fill: number) => asImportedKeysDek(new Uint8Array(32).fill(fill) as Uint8Array<ArrayBuffer>)
 const CHAIN = 0
 const L1 = 31337
 
@@ -42,16 +44,33 @@ async function build() {
 	const api = new FakeBrowserApi()
 	api.reset()
 	const services = new ServiceCollection()
+	// The profile's CURRENT session dek — consumeDekRewrapContext rotates it (mirrors production:
+	// after a restore, the session dek IS the freshly-minted destination dek).
+	let currentDekFill = 0x11
 	services.add(
 		svc(PROFILE_SERVICE_NAME, {
 			onProfileDeleted: new EventHandler(),
 			// getProfileSecret → session-gated master Fr (32 bytes of 9).
 			getActiveProfile: async () => ({ id: "p1", name: "P", type: "password" }),
 			getProfileSecret: async () => (await import("@aztec/foundation/curves/bn254")).Fr.fromBuffer(Buffer.from(MASTER_B64, "base64")),
+			// getProfileDek → session-gated imported-keys DEK COPY (the v2 root; never the master).
+			getProfileDek: async () => dekOf(currentDekFill),
 			// exportPlain(id, password) → base64 master iff the password is right (service-side auth).
 			exportPlain: async (_id: string, password?: string) => {
 				if (password !== "correct-pass") throw new Error("Invalid password")
 				return MASTER_B64
+			},
+			// exportImportedKeysDek(id, password) → fresh-auth DEK for the account-export path.
+			exportImportedKeysDek: async (_id: string, password?: string) => {
+				if (password !== "correct-pass") throw new Error("Invalid password")
+				return dekOf(currentDekFill)
+			},
+			// Restore rewrap context: source = the dek the backup rows were sealed under (the
+			// pre-restore session dek), destination = a fresh mint that becomes the session dek.
+			consumeDekRewrapContext: async () => {
+				const sourceDek = dekOf(currentDekFill)
+				currentDekFill = 0x22
+				return { sourceDek, destinationDek: dekOf(currentDekFill) }
 			},
 		}),
 	)

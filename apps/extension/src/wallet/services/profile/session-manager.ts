@@ -55,7 +55,15 @@ import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
-import { SessionSecretBox, verifyEnvelopeMac, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
+import {
+	asImportedKeysDek,
+	type ImportedKeysDek,
+	type MasterSecretBytes,
+	type Passhash,
+	SessionSecretBox,
+	verifyEnvelopeMacV2,
+	zeroize,
+} from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -187,6 +195,18 @@ export class SessionManager {
 		return session.secret
 	}
 
+	/** Returns a COPY of the imported-keys DEK for the given profile id, or `undefined` for a
+	 *  DEGRADED (derived-only) session. A copy, not the live reference — callers follow the
+	 *  house zeroize-after-use discipline and must not wipe the session's own buffer. Throws
+	 *  `"Profile locked"` on no-session / wrong-profile, same contract as `getSecret`. */
+	public async getDek(profileId: string): Promise<ImportedKeysDek | undefined> {
+		const session = await this.getActive()
+		if (session?.session.profile !== profileId) {
+			throw new Error("Profile locked")
+		}
+		return session.dek ? asImportedKeysDek(new Uint8Array(session.dek)) : undefined
+	}
+
 	/** Persists + enters the session for `profile`. `passhash` is now only
 	 *  a PRESENCE signal (a password unlock/create where a silent-restore
 	 *  bearer is appropriate) — its VALUE is never persisted (F-11). Only
@@ -206,7 +226,7 @@ export class SessionManager {
 	 *  COPY of `secretBuffer` under a fresh random token). The caller is
 	 *  responsible for calling `zeroize(...)` on these buffers after `open`
 	 *  returns. */
-	public async open(profile: Profile, secretBuffer: MasterSecretBytes, passhash?: Passhash): Promise<void> {
+	public async open(profile: Profile, secretBuffer: MasterSecretBytes, passhash?: Passhash, dek?: ImportedKeysDek): Promise<void> {
 		try {
 			const since = Date.now()
 			// F-11: `passhash` is now only a PRESENCE signal — "a password
@@ -217,8 +237,11 @@ export class SessionManager {
 			// persisted. Reading `strictSecurityMode` here (not at the call
 			// sites) keeps the gate race-free with a concurrent strict-toggle ON
 			// mid-unlock — it cannot create a session that already carries a bearer.
-			const persistBearer = passhash !== undefined && !this.strictSecurityMode && profile.type === "password"
-			const bearer = persistBearer ? await this.sessionSecretBox.wrap(secretBuffer, profile.id) : undefined
+			// A DEGRADED (dek-less) session persists NO bearer either: the next SW
+			// wake must force a full password unlock that re-surfaces the state,
+			// never silently extend it (degradation state machine, rule 2).
+			const persistBearer = passhash !== undefined && !this.strictSecurityMode && profile.type === "password" && dek !== undefined
+			const bearer = persistBearer && dek ? await this.sessionSecretBox.wrapPair(secretBuffer, dek, profile.id) : undefined
 			const session: Session = {
 				profile: profile.id,
 				bearer,
@@ -231,7 +254,10 @@ export class SessionManager {
 			// the in-memory secret usable for this SW lifetime (degraded success:
 			// not persisted, but usable).
 			const secret = Fr.fromBuffer(Buffer.from(secretBuffer))
-			this.activeSession = { profile, session, secret }
+			// Wipe a replaced session's DEK before dropping the reference (close/replace/expiry
+			// discipline); store a COPY of the caller-owned dek.
+			zeroize(this.activeSession?.dek)
+			this.activeSession = { profile, session, secret, dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined }
 			this.onChange(this.toInfo(profile))
 			try {
 				await this.session.set(session)
@@ -251,6 +277,7 @@ export class SessionManager {
 				// partial write → silent-close → locked), never a secret exposure. This
 				// residual is unavoidable while storage is fully unavailable.
 				if (await this.hasPersistedSession()) {
+					zeroize(this.activeSession?.dek)
 					this.activeSession = undefined
 					this.onChange(undefined)
 					return
@@ -279,6 +306,7 @@ export class SessionManager {
 			// (clearLockAlarm must still run) and callers that need the durable
 			// guarantee (lockActiveProfile) read back via hasPersistedSession().
 			if (this.activeSession) {
+				zeroize(this.activeSession.dek)
 				this.activeSession = undefined
 				this.onChange(undefined)
 			}
@@ -440,14 +468,15 @@ export class SessionManager {
 			await this.silentClose()
 			return
 		}
-		let secretBytes: MasterSecretBytes | null = null
+		let pair: { master: MasterSecretBytes; dek: ImportedKeysDek } | null = null
 		try {
-			// AAD = profile id: a bearer minted for one profile can't unwrap
-			// under another. `unwrap` returns null (never throws) on a tampered
-			// bearer / bad GCM tag / wrong version.
-			secretBytes = await this.sessionSecretBox.unwrap(session.bearer, profile.id)
-			if (!secretBytes) {
-				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session bearer failed to unwrap (tampered / wrong profile) → silentClose")
+			// AAD = profile id: a bearer minted for one profile can't unwrap under another.
+			// `unwrapPair` returns null (never throws) on a tampered bearer / bad GCM tag / a
+			// non-v2 version — a legacy v1 (master-only) record silently closes into a full
+			// re-unlock, NEVER a dek-less session (degradation state machine, rule 3).
+			pair = await this.sessionSecretBox.unwrapPair(session.bearer, profile.id)
+			if (!pair) {
+				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session bearer failed to unwrap (tampered / wrong profile / v1) → silentClose")
 				await this.silentClose()
 				return
 			}
@@ -460,15 +489,17 @@ export class SessionManager {
 				await this.silentClose()
 				return
 			}
-			// Envelope-MAC check: this passwordless path can never decrypt the sealed fields to
-			// run the words↔master pairing check, so it verifies the master-keyed MAC over the
-			// WHOLE sealed envelope (guard‖secret‖entropy) instead — catching both tampered
-			// entropy (silent recovery degradation) AND a single ciphertext transplanted from
-			// another same-password profile (which purpose-AAD alone does not stop). Mismatch
-			// blocks silent restore; the forced password unlock runs the full pairing check.
-			const envelopeIntact = await verifyEnvelopeMac(
-				secretBytes,
-				{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy },
+			// Envelope-MAC v2 check: this passwordless path can never decrypt the sealed fields to
+			// run the words↔master pairing check, so it verifies the HKDF(master‖dek)-keyed MAC
+			// over the WHOLE 4-slot envelope instead — catching tampered slots AND cross-profile
+			// transplants, and (unlike a master-keyed tag) unforgeable by the same-phrase attacker
+			// who holds the master but not this profile's DEK. Bearer restore requires BOTH a valid
+			// DEK and a valid MAC (rule 3) — any mismatch blocks silent restore; the forced
+			// password unlock runs the full pairing check + the degradation state machine.
+			const envelopeIntact = await verifyEnvelopeMacV2(
+				pair.master,
+				pair.dek,
+				{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy, dek: profile.dekSealed },
 				profile.envelopeMac,
 			)
 			if (!envelopeIntact) {
@@ -476,14 +507,14 @@ export class SessionManager {
 				await this.silentClose()
 				return
 			}
-			// `unwrap` already enforces the 32-byte length, but a 32-byte value ≥ the
+			// `unwrapPair` already enforces the pair length, but a 32-byte master ≥ the
 			// BN254 field modulus still throws in `Fr.fromBuffer`. A crafted/corrupt
 			// bearer must `silentClose`, not crash service init.
 			let secret: Fr
 			try {
 				// Fr.fromBuffer copies into Fr's internal field-element rep
-				// (verified by zeroize.test.ts). Safe to zero `secretBytes` after.
-				secret = Fr.fromBuffer(Buffer.from(secretBytes))
+				// (verified by zeroize.test.ts). Safe to zero the pair after.
+				secret = Fr.fromBuffer(Buffer.from(pair.master))
 			} catch (err) {
 				this.logger.log(
 					LOG_SOURCE,
@@ -495,13 +526,16 @@ export class SessionManager {
 				return
 			}
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session restored")
-			this.activeSession = { profile, session, secret }
+			this.activeSession = { profile, session, secret, dek: asImportedKeysDek(new Uint8Array(pair.dek)) }
 			// Re-schedule the alarm against the persisted `lockedAt`. If
 			// `lockedAt` is absent (older records), fall back to
 			// `since + sessionTtl`.
 			await this.scheduleLockAlarm(this.deriveLockedAt(session))
 		} finally {
-			zeroize(secretBytes)
+			if (pair) {
+				zeroize(pair.master)
+				zeroize(pair.dek)
+			}
 		}
 	}
 
@@ -542,6 +576,7 @@ export class SessionManager {
 	private async silentClose(): Promise<void> {
 		try {
 			await this.session.delete()
+			zeroize(this.activeSession?.dek)
 			this.activeSession = undefined
 			await this.clearLockAlarm()
 		} catch (error) {

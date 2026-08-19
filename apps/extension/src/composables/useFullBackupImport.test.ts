@@ -204,6 +204,9 @@ async function buildBackup(overrides: Record<string, unknown> = {}) {
 		// Epoch-4 password blobs REQUIRE the entropy field. The composable checks only
 		// presence/shape; the words↔master pairing check is service-side (mocked here).
 		entropy: Buffer.from(new Uint8Array(32).fill(1)).toString("base64"),
+		// Epoch-4 password blobs also REQUIRE the imported-keys DEK carrier (plaintext beside
+		// the plaintext master; the rewrap semantics are service-side, mocked here).
+		"imported-keys-dek": Buffer.from(new Uint8Array(32).fill(2)).toString("base64"),
 		data: {
 			profile: { id: "src-profile-id", name: "Imported", type: "password" },
 			// P6: schema-realistic default fixtures (new-shape network with
@@ -1404,6 +1407,9 @@ describe("useFullBackupImport — passkey backup", () => {
 		return buildBackup({
 			"master-key": PASSKEY_CRED_ID,
 			entropy: undefined,
+			// Passkey blobs carry the SEALED dek blob instead of the plaintext carrier.
+			"imported-keys-dek": undefined,
+			"imported-keys-dek-sealed": "AZGVrLXNlYWxlZA==",
 			data: {
 				profile: { id: "src-profile-id", name: "PK", type: "passkey" },
 				network: [{ id: "src-net-1", name: "Testnet", rpcUrl: "https://t/", chainId: 1 }],
@@ -1429,9 +1435,10 @@ describe("useFullBackupImport — passkey backup", () => {
 		expect(runCeremony).toHaveBeenCalledWith({ mode: "get", credentialId: PASSKEY_CRED_ID })
 		expect(profileClient.restore).toHaveBeenCalledWith(
 			expect.objectContaining({ type: "passkey" }),
-			{ type: "passkey", credentialId: PASSKEY_CRED_ID },
+			{ type: "passkey", credentialId: PASSKEY_CRED_ID, dekSealed: "AZGVrLXNlYWxlZA==" },
 			"", // empty password for passkey
 			PASSKEY_DATA, // credentialData forwarded
+			undefined, // allowDuplicate: no confirmed override on the happy path
 		)
 		expect(opts.completeImport).toHaveBeenCalledOnce()
 	})
