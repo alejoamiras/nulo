@@ -82,9 +82,11 @@ export interface WalletRuntime {
 	 *  retryable one is re-attempted by the next call. */
 	start(): Promise<void>
 	/** Stop the heartbeat. Services are not disposed (no mechanism yet), and
-	 *  the start memo is NOT reset — a stopped runtime does not restart
-	 *  (start() returns the settled memo; heartbeat stays disarmed). Same
-	 *  semantics as the pre-memo `started` flag, pinned as intentional. */
+	 *  the start memo is NOT reset — after a COMPLETED boot, a later start()
+	 *  returns the settled memo and the heartbeat stays disarmed. stop()
+	 *  during an in-flight boot does NOT cancel it — the boot's tail will
+	 *  still arm the heartbeat. Same semantics as the pre-memo `started`
+	 *  flag; zero production callers today. */
 	stop(): void
 	/** Exposed so shell code + tests can inspect / drive the graph. */
 	readonly services: ServiceCollection
@@ -115,9 +117,9 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	//     and the tabs/pxe-provider registrations are not re-entrant).
 	// A vetoed failure keeps the rejected memo: callers observe the rejection,
 	// and a fresh SW lifetime — fresh module state — is the retry. What
-	// remains genuinely retryable is small (transient schema-status storage
-	// writes; config.load swallows its own errors today) — kept because the
-	// reset costs nothing and covers any future throwing pre-registration step.
+	// remains genuinely retryable: transient storage writes — the schema-status
+	// sets/removes and config.load's own apply() write, all of which can
+	// throw transiently and re-run safely.
 	let retrySafe = true
 
 	const doStart = async (): Promise<void> => {
@@ -184,12 +186,12 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		}
 
 		// Config + Barretenberg load in parallel — neither depends on the other.
-		// Overlap-on-retry is impossible without allSettled here BECAUSE the BB
-		// veto keeps the memo on the only fast-rejecting leg: a BB failure
-		// never retries, and config.load cannot reject today (it swallows its
-		// own errors) — while a hung leg under allSettled would leave the boot
-		// promise silently pending forever, which is the defect class this arc
-		// exists to remove.
+		// Plain Promise.all (not allSettled): a BB failure vetoes the memo so
+		// no retry can overlap a still-pending config leg, and a config
+		// rejection (its apply() storage write can throw) settles that leg
+		// itself before the retry re-runs it — while allSettled would leave the
+		// boot promise silently pending forever when a leg hangs after the
+		// other failed, which is the defect class this arc exists to remove.
 		await Promise.all([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
 			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH })

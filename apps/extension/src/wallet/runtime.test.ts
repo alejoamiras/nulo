@@ -10,11 +10,12 @@
  *      `start()` void-resolved against a half-booted runtime and no retry
  *      ever happened for the SW's remaining lifetime.
  *
- * The remaining pins came out of the mid-tier audit (codex blocking findings):
- * retry must not overlap an unfinished first attempt (allSettled quiescence),
- * a Barretenberg failure must veto retry (upstream initSingleton memoizes its
- * REJECTED promise), and a TERMINAL migration block must veto retry while a
- * retryable one stays retryable.
+ * The remaining pins came out of the mid-tier audit (codex + fable): a
+ * Barretenberg failure vetoes retry (upstream initSingleton memoizes its
+ * REJECTED promise) and cannot cause an overlapping re-run even while config
+ * still pends; EVERY migration-blocked outcome vetoes retry (the engine's
+ * durable attempt budget is next-boot-cadenced); the genuinely-retryable
+ * representative is a transient storage write.
  *
  * Every pin stays inside the PRE-REGISTRATION boot zone — no service is ever
  * constructed.
@@ -118,8 +119,9 @@ describe("runtime.start() single-flight contract", () => {
 
 	test("a failed pre-registration boot permits a real retry (no permanent latch)", async () => {
 		// The genuinely-retryable representative: a transient schema-status
-		// storage write. (config.load swallows its own errors in production;
-		// BB and migration-blocked failures are veto-classified below.)
+		// storage write. (config.load's apply() write can also reject and is
+		// equally retryable; BB and migration-blocked failures are
+		// veto-classified below.)
 		const { deps, configLoad } = makeDeps()
 		const removeMock = vi.fn().mockRejectedValue(new Error("storage transient"))
 		;(deps.browserApi.storage.local as { remove: unknown }).remove = removeMock
