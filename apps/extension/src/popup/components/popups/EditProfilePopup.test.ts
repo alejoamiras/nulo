@@ -207,6 +207,24 @@ describe("EditProfilePopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight rename fires changeProfileName ONCE", async () => {
+		// The full-lifetime latch: isProfileUpdateInProgress joins the
+		// submit-validity source, so a second Enter (keyboards auto-repeat)
+		// while the first rename hangs is a no-op on every route.
+		profileServiceMock.changeProfileName.mockImplementationOnce(() => new Promise(() => {}))
+		const w = await mountShown()
+		await typeName(w, "Renamed")
+		pressEnterOnInput()
+		await flushPromises()
+		pressEnterOnInput()
+		await flushPromises()
+		// Cleanup BEFORE the assertion: a failing expect must not skip dispose
+		// and leak this instance's document listener into the next test.
+		const calls = profileServiceMock.changeProfileName.mock.calls.length
+		await dispose(w)
+		expect(calls).toBe(1)
+	})
+
 	test("hide disconnects the client; Enter after hide is inert", async () => {
 		const w = await mountShown()
 		await typeName(w, "Renamed")

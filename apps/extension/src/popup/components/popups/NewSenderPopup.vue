@@ -35,8 +35,11 @@ const fillError = (type, title, tooltip) => {
 
 const isAlreadyExist = computed(() => senders.value?.includes(senderAddress.value))
 const isAvailableToAddSender = computed(() => {
-	if (!senderAddress.value.length) return
-	if (!isValidHex(senderAddress.value)) return
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
+	if (!senderAddress.value.length) return false
+	if (!isValidHex(senderAddress.value)) return false
 
 	return true
 })
@@ -153,7 +156,7 @@ usePopupEntity(() => props.show, {
 						size="medium"
 						:loading="isLoading"
 						:class="error.type === 'error' && $style.shake"
-						:disabled="!!error.type || !senderAddress"
+						:disabled="!isAvailableToAddSender || !!error.type"
 						data-testid="new-sender-submit"
 					>
 						Add sender

@@ -100,6 +100,9 @@ const isAlreadyExistName = computed(() => form.fields.name.error.value === "Alre
 const isAlreadyExistAddress = computed(() => form.fields.address.error.value === "Already exist" && isStartedEditingAddress.value)
 const isValidAddress = computed(() => isValidHex(contactAddressTerm.value))
 const isAvailableToUpdateContact = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
 	if (!nameTerm.value?.replace(/\s/g, "").length) return false
 	if (!isValidAddress.value) return false
 	if (form.fields.name.error.value) return false

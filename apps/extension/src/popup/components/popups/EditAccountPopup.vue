@@ -1,6 +1,8 @@
 <script setup>
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -33,6 +35,9 @@ const addressTerm = form.fields.address.value
 const isStartedEditing = computed(() => Boolean(accountToEdit.value) && nameTerm.value !== accountToEdit.value?.name)
 
 const isAvailableToUpdateAccount = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isAccountUpdateInProgress.value) return false
 	if (!nameTerm.value.length) return false
 	if (!addressTerm.value.length) return false
 	return true
@@ -47,9 +52,20 @@ const isAccountUpdateInProgress = ref(false)
 const handleUpdateAccount = async () => {
 	if (!isAvailableToUpdateAccount.value) return
 
+	// finally, not sequential clear: a rejected update must release the latch
+	// or the folded validity source would lock the form disabled for good. The
+	// catch is part of the same repair — the rejection previously escaped as an
+	// unhandled promise (both submit routes fire-and-forget) with zero user
+	// feedback; the family's standard error toast handles it.
 	isAccountUpdateInProgress.value = true
-	await appStore.updateAccount(cacheStore.accountToEditIdx, nameTerm.value)
-	isAccountUpdateInProgress.value = false
+	try {
+		await appStore.updateAccount(cacheStore.accountToEditIdx, nameTerm.value)
+	} catch {
+		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		return
+	} finally {
+		isAccountUpdateInProgress.value = false
+	}
 
 	emit("onClose")
 

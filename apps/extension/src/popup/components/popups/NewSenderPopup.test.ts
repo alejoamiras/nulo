@@ -148,6 +148,36 @@ describe("NewSenderPopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight add fires addSender ONCE", async () => {
+		accountStateServiceMock.addSender.mockImplementationOnce(() => new Promise(() => {}))
+		const w = await mountShown()
+		await typeAddress(w, VALID_HEX)
+		pressEnterOnInput()
+		await flushPromises()
+		pressEnterOnInput()
+		await flushPromises()
+		// Cleanup BEFORE the assertion: a failing expect must not skip dispose
+		// and leak this instance's document listener into the next test.
+		const calls = accountStateServiceMock.addSender.mock.calls.length
+		await dispose(w)
+		expect(calls).toBe(1)
+	})
+
+	test("the button is NATIVELY disabled while the add is in flight (loading alone is only pointer-events CSS)", async () => {
+		// The template's :disabled is re-based onto the folded validity source,
+		// so the in-flight latch reaches the DOM — closing keyboard-focused
+		// activation, which pointer-events:none does not cover.
+		accountStateServiceMock.addSender.mockImplementationOnce(() => new Promise(() => {}))
+		const w = await mountShown()
+		await typeAddress(w, VALID_HEX)
+		expect(w.find("button").attributes("disabled")).toBeUndefined()
+		pressEnterOnInput()
+		await flushPromises()
+		const disabledDuringFlight = w.find("button").attributes("disabled")
+		await dispose(w)
+		expect(disabledDuringFlight).toBeDefined()
+	})
+
 	test("hide disconnects the client and resets the field; Enter after hide is inert", async () => {
 		const w = await mountShown()
 		await typeAddress(w, VALID_HEX)

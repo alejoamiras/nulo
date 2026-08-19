@@ -99,6 +99,33 @@ afterEach(() => {
 })
 
 describe("NewContactPopup — decoupled from sender registration", () => {
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight add fires addContact ONCE", async () => {
+		const w = await mountAndOpen()
+		contactServiceMock.addContact.mockImplementation(() => new Promise(() => {}))
+		await fill(w, "Alice-Reentrant", VALID_ADDRESS)
+		// The popup's keydown listener lives on `document`; the mounted tree is
+		// detached, so dispatch from a real document-level input. Tests in this
+		// file can leak their instances' document listeners (they never hide),
+		// so assert the DELTA of the second press — with every instance's latch
+		// engaged by press one, press two must add ZERO calls.
+		const docInput = document.createElement("input")
+		document.body.appendChild(docInput)
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		// Count only THIS instance's calls (unique name typed above) — leaked
+		// listeners from earlier tests answer the same document Enter but carry
+		// their own field values, so they cannot pollute this count.
+		const myCalls = contactServiceMock.addContact.mock.calls.filter((c) => c[0] === "Alice-Reentrant").length
+		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
+		// (document-listener removal) or the mock reset.
+		await w.setProps({ show: false })
+		contactServiceMock.addContact.mockReset()
+		docInput.remove()
+		expect(myCalls).toBe(1)
+	})
+
 	test("submit calls addContact with trimmed name + address, closes, and toasts success", async () => {
 		const w = await mountAndOpen()
 		contactServiceMock.addContact.mockResolvedValueOnce({ id: "c1" })

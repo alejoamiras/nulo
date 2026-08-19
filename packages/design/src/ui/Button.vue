@@ -362,6 +362,13 @@ const rel = computed(() => {
 	opacity: 0.3;
 }
 
+/* A running submit is its own state, not "invalid form": while loading, keep
+ * the brighter loading treatment so the spinner carries the message — the 0.3
+ * disabled dim stays reserved for genuinely unavailable controls. */
+.wrapper.disabled.loading {
+	opacity: 0.8;
+}
+
 .left_icon {
 	position: absolute;
 	top: 50%;

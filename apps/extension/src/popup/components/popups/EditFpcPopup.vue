@@ -76,6 +76,9 @@ const hasChanges = computed(() => nameChanged.value || addressChanged.value)
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist" && nameChanged.value)
 const isAddressValid = computed(() => isValidHex(addressTerm.value))
 const isAvailableToUpdateFpc = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isFpcUpdateInProgress.value) return false
 	if (!hasChanges.value) return false
 	// Name is locked on protocol rows; if it differs, that's an invalid edit.
 	if (isProtocol.value && nameChanged.value) return false

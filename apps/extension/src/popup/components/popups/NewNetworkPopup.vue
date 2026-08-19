@@ -4,7 +4,9 @@ import { managers } from "@/utils/core"
 import { activateNetworkGuarded } from "@/utils/guarded-network-activation"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -56,6 +58,9 @@ const isNameAlreadyExist = computed(() => form.fields.name.error.value === "Alre
 const isUrlAlreadyExist = computed(() => form.fields.url.error.value === "Already exists")
 
 const isAvailableToCreateNetwork = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isCreating.value) return false
 	if (!nameTerm.value.length) return false
 	if (!urlTerm.value.length) return false
 	if (urlTerm.value.length < 5) return false
@@ -75,9 +80,11 @@ const handleCreateNetwork = async () => {
 	}
 
 	try {
+		// The latch spans the WHOLE handler (cleared in finally, not after
+		// addNetwork): the activation + refresh awaits below are still part of
+		// this submit, and a re-entry during them would double-create.
 		isCreating.value = true
 		const network = await managers.network.addNetwork(nameTerm.value, urlTerm.value)
-		isCreating.value = false
 
 		// Guard first, persist second: the guard admits (and moves the in-memory
 		// scope) before the service write, so a refusal leaves the durable active
@@ -106,8 +113,6 @@ const handleCreateNetwork = async () => {
 
 		openToast({ label: "Network is created" })
 	} catch (error) {
-		isCreating.value = false
-
 		const msg = error instanceof Error ? error.message : String(error)
 		if (msg.startsWith("DUPLICATE_CHAIN")) {
 			// Smart-add: chain already exists in profile. Surface this clearly
@@ -121,6 +126,8 @@ const handleCreateNetwork = async () => {
 		} else {
 			openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
 		}
+	} finally {
+		isCreating.value = false
 	}
 }
 

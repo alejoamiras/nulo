@@ -91,6 +91,16 @@ function pressEnter() {
 	document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
 }
 
+/** Hide-then-unmount: the popup removes its document keydown listener only on
+ *  show → false. Without this, completed instances leak armed listeners into
+ *  later tests — previously masked by the latch sticking true (the popup
+ *  relied on the hide watcher to clear isLoading); the handler-owned release
+ *  unmasked it. */
+async function dispose(w: Awaited<ReturnType<typeof mountAndOpen>>) {
+	await w.setProps({ show: false })
+	w.unmount()
+}
+
 function setFee(w: ReturnType<typeof mount>) {
 	return w.find('[data-testid="set-fee"]').trigger("click")
 }
@@ -109,6 +119,7 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		pressEnter()
 		await flushPromises()
 		expect(authwitsServiceMock.setRegistryEnabled).toHaveBeenCalledTimes(1)
+		await dispose(w)
 	})
 
 	test("Enter is a no-op when feeSettings is unset (!isAllowedToExecute)", async () => {
@@ -119,6 +130,7 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		expect(authwitsServiceMock.setRegistryEnabled).not.toHaveBeenCalled()
 		// Send button mirrors the gate
 		expect(w.find('[data-testid="registry-toggle-submit"]').attributes("disabled")).toBeDefined()
+		await dispose(w)
 	})
 
 	test("(REGRESSION-PIN) Enter is a no-op while in-flight (isLoading)", async () => {
@@ -143,6 +155,8 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		await flushPromises()
 		expect(authwitsServiceMock.setRegistryEnabled).toHaveBeenCalledTimes(1)
 		resolveSet()
+		await flushPromises()
+		await dispose(w)
 	})
 
 	test("non-Enter keys are ignored (handler is Enter-specific)", async () => {
@@ -153,6 +167,7 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }))
 		await flushPromises()
 		expect(authwitsServiceMock.setRegistryEnabled).not.toHaveBeenCalled()
+		await dispose(w)
 	})
 
 	test("Send button click reaches handleChangeRegistry (parity with Enter path)", async () => {
@@ -163,5 +178,6 @@ describe("ChangeAuthwitsRegistryPopup — Enter-key gate", () => {
 		await w.find('[data-testid="registry-toggle-submit"]').trigger("click")
 		await flushPromises()
 		expect(authwitsServiceMock.setRegistryEnabled).toHaveBeenCalledTimes(1)
+		await dispose(w)
 	})
 })

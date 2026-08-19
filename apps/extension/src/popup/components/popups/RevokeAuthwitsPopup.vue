@@ -85,6 +85,10 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleRevokeAuthwits() {
+	// Full-lifetime submit latch, handler-owned: every route (keydown, click,
+	// any future caller) self-checks here — the caller-side `!isLoading`
+	// duplication in onKeydown/:disabled is defense-in-depth, not the guard.
+	if (isLoading.value) return
 	// `isAllowedToExecute` is a computed ref — must dereference `.value`.
 	// Pre-fix this guard was a no-op (refs are always truthy as objects);
 	// Enter could fire the handler before feeSettings was set on all chunks.
@@ -92,7 +96,31 @@ async function handleRevokeAuthwits() {
 	if (!isAllowedToExecute.value) return
 
 	isLoading.value = true
+	try {
+		await revokeChunks()
+	} finally {
+		isLoading.value = false
+	}
 
+	const errors = chunkedAuthwits.value.filter((ch) => ch.status === "error").map((ch) => ch.error)
+	const cancelled = chunkedAuthwits.value.some((ch) => ch.status === "cancelled")
+	if (cancelled) {
+		// User cancelled at least one chunk — suppress both success and
+		// failure summary toasts. The terminal card communicates the state.
+		emit("onClose")
+	} else if (errors.length) {
+		openToast(
+			{ label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)`, icon: "warning" },
+			TOAST_DURATION.LONG,
+		)
+		error.value = errors.join(", ")
+	} else {
+		openToast({ label: "Authwit(s) successfully revoked" })
+		emit("onClose")
+	}
+}
+
+async function revokeChunks() {
 	for (const ch of chunkedAuthwits.value) {
 		try {
 			ch.status = "progress"
@@ -110,24 +138,6 @@ async function handleRevokeAuthwits() {
 				ch.error = err
 			}
 		}
-	}
-
-	isLoading.value = false
-	const errors = chunkedAuthwits.value.filter((ch) => ch.status === "error").map((ch) => ch.error)
-	const cancelled = chunkedAuthwits.value.some((ch) => ch.status === "cancelled")
-	if (cancelled) {
-		// User cancelled at least one chunk — suppress both success and
-		// failure summary toasts. The terminal card communicates the state.
-		emit("onClose")
-	} else if (errors.length) {
-		openToast(
-			{ label: `Failed to revoke ${errors.length === chunksCount.value ? "" : "some "}authwit(s)`, icon: "warning" },
-			TOAST_DURATION.LONG,
-		)
-		error.value = errors.join(", ")
-	} else {
-		openToast({ label: "Authwit(s) successfully revoked" })
-		emit("onClose")
 	}
 }
 
@@ -273,7 +283,7 @@ const onKeydown = (e) => {
 						size="medium"
 						wide
 						:loading="isLoading"
-						:disabled="!isAllowedToExecute || isErrorOccurred"
+						:disabled="!isAllowedToExecute || isErrorOccurred || isLoading"
 					>
 						Revoke
 					</Button>

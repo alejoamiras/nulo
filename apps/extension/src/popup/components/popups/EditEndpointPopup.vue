@@ -44,6 +44,9 @@ const fillFromEndpoint = () => {
 const isDirty = form.isDirty
 
 const isAvailableToSave = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isSubmitting.value) return false
 	if (!endpoint.value || !network.value) return false
 	if (urlTerm.value.length < 5) return false
 	if (errorText.value) return false
