@@ -922,16 +922,22 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// already-dead material.
 				oldPasshash = await EncryptionKey.getPasshash(oldPassword)
 				dek = await this.unsealDekWithPasshash(oldPasshash, profile.dekSealed)
-				// A recovered DEK is not yet a TRUSTED one: without this check a password change
+				// A recovered DEK is not yet a TRUSTED one. Without this check a password change
 				// re-MACs whatever sits in the slot, so a transplanted `dekSealed` that unlock had
-				// quarantined (derived-only) gets laundered into a freshly-valid envelope — the
+				// quarantined (derived-only) is laundered into a freshly-valid envelope — the
 				// profile silently "recovers" onto an attacker-chosen key and every subsequently
-				// imported account is sealed to it. Discard a DEK the stored MAC does not cover and
-				// fall into the same self-heal below: the suspect key is destroyed, not blessed.
+				// imported account seals to it.
+				//
+				// REFUSE rather than self-heal. A MAC failure cannot distinguish a replaced slot
+				// (imported keys already lost) from corruption of the MAC field ALONE (the DEK is
+				// intact and every imported key still recoverable) — so minting fresh here would
+				// silently destroy recoverable keys in the second case. Refusing destroys nothing
+				// and blesses nothing; the non-destructive repair is export a full backup (which
+				// deliberately still works — see `exportBackupMaterial`) and restore it, since
+				// restore mints a fresh DEK and rewraps every row through it.
 				if (dek && !(await this.envelopeMacValid(profile, secret, dek))) {
 					this.logger.log(this.name, LogLevel.Error, "envelope MAC does not cover the DEK slot at password change", id)
-					zeroize(dek)
-					dek = null
+					throw new Error("Profile integrity check failed — export a full backup and restore it before changing the password")
 				}
 				if (!dek) {
 					this.logger.log(this.name, LogLevel.Error, "imported-keys DEK unrecoverable at password change — minting fresh", id)
@@ -1474,6 +1480,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (recovery.credentialId !== profile.credentialId) {
 					throw new Error("Invalid profile id")
 				}
+				// A passkey full backup carries `dekSealed` VERBATIM (the ceremony's wrap key opens
+				// it at restore), so nothing downstream ever proves it opens. Prove it here, where
+				// the wrap key is already in hand: otherwise a corrupt slot yields a backup that
+				// reports success and only fails at restore, when the source may be long gone.
+				let probe: ImportedKeysDek | null = null
+				try {
+					probe = await unsealDekUnderWrapKey(recovery.dekWrapKey, profile.dekSealed)
+				} catch {
+					probe = null
+				} finally {
+					zeroize(probe)
+				}
+				if (!probe) {
+					throw new Error("Imported-keys key unrecoverable — this profile cannot produce a complete backup")
+				}
 			} finally {
 				// Export doesn't need the derived master — security
 				// minimization. The credentialId is the actual return.
@@ -1595,27 +1616,31 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			// self-heals the slot for a retry.
 			//
 			// KNOWN LIMITATION, accepted: this is the LONG-LIVED profile DEK, not a per-backup
-			// transfer key, and a password change rewraps rather than rotates it. So a password
-			// backup grants forward reach — someone holding the blob who LATER also gains read
-			// access to this profile's storage can decrypt imported-key rows created after the
-			// export. It is strictly narrower than what the same blob already gives up (the
-			// plaintext master = every derived account plus every imported key existing at export
-			// time), it needs a second independent compromise, and it does not touch the isolation
-			// the DEK exists for (a same-phrase sibling profile still cannot reach this DEK).
-			// Passkey blobs are unaffected — they carry the DEK sealed under the PRF wrap key.
+			// transfer key, and a password change rewraps rather than rotates it. So a backup
+			// grants FORWARD reach — whoever holds it can decrypt imported-key rows created after
+			// the export, given access to those rows' ciphertext later. Scope it honestly:
+			//   - It needs later ciphertext access, but that is NOT a separate compromise for the
+			//     storage-reader this design targets — an ongoing reader already has it.
+			//   - It is narrower than what the same blob already gives up: the plaintext master =
+			//     every derived account plus every imported key existing at export time.
+			//   - It does NOT reach the sibling this DEK exists to stop — a profile created by
+			//     re-importing the recovery PHRASE never sees this key. A clone created by
+			//     RESTORING this backup does, because the blob hands it over by construction.
+			//   - Passkey blobs resist a blob-only thief (the DEK travels sealed under the PRF wrap
+			//     key), but not an authorized clone, which unseals and can retain it.
 			// Closing it means a per-backup transfer key: rewrap every row at export under a fresh
 			// key and carry THAT, which the restore side would consume exactly where it consumes
-			// the source DEK today.
+			// the source DEK today. That needs export-time ProfileService↔AccountService
+			// coordination and crash consistency — a follow-up arc, not a patch here.
 			passhash = await EncryptionKey.getPasshash(password)
 			dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
-			// Honour the degradation policy here too. This RPC is password-gated and
-			// session-independent, so it bypasses the unlock-time gate entirely: without this a
-			// profile quarantined for a failed MAC still exports, writing a DEK the profile does
-			// not own into the backup and silently stranding every imported account at restore.
-			if (dek && !(await this.envelopeMacValid(profile, unsealed.secret, dek))) {
-				zeroize(dek)
-				dek = null
-			}
+			// DELIBERATELY exports even when the envelope MAC no longer covers the row, unlike
+			// every path that puts the DEK to work. Exporting cannot leak: a planted DEK is the
+			// attacker's own key, and a genuine one makes the backup correct — while refusing
+			// would strand a MAC-corrupted profile with no non-destructive repair at all (backup
+			// + restore is precisely the repair `changeProfilePassword` points at). If the DEK
+			// does turn out to be foreign, its rows simply fail into the restore-side orphan
+			// taxonomy, which is a handled, visible outcome rather than a silent one.
 			if (!dek) {
 				throw new Error("Imported-keys key unrecoverable — change the profile password to repair, then retry the backup")
 			}
@@ -1679,13 +1704,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			}
 			passhash = await EncryptionKey.getPasshash(password)
 			const dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
-			// Same bypass as `exportBackupMaterial`: fresh-auth, session-independent, so the
-			// unlock-time MAC gate never ran. A DEK the stored MAC does not cover is not this
-			// profile's — refuse rather than hand it to the account-export path.
-			if (dek && !(await this.envelopeMacValid(profile, unsealed.secret, dek))) {
-				zeroize(dek)
-				throw new Error("Imported-keys key unrecoverable")
-			}
+			// No MAC gate here either, for `exportBackupMaterial`'s reason: a foreign DEK cannot
+			// unseal this profile's rows, so the account export fails loudly at the unseal instead
+			// of emitting anything — and gating would deny the single-account escape hatch to a
+			// profile whose DEK is merely MAC-corrupted.
 			if (!dek) {
 				throw new Error("Imported-keys key unrecoverable")
 			}

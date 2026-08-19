@@ -2411,15 +2411,18 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
 		})
 
-		// Post-impl codex MEDIUM: a password change must not LAUNDER a MAC that no longer covers
-		// the row — otherwise a transplanted dekSealed that unlock quarantined gets re-MACed into a
-		// freshly-valid envelope and the profile silently adopts an attacker-chosen key.
-		test("changeProfilePassword DISCARDS a dek the stored MAC does not cover (no laundering)", async () => {
+		// Post-impl codex round 2: a password change must neither LAUNDER an uncovered dek (re-MACing
+		// a transplanted slot into a freshly-valid envelope) NOR self-heal by minting a fresh one —
+		// a MAC failure cannot tell a replaced slot from corruption of the MAC field alone, so
+		// minting would silently destroy still-recoverable imported keys. It refuses, and the
+		// backup escape hatch (below) stays open so the refusal is not a dead end.
+		test("changeProfilePassword REFUSES when the stored MAC does not cover the dek", async () => {
 			const { api, service } = await makeService()
 			const p = await service.createProfile("P", "pass1234")
 			const before = await service.getProfileDek(p.id)
 			await service.lockActiveProfile()
-			// Break ONLY the MAC: dekSealed still unseals, so the pre-fix path would have kept it.
+			// Break ONLY the MAC: dekSealed still unseals, so the dek and every imported key that
+			// roots in it are still recoverable — exactly the case a mint-fresh would have lost.
 			const key = `nulo:core:profiles@${p.id}`
 			const row = await readRow(api, p.id)
 			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
@@ -2427,29 +2430,46 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 
 			await service.unlockProfile(p.id, "pass1234")
 			expect(await service.getProfileDek(p.id)).toBeUndefined() // derived-only, as designed
-			await service.changeProfilePassword(p.id, "pass1234", "newpass9")
-			const after = await service.getProfileDek(p.id)
-			// A FRESH dek — the suspect one was destroyed, not blessed.
-			expect(after).toBeDefined()
-			expect(Array.from(after!)).not.toEqual(Array.from(before!))
-			// And the repair sticks: a clean lock/unlock cycle is no longer degraded.
+			await expect(service.changeProfilePassword(p.id, "pass1234", "newpass9")).rejects.toThrow(/integrity check failed/)
+			// Nothing was committed: the OLD password still works and the dek is untouched.
 			await service.lockActiveProfile()
-			await service.unlockProfile(p.id, "newpass9")
-			expect(await service.getProfileDek(p.id)).toBeDefined()
+			await service.unlockProfile(p.id, "pass1234")
+			const material = await service.exportBackupMaterial(p.id, "pass1234")
+			expect(Array.from(Buffer.from(material.importedKeysDek, "base64"))).toEqual(Array.from(before!))
 		})
 
-		// Post-impl codex MEDIUM: the fresh-auth export RPCs bypass the unlock-time gate entirely,
-		// so they must run the MAC check themselves or a quarantined profile still exports.
-		test("the fresh-auth export RPCs refuse a dek the stored MAC does not cover", async () => {
+		// The counterpart of the refusal above: exporting under an unverified dek cannot leak (a
+		// planted dek is the attacker's own key; a genuine one makes the backup correct), so the
+		// export deliberately still works — it is the only non-destructive repair path out of a
+		// MAC-corrupted profile.
+		test("the fresh-auth export RPCs still work when the MAC no longer covers the row", async () => {
 			const { api, service } = await makeService()
 			const p = await service.createProfile("P", "pass1234")
+			const dek = await service.getProfileDek(p.id)
 			const key = `nulo:core:profiles@${p.id}`
 			const row = await readRow(api, p.id)
 			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
 			await api.storage.local.set({ [key]: JSON.stringify(row) })
 
-			await expect(service.exportBackupMaterial(p.id, "pass1234")).rejects.toThrow(/unrecoverable/)
-			await expect(service.exportImportedKeysDek(p.id, "pass1234")).rejects.toThrow(/unrecoverable/)
+			const material = await service.exportBackupMaterial(p.id, "pass1234")
+			expect(Array.from(Buffer.from(material.importedKeysDek, "base64"))).toEqual(Array.from(dek!))
+			expect(Array.from(await service.exportImportedKeysDek(p.id, "pass1234"))).toEqual(Array.from(dek!))
+		})
+
+		// Post-impl codex round 2: a passkey backup carries `dekSealed` verbatim, so nothing
+		// downstream ever proves it opens — a corrupt slot would yield a backup that reports
+		// success and only fails at restore, when the source profile may be long gone.
+		test("exportPlain refuses a passkey profile whose dekSealed slot does not open", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createPasskeyProfile("PK", fakeCredentialData("cred-x", "uh-x"))
+			const credentialId = await service.getPasskeyCredentialId(p.id)
+			await service.lockActiveProfile()
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.dekSealed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			await expect(service.exportPlain(p.id, undefined, fakeCredentialData(credentialId, "uh-x"))).rejects.toThrow(/unrecoverable/)
 		})
 
 		// Post-impl codex MEDIUM: the stale sweep EXCLUDES the id being consumed, so the TTL has to

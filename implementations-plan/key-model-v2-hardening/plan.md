@@ -583,6 +583,37 @@ gate layers incl. the passkey canary; pre-production in-place latitude.
 4. **Delivery**: `gh stack sync` + refresh PR bodies; the two new arc PRs stay draft until the fix
    loop converges, then mark ready. `gh stack merge` remains the owner's call, never autonomous.
 
+### Post-implementation record (2026-08-19)
+
+Full write-up: [`lessons/post-implementation.md`](lessons/post-implementation.md).
+
+**Round 1 — `/code-review max --fix`** (two parallel reviewers over the 44-file arc-4+5 diff).
+Crypto reviewer: *"no correctness bug and no isolation break in the new primitives"*, with one
+MEDIUM that mattered — the v1 primitives were still **exported**, including a master-rooted
+`sealImportedSigningKey`, i.e. an alternative to the very isolation break the DEK exists to
+prevent. Zero production callers (verified by grep); all three v1 pairs deleted. Service reviewer:
+`changeProfilePassword` persisted a resealed row on a null re-unseal (skipping the pairing check,
+the integrity pre-check and the MAC re-key), and `onImportedKeysDegraded` had **no subscriber**
+despite three comments and the spec doc promising a user-visible warning. Both fixed.
+Commits `204cbb9f`, `aa296743`, `cbaa1f20`.
+
+**Round 2 — codex xhigh, fresh session** (`01a01bb5-febb-74d2-a6f6-74e28664acb5`). Six findings.
+Three MEDIUMs shared one root cause: **only the unlock path verified MAC v2**, so
+`changeProfilePassword` and both fresh-auth export RPCs trusted a DEK the stored MAC no longer
+covered. Worst case: a password change re-MACs a transplanted `dekSealed` that unlock had
+quarantined, laundering the tamper into a valid envelope. Fixed by hoisting the invariant into
+`envelopeMacValid` and calling it at every DEK-trusting site; an uncovered DEK now falls into the
+existing mint-fresh self-heal. Fourth MEDIUM: `consumeDekRewrapContext` swept stale entries
+*excluding* the id it popped, so the TTL never applied to it. All four ship tests verified to fail
+without the fix. Commit `442fe16c`.
+
+**Accepted, not fixed** (both documented in-code):
+
+| Finding | Why accepted |
+|---|---|
+| HIGH — a password full-backup carries the long-lived profile DEK, granting forward reach to imported-key rows created after the export | Password blobs only (passkey blobs carry it sealed under the PRF wrap key); the same blob already carries the plaintext master, so the marginal leak is only *forward*; realising it needs a SECOND independent compromise (later storage read); it does not weaken sibling-profile isolation. The clean fix — a per-backup transfer key — needs an export-side cross-service handshake mirroring `pendingDekRewraps` in reverse. **Follow-up arc.** |
+| LOW — the wallet fingerprint is an offline confirmation oracle (23 known words ⇒ exactly 8 checksum-valid completions) | Inherent: the duplicate check runs pre-unlock against profiles whose credentials are unavailable, so the comparand must be computable from the candidate master alone. Cost-hardening cannot help an 8-candidate space. Header doc rewritten to state it plainly. |
+
 ## Delivery
 
 Two new arcs on the existing stack #420 (`dev ← #417 ← #418 ← #419`):

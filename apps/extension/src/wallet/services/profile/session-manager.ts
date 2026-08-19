@@ -253,12 +253,16 @@ export class SessionManager {
 			// contract is that a broken chrome.storage write at unlock still leaves
 			// the in-memory secret usable for this SW lifetime (degraded success:
 			// not persisted, but usable).
-			// Named + wiped: `Fr.fromBuffer` copies, so an anonymous `Buffer.from(...)` here would
-			// leave a second master-equivalent buffer alive until GC (same class of leak as the
-			// passkey OKM copy).
+			// Named + wiped in a finally: `Fr.fromBuffer` copies, so an anonymous `Buffer.from(...)`
+			// here would leave a second master-equivalent buffer alive until GC (same class of leak
+			// as the passkey OKM copy) — and an out-of-range throw must not skip the wipe.
 			const secretCopy = Buffer.from(secretBuffer)
-			const secret = Fr.fromBuffer(secretCopy)
-			zeroize(secretCopy)
+			let secret: Fr
+			try {
+				secret = Fr.fromBuffer(secretCopy)
+			} finally {
+				zeroize(secretCopy)
+			}
 			// Wipe a replaced session's DEK before dropping the reference (close/replace/expiry
 			// discipline); store a COPY of the caller-owned dek.
 			zeroize(this.activeSession?.dek)
