@@ -110,12 +110,13 @@ test.skipIf(!hasConfig)(
 		const permittedOrigin = `http://127.0.0.1:${nodePort}`
 		const unpermittedOrigin = new URL(aztecConfig.nodeUrl).origin
 
-		// Leg 1: host-permitted destination → changeInfo.url is delivered.
+		// Leg 1: host-permitted destination → the guard's EXACT firing predicate
+		// (`status === "loading" && url`) is satisfiable.
 		await dappPage.goto(`${permittedOrigin}/status`, { waitUntil: "domcontentloaded" })
 		const dappTabIdHandle = await popup.waitForFunction(
 			(origin: string) => {
-				const w = window as unknown as { __navEvents?: Array<{ tabId: number; url?: string }> }
-				const hit = (w.__navEvents ?? []).find((e) => e.url?.startsWith(origin))
+				const w = window as unknown as { __navEvents?: Array<{ tabId: number; status?: string; url?: string }> }
+				const hit = (w.__navEvents ?? []).find((e) => e.status === "loading" && e.url?.startsWith(origin))
 				return hit ? hit.tabId : false
 			},
 			{ timeout: 15_000 },
@@ -130,12 +131,12 @@ test.skipIf(!hasConfig)(
 			return w.__navEvents.length
 		})
 		await dappPage.goto(`${unpermittedOrigin}/status`, { waitUntil: "domcontentloaded" })
-		// The tab's events for this navigation did arrive (status flows without
-		// any URL grant)…
+		// Wait for the navigation's TERMINAL event ("complete") so the whole
+		// delivery window is closed before the negative assertion below.
 		await popup.waitForFunction(
 			(tabId: number, from: number) => {
 				const w = window as unknown as { __navEvents?: Array<{ tabId: number; status?: string }> }
-				return (w.__navEvents ?? []).slice(from).some((e) => e.tabId === tabId && e.status !== undefined)
+				return (w.__navEvents ?? []).slice(from).some((e) => e.tabId === tabId && e.status === "complete")
 			},
 			{ timeout: 15_000 },
 			dappTabId,
