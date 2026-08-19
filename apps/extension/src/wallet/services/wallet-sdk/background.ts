@@ -29,6 +29,7 @@ import "@nulo/wallet-sdk-schema-patch/register"
 
 import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession } from "@aztec/wallet-sdk/extension/handlers"
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
+import { attachContentListener } from "./content-message-relay"
 import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
 
@@ -154,8 +155,15 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		{
 			sendToTab: (tabId, message) => chrome.tabs.sendMessage(tabId, message),
 			addContentListener: (listener) => {
+				// The chrome.runtime.onMessage registration lives in the module-scope
+				// content-message-relay (cold-wake fix): registering a SECOND chrome
+				// listener here would double-deliver — a duplicate discovery's
+				// coalesce→reject path deletes the entry its twin queued, and a
+				// duplicate secure-message double-journals a sendTx. Attach to the
+				// relay instead; buffered cold-wake messages flush through this same
+				// validated wrapper.
 				// biome-ignore lint/suspicious/noExplicitAny: Chrome message listener provides untyped messages
-				chrome.runtime.onMessage.addListener((message: any, sender: chrome.runtime.MessageSender) => {
+				attachContentListener((message: any, sender: chrome.runtime.MessageSender) => {
 					// F-001: subframe rejection. Upstream `BackgroundConnectionHandler`
 					// attributes origin via `sender.tab?.url` (top-frame URL), so an
 					// iframe at https://evil.com/x.html embedded in https://app.example.com
