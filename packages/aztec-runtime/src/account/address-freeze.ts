@@ -9,10 +9,14 @@
  * Rules (enforced socially by review + branch protection, mechanically by the paired test
  * `address-freeze.test.ts`, which independently hardcodes EVERY entry):
  * - Entries are append-only ONCE SHIPPED. Editing or removing a historical entry is forbidden.
- *   One-time pre-launch carve-out: the launch-baseline entry of a major that has never shipped a
- *   build, backup, or exported artifact MAY be redefined in place, in one reviewed commit that
- *   updates this record, its paired test, and this rules text together (exercised once, for the
- *   KDF v1→v2 baseline redefinition — `implementations-plan/key-model-v2/`; owner-ratified).
+ *   Pre-launch carve-out: the launch-baseline entry of a major that has never shipped a build,
+ *   backup, or exported artifact MAY be redefined in place, in one reviewed commit that updates
+ *   this record, its paired test, and this rules text together. The carve-out is a WINDOW, not a
+ *   counter: it closes permanently at the major's first shipped build. Exercised twice inside the
+ *   V5 pre-launch window, owner-ratified both times: the KDF v1→v2 baseline redefinition
+ *   (`implementations-plan/key-model-v2/`) and the passkey-branch spec extension + 512-bit reduce
+ *   (`implementations-plan/key-model-v2-hardening/` — this also rotated every digest-embedding
+ *   account-export file; none existed outside e2e).
  * - Each extension major binds at compile time to exactly one regime constant (`V5_REGIME`).
  *   Re-binding a shipped major to a different regime is the forbidden act.
  * - Rotation = append a new entry AND ship a new extension major that binds to it (the
@@ -46,20 +50,22 @@ export type AddressRegime = {
 /**
  * The canonical, byte-frozen description of NULO-ACCOUNT-KDF v2 — the preimage of `kdfDigest`.
  * Changing ANY line changes the digest and reds `address-freeze.test.ts`. The constructions
- * themselves live in `@nulo/wallet-crypto` (mnemonic-master.ts, derive-account-seed.ts,
- * account-derivation.ts, nulo-separators.ts) and are value-pinned by the reference vectors in
- * `implementations-plan/key-model-v2/reference/`.
+ * themselves live in `@nulo/wallet-crypto` (mnemonic-master.ts, passkey-credential.ts,
+ * derive-account-seed.ts, account-derivation.ts, nulo-separators.ts) and are value-pinned by the
+ * reference vectors in `implementations-plan/key-model-v2/reference/` (mnemonic chain) and
+ * `implementations-plan/key-model-v2-hardening/reference/` (passkey master).
  */
 export const NULO_KDF_SPEC =
 	"nulo-account-kdf-v2\n" +
 	"seed64 = PBKDF2-HMAC-SHA512(NFKD(canonical(words).join(' ')), 'mnemonic'+NFKD(passphrase), 2048, 64B)\n" +
 	"master = Fr.fromBufferReduce(seed64)\n" +
+	"passkeyMaster = Fr.fromBufferReduce(HKDF-SHA256(ikm=prfBytes, salt=SHA-256(UTF8('nulo:kdf:v1')||credentialIdBytes), info=UTF8('nulo:master:v1'), 64B))  // profile master for passkey profiles\n" +
 	"accountSeed = poseidon2HashWithSeparator([master, l1ChainId, type, index], 2720999938)  // sha256('nulo:account-seed:v2')[0..4]\n" +
 	"signingKey = sha512ToGrumpkinScalar([accountSeed, 914717451])  // sha256('nulo:signing-root:v2')[0..4]\n" +
 	"secretKey = deriveSecretKeyFromSigningKey(signingKey)  // upstream @aztec/accounts 5.0.1, one-way\n"
 
 /** sha256(NULO_KDF_SPEC) — recomputed and asserted by the paired test. */
-export const NULO_KDF_DIGEST = "f6b4eee4f0d46c47090b06a6ce77786807d63e3772e5092466b9aedcf41bd1e3"
+export const NULO_KDF_DIGEST = "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d"
 
 export const REGIMES = {
 	"nulo-v5": {
