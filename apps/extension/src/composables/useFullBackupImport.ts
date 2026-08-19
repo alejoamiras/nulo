@@ -341,11 +341,17 @@ export interface UseFullBackupImportOptions {
 	 */
 	profileName?: Ref<string>
 	/**
-	 * Duplicate-phrase override from the warn-and-confirm dialog. The parent flips it after the
-	 * user confirms `DuplicateWalletError` and calls `restoreBackup` again — the service then
-	 * accepts the duplicate (soft guard by owner policy).
+	 * Duplicate-phrase override from the warn-and-confirm dialog. Set by `confirmDuplicate` while
+	 * it re-runs the restore; the service then accepts the duplicate (soft guard by owner policy).
 	 */
 	allowDuplicate?: Ref<boolean>
+	/**
+	 * Wraps the restore so a `DuplicateWalletError` surfaces the shared warn-and-confirm dialog
+	 * and, on confirm, re-runs with `allowDuplicate` set. Supplied by `useProfileImportFlow` so
+	 * the copy + retry semantics are identical across the seed / passkey / full-backup paths.
+	 * Resolves `undefined` when the user declines. Absent → no dialog (the error propagates).
+	 */
+	confirmDuplicate?: <T>(run: () => Promise<T>) => Promise<T | undefined>
 }
 
 export interface UseFullBackupImportResult {
@@ -642,13 +648,17 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 							importedKeysDek: dekField as string,
 						}
 					: { type: "passkey", credentialId: asBase64CredentialId(masterKey), dekSealed: dekSealedField as string }
-			const newProfile = await profileService.restore(
-				profileForRestore,
-				restoreSecret,
-				opts.password.value,
-				credentialData,
-				opts.allowDuplicate?.value,
-			)
+			// The dup guard throws a TYPED error out of restore (it is deliberately rethrown past
+			// restore's restoreError flattening); `confirmDuplicate` surfaces the shared dialog and
+			// re-runs with the override. `undefined` = the user declined → abandon the import
+			// cleanly (no profile was created — the guard runs before the row commit).
+			const runRestore = () =>
+				profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData, opts.allowDuplicate?.value)
+			const newProfile = opts.confirmDuplicate ? await opts.confirmDuplicate(runRestore) : await runRestore()
+			if (!newProfile) {
+				restoreStatus.value = ""
+				return
+			}
 
 			if (newProfile.restoreError) {
 				restoreStatus.value = "failed"
