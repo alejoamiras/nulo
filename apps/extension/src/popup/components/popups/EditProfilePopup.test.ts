@@ -145,6 +145,71 @@ describe("EditProfilePopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
+	test("Enter is LIVE during the unresolved initial getProfiles — the fresh re-check gates a collision the stale list missed", async () => {
+		// The composable installs the keydown listener BEFORE onShow's await
+		// (the hand-rolled watch installed it after). A collision typed during
+		// that window must be caught by the F4 re-fetch inside the submit latch.
+		profileServiceMock.getProfiles.mockReset()
+		profileServiceMock.getProfiles
+			.mockImplementationOnce(() => new Promise(() => {})) // initial population never resolves
+			.mockResolvedValueOnce([
+				{ id: "p1", name: "Main" },
+				{ id: "p2", name: "Backup" },
+			])
+		const w = await mountShown()
+		await typeName(w, "Backup")
+		pressEnterOnInput()
+		await flushPromises()
+		expect(profileServiceMock.getProfiles).toHaveBeenCalledTimes(2)
+		expect(profileServiceMock.changeProfileName).not.toHaveBeenCalled()
+		await dispose(w)
+	})
+
+	test("Enter during the unresolved initial getProfiles submits a non-colliding name (no deadlock)", async () => {
+		profileServiceMock.getProfiles.mockReset()
+		profileServiceMock.getProfiles
+			.mockImplementationOnce(() => new Promise(() => {}))
+			.mockResolvedValueOnce([
+				{ id: "p1", name: "Main" },
+				{ id: "p2", name: "Backup" },
+			])
+		const w = await mountShown()
+		await typeName(w, "Renamed")
+		pressEnterOnInput()
+		await flushPromises()
+		expect(profileServiceMock.changeProfileName).toHaveBeenCalledWith("p1", "Renamed")
+		await dispose(w)
+	})
+
+	test("re-show resets the editing state (name back to the profile's, submit button disabled again)", async () => {
+		const w = await mountShown()
+		await typeName(w, "Renamed")
+		await w.setProps({ show: false })
+		await w.setProps({ show: true })
+		await flushPromises()
+		const input = w.find('[data-testid="name-input"]').element as HTMLInputElement
+		expect(input.value).toBe("Main")
+		// isStartedEditing was reset on hide — the template's submit button is
+		// gated on it and must be disabled until the user types again.
+		const submitBtn = w.findAll("button").at(0)
+		expect(submitBtn?.attributes("disabled")).toBeDefined()
+		await dispose(w)
+	})
+
+	test("(BUG PIN) Enter submits the UNCHANGED name before any edit — the isStartedEditing gate is button-only", async () => {
+		// Pre-existing behavior preserved verbatim by the migration: the submit
+		// button is disabled until isStartedEditing, but handleUpdateProfile
+		// (the Enter path) checks only isAvailableToUpdateProfile, whose
+		// isUnchanged/isCollision guards BOTH require isStartedEditing — so an
+		// Enter right after opening submits the unchanged name. Tracked for a
+		// separate fix; this pin documents, not endorses.
+		const w = await mountShown()
+		pressEnterOnInput()
+		await flushPromises()
+		expect(profileServiceMock.changeProfileName).toHaveBeenCalledWith("p1", "Main")
+		await dispose(w)
+	})
+
 	test("hide disconnects the client; Enter after hide is inert", async () => {
 		const w = await mountShown()
 		await typeName(w, "Renamed")

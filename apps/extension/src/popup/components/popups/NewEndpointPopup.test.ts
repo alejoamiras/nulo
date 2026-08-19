@@ -136,14 +136,18 @@ describe("NewEndpointPopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
-	test("re-show resets the fields (label + URL + error cleared)", async () => {
+	test("re-show resets the fields (label + URL cleared)", async () => {
 		const w = await mountShown()
+		const label = w.findAll("input").find((i) => i.attributes("data-input-label") === "Label (optional)")
+		await label?.setValue("Backup")
 		await fillRpcUrl(w, "https://rpc.example.com")
 		await w.setProps({ show: false })
 		await w.setProps({ show: true })
 		await flushPromises()
 		const rpc = w.findAll("input").find((i) => i.attributes("data-input-label") === "RPC URL")
 		expect((rpc?.element as HTMLInputElement).value).toBe("")
+		const labelAfter = w.findAll("input").find((i) => i.attributes("data-input-label") === "Label (optional)")
+		expect((labelAfter?.element as HTMLInputElement).value).toBe("")
 		// And the cleared URL fails the submit guard again.
 		pressEnterOnInput()
 		await flushPromises()

@@ -129,6 +129,25 @@ describe("NewSenderPopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
+	test("Enter is LIVE during the unresolved initial getSenders — the hex-validity gate still holds", async () => {
+		// The composable installs the keydown listener BEFORE onShow's await
+		// (the hand-rolled watch installed it after). During that window the
+		// validity gate is the defense: invalid input never reaches addSender,
+		// a valid one submits (no deadlock).
+		accountStateServiceMock.getSenders.mockReset()
+		accountStateServiceMock.getSenders.mockImplementationOnce(() => new Promise(() => {}))
+		const w = await mountShown()
+		await typeAddress(w, "not-hex")
+		pressEnterOnInput()
+		await flushPromises()
+		expect(accountStateServiceMock.addSender).not.toHaveBeenCalled()
+		await typeAddress(w, VALID_HEX)
+		pressEnterOnInput()
+		await flushPromises()
+		expect(accountStateServiceMock.addSender).toHaveBeenCalledWith("net-1", VALID_HEX)
+		await dispose(w)
+	})
+
 	test("hide disconnects the client and resets the field; Enter after hide is inert", async () => {
 		const w = await mountShown()
 		await typeAddress(w, VALID_HEX)
