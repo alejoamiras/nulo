@@ -104,4 +104,13 @@ describe("SessionSecretBox v2 pair bearer (master || dek)", () => {
 		const crafted: SessionWrappedSecret = { ...v1, v: 2 }
 		expect(await box.unwrapPair(crafted, "profile-p1")).toBeNull()
 	})
+
+	test("wrapPair REJECTS non-32-byte components (a short dek must not zero-pad into a 'valid' pair)", async () => {
+		const short = asImportedKeysDek(new Uint8Array(1).fill(9))
+		const long = asImportedKeysDek(new Uint8Array(33).fill(9))
+		const short31 = asMasterSecretBytes(new Uint8Array(31).fill(9))
+		await expect(box.wrapPair(secret(), short, "p1")).rejects.toThrow()
+		await expect(box.wrapPair(secret(), long, "p1")).rejects.toThrow()
+		await expect(box.wrapPair(short31, dek(), "p1")).rejects.toThrow()
+	})
 })

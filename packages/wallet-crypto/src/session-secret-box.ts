@@ -97,13 +97,20 @@ export class SessionSecretBox {
 	 * caller-owned (caller zeroizes after this returns).
 	 */
 	public async wrapPair(master: MasterSecretBytes, dek: ImportedKeysDek, aad: string): Promise<SessionWrappedSecret> {
-		const pair = new Uint8Array(PAIR_LEN) as Uint8Array<ArrayBuffer>
-		pair.set(master, 0)
-		pair.set(dek, MASTER_SECRET_LEN)
+		// Brands erase at runtime — enforce the fixed 32+32 contract here, or a short input would
+		// silently zero-pad and unwrap into a "valid" branded secret (P3 rider Medium).
+		if (master.length !== MASTER_SECRET_LEN || dek.length !== MASTER_SECRET_LEN) {
+			throw new Error("wrapPair requires 32-byte master and dek")
+		}
+		let pair: Uint8Array<ArrayBuffer> | undefined
 		const token = crypto.getRandomValues(new Uint8Array(32))
 		const salt = crypto.getRandomValues(new Uint8Array(32))
 		const iv = crypto.getRandomValues(new Uint8Array(12))
 		try {
+			// Copy INSIDE the protected block so any throw from here on zeroizes it (rider Low).
+			pair = new Uint8Array(PAIR_LEN) as Uint8Array<ArrayBuffer>
+			pair.set(master, 0)
+			pair.set(dek, MASTER_SECRET_LEN)
 			const key = await deriveWrapKey(token, salt)
 			const ct = new Uint8Array(
 				await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) }, key, pair),
