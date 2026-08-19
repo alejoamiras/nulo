@@ -1334,6 +1334,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (!still || this.deletionState.isReserved(id) || !this.deletionState.isCurrent(id, capturedEpoch)) {
 					throw new Error("Invalid profile id")
 				}
+				// Pairing check at every entropy-decryption reveal site: this master feeds
+				// `exportAccount` (which derives real signing keys), so a corrupted/transplanted
+				// secret slot must fail loudly here too, not silently downstream.
+				await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 				// Backup `master-key` semantics: ALWAYS the derived master, never entropy —
 				// restore() seals this value verbatim as the working master.
 				return Buffer.from(unsealed.secret).toString("base64")
