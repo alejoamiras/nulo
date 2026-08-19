@@ -59,3 +59,14 @@ conditional approve (with conditions: define the transient source-DEK rewrap han
 - GATE / KDF freeze amendment / Explicit owner ratification remains open as the plan correctly requires.
 ---
 _Re-verdict (resumed final-pass session, on rev 3): conditional approve. Conditions 1 (rewrap-context lifetime) and 2 (rev-2 leftover sweep) adopted into rev 4; condition 3 (owner ratifies the KDF-spec amendment) is the approval-gate ask itself. Loop closed._
+FAIL (blocking: uncleared 64-byte HKDF reduction copy)
+
+- HIGH / [passkey-credential.ts:79](packages/wallet-crypto/src/passkey-credential.ts:79) / `Buffer.from(new Uint8Array(masterBits))` creates a separate 64-byte, master-equivalent OKM copy, but the `finally` at line 87 wipes only `masterBits`. The anonymous copy survives until GC; the new zeroize test wipes its own named input and cannot catch this production leak. / Store the reduction buffer in a variable and zero both buffers in `finally`, matching `mnemonic-master.ts`’s `seed64Copy` pattern.
+
+- LOW / [passkey-credential.ts:71](packages/wallet-crypto/src/passkey-credential.ts:71) / The old 256-bit reduction’s “~2^-1.6 relative bias” claim is inaccurate. Residues have five or six preimages: a 20% high/low skew (`2^-2.322`), with 253.415-bit min-entropy. / Use those exact figures.
+
+Everything else survived attack: full 64-byte big-endian reduction is wired; manual RFC 5869 Extract/Expand matched Node `hkdfSync`, WebCrypto, the JSON, and V3 exactly ([RFC 5869](https://www.rfc-editor.org/rfc/rfc5869.html), [WebCrypto HKDF](https://www.w3.org/TR/WebCryptoAPI/#hkdf)); the independently hashed spec digest is exactly `29eca1…166d`; no live stale V3 pin or missed dependent fixture was found. V8 and V11 are unaffected. Wallet-master production reductions are both 64 bytes; other grep hits are unrelated faucet deployer parsing.
+
+Relevant typechecks passed. Vitest could not start because the read-only sandbox rejected its cache/temp writes.
+---
+_P1 rider round 1 (FAIL: un-wiped 64-byte OKM copy) — fixed 987cd239; re-verdict: PASS. Absolute sandbox paths in the finding links refer to passkey-credential.ts lines 71/79 pre-fix._

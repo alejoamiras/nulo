@@ -337,7 +337,9 @@ account-import-export.test.ts` · ✚ dup-phrase e2e leg · ✎ `key-vectors.tes
 
 ### Arc 4 — `feat/kdf-v2-passkey-512` (stacks on #419)
 
-**P1 — passkey 512-bit reduce + KDF-spec extension.**
+**P1 — passkey 512-bit reduce + KDF-spec extension.** ✓ (gate passed 2026-08-19: audit:vue exit 0
+over the final state; mnemonic KATs/vectors green with ZERO edits; rider: codex xhigh FAIL —
+un-wiped 64-byte OKM copy — fixed 987cd239 → re-verdict PASS; lessons/phase-1.md)
 512-bit deriveBits + 64 B reduce; independent reference script → V3 re-pin; zeroize 64 B case;
 byte-precise `NULO_KDF_SPEC` passkey clause + digest recompute + freeze-test literals + substring
 pins + honest rules-text rewording ("window closes at the first shipped build"). Freeze triple in
