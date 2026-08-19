@@ -43,6 +43,7 @@ export {
 	sealDekUnderWrapKey,
 	unsealDekUnderWrapKey,
 } from "./imported-keys-dek-box"
+export { computeWalletFingerprint } from "./wallet-fingerprint"
 export { SessionSecretBox, type SessionWrappedSecret } from "./session-secret-box"
 export { PasskeyCredential, type PasskeyCredentialData } from "./passkey-credential"
 export { PASSKEY_PRF_LABEL } from "./constants"

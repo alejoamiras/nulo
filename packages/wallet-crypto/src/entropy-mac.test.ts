@@ -116,4 +116,11 @@ describe("envelope MAC v2 (DEK-keyed — the same-phrase attacker HOLDS the mast
 		expect(await verifyEnvelopeMacV2(MASTER, DEK, ENV_V2, "")).toBe(false)
 		expect(await verifyEnvelopeMacV2(MASTER, DEK, ENV_V2, "not-base64!!!")).toBe(false)
 	})
+
+	test("REJECTS non-32-byte key halves (distinct splits of the same bytes must not share a key)", async () => {
+		const master31 = asMasterSecretBytes(new Uint8Array(31).fill(7) as Uint8Array<ArrayBuffer>)
+		const dek33 = asImportedKeysDek(new Uint8Array(33).fill(7) as Uint8Array<ArrayBuffer>)
+		await expect(computeEnvelopeMacV2(master31, DEK, ENV_V2)).rejects.toThrow()
+		await expect(computeEnvelopeMacV2(MASTER, dek33, ENV_V2)).rejects.toThrow()
+	})
 })

@@ -76,6 +76,11 @@ function preimageV2(env: MacEnvelopeV2): Uint8Array<ArrayBuffer> {
 }
 
 async function macKeyV2(master: MasterSecretBytes, dek: ImportedKeysDek): Promise<CryptoKey> {
+	// Brands erase at runtime — enforce the fixed 32+32 concat contract, or two distinct
+	// (master, dek) splits of the same bytes would derive the same key (P3 rider Medium).
+	if (master.length !== 32 || dek.length !== 32) {
+		throw new Error("envelope MAC v2 requires 32-byte master and dek")
+	}
 	const ikmBytes = new Uint8Array(master.length + dek.length) as Uint8Array<ArrayBuffer>
 	ikmBytes.set(master, 0)
 	ikmBytes.set(dek, master.length)
