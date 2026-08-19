@@ -42,10 +42,14 @@ const NULO_ALLOW_IFRAME_DAPPS: boolean = import.meta.env?.VITE_NULO_ALLOW_IFRAME
 
 export const CONTENT_RELAY_GLOBAL_CAP = 32
 export const CONTENT_RELAY_PER_ORIGIN_CAP = 4
-/** Aligned with DISCOVERY_STALE_MS: the SDK stamps `discovery.timestamp` at
- *  FLUSH time, so relay residence would otherwise silently extend the B-16
- *  freshness window past the dApp's own 60s local timeout. */
-export const CONTENT_RELAY_MAX_AGE_MS = 55_000
+/** Relay-residence budget, sized for the COMPOSED freshness window: the SDK
+ *  stamps `discovery.timestamp` at FLUSH time, so the downstream 55s cutoff
+ *  restarts on delivery — end-to-end staleness is (relay residence + 55s).
+ *  With a 5s budget the worst case stays ≤ 60s, the dApp's own listener
+ *  window. Boot-to-attach is ~1-3s; a boot slower than this budget means the
+ *  dApp is effectively timed out anyway — drop and log rather than approve a
+ *  handshake nobody is waiting for. */
+export const CONTENT_RELAY_MAX_AGE_MS = 5_000
 
 type ContentListener = (message: unknown, sender: chrome.runtime.MessageSender) => void
 

@@ -113,9 +113,15 @@ describe("content-message-relay", () => {
 		expect(seen).toHaveLength(CONTENT_RELAY_GLOBAL_CAP)
 	})
 
-	test("TTL: entries older than the freshness window are dropped at flush (the B-16 clock is never laundered)", async () => {
+	test("TTL: entries older than the residence budget are dropped at flush (the composed freshness window stays ≤ the dApp's 60s)", async () => {
 		vi.useFakeTimers()
 		const { attachContentListener, dispatch, CONTENT_RELAY_MAX_AGE_MS } = await freshRelay()
+		// Pin the COMPOSED boundary arithmetic, not just the local constant: the
+		// SDK re-stamps freshness at flush, so end-to-end staleness is
+		// (relay residence + the downstream 55s cutoff). The budget must keep
+		// that sum within the dApp's 60s listener window.
+		expect(CONTENT_RELAY_MAX_AGE_MS + 55_000).toBeLessThanOrEqual(60_000)
+
 		dispatch(discovery("stale"), topFrameSender())
 		vi.advanceTimersByTime(CONTENT_RELAY_MAX_AGE_MS + 1_000)
 		dispatch(discovery("fresh"), topFrameSender("https://other.example"))
