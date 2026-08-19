@@ -26,4 +26,6 @@ Fix: `"ping"` added to the enum (the validator's own header documents this exact
 
 ## Audit ledger
 
-(appended as legs complete)
+- **Armed smoke: GREEN** (fixture-stamped build + `NULO_E2E_MIGRATION_FIXTURE=1`, per `_smoke-e2e.yml`): 112 passed / 6 skipped.
+- **Codex xhigh end-diff (light tier): `approve`, first pass, no conditions.** Independently confirmed: D2 opens no session oracle or amplification (pages cannot submit raw internal envelopes; no `externally_connectable`; PONG goes blind to the session's own tab; unknown ids allocate nothing; relay pre-attach admission still drops non-discovery types); the private-map pin's structural coupling is the accepted trade-off for its stated purpose; D1's gate has no other consumers and reset/collision flows hold; the diff contains nothing beyond the two sanctioned changes.
+- **New discovery (codex, pre-existing, NOT worsened by this diff):** `isProfileUpdateInProgress` is a loading flag, not an Enter re-entrancy guard — repeated Enter can start concurrent profile-name submissions. Recorded for the owner report; candidate for a tiny follow-up (early-return on the in-progress flag in `handleUpdateProfile`).
