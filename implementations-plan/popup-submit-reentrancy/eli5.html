@@ -61,7 +61,7 @@
   <p>Nothing, in normal use — except that mashing Enter now does exactly one thing. Tests: every fix class gets a pin that hangs a fake save and re-presses, proving one call; the existing end-to-end flows (rename, endpoints, accounts, contacts, senders) re-run as regression checks.</p>
 
   <div class="card ask">
-    <strong>One decision for you:</strong> while a save runs, the button will now look <em>disabled-dim</em> under its spinner (including the slow multi-second network probes). Accept that look, or should the spinner suppress the dimming (a small design-package CSS tweak)?
+    <strong>Decision made — Option B:</strong> while a save runs, the spinner keeps the button at its brighter loading look (one CSS line in the design package); the heavy dim stays reserved for "the form isn't valid". Chosen via the side-by-side design-system demo; the guard underneath is identical either way.
   </div>
 
   <h2>Where the details live</h2>

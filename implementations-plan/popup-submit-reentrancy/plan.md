@@ -27,8 +27,8 @@ Every async submit surface in `popup/components/popups/` + the capabilities appr
 - The in-flight visual (native-disabled 0.3 opacity layered under the spinner) is an acceptable state during slow probes (NewEndpoint's RPC probe, NewNetwork's addNetwork) — **explicit ASK below**.
 - B-09/B-26/NewToken stay untouched: their specialized latches justify convention divergence (audit concurs: "do not normalize merely for style").
 
-**Asks (surfaced at the approval gate):**
-1. **Visual acceptance:** during an in-flight submit the button will render natively disabled (dimmer) under its spinner, including multi-second probe flows. Accept, or should the loading state suppress the disabled dimming in CSS (small design-package tweak)?
+**Asks — RESOLVED at the approval gate:**
+1. **Visual: Option B chosen by the owner** (via the design-system A/B artifact): while loading, the disabled dim is suppressed — `.wrapper.disabled.loading { opacity: 0.8 }` in the design package's Button — so "saving" (bright + spinner) stays visually distinct from "invalid form" (0.3 dim). The native `disabled` attribute + `tabindex="-1"` behavior is identical in both options; the delta is presentational only.
 
 ## Architecture & Implementation (compact)
 
@@ -38,6 +38,7 @@ Every async submit surface in `popup/components/popups/` + the capabilities appr
 2. **Lifetime repairs + fold (3):** NewNetwork — `isCreating` spans the WHOLE handler (finally); EditAccount + EditNetwork — try/finally added so rejection clears the latch (prevents the fold-induced lockout).
 3. **Missing latch (1):** NewAccount — new `isCreatingAccount` ref (try/finally), fold, `:submitLoading` bound (currently absent).
 4. **Out-of-family repairs (2, audit-mandated):** RevokeAuthwits — `isLoading` added to the real button's `:disabled` (keydown gate already has it) + the test stub corrected to stop masking; capabilities window — `isLoading` joins `:confirm-disabled` and `approve()` gains the self-guard first line (matching execute/discover, which already self-guard).
+5. **Design-package visual (owner decision, Option B):** `packages/design/src/ui/Button.vue` gains `.wrapper.disabled.loading { opacity: 0.8 }` so the loading treatment wins over the disabled dim while a save runs. Pinned in the existing `Button.test.ts` (class-stacking case: disabled+loading renders BOTH classes — the selector's precondition; the opacity rule itself is CSS-only, review-verified).
 
 **Tests (audit-shaped):** the 5 existing-harness pins + a NewAccount harness whose single pin covers the rapid dual-route double-submit resolving to ONE RPC and ONE appended account; PLUS NewNetwork full-lifetime single-flight pin (re-press during the post-`addNetwork` awaits); NewSender disabled-follows-loading assertion; one rejection→retry pin on EditAccount or EditNetwork (latch clears, resubmit works); the corrected RevokeAuthwits stub keeps its existing `(REGRESSION-PIN)` honest. The remaining plain-fold popups (EditFpc, EditNetwork*, EditEndpoint, NewFpc) carry no new harnesses — each diff is the one-expression fold (\*EditNetwork's finally is covered by the rejection→retry pin if it's the chosen representative). No parameterized mega-harness (audit: it would hide fixture complexity, not save it). No new e2e (deterministic component pins beat Puppeteer races); existing specs run as regression checks.
 
