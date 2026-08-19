@@ -167,7 +167,7 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight update fires updateContact ONCE", async () => {
 		const w = await mountAndOpen()
 		contactServiceMock.updateContact.mockImplementation(() => new Promise(() => {}))
-		await w.find('[data-testid="name-input"]').setValue("Alicia")
+		await w.find('[data-testid="name-input"]').setValue("Alicia-Reentrant")
 		await flushPromises()
 		// The popup's keydown listener lives on `document`; the mounted tree is
 		// detached, so dispatch from a real document-level input. Earlier tests
@@ -178,17 +178,18 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		document.body.appendChild(docInput)
 		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 		await flushPromises()
-		const afterFirstPress = contactServiceMock.updateContact.mock.calls.length
 		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 		await flushPromises()
+		// Count only THIS instance's calls (unique name typed above) — leaked
+		// listeners from earlier tests answer the same document Enter but carry
+		// their own field values, so they cannot pollute this count.
+		const myCalls = contactServiceMock.updateContact.mock.calls.filter((c) => c[1] === "Alicia-Reentrant").length
 		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
 		// (document-listener removal) or the mock reset.
-		const afterSecondPress = contactServiceMock.updateContact.mock.calls.length
 		await w.setProps({ show: false })
 		contactServiceMock.updateContact.mockReset()
 		docInput.remove()
-		expect(afterFirstPress).toBeGreaterThan(0)
-		expect(afterSecondPress).toBe(afterFirstPress)
+		expect(myCalls).toBe(1)
 	})
 
 	test("Enter with a clean form is a no-op (dirty gate holds on the keyboard path)", async () => {

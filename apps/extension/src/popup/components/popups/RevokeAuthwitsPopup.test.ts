@@ -167,6 +167,11 @@ describe("RevokeAuthwitsPopup — Enter-key gate", () => {
 		pressEnter()
 		await flushPromises()
 		expect(authwitsServiceMock.revokeAuthwits).toHaveBeenCalledTimes(1)
+		// And the real button is NATIVELY disabled mid-flight (the corrected
+		// stub only forwards `disabled`, so this proves the template's
+		// :disabled now includes isLoading — closing keyboard-focused
+		// activation, which pointer-events CSS never covered).
+		expect(w.find('[data-testid="revoke-authwits-submit"]').attributes("disabled")).toBeDefined()
 		resolveRevoke()
 	})
 

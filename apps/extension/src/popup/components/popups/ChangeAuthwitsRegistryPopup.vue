@@ -64,6 +64,10 @@ const isAllowedToExecute = computed(() => {
 })
 
 async function handleChangeRegistry() {
+	// Full-lifetime submit latch, handler-owned: every route (keydown, click,
+	// any future caller) self-checks here — the caller-side `!isLoading`
+	// duplication in onKeydown/:disabled is defense-in-depth, not the guard.
+	if (isLoading.value) return
 	// `isAllowedToExecute` is a computed ref (always truthy as a ref object) —
 	// must dereference `.value` for the guard to actually work. Pre-fix this
 	// guard was a no-op, letting Enter / programmatic clicks fire the handler
@@ -84,6 +88,9 @@ async function handleChangeRegistry() {
 			openToast({ label: "Failed to change registry status", icon: "warning" }, TOAST_DURATION.LONG)
 		}
 	} finally {
+		// Handler-owned latch release — closure via the hide watcher still
+		// happens, but the latch must not depend on it.
+		isLoading.value = false
 		emit("onClose")
 	}
 }
