@@ -48,7 +48,6 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		"addToken",
 		"updateToken",
 		"deleteToken",
-		"getTokenInterface",
 		"parseTokenInterface",
 		"previewTokenMetadata",
 	)
@@ -431,88 +430,6 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		await this.tokens.delete(`${id}`)
 		if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
 		return getTokenInfo(token)
-	}
-
-	public async getTokenInterface(networkId: string, tokenId: number): Promise<TokenInterface> {
-		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profiles)
-		const token = requireOwnedRow(await this.tokens.get(`${tokenId}`), profile.id, "unknown token id")
-
-		const network = await this.networks.getNetwork(networkId)
-		if (!network) {
-			throw new Error("unknown network id")
-		}
-
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const instance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(token.contract))
-		if (!instance) {
-			throw new Error("contract instance not found")
-		}
-
-		const artifact = await pxe.getContractArtifact(instance.currentContractClassId)
-		if (!artifact) {
-			throw new Error("contract artifact not found")
-		}
-
-		await ensureRegistered(pxe, token.contract, instance, artifact)
-
-		const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact).map((x) => x.getImpl())
-		const getNameFn = token.getNameFn
-
-		const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact).map((x) => x.getImpl())
-		const getSymbolFn = token.getSymbolFn
-
-		const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact).map((x) => x.getImpl())
-		const getDecimalsFn = token.getDecimalsFn
-
-		const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact).map((x) => x.getImpl())
-		const balanceOfPrivateFn = token.balanceOfPrivateFn
-
-		const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact).map((x) => x.getImpl())
-		const balanceOfPublicFn = token.balanceOfPublicFn
-
-		const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact).map((x) => x.getImpl())
-		const transferPublicFn = token.transferPublicFn
-
-		const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact).map((x) => x.getImpl())
-		const transferPrivateFn = token.transferPrivateFn
-
-		const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact).map((x) =>
-			x.getImpl(),
-		)
-		const transferPrivateToPublicFn = token.transferPrivateToPublicFn
-
-		const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact).map((x) =>
-			x.getImpl(),
-		)
-		const transferPublicToPrivateFn = token.transferPublicToPrivateFn
-
-		const ti: TokenInterface = {
-			chainId: token.chainId,
-			contract: token.contract,
-			getNameFn,
-			getNameFnCandidates,
-			getSymbolFn,
-			getSymbolFnCandidates,
-			getDecimalsFn,
-			getDecimalsFnCandidates,
-			balanceOfPublicFn,
-			balanceOfPublicFnCandidates,
-			balanceOfPrivateFn,
-			balanceOfPrivateFnCandidates,
-			transferPublicFn,
-			transferPublicFnCandidates,
-			transferPrivateFn,
-			transferPrivateFnCandidates,
-			transferPublicToPrivateFn,
-			transferPublicToPrivateFnCandidates,
-			transferPrivateToPublicFn,
-			transferPrivateToPublicFnCandidates,
-			isComplete: false,
-		}
-		ti.isComplete = isTokenComplete(ti)
-		return ti
 	}
 
 	/**

@@ -182,13 +182,6 @@ export type Methods = {
 	deleteToken(id: number): TokenInfo
 
 	/**
-	 * Returns interface of the token with the specified id.
-	 * @param networkId Network id.
-	 * @param tokenId Token id.
-	 */
-	getTokenInterface(networkId: string, tokenId: number): TokenInterface
-
-	/**
 	 * Parses contract and returns token interface.
 	 * @param networkId Network id.
 	 * @param contract Token contract address.
