@@ -22,20 +22,8 @@ export { NULO_ACCOUNT_SEED_SEP, NULO_SEPARATOR_LABELS, NULO_SIGNING_ROOT_SEP } f
 export { derivePxeStoreKey, PXE_STORE_KDF_LABEL } from "./pxe-store-key"
 export { EncryptionKey } from "./encryption-key"
 export { PasswordSecretBox, PROFILE_AAD, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
-export {
-	computeEnvelopeMac,
-	computeEnvelopeMacV2,
-	verifyEnvelopeMac,
-	verifyEnvelopeMacV2,
-	type MacEnvelope,
-	type MacEnvelopeV2,
-} from "./entropy-mac"
-export {
-	sealImportedSigningKey,
-	sealImportedSigningKeyV2,
-	unsealImportedSigningKey,
-	unsealImportedSigningKeyV2,
-} from "./imported-account-key-box"
+export { computeEnvelopeMacV2, verifyEnvelopeMacV2, type MacEnvelopeV2 } from "./entropy-mac"
+export { sealImportedSigningKeyV2, unsealImportedSigningKeyV2 } from "./imported-account-key-box"
 export {
 	generateImportedKeysDek,
 	IMPORTED_DEK_AAD,
