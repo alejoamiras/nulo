@@ -353,7 +353,7 @@ async function setupConnectedPlayground(
  *  loadInteractionPayload's PXE/accountService warmup can each exceed 30s on a
  *  cold CI runner; 30s for the dApp result). `pick` owns the per-fixture
  *  selection + its failure messages (single account vs first-two). */
-async function grantCapBundle(
+export async function grantCapBundle(
 	ctx: ExtensionContext,
 	playgroundPage: Page,
 	bundle: "accounts" | "transaction",
