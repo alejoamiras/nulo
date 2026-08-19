@@ -3,7 +3,8 @@ name: Smoke e2e
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, dev]
+    # NO `branches:` filter — see pr-quick.yml: that key filters on the PR's BASE,
+    # so a stacked PR targeting its parent feature branch got no CI whatsoever.
     # `labeled` so adding `e2e:smoke` after open triggers a fresh run;
     # `unlabeled` so removing it re-evaluates the gate instead of leaving
     # a stale failing result; `ready_for_review` so a draft marked ready
