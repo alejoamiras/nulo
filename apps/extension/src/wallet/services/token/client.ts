@@ -28,7 +28,6 @@ definePassthroughsExhaustive<Methods>()(TokenServiceClient.prototype, [
 	"addToken",
 	"updateToken",
 	"deleteToken",
-	"getTokenInterface",
 	"parseTokenInterface",
 	"previewTokenMetadata",
 ])
