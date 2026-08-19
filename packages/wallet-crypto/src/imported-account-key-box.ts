@@ -1,12 +1,19 @@
 /**
  * Encrypts an IMPORTED account's Schnorr signing key at rest, bound to its row identity.
  *
- * The key is sealed under `HKDF(master, info = "nulo:imported-account-key:v1" || chainId ||
- * address)` — the per-row `info` means a ciphertext transplanted to a DIFFERENT account row (or a
- * different profile's master) fails to decrypt, not just fails a later address check. The master
- * is the profile's own secret and travels with a full backup, so imported keys survive a
- * backup/restore; `(master, chainId, address)` deliberately excludes `profileId` (full-backup
- * restore remaps profile ids, which would otherwise strand the key).
+ * The key is sealed under `HKDF(dek, info = "nulo:imported-account-key:v2" || chainId ||
+ * address)`. The root is the profile's CREDENTIAL-sealed imported-keys DEK, never the master: two
+ * profiles created from the same recovery phrase share the master, so a master-rooted key is
+ * readable by the sibling profile BY CONSTRUCTION — the DEK is the isolation boundary. (Isolation
+ * between same-phrase profiles therefore requires distinct CREDENTIALS; reusing one password
+ * across them collapses the boundary, and is the confused-deputy case the plan records as an
+ * accepted residual — that attacker can unlock the sibling profile outright anyway.)
+ *
+ * The per-row `info` means a ciphertext transplanted to a DIFFERENT account row (or sealed under a
+ * different profile's DEK) fails to decrypt, not just fails a later address check. It deliberately
+ * excludes `profileId` — full-backup restore remaps profile ids, which would otherwise strand the
+ * key; a restored backup's rows are instead rewrapped from the source DEK onto the destination
+ * profile's freshly minted one (clone divergence).
  *
  * Uses `globalThis.crypto` for the same cross-env reason as `mnemonic-master.ts`.
  */
@@ -14,16 +21,11 @@ import { fromBase64, toBase64 } from "@nulo/wallet-core/utils"
 import type { ImportedKeysDek } from "./secret-types"
 import { zeroize } from "./zeroize"
 
-const INFO_PREFIX = "nulo:imported-account-key:v1"
-// v2: the HKDF root is the CREDENTIAL-sealed per-profile DEK, not the master. A master-rooted
-// key is decryptable by any same-phrase sibling profile by construction (shared phrase ⇒ shared
-// master); the DEK is the isolation boundary. The per-row info (chainId|address, deliberately NO
-// profileId) keeps the restore-id-remap survival and transplant rejection of v1.
 const INFO_PREFIX_V2 = "nulo:imported-account-key:v2"
 
-async function rowKey(ikmBytes: Uint8Array<ArrayBuffer>, infoPrefix: string, chainId: number, address: string): Promise<CryptoKey> {
-	const ikm = await globalThis.crypto.subtle.importKey("raw", ikmBytes, "HKDF", false, ["deriveKey"])
-	const info = new TextEncoder().encode(`${infoPrefix}|${chainId}|${address}`)
+async function rowKey(dek: ImportedKeysDek, chainId: number, address: string): Promise<CryptoKey> {
+	const ikm = await globalThis.crypto.subtle.importKey("raw", dek, "HKDF", false, ["deriveKey"])
+	const info = new TextEncoder().encode(`${INFO_PREFIX_V2}|${chainId}|${address}`)
 	return globalThis.crypto.subtle.deriveKey(
 		{ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info },
 		ikm,
@@ -33,56 +35,16 @@ async function rowKey(ikmBytes: Uint8Array<ArrayBuffer>, infoPrefix: string, cha
 	)
 }
 
-/** Seal a 32-byte signing key for `(profile master, chainId, address)`. Returns base64
- *  `version(1) || iv(12) || ciphertext`. Caller owns + zeroes `signingKey`. */
-export async function sealImportedSigningKey(
-	master: Uint8Array<ArrayBuffer>,
-	chainId: number,
-	address: string,
-	signingKey: Uint8Array<ArrayBuffer>,
-): Promise<string> {
-	const key = await rowKey(master, INFO_PREFIX, chainId, address)
-	const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
-	const ct = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, signingKey))
-	const out = new Uint8Array(13 + ct.length)
-	out[0] = 1
-	out.set(iv, 1)
-	out.set(ct, 13)
-	return toBase64(out)
-}
-
-/** Unseal a signing key. Throws on wrong master / transplanted ciphertext / corruption (AES-GCM
- *  authentication). Caller owns + zeroes the returned buffer. */
-export async function unsealImportedSigningKey(
-	master: Uint8Array<ArrayBuffer>,
-	chainId: number,
-	address: string,
-	sealed: string,
-): Promise<Uint8Array<ArrayBuffer>> {
-	const bytes = fromBase64(sealed)
-	try {
-		if (bytes.length < 13 || bytes[0] !== 1) throw new Error("Invalid imported-key envelope")
-		const iv = bytes.subarray(1, 13)
-		const ct = bytes.subarray(13)
-		const key = await rowKey(master, INFO_PREFIX, chainId, address)
-		return new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct)) as Uint8Array<ArrayBuffer>
-	} finally {
-		// Wipe the decoded envelope on every path — including the wrong-master /
-		// transplant / corruption throw, which is the common adversarial case.
-		zeroize(bytes)
-	}
-}
-
-/** v2 seal: the row key roots in the profile's imported-keys DEK (brand-enforced — a master can
- *  never be passed here). Returns base64 `version(1) || iv(12) || ciphertext`. Caller owns +
- *  zeroes `signingKey`. */
+/** Seal a 32-byte signing key for `(profile DEK, chainId, address)`. Returns base64
+ *  `version(1) || iv(12) || ciphertext` — that leading byte is the ENVELOPE framing version,
+ *  orthogonal to the KDF-root version in the HKDF info. Caller owns + zeroes `signingKey`. */
 export async function sealImportedSigningKeyV2(
 	dek: ImportedKeysDek,
 	chainId: number,
 	address: string,
 	signingKey: Uint8Array<ArrayBuffer>,
 ): Promise<string> {
-	const key = await rowKey(dek, INFO_PREFIX_V2, chainId, address)
+	const key = await rowKey(dek, chainId, address)
 	const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
 	const ct = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, signingKey))
 	const out = new Uint8Array(13 + ct.length)
@@ -92,7 +54,7 @@ export async function sealImportedSigningKeyV2(
 	return toBase64(out)
 }
 
-/** v2 unseal. Throws on wrong DEK / transplanted ciphertext / corruption (AES-GCM
+/** Unseal a signing key. Throws on wrong DEK / transplanted ciphertext / corruption (AES-GCM
  *  authentication). Caller owns + zeroes the returned buffer. */
 export async function unsealImportedSigningKeyV2(
 	dek: ImportedKeysDek,
@@ -105,7 +67,7 @@ export async function unsealImportedSigningKeyV2(
 		if (bytes.length < 13 || bytes[0] !== 1) throw new Error("Invalid imported-key envelope")
 		const iv = bytes.subarray(1, 13)
 		const ct = bytes.subarray(13)
-		const key = await rowKey(dek, INFO_PREFIX_V2, chainId, address)
+		const key = await rowKey(dek, chainId, address)
 		return new Uint8Array(await globalThis.crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct)) as Uint8Array<ArrayBuffer>
 	} finally {
 		// Wipe the decoded envelope on every path — the wrong-DEK / transplant /
