@@ -580,13 +580,27 @@ Two new arcs on the existing stack #420 (`dev ← #417 ← #418 ← #419`):
 - Independently revertable: arc 4 reverts to the parent stack's passkey behavior; arc 5 reverts to
   master-rooted imported keys with no dup guard.
 
-## Seeds
+## Approval
 
-(final versions delivered post-approval; drafts in the ELI5 companion)
+**APPROVED (owner, 2026-08-19)** — verdict: approve, scope as written (arcs 4+5). The KDF-spec
+amendment is **RATIFIED** (owner accepted: passkey addresses rotate pre-production; pre-existing
+account-export files stop validating — none exist outside e2e; rules text rewritten to "the
+in-place redefinition window closes at the first shipped build"). This closes the final audit
+pass's third condition — no conditions remain open.
+
+## Seeds (FINAL — post-approval canonical)
 
 **ELI5 companion**: Artifact at https://claude.ai/code/artifact/e976d1bd-101a-44e2-9542-6cb74c5ed5cd
 (`eli5_mode: artifact`; source: `implementations-plan/key-model-v2-hardening/eli5.html` — redeploying
 the same file from the owning session keeps the URL; other sessions pass the URL as `url`).
+
+**Recommended: /goal** (completion transcript-observable; survives resume):
+
+```
+/goal All six phases (P1–P6) marked ✓ in implementations-plan/key-model-v2-hardening/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as defined in plan.md reported passing in the transcript — including P4's ten named integration criteria (a)–(j) and the prover-ON passkey execution canary; the crypto adversarial riders executed — after P1, P3, and P4 a focused codex xhigh attack on that phase's implemented diff is quoted in the transcript with its verdict, and no High finding is left unresolved; for each phase the agent printed LESSONS_FILE=implementations-plan/key-model-v2-hardening/lessons/phase-N.md in the transcript; /code-review max --fix complete with fixes committed separately; the codex post-impl fix loop converged (a resumed codex pass reporting no new material findings, quoted in the transcript); arcs 4 and 5 exist on the gh stack as draft PRs (gh stack view output in the transcript showing feat/kdf-v2-passkey-512 and feat/kdf-v2-dek-isolation stacked on #419); bun run audit:vue, bun run test:e2e, and the targeted bun run e2e:agent runs (passkey-execution-canary + frozen-account-canary + profile-reimport-matrix) all report exit 0 in the transcript.
+```
+
+**Alternative: /loop 15m** (in the ELI5 companion, kept in sync). Use exactly ONE per session.
 
 ## Audit verdicts
 
