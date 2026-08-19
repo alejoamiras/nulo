@@ -17,6 +17,22 @@ export interface TabLifecycleDeps {
  * session's life to its tab. Pure side-effecting registration — no unsubscribe
  * (nothing tears down in a service worker); MUST be called before
  * `handler.initialize()`, at the same position the inline block held.
+ *
+ * URL visibility: the manifest declares NO "tabs" permission and
+ * `host_permissions` covers only nulo.sh + 127.0.0.1 — yet `changeInfo.url` IS
+ * populated for ordinary web origins, because the content script's all-URLs
+ * `matches` pattern is itself an effective host-access grant and that grant
+ * class gates `changeInfo.url`. Pinned empirically by the tabs-onUpdated leg
+ * of tests/e2e/network/session-tabNavigate.test.ts, which observes the URL for
+ * a localhost origin covered by neither of the other two grants.
+ *
+ * Classification: bookkeeping hygiene + reconnect UX, NOT a security control.
+ * Navigation already destroys both MessagePort ends (per-document realms), the
+ * sessionId is an unguessable crypto.randomUUID the page never sees, and the
+ * ECDH sharedKey never leaves the two parties — a stale ActiveSession is inert
+ * memory. Cleanup holds even where URL visibility doesn't: tabs.onRemoved
+ * (fires without any URL grant), SW eviction, the DappSession deletion sweep,
+ * and the 7-day TTL.
  */
 export function wireTabLifecycle(deps: TabLifecycleDeps): void {
 	// Terminate sessions when a tab is closed

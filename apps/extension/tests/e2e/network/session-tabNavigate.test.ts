@@ -1,5 +1,5 @@
 import { expect, inject } from "vitest"
-import { clickByTestId, test } from "../fixtures/extension"
+import { clickByTestId, openPopup, test } from "../fixtures/extension"
 import { openPlayground } from "../fixtures/playground"
 import { waitForPopup, approveDiscover, approveVerify } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
@@ -35,8 +35,15 @@ test.skipIf(!hasConfig)(
 		await approveVerify(verifyPage)
 		await dappPage.waitForSelector('[data-testid="pg-status"][data-status="connected"]', { timeout: 20_000 })
 
-		// Navigate the same tab to a different origin — terminates transport, DappSession persists
-		await dappPage.goto("about:blank", { waitUntil: "domcontentloaded" })
+		// Navigate the same tab to a REAL cross-origin destination — the aztec node
+		// on another localhost port (guaranteed alive for the whole suite). This
+		// used to be about:blank, which the content-script pattern does not match,
+		// so Chrome withheld changeInfo.url and the guard's cross-origin branch
+		// never executed — the transport died only via realm teardown and the test
+		// was blind to the guard it cites. A localhost:<other-port> URL is matched,
+		// cross-origin vs the playground, and the guard branch runs for real.
+		if (!aztecConfig) throw new Error("unreachable: guarded by skipIf(!hasConfig)")
+		await dappPage.goto(`${aztecConfig.nodeUrl}/status`, { waitUntil: "domcontentloaded" })
 
 		// Open a fresh playground tab to reconnect. Snapshot existing targets so we
 		// can assert no NEW discover popup opened during the reconnect window.
@@ -59,5 +66,48 @@ test.skipIf(!hasConfig)(
 
 		await dappPage.close()
 		await dappPage2.close()
+	},
+)
+
+/**
+ * Empirical pin for the origin guard's URL-visibility premise (see the
+ * `wireTabLifecycle` header in `wallet-sdk/tab-lifecycle.ts`): with NO "tabs"
+ * permission and localhost absent from `host_permissions`, `changeInfo.url`
+ * must still reach `chrome.tabs.onUpdated` for a localhost navigation — the
+ * grant can only come from the content script's all-URLs `matches` pattern. If
+ * a manifest change ever drops that grant class, this reds and the guard's
+ * cross-origin branch is genuinely dead code.
+ */
+test.skipIf(!hasConfig)(
+	"tabs.onUpdated delivers changeInfo.url for a non-host-permitted origin (content-script grant)",
+	{ timeout: 60_000 },
+	async ({ registeredExtensionPerTest }) => {
+		if (!aztecConfig) throw new Error("unreachable: guarded by skipIf(!hasConfig)")
+		const dappPage = await openPlayground(registeredExtensionPerTest)
+
+		// An extension page registers the SAME event the guard listens on.
+		const popup = await openPopup(registeredExtensionPerTest)
+		await popup.evaluate(() => {
+			const w = window as unknown as { __navUrls: string[] }
+			w.__navUrls = []
+			chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+				if (changeInfo.url) w.__navUrls.push(changeInfo.url)
+			})
+		})
+
+		const nodeOrigin = new URL(aztecConfig.nodeUrl).origin
+		await dappPage.goto(`${aztecConfig.nodeUrl}/status`, { waitUntil: "domcontentloaded" })
+
+		await popup.waitForFunction(
+			(origin: string) => {
+				const w = window as unknown as { __navUrls?: string[] }
+				return (w.__navUrls ?? []).some((u) => u.startsWith(origin))
+			},
+			{ timeout: 15_000 },
+			nodeOrigin,
+		)
+
+		await popup.close()
+		await dappPage.close()
 	},
 )
