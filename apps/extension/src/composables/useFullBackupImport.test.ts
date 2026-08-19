@@ -44,6 +44,8 @@ const networkClient = {
 }
 const accountClient = {
 	restore: vi.fn(),
+	restoreImportedKeys: vi.fn(async () => []),
+	reconcileImportedAccounts: vi.fn(async () => []),
 	disconnect: vi.fn(),
 }
 const tokenClient = {
@@ -130,6 +132,8 @@ vi.mock("@/wallet/services/config/client", () => ({
 vi.mock("@/wallet/services/account/spec", () => ({
 	ACCOUNT_SERVICE_NAME: "account",
 	ACCOUNT_STORAGE_ROOT: "nulo:core:accounts",
+	IMPORTED_KEYS_SERVICE_NAME: "imported-account-keys",
+	IMPORTED_KEYS_STORAGE_ROOT: "nulo:core:imported-account-keys",
 	accountRowId: (profileId: string, chainId: number, address: string) => JSON.stringify(["account", profileId, chainId, address]),
 }))
 vi.mock("@/wallet/services/account-state/spec", () => ({ ACCOUNT_STATE_SERVICE_NAME: "account-state" }))

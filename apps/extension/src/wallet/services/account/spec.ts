@@ -216,6 +216,13 @@ export type Methods = {
 	 */
 	importAccount(profileId: string, chainId: number, fileBody: string, expectedAddress: string, password: string): Account
 
+	/**
+	 * Preview an account-export file WITHOUT writing: decrypt (if needed), validate the envelope,
+	 * and return the address recomputed from its signing key — the address the UI shows the user to
+	 * confirm before `importAccount`. Throws on any envelope/decrypt/regime failure.
+	 */
+	previewImportAccount(fileBody: string, password: string): string
+
 	/** Backup the active profile's imported-account encrypted key rows (the dedicated slice). */
 	backupImportedKeys(): ImportedAccountKey[]
 

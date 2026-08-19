@@ -12,6 +12,7 @@ export const useCacheStore = defineStore("cache", () => {
 	const endpointEditNetworkId = ref<string | null>(null)
 	const endpointEditId = ref<string | null>(null)
 	const accountToEditIdx = ref()
+	const accountToExportIdx = ref()
 	const contactToEditIdx = ref()
 	const fpcToEditIdx = ref()
 
@@ -42,6 +43,7 @@ export const useCacheStore = defineStore("cache", () => {
 		endpointEditNetworkId,
 		endpointEditId,
 		accountToEditIdx,
+		accountToExportIdx,
 		contactToEditIdx,
 		fpcToEditIdx,
 		activeTokenIdx,
