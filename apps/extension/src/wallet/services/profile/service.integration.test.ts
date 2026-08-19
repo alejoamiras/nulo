@@ -2411,6 +2411,72 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
 		})
 
+		// Post-impl codex MEDIUM: a password change must not LAUNDER a MAC that no longer covers
+		// the row — otherwise a transplanted dekSealed that unlock quarantined gets re-MACed into a
+		// freshly-valid envelope and the profile silently adopts an attacker-chosen key.
+		test("changeProfilePassword DISCARDS a dek the stored MAC does not cover (no laundering)", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const before = await service.getProfileDek(p.id)
+			await service.lockActiveProfile()
+			// Break ONLY the MAC: dekSealed still unseals, so the pre-fix path would have kept it.
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			await service.unlockProfile(p.id, "pass1234")
+			expect(await service.getProfileDek(p.id)).toBeUndefined() // derived-only, as designed
+			await service.changeProfilePassword(p.id, "pass1234", "newpass9")
+			const after = await service.getProfileDek(p.id)
+			// A FRESH dek — the suspect one was destroyed, not blessed.
+			expect(after).toBeDefined()
+			expect(Array.from(after!)).not.toEqual(Array.from(before!))
+			// And the repair sticks: a clean lock/unlock cycle is no longer degraded.
+			await service.lockActiveProfile()
+			await service.unlockProfile(p.id, "newpass9")
+			expect(await service.getProfileDek(p.id)).toBeDefined()
+		})
+
+		// Post-impl codex MEDIUM: the fresh-auth export RPCs bypass the unlock-time gate entirely,
+		// so they must run the MAC check themselves or a quarantined profile still exports.
+		test("the fresh-auth export RPCs refuse a dek the stored MAC does not cover", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			await expect(service.exportBackupMaterial(p.id, "pass1234")).rejects.toThrow(/unrecoverable/)
+			await expect(service.exportImportedKeysDek(p.id, "pass1234")).rejects.toThrow(/unrecoverable/)
+		})
+
+		// Post-impl codex MEDIUM: the stale sweep EXCLUDES the id being consumed, so the TTL has to
+		// be enforced on the consumed entry too — otherwise an abandoned restore's raw SOURCE dek
+		// stays consumable for the whole SW lifetime.
+		test("consumeDekRewrapContext enforces the TTL on the entry it consumes", async () => {
+			vi.useFakeTimers()
+			try {
+				const { service } = await makeService()
+				const pair = await restorePairFor(0x71)
+				const srcDek = Buffer.from(new Uint8Array(32).fill(0x77)).toString("base64")
+				const restored = await service.restore(
+					{ id: "ttl", name: "TTL", type: "password" },
+					{ type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: srcDek },
+					"pass1234",
+					undefined,
+					true,
+				)
+				if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+				vi.advanceTimersByTime(31 * 60 * 1000)
+				// No other map operation happened, so the sweep alone would never have freed it.
+				expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		// (i) same-credential passkey duplicate is a HARD reject (no allowDuplicate escape).
 		test("(i) a same-credential passkey import is hard-rejected", async () => {
 			const { service } = await makeService()
