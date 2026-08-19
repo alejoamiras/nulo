@@ -351,7 +351,9 @@ any spec edit reds the digest test). Layers: typecheck/unit/component/lint/build
 (64 B reduce correctly wired; no remaining sub-512 reduce anywhere), spec-clause byte-fidelity vs
 the implementation, reference-script independence. No unresolved High.
 
-**P2 — passkey execution canary.**
+**P2 — passkey execution canary.** ✓ (gate passed 2026-08-19: `bun run e2e:agent
+passkey-execution-canary + frozen-account-canary` prover-ON → 2 files / 4 tests passed, exit 0;
+round-1 stage-4 harness fix 791ec097 — lessons/phase-2.md)
 Execution-only design per §D: registration fixture (virtual authenticator PRF) + dApp connect →
 real proven tx → authwit → same-instance/same-FTN SW-restart leg (fresh ceremony) → proves again.
 **Gate**: `bun run e2e:agent tests/e2e/network/passkey-execution-canary.test.ts
