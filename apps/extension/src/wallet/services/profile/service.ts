@@ -1226,6 +1226,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (pending) {
 				this.pendingRestoreSecrets.delete(id)
 				zeroize(pending.secret)
+				zeroize(pending.dek)
+			}
+			// Deleting a profile mid-restore must also drop + zeroize its rewrap context (its
+			// buffers aren't aged yet, so the TTL sweep wouldn't reap them) — P4 rider Medium.
+			const rewrap = this.pendingDekRewraps.get(id)
+			if (rewrap) {
+				this.pendingDekRewraps.delete(id)
+				zeroize(rewrap.sourceDek)
+				zeroize(rewrap.destinationDek)
 			}
 			// A deleted profile's integrity records must not outlive it: a stale blocking record
 			// would keep the barrier up forever, and a stale verified-stamp could let a future
@@ -2313,11 +2322,35 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// the try so a pairing throw still wipes the unsealed buffers (rider Low).
 					await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 					passhash = await EncryptionKey.getPasshash(password)
-					// Degradation state machine at this open too — the row was freshly minted by
-					// restore(), so a failure here means a tamper landed between the two calls.
+					// Full degradation state machine at this open too (P4 rider High): the row was
+					// minted by restore(), so a DEK-unseal OR envelope-MAC-v2 failure here means a
+					// tamper landed BETWEEN restore and finalize — this path opens a bearer-backed
+					// session, so skipping the MAC check would hand a storage attacker a
+					// non-degraded session. On either failure: discard the DEK, open derived-only
+					// (no bearer), emit the visible warning.
 					dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
+					if (dek) {
+						const macOk = await verifyEnvelopeMacV2(
+							unsealed.secret,
+							dek,
+							this.macEnvelopeV2(
+								{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy },
+								profile.dekSealed,
+							),
+							profile.envelopeMac,
+						)
+						if (!macOk) {
+							zeroize(dek)
+							dek = null
+						}
+					}
 					if (!dek) {
-						this.logger.log(this.name, LogLevel.Error, "imported-keys DEK failed at finalizeRestore — opening derived-only", id)
+						this.logger.log(
+							this.name,
+							LogLevel.Error,
+							"imported-keys DEK/MAC failed at finalizeRestore — opening derived-only",
+							id,
+						)
 					}
 					await this.openSessionVerified(profile, unsealed.secret, passhash, dek ?? undefined)
 					if (!dek) {
