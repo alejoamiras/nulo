@@ -427,7 +427,11 @@ retry; copy per the frontend addendum; component tests for catch-confirm-retry.
 **Gate**: `bun run audit:vue && bun run test:e2e` — both exit 0 (smoke solo; armed build for the
 migration-fixture tests as in CI). Layers: + smoke e2e.
 
-**P6 — the missing e2e + reconciliation.**
+**P6 — the missing e2e + reconciliation.** ✓ (gate passed 2026-08-19 on the complete P1–P6 tree:
+`bun run audit:vue` exit 0; `bun run test:e2e` exit 0 — 28 files / 93 passed (the 6 new tests
+included); `bun run e2e:agent passkey-execution-canary + frozen-account-canary +
+profile-reimport-matrix` prover-ON exit 0 — 3 files / 7 passed. The new suite immediately caught a
+real shipped bug: the account-import file-picker was dead — lessons/phase-6.md)
 `account-import-export.test.ts` (round-trip ×2, tamper, duplicate); dup-phrase confirm e2e
 (password-profile scenario); full smoke; targeted network re-run at the stack tip.
 **Gate**: `bun run test:e2e` exit 0 (new tests green in the suite) AND `bun run e2e:agent
