@@ -219,7 +219,7 @@ Settled by owner in-conversation (recorded): 24-word-only import; Nulo-format-on
 | L10 | Import binds to active network; l1ChainId mismatch → warn + explicit confirm | fable M6 | adopted |
 | L11 | Entropy claim restated honestly (≥253.5-bit floor; no "no-narrowing"/"256-bit master" claims) | codex M1 + fable M1/C5 | adopted |
 | L12 | Imported-tamper quarantine vs profile block | fable M7 (codex High-4 preferred durable block) → Ask A4 | pending owner |
-| L13 | P6 imported-account live signing leg; P5 smoke proves import/UI only | codex gates + fable M8 | adopted |
+| L13 | P6 imported-account signing: DOWNGRADED to unit coverage per M8's explicit allowance — `import-export.test.ts` proves import → getAccountContract → decrypt → fromSigningKey → address-match (the "can sign" capability; returns the identical IAccountContract the derived path feeds the entrypoint), and live bb proving on that exact NuloAccount shape is exercised by the frozen-account canary. A dedicated live-tx-from-imported-account e2e leg is a low-marginal-value follow-up (the `signingKeyHex` affordance on `setupPreFundedAccount` is in place for it). | codex gates + fable M8 | adopted (downgraded) |
 | L14 | BIP-39 phrase-reuse trust model documented + UI discouragement | fable M9 | adopted |
 | L15 | Passkey 256-bit-reduce skew: backlog note only (out of scope) | fable M1 side note | adopted (deferred) |
 | L16 | Pairing check scoped to entropy-decryption sites; bearer path exempt (cannot reveal words) + pinning test | final-codex High-1 (its bearer-versioning option rejected as unnecessary — exportMnemonic always re-verifies under password) | adopted |
