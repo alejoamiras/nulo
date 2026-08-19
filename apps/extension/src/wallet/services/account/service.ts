@@ -1,6 +1,6 @@
-import type { Fr } from "@aztec/foundation/curves/bn254"
+import { Fr } from "@aztec/foundation/curves/bn254"
 import { restoreRows } from "@/wallet/services/restore-rows"
-import { deriveAccountSeed } from "@nulo/wallet-crypto"
+import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { LogLevel, type ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -12,14 +12,27 @@ import { EntityStorage } from "@/wallet/storage"
 import { array_max, hasIntersectionByKeys, KeyedLock, Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
-import { NuloAccount, V5_REGIME, type IAccountContract } from "@nulo/aztec-runtime/account"
+import {
+	buildAccountExport,
+	decryptAccountExport,
+	encryptAccountExport,
+	NuloAccount,
+	parseAccountExport,
+	serializeAccountExport,
+	V5_REGIME,
+	type IAccountContract,
+} from "@nulo/aztec-runtime/account"
+import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
+import { sealImportedSigningKey, unsealImportedSigningKey, zeroize } from "@nulo/wallet-crypto"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
+import { ImportedKeysRepository } from "./imported-keys-repository"
 import type { AccountIntegrityBlocked } from "../account-integrity/types"
 import {
 	ACCOUNT_SERVICE_NAME,
 	ACCOUNT_STORAGE_ROOT,
 	AccountSchema,
 	AccountType,
+	ImportedAccountUnusableError,
 	accountRowId,
 	accountRowIdOf,
 	parseAccountRowId,
@@ -38,6 +51,8 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		"ensureDefaultAccount",
 		"changeAccountName",
 		"changeAccountVisibility",
+		"exportAccount",
+		"importAccount",
 	)
 	public static name = ACCOUNT_SERVICE_NAME
 
@@ -46,6 +61,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public readonly onAccountDeleted = new EventHandler<Account>()
 
 	private readonly storage: EntityStorage<Account>
+	private readonly importedKeys: ImportedKeysRepository
 	// Serialises restore() so two concurrent full-backup imports of the same
 	// account can't BOTH pass the intersection check and BOTH write the same row
 	// (last-writer-wins ownership flip — audit H4).
@@ -57,6 +73,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(ACCOUNT_SERVICE_NAME, logger)
 		this.storage = new EntityStorage<Account>(ACCOUNT_STORAGE_ROOT, browserApi.storage.local, (raw) => AccountSchema.parse(raw))
+		this.importedKeys = new ImportedKeysRepository(browserApi.storage.local)
 	}
 
 	/**
@@ -85,6 +102,22 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		// NOT a fire-and-forget `onProfileDeleted` subscriber (finding D).
 		this.networkService = services.get(NetworkService.name) as NetworkService
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
+		// Orphan sweep: an imported-key row with no matching Account row is dead weight (a torn
+		// import that wrote the key but crashed before the Account row). Remove it so the store
+		// stays 1:1. Best-effort — a failure here must never wedge service start.
+		void this.sweepOrphanImportedKeys().catch((err) =>
+			this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "imported-key orphan sweep failed", String(err)),
+		)
+	}
+
+	/** Delete imported-key rows whose Account row is gone. */
+	private async sweepOrphanImportedKeys(): Promise<void> {
+		const accountKeys = new Set((await this.liveRows()).map((a) => accountRowIdOf(a)))
+		for (const id of await this.importedKeys.allRowIds()) {
+			if (!accountKeys.has(accountRowId(id.profileId, id.chainId, id.address))) {
+				await this.importedKeys.delete(id.profileId, id.chainId, id.address)
+			}
+		}
 	}
 
 	/**
@@ -97,7 +130,11 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const accounts = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
 		await purgeRows(
 			accounts,
-			(account) => this.storage.delete(accountRowIdOf(account)),
+			async (account) => {
+				await this.storage.delete(accountRowIdOf(account))
+				// An imported account's key row shares the account's chain scope — purge it too.
+				if (account.type === AccountType.Imported) await this.importedKeys.delete(profileId, chainId, account.address)
+			},
 			(account) => this.emit("onAccountDeleted", account),
 		)
 	}
@@ -141,7 +178,11 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	public async ensureDefaultAccount(profileId: string, chainId: number, type: AccountType, name: string): Promise<Account> {
 		await this.ensureInitialized()
 		return this.serializePerTuple(profileId, chainId, type, async () => {
-			const existing = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+			// Imported accounts are excluded from the default-account candidate pool: a foreign key
+			// must never become the profile's auto-selected default (owner decision, recon §3.10).
+			const existing = (await this.liveRows()).filter(
+				(x) => x.profileId === profileId && x.chainId === chainId && x.type !== AccountType.Imported,
+			)
 			if (existing.length > 0) {
 				return existing.sort((a, b) => a.index - b.index)[0]!
 			}
@@ -235,6 +276,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (account?.profileId !== profileId || account.chainId !== chainId) {
 			throw new Error("unknown account address")
 		}
+		if (account.type === AccountType.Imported) {
+			return this.loadImportedAccountContract(profileId, account)
+		}
 		if (account.type !== AccountType.Nulo_v1) {
 			throw new Error("unknown account type")
 		}
@@ -247,6 +291,156 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			await this.raiseRuntimeMismatch(profileId, chainId, account.index, address, accountContract.address.toString())
 		}
 		return accountContract
+	}
+
+	/**
+	 * Load an IMPORTED account for signing: decrypt its stored signing key, rebuild via
+	 * `fromSigningKey`, and assert the constructed address equals the stored row's — fail closed
+	 * on ANY problem (missing key, decrypt/AAD failure, non-canonical scalar, address mismatch).
+	 *
+	 * Blast radius is deliberately the SINGLE account (owner decision A4): a tampered imported key
+	 * is external material, so it must not profile-wide-block the derived accounts. The typed
+	 * error names the account; the UI offers delete + re-import as the repair. No profile block,
+	 * no `raiseRuntimeMismatch`.
+	 */
+	private async loadImportedAccountContract(profileId: string, account: Account): Promise<IAccountContract> {
+		const keyRow = await this.importedKeys.get(profileId, account.chainId, account.address)
+		if (!keyRow) throw new ImportedAccountUnusableError(account.address, "signing key missing")
+		const master = await this.profileService.getProfileSecret(profileId)
+		if (!master) throw new Error("unauthorized")
+		let skBytes: Uint8Array<ArrayBuffer> | undefined
+		try {
+			skBytes = await unsealImportedSigningKey(
+				master.toBuffer() as Uint8Array<ArrayBuffer>,
+				account.chainId,
+				account.address,
+				keyRow.encryptedSigningKey,
+			)
+			const signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
+			const contract = await NuloAccount.fromSigningKey(signingKey, this.logger)
+			if (contract.address.toString() !== account.address) {
+				throw new ImportedAccountUnusableError(account.address, "address mismatch")
+			}
+			return contract
+		} catch (err) {
+			if (err instanceof ImportedAccountUnusableError) throw err
+			throw new ImportedAccountUnusableError(account.address, "signing key could not be recovered")
+		} finally {
+			if (skBytes) zeroize(skBytes)
+		}
+	}
+
+	/**
+	 * Export one account as a NULO-ACCOUNT-EXPORT file body. Service-side auth: the profile
+	 * password must unseal the master (a compromised popup can't bypass it). The exported secret
+	 * is the account's Schnorr signing key — for a DERIVED account we re-derive it; for an
+	 * IMPORTED account we decrypt the stored one. `secretKey` is never exported (derivable).
+	 */
+	public async exportAccount(profileId: string, chainId: number, address: string, password: string, encrypt: boolean): Promise<string> {
+		await this.ensureInitialized()
+		const account = await this.storage.get(accountRowId(profileId, chainId, address))
+		if (account?.profileId !== profileId || account.chainId !== chainId) {
+			throw new Error("unknown account address")
+		}
+		// Service-side authentication: unseal via the profile password (throws on wrong password).
+		// exportMnemonic-style — the master returned by getProfileSecret is session-gated, so we
+		// additionally require the password here to gate the SECRET export behind a fresh check.
+		const master = await this.profileService.exportPlain(profileId, password)
+		if (typeof master !== "string" || master.length === 0) throw new Error("unauthorized")
+
+		let signingKey: GrumpkinScalar
+		if (account.type === AccountType.Imported) {
+			const keyRow = await this.importedKeys.get(profileId, chainId, address)
+			if (!keyRow) throw new ImportedAccountUnusableError(address, "signing key missing")
+			const masterBytes = Buffer.from(master, "base64") as Uint8Array<ArrayBuffer>
+			let skBytes: Uint8Array<ArrayBuffer> | undefined
+			try {
+				skBytes = await unsealImportedSigningKey(masterBytes, chainId, address, keyRow.encryptedSigningKey)
+				signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
+			} finally {
+				if (skBytes) zeroize(skBytes)
+				zeroize(masterBytes)
+			}
+		} else if (account.type === AccountType.Nulo_v1) {
+			const masterFr = Fr.fromBuffer(Buffer.from(master, "base64"))
+			const seed = await deriveAccountSeed(masterFr, account.l1ChainId, account.type, account.index)
+			signingKey = deriveSigningKeyFromSeed(seed)
+		} else {
+			throw new Error("unknown account type")
+		}
+		const envelope = buildAccountExport(signingKey, account.l1ChainId, address)
+		return encrypt ? encryptAccountExport(envelope, password) : serializeAccountExport(envelope)
+	}
+
+	/**
+	 * Import an account from a file body into `(profileId, chainId)`. Validates the envelope,
+	 * recomputes the address from the signing key and requires it to equal `expectedAddress` (the
+	 * address the UI showed the user — the checksum authenticates nothing), rejects a duplicate,
+	 * then writes KEY-ROW-FIRST with compensation so a crash never leaves an Account row that
+	 * cannot sign.
+	 */
+	public async importAccount(
+		profileId: string,
+		chainId: number,
+		fileBody: string,
+		expectedAddress: string,
+		password: string,
+	): Promise<Account> {
+		await this.ensureInitialized()
+		if (fileBody.length > 64 * 1024) throw new Error("Account export file is too large")
+		// Session-gated master for sealing the key at rest.
+		const master = await this.profileService.getProfileSecret(profileId)
+		if (!master) throw new Error("unauthorized")
+
+		// Decrypt if it's the encrypted variant (starts as base64, not JSON); else treat as plaintext.
+		const trimmed = fileBody.trim()
+		const json = trimmed.startsWith("{") ? trimmed : await decryptAccountExport(trimmed, password)
+		const { signingKey, claimedAddress } = parseAccountExport(json)
+
+		// Authenticity: the address is a pure function of the signing key. Recompute and require it
+		// to match BOTH the file's self-claim AND the address the user confirmed in the UI — a
+		// self-consistent hostile file is caught here by the user-confirmed address.
+		const recomputed = (await NuloAccount.fromSigningKey(signingKey, this.logger)).address.toString()
+		if (recomputed !== claimedAddress) throw new Error("Account export address does not match its signing key")
+		if (recomputed !== expectedAddress) throw new Error("Imported account address does not match the confirmed address")
+
+		return this.serializePerTuple(profileId, chainId, AccountType.Imported, async () => {
+			const rows = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+			if (rows.some((x) => x.address === recomputed)) throw new Error("This account is already in your wallet")
+			const sameType = rows.filter((x) => x.type === AccountType.Imported)
+			const index = sameType.length > 0 ? array_max(sameType.map((x) => +x.index)) + 1 : 0
+
+			const skBytes = signingKey.toBuffer() as Uint8Array<ArrayBuffer>
+			let sealed: string
+			try {
+				sealed = await sealImportedSigningKey(master.toBuffer() as Uint8Array<ArrayBuffer>, chainId, recomputed, skBytes)
+			} finally {
+				zeroize(skBytes)
+			}
+			// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
+			// leaves an orphan key (swept on init) rather than an Account that cannot sign.
+			await this.importedKeys.set({ profileId, chainId, address: recomputed, encryptedSigningKey: sealed })
+			const account: Account = {
+				profileId,
+				chainId,
+				address: recomputed,
+				index,
+				type: AccountType.Imported,
+				// Imported accounts bind to the ACTIVE network's L1 identity (they don't derive from
+				// it, but the row must carry a coherent value for the Account↔Network cross-check).
+				l1ChainId: await this.networkService.getL1ChainIdStored(profileId, chainId),
+				name: "Imported account",
+				visible: true,
+			}
+			try {
+				await this.storage.set(accountRowIdOf(account), account)
+			} catch (rowErr) {
+				await this.importedKeys.delete(profileId, chainId, recomputed).catch(() => {})
+				throw rowErr
+			}
+			this.emit("onAccountAdded", account)
+			return account
+		})
 	}
 
 	/**
@@ -357,6 +551,10 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			(account) => this.storage.delete(accountRowIdOf(account)),
 			() => {},
 		)
+		// Purge this profile's imported-account signing keys alongside its account rows.
+		for (const keyRow of await this.importedKeys.forProfile(profileId)) {
+			await this.importedKeys.delete(keyRow.profileId, keyRow.chainId, keyRow.address)
+		}
 		// F-B23: raw second pass — a validation-failed row this profile owns is
 		// invisible to liveRows() and would otherwise survive the purge forever.
 		// KEY ownership beats the value's claim: a row at another profile's

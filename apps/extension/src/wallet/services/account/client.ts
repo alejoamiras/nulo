@@ -29,4 +29,6 @@ definePassthroughsExhaustive<Methods>()(AccountServiceClient.prototype, [
 	"ensureDefaultAccount",
 	"changeAccountName",
 	"changeAccountVisibility",
+	"exportAccount",
+	"importAccount",
 ])
