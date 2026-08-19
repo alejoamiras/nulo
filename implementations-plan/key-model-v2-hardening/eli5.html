@@ -124,6 +124,8 @@
   <dl class="qa">
     <dt>Both auditors said "conditional approve" — what were the conditions?</dt>
     <dd>Real catches, all adopted: the tamper-seal on profile data had to be re-keyed so the attacker (who knows the shared root) can't forge it; the duplicate-phrase warning would never have appeared on the restore path (errors get swallowed there — the flow was redesigned); a passkey-created profile would have shipped without its DEK (a sixth code path the plan had missed); and the passkey-restore flow would have lost the DEK until the next unlock. This is exactly what the audit rounds are for.</dd>
+    <dt>Didn't a third audit also run?</dt>
+    <dd>Yes — a fresh-eyes final pass, and it <strong>rejected</strong> the second draft with a catch everyone else missed: because you chose warn-and-confirm, restoring a profile's backup while the original still exists is allowed — and the draft would have let that clone <em>share</em> the original's inner key, quietly recreating the very attack we're closing. Fixed: a restore now mints a brand-new inner key and re-locks every imported account in the backup under it, so clones diverge. The fix is pinned by a dedicated test ("the clone cannot open what the original imports later").</dd>
     <dt>The auditors disagreed twice. Who won?</dt>
     <dd>(1) If a profile's DEK is corrupted, one said "refuse to unlock", the other "unlock, but quarantine imported accounts". We chose quarantine — refusing would let a disk-writer lock you out of your <em>main</em> funds by corrupting one field — with a loud warning and no silent background restore, so it can't fester. (2) For the passkey live test, one wanted a fragile deep-hook cross-check, the other a simpler run. We found a third option better than both: an independent reference calculation, written with raw browser crypto and none of the wallet's own code, that pins the expected result.</dd>
   </dl>
@@ -150,8 +152,8 @@
   <div class="phase">
     <span class="arc">Arc 5</span>
     <h3>P4 — Wire it through the wallet</h3>
-    <p>Every place a profile is created, unlocked, has its password changed, is backed up, or is restored now carries the DEK — all six creation paths, the backup file, and the restart-survival path. Plus the duplicate-phrase fingerprint and its warning.</p>
-    <p class="gate">Proves itself by: <b>the full fast suite plus seven named integration criteria</b> (every creation path stamped, restore keeps imported accounts working, corrupted-DEK behavior pinned, the attacker scenario end-to-end). Then a resumed codex re-attack.</p>
+    <p>Every place a profile is created, unlocked, has its password changed, is backed up, or is restored now carries the DEK — all six creation paths, the backup file, and the restart-survival path. A restore mints a fresh inner key and re-locks the backup's imported accounts under it (so backup clones diverge). Plus the duplicate-phrase fingerprint and its warning.</p>
+    <p class="gate">Proves itself by: <b>the full fast suite plus nine named integration criteria</b> (every creation path stamped, restore keeps imported accounts working under the fresh key, clone divergence, corrupted-DEK behavior pinned at both checkpoints, the attacker scenario end-to-end). Then a resumed codex re-attack.</p>
   </div>
   <div class="phase">
     <span class="arc">Arc 5</span>
