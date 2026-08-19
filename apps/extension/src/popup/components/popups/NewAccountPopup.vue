@@ -6,6 +6,8 @@ import { storageLocalSet } from "@/utils/storage"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -40,11 +42,17 @@ const name = form.fields.name.value
 
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist")
 const isAvailableToCreateAccount = computed(() => {
+	// Full-lifetime submit latch: a running create closes the form on EVERY
+	// route (button, Enter, future callers) — the name-uniqueness check below
+	// is synchronous against a post-await push, so two concurrent invocations
+	// could otherwise both pass it and create two same-named accounts.
+	if (isCreatingAccount.value) return false
 	if (!name.value.length) return false
 	if (form.fields.name.error.value) return false
 	return true
 })
 
+const isCreatingAccount = ref(false)
 const handleCreateAccount = async () => {
 	if (!isAvailableToCreateAccount.value) return
 
@@ -55,30 +63,35 @@ const handleCreateAccount = async () => {
 		return
 	}
 
-	const account = await managers.account.createAccount(
-		appStore.profile.id,
-		appStore.network.chainId,
-		AccountType.Nulo_v1,
-		name.value.trim(),
-	)
+	isCreatingAccount.value = true
+	try {
+		const account = await managers.account.createAccount(
+			appStore.profile.id,
+			appStore.network.chainId,
+			AccountType.Nulo_v1,
+			name.value.trim(),
+		)
 
-	// The account is created either way; only SELECTING it moves the scope, so
-	// that part is re-checked after the creation RPC.
-	appStore.accounts.push(account)
-	const selected = await appStore.commitScopeChange(() => {
-		appStore.account = account
-	})
-	if (!selected) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		// The account is created either way; only SELECTING it moves the scope, so
+		// that part is re-checked after the creation RPC.
+		appStore.accounts.push(account)
+		const selected = await appStore.commitScopeChange(() => {
+			appStore.account = account
+		})
+		if (!selected) {
+			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			emit("onClose")
+			return
+		}
+
+		await storageLocalSet({
+			"nulo:ui:activeAccount": account.address,
+		})
+
 		emit("onClose")
-		return
+	} finally {
+		isCreatingAccount.value = false
 	}
-
-	await storageLocalSet({
-		"nulo:ui:activeAccount": account.address,
-	})
-
-	emit("onClose")
 }
 
 usePopupEntity(() => props.show, {
@@ -104,6 +117,7 @@ usePopupEntity(() => props.show, {
 		title="New account"
 		submitLabel="Create"
 		:submitDisabled="!isAvailableToCreateAccount"
+		:submitLoading="isCreatingAccount"
 		submitTestId="new-account-submit"
 		@submit="handleCreateAccount"
 	>

@@ -30,6 +30,9 @@ const errorText = ref("")
 const isSubmitting = ref(false)
 
 const isAvailableToCreate = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isSubmitting.value) return false
 	if (urlTerm.value.length < 5) return false
 	if (errorText.value) return false
 	if (!network.value) return false

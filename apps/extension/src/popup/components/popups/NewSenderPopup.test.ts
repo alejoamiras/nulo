@@ -163,6 +163,21 @@ describe("NewSenderPopup — Enter-submit wiring (usePopupEntity)", () => {
 		expect(calls).toBe(1)
 	})
 
+	test("the button is NATIVELY disabled while the add is in flight (loading alone is only pointer-events CSS)", async () => {
+		// The template's :disabled is re-based onto the folded validity source,
+		// so the in-flight latch reaches the DOM — closing keyboard-focused
+		// activation, which pointer-events:none does not cover.
+		accountStateServiceMock.addSender.mockImplementationOnce(() => new Promise(() => {}))
+		const w = await mountShown()
+		await typeAddress(w, VALID_HEX)
+		expect(w.find("button").attributes("disabled")).toBeUndefined()
+		pressEnterOnInput()
+		await flushPromises()
+		const disabledDuringFlight = w.find("button").attributes("disabled")
+		await dispose(w)
+		expect(disabledDuringFlight).toBeDefined()
+	})
+
 	test("hide disconnects the client and resets the field; Enter after hide is inert", async () => {
 		const w = await mountShown()
 		await typeAddress(w, VALID_HEX)

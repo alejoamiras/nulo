@@ -273,7 +273,7 @@ const onKeydown = (e) => {
 						size="medium"
 						wide
 						:loading="isLoading"
-						:disabled="!isAllowedToExecute || isErrorOccurred"
+						:disabled="!isAllowedToExecute || isErrorOccurred || isLoading"
 					>
 						Revoke
 					</Button>

@@ -170,20 +170,25 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		await w.find('[data-testid="name-input"]').setValue("Alicia")
 		await flushPromises()
 		// The popup's keydown listener lives on `document`; the mounted tree is
-		// detached, so dispatch from a real document-level input.
+		// detached, so dispatch from a real document-level input. Earlier tests
+		// in this file leak their instances' document listeners (they never
+		// hide), so assert the DELTA of the second press — with every instance's
+		// latch engaged by press one, press two must add ZERO calls.
 		const docInput = document.createElement("input")
 		document.body.appendChild(docInput)
 		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 		await flushPromises()
+		const afterFirstPress = contactServiceMock.updateContact.mock.calls.length
 		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 		await flushPromises()
 		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
 		// (document-listener removal) or the mock reset.
-		const calls = contactServiceMock.updateContact.mock.calls.length
+		const afterSecondPress = contactServiceMock.updateContact.mock.calls.length
 		await w.setProps({ show: false })
 		contactServiceMock.updateContact.mockReset()
 		docInput.remove()
-		expect(calls).toBe(1)
+		expect(afterFirstPress).toBeGreaterThan(0)
+		expect(afterSecondPress).toBe(afterFirstPress)
 	})
 
 	test("Enter with a clean form is a no-op (dirty gate holds on the keyboard path)", async () => {

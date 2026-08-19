@@ -181,6 +181,10 @@ const selectAccount = (account: UIAccount) => {
 const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((acc) => acc.address === account.address)
 
 const approve = async () => {
+	// Full-lifetime submit latch: `loading` alone only sets pointer-events CSS,
+	// so a keyboard-focused Approve can still emit a click mid-grant — the
+	// handler must self-guard like execute/discover already do.
+	if (isLoading.value) return
 	// Defense in depth: template's `:disabled="!initComplete"` should already
 	// block this, but if Enter / programmatic click slips through during init,
 	// throw loudly instead of silently no-opping (which was the 19-iteration
@@ -348,7 +352,7 @@ onUnmounted(disposeWindow)
 			confirm-testid="cap-approve-btn"
 			confirm-label="Approve"
 			:confirm-loading="isLoading"
-			:confirm-disabled="processingError?.type === 'error' || !initComplete"
+			:confirm-disabled="isLoading || processingError?.type === 'error' || !initComplete"
 			@reject="reject"
 			@approve="approve"
 		/>

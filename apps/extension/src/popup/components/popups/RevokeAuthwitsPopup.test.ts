@@ -72,7 +72,10 @@ const STUBS = {
 	},
 	Button: {
 		props: ["loading", "disabled"],
-		template: `<button data-testid="revoke-authwits-submit" :disabled="disabled || loading"><slot /></button>`,
+		// The stub mirrors the REAL primitive: only `disabled` sets the native
+		// attribute (loading alone is CSS pointer-events). A `disabled || loading`
+		// stub previously masked the template's missing isLoading in :disabled.
+		template: `<button data-testid="revoke-authwits-submit" :disabled="disabled"><slot /></button>`,
 	},
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
 	Icon: { template: "<i />" },

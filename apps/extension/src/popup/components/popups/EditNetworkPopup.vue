@@ -1,6 +1,6 @@
 <script setup>
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
 const { openToast } = useToast()
 
 /** Store */
@@ -44,6 +44,9 @@ const isStartedEditingName = form.fields.name.isDirty
 const isNameAlreadyExist = computed(() => form.fields.name.error.value === "Already exists" && isStartedEditingName.value)
 
 const isAvailableToUpdateNetwork = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isNetworkUpdateInProgress.value) return false
 	if (!nameTerm.value.length) return false
 	if (nameTerm.value === networkToEdit.value?.name) return false
 	if (form.fields.name.error.value) return false
@@ -61,9 +64,20 @@ const isNetworkUpdateInProgress = ref(false)
 const handleUpdateNetwork = async () => {
 	if (!isAvailableToUpdateNetwork.value) return
 
+	// finally, not sequential clear: a rejected rename must release the latch
+	// or the folded validity source would lock the form disabled for good. The
+	// catch is part of the same repair — the rejection previously escaped as an
+	// unhandled promise (both submit routes fire-and-forget) with zero user
+	// feedback; the family's standard error toast handles it.
 	isNetworkUpdateInProgress.value = true
-	await appStore.renameNetwork(cacheStore.networkToEditIdx, nameTerm.value)
-	isNetworkUpdateInProgress.value = false
+	try {
+		await appStore.renameNetwork(cacheStore.networkToEditIdx, nameTerm.value)
+	} catch {
+		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+		return
+	} finally {
+		isNetworkUpdateInProgress.value = false
+	}
 
 	emit("onClose")
 
