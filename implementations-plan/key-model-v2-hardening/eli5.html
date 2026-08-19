@@ -1,0 +1,200 @@
+<title>Key Model Hardening</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,650&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #faf9f7;
+    --surface: #ffffff;
+    --ink: #1f2430;
+    --ink-2: #4a5265;
+    --ink-3: #7a8296;
+    --line: #e4e1da;
+    --accent: #8a5a2b;        /* worked bronze — vault hardware, not terracotta */
+    --accent-ink: #6e4520;
+    --accent-soft: #f3ead9;
+    --good: #2e6b4f;
+    --good-soft: #e3efe8;
+    --warn: #8a4a1f;
+    --warn-soft: #f6e8dc;
+    --seed-bg: #23272f;
+    --seed-ink: #d9dde6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181d;
+      --surface: #1d2026;
+      --ink: #e6e4df;
+      --ink-2: #b3b0a8;
+      --ink-3: #7f7d76;
+      --line: #2e3138;
+      --accent: #c89a5e;
+      --accent-ink: #d8ab6e;
+      --accent-soft: #2b2620;
+      --good: #7dbb9c;
+      --good-soft: #1e2b25;
+      --warn: #d99a68;
+      --warn-soft: #2e241c;
+      --seed-bg: #101216;
+      --seed-ink: #c6cbd4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181d;
+    --surface: #1d2026;
+    --ink: #e6e4df;
+    --ink-2: #b3b0a8;
+    --ink-3: #7f7d76;
+    --line: #2e3138;
+    --accent: #c89a5e;
+    --accent-ink: #d8ab6e;
+    --accent-soft: #2b2620;
+    --good: #7dbb9c;
+    --good-soft: #1e2b25;
+    --warn: #d99a68;
+    --warn-soft: #2e241c;
+    --seed-bg: #101216;
+    --seed-ink: #c6cbd4;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+    font-size: 16px;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Source Serif 4", Georgia, serif; text-wrap: balance; line-height: 1.2; }
+  h1 { font-size: 2.1rem; font-weight: 650; margin: 0 0 .4rem; }
+  h2 { font-size: 1.35rem; font-weight: 650; margin: 3rem 0 .9rem; padding-top: 1.6rem; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.02rem; font-weight: 650; margin: 0 0 .3rem; }
+  p { margin: .7rem 0; color: var(--ink); max-width: 65ch; }
+  .lede { font-size: 1.08rem; color: var(--ink-2); max-width: 62ch; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: .8rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.1rem 0 0; }
+  .chip { font-family: "IBM Plex Mono", monospace; font-size: .72rem; padding: .22rem .6rem; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface); }
+  .chip.ok { color: var(--good); border-color: transparent; background: var(--good-soft); }
+  .chip.accent { color: var(--accent-ink); border-color: transparent; background: var(--accent-soft); }
+  .phase { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 1.05rem 1.25rem; margin: .9rem 0; }
+  .phase .arc { font-family: "IBM Plex Mono", monospace; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+  .gate { font-size: .88rem; color: var(--ink-2); margin: .55rem 0 0; padding-top: .55rem; border-top: 1px dashed var(--line); }
+  .gate b { color: var(--good); font-weight: 600; }
+  .approval { background: var(--accent-soft); border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; padding: 1.05rem 1.3rem; margin: 1.4rem 0; }
+  .approval h3 { color: var(--accent-ink); }
+  ul { padding-left: 1.2rem; margin: .6rem 0; }
+  li { margin: .45rem 0; max-width: 62ch; }
+  li::marker { color: var(--accent); }
+  .qa { margin: 1.1rem 0; }
+  .qa dt { font-weight: 600; }
+  .qa dd { margin: .25rem 0 1rem; color: var(--ink-2); max-width: 62ch; }
+  pre { background: var(--seed-bg); color: var(--seed-ink); border-radius: 10px; padding: 1.05rem 1.2rem; overflow-x: auto; font-family: "IBM Plex Mono", monospace; font-size: .8rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .recommended { border: 1px solid var(--accent); border-radius: 12px; padding: .25rem 1.2rem 1.1rem; margin: 1.2rem 0; }
+  .recommended .tag { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-ink); background: var(--accent-soft); border-radius: 999px; padding: .18rem .6rem; margin-top: 1rem; }
+  .warncard { background: var(--warn-soft); border-radius: 10px; padding: .8rem 1.1rem; color: var(--warn); font-size: .92rem; font-weight: 500; margin: 1rem 0; }
+  .muted { color: var(--ink-3); font-size: .85rem; }
+  code { font-family: "IBM Plex Mono", monospace; font-size: .86em; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: .05em .35em; }
+  pre code { background: none; border: none; padding: 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .74rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); font-weight: 600; }
+  .tablewrap { overflow-x: auto; }
+</style>
+
+<main>
+  <p class="kicker">Blueprint · plan approval</p>
+  <h1>Key Model Hardening</h1>
+  <p class="lede">The follow-up to the key-model redesign: make each wallet profile's <em>imported</em> accounts private to that profile's password, warn you before you create two profiles from the same recovery phrase, fix a small statistical imperfection in how passkey wallets derive their keys, and write the safety tests the last round promised but never delivered.</p>
+  <div class="chips">
+    <span class="chip accent">tier: mid</span>
+    <span class="chip ok">codex audit: conditional approve → adopted</span>
+    <span class="chip ok">fable audit: conditional approve → adopted</span>
+    <span class="chip">stacks on PRs #417–419</span>
+    <span class="chip">pre-production — no users affected</span>
+  </div>
+
+  <h2>The story, plainly</h2>
+  <p>Your wallet can hold several <strong>profiles</strong>, each locked by its own password. Profiles made from the same 24-word recovery phrase share the same mathematical root. That's fine for the accounts the phrase <em>generates</em> — but accounts you <strong>import from a file</strong> are outside material, and today they're locked with the shared root. So on a device with two same-phrase profiles, someone who reads the disk and knows just <em>one</em> profile's password could open the <em>other</em> profile's imported accounts. This plan gives every profile its own random inner key ("DEK") for imported accounts, locked by that profile's own password — structurally, not by policy.</p>
+  <p>Separately: two independent auditors confirmed the new mnemonic derivation is as strong as the standard everyone uses. The one blemish they found sits in the <em>passkey</em> path — it compresses randomness in a slightly lopsided way (a fraction of a bit; harmless in practice, but beneath the bar this project set). Since nothing has shipped, we fix it now for free, and we add the missing end-to-end tests, including a first-ever live proving test for passkey wallets.</p>
+
+  <h2>Why tier <code>mid</code></h2>
+  <p>One HIGH on the risk rubric (security sensitivity — it's key handling), everything else low or moderate: no novel surface (it extends code this same stack just built and audited), pre-production blast radius, nothing irreversible, no migrations, no external coupling. <code>mid</code> = plan + competing outline, two independent audits, a final fresh-eyes audit — plus the crypto-attack rider you asked for after every crypto phase.</p>
+
+  <h2>What already got challenged</h2>
+  <dl class="qa">
+    <dt>Both auditors said "conditional approve" — what were the conditions?</dt>
+    <dd>Real catches, all adopted: the tamper-seal on profile data had to be re-keyed so the attacker (who knows the shared root) can't forge it; the duplicate-phrase warning would never have appeared on the restore path (errors get swallowed there — the flow was redesigned); a passkey-created profile would have shipped without its DEK (a sixth code path the plan had missed); and the passkey-restore flow would have lost the DEK until the next unlock. This is exactly what the audit rounds are for.</dd>
+    <dt>The auditors disagreed twice. Who won?</dt>
+    <dd>(1) If a profile's DEK is corrupted, one said "refuse to unlock", the other "unlock, but quarantine imported accounts". We chose quarantine — refusing would let a disk-writer lock you out of your <em>main</em> funds by corrupting one field — with a loud warning and no silent background restore, so it can't fester. (2) For the passkey live test, one wanted a fragile deep-hook cross-check, the other a simpler run. We found a third option better than both: an independent reference calculation, written with raw browser crypto and none of the wallet's own code, that pins the expected result.</dd>
+  </dl>
+
+  <h2>Phases</h2>
+  <div class="phase">
+    <span class="arc">Arc 4 · new PR stacked on #419</span>
+    <h3>P1 — Fix the passkey math &amp; write it into the frozen spec</h3>
+    <p>Widen the passkey derivation to the same bias-free 64-byte form the phrase path already uses, and extend the frozen key-derivation spec (the tamper tripwire) to finally cover the passkey branch it was blind to.</p>
+    <p class="gate">Proves itself by: <b>the full fast test suite</b>, with the passkey test value re-pinned from an independent reference calculation — and the phrase-path tests passing with <b>zero edits</b> (proof nothing else moved). Then a codex crypto-attack on the diff.</p>
+  </div>
+  <div class="phase">
+    <span class="arc">Arc 4</span>
+    <h3>P2 — First-ever passkey live test</h3>
+    <p>A real passkey wallet is created in a real browser, connects to an app, and sends a transaction with a real cryptographic proof — then survives a service-worker restart and does it again. The phrase-path live test re-runs beside it.</p>
+    <p class="gate">Proves itself by: <b>both live network tests passing with real proving</b>, on a quiet machine.</p>
+  </div>
+  <div class="phase">
+    <span class="arc">Arc 5 · new PR stacked on Arc 4</span>
+    <h3>P3 — The DEK, as pure crypto</h3>
+    <p>The new inner key and its locks, built as small tested pieces: sealed under your password (or your passkey), covering imported-account storage, folded into the profile's tamper seal — which is re-keyed so knowing the shared root is no longer enough to forge it.</p>
+    <p class="gate">Proves itself by: <b>unit tests with real cryptography</b> — round-trips, wrong-key rejections, transplant rejections, and a test that plays the attacker (shared root + other password) and must fail. Then a codex crypto-attack.</p>
+  </div>
+  <div class="phase">
+    <span class="arc">Arc 5</span>
+    <h3>P4 — Wire it through the wallet</h3>
+    <p>Every place a profile is created, unlocked, has its password changed, is backed up, or is restored now carries the DEK — all six creation paths, the backup file, and the restart-survival path. Plus the duplicate-phrase fingerprint and its warning.</p>
+    <p class="gate">Proves itself by: <b>the full fast suite plus seven named integration criteria</b> (every creation path stamped, restore keeps imported accounts working, corrupted-DEK behavior pinned, the attacker scenario end-to-end). Then a resumed codex re-attack.</p>
+  </div>
+  <div class="phase">
+    <span class="arc">Arc 5</span>
+    <h3>P5 — The warning dialog</h3>
+    <p>"You already have a profile with this recovery phrase — continue?" — shown on phrase import <em>and</em> backup restore, per your call. Confirming proceeds; nothing is ever hard-blocked.</p>
+    <p class="gate">Proves itself by: <b>component tests + the browser smoke suite</b>.</p>
+  </div>
+  <div class="phase">
+    <span class="arc">Arc 5</span>
+    <h3>P6 — The missing tests, delivered</h3>
+    <p>The three export/import browser tests the last plan promised (round-trip into a second profile, tampered file rejected, duplicate rejected), the duplicate-warning flow, and a final live-network re-run of everything.</p>
+    <p class="gate">Proves itself by: <b>smoke suite + live network tests all green</b> at the top of the stack.</p>
+  </div>
+
+  <h2>Honest fine print</h2>
+  <ul>
+    <li><strong>The warning is a courtesy, not a wall.</strong> You chose warn-and-confirm, so a user can still deliberately make same-phrase profiles — the DEK alone carries the security guarantee. (That's why we build it.)</li>
+    <li><strong>Passkey wallet addresses rotate.</strong> The math fix changes them. Nobody's in production; test wallets just re-sync.</li>
+    <li><strong>Old export files stop validating.</strong> Extending the frozen spec changes its fingerprint, which account-export files embed. None exist outside tests — but this is yours to ratify below.</li>
+    <li><strong>Unlock gets ~half a second slower</strong> on password profiles (one more decryption pass). Documented so nobody "optimizes" it into a hole later.</li>
+  </ul>
+
+  <div class="approval">
+    <h3>Your approval decision</h3>
+    <ul>
+      <li><strong>Ratify the frozen-spec amendment</strong> — extending the key-derivation spec while the stack is still unmerged, accepting that pre-existing export files (test-only today) stop validating. The rule text is rewritten honestly: the redefinition window closes at the first shipped build.</li>
+      <li>Confirm scope: the four deliverables above; <em>not</em> included — mnemonic-path changes, forced-encrypted backups, multi-device dedup.</li>
+      <li>Confirm delivery: two new draft PRs (Arc 4, Arc 5) stacked on the existing three; you merge, never the agent.</li>
+      <li>Approve / conditionally approve / reject.</li>
+    </ul>
+  </div>
+
+  <h2>Implementation seeds</h2>
+  <p class="muted">Drafts — finalized after your approval. Paste ONE into the implementing session (inside the <code>key-model-v2</code> worktree).</p>
+  <div class="warncard">Use exactly one per session — /goal and /loop replace each other.</div>
+
+  <div class="recommended">
+    <span class="tag">Recommended: /goal (completion is transcript-observable)</span>
+    <pre><code>/goal All six phases (P1–P6) marked ✓ in implementations-plan/key-model-v2-hardening/plan.md (the per-phase headers in the file, not just the chat), each ✓ backed by its phase's validation gate as defined in plan.md reported passing in the transcript — including P4's seven named integration criteria (a)–(g) and the prover-ON passkey execution canary; the crypto adversarial riders executed — after P1, P3, and P4 a focused codex xhigh attack on that phase's implemented diff is quoted in the transcript with its verdict, and no High finding is left unresolved; for each phase the agent printed LESSONS_FILE=implementations-plan/key-model-v2-hardening/lessons/phase-N.md in the transcript; /code-review max --fix complete with fixes committed separately; the codex post-impl fix loop converged (a resumed codex pass reporting no new material findings, quoted in the transcript); arcs 4 and 5 exist on the gh stack as draft PRs (gh stack view output in the transcript showing feat/kdf-v2-passkey-512 and feat/kdf-v2-dek-isolation stacked on #419); bun run audit:vue, bun run test:e2e, and the targeted bun run e2e:agent runs (passkey-execution-canary + frozen-account-canary + profile-reimport-matrix) all report exit 0 in the transcript.</code></pre>
+  </div>
+
+  <h3>Alternative: /loop 15m</h3>
+  <pre><code>/loop 15m Drive implementations-plan/key-model-v2-hardening forward. Never idle waiting for my input. Each firing: (1) Reality check — read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; gh stack view for the stack. (2) Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. (3) No task in hand? Pick the next pending step from plan.md and start it; after each meaningful edit run bun run lint + the touched package's tests; commit → gh stack push; gh stack sync if a lower arc moved. (4) Stuck or facing a decision? Don't wait — /codex xhigh, argue to a defensible call, act, log the consult in lessons/phase-N.md. Hard limits stay hard: never merge, publish, or expand scope beyond plan.md. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase green? "Green" = the phase's validation gate as written in plan.md (P4 includes named criteria (a)–(g); P2/P6 need the prover-ON e2e:agent runs on a quiet host). Run the full gate, paste the result, mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/key-model-v2-hardening/lessons/phase-N.md, advance. Arc boundary (after P2)? gh stack add feat/kdf-v2-dek-isolation first. Crypto phases (P1, P3, P4): run the codex xhigh rider on the implemented diff before marking ✓; no unresolved High. (7) All phases ✓? Execute plan.md's Post-implementation section (code-review max --fix → codex post-impl loop until converged → gh stack sync, PRs ready) then write the wrap-up report and stop.</code></pre>
+
+  <p class="muted">Full technical plan: <code>implementations-plan/key-model-v2-hardening/plan.md</code> (in the repo, with the audit transcripts beside it).</p>
+</main>

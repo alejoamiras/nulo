@@ -511,6 +511,10 @@ Two new arcs on the existing stack #420 (`dev ← #417 ← #418 ← #419`):
 
 (final versions delivered post-approval; drafts in the ELI5 companion)
 
+**ELI5 companion**: Artifact at https://claude.ai/code/artifact/e976d1bd-101a-44e2-9542-6cb74c5ed5cd
+(`eli5_mode: artifact`; source: `implementations-plan/key-model-v2-hardening/eli5.html` — redeploying
+the same file from the owning session keeps the URL; other sessions pass the URL as `url`).
+
 ## Audit verdicts
 
 - **Round 1 — codex (gpt-5.6-sol, xhigh, fresh)**: `conditional approve` (conditions: DEK-bind the
