@@ -9,11 +9,12 @@ import { FROZEN_DESCRIPTOR_DIGEST, NULO_DESCRIPTOR_VERSION } from "./instantiati
  * independently hardcoded here as literals — moving any digest requires a coherent edit of the
  * source modules, the record, AND this file, in one reviewed, signed, branch-protected diff.
  * Editing or deleting a historical entry reds this test: never "fix" it by re-pinning; append a
- * new regime + a new extension major instead. (The nulo-v5 baseline was redefined in place ONCE,
- * pre-launch, under the record's one-time carve-out — KDF v1→v2, owner-ratified,
- * `implementations-plan/key-model-v2/`.)
+ * new regime + a new extension major instead. (The nulo-v5 baseline was redefined in place inside
+ * the pre-launch carve-out WINDOW — KDF v1→v2 (`implementations-plan/key-model-v2/`) and the
+ * passkey-branch spec extension (`implementations-plan/key-model-v2-hardening/`) — owner-ratified
+ * both times; the window closes permanently at V5's first shipped build.)
  */
-const EXPECTED_KDF_DIGEST = "f6b4eee4f0d46c47090b06a6ce77786807d63e3772e5092466b9aedcf41bd1e3"
+const EXPECTED_KDF_DIGEST = "29eca1a04b7acde8bb95905a2ac630b29f1edcf04d584274e90fd9f81736166d"
 
 const EXPECTED_REGIMES: Record<string, Record<string, unknown>> = {
 	"nulo-v5": {
@@ -53,6 +54,14 @@ describe("address-freeze regime record", () => {
 		expect(NULO_KDF_SPEC).toContain("2720999938")
 		expect(NULO_KDF_SPEC).toContain("914717451")
 		expect(NULO_KDF_SPEC).toContain("deriveSecretKeyFromSigningKey")
+	})
+
+	test("the KDF spec pins the passkey branch verbatim (the branch it was previously blind to)", () => {
+		// Byte-precise passkey clause: PRF ikm, label-salted SHA-256, HKDF-SHA256, the 64-byte
+		// low-skew expand, and the reduce. Any drift in the passkey derivation must red this.
+		expect(NULO_KDF_SPEC).toContain(
+			"passkeyMaster = Fr.fromBufferReduce(HKDF-SHA256(ikm=prfBytes, salt=SHA-256(UTF8('nulo:kdf:v1')||credentialIdBytes), info=UTF8('nulo:master:v1'), 64B))",
+		)
 	})
 
 	test("regime ids are unique and equal their record keys", () => {
