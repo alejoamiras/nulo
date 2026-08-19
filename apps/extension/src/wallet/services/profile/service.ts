@@ -876,24 +876,31 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				const unsealed = await this.secretBox.unsealWithPasshash(resealed.passhash, resealed.encrypted)
 				secret = unsealed?.secret ?? null
 				entropy = unsealed?.entropy ?? null
-				if (secret && entropy) {
-					// Pairing check BEFORE the reseal is committed (P3 rider High): a change-password
-					// on a transplanted-entropy row must NOT launder the mismatch into a MAC-valid
-					// profile. reseal preserves the plaintext, so checking the freshly-sealed pair is
-					// equivalent to checking the pre-change one.
-					await this.assertEntropyMasterPair(secret, entropy)
-					// Pre-persist verify: on drift, nothing is committed (honest failure — the password
-					// is NOT changed). But a drift here means the CURRENT session is on a mismatched
-					// build, so close it too — a rejected change must not leave the blocked profile
-					// operating (matches openSessionVerified's close-on-throw).
-					try {
-						await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
-					} catch (precheckError) {
-						if (precheckError instanceof AccountAddressInconsistencyError && this.sessionManager.isActive(id)) {
-							await this.sessionManager.close()
-						}
-						throw precheckError
+				// Fail CLOSED. `resealed.encrypted` was just minted under `resealed.passhash`, so a
+				// null here means the row is corrupt — and continuing would persist the new cipher
+				// while SKIPPING the pairing check, the integrity pre-check, and the MAC re-key,
+				// leaving a profile whose stored MAC no longer covers its own ciphertexts (i.e. a
+				// self-inflicted degraded state). Throw before any `profile.*` field is mutated so
+				// nothing is committed.
+				if (!secret || !entropy) {
+					throw new Error("Profile storage corrupted")
+				}
+				// Pairing check BEFORE the reseal is committed (P3 rider High): a change-password
+				// on a transplanted-entropy row must NOT launder the mismatch into a MAC-valid
+				// profile. reseal preserves the plaintext, so checking the freshly-sealed pair is
+				// equivalent to checking the pre-change one.
+				await this.assertEntropyMasterPair(secret, entropy)
+				// Pre-persist verify: on drift, nothing is committed (honest failure — the password
+				// is NOT changed). But a drift here means the CURRENT session is on a mismatched
+				// build, so close it too — a rejected change must not leave the blocked profile
+				// operating (matches openSessionVerified's close-on-throw).
+				try {
+					await this.integrityDelegate?.verifyBeforeSessionOpen(id, secret)
+				} catch (precheckError) {
+					if (precheckError instanceof AccountAddressInconsistencyError && this.sessionManager.isActive(id)) {
+						await this.sessionManager.close()
 					}
+					throw precheckError
 				}
 
 				// The DEK reseals in the SAME single-row atomic write as guard/master/entropy
@@ -920,13 +927,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				profile.secret = resealed.encrypted.secret
 				profile.entropy = resealed.encrypted.entropy
 				profile.dekSealed = newDekSealed
-				if (secret) {
-					profile.envelopeMac = await computeEnvelopeMacV2(secret, dek, this.macEnvelopeV2(resealed.encrypted, newDekSealed))
-				}
+				profile.envelopeMac = await computeEnvelopeMacV2(secret, dek, this.macEnvelopeV2(resealed.encrypted, newDekSealed))
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
 
-				if (secret && this.sessionManager.isActive(id)) {
+				if (this.sessionManager.isActive(id)) {
 					// Re-open with a fresh Fr. openSessionVerified re-runs the check + the deletion
 					// bracket. If the RE-check now fails on an address-drift block (e.g. a foreign
 					// account was restored between the pre-check and here), the password change ALREADY
