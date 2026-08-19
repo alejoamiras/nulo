@@ -262,7 +262,7 @@
 
 | Aspect | Details |
 |--------|---------|
-| **Public Methods** | `getTokens(profileId?, chainId?)` → TokenInfo[] (capabilities included)<br>`getTokensRaw(profileId?, chainId?)` → Token[] (raw storage)<br>`getToken(id)` → TokenInfo<br>`getTokenRaw(id)` → Token<br>`addToken(profileId, networkId, accountAddress, tokenInterface, parentTask?)` → TokenInfo<br>`updateToken(...)` → TokenInfo<br>`deleteToken(id)` → TokenInfo<br>`getTokenInterface(networkId, tokenId)` → TokenInterface (fetches from on-chain)<br>`parseTokenInterface(networkId, contract)` → TokenInterface (introspects contract) |
+| **Public Methods** | `getTokens(profileId?, chainId?)` → TokenInfo[] (capabilities included)<br>`getTokensRaw(profileId?, chainId?)` → Token[] (raw storage)<br>`getToken(id)` → TokenInfo<br>`getTokenRaw(id)` → Token<br>`addToken(profileId, networkId, accountAddress, tokenInterface, parentTask?)` → TokenInfo<br>`updateToken(...)` → TokenInfo<br>`deleteToken(id)` → TokenInfo<br>`parseTokenInterface(networkId, contract)` → TokenInterface (introspects contract) |
 | **Events** | `onTokenAdded: TokenInfo`<br>`onTokenUpdated: TokenInfo`<br>`onTokenDeleted: TokenInfo` |
 | **Storage** | `nulo:core:tokens` (EntityStorage, Local) |
 | **Dependencies** | NetworkService, ProfileService, AccountService, PxeServiceClient (new), TaskService |
