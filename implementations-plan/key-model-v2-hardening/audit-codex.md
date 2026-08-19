@@ -85,3 +85,14 @@ No new material findings.
 
 ---
 _P3 rider round 1 (FAIL: fixed-size contracts unenforced in wrapPair + macKeyV2, pair copy outside the protected block) — all fixed 8432bd07 (32-byte guards + boundary tests + copy inside try); re-verdict: PASS._
+FAIL (blocking: password restore finalization bypasses MAC-v2 validation)
+
+- HIGH / `profile/service.ts:2318` / `finalizeRestore` unseals the DEK and opens a full bearer-backed session without verifying the current four-slot MAC. A storage attacker can corrupt `envelopeMac` between restore and finalization yet obtain a non-degraded session. / Verify MAC-v2 before opening; on failure zeroize DEK, emit degradation, and open derived-only without bearer. Add a tamper-between-restore/finalize test.
+
+- MEDIUM / `profile/service.ts:1225` / `deleteProfile` zeroizes only `pending.secret`; it leaves `pending.dek` and both `pendingDekRewraps` DEKs resident until lazy expiry or worker death. / Remove and zeroize all pending restore and rewrap buffers under the lock; test rollback cleanup.
+
+Otherwise, sibling isolation, clone rewrapping, password resealing, account paths, and duplicate guards checked out.
+PASS
+
+---
+_P4 rider (resumed P3+P4 combined attack) round 1: FAIL — finalizeRestore opened a bearer-backed session without re-verifying MAC v2 (tamper window between restore and finalize) + deleteProfile leaked pending.dek and the rewrap context. Both fixed 15eab09b with the prescribed tests; re-verdict: PASS._
