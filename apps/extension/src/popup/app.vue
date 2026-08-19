@@ -21,6 +21,7 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
+const { openToast } = useToast()
 
 /** Update theme */
 const root = document.querySelector("html")
@@ -144,8 +145,17 @@ const onActiveProfileChanged = async (profile) => {
 	}
 }
 
+/** The profile unlocked DERIVED-ONLY: its imported-keys DEK (or the envelope MAC over it) failed,
+ *  so every imported account is unusable until the cause is repaired. The service deliberately does
+ *  NOT block the profile — derived funds stay reachable — which means this warning is the only
+ *  signal the user gets before an imported account fails at use time. */
+const onImportedKeysDegraded = (profile) => {
+	openToast({ label: `Imported accounts unavailable in "${profile.name}"`, icon: "warning" }, TOAST_DURATION.LONG)
+}
+
 const loadProfile = async () => {
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
+	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
 
 	appStore.profiles = await managers.profile.getProfiles()
 	const activeProfile = await managers.profile.getActiveProfile()
