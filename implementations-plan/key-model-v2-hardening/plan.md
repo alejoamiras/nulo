@@ -382,7 +382,10 @@ transport tests green. Layers: lint/typecheck/unit.
 path reaching an imported key with master-only material?), wrap-key domain separation, MAC v2
 keying + preimage, bearer wrap, zeroization. No unresolved High.
 
-**P4 — service threading + fingerprint + backup carriage.**
+**P4 — service threading + fingerprint + backup carriage.** ✓ (gate passed 2026-08-19: audit:vue
+exit 0 — typecheck 0 / 4443 unit+integration / lint 0 / build; named criteria (a)–(j) green as 13
+dedicated DEK-lifecycle tests; rider: FAIL — finalizeRestore skipped MAC v2 + deleteProfile leaked
+the rewrap context — fixed 15eab09b → re-verdict PASS; lessons/phase-4.md)
 ActiveSession.dek (copy accessor, zeroize on close/replace/expiry) + NINE open() call sites;
 unlock unseal-and-thread + the degradation state machine (derived-only + visible warning +
 no-bearer on DEK/MAC failure); bearer v2; fresh destination DEK at restore + the TTL-bound rewrap
