@@ -74,9 +74,17 @@ export interface WalletRuntimeDeps {
 
 /** Handle returned by `createWalletRuntime`. Lifecycle-controlled, not singleton. */
 export interface WalletRuntime {
-	/** Kick off config load, BB init, migrations, service-graph startup, heartbeat. Idempotent. */
+	/** Kick off migrations, config load, BB init, service-graph startup,
+	 *  heartbeat. Single-flight: concurrent callers share ONE in-flight boot
+	 *  and resolve only when it genuinely finishes. REJECTS on boot failure —
+	 *  callers must handle it; a retry-vetoed failure (migration-blocked, BB
+	 *  init, registration zone) rejects for the SW's remaining lifetime, a
+	 *  retryable one is re-attempted by the next call. */
 	start(): Promise<void>
-	/** Stop the heartbeat. Services are not disposed (no mechanism yet). */
+	/** Stop the heartbeat. Services are not disposed (no mechanism yet), and
+	 *  the start memo is NOT reset — a stopped runtime does not restart
+	 *  (start() returns the settled memo; heartbeat stays disarmed). Same
+	 *  semantics as the pre-memo `started` flag, pinned as intentional. */
 	stop(): void
 	/** Exposed so shell code + tests can inspect / drive the graph. */
 	readonly services: ServiceCollection
@@ -94,23 +102,25 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 	let heartbeatHandle: TimerHandle | undefined
 	let reaper: JournalReaper | undefined
 	let journalGc: JournalGC | undefined
-	// Retry classification for the single-flight memo. `retrySafe` starts true
-	// on every attempt and is vetoed at the three points where a re-run is
-	// pointless or harmful:
-	//   - a TERMINAL migration block (re-running explicitly terminal work on
-	//     every surviving alarm tick would burn the engine's durable attempts
-	//     meant for SW-respawn cadence; retryable blocks stay retryable);
-	//   - a Barretenberg init failure (`BarretenbergSync.initSingleton` memoizes
-	//     its REJECTED promise upstream — verified in the vendored source — so
-	//     an in-lifetime retry can only re-observe the same error);
+	// Retry classification for the single-flight memo. `retrySafe` is vetoed at
+	// the three points where an in-lifetime re-run is pointless or harmful:
+	//   - ANY migration-blocked throw (every `Migrator.run()` on a failing
+	//     migration bumps the DURABLE attempt counter whose cadence is
+	//     next-boot by design — an in-lifetime retry loop driven by the price
+	//     alarm would burn the whole cross-boot budget in minutes);
+	//   - a Barretenberg init failure (`BarretenbergSync.initSingleton`
+	//     memoizes its REJECTED promise upstream with no reset — verified in
+	//     the vendored source — so a retry can only re-observe the same error);
 	//   - the registration zone (`ServiceCollection.add` throws on duplicates,
 	//     and the tabs/pxe-provider registrations are not re-entrant).
 	// A vetoed failure keeps the rejected memo: callers observe the rejection,
-	// and a fresh SW lifetime — fresh module state — is the retry.
+	// and a fresh SW lifetime — fresh module state — is the retry. What
+	// remains genuinely retryable is small (transient schema-status storage
+	// writes; config.load swallows its own errors today) — kept because the
+	// reset costs nothing and covers any future throwing pre-registration step.
 	let retrySafe = true
 
 	const doStart = async (): Promise<void> => {
-		retrySafe = true
 		// Uninstall URL comes first — zero-cost and covers the user experience
 		// even if the rest of startup fails.
 		try {
@@ -152,9 +162,12 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				detail: migration.reason,
 				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
 			}
-			// A terminal block vetoes in-lifetime retry — only a retryable one
-			// may be re-attempted by a later start() call.
-			if (blocked.terminal) retrySafe = false
+			// EVERY blocked outcome vetoes in-lifetime retry — not just terminal
+			// ones: the engine's durable attempt counter bumps on each run, and
+			// its retry cadence is next-boot (SW respawn) by construction. An
+			// in-lifetime retry loop would consume the cross-boot budget and
+			// flip a recoverable block to terminal without a single real boot.
+			retrySafe = false
 			await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: blocked })
 			throw new Error(`storage migration blocked: ${migration.kind}`)
 		}
@@ -171,24 +184,23 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		}
 
 		// Config + Barretenberg load in parallel — neither depends on the other.
-		// allSettled, NOT all: a fast rejection in one leg must not settle this
-		// promise (and reset the single-flight memo) while the other leg is
-		// still running — a retry would then re-run migration/config
-		// CONCURRENTLY with the first attempt's unfinished work. Both legs
-		// settle before any rethrow, so a reset memo implies quiescence.
-		const [configResult, bbResult] = await Promise.allSettled([
+		// Overlap-on-retry is impossible without allSettled here BECAUSE the BB
+		// veto keeps the memo on the only fast-rejecting leg: a BB failure
+		// never retries, and config.load cannot reject today (it swallows its
+		// own errors) — while a hung leg under allSettled would leave the boot
+		// promise silently pending forever, which is the defect class this arc
+		// exists to remove.
+		await Promise.all([
 			config.load().then(() => logger.log("wallet", LogLevel.Info, "Config loaded")),
-			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH }).then(() =>
-				logger.log("wallet", LogLevel.Info, "Barretenberg initialized"),
-			),
+			BarretenbergSync.initSingleton({ wasmPath: process.env.BB_WASM_PATH })
+				.then(() => logger.log("wallet", LogLevel.Info, "Barretenberg initialized"))
+				.catch((err) => {
+					// initSingleton memoizes its rejected promise upstream — an
+					// in-lifetime retry can only re-observe this same error.
+					retrySafe = false
+					throw err
+				}),
 		])
-		if (bbResult.status === "rejected") {
-			// initSingleton memoizes its rejected promise upstream — an
-			// in-lifetime retry can only re-observe this same error.
-			retrySafe = false
-			throw bbResult.reason
-		}
-		if (configResult.status === "rejected") throw configResult.reason
 
 		// Service graph. Services migrated to ports accept `browserApi`;
 		// remaining services still reach into `chrome.*` directly until

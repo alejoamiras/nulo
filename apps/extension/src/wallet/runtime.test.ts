@@ -89,7 +89,7 @@ const tick = () => new Promise((r) => setTimeout(r, 10))
 
 beforeEach(() => {
 	bbImpl = async () => ({})
-	migratorImpl = async () => ({ kind: "up-to-date" })
+	migratorImpl = async () => ({ kind: "noop", version: 1 })
 	migratorRuns = 0
 })
 
@@ -117,39 +117,39 @@ describe("runtime.start() single-flight contract", () => {
 	})
 
 	test("a failed pre-registration boot permits a real retry (no permanent latch)", async () => {
+		// The genuinely-retryable representative: a transient schema-status
+		// storage write. (config.load swallows its own errors in production;
+		// BB and migration-blocked failures are veto-classified below.)
 		const { deps, configLoad } = makeDeps()
-		configLoad.mockRejectedValue(new Error("config down"))
+		const removeMock = vi.fn().mockRejectedValue(new Error("storage transient"))
+		;(deps.browserApi.storage.local as { remove: unknown }).remove = removeMock
 		const runtime = createWalletRuntime(deps)
 
-		await expect(runtime.start()).rejects.toThrow("config down")
-		expect(configLoad).toHaveBeenCalledTimes(1)
+		await expect(runtime.start()).rejects.toThrow("storage transient")
+		expect(migratorRuns).toBe(1)
 
 		// The second call must RE-ATTEMPT the boot (and surface its outcome),
 		// not void-resolve against the half-booted runtime.
-		await expect(runtime.start()).rejects.toThrow("config down")
-		expect(configLoad).toHaveBeenCalledTimes(2)
+		await expect(runtime.start()).rejects.toThrow("storage transient")
 		expect(migratorRuns).toBe(2)
+		// The failure precedes config/BB — neither leg ever ran.
+		expect(configLoad).not.toHaveBeenCalled()
 	})
 
-	test("a fast BB rejection does NOT reset the memo while config is still pending (no overlapping retry)", async () => {
+	test("a fast BB rejection with config still pending: memo KEPT, no overlapping re-run", async () => {
 		bbImpl = () => Promise.reject(new Error("bb down"))
 		const { deps, configLoad } = makeDeps()
 		configLoad.mockImplementation(() => new Promise(() => {})) // config never settles
 		const runtime = createWalletRuntime(deps)
 
-		const p1 = runtime.start()
-		p1.catch(() => {})
-		await tick()
-		// allSettled holds the boot open until BOTH legs settle — the memo is
-		// still in flight, so a second start() must join it, not re-run the
-		// migration/config work concurrently with the unfinished first attempt.
-		const p2 = runtime.start()
-		p2.catch(() => {})
-		await tick()
+		// Promise.all rejects fast (no silent forever-pending boot)…
+		await expect(runtime.start()).rejects.toThrow("bb down")
+		// …and the BB veto keeps the memo, so a second start() joins the SAME
+		// rejection instead of re-running migration/config concurrently with
+		// the first attempt's still-pending config leg.
+		await expect(runtime.start()).rejects.toThrow("bb down")
 		expect(migratorRuns).toBe(1)
 		expect(configLoad).toHaveBeenCalledTimes(1)
-		const outcome = await Promise.race([p2.then(() => "settled"), tick().then(() => "pending")])
-		expect(outcome).toBe("pending")
 	})
 
 	test("a Barretenberg failure vetoes retry — the rejection is memoized for the SW lifetime", async () => {
@@ -168,23 +168,25 @@ describe("runtime.start() single-flight contract", () => {
 		expect(migratorRuns).toBe(1)
 	})
 
-	test("a TERMINAL migration block vetoes retry; a RETRYABLE one stays retryable", async () => {
-		const { deps } = makeDeps()
-		migratorImpl = async () => ({ kind: "needs-recovery", reason: "terminal", retryable: false })
-		const runtime = createWalletRuntime(deps)
-
+	test("EVERY migration-blocked outcome vetoes retry — the engine's durable attempt budget is next-boot-cadenced", async () => {
+		// The budget-burner variant: failed+breaking with attempts still below
+		// max. An in-lifetime retry loop (the surviving price alarm) would bump
+		// the durable counter every 3 minutes and flip a recoverable block to
+		// terminal without a single real boot — so even NON-terminal blocks
+		// keep the memo.
+		migratorImpl = async () => ({ kind: "failed", version: 1, breaking: true, reason: "boom", attempts: 1, terminal: false })
+		const runtime = createWalletRuntime(makeDeps().deps)
 		await expect(runtime.start()).rejects.toThrow("storage migration blocked")
 		await expect(runtime.start()).rejects.toThrow("storage migration blocked")
-		// Terminal work must NOT be re-run on every surviving alarm tick.
 		expect(migratorRuns).toBe(1)
 
-		// Retryable block on a fresh runtime: the memo resets and a later call
-		// re-runs the engine (its next-boot resume is designed for this).
+		// Same for a retryable needs-recovery: its retry cadence is the NEXT
+		// BOOT (SW respawn), never an in-lifetime loop.
 		migratorRuns = 0
 		migratorImpl = async () => ({ kind: "needs-recovery", reason: "transient", retryable: true })
 		const runtime2 = createWalletRuntime(makeDeps().deps)
 		await expect(runtime2.start()).rejects.toThrow("storage migration blocked")
 		await expect(runtime2.start()).rejects.toThrow("storage migration blocked")
-		expect(migratorRuns).toBe(2)
+		expect(migratorRuns).toBe(1)
 	})
 })
