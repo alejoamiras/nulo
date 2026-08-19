@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest"
 import {
 	AccountAddressInconsistencyError,
+	DuplicateWalletError,
 	RestoreTornError,
 	CapabilityNotGrantedError,
 	CLIENT_DISCONNECTED_MESSAGE,
@@ -83,6 +84,18 @@ describe("walletErrorFromPayload", () => {
 		expect(rebuilt.code).toBe(CapabilityNotGrantedError.CODE)
 		expect(rebuilt.message).toBe(original.message)
 		expect((rebuilt.details as { capabilityType?: string })?.capabilityType).toBe("accounts")
+	})
+
+	test("DuplicateWalletError round-trips with code + existingProfileName preserved", () => {
+		// The dup-guard confirm-retry UX hinges on `instanceof` surviving the RPC boundary; a
+		// missing dispatch case flattens it to a generic Error and the dialog never shows.
+		const original = new DuplicateWalletError(undefined, { existingProfileName: "Main Profile" })
+		const rebuilt = walletErrorFromPayload(original.toPayload())
+		expect(rebuilt).toBeInstanceOf(DuplicateWalletError)
+		expect(rebuilt).toBeInstanceOf(WalletError)
+		expect(rebuilt.code).toBe(DuplicateWalletError.CODE)
+		expect(rebuilt.message).toBe("A profile with this recovery phrase already exists")
+		expect((rebuilt.details as { existingProfileName?: string })?.existingProfileName).toBe("Main Profile")
 	})
 
 	test("unknown code → base WalletError, code + message preserved (default arm)", () => {

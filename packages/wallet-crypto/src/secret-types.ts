@@ -37,6 +37,7 @@
 
 declare const __passhash: unique symbol
 declare const __masterSecretBytes: unique symbol
+declare const __importedKeysDek: unique symbol
 declare const __base64Ciphertext: unique symbol
 declare const __base64MasterSecret: unique symbol
 declare const __base64CredentialId: unique symbol
@@ -50,6 +51,13 @@ export type Passhash = ArrayBuffer & { readonly [__passhash]: true }
  *  behind `Fr.fromBuffer`. `Buffer<ArrayBuffer>` satisfies the `Uint8Array<ArrayBuffer>` base
  *  structurally, so both mint here. */
 export type MasterSecretBytes = Uint8Array<ArrayBuffer> & { readonly [__masterSecretBytes]: true }
+
+/** The per-profile random 32-byte imported-keys DEK — the HKDF root for imported signing-key
+ *  rows. CREDENTIAL-sealed (never master-derived: a shared recovery phrase means a shared master,
+ *  so any master-rooted key is decryptable by the sibling profile by construction — the
+ *  credential is the only input distinguishing two same-phrase profiles). Distinct brand from
+ *  `MasterSecretBytes` so a master can never be passed where the DEK is required. */
+export type ImportedKeysDek = Uint8Array<ArrayBuffer> & { readonly [__importedKeysDek]: true }
 
 /** Base64-encoded AES-GCM ciphertext persisted on a profile record (`EncryptedProfileSecret`'s
  *  `guard` + `secret`). Distinguishes an on-disk ciphertext from any other base64 string — a
@@ -83,6 +91,10 @@ export const asPasshash = (b: ArrayBuffer): Passhash => b as Passhash
 /** Mint `MasterSecretBytes` — grep to audit every boundary where the master secret originates
  *  (`PasswordSecretBox.unseal*`, `PasskeyCredential.deriveMasterSecret`, fresh `Fr.random`). */
 export const asMasterSecretBytes = (b: Uint8Array<ArrayBuffer>): MasterSecretBytes => b as MasterSecretBytes
+
+/** Mint `ImportedKeysDek` — grep to audit every boundary where a DEK originates (fresh CSPRNG at
+ *  profile creation, `unsealDekUnderWrapKey`, the backup restore carriage). */
+export const asImportedKeysDek = (b: Uint8Array<ArrayBuffer>): ImportedKeysDek => b as ImportedKeysDek
 
 /** Mint `Base64Ciphertext` — grep to audit ciphertext origins (`PasswordSecretBox.sealInternal`
  *  `toBase64`, the profile-record `guard`/`secret` lift at the unseal call sites). */
