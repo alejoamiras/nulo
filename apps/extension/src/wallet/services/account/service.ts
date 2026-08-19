@@ -55,6 +55,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		"changeAccountVisibility",
 		"exportAccount",
 		"importAccount",
+		"previewImportAccount",
 		"backupImportedKeys",
 		"restoreImportedKeys",
 		"reconcileImportedAccounts",
@@ -392,21 +393,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		password: string,
 	): Promise<Account> {
 		await this.ensureInitialized()
-		if (fileBody.length > 64 * 1024) throw new Error("Account export file is too large")
 		// Session-gated master for sealing the key at rest.
 		const master = await this.profileService.getProfileSecret(profileId)
 		if (!master) throw new Error("unauthorized")
 
-		// Decrypt if it's the encrypted variant (starts as base64, not JSON); else treat as plaintext.
-		const trimmed = fileBody.trim()
-		const json = trimmed.startsWith("{") ? trimmed : await decryptAccountExport(trimmed, password)
-		const { signingKey, claimedAddress } = parseAccountExport(json)
-
-		// Authenticity: the address is a pure function of the signing key. Recompute and require it
-		// to match BOTH the file's self-claim AND the address the user confirmed in the UI — a
-		// self-consistent hostile file is caught here by the user-confirmed address.
-		const recomputed = (await NuloAccount.fromSigningKey(signingKey, this.logger)).address.toString()
-		if (recomputed !== claimedAddress) throw new Error("Account export address does not match its signing key")
+		const { signingKey, address: recomputed } = await this.decodeAccountExport(fileBody, password)
+		// The user CONFIRMED this exact address in the UI (the checksum authenticates nothing —
+		// a self-consistent hostile file is caught here).
 		if (recomputed !== expectedAddress) throw new Error("Imported account address does not match the confirmed address")
 
 		return this.serializePerTuple(profileId, chainId, AccountType.Imported, async () => {
@@ -632,6 +625,26 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				return parsed
 			})
 		})
+	}
+
+	/** Decode + validate an account-export file body → its signing key + recomputed address.
+	 *  Shared by `previewImportAccount` (show the address) and `importAccount` (write). */
+	private async decodeAccountExport(fileBody: string, password: string): Promise<{ signingKey: GrumpkinScalar; address: string }> {
+		if (fileBody.length > 64 * 1024) throw new Error("Account export file is too large")
+		// Encrypted variant is base64 (not JSON); plaintext starts with `{`.
+		const trimmed = fileBody.trim()
+		const json = trimmed.startsWith("{") ? trimmed : await decryptAccountExport(trimmed, password)
+		const { signingKey, claimedAddress } = parseAccountExport(json)
+		// The address is a pure function of the signing key — recompute and require it to match the
+		// file's self-claim (catches a plaintext file whose address was edited without the key).
+		const address = (await NuloAccount.fromSigningKey(signingKey, this.logger)).address.toString()
+		if (address !== claimedAddress) throw new Error("Account export address does not match its signing key")
+		return { signingKey, address }
+	}
+
+	public async previewImportAccount(fileBody: string, password: string): Promise<string> {
+		await this.ensureInitialized()
+		return (await this.decodeAccountExport(fileBody, password)).address
 	}
 
 	/** Backup this profile's imported-account key rows (the dedicated `imported-account-keys`
