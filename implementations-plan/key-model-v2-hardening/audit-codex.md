@@ -50,3 +50,12 @@ Canary resolution: Agree with execution-only, narrowly. Raw-WebCrypto V3 is genu
 Sound: 512-bit reduction math; credential-rooted random DEKs for independent creations; fixed 32+32 atomic bearer; MAC v2 keying/preimage; six row sites, nine opens, RPC reconstruction, and origin/dev freeze facts.
 ---
 _Final fresh-context pass, round 1 on rev 2 (NEW codex session, full decision trail). Verdict: reject — the clone-divergence blocker + conditions, ALL adopted into rev 3 (fresh destination DEK + row rewrap at restore; explicit degradation state machine; dup check + commit under one lock + credentialId scan; "deriveKey" HKDF usage; fact narrowings; V3-claim scoping). Both rev-2 disagreement resolutions endorsed. The inline file link above was rewritten to repo-relative; it refers to rev 2's DEK-minting bullet. Re-verdict on rev 3 appended below._
+conditional approve (with conditions: define the transient source-DEK rewrap handoff/lifetime; remove contradictory rev-2 instructions; owner ratifies the KDF-spec amendment)
+
+- HIGH / Source→destination rewrap lacks an implementable ownership path / `ProfileService.restore()` runs before `AccountService.restoreImportedKeys()`, when imported-key rows are unavailable. Yet rev 3 says the source DEK is zeroized during restore and `pendingRestoreSecrets` retains only the destination DEK. The later slice cannot be decrypted. / Define a TTL-bound, memory-only rewrap context for both profile types, consumed atomically by `restoreImportedKeys`; cover empty slice, partial failure, rollback, expiry, finalize, and SW death cleanup. Alternatively pass the slice into the profile restore boundary.
+
+- MEDIUM / Authoritative sections still contradict rev 3 / The header still says “Rev 2”; the file map still specifies “throwing-zone dup check/passkey rethrow + retry stash”; and P4 still says “restore reseal pre-commit (SAME bytes)” plus “passkey rethrow/stash.” An implementer following P4 could recreate both rejected designs. / Replace these with locked check+commit, UI-held credential retry, and source→destination rewrap.
+
+- GATE / KDF freeze amendment / Explicit owner ratification remains open as the plan correctly requires.
+---
+_Re-verdict (resumed final-pass session, on rev 3): conditional approve. Conditions 1 (rewrap-context lifetime) and 2 (rev-2 leftover sweep) adopted into rev 4; condition 3 (owner ratifies the KDF-spec amendment) is the approval-gate ask itself. Loop closed._
