@@ -340,6 +340,12 @@ export interface UseFullBackupImportOptions {
 	 * duplicate-name auto-suffix at `service.ts:825-840` still applies.
 	 */
 	profileName?: Ref<string>
+	/**
+	 * Duplicate-phrase override from the warn-and-confirm dialog. The parent flips it after the
+	 * user confirms `DuplicateWalletError` and calls `restoreBackup` again — the service then
+	 * accepts the duplicate (soft guard by owner policy).
+	 */
+	allowDuplicate?: Ref<boolean>
 }
 
 export interface UseFullBackupImportResult {
@@ -611,11 +617,38 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				opts.fillError("full_backup", "Can't import", "A passkey backup must not carry an entropy field.")
 				return
 			}
+			// Epoch-4 shape: the imported-keys DEK carrier is REQUIRED — plaintext beside the
+			// plaintext master for password blobs, the sealed row blob for passkey blobs. The
+			// service uses it only inside the rewrap context (clone divergence: the restored row
+			// gets a FRESH dek; the backup's key rows rewrap onto it).
+			const dekField = (backup as { "imported-keys-dek"?: unknown })["imported-keys-dek"]
+			const dekSealedField = (backup as { "imported-keys-dek-sealed"?: unknown })["imported-keys-dek-sealed"]
+			if (profile.type === "password" && typeof dekField !== "string") {
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Can't import", "This backup is missing its imported-keys key.")
+				return
+			}
+			if (profile.type === "passkey" && typeof dekSealedField !== "string") {
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Can't import", "This backup is missing its imported-keys key.")
+				return
+			}
 			const restoreSecret: RestoreSecret =
 				profile.type === "password"
-					? { type: "password", masterKey: asBase64MasterSecret(masterKey), entropy: entropyField as string }
-					: { type: "passkey", credentialId: asBase64CredentialId(masterKey) }
-			const newProfile = await profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData)
+					? {
+							type: "password",
+							masterKey: asBase64MasterSecret(masterKey),
+							entropy: entropyField as string,
+							importedKeysDek: dekField as string,
+						}
+					: { type: "passkey", credentialId: asBase64CredentialId(masterKey), dekSealed: dekSealedField as string }
+			const newProfile = await profileService.restore(
+				profileForRestore,
+				restoreSecret,
+				opts.password.value,
+				credentialData,
+				opts.allowDuplicate?.value,
+			)
 
 			if (newProfile.restoreError) {
 				restoreStatus.value = "failed"

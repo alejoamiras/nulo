@@ -33,6 +33,8 @@ import {
 	asBase64MasterSecret,
 	asBase64SecretPrf,
 	asHexUserHandle,
+	asImportedKeysDek,
+	sealDekUnderWrapKey,
 	type PasskeyCredential,
 	type PasskeyCredentialData,
 	type SessionWrappedSecret,
@@ -64,12 +66,16 @@ async function restorePairFor(fill: number): Promise<{ masterKey: string; entrop
 	return pair
 }
 
+/** Deterministic 32-byte source-dek carrier for password restore secrets (any 32B is valid —
+ *  the service only feeds it into the rewrap context). */
+const RESTORE_DEK_B64 = Buffer.from(new Uint8Array(32).fill(0x55)).toString("base64")
+
 /** RestoreSecret password variant for a fill — the standard happy-path shape. */
 async function restoreSecretFor(
 	fill: number,
-): Promise<{ type: "password"; masterKey: ReturnType<typeof asBase64MasterSecret>; entropy: string }> {
+): Promise<{ type: "password"; masterKey: ReturnType<typeof asBase64MasterSecret>; entropy: string; importedKeysDek: string }> {
 	const pair = await restorePairFor(fill)
-	return { type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy }
+	return { type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: RESTORE_DEK_B64 }
 }
 
 /** Fake `IConfig` with `sessionTtl` + `strictSecurityMode`. Default is
@@ -151,8 +157,25 @@ class FakePasskeyService extends Service<Record<string, never>> {
 				const { Fr } = await import("@aztec/foundation/curves/bn254")
 				return Fr.fromBufferReduce(Buffer.from(secret)).toBuffer() as Buffer<ArrayBuffer>
 			},
+			// Deterministic per credential id — mirrors production's same-credential ⇒ same wrap
+			// key property, and a REAL AES-GCM key so dek seal/unseal genuinely round-trips.
+			deriveDekWrapKey: async () => fakeWrapKey(id),
 		} as unknown as PasskeyCredential
 	}
+}
+
+/** Deterministic AES-GCM wrap key per fake credential id (real WebCrypto key). */
+async function fakeWrapKey(credentialId: string): Promise<CryptoKey> {
+	const raw = new Uint8Array(32)
+	for (let i = 0; i < 32; i++) raw[i] = (credentialId.charCodeAt(i % credentialId.length) + i) & 0xff
+	return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"])
+}
+
+/** A sealed dek blob that unseals under the fake credential's wrap key — the passkey
+ *  RestoreSecret's `dekSealed` carrier. */
+async function fakeDekSealedFor(credentialId: string, fill = 0x66): Promise<string> {
+	const dek = asImportedKeysDek(new Uint8Array(32).fill(fill) as Uint8Array<ArrayBuffer>)
+	return sealDekUnderWrapKey(await fakeWrapKey(credentialId), dek)
 }
 
 /** Build a `PasskeyCredentialData` payload matching the FakePasskeyService's
@@ -563,7 +586,12 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "px", name: "Doctored", type: "password" },
-					{ type: "password", masterKey: asBase64MasterSecret(good.masterKey), entropy: evil.entropy },
+					{
+						type: "password",
+						masterKey: asBase64MasterSecret(good.masterKey),
+						entropy: evil.entropy,
+						importedKeysDek: RESTORE_DEK_B64,
+					},
 					"pass1234",
 				),
 			).rejects.toThrow(/entropy does not derive/)
@@ -636,6 +664,7 @@ describe("ProfileService integration", () => {
 							const { Fr } = await import("@aztec/foundation/curves/bn254")
 							return Fr.fromBufferReduce(Buffer.from(secret)).toBuffer() as Buffer<ArrayBuffer>
 						},
+						deriveDekWrapKey: async () => fakeWrapKey(`cred-${userHandle}`),
 					} as unknown as PasskeyCredential
 				}
 				public async getKey(): Promise<PasskeyCredential> {
@@ -723,7 +752,7 @@ describe("ProfileService integration", () => {
 		test("opt-out unlock keeps bearer (legacy lenient behavior)", async () => {
 			const { api, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 		}, 30_000)
 
 		test("createProfile honors strict mode (gate applies even on profile creation, not just unlock)", async () => {
@@ -754,7 +783,7 @@ describe("ProfileService integration", () => {
 		test("toggle ON during unlocked session: bearer cleared from persisted record + in-memory", async () => {
 			const { api, config, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 
 			config.set("strictSecurityMode", true)
 			// onConfigUpdated fires `void clearBearer()` — flush microtasks.
@@ -796,7 +825,7 @@ describe("ProfileService integration", () => {
 
 			// Now the bearer is back — confirms toggle OFF takes effect on
 			// next unlock.
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 		}, 30_000)
 
 		test("SW restart simulation: legacy passhash record → silentClose + profile still unlockable (upgrade-path safety)", async () => {
@@ -833,7 +862,7 @@ describe("ProfileService integration", () => {
 			// re-registration, no data loss (F-11 option (a)).
 			const reunlocked = await service2.unlockProfile(profile.id, "pass1234")
 			expect(reunlocked.id).toBe(profile.id)
-			expect((await readPersistedBearer(api))?.v).toBe(1) // fresh F-11 bearer on re-unlock
+			expect((await readPersistedBearer(api))?.v).toBe(2) // fresh F-11 bearer on re-unlock
 		}, 30_000)
 
 		test("SW restart simulation: clean strict session + strict ON → no in-memory restore (passkey-equivalent)", async () => {
@@ -852,7 +881,7 @@ describe("ProfileService integration", () => {
 			const { api } = await makeService({ strict: false })
 			const built = await makeServiceFromExistingApi(api, { strict: false })
 			await built.service.createProfile("P", "pass1234")
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 
 			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: false })
 			// Persisted bearer + strict OFF → silent restore.
@@ -960,7 +989,7 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(credentialId, original.id)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				credData,
 			)
@@ -991,7 +1020,7 @@ describe("ProfileService integration", () => {
 
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 			)
 			expect("restoreError" in out && out.restoreError).toBeTruthy()
 			expect(String((out as { restoreError?: unknown }).restoreError)).toMatch(/credentialData is required/)
@@ -1012,7 +1041,7 @@ describe("ProfileService integration", () => {
 			const wrongCred = fakeCredentialData("cred-WRONG", original.id)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				wrongCred,
 			)
@@ -1031,7 +1060,7 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(credentialId, original.id)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				credData,
 			)
@@ -1061,6 +1090,7 @@ describe("ProfileService integration", () => {
 						type: "password",
 						masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(16)).toString("base64")), // 16 bytes, not 32
 						entropy: Buffer.from(new Uint8Array(32)).toString("base64"),
+						importedKeysDek: RESTORE_DEK_B64,
 					},
 					"pass1234",
 				),
@@ -1079,7 +1109,7 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "ignored", name: "P", type: "password" },
-					{ type: "passkey", credentialId: asBase64CredentialId("cred-x") },
+					{ type: "passkey", credentialId: asBase64CredentialId("cred-x"), dekSealed: "AAA=" },
 					"pass1234",
 				),
 			).rejects.toThrow(/secret type does not match/i)
@@ -1122,7 +1152,7 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(credentialId, userHandle)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				credData,
 			)
@@ -1438,7 +1468,7 @@ describe("F-B24 — torn-import sweep on boot resume", () => {
 	const AGED = ProfileService.TORN_IMPORT_MIN_AGE_MS + 60 * 60 * 1000 // floor + 1h
 
 	const tornRestore = async (service: ProfileService, id = "ignored") => {
-		const out = await service.restore({ id, name: "Torn", type: "password" }, await restoreSecretFor(13), "pass1234")
+		const out = await service.restore({ id, name: "Torn", type: "password" }, await restoreSecretFor(13), "pass1234", undefined, true)
 		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 		return out
 	}
@@ -2089,9 +2119,10 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 				const credData = fakeCredentialData(credentialId, original.id)
 				const out = await service.restore(
 					{ id: "ignored", name: "PK", type: "passkey" },
-					{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+					{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 					undefined,
 					credData,
+					true,
 				)
 				if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 				expect(captured.length).toBeGreaterThan(0)
@@ -2104,9 +2135,14 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 				vi.advanceTimersByTime(31 * 60 * 1000)
 				await service.restore(
 					{ id: "ignored2", name: "PK2", type: "passkey" },
-					{ type: "passkey", credentialId: asBase64CredentialId("cred-fresh2") },
+					{
+						type: "passkey",
+						credentialId: asBase64CredentialId("cred-fresh2"),
+						dekSealed: await fakeDekSealedFor("cred-fresh2"),
+					},
 					undefined,
 					fakeCredentialData("cred-fresh2", "fresh2"),
+					true,
 				)
 
 				// The FIRST (abandoned) restore's stashed secret must now be wiped
