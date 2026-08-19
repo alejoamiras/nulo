@@ -6,6 +6,7 @@ import { AccountStateServiceClient } from "@/wallet/services/account-state/clien
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -74,27 +75,18 @@ watch(
 	() => senderAddress.value,
 	() => validateSenderAddress(),
 )
-watch(
-	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			accountStateClientService.disconnect()
-			accountStateClientService = null
-			senderAddress.value = ""
-		} else {
-			accountStateClientService = new AccountStateServiceClient()
-			senders.value = await accountStateClientService.getSenders(appStore.network.id)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+usePopupEntity(() => props.show, {
+	submit: handleAddSender,
+	onShow: async () => {
+		accountStateClientService = new AccountStateServiceClient()
+		senders.value = await accountStateClientService.getSenders(appStore.network.id)
 	},
-)
-
-const onKeydown = (e) => {
-	if (e.key === "Enter") handleAddSender()
-}
+	onHide: () => {
+		accountStateClientService.disconnect()
+		accountStateClientService = null
+		senderAddress.value = ""
+	},
+})
 </script>
 
 <template>

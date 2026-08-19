@@ -4,6 +4,7 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -81,35 +82,28 @@ const handleUpdateProfile = async () => {
 	}
 }
 
-watch(
-	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			profileService.disconnect()
-			profileService = null
-			nameTerm.value = ""
-			isStartedEditing.value = false
-			otherProfileNames.value = []
-		} else {
-			profileService = new ProfileServiceClient()
-			nameTerm.value = appStore.profile?.name
-			// Populate the cross-profile collision list. Excludes the
-			// current profile by id so renaming to the same name doesn't
-			// trigger a false-positive collision.
-			const currentId = appStore.profile?.id
-			const profiles = await profileService.getProfiles()
-			otherProfileNames.value = profiles.filter((p) => p.id !== currentId).map((p) => p.name.normalize("NFKC").toLocaleLowerCase())
-
-			document.addEventListener("keydown", onKeydown)
-		}
+usePopupEntity(() => props.show, {
+	submit: handleUpdateProfile,
+	onShow: async () => {
+		profileService = new ProfileServiceClient()
+		nameTerm.value = appStore.profile?.name
+		// Populate the cross-profile collision list. Excludes the
+		// current profile by id so renaming to the same name doesn't
+		// trigger a false-positive collision. An Enter during this await is
+		// safe: handleUpdateProfile re-validates against a fresh getProfiles()
+		// inside its in-progress latch.
+		const currentId = appStore.profile?.id
+		const profiles = await profileService.getProfiles()
+		otherProfileNames.value = profiles.filter((p) => p.id !== currentId).map((p) => p.name.normalize("NFKC").toLocaleLowerCase())
 	},
-)
-
-const onKeydown = (e) => {
-	if (e.key === "Enter") handleUpdateProfile()
-}
+	onHide: () => {
+		profileService.disconnect()
+		profileService = null
+		nameTerm.value = ""
+		isStartedEditing.value = false
+		otherProfileNames.value = []
+	},
+})
 </script>
 
 <template>
