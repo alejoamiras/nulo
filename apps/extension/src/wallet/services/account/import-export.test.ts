@@ -46,6 +46,7 @@ async function build() {
 		svc(PROFILE_SERVICE_NAME, {
 			onProfileDeleted: new EventHandler(),
 			// getProfileSecret → session-gated master Fr (32 bytes of 9).
+			getActiveProfile: async () => ({ id: "p1", name: "P", type: "password" }),
 			getProfileSecret: async () => (await import("@aztec/foundation/curves/bn254")).Fr.fromBuffer(Buffer.from(MASTER_B64, "base64")),
 			// exportPlain(id, password) → base64 master iff the password is right (service-side auth).
 			exportPlain: async (_id: string, password?: string) => {
@@ -116,5 +117,29 @@ describe("AccountService import/export", () => {
 		await account.clearChainState("p1", CHAIN)
 		const keys = Object.keys(await api.storage.local.get()).filter((k) => k.startsWith("nulo:core:imported-account-keys@"))
 		expect(keys).toHaveLength(0)
+	})
+
+	test("backup → restoreImportedKeys round-trips the encrypted key row, then the account signs", async () => {
+		const { account } = await build()
+		await account.importAccount("p1", CHAIN, exportFile(), addrFor(SK), "")
+		const slice = await account.backupImportedKeys()
+		expect(slice).toHaveLength(1)
+		// Simulate restore into a DIFFERENT profile id (id remap) — the ciphertext is
+		// (master, chainId, address)-bound, so it must still decrypt.
+		await account.clearChainState("p1", CHAIN)
+		const remapped = slice.map((r) => ({ ...r, profileId: "p1" }))
+		const results = await account.restoreImportedKeys(remapped)
+		expect(results.every((r) => !r.restoreError)).toBe(true)
+	})
+
+	test("reconcileImportedAccounts drops an imported Account row with no key row (zombie), keeps healthy ones", async () => {
+		const { api, account } = await build()
+		await account.importAccount("p1", CHAIN, exportFile(), addrFor(SK), "")
+		// Delete just the KEY row, leaving the Account row — the zombie a keyless backup would make.
+		const keyId = Object.keys(await api.storage.local.get()).find((k) => k.startsWith("nulo:core:imported-account-keys@"))!
+		await api.storage.local.remove(keyId)
+		const dropped = await account.reconcileImportedAccounts("p1")
+		expect(dropped).toEqual([addrFor(SK)])
+		expect(await account.getAccount("p1", CHAIN, addrFor(SK))).toBeUndefined()
 	})
 })

@@ -32,7 +32,9 @@ import {
 	ACCOUNT_STORAGE_ROOT,
 	AccountSchema,
 	AccountType,
+	ImportedAccountKeySchema,
 	ImportedAccountUnusableError,
+	type ImportedAccountKey,
 	accountRowId,
 	accountRowIdOf,
 	parseAccountRowId,
@@ -53,6 +55,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		"changeAccountVisibility",
 		"exportAccount",
 		"importAccount",
+		"backupImportedKeys",
+		"restoreImportedKeys",
+		"reconcileImportedAccounts",
 	)
 	public static name = ACCOUNT_SERVICE_NAME
 
@@ -627,5 +632,48 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				return parsed
 			})
 		})
+	}
+
+	/** Backup this profile's imported-account key rows (the dedicated `imported-account-keys`
+	 *  slice). Ciphertext only — the plaintext keys never leave the encrypted envelope. */
+	public async backupImportedKeys(): Promise<ImportedAccountKey[]> {
+		await this.ensureInitialized()
+		const profile = await requireActiveProfile(this.profileService)
+		return this.importedKeys.backup(profile.id)
+	}
+
+	/** Restore imported-account key rows. The stored ciphertext is HKDF-bound to `(master,
+	 *  chainId, address)` — NOT profileId — so it stays valid across restore's profile-id remap.
+	 *  Runs BEFORE `reconcileImportedAccounts` (which drops any keyless type-1 Account row). */
+	public async restoreImportedKeys(rows: ImportedAccountKey[]): Promise<Restored<ImportedAccountKey>[]> {
+		await this.ensureInitialized()
+		return await this.restoreLock.withLock(async () => {
+			return await restoreRows(rows, async (row) => {
+				const parsed = ImportedAccountKeySchema.parse(row)
+				if (parsed.address.trim().length === 0) throw new Error("empty imported-key address")
+				await this.importedKeys.set(parsed)
+				return parsed
+			})
+		})
+	}
+
+	/**
+	 * After a full-backup restore, drop any IMPORTED Account row that has no matching key row —
+	 * a hostile epoch-4 backup can carry a type-1 row with the key slice omitted, which would
+	 * otherwise restore as a zombie that fails only at signing. Runs at restore FINALIZE, after
+	 * both the account rows and the key rows have landed.
+	 */
+	public async reconcileImportedAccounts(profileId: string): Promise<string[]> {
+		await this.ensureInitialized()
+		const dropped: string[] = []
+		const imported = (await this.liveRows()).filter((a) => a.profileId === profileId && a.type === AccountType.Imported)
+		for (const account of imported) {
+			if (!(await this.importedKeys.get(profileId, account.chainId, account.address))) {
+				await this.storage.delete(accountRowIdOf(account))
+				this.emit("onAccountDeleted", account)
+				dropped.push(account.address)
+			}
+		}
+		return dropped
 	}
 }
