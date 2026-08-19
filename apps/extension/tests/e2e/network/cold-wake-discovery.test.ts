@@ -85,6 +85,12 @@ test.skipIf(!hasConfig)(
 				return 0
 			}
 		})
+		// Recurring alarms (the 1-minute journal reaper) could warm the worker
+		// between the kill and the click and false-green the pre-fix run —
+		// clear them all so the click is provably the first wake event.
+		await popupPage.evaluate(async () => {
+			await chrome.alarms.clearAll()
+		})
 		// Open the dApp page BEFORE the kill: page load injects the content
 		// script but sends no runtime message, so the SW stays killable and the
 		// later click is the first wake event.
@@ -92,6 +98,10 @@ test.skipIf(!hasConfig)(
 		await popupPage.close()
 
 		await stopServiceWorker(ext)
+
+		// Wake isolation: the SW must be genuinely dead at click time.
+		const swAlive = ext.browser.targets().some((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId))
+		expect(swAlive).toBe(false)
 
 		// The connect click fires the content script's chrome.runtime.sendMessage —
 		// the wake event itself. Arm the discover wait first (waiting never wakes).
