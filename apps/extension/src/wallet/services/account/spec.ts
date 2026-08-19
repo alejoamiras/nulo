@@ -56,11 +56,55 @@ export function parseAccountRowId(id: string): { profileId: string; chainId: num
 	return { profileId, chainId, address }
 }
 
+/**
+ * An imported account's stored key is unusable (missing, un-decryptable, or its recomputed
+ * address no longer matches the stored row). Fail-closed for THAT account only — never a
+ * profile-wide block (imported key material is external; owner decision A4). The UI surfaces
+ * this and offers delete + re-import as the repair.
+ */
+export class ImportedAccountUnusableError extends Error {
+	public readonly address: string
+	public constructor(address: string, reason: string) {
+		super(`Imported account ${address} is unusable: ${reason}`)
+		this.name = "ImportedAccountUnusableError"
+		this.address = address
+	}
+}
+
 export enum AccountType {
 	// SECURITY: Numeric value is used in poseidon2Hash for key derivation. NEVER change it.
-	/** Upstream-canonical Schnorr account (Aztec `@aztec/accounts/schnorr`). */
+	/** Derived Schnorr account (NULO-ACCOUNT-KDF v2 — the wallet's own recovery-phrase accounts). */
 	Nulo_v1 = 0,
+	/** An account IMPORTED from another wallet install via an account-export file. Its signing key
+	 *  is external key material stored (encrypted) in the imported-keys root; it does NOT derive
+	 *  from this profile's recovery phrase, and it has its OWN per-type index sequence. */
+	Imported = 1,
 }
+
+/** EntityStorage root for the encrypted signing keys of IMPORTED accounts. Keyed exactly like an
+ *  Account row (`accountRowId`) so the two stay 1:1. Frozen. */
+export const IMPORTED_KEYS_STORAGE_ROOT = "nulo:core:imported-account-keys"
+
+/** Backup slice / service name that OWNS the imported-keys root (its own registry entry — the
+ *  Account root belongs to AccountService, so the key root needs a distinct owner). */
+export const IMPORTED_KEYS_SERVICE_NAME = "imported-account-keys"
+
+/** A stored imported-account signing key: base64 AES-GCM ciphertext under HKDF(master, per-row
+ *  info). The row id is the SAME composite as the Account row it belongs to. */
+export type ImportedAccountKey = {
+	profileId: string
+	chainId: number
+	address: string
+	/** Base64 ciphertext of the 32-byte Schnorr signing key. */
+	encryptedSigningKey: string
+}
+
+export const ImportedAccountKeySchema: z.ZodType<ImportedAccountKey> = z.object({
+	profileId: z.string(),
+	chainId: z.number(),
+	address: z.string(),
+	encryptedSigningKey: z.string(),
+})
 
 export type Account = {
 	/** Profile Id (row scoping; selects the master secret the derivation starts from). */
@@ -153,6 +197,23 @@ export type Methods = {
 	 * @param visible Visibility flag.
 	 */
 	changeAccountVisibility(profileId: string, chainId: number, address: string, visible: boolean): Account | undefined
+
+	/**
+	 * Export one account as a portable file body (the NULO-ACCOUNT-EXPORT v1 envelope). Requires
+	 * the profile password (service-side auth — the caller cannot bypass it from a compromised
+	 * popup). `encrypt` picks the password-encrypted variant (default) vs the plaintext one.
+	 * @returns the file's string body (encrypted base64, or the plaintext JSON).
+	 */
+	exportAccount(profileId: string, chainId: number, address: string, password: string, encrypt: boolean): string
+
+	/**
+	 * Import an account from a NULO-ACCOUNT-EXPORT file body into `(profileId, chainId)`. Validates
+	 * the envelope (regime digests, canonical signing key, checksum), recomputes the address from
+	 * the signing key and requires it to equal `expectedAddress` (the address the UI showed the
+	 * user for confirmation), rejects a duplicate, seals the signing key, and writes the row.
+	 * `password` decrypts an encrypted file (omit/empty for plaintext).
+	 */
+	importAccount(profileId: string, chainId: number, fileBody: string, expectedAddress: string, password: string): Account
 }
 
 export type Events = {
