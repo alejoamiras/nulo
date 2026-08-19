@@ -475,13 +475,21 @@ describe("ProfileService integration", () => {
 			const profile = await service.createPasskeyProfile("PK")
 
 			const credData = fakeCredentialData(`cred-${profile.id}`, profile.id)
-			const exportPromise = service.exportPlain(profile.id, undefined, credData)
+			// Attach the settle handler SYNCHRONOUSLY at creation. The delete below awaits for
+			// several ticks before we'd otherwise call `.catch`, and exportPlain can reject inside
+			// that window (its own credentialId-refetch races the delete) — a late `.catch` leaves
+			// the rejection momentarily unhandled, which vitest fails the run on. Capturing
+			// value-or-error up front keeps the race assertion identical with no unhandled window.
+			const exportSettled = service.exportPlain(profile.id, undefined, credData).then(
+				(v) => v,
+				(err: unknown) => err,
+			)
 
 			// Race: delete + reimport with a different credentialId in parallel.
 			await service.deleteProfile(profile.id)
 			const newProfile = await service.createPasskeyProfile("PK new")
 
-			const exportResult = await exportPromise.catch((err) => err)
+			const exportResult = await exportSettled
 			if (exportResult instanceof Error) {
 				// Caught the stale-credential race → threw "Invalid profile id". Good.
 				expect(exportResult.message).toMatch(/Invalid profile id/)
@@ -2351,6 +2359,56 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			const cloneDek = await service.getProfileDek(restored.id)
 			// The restored row's dek is freshly minted — NOT the source dek it carried.
 			expect(Array.from(cloneDek!)).not.toEqual(Array.from(srcDek!))
+		})
+
+		// P4 rider HIGH: a tamper landing BETWEEN restore() and finalizeRestore must not yield a
+		// non-degraded (bearer-backed) session — finalize re-verifies MAC v2.
+		test("a MAC tamper between restore and finalize → derived-only finalize (no bearer)", async () => {
+			const { api, service } = await makeService()
+			const pair = await restorePairFor(0x51)
+			const srcDek = Buffer.from(new Uint8Array(32).fill(0x77)).toString("base64")
+			const restored = await service.restore(
+				{ id: "r", name: "R", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: srcDek },
+				"pass1234",
+				undefined,
+				true,
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			// Corrupt the envelope MAC on the freshly-restored row, THEN finalize.
+			const key = `nulo:core:profiles@${restored.id}`
+			const row = JSON.parse((await api.storage.local.get(key))[key] as string)
+			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			const degraded: string[] = []
+			service.onImportedKeysDegraded.add((info) => degraded.push(info.id))
+			await service.finalizeRestore(restored.id, "pass1234")
+			// Session opened derived-only: no dek, no persisted bearer, warning emitted.
+			expect(await service.getProfileDek(restored.id)).toBeUndefined()
+			expect(degraded).toContain(restored.id)
+			const rawSession = (await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT]
+			const session = typeof rawSession === "string" ? JSON.parse(rawSession) : rawSession
+			expect(session.bearer).toBeUndefined()
+		})
+
+		// P4 rider MEDIUM: deleting a profile mid-restore zeroizes + drops its rewrap context.
+		test("deleteProfile drops the pending rewrap context (no leak past delete)", async () => {
+			const { service } = await makeService()
+			const pair = await restorePairFor(0x61)
+			const srcDek = Buffer.from(new Uint8Array(32).fill(0x77)).toString("base64")
+			const restored = await service.restore(
+				{ id: "d", name: "D", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: srcDek },
+				"pass1234",
+				undefined,
+				true,
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
+			await service.deleteProfile(restored.id)
+			// The context is gone: a later consume returns undefined (nothing to rewrap).
+			expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
 		})
 
 		// (i) same-credential passkey duplicate is a HARD reject (no allowDuplicate escape).
