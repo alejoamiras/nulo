@@ -100,7 +100,9 @@ credential wrap key:
   passkey:  PasskeyCredential.deriveDekWrapKey()                       (NEW: HKDF(baseKey, salt,
             info="nulo:dek-wrap:v1") → 256-bit AES-GCM CryptoKey; new info label, frozen labels
             untouched; derived inside the 4 PasskeyRecoveryCoordinator methods while the
-            credential is transiently alive; PasskeyRecovery gains the wrap-key field)
+            credential is transiently alive; PasskeyRecovery gains the wrap-key field.
+            NOTE (final audit): the HKDF importKey call currently declares usages
+            ["deriveBits"] only — deriveDekWrapKey requires adding "deriveKey")
 
 profile row (4th slot, BOTH variants):
   dekSealed = AES-GCM(wrapKey, dek, AAD="nulo:profile-imported-dek:v1")  — independent field via a
@@ -113,10 +115,16 @@ imported-key rows (root swap, envelope shape unchanged):
   all carry over)
 ```
 
-- **New brand**: `ImportedKeysDek` (32 B CSPRNG) in `secret-types.ts`. **Minted ONLY at genuinely
-  new-profile creation** (create/import-new); **restore reseals the SAME bytes carried by the
-  backup** — minting fresh at restore would orphan every imported-key row in the backup slice
-  (audit LOW-4 wording fix). Imported-key APIs accept only the brand (codex: no bare Uint8Array).
+- **New brand**: `ImportedKeysDek` (32 B CSPRNG) in `secret-types.ts`. **A fresh DEK is minted at
+  EVERY profile-row creation — including restore** (final-audit blocking fix): restore unseals the
+  SOURCE DEK from the backup carriage, mints a fresh DESTINATION DEK, and **rewraps every
+  imported-key row in the backup slice source→destination pre-activation** (both DEKs are in hand
+  during restore; the source DEK never persists on the destination row). This closes the
+  clone-divergence hole: the owner's warn+confirm choice sanctions restoring A's backup while A
+  still exists, and a shared DEK would let the clone's password unseal keys A imports LATER —
+  recreating the target attack without password reuse. Rewrap (not fresh-mint-and-orphan) keeps
+  every restored row usable, honoring the round-1 concern that pushed rev 2 the wrong way.
+  Imported-key APIs accept only the brand (codex: no bare Uint8Array).
 - **Row-construction sites: SIX** (audit HIGH — the draft said five): `createProfile`,
   **`createPasskeyProfile` (service.ts:463-470, master in hand at 474)**, `importPasswordProfile`,
   `importPasskeyProfile`, `restore()` password branch, `restore()` passkey branch. Every one mints
@@ -130,18 +138,24 @@ imported-key rows (root swap, envelope shape unchanged):
   close/replace/expiry. **NINE `openSessionVerified`/`open` call sites** (corrected count),
   including the password-change reopen and both `finalizeRestore` branches.
 - **`pendingRestoreSecrets` (audit HIGH/MEDIUM, both auditors)**: the passkey restore→
-  `finalizeRestore` stash extends from master-only to `{secret, dek}` (TTL-zeroized as today) —
-  otherwise the first post-restore session is dek-less and every restored imported account
-  quarantines until the next full unlock. Dedicated integration leg: "restore a passkey backup
-  carrying an imported account → the account signs BEFORE any re-unlock."
-- **DEK-unseal failure at unlock (audit condition C4 — the two auditors disagreed; resolution
-  ledgered)**: **fail-soft**. The session opens dek-less; imported accounts quarantine per-account
-  (`ImportedAccountUnusableError`, A4 taxonomy — imported material must never profile-block
-  derived funds; a hard unlock failure would hand a storage-writer a one-field DoS on the whole
-  profile); an error-level surface fires at unlock time (not only at per-account use); and **no
-  silent-restore bearer is persisted for a dek-less session** — the next SW suspend forces a
-  password unlock, re-surfacing the failure loudly instead of extending it. Pinned by a dedicated
-  test.
+  `finalizeRestore` stash extends from master-only to `{secret, dek}` — carrying the freshly
+  minted DESTINATION DEK (TTL-zeroized as today) — otherwise the first post-restore session is
+  dek-less and every restored imported account quarantines until the next full unlock. Dedicated
+  integration leg: "restore a passkey backup carrying an imported account → the account signs
+  BEFORE any re-unlock."
+- **Degradation state machine (final-audit condition — replaces rev 2's underspecified fail-soft
+  bullet; a dek-less session has no MAC key, so the two failure modes must be defined together)**:
+  1. `guard`/`secret`/`entropy` decrypt failure, or pairing failure → **unlock BLOCKS** (as
+     today — core material).
+  2. DEK-unseal failure OR MAC-v2 verification failure at unlock → the session opens
+     **derived-only**: the DEK (if any) is discarded, imported accounts quarantine per-account
+     (`ImportedAccountUnusableError`, A4 taxonomy — imported material must never profile-block
+     derived funds; a corrupt MAC alone must not either), a **user-visible warning** fires at
+     unlock (a toast/banner, not just a log — final-audit loudness condition), and **no
+     silent-restore bearer is persisted**.
+  3. Bearer restore requires BOTH a valid DEK AND a valid MAC v2, else `silentClose` (forcing a
+     password unlock, which re-surfaces the state visibly).
+  Pinned by dedicated tests at both verify sites, healthy and degraded.
 - **Bearer**: the DEK joins the F-11 silent-restore wrap — `SessionSecretBox` generalizes to a
   fixed 32+32 `master || dek` payload (version-bumped box envelope; v1 records fail the version
   gate → silentClose → re-unlock; single wrap chosen over two so restore is atomic — no state
@@ -166,15 +180,15 @@ imported-key rows (root swap, envelope shape unchanged):
   invariant (audit): *any backup — encrypted or not — already carries jointly-sufficient material
   (plaintext `master-key` + the sealed imported-key rows are both in it); the DEK adds nothing a
   backup holder could not already reach*, so carriage adds zero marginal exposure. Password
-  backups carry the DEK plaintext beside `master-key`/`entropy`; passkey backups carry the
-  **sealed row blob verbatim** (fable-verified corollary: the row's `dekSealed` and the backup
-  field are interchangeable ciphertexts — the restore ceremony re-derives the same wrap key,
-  `recoverFromCredentialData` + credentialId assert, service.ts:1746-1755). Export goes through
-  ONE authenticated, discriminated `exportBackupMaterial` result carrying
-  credentialId/master/entropy/DEK atomically (codex: no cross-call races). `restore()` reseals
-  pre-commit. Epoch: **no bump** — epoch 4 exists only on unmerged PRs; the DEK field joins its
-  required shape (password: required plaintext field; passkey: required sealed blob), same
-  pre-launch latitude as parent A2.
+  backups carry the SOURCE DEK plaintext beside `master-key`/`entropy`; passkey backups carry the
+  **sealed row blob verbatim** (the restore ceremony re-derives the same wrap key to unseal it —
+  `recoverFromCredentialData` + credentialId assert, service.ts:1746-1755). Either way the source
+  DEK is used ONLY to rewrap the imported-key rows to the freshly minted destination DEK during
+  restore, then zeroized — it never persists on the restored profile. Export goes through ONE
+  authenticated, discriminated `exportBackupMaterial` result carrying
+  credentialId/master/entropy/DEK atomically (codex: no cross-call races). Epoch: **no bump** —
+  epoch 4 exists only on unmerged PRs; the DEK field joins its required shape (password: required
+  plaintext field; passkey: required sealed blob), same pre-launch latitude as parent A2.
 - **Account service**: `loadImportedAccountContract` and `importAccount` swap the master for the
   DEK via a **facade-mediated `ProfileService.getProfileDek(id)`** mirroring `getProfileSecret`
   (deletionState guards preserved; AccountService never touches SessionManager directly — audit
@@ -204,19 +218,27 @@ imported-key rows (root swap, envelope shape unchanged):
     registered in `packages/extension-messaging/src/errors.ts`'s code-based reconstruction union
     (the `InvalidPasswordError` mechanism) with a transport round-trip test — an unregistered
     class flattens to plain `Error` and the UI can never match it.
-  - **Restore-path escape (audit HIGH — `restore()` flattens errors into `restoreError` dead-end
-    strings)**: password branch — the check runs in the THROWING zone (after the pairing check
-    ~service.ts:1658, before `runExclusive`, master bytes in hand, errors propagate); passkey
-    branch — `DuplicateWalletError` is explicitly rethrown out of the branch's catch, and the
-    recovery secret is stashed (mirroring `pendingRestoreSecrets`) so the `allowDuplicate: true`
-    retry does NOT re-run a second WebAuthn ceremony.
+  - **Restore-path escape + atomicity (round-1 HIGH, tightened by the final audit)**: `restore()`
+    flattens thrown errors into `restoreError` dead-end strings inside its persistence zone, and a
+    check placed BEFORE the lock is a check→write TOCTOU (two concurrent same-phrase restores both
+    pass). Fix: the fingerprint check and the row commit run **under the same `runExclusive`
+    lock**, and the flatten-catch **explicitly rethrows `DuplicateWalletError`** (both branches) so
+    the typed error reaches the UI.
+  - **Passkey retry without a second ceremony (simplified per the final audit — no service-side
+    stash)**: the UI already holds the `credentialData` it passed in; on confirm it re-calls with
+    the SAME data + `allowDuplicate: true`, and `recoverFromCredentialData` re-derives from the
+    carried PRF bytes without a new WebAuthn prompt.
   - UI (`useProfileImportFlow` + `useFullBackupImport`) catches the typed error → existing
     `cacheStore.confirm` dialog ("You already have a profile with this recovery phrase —
     continue?") → re-call with `allowDuplicate: true`.
 - `createProfile`/`createPasskeyProfile` (fresh CSPRNG/PRF material) get the check as an invariant
   assertion — a collision there is cryptographically impossible.
-- Passkey duplicate-credential import stays HARD-blocked (structural, untouched) — therefore the
-  duplicate-CONFIRM e2e scenario is a **password-profile** flow by necessity (audit note).
+- Passkey duplicate-credential handling (final-audit fact correction — the "structural hard block"
+  claim was overstated): `userHandle` is OPTIONAL, and restore generates a fresh profile id when it
+  is absent, so the same credential CAN currently land twice. The dup check therefore also **scans
+  passkey rows by `credentialId`** (hard-reject on a same-credential duplicate — same-credential ⇒
+  same master ⇒ pure footgun, no legitimate use; the fingerprint path covers the cross-type
+  theoretical case). The duplicate-CONFIRM e2e scenario remains a **password-profile** flow.
 
 ### D. Missing e2e (arc 5) + passkey execution canary (arc 4)
 
@@ -246,11 +268,13 @@ Passkey execution canary (network, prover-ON — the passkey analog of the froze
   with a REAL proof → authwit consume → **MV3 SW-restart leg within the same browser instance and
   popup FrameTreeNode** (re-runs the ceremony — passkey profiles never silently restore) → still
   signs/proves. **No browser-relaunch leg** (virtual-authenticator credentials die with the
-  browser; PRF is deterministic across SW restarts only — audit-corrected Inference 4). The
-  formula-correctness concern that motivated the PRF-boundary-capture alternative is closed
-  INDEPENDENTLY by §A's reference-computed V3 vector, so the fragile in-page hook (which would
-  also leak PRF material into test-runner traces) is not needed. Reuses the mnemonic canary's
-  machinery (playground bridge, nullifier witness, `mintPublicTokensForAccount`).
+  browser; PRF is deterministic across SW restarts only — audit-corrected Inference 4). §A's
+  reference-computed V3 vector independently pins everything AFTER the PRF boundary (final-audit
+  scoping: it cannot detect a consistently mis-wired WebAuthn ceremony itself — that residual is
+  covered by the existing ceremony unit pins plus this execution canary, judged adequate), so the
+  fragile in-page hook (which would also leak PRF material into test-runner traces) is not
+  needed. Reuses the mnemonic canary's machinery (playground bridge, nullifier witness,
+  `mintPublicTokensForAccount`).
 
 ### File-level change map (adds ✚ / modifies ✎)
 
@@ -349,12 +373,19 @@ ALL SIX row sites; dup check in the restore throwing zone + passkey rethrow/stas
 **Gate**: `bun run audit:vue` — exit 0 — AND these NAMED integration criteria green (audit
 conditions absorbed as pass criteria): (a) all-six-creation-paths test asserts `dekSealed` +
 `walletFingerprint` on the persisted row, both profile types; (b) restore-passkey-backup-with-
-imported-account signs BEFORE any re-unlock; (c) an imported key DECRYPTS post-restore (not
-merely row-exists); (d) dek-less session: unlock succeeds, imported accounts quarantine, NO bearer
-persisted, next wake forces re-unlock; (e) DEK full lifecycle
-(create→unlock→SW-bearer-restart→password-change→export→restore); (f) transplant matrix extended
-to the DEK slot incl. the master-holder forgery; (g) dup-guard check + `allowDuplicate` override
-on import AND restore paths. Layers: typecheck/unit/integration/component/lint/build.
+imported-account signs BEFORE any re-unlock; (c) an imported key DECRYPTS post-restore via the
+freshly minted destination DEK (not merely row-exists); (d) degraded unlock per the state
+machine: DEK-unseal or MAC failure → derived-only session, imported accounts quarantine,
+user-visible warning, NO bearer persisted, next wake forces re-unlock — pinned at BOTH verify
+sites, healthy and degraded; (e) DEK full lifecycle
+(create→unlock→SW-bearer-restart→password-change→export→restore) incl. DEK zeroization on
+close/replace/expiry; (f) transplant matrix extended to the DEK slot incl. the master-holder
+MAC-forgery; (g) dup-guard check + `allowDuplicate` override on import AND restore paths, under
+the lock (concurrent same-phrase restores: exactly one dup verdict, no double-commit);
+(h) **clone divergence**: restore A's backup as B (different password) while A exists, A imports a
+NEW account afterward, assert B's material cannot decrypt it; (i) absent-`userHandle`
+same-credential passkey import is rejected by the credentialId scan. Layers:
+typecheck/unit/integration/component/lint/build.
 **Rider (blocking)**: resumed codex session re-attack on P3+P4 together — transplant matrix
 end-to-end, backup carriage, restore reseal, bearer restore, dek-less semantics. No unresolved
 High.
@@ -410,18 +441,21 @@ e2e-live-network.
 **Facts** (recon-verified; audit-corrected where noted): ActiveSession carries only the master
 post-unlock, both types; the bearer restores master-only and passkey never silently restores;
 profile rows are block-listed from backups (top-level master-key/entropy only); the envelope-MAC
-preimage has 4 compute sites + 1 verify + 1 helper; V3 is the ONLY passkey-sensitive pinned
-literal (V10 never implemented; both production `fromBufferReduce` sites end at 64 B after P1);
-the harness drives real WebAuthn PRF (per-FrameTreeNode); PRF secrets cannot be read back via CDP;
-the popup never derives a master; no in-session second-profile fixture exists (cross-browser
+preimage has 4 compute sites + 1 verify + 1 helper; V3 is the only REDUCE-sensitive pinned literal
+(final-audit narrowing: V8 pins the — untouched — PRF label, so it is passkey-sensitive but not
+affected by P1; V10 never implemented; both production `fromBufferReduce` sites end at 64 B after
+P1); the harness drives real WebAuthn PRF (per-FrameTreeNode); PRF secrets cannot be read back via
+CDP; the popup never derives a master; no in-session second-profile fixture exists (cross-browser
 pattern is the proven one); `importAccount`'s dup check is (profileId, chainId)-scoped; passkey
-duplicate-credential import is hard-blocked structurally; **SIX profile-row construction sites**
-(audit-corrected: + `createPasskeyProfile:463-470`); **NINE session-open call sites**
-(audit-corrected); **typed errors survive the RPC only via `extension-messaging/src/errors.ts`
-code-based reconstruction** (audit-established); **`restore()` flattens thrown errors into
-`restoreError` strings on both branches** (audit-established — drives the §C throwing-zone
-design); origin/dev's freeze record has no `kdfDigest` and no carve-out text (fable-verified —
-grounds the governance position).
+duplicate-credential import is NOT structurally blocked when `userHandle` is absent (final-audit
+correction — restore mints a fresh id then; hence the credentialId scan in §C); **SIX profile-row
+construction sites** (audit-corrected: + `createPasskeyProfile:463-470`); **NINE session-open call
+sites** (audit-corrected); **typed errors survive the RPC only via
+`extension-messaging/src/errors.ts` code-based reconstruction** (audit-established);
+**`restore()` flattens thrown errors into `restoreError` strings inside its persistence zone**
+(final-audit narrowing — hence §C's check-and-commit-under-one-lock + explicit rethrow);
+origin/dev's freeze record has no `kdfDigest` and no carve-out text (fable-verified — grounds the
+governance position).
 
 **Inferences** (audits attacked round 1; current state): (1) ~~PRF boundary hook~~ — resolved:
 not needed; the reference-computed V3 closes the self-consistency hole. (2) SessionSecretBox
@@ -473,7 +507,28 @@ gate layers incl. the passkey canary; pre-production in-place latitude.
   owner choice + one code path; passkey fingerprints are harmless); requiring encrypted password
   backups (codex — product change, out of scope, surfaced as follow-up); PRF boundary capture
   (fable — superseded by the reference-vector resolution).
-- **Disputed → to the final pass**: none remaining beyond the two resolutions above.
+- **Final-pass (fresh-context codex) round — verdict `reject`, blocking finding adopted → rev 3**:
+  1. **BLOCKER adopted — clone divergence**: rev 2's "restore reseals the SAME DEK" let the
+     owner-sanctioned restore-while-original-exists path clone the DEK; the clone's password then
+     unseals keys the ORIGINAL imports later — the target attack without password reuse, and the
+     forgeable-MAC hole reopened for the pair. Fix: fresh destination DEK at restore + service-side
+     rewrap of the backup's imported-key rows (both DEKs in hand during restore; the source DEK is
+     zeroized, never persisted). This REVERSES rev 2's LOW-4 wording adoption while still honoring
+     its substance (rows stay usable — via rewrap, not via sharing). Criterion (h) pins it.
+  2. Degradation state machine made explicit (core-failure blocks; DEK-or-MAC failure →
+     derived-only + visible warning + no bearer; bearer needs DEK+MAC or silentClose) — replaces
+     the underspecified fail-soft bullet; codex agreed fail-soft itself was right once explicit.
+  3. Dup-check TOCTOU closed (check+commit under one lock, flatten-catch rethrows the typed
+     error); passkey retry simplified (UI re-sends credentialData — no service-side stash, no
+     second ceremony); absent-`userHandle` credentialId scan added (the "structural block" claim
+     was overstated).
+  4. Facts narrowed (V8 label pin; restore-flatten scope); `deriveDekWrapKey` needs the
+     `"deriveKey"` HKDF usage; the V3-reference "exactly closes" claim softened (it pins everything
+     after the PRF boundary; a consistently mis-wired ceremony is covered by ceremony unit pins +
+     the execution canary — judged adequate).
+  Both disagreement resolutions ENDORSED by the fresh pass (fail-soft narrowly — visible warning
+  required; execution-only canary — claim-scoping required). Re-verdict on rev 3: see Audit
+  verdicts.
 
 ## Post-implementation (self-contained — execute from this file)
 
@@ -524,4 +579,8 @@ the same file from the owning session keeps the URL; other sessions pass the URL
 - **Round 1 — fable (independent)**: `conditional approve` (conditions C1–C5: sixth row site;
   restore-path error escape; pendingRestoreSecrets DEK; dek-less semantics + no-bearer; MAC info
   bump). All adopted → rev 2. Transcript: `audit-fable.md`.
-- **Final fresh-context codex pass**: _(pending)_
+- **Final fresh-context codex pass (round 1 on rev 2)**: `reject` (blocking: restore-reseals-same-
+  DEK lets an allowed backup clone defeat per-profile isolation; plus the degradation state
+  machine, dup-check TOCTOU, passkey userHandle hole, deriveKey usage, fact narrowings). ALL
+  adopted → rev 3. Both disagreement resolutions endorsed.
+- **Final pass re-verdict (resumed, on rev 3)**: _(pending)_
