@@ -99,6 +99,27 @@ afterEach(() => {
 })
 
 describe("NewContactPopup — decoupled from sender registration", () => {
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight add fires addContact ONCE", async () => {
+		const w = await mountAndOpen()
+		contactServiceMock.addContact.mockImplementation(() => new Promise(() => {}))
+		await fill(w, "Alice", VALID_ADDRESS)
+		// The popup's keydown listener lives on `document`; the mounted tree is
+		// detached, so dispatch from a real document-level input.
+		const docInput = document.createElement("input")
+		document.body.appendChild(docInput)
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
+		// (document-listener removal) or the mock reset.
+		const calls = contactServiceMock.addContact.mock.calls.length
+		await w.setProps({ show: false })
+		contactServiceMock.addContact.mockReset()
+		docInput.remove()
+		expect(calls).toBe(1)
+	})
+
 	test("submit calls addContact with trimmed name + address, closes, and toasts success", async () => {
 		const w = await mountAndOpen()
 		contactServiceMock.addContact.mockResolvedValueOnce({ id: "c1" })

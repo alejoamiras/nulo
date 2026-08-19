@@ -164,6 +164,28 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		expect(openToastMock).toHaveBeenCalledWith({ label: "Something went wrong", icon: "warning" }, expect.anything())
 	})
 
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight update fires updateContact ONCE", async () => {
+		const w = await mountAndOpen()
+		contactServiceMock.updateContact.mockImplementation(() => new Promise(() => {}))
+		await w.find('[data-testid="name-input"]').setValue("Alicia")
+		await flushPromises()
+		// The popup's keydown listener lives on `document`; the mounted tree is
+		// detached, so dispatch from a real document-level input.
+		const docInput = document.createElement("input")
+		document.body.appendChild(docInput)
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		await flushPromises()
+		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
+		// (document-listener removal) or the mock reset.
+		const calls = contactServiceMock.updateContact.mock.calls.length
+		await w.setProps({ show: false })
+		contactServiceMock.updateContact.mockReset()
+		docInput.remove()
+		expect(calls).toBe(1)
+	})
+
 	test("Enter with a clean form is a no-op (dirty gate holds on the keyboard path)", async () => {
 		const w = await mountAndOpen()
 		const input = w.find('[data-testid="name-input"]').element as HTMLInputElement

@@ -155,6 +155,21 @@ describe("NewEndpointPopup — Enter-submit wiring (usePopupEntity)", () => {
 		await dispose(w)
 	})
 
+	test("(RE-ENTRANCY PIN) repeated Enter during an in-flight probe fires addEndpoint ONCE", async () => {
+		addEndpointMock.mockImplementationOnce(() => new Promise(() => {}))
+		const w = await mountShown()
+		await fillRpcUrl(w, "https://rpc.example.com")
+		pressEnterOnInput()
+		await flushPromises()
+		pressEnterOnInput()
+		await flushPromises()
+		// Cleanup BEFORE the assertion: a failing expect must not skip dispose
+		// and leak this instance's document listener into the next test.
+		const calls = addEndpointMock.mock.calls.length
+		await dispose(w)
+		expect(calls).toBe(1)
+	})
+
 	test("submit success closes the popup and toasts", async () => {
 		const w = await mountShown()
 		await fillRpcUrl(w, "https://rpc.example.com")
