@@ -350,19 +350,18 @@ export async function makeRandomMasterBase64(): Promise<string> {
 	return Buffer.from(Fr.random().toBuffer()).toString("base64")
 }
 
-/** Derive the REAL Nulo account address for (master, chainId, index) through the frozen
- *  derivation path. Synthetic backups must carry derivation-consistent account rows: the
- *  background integrity coordinator re-derives every account before activating an imported
- *  profile and withholds the session on mismatch — a fabricated address IS a foreign backup. */
-export async function deriveNuloAccountAddress(masterBase64: string, chainId: number, index = 0): Promise<string> {
+/** Derive the REAL Nulo account address for (master, l1ChainId, index) through the v2 frozen
+ *  path (`deriveAccountSeed` → NuloAccount). Synthetic backups must carry derivation-consistent
+ *  account rows: the background integrity coordinator re-derives every account before activating
+ *  an imported profile and withholds the session on mismatch — a fabricated address IS a foreign
+ *  backup. */
+export async function deriveNuloAccountAddress(masterBase64: string, l1ChainId: number, index = 0): Promise<string> {
 	const { Fr } = await import("@aztec/aztec.js/fields")
-	const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
+	const { deriveAccountSeed } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 	const { createLogger } = await import("@aztec/foundation/log")
 	const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
-	// Same formula as the wallet's account service: poseidon2Hash([master, chainId, type, index])
-	// with AccountType.Nulo_v1 = 0.
-	const seed = poseidon2Hash([master, new Fr(chainId), new Fr(0), new Fr(index)])
+	const seed = await deriveAccountSeed(master, l1ChainId, 0, index) // AccountType.Nulo_v1 = 0
 	const account = await NuloAccount.new(seed, createLogger("import-drivers"))
 	return account.address.toString()
 }
@@ -401,8 +400,16 @@ export async function makeEncryptedKeyBlob(page: Page, masterBase64: string, pas
 	)
 }
 
+/** Anvil's L1 chain id — the EXACT id KDF v2 derives Local-chain accounts under (the composite
+ *  storage chainId stays 0; the two are now separate inputs). */
+export const LOCAL_L1_CHAIN_ID = 31337
+
 export interface SyntheticBackupOpts {
 	masterBase64: string
+	/** The EXACT L1 chain id stamped on the network + account rows (the KDF v2 derivation input).
+	 *  Defaults to the Local Network's anvil id; must match the l1ChainId `accountAddress` was
+	 *  derived under, or the integrity coordinator withholds the imported profile. */
+	l1ChainId?: number
 	profileName?: string
 	/** Override the embedded account address (used for the duplicate-rejection test). */
 	accountAddress?: string
@@ -420,6 +427,7 @@ export interface SyntheticBackupOpts {
  *  token slice. Missing slices are treated as no-ops by the importer. */
 export function buildSyntheticBackup({
 	masterBase64,
+	l1ChainId = LOCAL_L1_CHAIN_ID,
 	profileName = "Imported",
 	accountAddress,
 	extraData,
@@ -439,10 +447,12 @@ export function buildSyntheticBackup({
 					profileId: "syn-profile-id",
 					name: "Local Network",
 					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
-					// Canonical LOCAL chain id is 0 (network/service.ts DEFAULT_SEEDS): the view-simulation
-					// identity guard exempts ONLY chain 0 — a synthetic 31337 reads as a REAL chain identity
-					// and assertLiveChainIdentity throws on every read (fee-juice "— FJ" forever).
+					// Composite LOCAL chain id is 0 (storage scoping); the view-simulation identity
+					// guard exempts ONLY chain 0. l1ChainId is the SEPARATE derivation input (anvil
+					// 31337) — it must match what the account rows derive under, and what a restored
+					// Local Network row validates against the DEFAULT_SEEDS constant.
 					chainId: 0,
+					l1ChainId,
 					kind: "local",
 					endpoints: [{ id: "syn-endpoint-id", rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080" }],
 					primaryEndpointId: "syn-endpoint-id",
@@ -452,10 +462,10 @@ export function buildSyntheticBackup({
 				{
 					address: accountAddress ?? `0x${"01".repeat(32)}`,
 					profileId: "syn-profile-id",
-					// Canonical LOCAL chain id is 0 (network/service.ts DEFAULT_SEEDS): the view-simulation
-					// identity guard exempts ONLY chain 0 — a synthetic 31337 reads as a REAL chain identity
-					// and assertLiveChainIdentity throws on every read (fee-juice "— FJ" forever).
+					// Composite storage chainId stays 0 (see the network row note); the account row
+					// ALSO carries the l1ChainId its address was derived under.
 					chainId: 0,
+					l1ChainId,
 					name: "Account",
 					index: 0,
 					type: 0,

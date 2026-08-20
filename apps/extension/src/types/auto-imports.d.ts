@@ -19,12 +19,15 @@ declare global {
   const IMPORT_REGISTRATION_BUDGET_MS: typeof import('../composables/importChainSync').IMPORT_REGISTRATION_BUDGET_MS
   const INIT_FETCH_TIMEOUT_MS: typeof import('../stores/balances.store').INIT_FETCH_TIMEOUT_MS
   const INIT_RETRY_BACKOFF_MS: typeof import('../stores/balances.store').INIT_RETRY_BACKOFF_MS
+  const LOCAL_L1_CHAIN_ID: typeof import('../utils/chain-ids').LOCAL_L1_CHAIN_ID
   const MAINNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').MAINNET_L1_CHAIN_ID
   const MAINNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').MAINNET_ROLLUP_VERSION
   const MAX_CONTACT_IMPORT_BYTES: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_BYTES
   const MAX_CONTACT_IMPORT_ROWS: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_ROWS
   const PREFLIGHT_ATTEMPT_TIMEOUT_MS: typeof import('../composables/importPreflight').PREFLIGHT_ATTEMPT_TIMEOUT_MS
   const PREFLIGHT_BACKOFF_WAITS_MS: typeof import('../composables/importPreflight').PREFLIGHT_BACKOFF_WAITS_MS
+  const TESTNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').TESTNET_L1_CHAIN_ID
+  const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
   const TOAST_DURATION: typeof import('../composables/toast.js').TOAST_DURATION
   const activateNetworkGuarded: typeof import('../utils/guarded-network-activation').activateNetworkGuarded
@@ -357,10 +360,13 @@ declare module 'vue' {
     readonly IMPORT_REGISTRATION_BUDGET_MS: UnwrapRef<typeof import('../composables/importChainSync')['IMPORT_REGISTRATION_BUDGET_MS']>
     readonly INIT_FETCH_TIMEOUT_MS: UnwrapRef<typeof import('../stores/balances.store')['INIT_FETCH_TIMEOUT_MS']>
     readonly INIT_RETRY_BACKOFF_MS: UnwrapRef<typeof import('../stores/balances.store')['INIT_RETRY_BACKOFF_MS']>
+    readonly LOCAL_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['LOCAL_L1_CHAIN_ID']>
     readonly MAINNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_L1_CHAIN_ID']>
     readonly MAINNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['MAINNET_ROLLUP_VERSION']>
     readonly MAX_CONTACT_IMPORT_BYTES: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_BYTES']>
     readonly MAX_CONTACT_IMPORT_ROWS: UnwrapRef<typeof import('../utils/contacts-export-format')['MAX_CONTACT_IMPORT_ROWS']>
+    readonly TESTNET_L1_CHAIN_ID: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_L1_CHAIN_ID']>
+    readonly TESTNET_ROLLUP_VERSION: UnwrapRef<typeof import('../utils/chain-ids')['TESTNET_ROLLUP_VERSION']>
     readonly THEME_HINT_KEY: UnwrapRef<typeof import('../utils/general')['THEME_HINT_KEY']>
     readonly TOAST_DURATION: UnwrapRef<typeof import('../composables/toast.js')['TOAST_DURATION']>
     readonly activateNetworkGuarded: UnwrapRef<typeof import('../utils/guarded-network-activation')['activateNetworkGuarded']>

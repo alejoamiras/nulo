@@ -19,6 +19,7 @@ import {
 	deriveNuloAccountAddress,
 	gotoPopupImport,
 	importFullBackup,
+	LOCAL_L1_CHAIN_ID,
 	makeRandomMasterBase64,
 	POPUP_IMPORT_SHELL,
 	readActiveAccount,
@@ -48,9 +49,9 @@ test.skipIf(!HAS_FIXTURE)(
 		const filePath = writeBackupToTemp(
 			buildSyntheticBackup({
 				masterBase64,
-				// Derivation-consistent with the master (chainId 0 = the synthetic LOCAL network) —
+				// Derivation-consistent with the master under the REAL L1 id (the KDF v2 input) —
 				// the integrity coordinator blocks a mismatched import at finalize.
-				accountAddress: await deriveNuloAccountAddress(masterBase64, 0),
+				accountAddress: await deriveNuloAccountAddress(masterBase64, LOCAL_L1_CHAIN_ID),
 				extraData: {
 					// PRE-shape contact row: carries `legacyName`, no `name` — exactly
 					// what a v1 export would hold if v9001 had shipped as a real v2.
