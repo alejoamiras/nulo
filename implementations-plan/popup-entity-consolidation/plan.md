@@ -20,8 +20,8 @@ One place owns the standard popup Enter-listener lifecycle (named exceptions: Ne
 
 **Inferences:** the C1 rule's RATIONALE is service-disconnect ordering (inference from its text + the repo's existing mixed practice — some composables already use `onScopeDispose` alongside exposed disposal); remove-first-on-hide is strictly safer (audit confirmed: no interleaving window, EditContact's cache clear has no listener dependency).
 
-**Asks (approval gate):**
-1. **C1 convention ruling**: (a) RECOMMENDED — add a one-sentence carve-out to CLAUDE.md's composable rules: scope-tied cleanup of non-service resources (DOM listeners, timers) via `onScopeDispose` is allowed; service clients stay parent-disposed. Matches existing practice the audit found. (b) Alternative: `usePopupEntity` returns an idempotent `dispose()` and every parent wires it — explicit but reintroduces the 12-site forget-one failure mode.
+**Asks — RESOLVED at the approval gate:**
+1. **C1 convention ruling: option (a) chosen by the owner** (after argument both ways; (b) was weighed and rejected as discipline-dependent — twelve call sites remembering a manual step is the failure mode this arc family exists to kill, and the listener participates in no order-sensitive teardown sequence). The arc adds the one-sentence carve-out to CLAUDE.md's composables section: scope-tied cleanup of non-service resources (DOM listeners, timers) via `onScopeDispose` is allowed; service clients stay parent-disposed via `dispose()`. This makes the C1 rule MORE precise, not weaker.
 
 ## Architecture & Implementation (compact)
 
@@ -32,7 +32,8 @@ One place owns the standard popup Enter-listener lifecycle (named exceptions: Ne
 2. **Migrate 4 popups**, bodies verbatim (NewContact's reset-before-await comment survives; EditFpc's missing-row `emit("onClose"); return` stays).
 3. **Pins-first** for the untested EditFpc + NewFpc, INCLUDING the initialization window: Enter during the pending population await → inert (the flag's pin), plus the standard focused-Enter/body-Enter/post-hide/latch set. Composable pins: scope-stop removal; `submitWaitsForShow` gating incl. rejection unblock; rejection re-dispatch.
 4. **Test cleanup, guaranteed not manual**: the touched suites move to wrapper-tracking `afterEach` unmount (works even when an assertion throws); the six `dispose()` helpers reduce accordingly; ONE component-level canary (shown → `unmount()` → Enter inert) proves the scope hook through test-utils, not just `effectScope`. Documented limitation: plain unmount does NOT run `onHide` — cleanup of the listener is the scope hook's job; service-disconnect side effects in tests that need them still hide first.
-5. **Untouched, named**: NewToken (specialized teardown + oracle suite), authwits pair, B-09/B-26, capabilities frozen oracle, all submit-handler logic, all existing adopters' timing.
+5. **CLAUDE.md**: the C1 carve-out sentence lands in the Composables (C0/C1) section in the SAME PR (docs-with-the-change rule).
+6. **Untouched, named**: NewToken (specialized teardown + oracle suite), authwits pair, B-09/B-26, capabilities frozen oracle, all submit-handler logic, all existing adopters' timing.
 
 ## Security & Adversarial Considerations
 

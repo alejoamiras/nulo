@@ -52,9 +52,7 @@
   </ul>
 
   <div class="card ask">
-    <strong>One decision for you:</strong> the repo's rulebook says composables must not own their teardown (parents call <code>dispose()</code>). The self-cleanup here technically bends that — for a keyboard listener, not a service. <br><br>
-    <strong>(a) Recommended:</strong> add a one-sentence carve-out to CLAUDE.md ("scope-tied cleanup of non-service resources is allowed; service clients stay parent-disposed") — this matches what parts of the codebase already do. <br>
-    <strong>(b) Alternative:</strong> the helper returns a <code>dispose()</code> all twelve popups must remember to call — stricter on paper, but it reinstates the exact forget-one-callsite failure mode this whole effort exists to kill.
+    <strong>Decision made — option (a):</strong> the helper cleans up its own listener via scope teardown, and CLAUDE.md gains a one-sentence refinement — parents own <em>service</em> teardown (order matters there); scope owns inert-resource cleanup (order doesn't). Chosen over the exposed-<code>dispose()</code> alternative, which would have made correctness depend on twelve call sites remembering a manual step — the exact failure mode this effort exists to kill.
   </div>
 
   <h2>Risk posture</h2>
