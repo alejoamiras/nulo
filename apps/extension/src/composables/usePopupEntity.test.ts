@@ -11,9 +11,13 @@ import { isPopupSubmitKey, usePopupEntity } from "./usePopupEntity"
 
 /** Run the composable inside an effect scope so its `watch` is active; return a
  *  `stop()` to tear it down (mirrors component unmount). */
-function mount(show: ReturnType<typeof ref<boolean>>, handlers: Parameters<typeof usePopupEntity>[1]) {
+function mount(
+	show: ReturnType<typeof ref<boolean>>,
+	handlers: Parameters<typeof usePopupEntity>[1],
+	options?: Parameters<typeof usePopupEntity>[2],
+) {
 	const scope = effectScope()
-	scope.run(() => usePopupEntity(() => Boolean(show.value), handlers))
+	scope.run(() => usePopupEntity(() => Boolean(show.value), handlers, options))
 	return () => scope.stop()
 }
 
@@ -130,6 +134,65 @@ describe("usePopupEntity", () => {
 		await nextTick()
 		show.value = false
 		await nextTick()
+		show.value = true
+		await nextTick()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce()
+	})
+
+	it("removes the listener on SCOPE DISPOSE even while shown (unmount cannot leak it)", async () => {
+		const submit = vi.fn()
+		const show = ref(false)
+		const stop = mount(show, { submit })
+		show.value = true
+		await nextTick()
+		stop() // component unmount → scope death; the popup was never hidden
+		pressKey(makeInput(), "Enter")
+		expect(submit).not.toHaveBeenCalled()
+	})
+
+	it("submitWaitsForShow: Enter is inert while onShow's promise pends, live after it resolves", async () => {
+		const submit = vi.fn()
+		let resolveShow!: () => void
+		const show = ref(false)
+		cleanup.push(mount(show, { submit, onShow: () => new Promise<void>((r) => (resolveShow = r)) }, { submitWaitsForShow: true }))
+		show.value = true
+		await nextTick()
+		pressKey(makeInput(), "Enter")
+		expect(submit).not.toHaveBeenCalled() // population pending → inert
+		resolveShow()
+		await Promise.resolve()
+		await Promise.resolve()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce()
+	})
+
+	it("submitWaitsForShow: a REJECTED onShow unblocks the gate AND re-dispatches the error", async () => {
+		const submit = vi.fn()
+		let rejectShow!: (e: Error) => void
+		const show = ref(false)
+		// Capture the deliberate re-dispatch instead of letting it hit the
+		// process: the stub both silences vitest's unhandled-error net and PINS
+		// that the rejection is re-surfaced rather than swallowed.
+		const microtasks: Array<() => void> = []
+		vi.stubGlobal("queueMicrotask", (fn: () => void) => microtasks.push(fn))
+		cleanup.push(mount(show, { submit, onShow: () => new Promise<void>((_r, rj) => (rejectShow = rj)) }, { submitWaitsForShow: true }))
+		show.value = true
+		await nextTick()
+		rejectShow(new Error("population failed"))
+		await Promise.resolve()
+		await Promise.resolve()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce() // the gate opened — no lockout
+		expect(microtasks).toHaveLength(1)
+		expect(() => microtasks[0]()).toThrow("population failed") // the error is re-surfaced
+		vi.unstubAllGlobals()
+	})
+
+	it("WITHOUT submitWaitsForShow, an async onShow does not gate Enter (existing adopters' pinned timing)", async () => {
+		const submit = vi.fn()
+		const show = ref(false)
+		cleanup.push(mount(show, { submit, onShow: () => new Promise<void>(() => {}) }))
 		show.value = true
 		await nextTick()
 		pressKey(makeInput(), "Enter")
