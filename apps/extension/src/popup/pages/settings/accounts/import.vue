@@ -93,20 +93,26 @@ const handleConfirmImport = async () => {
 	isBusy.value = true
 	error.value = ""
 	const gen = generation
+	// Scope snapshot: the RPC imports into THESE ids, so the UI write-back below must only touch
+	// a store still showing them (a background profile/chain change can land without unmounting).
+	const profileId = appStore.profile.id
+	const chainId = appStore.network.chainId
 	try {
 		const account = await managers.account.importAccount(
-			appStore.profile.id,
-			appStore.network.chainId,
+			profileId,
+			chainId,
 			fileBody.value.trim(),
 			previewAddress.value,
 			password.value,
 		)
-		// The import itself is committed service-side; the fence only guards the UI-scope writes.
-		// A confirm resolving after the page died must not push an old scope's account into
-		// whatever store is current, flip the active pointer, or toast+route from beyond the grave.
-		if (gen !== generation) return
+		// The import itself is committed service-side; the fences only guard the UI-scope writes.
+		// A confirm resolving after the page died (or after the scope moved) must not push an old
+		// scope's account into whatever store is current, flip the active pointer, or toast+route
+		// from beyond the grave.
+		if (gen !== generation || appStore.profile?.id !== profileId || appStore.network?.chainId !== chainId) return
 		appStore.accounts.push(account)
 		await storageLocalSet({ "nulo:ui:activeAccount": account.address })
+		if (gen !== generation) return
 		openToast({ label: "Account imported", icon: "check-circle" }, 2_000)
 		router.push("/popup/settings/accounts")
 	} catch (err) {
