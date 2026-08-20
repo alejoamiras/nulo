@@ -1,0 +1,69 @@
+<title>Popup Entity Consolidation</title>
+<style>
+  :root {
+    --bg: #faf9f6; --surface: #ffffff; --ink: #1a1d21; --muted: #5c636b;
+    --accent: #0f6f5c; --accent-soft: #e3f0ec; --line: #e4e1da;
+    --warn: #8a5a00; --warn-soft: #fdf3df; --code: #f0eee9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161a; --surface: #1c1f24; --ink: #e8e6e1; --muted: #9aa0a8;
+      --accent: #4dbfa4; --accent-soft: #1e2f2a; --line: #2a2e34;
+      --warn: #e0b45c; --warn-soft: #2c2417; --code: #23262c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161a; --surface: #1c1f24; --ink: #e8e6e1; --muted: #9aa0a8;
+    --accent: #4dbfa4; --accent-soft: #1e2f2a; --line: #2a2e34;
+    --warn: #e0b45c; --warn-soft: #2c2417; --code: #23262c;
+  }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.65 system-ui, sans-serif; margin: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 48px 24px 96px; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 4px; text-wrap: balance; }
+  .kicker { color: var(--accent); font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .sub { color: var(--muted); margin: 0 0 36px; }
+  h2 { font-size: 1.15rem; margin: 36px 0 10px; }
+  p { margin: 0 0 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin: 0 0 16px; }
+  .ask { background: var(--warn-soft); border-color: var(--warn); }
+  .ask strong { color: var(--warn); }
+  ul { margin: 0 0 14px; padding-left: 22px; }
+  li { margin-bottom: 6px; }
+  code, pre { background: var(--code); border-radius: 6px; font-size: .85em; }
+  code { padding: 2px 6px; }
+  pre { padding: 14px 16px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  a { color: var(--accent); }
+</style>
+<main>
+  <div class="kicker">Blueprint · light</div>
+  <h1>Popup Entity Consolidation</h1>
+  <p class="sub">One mechanism owns the popup Enter-key lifecycle — and cleans up after itself.</p>
+
+  <h2>What &amp; why</h2>
+  <p>Eight popups share one Enter-to-submit helper; four more still hand-copy the same ~15-line boilerplate, and none of it removes its keyboard listener when a component dies. That never hurts users (popups never die in the running wallet) — but it has now tripped our own tests three times, and five copies of the same code drift apart (last arc proved two already had). This arc: the shared helper cleans up after itself automatically, the four copies are deleted by moving onto it, and the test suites drop their hand-rolled workarounds.</p>
+
+  <h2>What the review round changed (its reject was right)</h2>
+  <ul>
+    <li><strong>The subtle one:</strong> the four popups only accept Enter <em>after</em> their data finishes loading. The naive migration would have made Enter live <em>during</em> loading — and the safety nets from last arc stop <em>double</em>-submits, not a <em>too-early first</em> submit (which could, e.g., add a duplicate FPC because the duplicate list hadn't loaded). The helper now gets an opt-in "wait for loading" switch so each popup keeps its exact current timing.</li>
+    <li>Async loading errors would have been silently dropped — the helper is now promise-aware and re-surfaces them.</li>
+    <li>Test cleanup becomes <em>guaranteed</em> (runs even when an assertion fails) instead of a per-test convention, plus one canary test proving the leak can never quietly return.</li>
+    <li>NewToken is named as a deliberate exception (it has specialized teardown and the family's biggest test suite — migrating it is risk for no gain).</li>
+  </ul>
+
+  <div class="card ask">
+    <strong>One decision for you:</strong> the repo's rulebook says composables must not own their teardown (parents call <code>dispose()</code>). The self-cleanup here technically bends that — for a keyboard listener, not a service. <br><br>
+    <strong>(a) Recommended:</strong> add a one-sentence carve-out to CLAUDE.md ("scope-tied cleanup of non-service resources is allowed; service clients stay parent-disposed") — this matches what parts of the codebase already do. <br>
+    <strong>(b) Alternative:</strong> the helper returns a <code>dispose()</code> all twelve popups must remember to call — stricter on paper, but it reinstates the exact forget-one-callsite failure mode this whole effort exists to kill.
+  </div>
+
+  <h2>Risk posture</h2>
+  <p>Zero intended behavior change; every timing preserved per popup and pinned. The two never-tested popups get their pins <em>before</em> migration; the two well-tested ones use their existing suites as the regression oracle. Frozen-oracle suites untouched, byte-identical.</p>
+
+  <h2>Where the details live</h2>
+  <p class="muted">Plan: <a href="plan.md">plan.md</a> · Evidence: <a href="recon.md">recon.md</a> · The full reject + all six adopted findings are in the plan's ledger.</p>
+
+  <h2>Seeds (draft — finalized on approval)</h2>
+  <pre>/goal Execute the approved popup-entity-consolidation plan (implementations-plan/popup-entity-consolidation/plan.md — onScopeDispose cleanup + promise-aware hooks + opt-in submitWaitsForShow in usePopupEntity; migrate EditFpc/NewFpc/EditContact/NewContact with per-popup timing preserved; pins-first for the untested two incl. the initialization window; guaranteed afterEach unmount + the unmount canary; C1 decision as recorded at approval): ONE green codex-converged PR into dev, autonomously until merged or rejected via codex-agreed documented deviation. PROCESS inherited verbatim from implementations-plan/remediation-followups/plan.md (ONE codex xhigh end-diff, max 2 resumes, SIMPLER wins; never weaken a gate; never --admin; squash authorized). Named exceptions untouched: NewToken, authwits, B-09/B-26, frozen oracles. VALIDATION: audit:vue → armed smoke local per _smoke-e2e.yml → PR with e2e:smoke label → babysit → merge. DONE WHEN: PR merged in dev history (verified via git log, not API state); index.md updated; audit:vue green on post-merge dev; owner report.</pre>
+  <pre>/loop Continue the popup-entity-consolidation arc to the next incomplete step of implementations-plan/popup-entity-consolidation/plan.md; babysit in-flight gates; stop when the PR is merged (verified in dev history) and closure recorded.</pre>
+</main>
