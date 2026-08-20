@@ -4,14 +4,13 @@
  *
  * Covered here:
  *   1. Round-trip into a SECOND profile (plaintext + encrypted), via the paste path and the
- *      file-chooser path — export reveals inline, import previews the recomputed address, the
- *      user confirms, the account lands with the imported badge.
+ *      file-chooser path — export DOWNLOADS a file (captured in-page), import previews the
+ *      recomputed address, the user confirms, the account lands with the imported badge.
  *   2. A tampered file is REJECTED (the confirm step never renders).
  *   3. A duplicate import is rejected (same profile, second attempt).
  *
- * Selector discipline: testids only. `account-export-btn` is a PER-ROW testid shared by every
- * row, so it is always clicked through its row's `data-account-name` — a bare `clickByTestId`
- * would silently hit the LAST matching row (see `accounts.test.ts`'s edit-name idiom).
+ * Selector discipline: testids only. Rows are clicked through their `data-account-name` (or the
+ * imported badge) — a bare repeated-testid click silently hits the LAST matching row.
  *
  * The second profile uses the proven cross-browser pattern (a second `launchExtension` +
  * `registerProfile`), NOT the in-session profile picker: that in-page path has never been driven
@@ -21,8 +20,7 @@ import { rmSync } from "node:fs"
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { clickByTestId, launchExtension, openPopup, registerProfile, test, waitForHash } from "./fixtures/extension"
-import { waitForToast } from "./fixtures/helpers"
-import { exportAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
+import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 import { writeBackupToTemp } from "./helpers/import-drivers"
 
 test("account export → import into a SECOND profile (plaintext + encrypted round-trips)", { timeout: 240_000 }, async ({
@@ -51,8 +49,7 @@ test("account export → import into a SECOND profile (plaintext + encrypted rou
 		const previewed = await previewImport(targetPage, plaintextBody)
 		expect(previewed).toBeTruthy()
 		expect(previewed?.startsWith("0x")).toBe(true)
-		await clickByTestId(targetPage, "import-account-submit")
-		await waitForToast(targetPage, "Account imported")
+		await confirmImport(targetPage)
 		await gotoAccounts(targetPage)
 		await targetPage.waitForSelector('[data-testid="account-imported-badge"]', { visible: true, timeout: 20_000 })
 
@@ -110,18 +107,17 @@ test("the file-chooser import path accepts a written export file", { timeout: 18
 	// A plaintext export carries a REAL signing key — clean the temp file up.
 	const filePath = writeBackupToTemp(body, "account-export.json")
 	try {
+		// Enter the page the way a user does: the Manage Accounts button routes to it.
 		await gotoAccounts(page)
 		await clickByTestId(page, "accounts-import-btn")
 		await page.waitForSelector('[data-testid="import-account-pick-file"]', { visible: true, timeout: 15_000 })
 		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-account-pick-file")])
 		await chooser.accept([filePath])
-		// The picked body lands in the textarea; preview then decodes it.
+		// The chip reflects the picked file; Continue then decodes it.
 		await page.waitForFunction(
-			() => {
-				const input = document.querySelector('[data-testid="import-account-body-input"] input') as HTMLInputElement | null
-				return (input?.value ?? "").length > 0
-			},
+			(name: string) => (document.querySelector('[data-testid="import-account-pick-file"]')?.textContent ?? "").includes(name),
 			{ timeout: 15_000, polling: 200 },
+			"account-export.json",
 		)
 		await clickByTestId(page, "import-account-submit")
 		await page.waitForFunction(

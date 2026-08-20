@@ -13,8 +13,6 @@ import EditProfilePopup from "./EditProfilePopup.vue"
 import ForgotPasswordPopup from "./ForgotPasswordPopup.vue"
 import ImportContactsPopup from "./ImportContactsPopup.vue"
 import IncomingTrustPopup from "./IncomingTrustPopup.vue"
-import AccountExportPopup from "./AccountExportPopup.vue"
-import AccountImportPopup from "./AccountImportPopup.vue"
 import NewAccountPopup from "./NewAccountPopup.vue"
 import NewContactPopup from "./NewContactPopup.vue"
 import NewFpcPopup from "./NewFpcPopup.vue"
@@ -335,8 +333,6 @@ onBeforeUnmount(() => {
 
 	<AccountsPopup :show="popupStore.isOpened('accounts')" @onClose="popupStore.close('accounts')" />
 	<NewAccountPopup :show="popupStore.isOpened('new_account')" @onClose="popupStore.close('new_account')" />
-	<AccountImportPopup :show="popupStore.isOpened('import_account')" @onClose="popupStore.close('import_account')" />
-	<AccountExportPopup :show="popupStore.isOpened('export_account')" @onClose="popupStore.close('export_account')" />
 	<EditAccountPopup :show="popupStore.isOpened('edit_account')" @onClose="popupStore.close('edit_account')" />
 
 	<TokenMetadataPopup :show="popupStore.isOpened('token_metadata')" @onClose="popupStore.close('token_metadata')" />

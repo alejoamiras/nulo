@@ -41,11 +41,10 @@ import {
 	sendTransfer,
 	switchAccountByAddress,
 	switchToLocalNetwork,
-	waitForToast,
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "../fixtures/passkey"
-import { exportAccountBody, previewImport } from "../helpers/account-io"
+import { confirmImport, exportAccountBody, previewImport } from "../helpers/account-io"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -89,12 +88,10 @@ test.skipIf(!hasConfig)(
 
 			const previewed = await previewImport(page, accountFile)
 			expect(previewed).toBe(sourceAddress)
-			await clickByTestId(page, "import-account-submit")
-			await waitForToast(page, "Account imported")
+			await confirmImport(page)
 
 			// Operate AS the imported account: back on the home screen (the tokens menu and the
-			// account selector live there — previewImport parked us on manage-accounts), register
-			// the token, switch.
+			// account selector live there), register the token, switch.
 			await navigateByHash(page, "#/popup/general", 15_000)
 			await importToken(page, aztecConfig!.tokenAddress)
 			await switchAccountByAddress(page, sourceAddress)
@@ -146,8 +143,7 @@ test.skipIf(!hasConfig)(
 
 				const previewed = await previewImport(anchorPopup, accountFile)
 				expect(previewed).toBe(sourceAddress)
-				await clickByTestId(anchorPopup, "import-account-submit")
-				await waitForToast(anchorPopup, "Account imported")
+				await confirmImport(anchorPopup)
 				await anchorPopup.waitForSelector('[data-testid="account-imported-badge"]', { visible: true, timeout: 20_000 })
 
 				// ── Stage 3: full lock → ceremony re-unlock, so the signature below comes from a
