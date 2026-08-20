@@ -38,16 +38,29 @@ const error = ref("")
 const isBusy = ref(false)
 const showPaste = ref(false)
 
+/** Async-result fence. Every edit AND the unmount bump it; a preview or file read that resolves
+ *  under a stale generation is dropped, so an in-flight RPC can neither repopulate a preview the
+ *  user just invalidated by editing, nor write secrets back after the page scrubbed them. */
+let generation = 0
+
 /** A plain account file is a JSON envelope; anything else is the protected base64 blob and
  *  needs the password it was exported with. */
 const isProtectedFile = computed(() => fileBody.value.trim().length > 0 && !fileBody.value.trim().startsWith("{"))
 const needsConfirm = computed(() => previewAddress.value.length > 0)
 
+/** The fileBody watcher clears the chip name on PASTED edits; a pick sets both together, and the
+ *  (async-flushed) watcher must not erase the name it just set. */
+let bodySetByPick = false
+
 const handlePickFile = async () => {
+	const gen = generation
 	try {
 		const picked = await pickFile()
 		if (!picked) return
-		fileBody.value = (await picked.text()).trim()
+		const text = (await picked.text()).trim()
+		if (gen !== generation) return
+		bodySetByPick = true
+		fileBody.value = text
 		fileName.value = picked.name ?? ""
 		error.value = ""
 	} catch {
@@ -61,9 +74,13 @@ const handlePreview = async () => {
 	if (isProtectedFile.value && !password.value) return
 	isBusy.value = true
 	error.value = ""
+	const gen = generation
 	try {
-		previewAddress.value = await managers.account.previewImportAccount(fileBody.value.trim(), password.value)
+		const address = await managers.account.previewImportAccount(fileBody.value.trim(), password.value)
+		if (gen !== generation) return
+		previewAddress.value = address
 	} catch (err) {
+		if (gen !== generation) return
 		error.value = err instanceof Error ? err.message : String(err)
 	} finally {
 		isBusy.value = false
@@ -95,9 +112,37 @@ const handleConfirmImport = async () => {
 }
 
 // A confirmed address is only valid for the exact body+password it was previewed from. Any edit
-// invalidates it so the user must re-preview (the service also recomputes and rejects a stale
-// confirmation, but this keeps the UI honest).
-watch([fileBody, password], () => {
+// invalidates it — including a preview RPC still in flight (generation bump) — so the user must
+// re-preview (the service also recomputes and rejects a stale confirmation, but this keeps the UI
+// honest). A pasted edit also unbinds the chip from the previously picked file's name.
+watch([fileBody, password], ([newBody], [oldBody]) => {
+	generation++
+	previewAddress.value = ""
+	if (newBody !== oldBody && fileName.value && !bodySetByPick) fileName.value = ""
+	bodySetByPick = false
+})
+
+// Flipping from a protected body to a plain one orphans the file password; drop it so it cannot
+// silently ride along into a later preview.
+watch(isProtectedFile, (nowProtected) => {
+	if (!nowProtected) password.value = ""
+})
+
+/** Enter submits the active step, matching the popup this page replaced. */
+const onKeydown = (e) => {
+	if (e.key !== "Enter") return
+	if (needsConfirm.value) handleConfirmImport()
+	else handlePreview()
+}
+onMounted(() => document.addEventListener("keydown", onKeydown))
+
+onBeforeUnmount(() => {
+	document.removeEventListener("keydown", onKeydown)
+	// The body is spendable material (a plain file carries the signing key); scrub with the page
+	// and fence out any RPC or file read still in flight.
+	generation++
+	fileBody.value = ""
+	password.value = ""
 	previewAddress.value = ""
 })
 

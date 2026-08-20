@@ -38,25 +38,57 @@ if (appStore.profile?.type === "passkey") {
 	router.replace("/popup/settings/security/export")
 }
 
-const accounts = computed(() => appStore.accounts ?? [])
+/** The picker (and the preselect validation) only ever offers CURRENT-chain rows: during a
+ *  network switch `appStore.accounts` can transiently hold the previous chain's rows, and an
+ *  export must never bind an address to the wrong chainId. */
+const accounts = computed(() => (appStore.accounts ?? []).filter((a) => a.chainId === appStore.network?.chainId))
 
-/** Preselected via the Manage Accounts deep-link (`?address=`); the picker is skipped when the
- *  address belongs to this profile's current chain. */
 const selectedAddress = ref("")
-const queryAddress = typeof route.query.address === "string" ? route.query.address : ""
-if (queryAddress && (appStore.accounts ?? []).some((a) => a.address === queryAddress)) {
-	selectedAddress.value = queryAddress
-}
-const selectedAccount = computed(() => accounts.value.find((a) => a.address === selectedAddress.value))
-
 const isAgreed = ref(false)
 const password = ref()
 const isWrongPassword = ref(false)
 const isBusy = ref(false)
+const isDownloading = ref(false)
 
 /** "" | "ready" | "protected" — the file stages, mirroring Full Backup's status machine. */
 const fileStatus = ref("")
 const payload = ref("")
+
+/** Async-result fence: bumped by every flow reset and by unmount, so an export RPC that resolves
+ *  late can neither write a payload back after the scrub nor land in a different account's flow. */
+let generation = 0
+
+const resetFlow = () => {
+	generation++
+	selectedAddress.value = ""
+	isAgreed.value = false
+	password.value = null
+	isWrongPassword.value = false
+	fileStatus.value = ""
+	payload.value = ""
+}
+
+/** Preselect via the Manage Accounts deep-link (`?address=`); the picker is skipped when the
+ *  address belongs to this profile's CURRENT chain. Watched, not read once: a query-only
+ *  navigation reuses this component instance, so entering with a different (or no) address must
+ *  scrub the previous flow's stage and payload rather than inherit them. */
+const applyQueryPreselect = () => {
+	const queryAddress = typeof route.query.address === "string" ? route.query.address : ""
+	if (queryAddress && accounts.value.some((a) => a.address === queryAddress)) {
+		selectedAddress.value = queryAddress
+	}
+}
+applyQueryPreselect()
+watch(
+	() => route.query.address,
+	() => {
+		if (route.path !== "/popup/settings/security/export/account") return
+		resetFlow()
+		applyQueryPreselect()
+	},
+)
+
+const selectedAccount = computed(() => accounts.value.find((a) => a.address === selectedAddress.value))
 
 const collapsingLabel = computed(() => {
 	if (!selectedAddress.value) return "Account"
@@ -74,37 +106,53 @@ const handleAgree = () => {
 const handleCreate = async () => {
 	if (!password.value || isBusy.value) return
 	isBusy.value = true
+	const gen = generation
 	try {
-		payload.value = await managers.account.exportAccount(
+		const body = await managers.account.exportAccount(
 			appStore.profile.id,
 			appStore.network.chainId,
 			selectedAddress.value,
 			password.value,
 			false,
 		)
+		if (gen !== generation) return
+		payload.value = body
 		fileStatus.value = "ready"
 	} catch (error) {
-		isWrongPassword.value = true
+		if (gen !== generation) return
+		// Only an authentication failure belongs on the password field; anything else (a deleted
+		// account, a disconnect) shaking the input as "Wrong password" would send the user
+		// retyping a password that was never the problem.
+		if (/password/i.test(error?.message ?? "")) {
+			isWrongPassword.value = true
+		} else {
+			console.error("[export/account] create failed:", error)
+			openToast({ label: "Failed to create the file", icon: "warning" }, 4_000)
+		}
 	} finally {
 		isBusy.value = false
 	}
 }
 
 const handleProtect = async () => {
-	if (isBusy.value) return
+	if (isBusy.value || isDownloading.value) return
 	isBusy.value = true
+	const gen = generation
 	try {
-		payload.value = await managers.account.exportAccount(
+		const body = await managers.account.exportAccount(
 			appStore.profile.id,
 			appStore.network.chainId,
 			selectedAddress.value,
 			password.value,
 			true,
 		)
+		if (gen !== generation) return
+		payload.value = body
 		fileStatus.value = "protected"
 		// The password's job is done once the protected payload exists.
 		password.value = null
 	} catch (error) {
+		if (gen !== generation) return
 		openToast({ label: "Failed to protect the file", icon: "warning" }, 4_000)
 	} finally {
 		isBusy.value = false
@@ -112,23 +160,43 @@ const handleProtect = async () => {
 }
 
 const fileName = computed(() => {
-	const profile = (appStore.profile?.name ?? "profile").replace(/\s+/g, "_")
+	// The profile name is user-typed: strip path separators and anything else
+	// `chrome.downloads.download` can reject or misroute (a "foo/bar" name would create a
+	// subdirectory; "../" is refused outright).
+	const profile = (appStore.profile?.name ?? "profile").replace(/[^\p{L}\p{N}_-]+/gu, "_") || "profile"
 	const addr = selectedAddress.value.slice(0, 10)
 	return fileStatus.value === "protected" ? `NuloEncryptedAccount_${profile}_${addr}.txt` : `NuloAccount_${profile}_${addr}.json`
 })
 
 const handleDownload = async () => {
+	if (isDownloading.value || isBusy.value) return
+	isDownloading.value = true
 	try {
 		await downloadFile({ data: payload.value, filename: fileName.value })
 		openToast({ label: "Account file downloaded", icon: "download" }, 2_000)
 	} catch (err) {
 		console.error("Download failed:", err?.message || err)
 		openToast({ label: "Failed to download the file", icon: "warning" }, 4_000)
+	} finally {
+		isDownloading.value = false
 	}
 }
 
+/** Enter advances the active stage, matching the flow's CTA (the popup this page replaced
+ *  submitted on Enter). Download stages stay click-only: Enter re-firing a download is noise. */
+const onKeydown = (e) => {
+	if (e.key !== "Enter") return
+	if (!selectedAddress.value || fileStatus.value) return
+	if (!isAgreed.value) handleAgree()
+	else handleCreate()
+}
+onMounted(() => document.addEventListener("keydown", onKeydown))
+
 onBeforeUnmount(() => {
-	// The plain payload is spendable material; drop both secrets with the page.
+	document.removeEventListener("keydown", onKeydown)
+	// The plain payload is spendable material; drop both secrets with the page and fence out any
+	// export RPC still in flight.
+	generation++
 	payload.value = ""
 	password.value = null
 })
@@ -231,13 +299,13 @@ onBeforeUnmount(() => {
 			</Button>
 
 			<Flex v-else-if="fileStatus === 'ready'" direction="column" gap="8" wide>
-				<Button @click="handleProtect" :disabled="isBusy" variant="cta" data-testid="account-protect-btn">
+				<Button @click="handleProtect" :disabled="isBusy || isDownloading" variant="cta" data-testid="account-protect-btn">
 					{{ isBusy ? "Protecting" : "Protect with Password" }}
 				</Button>
-				<Button @click="handleDownload" variant="cta_outline" data-testid="account-download-btn"> Download File </Button>
+				<Button @click="handleDownload" :disabled="isBusy || isDownloading" variant="cta_outline" data-testid="account-download-btn"> Download File </Button>
 			</Flex>
 
-			<Button v-else-if="fileStatus === 'protected'" @click="handleDownload" variant="cta" data-testid="account-download-btn">
+			<Button v-else-if="fileStatus === 'protected'" @click="handleDownload" :disabled="isDownloading" variant="cta" data-testid="account-download-btn">
 				Download File
 			</Button>
 		</template>
