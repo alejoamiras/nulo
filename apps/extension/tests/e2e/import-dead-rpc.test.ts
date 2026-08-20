@@ -155,6 +155,8 @@ async function deadRpcBackup(rpcUrl: string, withAccountState = true): Promise<s
 	const address = await deriveNuloAccountAddress(master, STUB_CHAIN_ID)
 	const base = buildSyntheticBackup({
 		masterBase64: master,
+		// The stub network's L1 identity — must match what `address` was derived under.
+		l1ChainId: STUB_CHAIN_ID,
 		accountAddress: address,
 		extraData: withAccountState ? { "account-state": [{ networkId: "syn-network-id", senders: [{ address }], contracts: [] }] } : {},
 	})
