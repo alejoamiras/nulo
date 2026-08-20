@@ -64,8 +64,11 @@ function pressEnterOnBody() {
 	document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 }
 
+const wrappers: VueWrapper[] = []
+
 async function mountShown(): Promise<VueWrapper> {
 	const w = mount(NewSenderPopup, { props: { show: false }, global: { stubs: STUBS } })
+	wrappers.push(w)
 	await w.setProps({ show: true })
 	await flushPromises()
 	return w
@@ -88,6 +91,14 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	// Guaranteed net — runs even when an assertion skipped the in-test dispose.
+	for (const w of wrappers.splice(0)) {
+		try {
+			w.unmount()
+		} catch {
+			/* already unmounted by the test */
+		}
+	}
 	vi.clearAllMocks()
 	document.body.innerHTML = ""
 })

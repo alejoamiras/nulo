@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { effectScope, nextTick, ref } from "vue"
+import { createApp, effectScope, nextTick, ref } from "vue"
 import { isPopupSubmitKey, usePopupEntity } from "./usePopupEntity"
 
 /** Run the composable inside an effect scope so its `watch` is active; return a
@@ -167,26 +167,53 @@ describe("usePopupEntity", () => {
 		expect(submit).toHaveBeenCalledOnce()
 	})
 
-	it("submitWaitsForShow: a REJECTED onShow unblocks the gate AND re-dispatches the error", async () => {
+	it("submitWaitsForShow: a REJECTED onShow keeps the gate CLOSED, routes through Vue's error channel, and a fresh show reopens", async () => {
+		// The hand-rolled watchers never reached addEventListener after a
+		// rejection — Enter against a failed/incomplete population must stay
+		// impossible until a fresh show repopulates. Mounted through a REAL app
+		// so the rejection's routing (Vue's watcher error channel → the app
+		// errorHandler) is itself asserted, not just tolerated.
 		const submit = vi.fn()
+		const errorHandler = vi.fn()
 		let rejectShow!: (e: Error) => void
+		let attempt = 0
 		const show = ref(false)
-		// Capture the deliberate re-dispatch instead of letting it hit the
-		// process: the stub both silences vitest's unhandled-error net and PINS
-		// that the rejection is re-surfaced rather than swallowed.
-		const microtasks: Array<() => void> = []
-		vi.stubGlobal("queueMicrotask", (fn: () => void) => microtasks.push(fn))
-		cleanup.push(mount(show, { submit, onShow: () => new Promise<void>((_r, rj) => (rejectShow = rj)) }, { submitWaitsForShow: true }))
+		const app = createApp({
+			setup() {
+				usePopupEntity(
+					() => Boolean(show.value),
+					{
+						submit,
+						onShow: () => {
+							attempt++
+							return attempt === 1 ? new Promise<void>((_r, rj) => (rejectShow = rj)) : Promise.resolve()
+						},
+					},
+					{ submitWaitsForShow: true },
+				)
+				return () => null
+			},
+		})
+		app.config.errorHandler = errorHandler
+		app.mount(document.createElement("div"))
+		cleanup.push(() => app.unmount())
+
 		show.value = true
 		await nextTick()
 		rejectShow(new Error("population failed"))
 		await Promise.resolve()
 		await Promise.resolve()
 		pressKey(makeInput(), "Enter")
-		expect(submit).toHaveBeenCalledOnce() // the gate opened — no lockout
-		expect(microtasks).toHaveLength(1)
-		expect(() => microtasks[0]()).toThrow("population failed") // the error is re-surfaced
-		vi.unstubAllGlobals()
+		expect(submit).not.toHaveBeenCalled() // rejection ≠ open gate
+		expect(errorHandler).toHaveBeenCalledTimes(1) // the rejection traveled Vue's channel
+		show.value = false
+		await nextTick()
+		show.value = true
+		await nextTick()
+		await Promise.resolve()
+		await Promise.resolve()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce() // fresh, successful show reopens
 	})
 
 	it("WITHOUT submitWaitsForShow, an async onShow does not gate Enter (existing adopters' pinned timing)", async () => {

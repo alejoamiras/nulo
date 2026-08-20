@@ -20,12 +20,12 @@ export type UsePopupEntityHandlers = {
 	submit: () => void
 	/** Ran when the popup becomes visible, AFTER the keydown listener is
 	 *  installed. Optional (e.g. connect a client / populate / focus). May be
-	 *  async — the returned promise's rejection is re-dispatched (never
-	 *  silently dropped), and it drives `submitWaitsForShow` when set. */
+	 *  async — the promise is AWAITED by the watcher, so rejections travel
+	 *  Vue's watcher error channel; it also drives `submitWaitsForShow`. */
 	onShow?: () => void | Promise<void>
 	/** Ran when the popup hides, AFTER the keydown listener is removed.
 	 *  Optional (e.g. `form.reset()` / disconnect a client). May be async;
-	 *  rejections are re-dispatched. */
+	 *  awaited the same way. */
 	onHide?: () => void | Promise<void>
 }
 
@@ -37,14 +37,6 @@ export type UsePopupEntityOptions = {
 	 *  need this — their re-entrancy latches stop DOUBLE submits, not a
 	 *  premature FIRST submit against an incomplete list. */
 	submitWaitsForShow?: boolean
-}
-
-/** An async watcher surfaced its rejection through Vue's error channel; the
- *  sync watcher below must not silently swallow what used to be loud. */
-const redispatch = (err: unknown) => {
-	queueMicrotask(() => {
-		throw err
-	})
 }
 
 /**
@@ -80,30 +72,29 @@ export function usePopupEntity(show: () => boolean, handlers: UsePopupEntityHand
 		if (options.submitWaitsForShow && pendingShowToken !== null) return
 		if (isPopupSubmitKey(e)) handlers.submit()
 	}
-	watch(show, (isShown) => {
+	// The watcher is ASYNC and awaits the handlers so their rejections travel
+	// Vue's watcher error channel (onErrorCaptured / app errorHandler /
+	// watcher metadata) exactly as the popups' hand-rolled async watchers did.
+	watch(show, async (isShown) => {
 		if (isShown) {
 			document.addEventListener("keydown", onKeydown)
-			pendingShowToken = null
-			const result = handlers.onShow?.()
-			if (result instanceof Promise) {
-				const token = {}
-				pendingShowToken = token
-				result
-					.catch(redispatch)
-					// The gate opens on settle EITHER way — a failed population
-					// must not lock the popup shut (matches the old timing: the
-					// hand-rolled watcher installed its listener only on the
-					// success path, but its async-watcher rejection left the
-					// popup closed-for-Enter, which surfaced as the SAME "try
-					// again after reopening" UX this preserves via the error).
-					.finally(() => {
-						if (pendingShowToken === token) pendingShowToken = null
-					})
+			if (!handlers.onShow) {
+				pendingShowToken = null
+				return
 			}
+			const token = {}
+			pendingShowToken = token
+			// The gate opens on FULFILLMENT ONLY. A rejected population keeps
+			// it closed — matching the hand-rolled watchers, which never
+			// reached their addEventListener after a rejection: Enter against
+			// a failed/incomplete population stays impossible until a fresh
+			// show repopulates. (A new show replaces the token, so no stale
+			// settle can unlock it, and no rejection can lock a LATER show.)
+			await handlers.onShow()
+			if (pendingShowToken === token) pendingShowToken = null
 		} else {
 			document.removeEventListener("keydown", onKeydown)
-			const result = handlers.onHide?.()
-			if (result instanceof Promise) result.catch(redispatch)
+			await handlers.onHide?.()
 		}
 	})
 	onScopeDispose(() => document.removeEventListener("keydown", onKeydown))
