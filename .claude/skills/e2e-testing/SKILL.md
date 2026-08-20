@@ -491,3 +491,37 @@ assuming "transient".
   arming-contract test by design. Mirror `_smoke-e2e.yml`
   (`VITE_NULO_E2E_MIGRATION_FIXTURE=1` + `VITE_NULO_E2E_DEFAULT_NET=testnet`
   at build, `NULO_E2E_MIGRATION_FIXTURE=1` at run) for local smoke.
+
+## Imported-account coverage arc lessons (2026-08-20, `feat/kdf-v2-e2e-coverage`)
+
+- **`popupStore.open()` on an already-open key is not a reactive change — a
+  DOM-cleared popup goes PERMANENTLY dead.** The store is a plain
+  `popups[key] = {...}` map with no open-guard; `:show="isOpened(key)"`
+  never re-fires when the key is re-set. So the sequence *preview-only popup
+  left open → `closeStuckPopup` force-removes its teleported DOM → later
+  `open()` on the same key* leaves `:show` true, DOM gone, and no amount of
+  clicking (even kick-until-rendered) revives it. **Any helper that opens a
+  store-tracked popup and does NOT drive it to its self-closing action must
+  close it THROUGH the UI** (`popup-close-btn` on `PopupHeader`, added for
+  exactly this) — `closeStuckPopup` is for stuck *transition remnants*, not
+  a substitute for closing. The failure surfaces far from the cause: the
+  NEXT open attempt times out on a healthy-looking page.
+- **Never match an imported account row by name.** An import carries the
+  SOURCE profile's account name, so it routinely collides with the target's
+  own derived row (both "Account" by default) and a `data-account-name`
+  `.find()` silently exports the WRONG row — a wrong-target pass/fail, not
+  an error. Scope through `account-imported-badge` → `closest(row)`.
+- **Destructive scenarios get `retry: 0`** (the `transfers.test.ts` rule,
+  sharpened): a scenario that changes the profile password or corrupts
+  storage mid-test cannot re-enter — every retry fails on the mutated state
+  (wrong password at unlock) and buries the original failure under
+  unrelated symptoms. One honest fail beats three misleading ones.
+- **Post-unlock/bootstrap routing can yank a just-navigated route.**
+  `bootstrapActiveProfile` may push `/popup/general` LATE; a hash
+  navigation issued in that window gets unmounted under its own
+  `waitForSelector`. Gate follow-on navigation on hash STABILITY (~1.5s
+  unchanged, bounded) rather than on reaching the hash once.
+- **Helpers that assume `/popup/general` say so nowhere** — `importToken`
+  (tokens-menu trigger) and `switchAccountByAddress` (header selector) both
+  need the home screen; a caller parked on a settings page times out on a
+  2s internal wait with no useful message. Navigate to general first.
