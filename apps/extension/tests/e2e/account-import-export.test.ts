@@ -19,83 +19,11 @@
  */
 import { rmSync } from "node:fs"
 import { expect } from "vitest"
-import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
-import { closeStuckPopup, navigateByHash, waitForToast } from "./fixtures/helpers"
+import { clickByTestId, launchExtension, openPopup, registerProfile, test, waitForHash } from "./fixtures/extension"
+import { waitForToast } from "./fixtures/helpers"
+import { exportAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 import { writeBackupToTemp } from "./helpers/import-drivers"
-
-/** Go to the manage-accounts page by HASH. `navigateToSettings` enters through the bottom nav,
- *  which settings SUB-pages don't render — so it only works from /popup/general, and this suite
- *  is usually already on a settings page when it needs to navigate again. */
-async function gotoAccounts(page: Page): Promise<void> {
-	await navigateByHash(page, "#/popup/settings/accounts", 15_000)
-	await page.waitForSelector('[data-testid="manage-accounts-page"]', { visible: true, timeout: 15_000 })
-}
-
-/** Open the export popup for the row whose account NAME matches. Scoped click — the export
- *  testid repeats per row. */
-async function openExportForAccount(page: Page, accountName: string): Promise<void> {
-	// A prior popup can stick mid-leave in headless Chrome (documented repo quirk) and its
-	// dimmer then swallows the settings-nav click — clear it before navigating.
-	await closeStuckPopup(page)
-	await gotoAccounts(page)
-	await page.waitForSelector('[data-testid="manage-accounts-row"]', { visible: true, timeout: 15_000 })
-	await page.evaluate((name: string) => {
-		const row = [...document.querySelectorAll('[data-testid="manage-accounts-row"]')].find(
-			(r) => r.getAttribute("data-account-name") === name,
-		)
-		if (!row) throw new Error(`no account row named ${name}`)
-		const btn = row.querySelector('[data-testid="account-export-btn"]')
-		if (!btn) throw new Error("row has no export button")
-		btn.dispatchEvent(new MouseEvent("click", { bubbles: true }))
-	}, accountName)
-	await page.waitForSelector('[data-testid="export-account-password-input"]', { visible: true, timeout: 15_000 })
-}
-
-/** Drive the export popup to a revealed file body. `encrypt` toggles the password-protect switch
- *  (default ON in the UI). */
-async function exportAccountBody(page: Page, accountName: string, encrypt: boolean): Promise<string> {
-	await openExportForAccount(page, accountName)
-	if (!encrypt) await clickByTestId(page, "export-account-encrypt-toggle")
-	await replaceInputValue(page, '[data-testid="export-account-password-input"] input', TEST_PASSWORD)
-	await clickByTestId(page, "export-account-submit")
-	await page.waitForSelector('[data-testid="export-account-reveal"]', { visible: true, timeout: 20_000 })
-	const body = await page.evaluate(() => {
-		const scope = document.querySelector('[data-testid="export-account-reveal"]')
-		const input = scope?.querySelector("input") as HTMLInputElement | null
-		return input?.value ?? ""
-	})
-	expect(body.length).toBeGreaterThan(0)
-	// Close the popup (Done), then force-clear any stuck <Transition> remnants so the next
-	// navigation isn't blocked by a lingering dimmer.
-	await clickByTestId(page, "export-account-submit")
-	await closeStuckPopup(page)
-	return body
-}
-
-/** Paste a file body into the import popup and run the PREVIEW step. Returns the previewed
- *  address, or null when the popup surfaced an error instead. */
-async function previewImport(page: Page, body: string, filePassword?: string): Promise<string | null> {
-	await closeStuckPopup(page)
-	await gotoAccounts(page)
-	await clickByTestId(page, "accounts-import-btn")
-	await page.waitForSelector('[data-testid="import-account-body-input"]', { visible: true, timeout: 15_000 })
-	await replaceInputValue(page, '[data-testid="import-account-body-input"] input', body)
-	if (filePassword) await replaceInputValue(page, '[data-testid="import-account-password-input"] input', filePassword)
-	await clickByTestId(page, "import-account-submit")
-	// Either the confirm block renders (with the recomputed address) or an error does.
-	await page.waitForFunction(
-		() =>
-			document.querySelector('[data-testid="import-account-preview-address"]') !== null ||
-			document.querySelector('[data-testid="import-account-error"]') !== null,
-		{ timeout: 30_000, polling: 200 },
-	)
-	return await page.evaluate(() => {
-		const addr = document.querySelector('[data-testid="import-account-preview-address"]')
-		return addr ? (addr.textContent ?? "").trim() : null
-	})
-}
 
 test("account export → import into a SECOND profile (plaintext + encrypted round-trips)", { timeout: 240_000 }, async ({
 	registeredExtension,

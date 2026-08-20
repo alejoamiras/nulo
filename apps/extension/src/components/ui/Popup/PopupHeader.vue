@@ -21,6 +21,7 @@ const props = defineProps({
 					@click="emit('onClose')"
 					type="button"
 					aria-label="Close"
+					data-testid="popup-close-btn"
 					:class="$style.close_btn"
 				>
 					<MaterialIcon name="close" :size="20" color="secondary" />
