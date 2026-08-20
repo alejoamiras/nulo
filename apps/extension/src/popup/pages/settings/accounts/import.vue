@@ -92,6 +92,7 @@ const handleConfirmImport = async () => {
 	if (!needsConfirm.value || isBusy.value) return
 	isBusy.value = true
 	error.value = ""
+	const gen = generation
 	try {
 		const account = await managers.account.importAccount(
 			appStore.profile.id,
@@ -100,11 +101,16 @@ const handleConfirmImport = async () => {
 			previewAddress.value,
 			password.value,
 		)
+		// The import itself is committed service-side; the fence only guards the UI-scope writes.
+		// A confirm resolving after the page died must not push an old scope's account into
+		// whatever store is current, flip the active pointer, or toast+route from beyond the grave.
+		if (gen !== generation) return
 		appStore.accounts.push(account)
 		await storageLocalSet({ "nulo:ui:activeAccount": account.address })
 		openToast({ label: "Account imported", icon: "check-circle" }, 2_000)
 		router.push("/popup/settings/accounts")
 	} catch (err) {
+		if (gen !== generation) return
 		error.value = err instanceof Error ? err.message : String(err)
 	} finally {
 		isBusy.value = false
@@ -128,9 +134,11 @@ watch(isProtectedFile, (nowProtected) => {
 	if (!nowProtected) password.value = ""
 })
 
-/** Enter submits the active step, matching the popup this page replaced. */
+/** Enter submits the active step, matching the popup this page replaced. Controls that handle
+ *  Enter themselves (the file chip, the paste toggle) call preventDefault, so deferring to
+ *  `defaultPrevented` keeps one keypress from opening the picker AND previewing at once. */
 const onKeydown = (e) => {
-	if (e.key !== "Enter") return
+	if (e.key !== "Enter" || e.defaultPrevented) return
 	if (needsConfirm.value) handleConfirmImport()
 	else handlePreview()
 }

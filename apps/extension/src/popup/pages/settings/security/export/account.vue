@@ -64,6 +64,8 @@ const resetFlow = () => {
 	isAgreed.value = false
 	password.value = null
 	isWrongPassword.value = false
+	isBusy.value = false
+	isDownloading.value = false
 	fileStatus.value = ""
 	payload.value = ""
 }
@@ -130,7 +132,7 @@ const handleCreate = async () => {
 			openToast({ label: "Failed to create the file", icon: "warning" }, 4_000)
 		}
 	} finally {
-		isBusy.value = false
+		if (gen === generation) isBusy.value = false
 	}
 }
 
@@ -155,7 +157,7 @@ const handleProtect = async () => {
 		if (gen !== generation) return
 		openToast({ label: "Failed to protect the file", icon: "warning" }, 4_000)
 	} finally {
-		isBusy.value = false
+		if (gen === generation) isBusy.value = false
 	}
 }
 
@@ -171,21 +173,24 @@ const fileName = computed(() => {
 const handleDownload = async () => {
 	if (isDownloading.value || isBusy.value) return
 	isDownloading.value = true
+	const gen = generation
 	try {
 		await downloadFile({ data: payload.value, filename: fileName.value })
+		if (gen !== generation) return
 		openToast({ label: "Account file downloaded", icon: "download" }, 2_000)
 	} catch (err) {
+		if (gen !== generation) return
 		console.error("Download failed:", err?.message || err)
 		openToast({ label: "Failed to download the file", icon: "warning" }, 4_000)
 	} finally {
-		isDownloading.value = false
+		if (gen === generation) isDownloading.value = false
 	}
 }
 
 /** Enter advances the active stage, matching the flow's CTA (the popup this page replaced
  *  submitted on Enter). Download stages stay click-only: Enter re-firing a download is noise. */
 const onKeydown = (e) => {
-	if (e.key !== "Enter") return
+	if (e.key !== "Enter" || e.defaultPrevented) return
 	if (!selectedAddress.value || fileStatus.value) return
 	if (!isAgreed.value) handleAgree()
 	else handleCreate()
