@@ -3,7 +3,12 @@ name: Quality
 on:
   workflow_dispatch:
   pull_request:
-    branches: [main, dev]
+    # NO `branches:` filter, deliberately. That key filters on the PR's BASE, so
+    # `[main, dev]` silently gave ZERO CI to every stacked PR — a stack's middle
+    # arcs target their parent feature branch, never dev, so no workflow fired and
+    # the PRs sat with no checks at all rather than with red ones. Gating every PR
+    # regardless of base costs CI minutes and makes each arc independently
+    # verifiable; a bad middle arc is otherwise invisible until it reaches dev.
     # `ready_for_review` so a draft marked ready WITHOUT a new push still re-runs
     # CI — otherwise the required `… / Status` checks never report on the PR and
     # hang "Expected" forever → mergeStateStatus=BLOCKED.
