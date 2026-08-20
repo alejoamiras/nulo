@@ -97,6 +97,7 @@ const handleConfirmImport = async () => {
 	// a store still showing them (a background profile/chain change can land without unmounting).
 	const profileId = appStore.profile.id
 	const chainId = appStore.network.chainId
+	const isStale = () => gen !== generation || appStore.profile?.id !== profileId || appStore.network?.chainId !== chainId
 	try {
 		const account = await managers.account.importAccount(
 			profileId,
@@ -108,15 +109,16 @@ const handleConfirmImport = async () => {
 		// The import itself is committed service-side; the fences only guard the UI-scope writes.
 		// A confirm resolving after the page died (or after the scope moved) must not push an old
 		// scope's account into whatever store is current, flip the active pointer, or toast+route
-		// from beyond the grave.
-		if (gen !== generation || appStore.profile?.id !== profileId || appStore.network?.chainId !== chainId) return
+		// from beyond the grave. Re-checked after EVERY await: the scope can also move while the
+		// active-pointer persist is in flight.
+		if (isStale()) return
 		appStore.accounts.push(account)
 		await storageLocalSet({ "nulo:ui:activeAccount": account.address })
-		if (gen !== generation) return
+		if (isStale()) return
 		openToast({ label: "Account imported", icon: "check-circle" }, 2_000)
 		router.push("/popup/settings/accounts")
 	} catch (err) {
-		if (gen !== generation) return
+		if (isStale()) return
 		error.value = err instanceof Error ? err.message : String(err)
 	} finally {
 		isBusy.value = false
