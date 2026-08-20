@@ -628,6 +628,41 @@ destructive branch as expected on exactly the input where it is wrong. Corrected
 **Round 3 verdict — CONVERGED**: *"no unhandled material defect remains beyond the explicitly
 accepted backup-DEK forward-reach risk."*
 
+### E2E coverage arc (2026-08-20 — arc 7, `feat/kdf-v2-e2e-coverage`, PR #431)
+
+Owner asked the direct question: is every new behavior of this stack e2e-covered, or does the
+stack need a manual smoke pass? The audit (against the tree, not memory) found the P6 files plus
+the pre-existing suite covered the file round-trips, the seed-path dup guard, backups, passkey
+flows and the canaries — but SEVEN behaviors this stack introduced had no e2e at all. All seven
+now do:
+
+| Behavior | Proven by |
+|---|---|
+| imported key survives lock/unlock | `imported-account-lifecycle` (stage 2) |
+| imported key survives a REAL SW kill + cold unlock | stage 3 |
+| password change reseals the DEK slot; old password stops working | stage 4 |
+| MAC tamper → toast + derived-only + change-password REFUSES | stage 5 |
+| clone divergence: restore rewraps imported rows onto the fresh DEK | `backup-imported-account` |
+| dup-phrase guard on the BACKUP import path | same file |
+| a file-imported account signs + real-proves + lands a tx in a second profile | `network/imported-account-execution` |
+
+The lifecycle scenario is destructive and runs `retry: 0`; the shared probe re-exports the
+imported account and previews the body (preview re-derives the address from the decrypted key, so
+a wrong-key row cannot pass). Debugging surfaced two durable suite lessons — the
+`popupStore`/DOM desync that permanently kills a popup's open button, and the imported-row
+name-collision trap — routed to the `e2e-testing` skill. Gates: full smoke 31 files / 112 tests
+exit 0; the network file prover-ON solo exit 0; `audit:vue` exit 0.
+
+### Stacked-PR CI hole (found 2026-08-19, fixed in #428)
+
+The three PR workflows filtered `pull_request.branches: [main, dev]` — which matches the PR's
+BASE — so every stacked arc targeting its parent feature branch got NO CI at all (no checks, not
+red ones). Arcs #418/#419/#427 shipped without a single CI run. #428 (merged to dev) drops the
+filter; the first full-stack CI pass it enabled immediately caught a REAL mid-stack break: arc 2's
+tree called `getMnemonic` from node-context e2e drivers while its `self.crypto` fix lived in arc 3
+(`fb9dc327`). Fixed by moving the commit down the stack + cascade rebase; every arc then went
+green independently.
+
 **Accepted, not fixed** (both documented in-code):
 
 | Finding | Why accepted |
