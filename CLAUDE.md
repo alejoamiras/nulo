@@ -211,7 +211,7 @@ onBeforeUnmount(() => {
 })
 ```
 
-Composables MUST NOT own their own `onUnmounted`. They expose `dispose()` that the parent calls in the existing slot.
+Composables MUST NOT own their own `onUnmounted`. They expose `dispose()` that the parent calls in the existing slot. **Carve-out:** scope-tied cleanup of NON-SERVICE resources (DOM listeners, timers) via `onScopeDispose` is allowed — such cleanup participates in no order-sensitive teardown sequence, and Vue runs `onBeforeUnmount` hooks BEFORE scope disposal, so parent-owned service teardown always sees the resource still live. Service clients stay parent-disposed, always.
 
 ## Vue SFC ordering convention
 

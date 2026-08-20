@@ -8,7 +8,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
-import { isPopupSubmitKey } from "@/composables/usePopupEntity"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -162,10 +162,19 @@ const handleUpdateContact = async () => {
 	}
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
+	{
+		submit: handleUpdateContact,
+		onShow: async () => {
+			contacts.value = await contactService.getContacts()
+			contactToEdit.value = cacheStore.importContact
+				? cacheStore.importContact
+				: contacts.value.find((c) => c.id === cacheStore.contactToEditIdx)
+			nameTerm.value = contactToEdit.value?.name ?? ""
+			contactAddressTerm.value = contactToEdit.value?.address ?? ""
+		},
+		onHide: () => {
 			cacheStore.contactToEditIdx = ""
 
 			contactService.disconnect()
@@ -174,19 +183,12 @@ watch(
 			contacts.value = []
 
 			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
-			contacts.value = await contactService.getContacts()
-			contactToEdit.value = cacheStore.importContact
-				? cacheStore.importContact
-				: contacts.value.find((c) => c.id === cacheStore.contactToEditIdx)
-			nameTerm.value = contactToEdit.value?.name ?? ""
-			contactAddressTerm.value = contactToEdit.value?.address ?? ""
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
 	},
+	// The edit target (import mode included) arrives with the await above — a
+	// premature first submit must stay inert, exactly as when the hand-rolled
+	// watcher installed its listener only after it.
+	{ submitWaitsForShow: true },
 )
 
 watch(
@@ -195,11 +197,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	// Guarded to input/textarea focus so a global Enter can't double-fire.
-	if (isPopupSubmitKey(e)) handleUpdateContact()
-}
 </script>
 
 <template>

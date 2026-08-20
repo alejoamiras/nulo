@@ -113,6 +113,7 @@
     "UseIncomingTransfersOptions": true,
     "UseIncomingTransfersResult": true,
     "UsePopupEntityHandlers": true,
+    "UsePopupEntityOptions": true,
     "UseProfileCreateFlowOptions": true,
     "UseProfileImportFlowOptions": true,
     "UseSecretCountdownOptions": true,

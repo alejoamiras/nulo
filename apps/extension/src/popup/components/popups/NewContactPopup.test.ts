@@ -74,11 +74,14 @@ import NewContactPopup from "./NewContactPopup.vue"
 
 const VALID_ADDRESS = `0x${"a".repeat(64)}`
 
+const trackedWrappers: Array<ReturnType<typeof mount>> = []
+
 async function mountAndOpen(existing: Array<{ id: string; name: string; address: string }> = []) {
 	const w = mount(NewContactPopup, {
 		props: { show: false },
 		global: { stubs: STUBS },
 	})
+	trackedWrappers.push(w)
 	contactServiceMock.getContacts.mockResolvedValueOnce(existing)
 	await w.setProps({ show: true })
 	await flushPromises()
@@ -95,6 +98,15 @@ beforeEach(() => {
 	vi.clearAllMocks()
 })
 afterEach(() => {
+	// Guaranteed net: unmount every tracked wrapper (scope cleanup removes the
+	// document listener) even when an assertion aborted the test mid-way.
+	for (const w of trackedWrappers.splice(0)) {
+		try {
+			w.unmount()
+		} catch {
+			/* already unmounted by the test */
+		}
+	}
 	vi.restoreAllMocks()
 })
 
@@ -104,10 +116,9 @@ describe("NewContactPopup — decoupled from sender registration", () => {
 		contactServiceMock.addContact.mockImplementation(() => new Promise(() => {}))
 		await fill(w, "Alice-Reentrant", VALID_ADDRESS)
 		// The popup's keydown listener lives on `document`; the mounted tree is
-		// detached, so dispatch from a real document-level input. Tests in this
-		// file can leak their instances' document listeners (they never hide),
-		// so assert the DELTA of the second press — with every instance's latch
-		// engaged by press one, press two must add ZERO calls.
+		// detached, so dispatch from a real document-level input. (The tracked
+		// afterEach net unmounts every prior wrapper, so only THIS instance is
+		// listening; the unique-name filter below keeps the pin robust anyway.)
 		const docInput = document.createElement("input")
 		document.body.appendChild(docInput)
 		docInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
@@ -118,9 +129,9 @@ describe("NewContactPopup — decoupled from sender registration", () => {
 		// listeners from earlier tests answer the same document Enter but carry
 		// their own field values, so they cannot pollute this count.
 		const myCalls = contactServiceMock.addContact.mock.calls.filter((c) => c[0] === "Alice-Reentrant").length
-		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
-		// (document-listener removal) or the mock reset.
-		await w.setProps({ show: false })
+		// Cleanup BEFORE the assertion: a failing expect must not skip the
+		// unmount (scope cleanup removes the document listener) or the reset.
+		w.unmount()
 		contactServiceMock.addContact.mockReset()
 		docInput.remove()
 		expect(myCalls).toBe(1)

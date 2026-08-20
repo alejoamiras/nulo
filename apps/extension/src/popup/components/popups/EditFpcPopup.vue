@@ -8,7 +8,8 @@ import { isValidHex } from "@/utils/string"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
-import { isPopupSubmitKey } from "@/composables/usePopupEntity"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -155,19 +156,11 @@ const handleCopyAddress = () => {
 	})
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			fpcService.disconnect()
-			fpcService = null
-			fpcToEdit.value = null
-			fpcs.value = []
-			form.reset()
-			processingError.value = { show: false, title: "", tooltip: "" }
-		} else {
+	{
+		submit: handleUpdateFpc,
+		onShow: async () => {
 			fpcService = new FpcServiceClient()
 			fpcService.onFpcAdded.add(onFpcAdded)
 			fpcService.onFpcDeleted.add(onFpcDeleted)
@@ -180,10 +173,20 @@ watch(
 			nameTerm.value = fpcToEdit.value.name ?? ""
 			addressTerm.value = fpcToEdit.value.address ?? ""
 			fpcs.value = await fpcService.getFpcs(appStore.network.chainId)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			fpcService.disconnect()
+			fpcService = null
+			fpcToEdit.value = null
+			fpcs.value = []
+			form.reset()
+			processingError.value = { show: false, title: "", tooltip: "" }
+		},
 	},
+	// The edit target and the collision list arrive with the awaits above — a
+	// premature first submit must stay inert, exactly as when the hand-rolled
+	// watcher installed its listener only after them.
+	{ submitWaitsForShow: true },
 )
 
 watch(
@@ -192,10 +195,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	if (isPopupSubmitKey(e)) handleUpdateFpc()
-}
 </script>
 
 <template>

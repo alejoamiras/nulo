@@ -6,14 +6,18 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { effectScope, nextTick, ref } from "vue"
+import { createApp, effectScope, nextTick, ref } from "vue"
 import { isPopupSubmitKey, usePopupEntity } from "./usePopupEntity"
 
 /** Run the composable inside an effect scope so its `watch` is active; return a
  *  `stop()` to tear it down (mirrors component unmount). */
-function mount(show: ReturnType<typeof ref<boolean>>, handlers: Parameters<typeof usePopupEntity>[1]) {
+function mount(
+	show: ReturnType<typeof ref<boolean>>,
+	handlers: Parameters<typeof usePopupEntity>[1],
+	options?: Parameters<typeof usePopupEntity>[2],
+) {
 	const scope = effectScope()
-	scope.run(() => usePopupEntity(() => Boolean(show.value), handlers))
+	scope.run(() => usePopupEntity(() => Boolean(show.value), handlers, options))
 	return () => scope.stop()
 }
 
@@ -130,6 +134,92 @@ describe("usePopupEntity", () => {
 		await nextTick()
 		show.value = false
 		await nextTick()
+		show.value = true
+		await nextTick()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce()
+	})
+
+	it("removes the listener on SCOPE DISPOSE even while shown (unmount cannot leak it)", async () => {
+		const submit = vi.fn()
+		const show = ref(false)
+		const stop = mount(show, { submit })
+		show.value = true
+		await nextTick()
+		stop() // component unmount → scope death; the popup was never hidden
+		pressKey(makeInput(), "Enter")
+		expect(submit).not.toHaveBeenCalled()
+	})
+
+	it("submitWaitsForShow: Enter is inert while onShow's promise pends, live after it resolves", async () => {
+		const submit = vi.fn()
+		let resolveShow!: () => void
+		const show = ref(false)
+		cleanup.push(mount(show, { submit, onShow: () => new Promise<void>((r) => (resolveShow = r)) }, { submitWaitsForShow: true }))
+		show.value = true
+		await nextTick()
+		pressKey(makeInput(), "Enter")
+		expect(submit).not.toHaveBeenCalled() // population pending → inert
+		resolveShow()
+		await Promise.resolve()
+		await Promise.resolve()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce()
+	})
+
+	it("submitWaitsForShow: a REJECTED onShow keeps the gate CLOSED, routes through Vue's error channel, and a fresh show reopens", async () => {
+		// The hand-rolled watchers never reached addEventListener after a
+		// rejection — Enter against a failed/incomplete population must stay
+		// impossible until a fresh show repopulates. Mounted through a REAL app
+		// so the rejection's routing (Vue's watcher error channel → the app
+		// errorHandler) is itself asserted, not just tolerated.
+		const submit = vi.fn()
+		const errorHandler = vi.fn()
+		let rejectShow!: (e: Error) => void
+		let attempt = 0
+		const show = ref(false)
+		const app = createApp({
+			setup() {
+				usePopupEntity(
+					() => Boolean(show.value),
+					{
+						submit,
+						onShow: () => {
+							attempt++
+							return attempt === 1 ? new Promise<void>((_r, rj) => (rejectShow = rj)) : Promise.resolve()
+						},
+					},
+					{ submitWaitsForShow: true },
+				)
+				return () => null
+			},
+		})
+		app.config.errorHandler = errorHandler
+		app.mount(document.createElement("div"))
+		cleanup.push(() => app.unmount())
+
+		show.value = true
+		await nextTick()
+		rejectShow(new Error("population failed"))
+		await Promise.resolve()
+		await Promise.resolve()
+		pressKey(makeInput(), "Enter")
+		expect(submit).not.toHaveBeenCalled() // rejection ≠ open gate
+		expect(errorHandler).toHaveBeenCalledTimes(1) // the rejection traveled Vue's channel
+		show.value = false
+		await nextTick()
+		show.value = true
+		await nextTick()
+		await Promise.resolve()
+		await Promise.resolve()
+		pressKey(makeInput(), "Enter")
+		expect(submit).toHaveBeenCalledOnce() // fresh, successful show reopens
+	})
+
+	it("WITHOUT submitWaitsForShow, an async onShow does not gate Enter (existing adopters' pinned timing)", async () => {
+		const submit = vi.fn()
+		const show = ref(false)
+		cleanup.push(mount(show, { submit, onShow: () => new Promise<void>(() => {}) }))
 		show.value = true
 		await nextTick()
 		pressKey(makeInput(), "Enter")

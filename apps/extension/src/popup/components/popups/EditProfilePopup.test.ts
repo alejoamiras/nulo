@@ -65,18 +65,20 @@ function pressEnterOnBody() {
 	document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 }
 
+const wrappers: VueWrapper[] = []
+
 async function mountShown(): Promise<VueWrapper> {
 	const w = mount(EditProfilePopup, { props: { show: false }, global: { stubs: STUBS } })
+	wrappers.push(w)
 	await w.setProps({ show: true })
 	await flushPromises()
 	return w
 }
 
-/** Hide-then-unmount: the composable only removes its document listener on
- *  show → false (production popups never unmount), so tests must hide first or
- *  the listener leaks into the next test. */
+/** Plain unmount suffices since usePopupEntity's scope cleanup removes the
+ *  document listener; onHide side effects are NOT run here — tests that need
+ *  them hide explicitly. */
 async function dispose(w: VueWrapper) {
-	await w.setProps({ show: false })
 	w.unmount()
 }
 
@@ -95,6 +97,14 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	// Guaranteed net — runs even when an assertion skipped the in-test dispose.
+	for (const w of wrappers.splice(0)) {
+		try {
+			w.unmount()
+		} catch {
+			/* already unmounted by the test */
+		}
+	}
 	vi.clearAllMocks()
 	document.body.innerHTML = ""
 })
