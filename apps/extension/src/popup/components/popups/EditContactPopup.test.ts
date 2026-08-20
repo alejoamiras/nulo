@@ -184,9 +184,9 @@ describe("EditContactPopup — decoupled from sender registration", () => {
 		// listeners from earlier tests answer the same document Enter but carry
 		// their own field values, so they cannot pollute this count.
 		const myCalls = contactServiceMock.updateContact.mock.calls.filter((c) => c[1] === "Alicia-Reentrant").length
-		// Cleanup BEFORE the assertion: a failing expect must not skip the hide
-		// (document-listener removal) or the mock reset.
-		await w.setProps({ show: false })
+		// Cleanup BEFORE the assertion: a failing expect must not skip the
+		// unmount (scope cleanup removes the document listener) or the reset.
+		w.unmount()
 		contactServiceMock.updateContact.mockReset()
 		docInput.remove()
 		expect(myCalls).toBe(1)

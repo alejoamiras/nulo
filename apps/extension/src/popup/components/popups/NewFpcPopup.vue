@@ -8,7 +8,7 @@ import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
-import { isPopupSubmitKey } from "@/composables/usePopupEntity"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -96,26 +96,28 @@ const onFpcUpdated = (fpc) => {
 const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			fpcService.disconnect()
-			fpcService = null
-			fpcs.value = []
-			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
+	{
+		submit: handleAddFpc,
+		onShow: async () => {
 			fpcService = new FpcServiceClient()
 			fpcService.onFpcAdded.add(onFpcAdded)
 			fpcService.onFpcDeleted.add(onFpcDeleted)
 			fpcService.onFpcUpdated.add(onFpcUpdated)
 			fpcs.value = await fpcService.getFpcs(appStore.network.chainId)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			fpcService.disconnect()
+			fpcService = null
+			fpcs.value = []
+			form.reset()
+		},
 	},
+	// Duplicate-name knowledge arrives with getFpcs — a premature first submit
+	// must stay inert, exactly as when the hand-rolled watcher installed its
+	// listener only after this await.
+	{ submitWaitsForShow: true },
 )
 watch(
 	() => fpcAddressTerm.value,
@@ -123,9 +125,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-const onKeydown = (e) => {
-	if (isPopupSubmitKey(e)) handleAddFpc()
-}
 </script>
 
 <template>

@@ -266,7 +266,7 @@ declare global {
   export type { IncomingTransferServiceLike, ConfigServiceLike, PriceServiceLike, UseIncomingTransfersOptions, UseIncomingTransfersResult } from '../composables/useIncomingTransfers'
   import('../composables/useIncomingTransfers')
   // @ts-ignore
-  export type { UsePopupEntityHandlers } from '../composables/usePopupEntity'
+  export type { UsePopupEntityHandlers, UsePopupEntityOptions } from '../composables/usePopupEntity'
   import('../composables/usePopupEntity')
   // @ts-ignore
   export type { UseProfileCreateFlowOptions } from '../composables/useProfileCreateFlow'

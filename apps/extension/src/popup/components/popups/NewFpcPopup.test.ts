@@ -94,12 +94,12 @@ beforeEach(() => {
 	fpcServiceMock.addFpc.mockResolvedValue(undefined)
 })
 
-// Guaranteed cleanup — runs even when an assertion throws mid-test.
-afterEach(async () => {
-	for (const w of wrappers.splice(0)) {
-		await w.setProps({ show: false })
-		w.unmount()
-	}
+// Guaranteed cleanup — runs even when an assertion throws mid-test. Plain
+// unmount suffices: the composable's scope cleanup removes the listener
+// (onHide side effects are deliberately NOT run here — tests that need them
+// hide explicitly).
+afterEach(() => {
+	for (const w of wrappers.splice(0)) w.unmount()
 	vi.clearAllMocks()
 	document.body.innerHTML = ""
 })
@@ -142,6 +142,20 @@ describe("NewFpcPopup — Enter wiring + initialization window", () => {
 		pressEnterOnInput()
 		await flushPromises()
 		expect(fpcServiceMock.addFpc).toHaveBeenCalledTimes(1)
+	})
+
+	test("(CANARY) unmount WITHOUT hide leaves no live listener — the leak class cannot recur", async () => {
+		// Through the real component mount path (not just effectScope): a shown
+		// popup unmounted directly must not keep answering document Enter. This
+		// is the pin that reds if the composable's scope cleanup ever regresses
+		// and the suites silently re-enter the leak-masking trap.
+		const w = await mountShown()
+		await fillForm(w)
+		wrappers.splice(wrappers.indexOf(w), 1) // taken out of afterEach — this test owns the unmount
+		w.unmount() // never hidden
+		pressEnterOnInput()
+		await flushPromises()
+		expect(fpcServiceMock.addFpc).not.toHaveBeenCalled()
 	})
 
 	test("after hide, Enter is inert (listener removed) and the client disconnected", async () => {

@@ -74,11 +74,10 @@ async function mountShown(): Promise<VueWrapper> {
 	return w
 }
 
-/** Hide-then-unmount: the composable only removes its document listener on
- *  show → false (production popups never unmount), so tests must hide first or
- *  the listener leaks into the next test. */
+/** Plain unmount suffices since usePopupEntity's scope cleanup removes the
+ *  document listener; onHide side effects are NOT run here — tests that need
+ *  them hide explicitly. */
 async function dispose(w: VueWrapper) {
-	await w.setProps({ show: false })
 	w.unmount()
 }
 

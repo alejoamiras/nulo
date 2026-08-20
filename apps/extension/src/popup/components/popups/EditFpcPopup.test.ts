@@ -101,12 +101,12 @@ beforeEach(() => {
 	fpcServiceMock.updateFpcAddress.mockResolvedValue(undefined)
 })
 
-// Guaranteed cleanup — runs even when an assertion throws mid-test.
-afterEach(async () => {
-	for (const w of wrappers.splice(0)) {
-		await w.setProps({ show: false })
-		w.unmount()
-	}
+// Guaranteed cleanup — runs even when an assertion throws mid-test. Plain
+// unmount suffices: the composable's scope cleanup removes the listener
+// (onHide side effects are deliberately NOT run here — tests that need them
+// hide explicitly).
+afterEach(() => {
+	for (const w of wrappers.splice(0)) w.unmount()
 	vi.clearAllMocks()
 	document.body.innerHTML = ""
 })
