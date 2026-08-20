@@ -645,6 +645,7 @@ now do:
 | clone divergence: restore rewraps imported rows onto the fresh DEK | `backup-imported-account` |
 | dup-phrase guard on the BACKUP import path | same file |
 | a file-imported account signs + real-proves + lands a tx in a second profile | `network/imported-account-execution` |
+| a PASSKEY profile imports an account, survives a ceremony re-unlock, and executes with it | same file, second test |
 
 The lifecycle scenario is destructive and runs `retry: 0`; the shared probe re-exports the
 imported account and previews the body (preview re-derives the address from the decrypted key, so
