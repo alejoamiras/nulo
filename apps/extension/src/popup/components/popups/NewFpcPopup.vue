@@ -6,7 +6,8 @@ import { isValidHex } from "@/utils/string"
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
 import { isPopupSubmitKey } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
