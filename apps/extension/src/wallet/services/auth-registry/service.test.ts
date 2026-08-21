@@ -194,14 +194,26 @@ describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 		const service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
 		services.add(service)
 		await services.start()
-		await service.recordPendingAuthwits(A, [{ hash: "0xh5", content }], "0xtx5")
+		// Five rows so the journal holds an honest row at key @5 (ids mint sequentially).
+		await service.recordPendingAuthwits(
+			A,
+			[
+				{ hash: "0xh1", content },
+				{ hash: "0xh2", content },
+				{ hash: "0xh3", content },
+				{ hash: "0xh4", content },
+				{ hash: "0xh5", content },
+			],
+			"0xtx",
+		)
 		const all = await api.storage.local.get()
-		const sourceKey = Object.keys(all).find((k) => k.startsWith("nulo:core:auth-registry@"))
-		expect(sourceKey).toBeTruthy()
-		await api.storage.local.set({ "nulo:core:auth-registry@9": all[sourceKey!] })
+		const rowFiveKey = Object.keys(all).find((k) => k === "nulo:core:auth-registry@5")
+		expect(rowFiveKey).toBeTruthy()
+		// Copy row 5 VERBATIM (embedded id stays 5) under key 9.
+		await api.storage.local.set({ "nulo:core:auth-registry@9": all[rowFiveKey!] })
 
 		await expect(service.revokeAuthwits("network-1", A, [9], undefined as never)).rejects.toThrow(/doesn't exist/)
 		// The original row is untouched and still lists.
-		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xh5"])
+		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xh1", "0xh2", "0xh3", "0xh4", "0xh5"])
 	}, 15_000)
 })

@@ -281,7 +281,9 @@ describe("EntityStorage", () => {
 				"journal@3": JSON.stringify({ name: "no-id" }),
 				"journal@4": JSON.stringify({ id: -4, name: "negative" }),
 				"journal@5.5": JSON.stringify({ id: 5.5, name: "fractional" }),
-				"journal@1000000000000000000000": JSON.stringify({ id: 1e21, name: "unsafe-exponential" }),
+				// String(1e21) === "1e+21", so a naive String()-comparison guard would ACCEPT
+				// this alias — only the safe-integer check rejects it. Pins that check.
+				"journal@1e+21": JSON.stringify({ id: 1e21, name: "unsafe-exponential" }),
 				"journal@0": JSON.stringify({ id: 0, name: "zero-never-minted" }),
 				"journal@2x": JSON.stringify({ id: "2", name: "string-id-under-numeric-mode" }),
 			})
@@ -290,7 +292,7 @@ describe("EntityStorage", () => {
 			expect(await guarded.get("3")).toBeUndefined()
 			expect(await guarded.get("4")).toBeUndefined()
 			expect(await guarded.get("5.5")).toBeUndefined()
-			expect(await guarded.get("1000000000000000000000")).toBeUndefined()
+			expect(await guarded.get("1e+21")).toBeUndefined()
 			expect(await guarded.get("0")).toBeUndefined()
 			expect(await guarded.get("2x")).toBeUndefined()
 		})
