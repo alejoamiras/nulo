@@ -228,6 +228,92 @@ contract BlackhatV4ForkTest is Test {
         assertGt(out, 0, "legit native route must execute");
         assertEq(mockFj.balanceOf(address(this)), out, "caller receives FJ");
     }
+
+    // ─── Production-shape regression: the multi-hop routes the app actually signs ───
+
+    /// THE production fuel route (USDC→WETH→unwrap→native→FJ) end-to-end on a controlled PM:
+    /// two-hop with the sanctioned WETH↔native boundary at the FINAL hop. This is the shape old
+    /// Case-C settlement existed for; delta-driven settlement must land exactly-in/exactly-out
+    /// with zero residue in the swap contract (tokens AND ETH).
+    function test_FG_productionShape_usdcWethNativeFj_zeroResidue() public {
+        // 18-dec stand-in: the per-tx mint cap on 6 decimals could never fund the seeded depth,
+        // and the settlement property under test is decimal-agnostic.
+        MintableERC20 usdc = new MintableERC20("USDC", "USDC", 18, 1_000_000_000);
+        // Seed {usdc/WETH} + {native/FJ}; order currencies by address (V4 requires c0 < c1).
+        (PoolKey memory poolUW, bool sellUsdcZfo) = address(usdc) < address(weth)
+            ? (PoolKey({currency0: Currency.wrap(address(usdc)), currency1: Currency.wrap(address(weth)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), true)
+            : (PoolKey({currency0: Currency.wrap(address(weth)), currency1: Currency.wrap(address(usdc)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), false);
+
+        vm.deal(address(this), 2_000_000 ether);
+        weth.deposit{value: 1_500_000 ether}();
+        usdc.mint(address(seeder), 1_000_000_000 ether);
+        weth.transfer(address(seeder), 1_000_000 ether); // L=1e24 depth needs ~451k WETH-wei*1e18 per side
+        seeder.seed(poolUW, -12_000, 12_000, 1e24);
+
+        PoolKey[] memory path = new PoolKey[](2);
+        path[0] = poolUW;
+        path[1] = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(address(mockFj)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))});
+        bool[] memory dirs = new bool[](2);
+        dirs[0] = sellUsdcZfo; // sell USDC → receive WETH
+        dirs[1] = true; // sell native → FJ
+
+        uint256 amountIn = 1000 ether;
+        usdc.mint(address(this), amountIn);
+        usdc.approve(address(fuelSwap), amountIn);
+        uint256 fjBefore = mockFj.balanceOf(address(this));
+
+        uint256 out = fuelSwap.swap(address(usdc), amountIn, 1 wei, path, dirs);
+
+        assertGt(out, 0, "production route must produce output");
+        assertEq(mockFj.balanceOf(address(this)) - fjBefore, out, "caller receives exactly the reported output");
+        // Zero residue across EVERY asset the route touches.
+        assertEq(usdc.balanceOf(address(fuelSwap)), 0, "no USDC dust");
+        assertEq(mockFj.balanceOf(address(fuelSwap)), 0, "no FJ dust");
+        assertTrue(IERC20(address(weth)).balanceOf(address(fuelSwap)) == 0, "no WETH residue");
+        assertEq(address(fuelSwap).balance, 0, "no ETH residue");
+    }
+
+    /// All-ERC20 two-hop chain (Case-A family): no native anywhere — settlement must pay only
+    /// the input and take only the output, with zero intermediate-token residue.
+    function test_FG_allErc20TwoHop_zeroResidue() public {
+        // 18-dec stand-in: the per-tx mint cap on 6 decimals could never fund the seeded depth,
+        // and the settlement property under test is decimal-agnostic.
+        MintableERC20 usdc = new MintableERC20("USDC", "USDC", 18, 1_000_000_000);
+        (PoolKey memory poolUW, bool sellUsdcZfo) = address(usdc) < address(weth)
+            ? (PoolKey({currency0: Currency.wrap(address(usdc)), currency1: Currency.wrap(address(weth)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), true)
+            : (PoolKey({currency0: Currency.wrap(address(weth)), currency1: Currency.wrap(address(usdc)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), false);
+        (PoolKey memory poolWF, bool sellWethZfo) = address(weth) < address(mockFj)
+            ? (PoolKey({currency0: Currency.wrap(address(weth)), currency1: Currency.wrap(address(mockFj)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), true)
+            : (PoolKey({currency0: Currency.wrap(address(mockFj)), currency1: Currency.wrap(address(weth)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), false);
+
+        usdc.mint(address(seeder), 1_000_000_000 ether);
+        vm.deal(address(this), 3_000_000 ether);
+        weth.deposit{value: 2_500_000 ether}();
+        weth.transfer(address(seeder), 2_000_000 ether); // two pools x ~451k depth
+        seeder.seed(poolUW, -12_000, 12_000, 1e24);
+        seeder.seed(poolWF, -12_000, 12_000, 1e24);
+
+        PoolKey[] memory path = new PoolKey[](2);
+        path[0] = poolUW;
+        path[1] = poolWF;
+        bool[] memory dirs = new bool[](2);
+        dirs[0] = sellUsdcZfo;
+        dirs[1] = sellWethZfo;
+
+        uint256 amountIn = 1000 ether;
+        usdc.mint(address(this), amountIn);
+        usdc.approve(address(fuelSwap), amountIn);
+        uint256 fjBefore = mockFj.balanceOf(address(this));
+
+        uint256 out = fuelSwap.swap(address(usdc), amountIn, 1 wei, path, dirs);
+
+        assertGt(out, 0, "all-ERC20 chain must produce output");
+        assertEq(mockFj.balanceOf(address(this)) - fjBefore, out, "caller receives exactly the reported output");
+        assertEq(usdc.balanceOf(address(fuelSwap)), 0, "no USDC dust");
+        assertTrue(IERC20(address(weth)).balanceOf(address(fuelSwap)) == 0, "no intermediate-WETH residue");
+        assertEq(mockFj.balanceOf(address(fuelSwap)), 0, "no FJ dust");
+        assertEq(address(fuelSwap).balance, 0, "no ETH residue");
+    }
 }
 
 contract RawSwapper is IUnlockCallback {
