@@ -63,7 +63,19 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
-		this.authwits = new EntityStorage<Authwit>(AUTH_REGISTRY_STORAGE_ROOT, browserApi.storage.local, (raw) => AuthwitSchema.parse(raw))
+		// The journal is keyed BY the authwit's numeric id and every mutation site derives its
+		// storage key from the row's embedded id — so a raw-storage row copied under a foreign
+		// key (id aliasing) would make revoke/delete/reconcile operate on the wrong row. The
+		// id/key guard hides such rows at read time; honest rows always agree.
+		this.authwits = new EntityStorage<Authwit>(
+			AUTH_REGISTRY_STORAGE_ROOT,
+			browserApi.storage.local,
+			(raw) => AuthwitSchema.parse(raw),
+			{
+				requireKeyIdentityMatch: true,
+				keyIdentityMode: "numeric",
+			},
+		)
 		this.statuses = new EntityStorage<boolean>(AUTH_REGISTRY_ENABLED_STORAGE_ROOT, browserApi.storage.local, (raw) =>
 			AuthwitStatusSchema.parse(raw),
 		)
