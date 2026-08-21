@@ -38,8 +38,9 @@ name: nightly
 
 on:
   schedule:
-    # 03:00 UTC daily.
-    - cron: "0 3 * * *"
+    # 03:23 UTC daily. Off the :00 mark on purpose — GitHub documents the top
+    # of the hour as peak load where scheduled runs get delayed or dropped.
+    - cron: "23 3 * * *"
   workflow_dispatch:
     inputs:
       force:
@@ -90,18 +91,30 @@ jobs:
           # run — nightlies are defined as "current dev", and this makes manual
           # test-dispatches from feature branches behave exactly like the cron.
           DEV_SHA="$(git rev-parse origin/dev)"
-          BASE_VERSION="$(git show origin/dev:apps/extension/package.json | jq -r .version)"
-          case "$BASE_VERSION" in
-            *nightly*)
-              echo "::error::dev package.json version already carries a nightly label ('$BASE_VERSION') — refusing to double-suffix"
-              exit 1
-              ;;
-          esac
+          RAW_VERSION="$(git show origin/dev:apps/extension/package.json | jq -r .version)"
+
+          # Normalize the base to plain MAJOR.MINOR.PATCH. During an rc series
+          # dev carries e.g. `0.28.0-rc.1`, whose numeric strip is `0.28.0.1` —
+          # suffixing the nightly code would yield a FIVE-component manifest,
+          # which Chrome rejects. The nightly base is the release line, not the
+          # rc counter.
+          BASE_VERSION="$(printf '%s' "$RAW_VERSION" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+          if [ -z "$BASE_VERSION" ]; then
+            echo "::error::dev package.json version '$RAW_VERSION' has no MAJOR.MINOR.PATCH prefix — cannot derive a nightly version"
+            exit 1
+          fi
 
           DATE_CODE="$(date -u +%y%j)"
           CODE="$DATE_CODE"
           ATTEMPT=0
-          while git ls-remote --tags origin "refs/tags/v${BASE_VERSION}-nightly.${CODE}" | grep -q .; do
+          while true; do
+            # Capture first so a git/network failure aborts via set -e instead
+            # of reading as "tag absent" (an empty result must only ever mean
+            # absence, never an errored probe).
+            REMOTE_MATCH="$(git ls-remote --tags origin "refs/tags/v${BASE_VERSION}-nightly.${CODE}")"
+            if ! grep -q . <<<"$REMOTE_MATCH"; then
+              break
+            fi
             ATTEMPT=$((ATTEMPT + 1))
             if [ "$ATTEMPT" -gt 20 ]; then
               echo "::error::more than 20 nightly tags exist for date-code $DATE_CODE — aborting rather than looping further"
@@ -276,12 +289,23 @@ jobs:
         build-firefox,
         smoke-against-artifact,
       ]
+    # Fail-closed: EVERY gate must be exactly 'success'. A skipped gate is not
+    # reachable when resolve succeeded with skip=false, but enumerating success
+    # (instead of only rejecting failure/cancelled) makes a future graph edit
+    # that introduces a skip path publish-proof by construction.
     if: |
       always() &&
       needs.resolve.result == 'success' &&
       needs.resolve.outputs.skip != 'true' &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled')
+      needs.lint-and-typecheck.result == 'success' &&
+      needs.unit-tests.result == 'success' &&
+      needs.network-e2e.result == 'success' &&
+      needs.network-e2e-heavy.result == 'success' &&
+      needs.network-e2e-heavy-concurrent.result == 'success' &&
+      needs.network-e2e-canary.result == 'success' &&
+      needs.build-chrome.result == 'success' &&
+      needs.build-firefox.result == 'success' &&
+      needs.smoke-against-artifact.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -291,7 +315,6 @@ jobs:
       TAG: ${{ needs.resolve.outputs.tag }}
       SHA: ${{ needs.resolve.outputs.sha }}
       DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -330,24 +353,13 @@ jobs:
 
       - name: Compose release body
         run: |
+          # The cliff output already carries its own `## <version>` heading and
+          # the install block (cliff.toml emits both whenever --tag is passed),
+          # so this header stays minimal to avoid duplicating them.
           {
-            echo "## Nightly — $(date -u +%Y-%m-%d)"
+            echo "Automated developer preview built from \`dev\` @ \`${SHA:0:7}\` on $(date -u +%Y-%m-%d)."
             echo ""
-            echo "Automated developer preview built from \`dev\` @ \`${SHA:0:7}\`."
-            echo "Superseded every night at 03:00 UTC; expect rough edges. Do not use in production."
-            echo ""
-            echo "### Install (developer preview)"
-            echo ""
-            echo "1. Download \`nulo-chrome-${VERSION}.zip\` from the assets below."
-            echo "2. Unzip locally."
-            echo "3. Open \`chrome://extensions\` and toggle **Developer mode** (top-right)."
-            echo "4. Click **Load unpacked** and select the unzipped folder."
-            echo ""
-            echo "Verify: \`shasum -a 256 -c SHASUMS256.txt\`"
-            echo ""
-            echo "Firefox build is also attached but unsigned — load via \`about:debugging\`."
-            echo ""
-            echo "---"
+            echo "Superseded every night at 03:23 UTC; expect rough edges. Do not use in production."
             echo ""
             cat /tmp/release-notes.md
           } > /tmp/body.md
@@ -356,6 +368,10 @@ jobs:
 
       - name: Create prerelease + upload assets
         if: env.DRY_RUN != 'true'
+        env:
+          # Scoped to this step only — the git-cliff step above must not run
+          # with a write-capable token it never needs.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "$TAG" \
             "dist/release/nulo-chrome-${VERSION}.zip" \

@@ -22,7 +22,7 @@ Chrome and Firefox cap every manifest `version` component at 65535, and `apps/ex
 
 ## Pipeline
 
-New workflow `.github/workflows/nightly.yml`. Triggers: `schedule` cron `0 3 * * *` (03:00 UTC) + `workflow_dispatch` (inputs: `force`, `dry_run`). First scheduled workflow in the repo; fires from dev because dev is the default branch.
+New workflow `.github/workflows/nightly.yml`. Triggers: `schedule` cron `23 3 * * *` (03:23 UTC, off the :00 peak-load mark) + `workflow_dispatch` (inputs: `force`, `dry_run`). First scheduled workflow in the repo; fires from dev because dev is the default branch.
 
 Jobs (all reuse existing reusable workflows; no new build/test logic):
 
@@ -39,6 +39,19 @@ Skip propagation follows the `release.yml` lesson: reusable workflows need `if: 
 - `bun run lint:actions` locally (actionlint + shellcheck on inline scripts).
 - Live dry-run on the feature branch before PR: `gh workflow run nightly.yml --ref worktree-nightly-release -f dry_run=true` — full gates run, publish skipped. Watch green.
 - Post-merge: first scheduled run observed next morning.
+
+## Codex review round (2026-08-21, session 01a024d5)
+
+Pre-merge review by codex (`gpt-5.6-sol`, xhigh) on the first implementation. Findings + dispositions:
+
+- **HIGH — stable release notes truncation** (accepted, fixed): `cliff.toml`'s `tag_pattern = "v[0-9].*"` would make nightly tags range boundaries for `release.yml`'s `--unreleased` generation — a stable cut the day after any nightly would document only the last ~24h. Verified against git-cliff docs (`ignore_tags` folds ignored tags' commits into the next section). Fix: `--ignore-tags '^v[0-9]+\.[0-9]+\.[0-9]+-nightly'` added to `release.yml`'s cliff args; the nightly's own invocation keeps nightly boundaries (daily delta by design).
+- **MEDIUM — rc-window base version** (accepted, fixed): during an rc series dev carries e.g. `0.28.0-rc.1`; the manifest numeric-strip yields `0.28.0.1`, so a nightly suffix produced a five-component (invalid) manifest every night of the window. Fix: resolve normalizes the base to its `MAJOR.MINOR.PATCH` prefix and fails loudly if none.
+- **MEDIUM — publish guard not fail-closed against skipped gates** (accepted, fixed): `!contains(failure/cancelled)` tolerated hypothetical skipped needs; now enumerates `== 'success'` for all nine gates.
+- **MEDIUM — write-token exposure** (partially adopted): `GH_TOKEN` scoped from job level to the `gh release create` step only. The suggested action SHA-pinning of `orhun/git-cliff-action@v4` was REJECTED for this PR — mutable major tags are the repo-wide convention (`actions/checkout@v7` etc.); pinning one action in isolation is churn without a boundary change.
+- **LOW — ls-remote error read as tag-absence** (accepted, fixed): probe output captured via command substitution so a network error aborts under `set -e` instead of reading as absence.
+- **LOW — cron off the :00 mark** (accepted, fixed): moved to `23 3 * * *` per GitHub's peak-load guidance; docs synced.
+- **MEDIUM — interrupted publish not self-healing** (adopted as documentation): behavior kept (fresh date-code tag on force re-dispatch); recovery path documented in CI.md rather than adding idempotent-create complexity.
+- **Presentation duplication in release body** (accepted, fixed): composed header minimized to date/sha/warning — cliff's output already carries the `## <version>` heading + install block whenever `--tag` is passed.
 
 ## Delivery
 
