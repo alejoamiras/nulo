@@ -1,0 +1,431 @@
+name: nightly
+
+# Nightly prerelease of the extension from `dev`, published to GitHub Releases
+# so people can install the current state of dev without a maintainer hand-off.
+#
+# This is the repo's ONLY scheduled workflow. GitHub runs schedules from the
+# workflow file on the DEFAULT branch, which is `dev` — the trigger is inert on
+# feature branches (where only the workflow_dispatch input works), and becomes
+# live the moment this file merges to dev. Scheduled starts can be delayed by
+# GitHub during peak load; that is expected and harmless here.
+#
+# Flow:
+#   1. resolve pins origin/dev HEAD and derives tag + version (see below).
+#   2. The full gate battery runs at that pinned sha: lint+typecheck, unit,
+#      the complete network e2e suite, chrome+firefox builds, smoke against
+#      the built chrome artifact.
+#   3. Only if EVERY gate is green, publish-nightly creates the tag + a
+#      PRE-release with the zips + SHASUMS256.txt + git-cliff notes. A red
+#      night publishes nothing and strands nothing (the tag does not exist
+#      until publish time).
+#
+# Version scheme — why not a calendar date in the last component:
+#   Chrome and Firefox cap every manifest `version` component at 65535, and
+#   apps/extension/manifest/manifest.config.ts derives that field by stripping
+#   non-numerics from the package version. So the nightly suffix encodes the
+#   date as YY+day-of-year (`26233` = 2026-08-21): `0.27.0-nightly.26233`
+#   maps to manifest `0.27.0.26233` (valid) while `version_name` keeps the
+#   full human-readable string. Same-day re-runs ADVANCE the code (`…26234`)
+#   instead of appending `.1` — a fifth component would be an invalid manifest.
+#
+# Flake policy — deliberately NOT the PR gate's posture:
+#   The PR network gate forces retry 0 so app flakes surface honestly. A
+#   nightly wants the opposite trade: absorb flakes, ship when the suite
+#   passes within its normal retry budget. So the network calls below OMIT
+#   the `retry` input (config default = 2 attempts) and keep the reusable
+#   workflow's built-in exit-86 infra-boot retry. Smoke has retry 2 baked
+#   into its vitest config already.
+
+on:
+  schedule:
+    # 03:23 UTC daily. Off the :00 mark on purpose — GitHub documents the top
+    # of the hour as peak load where scheduled runs get delayed or dropped.
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if dev HEAD already has a nightly release (quiet-day skip bypass)."
+        required: false
+        type: boolean
+        default: false
+      dry_run:
+        description: "Run all gates but skip tag creation + release upload."
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: nightly
+  # A newer run supersedes a stale in-flight one (manual dispatch while a
+  # scheduled run crawls). Worst case of a cancel DURING publish is a release
+  # with partial assets; publish is short (~5 min) and a re-dispatch heals it
+  # under a fresh date-code tag, so cancel beats queueing a duplicate build.
+  cancel-in-progress: true
+
+# Least-privilege default; publish-nightly escalates explicitly.
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      skip: ${{ steps.r.outputs.skip }}
+      tag: ${{ steps.r.outputs.tag }}
+      version: ${{ steps.r.outputs.version }}
+      sha: ${{ steps.r.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: r
+        env:
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          set -euo pipefail
+
+          # Always operate on origin/dev regardless of what ref dispatched the
+          # run — nightlies are defined as "current dev", and this makes manual
+          # test-dispatches from feature branches behave exactly like the cron.
+          DEV_SHA="$(git rev-parse origin/dev)"
+          RAW_VERSION="$(git show origin/dev:apps/extension/package.json | jq -r .version)"
+
+          # Normalize the base to plain MAJOR.MINOR.PATCH. During an rc series
+          # dev carries e.g. `0.28.0-rc.1`, whose numeric strip is `0.28.0.1` —
+          # suffixing the nightly code would yield a FIVE-component manifest,
+          # which Chrome rejects. The nightly base is the release line, not the
+          # rc counter.
+          BASE_VERSION="$(printf '%s' "$RAW_VERSION" | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+' || true)"
+          if [ -z "$BASE_VERSION" ]; then
+            echo "::error::dev package.json version '$RAW_VERSION' has no MAJOR.MINOR.PATCH prefix — cannot derive a nightly version"
+            exit 1
+          fi
+
+          DATE_CODE="$(date -u +%y%j)"
+          CODE="$DATE_CODE"
+          ATTEMPT=0
+          while true; do
+            # Capture first so a git/network failure aborts via set -e instead
+            # of reading as "tag absent" (an empty result must only ever mean
+            # absence, never an errored probe).
+            REMOTE_MATCH="$(git ls-remote --tags origin "refs/tags/v${BASE_VERSION}-nightly.${CODE}")"
+            if ! grep -q . <<<"$REMOTE_MATCH"; then
+              break
+            fi
+            ATTEMPT=$((ATTEMPT + 1))
+            if [ "$ATTEMPT" -gt 20 ]; then
+              echo "::error::more than 20 nightly tags exist for date-code $DATE_CODE — aborting rather than looping further"
+              exit 1
+            fi
+            CODE=$((CODE + 1))
+          done
+
+          TAG="v${BASE_VERSION}-nightly.${CODE}"
+          VERSION="${TAG#v}"
+
+          SKIP="false"
+          if [ "$FORCE" != "true" ]; then
+            for t in $(git tag -l 'v*-nightly*'); do
+              if [ "$(git rev-list -n 1 "$t")" = "$DEV_SHA" ]; then
+                SKIP="true"
+                echo "::notice::dev HEAD ${DEV_SHA::7} is already released as $t — quiet-day skip (dispatch with force=true to override)"
+              fi
+            done
+          fi
+
+          {
+            echo "skip=$SKIP"
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "sha=$DEV_SHA"
+          } >> "$GITHUB_OUTPUT"
+
+  # Every gate guard repeats `needs.resolve.result == 'success' && …skip != 'true'`
+  # because reusable workflows inherit skip propagation from ANY skipped
+  # ancestor: without `always()` the if evaluates too early and a skipped
+  # resolve fells the whole chain (lesson recorded in release.yml).
+
+  lint-and-typecheck:
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_lint-and-typecheck.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  unit-tests:
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_unit-tests.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+
+  # The network suite mirrors pr-network-e2e.yml's job shape exactly (5
+  # proverless shards + two dedicated heavy jobs + the real-proving canary),
+  # minus its paths-filter/decide plumbing — a nightly always runs everything.
+  # Keep the shard count / exclude lists in sync with that file.
+
+  network-e2e:
+    name: Run / shard ${{ matrix.shard.id }}
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - { id: "1/5", label: "1-of-5" }
+          - { id: "2/5", label: "2-of-5" }
+          - { id: "3/5", label: "3-of-5" }
+          - { id: "4/5", label: "4-of-5" }
+          - { id: "5/5", label: "5-of-5" }
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard: ${{ matrix.shard.id }}
+      shard_label: ${{ matrix.shard.label }}
+      # No `retry` input → config default (2 attempts). See header, flake policy.
+      exclude_files: "tests/e2e/network/fee-methods.test.ts tests/e2e/network/concurrent-sendtx-confirm.test.ts tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy:
+    name: Run / heavy / fee-methods
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard_label: "heavy"
+      test_files: "tests/e2e/network/fee-methods.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-heavy-concurrent:
+    name: Run / heavy / concurrent-confirm
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard_label: "heavy-concurrent"
+      test_files: "tests/e2e/network/concurrent-sendtx-confirm.test.ts"
+      proverless: true
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  network-e2e-canary:
+    name: Run / canary / real-proving
+    needs: resolve
+    if: always() && needs.resolve.result == 'success' && needs.resolve.outputs.skip != 'true'
+    uses: ./.github/workflows/_network-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      shard_label: "canary"
+      test_files: "tests/e2e/network/transfers.test.ts tests/e2e/network/tx-sendTx-default.test.ts tests/e2e/network/frozen-account-canary.test.ts"
+      disable_accelerator: ${{ vars.NULO_E2E_DISABLE_ACCELERATOR == '1' }}
+    secrets:
+      SPONSORED_FPC_SALT: ${{ secrets.SPONSORED_FPC_SALT }}
+
+  # Builds gate on lint+unit only (not network) — same wall-time overlap as
+  # release.yml; the publish job waits for everything.
+
+  build-chrome:
+    needs: [resolve, lint-and-typecheck, unit-tests]
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.skip != 'true' &&
+      needs.lint-and-typecheck.result == 'success' &&
+      needs.unit-tests.result == 'success'
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      target: chrome
+      version_override: ${{ needs.resolve.outputs.version }}
+      upload_artifacts: true
+
+  build-firefox:
+    needs: [resolve, lint-and-typecheck, unit-tests]
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.skip != 'true' &&
+      needs.lint-and-typecheck.result == 'success' &&
+      needs.unit-tests.result == 'success'
+    uses: ./.github/workflows/_build-extension.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      target: firefox
+      version_override: ${{ needs.resolve.outputs.version }}
+      upload_artifacts: true
+
+  smoke-against-artifact:
+    needs: [resolve, build-chrome]
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.skip != 'true' &&
+      needs.build-chrome.result == 'success'
+    uses: ./.github/workflows/_smoke-e2e.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+      artifact_name: extension-chrome
+
+  publish-nightly:
+    needs:
+      [
+        resolve,
+        lint-and-typecheck,
+        unit-tests,
+        network-e2e,
+        network-e2e-heavy,
+        network-e2e-heavy-concurrent,
+        network-e2e-canary,
+        build-chrome,
+        build-firefox,
+        smoke-against-artifact,
+      ]
+    # Fail-closed: EVERY gate must be exactly 'success'. A skipped gate is not
+    # reachable when resolve succeeded with skip=false, but enumerating success
+    # (instead of only rejecting failure/cancelled) makes a future graph edit
+    # that introduces a skip path publish-proof by construction.
+    if: |
+      always() &&
+      needs.resolve.result == 'success' &&
+      needs.resolve.outputs.skip != 'true' &&
+      needs.lint-and-typecheck.result == 'success' &&
+      needs.unit-tests.result == 'success' &&
+      needs.network-e2e.result == 'success' &&
+      needs.network-e2e-heavy.result == 'success' &&
+      needs.network-e2e-heavy-concurrent.result == 'success' &&
+      needs.network-e2e-canary.result == 'success' &&
+      needs.build-chrome.result == 'success' &&
+      needs.build-firefox.result == 'success' &&
+      needs.smoke-against-artifact.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.resolve.outputs.version }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      SHA: ${{ needs.resolve.outputs.sha }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+
+      - name: Download Chrome build
+        uses: actions/download-artifact@v8
+        with:
+          name: extension-chrome
+          path: dist/release/chrome
+      - name: Download Firefox build
+        uses: actions/download-artifact@v8
+        with:
+          name: extension-firefox
+          path: dist/release/firefox
+
+      - name: Zip artifacts + SHASUMS
+        run: |
+          mkdir -p dist/release
+          (cd dist/release/chrome && zip -r "../nulo-chrome-${VERSION}.zip" .)
+          (cd dist/release/firefox && zip -r "../nulo-firefox-${VERSION}.zip" .)
+          cd dist/release
+          sha256sum \
+            "nulo-chrome-${VERSION}.zip" \
+            "nulo-firefox-${VERSION}.zip" \
+            > SHASUMS256.txt
+
+      - name: Generate changelog since previous tag (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --tag ${{ env.TAG }} --unreleased --strip header --include-path 'apps/extension/**'
+        env:
+          OUTPUT: /tmp/release-notes.md
+
+      - name: Compose release body
+        run: |
+          # The cliff output already carries its own `## <version>` heading and
+          # the install block (cliff.toml emits both whenever --tag is passed),
+          # so this header stays minimal to avoid duplicating them.
+          {
+            echo "Automated developer preview built from \`dev\` @ \`${SHA:0:7}\` on $(date -u +%Y-%m-%d)."
+            echo ""
+            echo "Superseded every night at 03:23 UTC; expect rough edges. Do not use in production."
+            echo ""
+            cat /tmp/release-notes.md
+          } > /tmp/body.md
+          echo '--- body preview ---'
+          cat /tmp/body.md
+
+      - name: Create prerelease + upload assets
+        if: env.DRY_RUN != 'true'
+        env:
+          # Scoped to this step only — the git-cliff step above must not run
+          # with a write-capable token it never needs.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$TAG" \
+            "dist/release/nulo-chrome-${VERSION}.zip" \
+            "dist/release/nulo-firefox-${VERSION}.zip" \
+            "dist/release/SHASUMS256.txt" \
+            --target "$SHA" \
+            --prerelease \
+            --title "$TAG" \
+            --notes-file /tmp/body.md
+
+      - name: Dry-run preview (skip publish)
+        if: env.DRY_RUN == 'true'
+        run: |
+          echo "DRY RUN — would have created tag $TAG at $SHA and uploaded:"
+          ls -la dist/release/
+
+  status:
+    name: status
+    if: always()
+    needs:
+      [
+        resolve,
+        lint-and-typecheck,
+        unit-tests,
+        network-e2e,
+        network-e2e-heavy,
+        network-e2e-heavy-concurrent,
+        network-e2e-canary,
+        build-chrome,
+        build-firefox,
+        smoke-against-artifact,
+        publish-nightly,
+      ]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Aggregate results
+        run: |
+          for r in \
+            "${{ needs.resolve.result }}" \
+            "${{ needs.lint-and-typecheck.result }}" \
+            "${{ needs.unit-tests.result }}" \
+            "${{ needs.network-e2e.result }}" \
+            "${{ needs.network-e2e-heavy.result }}" \
+            "${{ needs.network-e2e-heavy-concurrent.result }}" \
+            "${{ needs.network-e2e-canary.result }}" \
+            "${{ needs.build-chrome.result }}" \
+            "${{ needs.build-firefox.result }}" \
+            "${{ needs.smoke-against-artifact.result }}" \
+            "${{ needs.publish-nightly.result }}" \
+          ; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A nightly stage failed or was cancelled: $r"
+              exit 1
+            fi
+          done
+          echo "Nightly pipeline completed (skipped stages are quiet-day skips or dry-runs)."

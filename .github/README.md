@@ -13,6 +13,7 @@ These `status` aggregators are what branch protection on `main` / `dev` requires
 | `pr-network-e2e.yml` | `network-e2e-status` | dev + main | PR to `main`, OR `e2e:network` label, OR `extension-network` paths-filter | full network e2e (anvil + Aztec sandbox + playground) |
 | `actionlint.yml` | `Status` (not required) | — | when `.github/workflows/**` or shell scripts change | actionlint + shellcheck |
 | `release.yml` | `status` (not required) | — | manual `workflow_dispatch` only | full quality bar + build + smoke against artifact + (optional) tag + GitHub Release |
+| `nightly.yml` | `status` (not required) | — | schedule (03:23 UTC daily) + manual dispatch | full quality bar incl. network suite → prerelease GitHub Release from dev (`v<ver>-nightly.<YYDDD>`) |
 
 Each required check-run is `app_id`-pinned to GitHub Actions in `required_status_checks.checks`, so only a check produced by Actions (not a same-named check from another app) can satisfy the gate.
 
@@ -22,11 +23,11 @@ Reusables live as `.github/workflows/_*.yml` and are called from top-level workf
 
 | Reusable | Callers |
 |---|---|
-| `_lint-and-typecheck.yml` | `pr-quick`, `release` |
-| `_unit-tests.yml` | `pr-quick`, `release` |
-| `_build-extension.yml` | `pr-quick`, `release` |
-| `_smoke-e2e.yml` | `pr-quick`, `release` |
-| `_network-e2e.yml` | `pr-network-e2e`, `release` (stable channel only) |
+| `_lint-and-typecheck.yml` | `pr-quick`, `release`, `nightly` |
+| `_unit-tests.yml` | `pr-quick`, `release`, `nightly` |
+| `_build-extension.yml` | `pr-quick`, `release`, `nightly` |
+| `_smoke-e2e.yml` | `pr-quick`, `release`, `nightly` |
+| `_network-e2e.yml` | `pr-network-e2e`, `release` (stable channel only), `nightly` |
 
 Composite actions live in `.github/actions/` and are shared step fragments used inside jobs.
 
@@ -44,6 +45,7 @@ Composite actions live in `.github/actions/` and are shared step fragments used 
 - Open a PR to `main` → `pr-quick`, `pr-smoke-e2e`, `pr-network-e2e` all run unconditionally.
 - Add `e2e:smoke` or `e2e:network` to an open PR → that workflow fires a fresh run immediately (`labeled` is a subscribed event type; no push needed). Removing the label re-evaluates the gate (`unlabeled`).
 - Click "Run workflow" on `release.yml` → manual release (must supply `version` + `channel`).
+- Every night at 03:23 UTC → `nightly.yml` builds current dev and publishes a prerelease GitHub Release (skips itself when dev HEAD already has tonight's nightly; manual dispatch offers `force` + `dry_run`).
 
 ## Labels
 

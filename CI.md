@@ -90,6 +90,18 @@ Marketplace publish (CWS + AMO) is stubbed until secrets are wired (`CWS_*` + `A
 
 Config files: `.github/release-please-config.json`, `.release-please-manifest.json`, `CHANGELOG.md`. The git-cliff template at `cliff.toml` provides the final release-body content.
 
+### `nightly.yml`
+
+The repo's only scheduled workflow: every night at 03:23 UTC it builds current `dev` and publishes a **prerelease** GitHub Release (`v<version>-nightly.<YYDDD>`, e.g. `v0.27.0-nightly.26233`) with the chrome + firefox zips + SHASUMS256.txt, so people can install the latest state of dev without a maintainer hand-off. Nightlies are marked pre-release and never take the "Latest" badge from stable releases. Also dispatchable manually (`force` bypasses the quiet-day skip; `dry_run` runs all gates but skips the publish).
+
+- **Version scheme**: `<dev package.json version>-nightly.<YY+day-of-year>`. Chrome/Firefox cap each manifest version component at 65535 and `manifest.config.ts` strips non-numerics, so a calendar date would overflow — YYDDD keeps every component valid while `version_name` shows the full string. Same-day re-runs advance the code (`…26234`) instead of appending `.1` (a fifth component is an invalid manifest).
+- **Gates are hard**: lint+typecheck → unit → full network suite (same shape as the PR gate: 5 proverless shards + 2 heavy jobs + real-proving canary) → chrome+firefox builds with the nightly version override → smoke against the built artifact. The tag + release are created only after everything is green, so a red night publishes nothing.
+- **Flake policy** differs deliberately from the PR gate: the network suite runs at its config-default retry 2 (the PR gate forces 0 for honesty) plus the built-in infra-boot retry. A nightly absorbs flakes; a PR must surface them.
+- **Quiet-day skip**: if the newest `v*-nightly.*` tag already points at dev HEAD, the run no-ops green.
+- **Stable notes are protected**: `release.yml` passes `--ignore-tags '^v[0-9]+\.[0-9]+\.[0-9]+-nightly'` to git-cliff so nightly tags never act as range boundaries for a stable release's notes (without it, a stable cut the day after any nightly would only document the last ~24h). The nightly's own notes intentionally use the previous nightly as their boundary — a daily delta.
+- **Interrupted-publish recovery**: `gh release create` makes the tag before assets finish uploading; a cancelled run can leave partial assets, and the quiet-day skip will then match that sha. Re-dispatch with `force=true` (publishes under a fresh date-code tag) or heal in place: rebuild the zips locally and `gh release upload <tag> …--clobber`.
+- Schedules fire from the workflow file on the default branch (`dev`) — the trigger is inert on feature branches until merged.
+
 ## Labels
 
 | Label | Effect |
