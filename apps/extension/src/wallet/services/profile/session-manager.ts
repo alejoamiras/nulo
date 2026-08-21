@@ -508,7 +508,9 @@ export class SessionManager {
 			// BOTH a valid DEK and a valid MAC (rule 3) — any mismatch blocks silent restore;
 			// the forced password unlock runs the full pairing check + the degradation machine.
 			const envelopeIntact = await verifyEnvelopeMacV3(
-				profile.id,
+				// The REQUESTED id from the session record, not the row's self-claimed one —
+				// mirrors the unlock-path belt-and-suspenders on top of EntityStorage's guard.
+				session.profile,
 				pair.master,
 				pair.dek,
 				{

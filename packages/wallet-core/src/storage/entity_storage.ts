@@ -22,6 +22,7 @@ export class EntityStorage<T> {
 	private readonly storage: MinimalStorageArea
 	private readonly root: string
 	private readonly parse?: (raw: unknown) => T
+	private readonly requireKeyIdentityMatch: boolean
 
 	/**
 	 * Callers must pass a concrete `MinimalStorageArea` (e.g.
@@ -35,11 +36,22 @@ export class EntityStorage<T> {
 	 * JSON. Both JSON-SYNTAX failure and CODEC-VALIDATION failure KEEP the row
 	 * (return undefined; the read path never deletes — see `decodeRow`).
 	 * wallet-core carries no zod itself; the schema is injected from the app layer.
+	 *
+	 * `requireKeyIdentityMatch` opts a root into the id/key consistency guard: a row whose
+	 * embedded `id` disagrees with the storage-key suffix reads as undefined. Only roots whose
+	 * SECURITY decisions trust the embedded id enable this — several roots legitimately key rows
+	 * by something other than the entity id (e.g. dapp sessions keyed per context).
 	 */
-	public constructor(root: string, area: MinimalStorageArea, parse?: (raw: unknown) => T) {
+	public constructor(
+		root: string,
+		area: MinimalStorageArea,
+		parse?: (raw: unknown) => T,
+		options?: { requireKeyIdentityMatch?: boolean },
+	) {
 		this.root = root
 		this.storage = area
 		this.parse = parse
+		this.requireKeyIdentityMatch = options?.requireKeyIdentityMatch === true
 	}
 
 	/**
@@ -81,14 +93,37 @@ export class EntityStorage<T> {
 			)
 			return undefined
 		}
-		if (!this.parse) return parsed as T
+		if (!this.parse) {
+			return this.requireIdMatch(fullKey, parsed as T)
+		}
+		let validated: T
 		try {
-			return this.parse(parsed)
+			validated = this.parse(parsed)
 		} catch (verr) {
 			const vmsg = verr instanceof Error ? verr.message : String(verr)
 			console.error(`EntityStorage[${this.root}]: row "${fullKey}" failed validation — KEEPING (not deleting) — ${vmsg}`)
 			return undefined
 		}
+		return this.requireIdMatch(fullKey, validated)
+	}
+
+	/**
+	 * A row whose embedded `id` disagrees with the storage-key suffix is treated exactly like a
+	 * malformed row: hidden (undefined), never deleted. Honest writers always agree — `set(id,
+	 * entity)` writes under the id it was given — so a disagreement means a raw storage writer
+	 * moved or duplicated a row's payload across keys. Serving such a row under the requested id
+	 * would let an attacker transplant another profile's ENTIRE record (id field included) and
+	 * have every downstream identity check pass against the forged embedded value.
+	 */
+	private requireIdMatch(fullKey: string, entity: T): T | undefined {
+		if (!this.requireKeyIdentityMatch) return entity
+		const suffix = fullKey.substring(this.root.length + 1)
+		const embedded = (entity as { id?: unknown }).id
+		if (embedded !== undefined && embedded !== suffix) {
+			console.error(`EntityStorage[${this.root}]: row "${fullKey}" embeds id "${String(embedded)}" — KEEPING (not deleting)`)
+			return undefined
+		}
+		return entity
 	}
 
 	public async contains(id: string): Promise<boolean> {

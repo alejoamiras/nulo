@@ -242,6 +242,37 @@ describe("EntityStorage", () => {
 		})
 	})
 
+	/** The id/key consistency guard (opt-in) — the embedded-id transplant bypass closure. */
+	describe("requireKeyIdentityMatch (opt-in)", () => {
+		interface Identified {
+			id?: string
+			name: string
+		}
+		test("a row whose embedded id disagrees with its storage key reads as undefined", async () => {
+			const guarded = new EntityStorage<Identified>("profiles", api.storage.local, undefined, {
+				requireKeyIdentityMatch: true,
+			})
+			await api.storage.local.set({
+				"profiles@A": JSON.stringify({ id: "B", name: "Bob" }),
+				"profiles@C": JSON.stringify({ id: "C", name: "Carol" }),
+				"profiles@D": JSON.stringify({ name: "NoId" }),
+			})
+			expect(await guarded.get("A")).toBeUndefined()
+			expect(await guarded.get("C")).toEqual({ id: "C", name: "Carol" })
+			expect(await guarded.get("D")).toEqual({ name: "NoId" })
+			const all = Object.fromEntries(await guarded.getAll())
+			expect(Object.keys(all)).toEqual(["C", "D"])
+			// The row is hidden, never deleted — repair paths can still see it.
+			expect(await api.storage.local.get("profiles@A")).toHaveProperty("profiles@A")
+		})
+
+		test("without the flag, mismatched embedded ids keep reading (other roots rely on this)", async () => {
+			const unguarded = new EntityStorage<Identified>("contexts", api.storage.local)
+			await api.storage.local.set({ "contexts@full": JSON.stringify({ id: "s1", name: "x" }) })
+			expect(await unguarded.get("full")).toEqual({ id: "s1", name: "x" })
+		})
+	})
+
 	/** The compare-and-delete surface for the F-B23 purge second pass. */
 	describe("raw string accessors", () => {
 		test("rawStringEntries returns the EXACT stored strings, including syntax-broken and validation-failed rows", async () => {

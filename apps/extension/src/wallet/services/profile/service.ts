@@ -496,8 +496,10 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// log), and NO bearer is persisted (open() enforces that from the absent dek).
 					dek = await this.unsealDekWithPasshash(passhash, current.dekSealed)
 					if (dek) {
+						// Belt-and-suspenders on top of EntityStorage's id/key guard: verify against
+						// the REQUESTED id, never the row's self-claimed one.
 						const macOk = await verifyEnvelopeMacV3(
-							current.id,
+							id,
 							secret,
 							dek,
 							this.macEnvelopeV3(
@@ -680,20 +682,31 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					// prompt. Refuse rather than open a session bound to the old id.
 					throw new Error("Invalid profile id")
 				}
-				// Degradation state machine, rule 2 (passkey branch): the DEK unseals under the
-				// ceremony's PRF-derived wrap key; failure (corrupt/transplanted slot) opens
-				// DERIVED-ONLY with the visible warning. No MAC on passkey rows — AES-GCM auth
-				// under the per-credential wrap key already fails closed on any transplant.
+				// Passkey rows carry no envelope MAC (nothing password-sealed to cover), so the
+				// plaintext fingerprint is bound by RECOMPUTING it from the ceremony's freshly
+				// derived master instead: a same-credential ceremony always reproduces the same
+				// master, so a mismatch means the stored row was edited — treat it exactly like
+				// a failed envelope MAC on the password side (derived-only, visible warning).
+				const expectedFingerprint = await computeWalletFingerprint(recovery.secret)
 				let dek: ImportedKeysDek | null = null
 				try {
-					dek = await unsealDekUnderWrapKey(recovery.dekWrapKey, current.dekSealed)
+					if (current.walletFingerprint === expectedFingerprint) {
+						dek = await unsealDekUnderWrapKey(recovery.dekWrapKey, current.dekSealed)
+					}
 				} catch {
 					dek = null
 				}
+				if (!dek) {
+					this.logger.log(
+						this.name,
+						LogLevel.Error,
+						current.walletFingerprint !== expectedFingerprint
+							? "passkey wallet fingerprint mismatch — opening derived-only"
+							: "imported-keys DEK failed at passkey unlock — opening derived-only",
+						id,
+					)
+				}
 				try {
-					if (!dek) {
-						this.logger.log(this.name, LogLevel.Error, "imported-keys DEK failed at passkey unlock — opening derived-only", id)
-					}
 					await this.openSessionVerified(current, recovery.secret, undefined, dek ?? undefined)
 					if (!dek) {
 						this.emit("onImportedKeysDegraded", this.getProfileInfo(current))
@@ -940,7 +953,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				// and blesses nothing; the non-destructive repair is export a full backup (which
 				// deliberately still works — see `exportBackupMaterial`) and restore it, since
 				// restore mints a fresh DEK and rewraps every row through it.
-				if (dek && !(await this.envelopeMacValid(profile, secret, dek))) {
+				if (dek && !(await this.envelopeMacValid(id, profile, secret, dek))) {
 					this.logger.log(this.name, LogLevel.Error, "envelope MAC does not cover the DEK slot at password change", id)
 					throw new Error("Profile integrity check failed — export a full backup and restore it before changing the password")
 				}
@@ -1491,6 +1504,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				if (recovery.credentialId !== profile.credentialId) {
 					throw new Error("Invalid profile id")
 				}
+				// Same fingerprint binding the unlock path enforces: a stored row edited after
+				// creation must not produce a backup that looks complete.
+				if (profile.walletFingerprint !== (await computeWalletFingerprint(recovery.secret))) {
+					throw new Error("Profile integrity check failed — this profile cannot produce a trustworthy backup")
+				}
 				// A passkey full backup carries `dekSealed` VERBATIM (the ceremony's wrap key opens
 				// it at restore), so nothing downstream ever proves it opens. Prove it here, where
 				// the wrap key is already in hand: otherwise a corrupt slot yields a backup that
@@ -1836,8 +1854,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * freshly-valid MAC) or exports material sealed to a key the profile does not own.
 	 */
 	private async envelopeMacValid(
+		requestedId: string,
 		p: {
-			id: string
 			guard: string
 			secret: string
 			entropy: string
@@ -1848,7 +1866,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		secret: MasterSecretBytes,
 		dek: ImportedKeysDek,
 	): Promise<boolean> {
-		return verifyEnvelopeMacV3(p.id, secret, dek, this.macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
+		return verifyEnvelopeMacV3(requestedId, secret, dek, this.macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
 	}
 
 	/** Seal the imported-keys DEK under the password credential (EncryptionKey — the audited
