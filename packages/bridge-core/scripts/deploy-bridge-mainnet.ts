@@ -251,6 +251,9 @@ async function main() {
 	console.log("L2 (precomputed) token:", tokenInstance.address.toString())
 	console.log("L2 (precomputed) bridge:", bridgeInstance.address.toString())
 
+	// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
+	// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
+	// landed the portal step — a different key gets NotInitializer and the run stops here.
 	if (!recorded?.confirmed["portal-init"]) {
 		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing

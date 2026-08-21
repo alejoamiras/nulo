@@ -362,6 +362,9 @@ async function main() {
 		}
 		console.log(`proxy wired (${mins()})`)
 
+		// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
+		// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
+		// landed the portal step — a different key gets NotInitializer and the run stops here.
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
 		// Preflight (P5): the portal we are about to initialize must still be
 		// UNINITIALIZED — a non-zero l2Bridge() means this address is an

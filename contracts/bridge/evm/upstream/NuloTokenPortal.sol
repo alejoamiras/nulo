@@ -1,12 +1,18 @@
 // NuloTokenPortal — a minimal SECURITY FORK of the canonical Aztec TokenPortal
-// (contracts/bridge/evm/upstream/TokenPortal.sol). It adds ONLY an init-once guard to close
+// (contracts/bridge/evm/upstream/TokenPortal.sol). It adds ONLY initialization guards to close
 // audit finding F-001: the canonical `initialize` has no access control and no guard, so anyone
-// can re-call it on a deployed portal and repoint underlying/l2Bridge/registry (→ drain the held
-// reserves / redirect deposits). Everything else — imports, storage layout, public getters, and the
-// content-hash-critical `depositToAztec*` / `withdraw` bodies — is BYTE-IDENTICAL to canonical so the
-// L1↔L2 content hashes do NOT drift (a drift would strand every deposit; pinned by ContentHash.t.sol
-// + the Noir keystone). Compiled/deployed/Etherscan-verified from the l1-contracts root (real @aztec
-// interfaces resolve there); the in-project forge regression test uses NuloTokenPortalShim instead.
+// can call it on a deployed portal and repoint underlying/l2Bridge/registry (→ drain the held
+// reserves / redirect deposits). Two guards close every path: init-once (re-init reverts) and a
+// deployer-only initializer (a front-run of the FIRST initialize — the deploy and initialize are
+// separate transactions — reverts instead of binding an attacker registry whose fake outbox would
+// drain all deposits). A true constructor-init is not possible here: the L2 bridge address the
+// initializer binds is derived FROM the deployed portal address (deterministic L2 instantiation),
+// so binding at construction is circular. Everything else — imports, storage layout, public
+// getters, and the content-hash-critical `depositToAztec*` / `withdraw` bodies — is
+// BYTE-IDENTICAL to canonical so the L1↔L2 content hashes do NOT drift (a drift would strand
+// every deposit; pinned by ContentHash.t.sol + the Noir keystone). Compiled/deployed/
+// Etherscan-verified from the l1-contracts root (real @aztec interfaces resolve there); the
+// in-project forge regression test uses NuloTokenPortalShim instead.
 pragma solidity >=0.8.27;
 
 import {IERC20} from "@oz/token/ERC20/IERC20.sol";
@@ -27,6 +33,9 @@ contract NuloTokenPortal {
   /// @notice F-001 fork: thrown if `initialize` is called more than once.
   error AlreadyInitialized();
 
+  /// @notice F-001 fork: thrown if `initialize` is called by anyone but the deploying EOA.
+  error NotInitializer();
+
   event DepositToAztecPublic(bytes32 to, uint256 amount, bytes32 secretHash, bytes32 key, uint256 index);
 
   event DepositToAztecPrivate(uint256 amount, bytes32 secretHashForL2MessageConsumption, bytes32 key, uint256 index);
@@ -40,6 +49,13 @@ contract NuloTokenPortal {
   IInbox public inbox;
   uint256 public rollupVersion;
 
+  /// @notice The only address allowed to call `initialize` — pinned at construction.
+  address public immutable initializer;
+
+  constructor() {
+    initializer = msg.sender;
+  }
+
   /**
    * @notice Initialize the portal
    * @param _registry - The registry address
@@ -47,6 +63,10 @@ contract NuloTokenPortal {
    * @param _l2Bridge - The L2 bridge address
    */
   function initialize(address _registry, address _underlying, bytes32 _l2Bridge) external {
+    // F-001: deployer-only. The deploy and initialize are separate transactions; without this
+    // guard an attacker front-running the first initialize binds their own registry (whose fake
+    // outbox would drain every deposit) and bricks the deployment.
+    if (msg.sender != initializer) revert NotInitializer();
     // F-001: init-once. `registry` is the zero address only before the first initialize; any
     // later call reverts, so a deployed portal can never be repointed.
     if (address(registry) != address(0)) revert AlreadyInitialized();
