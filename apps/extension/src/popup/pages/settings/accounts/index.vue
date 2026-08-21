@@ -91,18 +91,24 @@ const handleCopyAddress = (target) => {
 						v-for="account in accounts"
 						@click="handleSelectAccount(account)"
 						:title="account.name"
-						:description="trimAddress(account.address, 6, 4, '...')"
 						:icon="account?.address === appStore.account?.address ? 'check-circle' : 'circle'"
 						:iconFillColor="account?.address === appStore.account?.address ? 'primary' : 'tertiary'"
 						data-testid="manage-accounts-row"
 						:data-account-name="account.name"
 					>
+						<!-- Imported marker lives on the DESCRIPTION line (owner pick, option B): the
+						     name-line chip cost ~64px and truncated names to a handful of characters. -->
+						<template #description>
+							<template v-if="account.type === AccountType.Imported">
+								<Text size="12" weight="600" color="sand" :class="$style.imported_marker" data-testid="account-imported-badge">
+									Imported
+								</Text>
+								<Text size="12" weight="500" color="tertiary">&nbsp;&#183;&nbsp;</Text>
+							</template>
+							{{ trimAddress(account.address, 6, 4, "...") }}
+						</template>
 						<template #right>
 							<Flex align="center" gap="8">
-								<Badge v-if="account.type === AccountType.Imported" variant="secondary" data-testid="account-imported-badge">
-									Imported
-								</Badge>
-
 								<Tooltip position="end" delay="350">
 									<Icon
 										@click.stop="handleCopyAddress(account.address)"
