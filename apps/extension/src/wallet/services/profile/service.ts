@@ -47,6 +47,7 @@ import {
 	PROFILE_SERVICE_NAME,
 	type ProfileInfo,
 	type Profile,
+	type ProfileType,
 	type Events,
 	type Methods,
 	type RestoreSecret,
@@ -128,7 +129,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			 *  `dekSealed`/`credentialId`/`pxeGeneration` between restore and finalize must not
 			 *  get a clean session carrying the stashed master (the fingerprint binding alone
 			 *  would miss those fields). */
-			expected: { credentialId: string; dekSealed: string; pxeGeneration: string; walletFingerprint: string }
+			expected: { type: ProfileType; credentialId: string; dekSealed: string; pxeGeneration: string; walletFingerprint: string }
 		}
 	>()
 
@@ -2362,6 +2363,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 							dek: stashDek,
 							capturedAt: Date.now(),
 							expected: {
+								type: newProfile.type,
 								credentialId: newProfile.credentialId,
 								dekSealed: newProfile.dekSealed,
 								pxeGeneration: newProfile.pxeGeneration,
@@ -2537,6 +2539,11 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			if (!pending) {
 				throw new Error("No pending restore secret for passkey profile")
 			}
+			// The dispatch below falls through to the passkey branch for ANY non-password
+			// type — an edited `type` field must not select it.
+			if (profile.type !== "passkey") {
+				throw new Error("Profile type changed between restore and finalizeRestore")
+			}
 			this.pendingRestoreSecrets.delete(id)
 			// Same binding every other passkey open enforces: a tamper between restore() and
 			// this finalize (the row sat unlocked in storage the whole time) must not yield a
@@ -2546,6 +2553,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			let dek: ImportedKeysDek | null = pending.dek
 			try {
 				const intact =
+					profile.type === pending.expected.type &&
 					profile.credentialId === pending.expected.credentialId &&
 					profile.dekSealed === pending.expected.dekSealed &&
 					profile.pxeGeneration === pending.expected.pxeGeneration &&
