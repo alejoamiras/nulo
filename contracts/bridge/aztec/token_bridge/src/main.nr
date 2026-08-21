@@ -1,4 +1,5 @@
 mod config;
+mod test;
 
 // Minimal token bridge that moves funds between L1 <> L2 via the canonical
 // portal messaging (Inbox/Outbox). Attached to an L1 TokenPortal; mints/burns
