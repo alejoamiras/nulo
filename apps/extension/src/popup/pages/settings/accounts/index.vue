@@ -21,7 +21,6 @@ import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { copyToClipboard } from "@/utils/clipboard"
-import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
@@ -96,16 +95,19 @@ const handleCopyAddress = (target) => {
 						data-testid="manage-accounts-row"
 						:data-account-name="account.name"
 					>
-						<!-- Imported marker on the DESCRIPTION line (owner picks: option B, voice V4): the
-						     whole line is one mono string in the address's own tone, so the marker reads as
-						     metadata rather than decoration. Imported rows trim tighter (4+4) so our trim is
-						     the only truncation. -->
+						<!-- Imported marker on the DESCRIPTION line in the address's own mono voice (owner
+						     pick: option B + V4). Exactly ONE truncation mechanism: the address's head span
+						     clips with a CSS ellipsis while the marker and the 4-char tail never shrink, so
+						     the line adapts to whatever width the action icons leave instead of a guessed
+						     trim length fighting the wrapper's own ellipsis. -->
 						<template #description>
-							<Text size="11" weight="500" color="tertiary" mono>
+							<Text size="11" weight="500" color="tertiary" mono :class="$style.desc_line">
 								<template v-if="account.type === AccountType.Imported">
-									<span data-testid="account-imported-badge">imported</span>&nbsp;&#183;&nbsp;
+									<span data-testid="account-imported-badge" :class="$style.desc_fixed">imported</span>
+									<span :class="$style.desc_fixed">&nbsp;&#183;&nbsp;</span>
 								</template>
-								{{ trimAddress(account.address, account.type === AccountType.Imported ? 4 : 6, 4, "...") }}
+								<span :class="$style.addr_head">{{ account.address.slice(0, -4) }}</span>
+								<span :class="$style.desc_fixed">{{ account.address.slice(-4) }}</span>
 							</Text>
 						</template>
 						<template #right>
@@ -231,6 +233,24 @@ const handleCopyAddress = (target) => {
 
 .content {
 	padding: 16px 24px var(--nav-clearance) 24px;
+}
+
+.desc_line {
+	display: flex;
+	max-width: 100%;
+}
+
+.desc_fixed {
+	flex-shrink: 0;
+}
+
+/* Shrink-only (no grow), so on wide rows the tail sits flush against the head. */
+.addr_head {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .icon_btn {

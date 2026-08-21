@@ -53,6 +53,32 @@ test("account export → import into a SECOND profile (plaintext + encrypted rou
 		await gotoAccounts(targetPage)
 		await targetPage.waitForSelector('[data-testid="account-imported-badge"]', { visible: true, timeout: 20_000 })
 
+		// Single-truncation pin at the REAL popup width (e2e tabs are otherwise wide enough to
+		// make overflow assertions vacuous): the description line may clip ONLY inside the
+		// address's head span. The marker, the 4-char tail, the line, and the wrapper must all
+		// fit — a second (wrapper-level) ellipsis is exactly the double-truncation bug.
+		await targetPage.setViewport({ width: 360, height: 600 })
+		const fit = await targetPage.evaluate(() => {
+			const badge = document.querySelector('[data-testid="account-imported-badge"]') as HTMLElement | null
+			if (!badge?.parentElement?.parentElement) return null
+			const line = badge.parentElement
+			const wrapper = line.parentElement as HTMLElement
+			const tail = line.lastElementChild as HTMLElement
+			return {
+				badgeClipped: badge.scrollWidth > badge.clientWidth,
+				tailClipped: tail.scrollWidth > tail.clientWidth,
+				lineClipped: line.scrollWidth > line.clientWidth + 1,
+				wrapperClipped: wrapper.scrollWidth > wrapper.clientWidth + 1,
+				tailLength: (tail.textContent ?? "").length,
+			}
+		})
+		expect(fit).not.toBeNull()
+		expect(fit?.badgeClipped).toBe(false)
+		expect(fit?.tailClipped).toBe(false)
+		expect(fit?.lineClipped).toBe(false)
+		expect(fit?.wrapperClipped).toBe(false)
+		expect(fit?.tailLength).toBe(4)
+
 		// The imported address equals the source account's address (the round-trip's point).
 		const importedAddress = previewed as string
 
