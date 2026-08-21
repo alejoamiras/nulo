@@ -533,6 +533,57 @@ describe("ProfileService integration", () => {
 			await expect(service.changeProfilePassword(a.id, "shared-pass1", "new-pass12")).rejects.toThrow()
 		}, 30_000)
 
+		test("a WHOLE-envelope swap between same-password profiles is rejected at unlock (identity binding)", async () => {
+			// The F-1 attack: overwrite EVERY sealed field of A with B's row — every byte,
+			// including B's authentic tag, is genuine. The MAC binds the ROW's own id, so the
+			// pasted envelope fails verification under A's storage key: no unlock, no identity
+			// adoption, no laundering via password change.
+			const { api, service } = await makeService()
+			const a = await service.createProfile("A", "shared-pass1")
+			await service.lockActiveProfile()
+			const b = await service.createProfile("B", "shared-pass1")
+			await service.lockActiveProfile()
+
+			const rowB = await readRow(api, b.id)
+			await writeRow(api, a.id, { ...rowB, id: a.id, name: "A" })
+
+			let outcome = "unlocked"
+			try {
+				await service.unlockProfile(a.id, "shared-pass1")
+				outcome = "derived-only"
+			} catch {
+				outcome = "rejected"
+			}
+			expect(outcome).not.toBe("unlocked")
+			if (outcome === "derived-only") {
+				// Even the degraded open must not have laundered the swap: change-password
+				// refuses an uncovered DEK.
+				await expect(service.changeProfilePassword(a.id, "shared-pass1", "new-pass12")).rejects.toThrow()
+			}
+			// And the sibling wallet is untouched.
+			const info = await service.unlockProfile(b.id, "shared-pass1")
+			expect(info.name).toBe("B")
+		}, 30_000)
+
+		test("blinding the plaintext walletFingerprint is caught at unlock + password change (F-2)", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const row = await readRow(api, p.id)
+			await writeRow(api, p.id, { ...row, walletFingerprint: "0".repeat(64) })
+
+			// Unlock opens derived-only (visible degradation), never a clean session.
+			let degradedFired = false
+			service.onImportedKeysDegraded.add(() => {
+				degradedFired = true
+			})
+			await service.unlockProfile(p.id, "pass1234")
+			expect(degradedFired).toBe(true)
+			expect(await service.getProfileDek(p.id)).toBeUndefined()
+			// And the tamper cannot be blessed by a password change.
+			await service.lockActiveProfile()
+			await expect(service.changeProfilePassword(p.id, "pass1234", "new-pass12")).rejects.toThrow()
+		}, 30_000)
+
 		test("transplanting another profile's master (secret) is caught by the whole-envelope bearer MAC", async () => {
 			const { api, service } = await makeService() // non-strict → a bearer is persisted
 			const b = await service.createProfile("B", "shared-pass1")
