@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.27;
 
-// [F-G] BLACKHAT PoC — UniswapFuelSwap route-validation gap, proven against the CANONICAL
-// mainnet V4 PoolManager (deployed bytecode; no v4-core source import → no solc pin clash).
+// [F-G] BLACKHAT PoC — UniswapFuelSwap settlement vs route shapes, proven against the REAL
+// Sepolia V4 PoolManager (deployed bytecode; no v4-core source import → no solc pin clash).
 //
-// The route [{X/native}, {native/FJ}] passes _validateRoute (the mid-path native hop looks
-// "continuous": outI == inNext == address(0)), but Case C settlement takes WETH against a
-// NATIVE-ETH delta — the unlock can never settle and the whole swap reverts. Fail-closed,
-// self-DoS only: any permissionless caller crafting this shape burns their own gas.
+// HISTORY: pre-fix, the route [{X/native}, {native/FJ}] passed _validateRoute (the mid-path
+// native hop looks "continuous": outI == inNext == address(0)) but Case-C settlement took WETH
+// against a NATIVE-ETH delta — the swap always reverted. The delta-driven settlement fix makes
+// the shape execute CORRECTLY: mid-path native deltas net to zero and need no transfer, so the
+// swap is exact-in/exact-out with no residue. These tests pin that behavior on the real PM.
 
 import {Test} from "forge-std/Test.sol";
 import {UniswapFuelSwap} from "../src/UniswapFuelSwap.sol";
@@ -190,16 +191,21 @@ contract BlackhatV4ForkTest is Test {
         harness.exposeValidate(address(tokenX), path, dirs); // no revert = accepted
     }
 
-    /// Executing it fails CLOSED at unlock exit (CurrencyNotSettled).
-    function test_FG_executionFailsClosed() public {
+    /// Post-fix, the previously-hostile shape SETTLES EXACTLY: X in → FJ out, nothing stranded.
+    function test_FG_midNativeRouteSettlesExactly() public {
         (PoolKey[] memory path, bool[] memory dirs) = _hostilePath();
         tokenX.mint(address(this), 100 ether);
         tokenX.approve(address(fuelSwap), 100 ether);
-        // Fail-closed: the unexecutable shape can never complete. It dies inside settlement
-        // (take() against a currency that never entered the PoolManager -> reserve underflow)
-        // rather than at unlock exit — either way the caller loses only gas.
-        vm.expectRevert();
-        fuelSwap.swap(address(tokenX), 100 ether, 1 wei, path, dirs);
+        uint256 fjBefore = mockFj.balanceOf(address(this));
+        uint256 xBefore = tokenX.balanceOf(address(this));
+        uint256 out = fuelSwap.swap(address(tokenX), 100 ether, 1 wei, path, dirs);
+        assertGt(out, 0, "route must produce output");
+        assertEq(mockFj.balanceOf(address(this)) - fjBefore, out, "caller receives exactly the reported output");
+        assertEq(tokenX.balanceOf(address(this)), xBefore - 100 ether, "caller paid exactly the input");
+        // No residue anywhere: the swap contract must hold zero of every touched asset.
+        assertEq(tokenX.balanceOf(address(fuelSwap)), 0, "no X dust in the swap contract");
+        assertEq(mockFj.balanceOf(address(fuelSwap)), 0, "no FJ dust in the swap contract");
+        assertEq(address(fuelSwap).balance, 0, "no ETH dust in the swap contract");
     }
 
 /// Sanity: a LEGIT all-native-final route (single-hop WETH→native→FJ) still works on the

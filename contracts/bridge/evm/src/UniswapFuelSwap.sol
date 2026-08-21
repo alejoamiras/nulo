@@ -119,8 +119,11 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
 
     /**
      * @notice PoolManager callback — executes swaps inside the unlock context.
-     * @dev Only callable by the PoolManager. Performs multi-hop swaps using
-     *      flash accounting (deltas settled at the end, no intermediate transfers).
+     * @dev Only callable by the PoolManager. Performs multi-hop swaps using flash accounting, then
+     *      settles EXACTLY the accumulated per-currency deltas. Deriving settlement from the
+     *      deltas (instead of pattern-matching on route shape) is what makes every validated
+     *      route settle correctly: mid-path native handoffs net to zero and need no transfer, and
+     *      a WETH→native final boundary is bridged by unwrapping only what the last hop owes.
      */
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
         require(msg.sender == address(poolManager), "UniswapFuelSwap: unauthorized callback");
@@ -132,17 +135,16 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
             bool[] memory zeroForOnes
         ) = abi.decode(data, (address, uint256, PoolKey[], bool[]));
 
-        bool lastPoolNative = _hasNativeEth(path[path.length - 1]);
+        // Touched currencies and their net deltas (positive = PM owes us, negative = we owe PM).
+        // A route touches at most 2*path.length + 1 distinct currencies; bound accordingly.
+        address[] memory currencies = new address[](2 * path.length + 1);
+        int256[] memory deltas = new int256[](currencies.length);
+        uint256 touched;
+
         uint256 currentAmount = inputAmount;
-        uint256 ethBridgeAmount;
 
         // ── Execute each hop ─────────────────────────────────────────
         for (uint256 i = 0; i < path.length; i++) {
-            // Track amount entering last (native ETH) hop for WETH→ETH bridging
-            if (lastPoolNative && i == path.length - 1) {
-                ethBridgeAmount = currentAmount;
-            }
-
             // Exact input swap: negative amountSpecified = exact input
             BalanceDelta delta = poolManager.swap(
                 path[i],
@@ -160,60 +162,60 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
             int128 outputDelta = zeroForOnes[i] ? delta.amount1() : delta.amount0();
             require(outputDelta > 0, "UniswapFuelSwap: non-positive output");
             currentAmount = uint256(int256(outputDelta));
+
+            bool zfo = zeroForOnes[i];
+            touched = _accumulate(currencies, deltas, touched, _side(path[i], zfo, true), int256(zfo ? delta.amount0() : delta.amount1()));
+            touched = _accumulate(currencies, deltas, touched, _side(path[i], zfo, false), int256(zfo ? delta.amount1() : delta.amount0()));
         }
 
-        // ── Settlement ───────────────────────────────────────────────
-        _settle(inputToken, inputAmount, lastPoolNative, ethBridgeAmount, path);
-
-        // Take output FeeJuice (always ERC-20)
-        poolManager.take(Currency.wrap(feeJuice), address(this), currentAmount);
+        // ── Settlement: takes first (so bridged WETH is in hand), then pays ──
+        for (uint256 i = 0; i < touched; i++) {
+            if (deltas[i] > 0) poolManager.take(Currency.wrap(currencies[i]), address(this), uint256(deltas[i]));
+        }
+        for (uint256 i = 0; i < touched; i++) {
+            if (deltas[i] >= 0) continue;
+            uint256 owed = uint256(-deltas[i]);
+            if (currencies[i] == address(0)) {
+                // Native ETH owed: bridge from taken WETH when the route's final boundary was the
+                // sanctioned WETH unwrap; validation guarantees WETH coverage whenever native is
+                // owed by a first hop (input must be WETH) or a final boundary.
+                require(IERC20(weth).balanceOf(address(this)) >= owed, "UniswapFuelSwap: weth bridge shortfall");
+                IWETH(weth).withdraw(owed);
+                poolManager.settle{value: owed}();
+            } else {
+                poolManager.sync(Currency.wrap(currencies[i]));
+                IERC20(currencies[i]).safeTransfer(address(poolManager), owed);
+                poolManager.settle();
+            }
+        }
 
         return abi.encode(currentAmount);
     }
 
-    // ─── Settlement Logic ────────────────────────────────────────────
+    /// @dev Input/output currency of hop `i` given its direction.
+    function _side(PoolKey memory key, bool zeroForOne, bool inputSide) internal pure returns (address) {
+        bool pickZero = inputSide ? zeroForOne : !zeroForOne;
+        return Currency.unwrap(pickZero ? key.currency0 : key.currency1);
+    }
 
-    /**
-     * @dev Settle all input-side deltas depending on route type.
-     *
-     *   Case A — All ERC-20 route (no native ETH):
-     *     Transfer input token to PoolManager, settle.
-     *
-     *   Case B — Single-hop native (WETH → ETH/AZTEC pool):
-     *     Unwrap WETH to ETH, settle with msg.value.
-     *
-     *   Case C — Multi-hop, last pool native (e.g. USDC → WETH, then ETH/AZTEC):
-     *     Settle input ERC-20 for first hop(s), take intermediate WETH,
-     *     unwrap WETH to ETH, settle ETH for last hop.
-     */
-    function _settle(
-        address inputToken,
-        uint256 inputAmount,
-        bool lastPoolNative,
-        uint256 ethBridgeAmount,
-        PoolKey[] memory path
-    ) internal {
-        if (!lastPoolNative) {
-            // Case A: All ERC-20 — settle input token directly
-            poolManager.sync(Currency.wrap(inputToken));
-            IERC20(inputToken).safeTransfer(address(poolManager), inputAmount);
-            poolManager.settle();
-        } else if (path.length == 1) {
-            // Case B: Single-hop native — contract holds WETH from swap(), unwrap and settle
-            IWETH(weth).withdraw(inputAmount);
-            poolManager.settle{value: inputAmount}();
-        } else {
-            // Case C: Multi-hop, last pool native
-            // 1. Settle the input ERC-20 for the first hop(s)
-            poolManager.sync(Currency.wrap(inputToken));
-            IERC20(inputToken).safeTransfer(address(poolManager), inputAmount);
-            poolManager.settle();
-
-            // 2. Take intermediate WETH from PoolManager, unwrap, settle ETH
-            poolManager.take(Currency.wrap(weth), address(this), ethBridgeAmount);
-            IWETH(weth).withdraw(ethBridgeAmount);
-            poolManager.settle{value: ethBridgeAmount}();
+    /// @dev Append `delta` to `currency`'s running total; registers the currency on first touch.
+    function _accumulate(
+        address[] memory currencies,
+        int256[] memory deltas,
+        uint256 touched,
+        address currency,
+        int256 delta
+    ) internal pure returns (uint256) {
+        if (delta == 0) return touched;
+        for (uint256 i = 0; i < touched; i++) {
+            if (currencies[i] == currency) {
+                deltas[i] += delta;
+                return touched;
+            }
         }
+        currencies[touched] = currency;
+        deltas[touched] = delta;
+        return touched + 1;
     }
 
     // ─── Route Validation ──────────────────────────────────────────
@@ -275,11 +277,6 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
-
-    function _hasNativeEth(PoolKey memory key) internal pure returns (bool) {
-        return Currency.unwrap(key.currency0) == address(0)
-            || Currency.unwrap(key.currency1) == address(0);
-    }
 
     // ─── Emergency Sweep ─────────────────────────────────────────────
 
