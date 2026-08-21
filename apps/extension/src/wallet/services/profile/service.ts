@@ -117,7 +117,20 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * to get the same secret would be a UX regression — we cache the recovery
 	 * secret here in memory only, never persisted, cleared on SW restart.
 	 */
-	private readonly pendingRestoreSecrets = new Map<string, { secret: MasterSecretBytes; dek: ImportedKeysDek; capturedAt: number }>()
+	private readonly pendingRestoreSecrets = new Map<
+		string,
+		{
+			secret: MasterSecretBytes
+			dek: ImportedKeysDek
+			capturedAt: number
+			/** The security-bearing row fields as restore() wrote them. Finalize compares the
+			 *  live row against this snapshot before a clean open — an A1 writer editing
+			 *  `dekSealed`/`credentialId`/`pxeGeneration` between restore and finalize must not
+			 *  get a clean session carrying the stashed master (the fingerprint binding alone
+			 *  would miss those fields). */
+			expected: { credentialId: string; dekSealed: string; pxeGeneration: string; walletFingerprint: string }
+		}
+	>()
 
 	/**
 	 * TTL-bound, memory-only source→destination DEK rewrap context (final-audit condition).
@@ -2344,7 +2357,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 						// maps take ownership — DO NOT zero the stashed buffers in finally.
 						this.sweepStalePendingRestore(Date.now(), id)
 						stashDek = asImportedKeysDek(new Uint8Array(destDekLocal))
-						this.pendingRestoreSecrets.set(id, { secret: recovery.secret, dek: stashDek, capturedAt: Date.now() })
+						this.pendingRestoreSecrets.set(id, {
+							secret: recovery.secret,
+							dek: stashDek,
+							capturedAt: Date.now(),
+							expected: {
+								credentialId: newProfile.credentialId,
+								dekSealed: newProfile.dekSealed,
+								pxeGeneration: newProfile.pxeGeneration,
+								walletFingerprint: newProfile.walletFingerprint,
+							},
+						})
 						storedPending = true
 						this.pendingDekRewraps.set(id, { sourceDek: sourceDekLocal, destinationDek: destDekLocal, capturedAt: Date.now() })
 						storedContext = true
@@ -2517,11 +2540,18 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			this.pendingRestoreSecrets.delete(id)
 			// Same binding every other passkey open enforces: a tamper between restore() and
 			// this finalize (the row sat unlocked in storage the whole time) must not yield a
-			// clean session — recompute the fingerprint from the stashed master and degrade
-			// exactly like the password side on mismatch.
+			// clean session — compare the live row's security fields against the restore-time
+			// snapshot AND recompute the fingerprint from the stashed master; degrade exactly
+			// like the password side on any mismatch.
 			let dek: ImportedKeysDek | null = pending.dek
 			try {
-				if (profile.walletFingerprint !== (await computeWalletFingerprint(pending.secret))) {
+				const intact =
+					profile.credentialId === pending.expected.credentialId &&
+					profile.dekSealed === pending.expected.dekSealed &&
+					profile.pxeGeneration === pending.expected.pxeGeneration &&
+					profile.walletFingerprint === pending.expected.walletFingerprint &&
+					profile.walletFingerprint === (await computeWalletFingerprint(pending.secret))
+				if (!intact) {
 					zeroize(pending.dek)
 					dek = null
 				}
@@ -2533,7 +2563,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				this.logger.log(
 					this.name,
 					LogLevel.Error,
-					"passkey wallet fingerprint mismatch at finalizeRestore — opening derived-only",
+					"passkey row changed between restore and finalizeRestore — opening derived-only",
 					id,
 				)
 			}

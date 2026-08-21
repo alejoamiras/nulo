@@ -270,21 +270,29 @@ describe("EntityStorage", () => {
 			expect(await api.storage.local.get("profiles@A")).toHaveProperty("profiles@A")
 		})
 
-		test("numeric mode: canonical decimal form of a number/string id must equal the suffix", async () => {
+		test("numeric mode: positive safe integer whose canonical decimal form equals the suffix", async () => {
 			const guarded = new EntityStorage<Identified>("journal", api.storage.local, undefined, {
 				requireKeyIdentityMatch: true,
 				keyIdentityMode: "numeric",
 			})
 			await api.storage.local.set({
 				"journal@1": JSON.stringify({ id: 1, name: "one" }),
-				"journal@2": JSON.stringify({ id: "2", name: "two-as-string" }),
 				"journal@9": JSON.stringify({ id: 5, name: "aliased" }),
 				"journal@3": JSON.stringify({ name: "no-id" }),
+				"journal@4": JSON.stringify({ id: -4, name: "negative" }),
+				"journal@5.5": JSON.stringify({ id: 5.5, name: "fractional" }),
+				"journal@1000000000000000000000": JSON.stringify({ id: 1e21, name: "unsafe-exponential" }),
+				"journal@0": JSON.stringify({ id: 0, name: "zero-never-minted" }),
+				"journal@2x": JSON.stringify({ id: "2", name: "string-id-under-numeric-mode" }),
 			})
 			expect(await guarded.get("1")).toEqual({ id: 1, name: "one" })
-			expect(await guarded.get("2")).toEqual({ id: "2", name: "two-as-string" })
 			expect(await guarded.get("9")).toBeUndefined()
 			expect(await guarded.get("3")).toBeUndefined()
+			expect(await guarded.get("4")).toBeUndefined()
+			expect(await guarded.get("5.5")).toBeUndefined()
+			expect(await guarded.get("1000000000000000000000")).toBeUndefined()
+			expect(await guarded.get("0")).toBeUndefined()
+			expect(await guarded.get("2x")).toBeUndefined()
 		})
 
 		test("without the flag, mismatched embedded ids keep reading (other roots rely on this)", async () => {
