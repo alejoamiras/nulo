@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { fuelRecipientFor } from "@/lib/fuel-target"
 import { InboxAbi } from "@aztec/l1-artifacts"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
@@ -863,7 +864,7 @@ export function useDepositFlow() {
 					aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
 					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
 					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
-					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
+					fuelRecipient: fuelRecipientFor(isPrivate, recipient),
 					tokenSecretHash: id as `0x${string}`,
 					fuelSecretHash: fuelPre.secretHashHex as `0x${string}`,
 					minFuelOutput: fuelPre.minOutput,
