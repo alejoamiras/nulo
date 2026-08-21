@@ -23,6 +23,7 @@ import {
 	isSealTrusted,
 	markSealTrusted,
 	minOutputForSlippage,
+	PERMIT_DEADLINE_SECONDS,
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
 	parseFeeJuiceDeposit,
@@ -851,7 +852,7 @@ export function useDepositFlow() {
 
 				setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
 				const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-				const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+				const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 				const witness: BridgeWitness = {
 					tokenPortal: L1_PORTAL,
 					bridgeToken: L1_USDC,
@@ -986,7 +987,7 @@ export function useDepositFlow() {
 
 			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 			const bridgeWitness: BridgeWitness = {
 				tokenPortal: L1_PORTAL,
 				bridgeToken: L1_USDC,
