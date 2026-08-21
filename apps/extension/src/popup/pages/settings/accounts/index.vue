@@ -105,7 +105,7 @@ const handleCopyAddress = (target) => {
 								</Text>
 								<Text size="12" weight="500" color="tertiary">&nbsp;&#183;&nbsp;</Text>
 							</template>
-							{{ trimAddress(account.address, 6, 4, "...") }}
+							{{ trimAddress(account.address, account.type === AccountType.Imported ? 4 : 6, 4, "...") }}
 						</template>
 						<template #right>
 							<Flex align="center" gap="8">

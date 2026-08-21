@@ -159,7 +159,7 @@ onBeforeUnmount(() => {
 	previewAddress.value = ""
 })
 
-const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import"))
+const collapsingLabel = "Import Account"
 </script>
 
 <template>
@@ -220,7 +220,7 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 				</ItemsContainer>
 			</div>
 
-			<div class="export_section">
+			<div class="export_section_last">
 				<span class="export_section_label">Account name</span>
 				<Input
 					label="Name"
