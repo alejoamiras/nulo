@@ -96,16 +96,17 @@ const handleCopyAddress = (target) => {
 						data-testid="manage-accounts-row"
 						:data-account-name="account.name"
 					>
-						<!-- Imported marker lives on the DESCRIPTION line (owner pick, option B): the
-						     name-line chip cost ~64px and truncated names to a handful of characters. -->
+						<!-- Imported marker on the DESCRIPTION line (owner picks: option B, voice V4): the
+						     whole line is one mono string in the address's own tone, so the marker reads as
+						     metadata rather than decoration. Imported rows trim tighter (4+4) so our trim is
+						     the only truncation. -->
 						<template #description>
-							<template v-if="account.type === AccountType.Imported">
-								<Text size="12" weight="600" color="sand" :class="$style.imported_marker" data-testid="account-imported-badge">
-									Imported
-								</Text>
-								<Text size="12" weight="500" color="tertiary">&nbsp;&#183;&nbsp;</Text>
-							</template>
-							{{ trimAddress(account.address, account.type === AccountType.Imported ? 4 : 6, 4, "...") }}
+							<Text size="11" weight="500" color="tertiary" mono>
+								<template v-if="account.type === AccountType.Imported">
+									<span data-testid="account-imported-badge">imported</span>&nbsp;&#183;&nbsp;
+								</template>
+								{{ trimAddress(account.address, account.type === AccountType.Imported ? 4 : 6, 4, "...") }}
+							</Text>
 						</template>
 						<template #right>
 							<Flex align="center" gap="8">
