@@ -2515,12 +2515,37 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				throw new Error("No pending restore secret for passkey profile")
 			}
 			this.pendingRestoreSecrets.delete(id)
+			// Same binding every other passkey open enforces: a tamper between restore() and
+			// this finalize (the row sat unlocked in storage the whole time) must not yield a
+			// clean session — recompute the fingerprint from the stashed master and degrade
+			// exactly like the password side on mismatch.
+			let dek: ImportedKeysDek | null = pending.dek
 			try {
-				await this.openSessionVerified(profile, pending.secret, undefined, pending.dek)
+				if (profile.walletFingerprint !== (await computeWalletFingerprint(pending.secret))) {
+					zeroize(pending.dek)
+					dek = null
+				}
+			} catch {
+				zeroize(pending.dek)
+				dek = null
+			}
+			if (!dek) {
+				this.logger.log(
+					this.name,
+					LogLevel.Error,
+					"passkey wallet fingerprint mismatch at finalizeRestore — opening derived-only",
+					id,
+				)
+			}
+			try {
+				await this.openSessionVerified(profile, pending.secret, undefined, dek ?? undefined)
+				if (!dek) {
+					this.emit("onImportedKeysDegraded", this.getProfileInfo(profile))
+				}
 				return this.getProfileInfo(profile)
 			} finally {
 				zeroize(pending.secret)
-				zeroize(pending.dek)
+				zeroize(dek)
 			}
 		})
 	}

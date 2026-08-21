@@ -245,10 +245,10 @@ describe("EntityStorage", () => {
 	/** The id/key consistency guard (opt-in) — the embedded-id transplant bypass closure. */
 	describe("requireKeyIdentityMatch (opt-in)", () => {
 		interface Identified {
-			id?: string
+			id?: string | number
 			name: string
 		}
-		test("a row whose embedded id disagrees with its storage key reads as undefined", async () => {
+		test('strict mode ("string"): mismatched, missing, or non-string ids read as undefined', async () => {
 			const guarded = new EntityStorage<Identified>("profiles", api.storage.local, undefined, {
 				requireKeyIdentityMatch: true,
 			})
@@ -256,14 +256,35 @@ describe("EntityStorage", () => {
 				"profiles@A": JSON.stringify({ id: "B", name: "Bob" }),
 				"profiles@C": JSON.stringify({ id: "C", name: "Carol" }),
 				"profiles@D": JSON.stringify({ name: "NoId" }),
+				"profiles@E": JSON.stringify({ id: 5, name: "NumericIdUnderStringRoot" }),
+				"profiles@6": JSON.stringify({ id: 6, name: "NumericIdMatchingButNonString" }),
 			})
 			expect(await guarded.get("A")).toBeUndefined()
+			expect(await guarded.get("D")).toBeUndefined()
+			expect(await guarded.get("E")).toBeUndefined()
+			expect(await guarded.get("6")).toBeUndefined()
 			expect(await guarded.get("C")).toEqual({ id: "C", name: "Carol" })
-			expect(await guarded.get("D")).toEqual({ name: "NoId" })
 			const all = Object.fromEntries(await guarded.getAll())
-			expect(Object.keys(all)).toEqual(["C", "D"])
+			expect(Object.keys(all)).toEqual(["C"])
 			// The row is hidden, never deleted — repair paths can still see it.
 			expect(await api.storage.local.get("profiles@A")).toHaveProperty("profiles@A")
+		})
+
+		test("numeric mode: canonical decimal form of a number/string id must equal the suffix", async () => {
+			const guarded = new EntityStorage<Identified>("journal", api.storage.local, undefined, {
+				requireKeyIdentityMatch: true,
+				keyIdentityMode: "numeric",
+			})
+			await api.storage.local.set({
+				"journal@1": JSON.stringify({ id: 1, name: "one" }),
+				"journal@2": JSON.stringify({ id: "2", name: "two-as-string" }),
+				"journal@9": JSON.stringify({ id: 5, name: "aliased" }),
+				"journal@3": JSON.stringify({ name: "no-id" }),
+			})
+			expect(await guarded.get("1")).toEqual({ id: 1, name: "one" })
+			expect(await guarded.get("2")).toEqual({ id: "2", name: "two-as-string" })
+			expect(await guarded.get("9")).toBeUndefined()
+			expect(await guarded.get("3")).toBeUndefined()
 		})
 
 		test("without the flag, mismatched embedded ids keep reading (other roots rely on this)", async () => {

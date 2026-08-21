@@ -23,6 +23,7 @@ export class EntityStorage<T> {
 	private readonly root: string
 	private readonly parse?: (raw: unknown) => T
 	private readonly requireKeyIdentityMatch: boolean
+	private readonly keyIdentityMode: "string" | "numeric"
 
 	/**
 	 * Callers must pass a concrete `MinimalStorageArea` (e.g.
@@ -41,17 +42,25 @@ export class EntityStorage<T> {
 	 * embedded `id` disagrees with the storage-key suffix reads as undefined. Only roots whose
 	 * SECURITY decisions trust the embedded id enable this — several roots legitimately key rows
 	 * by something other than the entity id (e.g. dapp sessions keyed per context).
+	 *
+	 * `keyIdentityMode` picks how the embedded id must match the suffix:
+	 *   - `"string"` (default): embedded id must be a STRING byte-equal to the suffix. For roots
+	 *     whose ids are hex strings (profiles).
+	 *   - `"numeric"`: the embedded id may be a number or numeric string whose canonical decimal
+	 *     form equals the suffix (`String(embedded) === suffix`). For roots minting numeric
+	 *     sequence ids (e.g. the auth-wit journal).
 	 */
 	public constructor(
 		root: string,
 		area: MinimalStorageArea,
 		parse?: (raw: unknown) => T,
-		options?: { requireKeyIdentityMatch?: boolean },
+		options?: { requireKeyIdentityMatch?: boolean; keyIdentityMode?: "string" | "numeric" },
 	) {
 		this.root = root
 		this.storage = area
 		this.parse = parse
 		this.requireKeyIdentityMatch = options?.requireKeyIdentityMatch === true
+		this.keyIdentityMode = options?.keyIdentityMode ?? "string"
 	}
 
 	/**
@@ -119,7 +128,13 @@ export class EntityStorage<T> {
 		if (!this.requireKeyIdentityMatch) return entity
 		const suffix = fullKey.substring(this.root.length + 1)
 		const embedded = (entity as { id?: unknown }).id
-		if (embedded !== undefined && embedded !== suffix) {
+		// Strict: opt-in roots trust the embedded id for security decisions. A missing or
+		// wrongly-typed id is just as hostile as a wrong one.
+		const ok =
+			this.keyIdentityMode === "numeric"
+				? (typeof embedded === "number" || typeof embedded === "string") && String(embedded) === suffix
+				: typeof embedded === "string" && embedded === suffix
+		if (!ok) {
 			console.error(`EntityStorage[${this.root}]: row "${fullKey}" embeds id "${String(embedded)}" — KEEPING (not deleting)`)
 			return undefined
 		}
