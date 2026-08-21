@@ -30,13 +30,15 @@ const appStore = useAppStore()
 
 const router = useRouter()
 
+const DEFAULT_ACCOUNT_NAME = "Imported account"
+
 const fileBody = ref("")
 const fileName = ref("")
 const password = ref("")
+const accountName = ref(DEFAULT_ACCOUNT_NAME)
 const previewAddress = ref("")
 const error = ref("")
 const isBusy = ref(false)
-const showPaste = ref(false)
 
 /** Async-result fence. Every edit AND the unmount bump it; a preview or file read that resolves
  *  under a stale generation is dropped, so an in-flight RPC can neither repopulate a preview the
@@ -48,10 +50,6 @@ let generation = 0
 const isProtectedFile = computed(() => fileBody.value.trim().length > 0 && !fileBody.value.trim().startsWith("{"))
 const needsConfirm = computed(() => previewAddress.value.length > 0)
 
-/** The fileBody watcher clears the chip name on PASTED edits; a pick sets both together, and the
- *  (async-flushed) watcher must not erase the name it just set. */
-let bodySetByPick = false
-
 const handlePickFile = async () => {
 	const gen = generation
 	try {
@@ -59,7 +57,6 @@ const handlePickFile = async () => {
 		if (!picked) return
 		const text = (await picked.text()).trim()
 		if (gen !== generation) return
-		bodySetByPick = true
 		fileBody.value = text
 		fileName.value = picked.name ?? ""
 		error.value = ""
@@ -89,7 +86,7 @@ const handlePreview = async () => {
 
 /** The user confirmed the previewed address; write the account and return to the list. */
 const handleConfirmImport = async () => {
-	if (!needsConfirm.value || isBusy.value) return
+	if (!needsConfirm.value || !accountName.value.trim() || isBusy.value) return
 	isBusy.value = true
 	error.value = ""
 	const gen = generation
@@ -105,6 +102,7 @@ const handleConfirmImport = async () => {
 			fileBody.value.trim(),
 			previewAddress.value,
 			password.value,
+			accountName.value.trim(),
 		)
 		// The import itself is committed service-side; the fences only guard the UI-scope writes.
 		// A confirm resolving after the page died (or after the scope moved) must not push an old
@@ -116,7 +114,10 @@ const handleConfirmImport = async () => {
 		await storageLocalSet({ "nulo:ui:activeAccount": account.address })
 		if (isStale()) return
 		openToast({ label: "Account imported", icon: "check-circle" }, 2_000)
-		router.push("/popup/settings/accounts")
+		// History-aware return (the SubPageHeader back arrow is history-first): a push would leave
+		// this page one Back away from the account list it just finished with.
+		if (window.history.length > 1) router.back()
+		else router.replace("/popup/settings/accounts")
 	} catch (err) {
 		if (isStale()) return
 		error.value = err instanceof Error ? err.message : String(err)
@@ -128,12 +129,10 @@ const handleConfirmImport = async () => {
 // A confirmed address is only valid for the exact body+password it was previewed from. Any edit
 // invalidates it — including a preview RPC still in flight (generation bump) — so the user must
 // re-preview (the service also recomputes and rejects a stale confirmation, but this keeps the UI
-// honest). A pasted edit also unbinds the chip from the previously picked file's name.
-watch([fileBody, password], ([newBody], [oldBody]) => {
+// honest).
+watch([fileBody, password], () => {
 	generation++
 	previewAddress.value = ""
-	if (newBody !== oldBody && fileName.value && !bodySetByPick) fileName.value = ""
-	bodySetByPick = false
 })
 
 // Flipping from a protected body to a plain one orphans the file password; drop it so it cannot
@@ -143,8 +142,8 @@ watch(isProtectedFile, (nowProtected) => {
 })
 
 /** Enter submits the active step, matching the popup this page replaced. Controls that handle
- *  Enter themselves (the file chip, the paste toggle) call preventDefault, so deferring to
- *  `defaultPrevented` keeps one keypress from opening the picker AND previewing at once. */
+ *  Enter themselves (the file row) call preventDefault, so deferring to `defaultPrevented`
+ *  keeps one keypress from opening the picker AND previewing at once. */
 const onKeydown = (e) => {
 	if (e.key !== "Enter" || e.defaultPrevented) return
 	if (needsConfirm.value) handleConfirmImport()
@@ -167,52 +166,22 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 
 <template>
 	<SecretExportLayout heroMain="Import" heroSub="Account" :collapsingLabel="collapsingLabel" backTo="/popup/settings/accounts">
-		<!-- Step 1: the file -->
+		<!-- Step 1: the file (the full-backup restore's picker pattern) -->
 		<template v-if="!needsConfirm">
 			<div class="export_section">
 				<span class="export_section_label">Account file</span>
-				<Flex direction="column" gap="10">
-					<Flex
+				<ItemsContainer flat>
+					<SettingItem
 						@click="handlePickFile"
-						align="center"
-						gap="10"
-						:class="$style.file_chip"
-						role="button"
-						tabindex="0"
-						@keydown.enter.prevent="handlePickFile"
-						@keydown.space.prevent="handlePickFile"
+						title="Choose an account file"
+						:description="fileName || 'Select a .json or .txt file'"
+						icon="key"
+						:iconBgColor="error ? 'red' : fileBody ? 'blue' : 'gray'"
+						chevron
+						:disabled="isBusy"
 						data-testid="import-account-pick-file"
-					>
-						<Icon :name="isProtectedFile ? 'lock' : 'brackets'" size="16" color="secondary" />
-						<Text size="12" weight="600" :color="fileName || fileBody ? 'primary' : 'tertiary'" mono :class="$style.file_name">
-							{{ fileName || (fileBody ? "Pasted file contents" : "Choose a file") }}
-						</Text>
-					</Flex>
-
-					<Text
-						v-if="!showPaste"
-						@click="showPaste = true"
-						size="12"
-						weight="600"
-						color="tertiary"
-						align="center"
-						:class="$style.paste_link"
-						role="button"
-						tabindex="0"
-						@keydown.enter.prevent="showPaste = true"
-						data-testid="import-account-paste-toggle"
-					>
-						or paste the file contents
-					</Text>
-
-					<Input
-						v-if="showPaste"
-						label="File contents"
-						placeholder="Paste the account file contents"
-						data-testid="import-account-body-input"
-						v-model="fileBody"
 					/>
-				</Flex>
+				</ItemsContainer>
 			</div>
 
 			<!-- Step 2 (protected files only): the file password -->
@@ -242,16 +211,19 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 				<ItemsContainer flat>
 					<SettingItem
 						size="large"
-						title="Imported account"
+						:title="accountName.trim() || DEFAULT_ACCOUNT_NAME"
 						:description="trimAddress(previewAddress, 8, 6, '...')"
 						icon="user"
 						raw
 						data-testid="import-account-preview"
+						:data-account-address="previewAddress"
 					/>
 				</ItemsContainer>
-				<Text size="11" color="tertiary" mono :class="$style.full_address" data-testid="import-account-preview-address">
-					{{ previewAddress }}
-				</Text>
+			</div>
+
+			<div class="export_section">
+				<span class="export_section_label">Account name</span>
+				<Input label="Name" placeholder="Name this account" data-testid="import-account-name-input" v-model="accountName" />
 			</div>
 
 			<div class="export_section_last">
@@ -282,41 +254,15 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 				{{ isProtectedFile ? "Unlock File" : "Continue" }}
 			</Button>
 
-			<Button v-else @click="handleConfirmImport" :disabled="isBusy" variant="cta" data-testid="import-account-submit">
+			<Button
+				v-else
+				@click="handleConfirmImport"
+				:disabled="!accountName.trim() || isBusy"
+				variant="cta"
+				data-testid="import-account-submit"
+			>
 				Import Account
 			</Button>
 		</template>
 	</SecretExportLayout>
 </template>
-
-<style module>
-.file_chip {
-	background: var(--card-bg);
-	border: 1px dashed var(--nulo-outline);
-	border-radius: 12px;
-	padding: 14px 12px;
-	cursor: pointer;
-	transition: border-color 0.2s var(--bezier);
-}
-
-.file_chip:hover {
-	border-color: var(--nulo-secondary);
-}
-
-.file_name {
-	overflow-wrap: anywhere;
-}
-
-.paste_link {
-	cursor: pointer;
-}
-
-.paste_link:hover {
-	text-decoration: underline;
-}
-
-.full_address {
-	overflow-wrap: anywhere;
-	padding: 0 4px;
-}
-</style>

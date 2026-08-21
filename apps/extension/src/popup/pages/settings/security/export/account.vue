@@ -272,11 +272,6 @@ onBeforeUnmount(() => {
 						</template>
 					</Banner>
 
-					<Flex align="center" gap="10" :class="$style.file_chip" data-testid="account-file-chip">
-						<Icon :name="fileStatus === 'protected' ? 'lock' : 'brackets'" size="16" color="secondary" />
-						<Text size="12" weight="600" color="primary" mono :class="$style.file_name">{{ fileName }}</Text>
-					</Flex>
-
 					<Flex v-if="selectedAccount?.type === AccountType.Imported" gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
@@ -287,8 +282,9 @@ onBeforeUnmount(() => {
 			</div>
 		</template>
 
-		<!-- Bottom CTA per stage -->
-		<template #bottom>
+		<!-- Bottom CTA per stage. CONDITIONAL template: the picker stage has no CTA, and an empty
+		     slot would still make the layout render its bottom container as a bare border. -->
+		<template v-if="selectedAddress" #bottom>
 			<Button v-if="selectedAddress && !isAgreed" @click="handleAgree" variant="cta" data-testid="agree-continue-btn">
 				Agree &amp; Continue
 			</Button>
@@ -316,16 +312,3 @@ onBeforeUnmount(() => {
 		</template>
 	</SecretExportLayout>
 </template>
-
-<style module>
-.file_chip {
-	background: var(--card-bg);
-	border: 1px dashed var(--nulo-outline);
-	border-radius: 12px;
-	padding: 12px;
-}
-
-.file_name {
-	overflow-wrap: anywhere;
-}
-</style>

@@ -46,7 +46,6 @@ const appStore = useAppStore()
 					<SettingItem title="Recovery Phrase" icon="text" iconBgColor="blue" to="/popup/settings/security/export/seed" data-testid="seed-phrase-link-btn" />
 					<SettingItem
 						title="Account"
-						description="One account as a file"
 						icon="key"
 						iconBgColor="blue"
 						to="/popup/settings/security/export/account"

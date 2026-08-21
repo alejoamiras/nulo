@@ -7,11 +7,15 @@
  * The body is captured in-page with the same `chrome.downloads` stub the backup suites use —
  * account files are uncompressed, so the capture reads the blob as plain text.
  *
- * Import drives `settings/accounts/import`: paste (behind the "or paste" toggle) or the file
- * chooser, the protected-file password when the body sniffs encrypted, preview, confirm.
+ * Import drives `settings/accounts/import`: the file picker row (the page is file-only — bodies
+ * are delivered by writing a temp file and accepting it through the chooser), the protected-file
+ * password when the body sniffs encrypted, preview, confirm.
  *
  * Selector discipline: testids only.
  */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { expect } from "vitest"
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -171,17 +175,32 @@ export async function exportImportedAccountBody(page: Page, encrypt: boolean, pa
 	return runExportStages(page, encrypt, password)
 }
 
-/** Open the import page and paste `body` (via the paste toggle). Runs the PREVIEW step ("Continue"
- *  or "Unlock File" for protected bodies). Returns the previewed address, or null when the page
+/** Open the import page and feed `body` through the FILE picker (the page is file-only now —
+ *  the paste path died with the redesign refinements). Runs the PREVIEW step ("Continue", or
+ *  "Unlock File" for protected bodies). Returns the previewed address, or null when the page
  *  surfaced an error instead. The page is left on the confirm step; `confirmImport` completes it. */
 export async function previewImport(page: Page, body: string, filePassword?: string): Promise<string | null> {
 	await closeStuckPopup(page)
 	await waitForRouteStability(page)
 	await navigateByHash(page, "#/popup/settings/accounts/import", 15_000)
-	await page.waitForSelector('[data-testid="import-account-paste-toggle"]', { visible: true, timeout: 20_000 })
-	await clickByTestId(page, "import-account-paste-toggle")
-	await page.waitForSelector('[data-testid="import-account-body-input"] input', { visible: true, timeout: 15_000 })
-	await replaceInputValue(page, '[data-testid="import-account-body-input"] input', body)
+	await page.waitForSelector('[data-testid="import-account-pick-file"]', { visible: true, timeout: 20_000 })
+
+	// Deliver the body as a real file: write it to a temp path and accept it through the chooser.
+	const dir = mkdtempSync(join(tmpdir(), "nulo-e2e-account-io-"))
+	const filePath = join(dir, "account-import.json")
+	writeFileSync(filePath, body)
+	try {
+		const [chooser] = await Promise.all([page.waitForFileChooser({ timeout: 10_000 }), clickByTestId(page, "import-account-pick-file")])
+		await chooser.accept([filePath])
+		// The row's description reflects the picked file once the page has read it.
+		await page.waitForFunction(
+			() => (document.querySelector('[data-testid="import-account-pick-file"]')?.textContent ?? "").includes("account-import.json"),
+			{ timeout: 15_000, polling: 200 },
+		)
+	} finally {
+		rmSync(dir, { recursive: true, force: true })
+	}
+
 	if (filePassword) {
 		await page.waitForSelector('[data-testid="import-account-password-input"] input', { visible: true, timeout: 15_000 })
 		await replaceInputValue(page, '[data-testid="import-account-password-input"] input', filePassword)
@@ -190,18 +209,18 @@ export async function previewImport(page: Page, body: string, filePassword?: str
 	// Either the confirm step renders (with the recomputed address) or an error does.
 	await page.waitForFunction(
 		() =>
-			document.querySelector('[data-testid="import-account-preview-address"]') !== null ||
+			document.querySelector('[data-testid="import-account-preview"]') !== null ||
 			document.querySelector('[data-testid="import-account-error"]') !== null,
 		{ timeout: 30_000, polling: 200 },
 	)
 	return await page.evaluate(() => {
-		const addr = document.querySelector('[data-testid="import-account-preview-address"]')
-		return addr ? (addr.textContent ?? "").trim() : null
+		const row = document.querySelector('[data-testid="import-account-preview"]')
+		return row ? (row.getAttribute("data-account-address") ?? "").trim() || null : null
 	})
 }
 
 /** Complete an import the caller previewed: click the confirm CTA and wait for the toast. The
- *  page navigates back to Manage Accounts on success. */
+ *  page returns to Manage Accounts on success (history-aware back). */
 export async function confirmImport(page: Page): Promise<void> {
 	await clickByTestId(page, "import-account-submit")
 	await waitForToast(page, "Account imported")

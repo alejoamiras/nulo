@@ -122,14 +122,14 @@ test("the file-chooser import path accepts a written export file", { timeout: 18
 		await clickByTestId(page, "import-account-submit")
 		await page.waitForFunction(
 			() =>
-				document.querySelector('[data-testid="import-account-preview-address"]') !== null ||
+				document.querySelector('[data-testid="import-account-preview"]') !== null ||
 				document.querySelector('[data-testid="import-account-error"]') !== null,
 			{ timeout: 30_000, polling: 200 },
 		)
 		// Same profile ⇒ the account already exists, so this previews fine and would reject at
 		// write; the point here is that the FILE PATH produced a decodable body.
 		const previewed = await page.evaluate(
-			() => document.querySelector('[data-testid="import-account-preview-address"]')?.textContent?.trim() ?? null,
+			() => document.querySelector('[data-testid="import-account-preview"]')?.getAttribute("data-account-address") ?? null,
 		)
 		expect(previewed).toBeTruthy()
 	} finally {

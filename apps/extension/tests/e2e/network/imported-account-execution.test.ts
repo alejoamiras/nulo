@@ -44,7 +44,7 @@ import {
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { registerPasskeyProfile, setupPasskeyVirtualAuth } from "../fixtures/passkey"
-import { confirmImport, exportAccountBody, previewImport } from "../helpers/account-io"
+import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "../helpers/account-io"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined
@@ -144,6 +144,9 @@ test.skipIf(!hasConfig)(
 				const previewed = await previewImport(anchorPopup, accountFile)
 				expect(previewed).toBe(sourceAddress)
 				await confirmImport(anchorPopup)
+				// The success return is history-aware (back to wherever the user entered from), so the
+				// badge assertion navigates to Manage Accounts explicitly.
+				await gotoAccounts(anchorPopup)
 				await anchorPopup.waitForSelector('[data-testid="account-imported-badge"]', { visible: true, timeout: 20_000 })
 
 				// ── Stage 3: full lock → ceremony re-unlock, so the signature below comes from a
