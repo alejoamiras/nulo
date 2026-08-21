@@ -173,6 +173,8 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 				<ItemsContainer flat>
 					<SettingItem
 						@click="handlePickFile"
+						@keydown.enter.prevent="handlePickFile"
+						@keydown.space.prevent="handlePickFile"
 						title="Choose an account file"
 						:description="fileName || 'Select a .json or .txt file'"
 						icon="key"
@@ -223,7 +225,14 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 
 			<div class="export_section">
 				<span class="export_section_label">Account name</span>
-				<Input label="Name" placeholder="Name this account" data-testid="import-account-name-input" v-model="accountName" />
+				<Input
+					label="Name"
+					placeholder="Name this account"
+					:maxLength="40"
+					:disabled="isBusy"
+					data-testid="import-account-name-input"
+					v-model="accountName"
+				/>
 			</div>
 
 			<div class="export_section_last">
