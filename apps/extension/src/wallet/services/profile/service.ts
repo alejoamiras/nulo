@@ -21,7 +21,7 @@ import {
 	asBase64Ciphertext,
 	asImportedKeysDek,
 	asMasterSecretBytes,
-	computeEnvelopeMacV2,
+	computeEnvelopeMacV3,
 	computeWalletFingerprint,
 	deriveMasterFromMnemonic,
 	EncryptionKey,
@@ -29,13 +29,13 @@ import {
 	IMPORTED_DEK_AAD,
 	IMPORTED_KEYS_DEK_LEN,
 	type ImportedKeysDek,
-	type MacEnvelopeV2,
+	type MacEnvelopeV3,
 	type MasterSecretBytes,
 	type Passhash,
 	PasswordSecretBox,
 	sealDekUnderWrapKey,
 	unsealDekUnderWrapKey,
-	verifyEnvelopeMacV2,
+	verifyEnvelopeMacV3,
 	zeroize,
 } from "@nulo/wallet-crypto"
 import { PasskeyService } from "@/wallet/services/passkey/service"
@@ -374,12 +374,15 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 			passhash = sealed.passhash
 			const encrypted = sealed.encrypted
 			const dekSealed = await this.sealDekWithPasshash(passhash, dek)
-			const envelopeMac = await computeEnvelopeMacV2(secret, dek, this.macEnvelopeV2(encrypted, dekSealed))
 			return await this.runExclusive(async () => {
 				// Invariant assertion on fresh CSPRNG entropy (a collision is cryptographically
 				// impossible) — kept uniform with the import/restore paths.
 				const walletFingerprint = await this.assertNotDuplicateWallet(secret, false)
 				const id = await this.nextUnreservedId()
+				// The envelope MAC binds the row's OWN storage key (plus its fingerprint), so it
+				// can only be computed after the id is final — hence inside this locked section,
+				// after allocation. PBKDF2 stays outside; this is microseconds.
+				const envelopeMac = await computeEnvelopeMacV3(id, secret, dek, this.macEnvelopeV3(encrypted, dekSealed, walletFingerprint))
 
 				const profile: Profile = {
 					id,
@@ -486,19 +489,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 						throw new InvalidPasswordError()
 					}
 					// Degradation state machine, rule 2: a DEK-unseal failure OR an envelope-MAC
-					// v2 failure opens DERIVED-ONLY — imported accounts quarantine per-account
+					// v3 failure opens DERIVED-ONLY — imported accounts quarantine per-account
 					// (A4: imported material must never profile-block derived funds; blocking
 					// here would hand a storage-writer a one-field DoS lever), a user-visible
 					// warning fires (the popup listens on onImportedKeysDegraded — never just a
 					// log), and NO bearer is persisted (open() enforces that from the absent dek).
 					dek = await this.unsealDekWithPasshash(passhash, current.dekSealed)
 					if (dek) {
-						const macOk = await verifyEnvelopeMacV2(
+						const macOk = await verifyEnvelopeMacV3(
+							current.id,
 							secret,
 							dek,
-							this.macEnvelopeV2(
+							this.macEnvelopeV3(
 								{ guard: current.guard, secret: current.secret, entropy: current.entropy },
 								current.dekSealed,
+								current.walletFingerprint,
 							),
 							current.envelopeMac,
 						)
@@ -947,13 +952,19 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 				// Dual reseal is atomic with this same pre-persist-verified commit (audit H2):
 				// guard, master, entropy, AND the DEK re-encrypt together — nothing may remain
-				// decryptable under the retired password — and the envelope MAC v2 re-keys over
-				// the new ciphertexts so both verify sites keep holding.
+				// decryptable under the retired password — and the envelope MAC v3 re-keys over
+				// the new ciphertexts (still bound to this row's id + fingerprint) so both verify
+				// sites keep holding.
 				profile.guard = resealed.encrypted.guard
 				profile.secret = resealed.encrypted.secret
 				profile.entropy = resealed.encrypted.entropy
 				profile.dekSealed = newDekSealed
-				profile.envelopeMac = await computeEnvelopeMacV2(secret, dek, this.macEnvelopeV2(resealed.encrypted, newDekSealed))
+				profile.envelopeMac = await computeEnvelopeMacV3(
+					id,
+					secret,
+					dek,
+					this.macEnvelopeV3(resealed.encrypted, newDekSealed, profile.walletFingerprint),
+				)
 				await this.repo.set(id, profile)
 				this.emit("onProfileUpdated", this.getProfileInfo(profile))
 
@@ -1803,9 +1814,17 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 		}
 	}
 
-	/** The whole-envelope MAC v2 preimage for a sealed profile record (all four slots). */
-	private macEnvelopeV2(p: { guard: string; secret: string; entropy: string }, dekSealed: string): MacEnvelopeV2 {
-		return { guard: p.guard, secret: p.secret, entropy: p.entropy, dek: dekSealed }
+	/** The envelope MAC v3 preimage for a sealed profile record: the row's OWN storage key
+	 *  first (kills whole-envelope swaps between same-password profiles — B's authentic
+	 *  envelope pasted under A's id fails verification even though every byte, including the
+	 *  original tag, is genuine), then the four sealed slots, then the plaintext fingerprint
+	 *  (blinding the duplicate guard becomes a detectable tamper). */
+	private macEnvelopeV3(
+		p: { guard: string; secret: string; entropy: string },
+		dekSealed: string,
+		walletFingerprint: string,
+	): MacEnvelopeV3 {
+		return { guard: p.guard, secret: p.secret, entropy: p.entropy, dek: dekSealed, walletFingerprint }
 	}
 
 	/**
@@ -1817,11 +1836,19 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 	 * freshly-valid MAC) or exports material sealed to a key the profile does not own.
 	 */
 	private async envelopeMacValid(
-		p: { guard: string; secret: string; entropy: string; dekSealed: string; envelopeMac: string },
+		p: {
+			id: string
+			guard: string
+			secret: string
+			entropy: string
+			dekSealed: string
+			walletFingerprint: string
+			envelopeMac: string
+		},
 		secret: MasterSecretBytes,
 		dek: ImportedKeysDek,
 	): Promise<boolean> {
-		return verifyEnvelopeMacV2(secret, dek, this.macEnvelopeV2(p, p.dekSealed), p.envelopeMac)
+		return verifyEnvelopeMacV3(p.id, secret, dek, this.macEnvelopeV3(p, p.dekSealed, p.walletFingerprint), p.envelopeMac)
 	}
 
 	/** Seal the imported-keys DEK under the password credential (EncryptionKey — the audited
@@ -1928,7 +1955,7 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 				const id = await this.nextUnreservedId()
 				const encrypted = await this.secretBox.sealWithPasshash(passhash, secret, entropy)
 				const dekSealed = await this.sealDekWithPasshash(passhash, dek)
-				const envelopeMac = await computeEnvelopeMacV2(secret, dek, this.macEnvelopeV2(encrypted, dekSealed))
+				const envelopeMac = await computeEnvelopeMacV3(id, secret, dek, this.macEnvelopeV3(encrypted, dekSealed, walletFingerprint))
 				const profile: Profile = {
 					id,
 					name,
@@ -2123,16 +2150,19 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 							// stay usable via the source→destination rewrap context below.
 							destinationDek = generateImportedKeysDek()
 							const dekSealed = await this.sealDekWithPasshash(passhash, destinationDek)
-							const envelopeMac = await computeEnvelopeMacV2(
-								asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
-								destinationDek,
-								this.macEnvelopeV2(sealed.encrypted, dekSealed),
-							)
 
 							let id = profile.id
 							while ((await this.repo.contains(id)) || this.deletionState.isReserved(id)) {
 								id = await this.repo.generateUniqueId()
 							}
+							// MAC v3 binds the row's OWN id — computed only after the id loop above
+							// settles it.
+							const envelopeMac = await computeEnvelopeMacV3(
+								id,
+								asMasterSecretBytes(plainSecret as Uint8Array<ArrayBuffer>),
+								destinationDek,
+								this.macEnvelopeV3(sealed.encrypted, dekSealed, walletFingerprint),
+							)
 
 							const newProfile: Profile = {
 								id,
@@ -2414,19 +2444,21 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 					await this.assertEntropyMasterPair(unsealed.secret, unsealed.entropy)
 					passhash = await EncryptionKey.getPasshash(password)
 					// Full degradation state machine at this open too (P4 rider High): the row was
-					// minted by restore(), so a DEK-unseal OR envelope-MAC-v2 failure here means a
+					// minted by restore(), so a DEK-unseal OR envelope-MAC-v3 failure here means a
 					// tamper landed BETWEEN restore and finalize — this path opens a bearer-backed
 					// session, so skipping the MAC check would hand a storage attacker a
 					// non-degraded session. On either failure: discard the DEK, open derived-only
 					// (no bearer), emit the visible warning.
 					dek = await this.unsealDekWithPasshash(passhash, profile.dekSealed)
 					if (dek) {
-						const macOk = await verifyEnvelopeMacV2(
+						const macOk = await verifyEnvelopeMacV3(
+							id,
 							unsealed.secret,
 							dek,
-							this.macEnvelopeV2(
+							this.macEnvelopeV3(
 								{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy },
 								profile.dekSealed,
+								profile.walletFingerprint,
 							),
 							profile.envelopeMac,
 						)
