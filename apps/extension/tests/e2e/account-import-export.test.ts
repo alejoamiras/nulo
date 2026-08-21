@@ -19,7 +19,7 @@
 import { rmSync } from "node:fs"
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
-import { clickByTestId, launchExtension, openPopup, registerProfile, test, waitForHash } from "./fixtures/extension"
+import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 import { confirmImport, exportAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 import { writeBackupToTemp } from "./helpers/import-drivers"
 
@@ -94,6 +94,8 @@ test("a DUPLICATE account import is rejected", { timeout: 180_000 }, async ({ re
 	// duplicate (importAccount's dup check is (profileId, chainId)-scoped).
 	const previewed = await previewImport(page, body)
 	expect(previewed).toBeTruthy() // preview only decodes; the write is what rejects
+	// The name is required (no default) and gates the CTA; the rejection happens at the write.
+	await replaceInputValue(page, '[data-testid="import-account-name-input"] input', "Dup Probe")
 	await clickByTestId(page, "import-account-submit")
 	await page.waitForSelector('[data-testid="import-account-error"]', { visible: true, timeout: 20_000 })
 	const errorText = await page.evaluate(() => document.querySelector('[data-testid="import-account-error"]')?.textContent ?? "")

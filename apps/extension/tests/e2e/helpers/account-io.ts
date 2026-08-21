@@ -219,9 +219,11 @@ export async function previewImport(page: Page, body: string, filePassword?: str
 	})
 }
 
-/** Complete an import the caller previewed: click the confirm CTA and wait for the toast. The
- *  page returns to Manage Accounts on success (history-aware back). */
-export async function confirmImport(page: Page): Promise<void> {
+/** Complete an import the caller previewed: type the account NAME (required, no default), click
+ *  the confirm CTA, and wait for the toast. The page returns history-aware on success. */
+export async function confirmImport(page: Page, name = "Imported account"): Promise<void> {
+	await page.waitForSelector('[data-testid="import-account-name-input"] input', { visible: true, timeout: 15_000 })
+	await replaceInputValue(page, '[data-testid="import-account-name-input"] input', name)
 	await clickByTestId(page, "import-account-submit")
 	await waitForToast(page, "Account imported")
 }

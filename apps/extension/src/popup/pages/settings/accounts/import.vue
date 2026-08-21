@@ -30,12 +30,10 @@ const appStore = useAppStore()
 
 const router = useRouter()
 
-const DEFAULT_ACCOUNT_NAME = "Imported account"
-
 const fileBody = ref("")
 const fileName = ref("")
 const password = ref("")
-const accountName = ref(DEFAULT_ACCOUNT_NAME)
+const accountName = ref("")
 const previewAddress = ref("")
 const error = ref("")
 const isBusy = ref(false)
@@ -166,9 +164,11 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 
 <template>
 	<SecretExportLayout heroMain="Import" heroSub="Account" :collapsingLabel="collapsingLabel" backTo="/popup/settings/accounts">
-		<!-- Step 1: the file (the full-backup restore's picker pattern) -->
+		<!-- Step 1: the file (the full-backup restore's picker pattern). The section divider only
+		     exists when the password section actually follows — `export_section`'s border-bottom
+		     separates it from a NEXT section, and a plain file has none. -->
 		<template v-if="!needsConfirm">
-			<div class="export_section">
+			<div :class="isProtectedFile ? 'export_section' : 'export_section_last'">
 				<span class="export_section_label">Account file</span>
 				<ItemsContainer flat>
 					<SettingItem
@@ -184,10 +184,14 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 						data-testid="import-account-pick-file"
 					/>
 				</ItemsContainer>
+				<Flex v-if="error" align="center" gap="6" data-testid="import-account-error">
+					<Icon name="warning" size="12" color="red" />
+					<Text size="12" weight="600" color="red" height="140">{{ error }}</Text>
+				</Flex>
 			</div>
 
 			<!-- Step 2 (protected files only): the file password -->
-			<div v-if="isProtectedFile" class="export_section">
+			<div v-if="isProtectedFile" class="export_section_last">
 				<span class="export_section_label">Protected file</span>
 				<Input
 					label="File password"
@@ -196,13 +200,6 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 					data-testid="import-account-password-input"
 					v-model="password"
 				/>
-			</div>
-
-			<div class="export_section_last">
-				<Flex v-if="error" align="center" gap="6" data-testid="import-account-error">
-					<Icon name="warning" size="12" color="red" />
-					<Text size="12" weight="600" color="red" height="140">{{ error }}</Text>
-				</Flex>
 			</div>
 		</template>
 
@@ -213,7 +210,7 @@ const collapsingLabel = computed(() => (needsConfirm.value ? "Confirm" : "Import
 				<ItemsContainer flat>
 					<SettingItem
 						size="large"
-						:title="accountName.trim() || DEFAULT_ACCOUNT_NAME"
+						:title="accountName.trim() || 'Account'"
 						:description="trimAddress(previewAddress, 8, 6, '...')"
 						icon="user"
 						raw
