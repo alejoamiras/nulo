@@ -46,9 +46,11 @@ export class EntityStorage<T> {
 	 * `keyIdentityMode` picks how the embedded id must match the suffix:
 	 *   - `"string"` (default): embedded id must be a STRING byte-equal to the suffix. For roots
 	 *     whose ids are hex strings (profiles).
-	 *   - `"numeric"`: the embedded id may be a number or numeric string whose canonical decimal
-	 *     form equals the suffix (`String(embedded) === suffix`). For roots minting numeric
-	 *     sequence ids (e.g. the auth-wit journal).
+	 *   - `"numeric"`: the embedded id must be a POSITIVE SAFE INTEGER whose canonical decimal
+	 *     form equals the suffix (`Number.isSafeInteger(embedded) && embedded >= 1`). For roots
+	 *     minting sequence ids via `array_max(existing) + 1`, whose smallest honest id is 1 —
+	 *     negative/fractional/exponential hostiles would otherwise alias (`-0` → "0",
+	 *     `1e21` poisons future id allocation).
 	 */
 	public constructor(
 		root: string,
@@ -132,7 +134,7 @@ export class EntityStorage<T> {
 		// wrongly-typed id is just as hostile as a wrong one.
 		const ok =
 			this.keyIdentityMode === "numeric"
-				? (typeof embedded === "number" || typeof embedded === "string") && String(embedded) === suffix
+				? typeof embedded === "number" && Number.isSafeInteger(embedded) && embedded >= 1 && String(embedded) === suffix
 				: typeof embedded === "string" && embedded === suffix
 		if (!ok) {
 			console.error(`EntityStorage[${this.root}]: row "${fullKey}" embeds id "${String(embedded)}" — KEEPING (not deleting)`)

@@ -617,6 +617,38 @@ describe("ProfileService integration", () => {
 			expect(await service.getProfileDek(pk.id)).toBeUndefined()
 		}, 30_000)
 
+		test("a passkey row edited BETWEEN restore() and finalizeRestore() degrades the finalize open (codex r3)", async () => {
+			// restore() stashes the row's security fields as written; a storage writer editing
+			// `dekSealed` during the import window must not get a clean finalize session.
+			const { api, service } = await makeService()
+			const original = await service.createPasskeyProfile("PK")
+			const credentialId = await service.getPasskeyCredentialId(original.id)
+			await service.lockActiveProfile()
+			await service.deleteProfile(original.id)
+
+			const credData = fakeCredentialData(credentialId, original.id)
+			const out = await service.restore(
+				{ id: "ignored", name: "PK", type: "passkey" },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
+				undefined,
+				credData,
+			)
+			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
+
+			// Swap the destination DEK slot for one sealed under a DIFFERENT credential.
+			const row = await readRow(api, out.id)
+			await writeRow(api, out.id, { ...row, dekSealed: await fakeDekSealedFor("cred-other") })
+
+			let degraded = false
+			service.onImportedKeysDegraded.add(() => {
+				degraded = true
+			})
+			const info = await service.finalizeRestore(out.id)
+			expect(info.id).toBe(out.id)
+			expect(degraded).toBe(true)
+			expect(await service.getProfileDek(out.id)).toBeUndefined()
+		}, 30_000)
+
 		test("blinding the plaintext walletFingerprint is caught at unlock + password change (F-2)", async () => {
 			const { api, service } = await makeService()
 			const p = await service.createProfile("P", "pass1234")

@@ -177,4 +177,31 @@ describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 		expect(restored[1].restoreError).toBeUndefined()
 		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xgood"])
 	})
+
+	/** Codex r3: the journal is keyed BY the embedded numeric id — an aliased copy of row 5
+	 *  under key 9 must read as absent, so revoke(9) refuses instead of touching row 5. */
+	test("an id-aliased row (5 copied under key 9) reads as absent — revoke(9) refuses", async () => {
+		// revokeAuthwits gates on ensureInitialized(); run the real lifecycle over stub peers.
+		const api = new FakeBrowserApi()
+		api.reset()
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, {}))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		const service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
+		services.add(service)
+		await services.start()
+		await service.recordPendingAuthwits(A, [{ hash: "0xh5", content }], "0xtx5")
+		const all = await api.storage.local.get()
+		const sourceKey = Object.keys(all).find((k) => k.startsWith("nulo:core:auth-registry@"))
+		expect(sourceKey).toBeTruthy()
+		await api.storage.local.set({ "nulo:core:auth-registry@9": all[sourceKey!] })
+
+		await expect(service.revokeAuthwits("network-1", A, [9], undefined as never)).rejects.toThrow(/doesn't exist/)
+		// The original row is untouched and still lists.
+		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xh5"])
+	}, 15_000)
 })
