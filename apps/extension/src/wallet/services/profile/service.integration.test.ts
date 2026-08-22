@@ -2497,7 +2497,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		})
 
 		// P4 rider HIGH: a tamper landing BETWEEN restore() and finalizeRestore must not yield a
-		// non-degraded (bearer-backed) session — finalize re-verifies MAC v2.
+		// non-degraded (bearer-backed) session — finalize re-verifies MAC v3.
 		test("a MAC tamper between restore and finalize → derived-only finalize (no bearer)", async () => {
 			const { api, service } = await makeService()
 			const pair = await restorePairFor(0x51)
