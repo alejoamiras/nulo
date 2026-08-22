@@ -142,7 +142,7 @@ usePopupEntity(() => props.show, {
 
 		<template #belowSubmit>
 			<Text size="12" weight="500" color="tertiary" height="140" align="center" style="padding: 0 20px">
-				New accounts do not require the creation of a new seed phrase
+				New accounts do not require the creation of a new recovery phrase
 			</Text>
 		</template>
 	</FormPopup>

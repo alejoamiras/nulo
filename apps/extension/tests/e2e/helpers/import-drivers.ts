@@ -99,7 +99,7 @@ function readStageTraceFinalBounded(page: Page): Promise<FinalObservation> {
 export const CANONICAL_SEED_24 =
 	"abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
 
-export type ImportMethod = "seed" | "private-key" | "public-key" | "full-backup"
+export type ImportMethod = "seed" | "full-backup"
 
 /** The only parts of the import flow that differ between shells. */
 export interface ImportShell {
@@ -169,34 +169,6 @@ export async function gotoOnboardingImport(ctx: ExtensionContext): Promise<Page>
 	await clickByTestId(page, "onboarding-welcome-import")
 	await waitForHash(page, "#/onboarding/import", 10_000)
 	return page
-}
-
-export async function importPlainKey(page: Page, secret: string, password: string, shell: ImportShell): Promise<void> {
-	await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 10_000 })
-	await clickByTestId(page, "import-option-private-key")
-	await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 10_000 })
-	await setInputs(page, {
-		[`[data-testid="${shell.nameInputTestId}"] input`]: "Imported Profile",
-		'[data-testid="import-private-key-input"] input': secret,
-		'[data-testid="import-password-input"] input': password,
-		'[data-testid="import-password-confirm-input"] input': password,
-	})
-	await submitWhenEnabled(page, shell.submitTestId("private-key"))
-	await waitForHash(page, shell.successHash, 30_000)
-}
-
-export async function importEncryptedKey(page: Page, encrypted: string, password: string, shell: ImportShell): Promise<void> {
-	await page.waitForSelector('[data-testid="import-option-public-key"]', { visible: true, timeout: 10_000 })
-	await clickByTestId(page, "import-option-public-key")
-	await page.waitForSelector('[data-testid="import-public-key-input"] input', { visible: true, timeout: 10_000 })
-	// public_key flow has a single password field (no confirm).
-	await setInputs(page, {
-		[`[data-testid="${shell.nameInputTestId}"] input`]: "Imported Profile",
-		'[data-testid="import-public-key-input"] input': encrypted,
-		'[data-testid="import-password-input"] input': password,
-	})
-	await submitWhenEnabled(page, shell.submitTestId("public-key"))
-	await waitForHash(page, shell.successHash, 30_000)
 }
 
 export async function importSeed(page: Page, seed: string, password: string, shell: ImportShell): Promise<void> {
@@ -343,18 +315,29 @@ export async function waitForActiveAccount(page: Page, expected: string, timeout
 	)
 }
 
-/** Generate an Fr-valid 32-byte master, base64-encoded (the form `importPlain`
- *  accepts). Lazy-imports `Fr` to avoid loading the heavy aztec wasm. */
-export async function makeRandomMasterBase64(): Promise<string> {
-	const { Fr } = await import("@aztec/aztec.js/fields")
-	return Buffer.from(Fr.random().toBuffer()).toString("base64")
+/** Anvil's fixed L1 chain id — the local network's derivation input under KDF v2. */
+export const LOCAL_L1_CHAIN_ID = 31337
+
+/** A coherent recovery triple: random 32-byte entropy → 24 words → derived master, all the
+ *  forms the epoch-4 backup + import flows need. `words` drives the recovery-phrase import;
+ *  `masterBase64` is the backup `master-key`; `entropyBase64` is the backup `entropy` field. */
+export async function makeRecoveryTriple(): Promise<{ words: string[]; masterBase64: string; entropyBase64: string }> {
+	const { getMnemonic } = await import("@nulo/wallet-core/utils")
+	const { deriveMasterFromMnemonic } = await import("@nulo/wallet-crypto")
+	const entropy = crypto.getRandomValues(new Uint8Array(32))
+	const words = await getMnemonic(entropy)
+	const master = await deriveMasterFromMnemonic(words)
+	return {
+		words,
+		masterBase64: Buffer.from(master).toString("base64"),
+		entropyBase64: Buffer.from(entropy).toString("base64"),
+	}
 }
 
 /** Derive the REAL Nulo account address for (master, l1ChainId, index) through the v2 frozen
  *  path (`deriveAccountSeed` → NuloAccount). Synthetic backups must carry derivation-consistent
- *  account rows: the background integrity coordinator re-derives every account before activating
- *  an imported profile and withholds the session on mismatch — a fabricated address IS a foreign
- *  backup. */
+ *  account rows: the integrity coordinator re-derives every account before activating an imported
+ *  profile and withholds the session on mismatch — a fabricated address IS a foreign backup. */
 export async function deriveNuloAccountAddress(masterBase64: string, l1ChainId: number, index = 0): Promise<string> {
 	const { Fr } = await import("@aztec/aztec.js/fields")
 	const { deriveAccountSeed } = await import("@nulo/wallet-crypto")
@@ -366,49 +349,14 @@ export async function deriveNuloAccountAddress(masterBase64: string, l1ChainId: 
 	return account.address.toString()
 }
 
-/** Encrypt a base64 master with the test password, returning the base64
- *  ciphertext `importEncrypted` accepts. Runs in the page's browser context so
- *  `self.crypto.subtle` is available. */
-export async function makeEncryptedKeyBlob(page: Page, masterBase64: string, password: string): Promise<string> {
-	return await page.evaluate(
-		async ({ master, pwd }: { master: string; pwd: string }) => {
-			const utf8 = new TextEncoder()
-			const passhash = await self.crypto.subtle.digest("SHA-256", utf8.encode(pwd))
-			const iv = self.crypto.getRandomValues(new Uint8Array(12))
-			const salt = await self.crypto.subtle.digest("SHA-256", iv)
-			const baseKey = await self.crypto.subtle.importKey("raw", passhash, { name: "PBKDF2" }, false, ["deriveKey"])
-			// 600_000 — must match wallet-crypto encryption-key.ts PBKDF2_ITERATIONS.
-			const key = await self.crypto.subtle.deriveKey(
-				{ name: "PBKDF2", salt, iterations: 600_000, hash: "SHA-256" },
-				baseKey,
-				{ name: "AES-GCM", length: 256 },
-				false,
-				["encrypt"],
-			)
-			const masterBytes = Uint8Array.from(atob(master), (c) => c.charCodeAt(0))
-			const ctBuf = await self.crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, masterBytes)
-			const ct = new Uint8Array(ctBuf)
-			const out = new Uint8Array(13 + ct.length)
-			out[0] = 0
-			out.set(iv, 1)
-			out.set(ct, 13)
-			let bin = ""
-			for (const b of out) bin += String.fromCharCode(b)
-			return btoa(bin)
-		},
-		{ master: masterBase64, pwd: password },
-	)
-}
-
-/** Anvil's L1 chain id — the EXACT id KDF v2 derives Local-chain accounts under (the composite
- *  storage chainId stays 0; the two are now separate inputs). */
-export const LOCAL_L1_CHAIN_ID = 31337
-
 export interface SyntheticBackupOpts {
 	masterBase64: string
+	/** Base64 32-byte entropy that derives `masterBase64` (epoch-4 password blobs REQUIRE it;
+	 *  restore verifies the pairing). Get both from `makeRecoveryTriple()`. */
+	entropyBase64: string
 	/** The EXACT L1 chain id stamped on the network + account rows (the KDF v2 derivation input).
-	 *  Defaults to the Local Network's anvil id; must match the l1ChainId `accountAddress` was
-	 *  derived under, or the integrity coordinator withholds the imported profile. */
+	 *  Defaults to the Local Network's anvil id; override for a custom-chain synthetic backup —
+	 *  it must match the l1ChainId the `accountAddress` was derived under. */
 	l1ChainId?: number
 	profileName?: string
 	/** Override the embedded account address (used for the duplicate-rejection test). */
@@ -427,6 +375,7 @@ export interface SyntheticBackupOpts {
  *  token slice. Missing slices are treated as no-ops by the importer. */
 export function buildSyntheticBackup({
 	masterBase64,
+	entropyBase64,
 	l1ChainId = LOCAL_L1_CHAIN_ID,
 	profileName = "Imported",
 	accountAddress,
@@ -436,9 +385,11 @@ export function buildSyntheticBackup({
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 3,
+		"compat-epoch": 4,
 		"backup-schema-version": 1,
 		"master-key": masterBase64,
+		// Epoch-4 password blobs REQUIRE entropy (restore verifies words(entropy) derives master).
+		entropy: entropyBase64,
 		data: {
 			profile: { id: "syn-profile-id", name: profileName, type: "password" },
 			network: [
@@ -462,8 +413,6 @@ export function buildSyntheticBackup({
 				{
 					address: accountAddress ?? `0x${"01".repeat(32)}`,
 					profileId: "syn-profile-id",
-					// Composite storage chainId stays 0 (see the network row note); the account row
-					// ALSO carries the l1ChainId its address was derived under.
 					chainId: 0,
 					l1ChainId,
 					name: "Account",

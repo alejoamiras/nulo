@@ -73,14 +73,6 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		return this.request("deleteProfile", id)
 	}
 
-	public importEncrypted(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		return this.request("importEncrypted", name, secret, password)
-	}
-
-	public importPlain(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		return this.request("importPlain", name, secret, password)
-	}
-
 	public importMnemonic(name: string, mnemonic: string[], password: string): Promise<ProfileInfo> {
 		return this.request("importMnemonic", name, mnemonic, password)
 	}
@@ -89,12 +81,12 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		return this.request("importPasskey", name, credentialData)
 	}
 
-	public exportEncrypted(id: string): Promise<string> {
-		return this.request("exportEncrypted", id)
-	}
-
 	public exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
 		return this.request("exportPlain", id, password, credentialData)
+	}
+
+	public exportBackupMaterial(id: string, password: string): Promise<{ masterKey: string; entropy: string }> {
+		return this.request("exportBackupMaterial", id, password)
 	}
 
 	public exportMnemonic(id: string, password: string): Promise<string[]> {

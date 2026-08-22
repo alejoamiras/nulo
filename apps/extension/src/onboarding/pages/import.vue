@@ -65,8 +65,6 @@ const {
 	onCeremonyReject,
 	selectedImportOption,
 	seedPhrase,
-	privateKey,
-	publicKey,
 	password,
 	repeatedPassword,
 	maxPasswordLength,
@@ -74,8 +72,6 @@ const {
 	error,
 	isCopied,
 	isAllowedToImportBySeedPhrase,
-	isAllowedToImportByPrivateKey,
-	isAllowedToImportByPublicKey,
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
@@ -88,8 +84,6 @@ const {
 	restoreBackup,
 	showRestoreErrorLog,
 	handleImportSeed,
-	handleImportPrivateKey,
-	handleImportPublicKey,
 	handleImportPasskey,
 	handlePasswordInput,
 	handleSecretInput,
@@ -133,8 +127,6 @@ onBeforeUnmount(() => {
 	password.value = ""
 	repeatedPassword.value = ""
 	seedPhrase.value = undefined
-	privateKey.value = undefined
-	publicKey.value = undefined
 })
 </script>
 
@@ -201,10 +193,8 @@ onBeforeUnmount(() => {
 		/>
 
 		<ImportSecretForm
-			v-if="selectedImportOption === 'seed' || selectedImportOption === 'private_key' || selectedImportOption === 'public_key'"
+			v-if="selectedImportOption === 'seed'"
 			v-model:seedPhrase="seedPhrase"
-			v-model:privateKey="privateKey"
-			v-model:publicKey="publicKey"
 			v-model:password="password"
 			v-model:repeatedPassword="repeatedPassword"
 			:method="selectedImportOption"
@@ -268,29 +258,6 @@ onBeforeUnmount(() => {
 			>
 				Import profile
 			</Button>
-			<Button
-				v-if="selectedImportOption === 'private_key'"
-				variant="cta"
-				size="large"
-				:disabled="!isAllowedToImportByPrivateKey || isImporting"
-				:loading="isImporting"
-				data-testid="onboarding-submit-import"
-				@click="handleImportPrivateKey"
-			>
-				Import profile
-			</Button>
-			<Button
-				v-if="selectedImportOption === 'public_key'"
-				variant="cta"
-				size="large"
-				:disabled="!isAllowedToImportByPublicKey || isImporting"
-				:loading="isImporting"
-				data-testid="onboarding-submit-import"
-				@click="handleImportPublicKey"
-			>
-				Import profile
-			</Button>
-
 			<Button
 				variant="cta_outline"
 				size="large"

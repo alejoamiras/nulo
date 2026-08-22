@@ -55,7 +55,7 @@ import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
 import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
-import { SessionSecretBox, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
+import { SessionSecretBox, verifyEnvelopeMac, type MasterSecretBytes, type Passhash, zeroize } from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
 
 const LOG_SOURCE = "SessionManager"
@@ -457,6 +457,22 @@ export class SessionManager {
 			// bearer session past it.
 			if (this.strictSecurityMode) {
 				this.logger.log(LOG_SOURCE, LogLevel.Debug, "Strict toggled ON mid-restore → silentClose")
+				await this.silentClose()
+				return
+			}
+			// Envelope-MAC check: this passwordless path can never decrypt the sealed fields to
+			// run the words↔master pairing check, so it verifies the master-keyed MAC over the
+			// WHOLE sealed envelope (guard‖secret‖entropy) instead — catching both tampered
+			// entropy (silent recovery degradation) AND a single ciphertext transplanted from
+			// another same-password profile (which purpose-AAD alone does not stop). Mismatch
+			// blocks silent restore; the forced password unlock runs the full pairing check.
+			const envelopeIntact = await verifyEnvelopeMac(
+				secretBytes,
+				{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy },
+				profile.envelopeMac,
+			)
+			if (!envelopeIntact) {
+				this.logger.log(LOG_SOURCE, LogLevel.Error, "Sealed-envelope MAC mismatch → silentClose (password unlock will verify)")
 				await this.silentClose()
 				return
 			}

@@ -42,6 +42,35 @@ import { flushPromises } from "@vue/test-utils"
 import { ProfileService } from "./service"
 import { RESTORE_PENDING_ROOT, RestorePendingRepository } from "./restore-pending-repository"
 import { SESSION_STORAGE_ROOT, SESSION_TTL_ALARM_NAME } from "./session-manager"
+import { getMnemonic } from "@nulo/wallet-core/utils"
+import { deriveMasterFromMnemonic } from "@nulo/wallet-crypto"
+
+/** Recovery words for a deterministic 32-byte entropy fill (the v2 restore pairing check
+ *  requires entropy whose words actually derive the master). */
+async function wordsForFill(fill: number): Promise<string[]> {
+	return getMnemonic(new Uint8Array(32).fill(fill))
+}
+
+/** A valid `(masterKey, entropy)` restore pair for a deterministic entropy fill — memoized:
+ *  PBKDF2 runs once per fill across the suite. */
+const restorePairCache = new Map<number, { masterKey: string; entropy: string }>()
+async function restorePairFor(fill: number): Promise<{ masterKey: string; entropy: string }> {
+	const cached = restorePairCache.get(fill)
+	if (cached) return cached
+	const entropy = new Uint8Array(32).fill(fill)
+	const master = await deriveMasterFromMnemonic(await getMnemonic(entropy))
+	const pair = { masterKey: Buffer.from(master).toString("base64"), entropy: Buffer.from(entropy).toString("base64") }
+	restorePairCache.set(fill, pair)
+	return pair
+}
+
+/** RestoreSecret password variant for a fill — the standard happy-path shape. */
+async function restoreSecretFor(
+	fill: number,
+): Promise<{ type: "password"; masterKey: ReturnType<typeof asBase64MasterSecret>; entropy: string }> {
+	const pair = await restorePairFor(fill)
+	return { type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy }
+}
 
 /** Fake `IConfig` with `sessionTtl` + `strictSecurityMode`. Default is
  *  `strictSecurityMode = false` so the bearer-cache tests preserve
@@ -442,42 +471,131 @@ describe("ProfileService integration", () => {
 		}, 30_000)
 	})
 
-	describe("AUDIT A2 — exportEncrypted auth gate", () => {
-		test("exportEncrypted returns the blob when called for the currently-active profile", async () => {
+	describe("cross-profile transplant defenses (P3 rider High)", () => {
+		// Two profiles sharing a password: purpose-AAD does NOT stop moving a single authentic
+		// ciphertext between them, so the pairing checks + whole-envelope MAC must.
+		const profileRowKey = (id: string) => `nulo:core:profiles@${id}`
+		async function readRow(api: FakeBrowserApi, id: string) {
+			const all = await api.storage.local.get()
+			return JSON.parse(all[profileRowKey(id)] as string)
+		}
+		async function writeRow(api: FakeBrowserApi, id: string, row: unknown) {
+			await api.storage.local.set({ [profileRowKey(id)]: JSON.stringify(row) })
+		}
+
+		test("transplanting another profile's entropy is caught at unlock, and change-password can't launder it", async () => {
+			const { api, service } = await makeService()
+			const a = await service.createProfile("A", "shared-pass1")
+			await service.lockActiveProfile()
+			const b = await service.createProfile("B", "shared-pass1")
+			await service.lockActiveProfile()
+
+			const rowA = await readRow(api, a.id)
+			const rowB = await readRow(api, b.id)
+			await writeRow(api, a.id, { ...rowA, entropy: rowB.entropy }) // B's authentic entropy into A
+
+			// Unlock catches the pair mismatch.
+			await expect(service.unlockProfile(a.id, "shared-pass1")).rejects.toThrow()
+			// And change-password refuses too — it must NOT reseal + rewrite the MAC into a
+			// bearer-valid-but-unrecoverable profile.
+			await expect(service.changeProfilePassword(a.id, "shared-pass1", "new-pass12")).rejects.toThrow()
+		}, 30_000)
+
+		test("transplanting another profile's master (secret) is caught by the whole-envelope bearer MAC", async () => {
+			const { api, service } = await makeService() // non-strict → a bearer is persisted
+			const b = await service.createProfile("B", "shared-pass1")
+			await service.lockActiveProfile()
+			// Create A LAST so it is the active session with a persisted bearer at reboot.
+			const a = await service.createProfile("A", "shared-pass1")
+
+			const rowA = await readRow(api, a.id)
+			const rowB = await readRow(api, b.id)
+			// Move B's master ciphertext into A but keep A's entropy + A's (now-stale) envelope MAC.
+			await writeRow(api, a.id, { ...rowA, secret: rowB.secret })
+
+			// A fresh SW runs the passwordless bearer restore during start(); the envelope MAC
+			// (keyed by the master the bearer carries) no longer matches A's mutated envelope,
+			// so the session is silently closed rather than opened on a mismatched master.
+			const { service: rebooted } = await makeServiceFromExistingApi(api)
+			expect(await rebooted.getActiveProfile()).toBeUndefined()
+			// Password unlock also refuses via the pairing check.
+			await expect(rebooted.unlockProfile(a.id, "shared-pass1")).rejects.toThrow()
+		}, 30_000)
+	})
+
+	describe("recovery-phrase round trip (NULO-ACCOUNT-KDF v2)", () => {
+		test("create → export words → re-import → the SAME master secret", async () => {
+			const { service } = await makeService()
+			const created = await service.createProfile("P", "pass1234")
+			const words = await service.exportMnemonic(created.id, "pass1234")
+			expect(words).toHaveLength(24)
+			const master = await service.exportPlain(created.id, "pass1234")
+
+			const { service: fresh } = await makeService()
+			const imported = await fresh.importMnemonic("Recovered", words, "otherpass1")
+			expect(await fresh.exportPlain(imported.id, "otherpass1")).toBe(master)
+			// And the words re-display identically from the imported profile's stored entropy.
+			expect(await fresh.exportMnemonic(imported.id, "otherpass1")).toEqual(words)
+		}, 30_000)
+
+		test("importMnemonic canonicalizes (case/whitespace) and enforces exactly 24 words", async () => {
+			const { service } = await makeService()
+			const created = await service.createProfile("P", "pass1234")
+			const words = await service.exportMnemonic(created.id, "pass1234")
+			const master = await service.exportPlain(created.id, "pass1234")
+
+			const { service: fresh } = await makeService()
+			const messy = ` ${words.join("  ").toUpperCase()} `.split(" ")
+			const imported = await fresh.importMnemonic("Messy", messy, "otherpass1")
+			expect(await fresh.exportPlain(imported.id, "otherpass1")).toBe(master)
+
+			await expect(fresh.importMnemonic("Short", words.slice(0, 12), "otherpass1")).rejects.toThrow(/Invalid mnemonic length/)
+			const corrupted = [...words.slice(0, 23), words[0] === "abandon" ? "zoo" : "abandon"]
+			await expect(fresh.importMnemonic("BadSum", corrupted, "otherpass1")).rejects.toThrow(/Invalid checksum|Invalid mnemonic/)
+		}, 30_000)
+
+		test("restore rejects a doctored backup whose entropy does not derive the master (H3)", async () => {
+			const { service } = await makeService()
+			const good = await restorePairFor(11)
+			const evil = await restorePairFor(12)
+			// The pairing check throws BEFORE anything is sealed or persisted — a doctored blob
+			// (checksum is integrity-not-auth) fails loudly, never as a half-restored profile.
+			await expect(
+				service.restore(
+					{ id: "px", name: "Doctored", type: "password" },
+					{ type: "password", masterKey: asBase64MasterSecret(good.masterKey), entropy: evil.entropy },
+					"pass1234",
+				),
+			).rejects.toThrow(/entropy does not derive/)
+			expect(await service.getProfiles()).toEqual([])
+		}, 30_000)
+	})
+
+	describe("exportBackupMaterial — atomic paired export", () => {
+		test("returns a master+entropy pair from one unseal, and the pair is derivation-consistent", async () => {
 			const { service } = await makeService()
 			const profile = await service.createProfile("P", "pass1234")
-			// createProfile leaves the new profile as the active session.
-			const exported = await service.exportEncrypted(profile.id)
-			expect(exported).toBeDefined()
-			expect(exported.length).toBeGreaterThan(0)
+			const material = await service.exportBackupMaterial(profile.id, "pass1234")
+			const entropy = new Uint8Array(Buffer.from(material.entropy, "base64"))
+			expect(entropy.byteLength).toBe(32)
+			const rederived = await deriveMasterFromMnemonic(await getMnemonic(entropy))
+			expect(Buffer.from(rederived).toString("base64")).toBe(material.masterKey)
+			// And `master-key` semantics hold: exportPlain returns the SAME master.
+			expect(await service.exportPlain(profile.id, "pass1234")).toBe(material.masterKey)
 		}, 30_000)
 
-		test("exportEncrypted throws 'Profile locked' when no session is active", async () => {
+		test("rejects a wrong password", async () => {
 			const { service } = await makeService()
 			const profile = await service.createProfile("P", "pass1234")
-			await service.lockActiveProfile()
-			await expect(service.exportEncrypted(profile.id)).rejects.toThrow(/Profile locked/)
+			await expect(service.exportBackupMaterial(profile.id, "wrong-pass")).rejects.toThrow()
 		}, 30_000)
 
-		test("exportEncrypted throws 'Profile locked' when a DIFFERENT profile is active", async () => {
-			const { service } = await makeService()
-			const a = await service.createProfile("A", "passA1234")
-			// Lock A and create B; B is now the active profile.
-			await service.lockActiveProfile()
-			const b = await service.createProfile("B", "passB1234")
-			expect((await service.getActiveProfile())?.id).toBe(b.id)
-			// Asking for A's blob while B is active must reject — closes the
-			// "I-know-the-id" exfil hole even though the wallet is unlocked.
-			await expect(service.exportEncrypted(a.id)).rejects.toThrow(/Profile locked/)
-			// Sanity: B's blob still works (the gate is per-profile, not global).
-			const exportedB = await service.exportEncrypted(b.id)
-			expect(exportedB).toBeDefined()
-		}, 30_000)
-
-		test("exportEncrypted throws 'Operation not supported for passkey profile' when active is passkey", async () => {
+		test("throws 'Operation not supported for passkey profile' for a passkey profile", async () => {
 			const { service } = await makeService()
 			const profile = await service.createPasskeyProfile("PK")
-			await expect(service.exportEncrypted(profile.id)).rejects.toThrow(/Operation not supported for passkey profile/)
+			await expect(service.exportBackupMaterial(profile.id, "irrelevant")).rejects.toThrow(
+				/Operation not supported for passkey profile/,
+			)
 		}, 30_000)
 	})
 
@@ -587,9 +705,6 @@ describe("ProfileService integration", () => {
 	 * the toggle race + SW-restart upgrade.
 	 */
 	describe("M4.2 — Strict Security Mode", () => {
-		// 32-byte base64 secret used for importPlain.
-		const PLAIN_SECRET_B64 = Buffer.from(new Uint8Array(32).fill(7)).toString("base64")
-
 		async function readPersistedBearer(api: FakeBrowserApi): Promise<SessionWrappedSecret | undefined> {
 			const raw = await api.storage.session.get("nulo:core:session")
 			if (!raw["nulo:core:session"]) return undefined
@@ -628,9 +743,9 @@ describe("ProfileService integration", () => {
 			expect(await readPersistedBearer(api)).toBeUndefined()
 		}, 30_000)
 
-		test("importPlain honors strict mode (gate applies on import-then-open)", async () => {
+		test("importMnemonic honors strict mode (gate applies on import-then-open)", async () => {
 			const { api, service } = await makeService({ strict: true })
-			await service.importPlain("Imported", PLAIN_SECRET_B64, "pass1234")
+			await service.importMnemonic("Imported", await wordsForFill(0x2e), "pass1234")
 			// importPasswordProfile reopens the session as part of the import flow
 			// — must respect strict mode (codex-flagged BLOCKER in v1).
 			expect(await readPersistedBearer(api)).toBeUndefined()
@@ -766,16 +881,11 @@ describe("ProfileService integration", () => {
 	 */
 	describe("restore + finalizeRestore", () => {
 		// 32-byte base64 master key used for restore() password-profile path.
-		const RESTORE_MASTER_KEY = Buffer.from(new Uint8Array(32).fill(11)).toString("base64")
 
 		test("restore() writes the profile but does NOT open a session", async () => {
 			const { service } = await makeService()
 
-			const out = await service.restore(
-				{ id: "ignored", name: "P", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 
 			expect("restoreError" in out && out.restoreError).toBeFalsy()
 			// Profile is in storage but no session.
@@ -789,11 +899,7 @@ describe("ProfileService integration", () => {
 			const events: Array<{ id: string } | undefined> = []
 			service.onActiveProfileChanged.add((p) => events.push(p))
 
-			const out = await service.restore(
-				{ id: "ignored", name: "P", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			// No emit happened during restore — sanity-check before finalize.
@@ -808,11 +914,7 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() with wrong password throws InvalidPasswordError; profile stays in storage", async () => {
 			const { service } = await makeService()
-			const out = await service.restore(
-				{ id: "ignored", name: "P", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await expect(service.finalizeRestore(out.id, "wrong-pass")).rejects.toBeInstanceOf(InvalidPasswordError)
@@ -823,11 +925,7 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() is idempotent: a second call on an already-active session is a no-op", async () => {
 			const { service } = await makeService()
-			const out = await service.restore(
-				{ id: "ignored", name: "P", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await service.finalizeRestore(out.id, "pass1234")
@@ -841,11 +939,7 @@ describe("ProfileService integration", () => {
 
 		test("finalizeRestore() throws when the profile no longer exists (rollback case)", async () => {
 			const { service } = await makeService()
-			const out = await service.restore(
-				{ id: "ignored", name: "P", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 			await service.deleteProfile(out.id)
@@ -963,7 +1057,11 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "ignored", name: "P", type: "password" },
-					{ type: "password", masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(16)).toString("base64")) }, // 16 bytes, not 32
+					{
+						type: "password",
+						masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(16)).toString("base64")), // 16 bytes, not 32
+						entropy: Buffer.from(new Uint8Array(32)).toString("base64"),
+					},
 					"pass1234",
 				),
 			).rejects.toThrow(/master key length/i)
@@ -988,7 +1086,7 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "ignored", name: "PK", type: "passkey" },
-					{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
+					await restoreSecretFor(11),
 					undefined,
 					fakeCredentialData("cred-x"),
 				),
@@ -999,11 +1097,7 @@ describe("ProfileService integration", () => {
 
 		test("restore + finalize password profile survives a simulated SW restart via chrome.storage.session", async () => {
 			const { service, api } = await makeService()
-			const out = await service.restore(
-				{ id: "ignored", name: "P", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 			await service.finalizeRestore(out.id, "pass1234")
 			expect((await service.getActiveProfile())?.id).toBe(out.id)
@@ -1341,15 +1435,10 @@ describe("F-B24 — torn-import sweep on boot resume", () => {
 	// age: only markers older than TORN_IMPORT_MIN_AGE_MS are reaped. The boot
 	// resume must then complete the compensating delete instead of leaving the
 	// zombie immortal.
-	const TORN_MASTER_KEY = Buffer.from(new Uint8Array(32).fill(13)).toString("base64")
 	const AGED = ProfileService.TORN_IMPORT_MIN_AGE_MS + 60 * 60 * 1000 // floor + 1h
 
 	const tornRestore = async (service: ProfileService, id = "ignored") => {
-		const out = await service.restore(
-			{ id, name: "Torn", type: "password" },
-			{ type: "password", masterKey: asBase64MasterSecret(TORN_MASTER_KEY) },
-			"pass1234",
-		)
+		const out = await service.restore({ id, name: "Torn", type: "password" }, await restoreSecretFor(13), "pass1234")
 		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 		return out
 	}
@@ -1656,11 +1745,7 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 		const events: unknown[] = []
 		service.onActiveProfileChanged.add((p) => events.push(p))
 
-		const out = await service.restore(
-			{ id: "ignored", name: "P", type: "password" },
-			{ type: "password", masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(32).fill(11)).toString("base64")) },
-			"pass1234",
-		)
+		const out = await service.restore({ id: "ignored", name: "P", type: "password" }, await restoreSecretFor(11), "pass1234")
 		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 
 		// Accounts are restored by the caller between restore() and finalizeRestore() — the
@@ -1825,14 +1910,8 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 	 * into a typed unlock refusal instead of a silent bootstrap re-seed.
 	 */
 	describe("restore-pending marker (torn-restore gate)", () => {
-		const RESTORE_MASTER_KEY_2 = Buffer.from(new Uint8Array(32).fill(13)).toString("base64")
-
 		async function restoreOnly(service: ProfileService) {
-			const out = await service.restore(
-				{ id: "ignored", name: "Torn", type: "password" },
-				{ type: "password", masterKey: asBase64MasterSecret(RESTORE_MASTER_KEY_2) },
-				"pass1234",
-			)
+			const out = await service.restore({ id: "ignored", name: "Torn", type: "password" }, await restoreSecretFor(13), "pass1234")
 			if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 			return out
 		}

@@ -136,8 +136,10 @@ function buildSyntheticPasskeyBackup(
 	const body = {
 		"wallet-version": "test",
 		"aztec-version": "test",
-		"compat-epoch": 3,
+		"compat-epoch": 4,
 		"backup-schema-version": 1,
+		// Passkey blobs carry the credentialId as master-key and NEVER an entropy field
+		// (the master re-derives from the passkey PRF at restore).
 		"master-key": credentialId,
 		data: {
 			profile: { id: "syn-profile-id", name: "Imported PK", type: "passkey" },
@@ -148,9 +150,8 @@ function buildSyntheticPasskeyBackup(
 					name: "Imported Network",
 					rpcUrl: process.env.AZTEC_NODE_URL ?? "http://localhost:8080",
 					chainId: accountRow.chainId,
-					// Real (l1ChainId, kind) from the wallet's own network row, so the restore's
-					// Account↔Network l1ChainId cross-check validates against the correct seeded
-					// constant (or none, for custom) instead of rejecting the account row.
+					// Real (l1ChainId, kind) from the wallet's own network row, so the epoch-4 restore
+					// cross-check validates against the correct seeded constant (or none, for custom).
 					l1ChainId: networkRow.l1ChainId,
 					kind: networkRow.kind,
 					endpoints: [
@@ -442,16 +443,15 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 			for (const [k, v] of Object.entries(all)) {
 				if (!k.startsWith("nulo:core:accounts@")) continue
 				const row = JSON.parse(v as string) as { address: string; chainId: number; l1ChainId: number; index: number; type: number }
-				if (row.address === addr) {
+				if (row.address === addr)
 					return { address: row.address, chainId: row.chainId, l1ChainId: row.l1ChainId, index: row.index, type: row.type }
-				}
 			}
 			throw new Error(`no account row found for ${addr}`)
 		}, addressBefore)
 
 		// Capture the account's REAL network row (kind + l1ChainId): the synthetic backup's network
-		// must be coherent with what the wallet stored, or the restore's Account↔Network l1ChainId
-		// cross-check (validated against the seeded constant for the kind) rejects the account row.
+		// must be coherent with what the wallet stored, or the epoch-4 restore's Account↔Network
+		// l1ChainId cross-check (validated against the seeded constant for the kind) rejects it.
 		const networkRow = await page.evaluate(async (chainId: number) => {
 			const all = await chrome.storage.local.get()
 			for (const [k, v] of Object.entries(all)) {

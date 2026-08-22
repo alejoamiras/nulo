@@ -6,27 +6,22 @@
  * functions with `ONBOARDING_IMPORT_SHELL`). This file passes
  * `POPUP_IMPORT_SHELL` and adds the popup-only round-trip + full-backup tests.
  *
- * Gaps closed here:
- * - Standalone import via seed / plain key / encrypted key.
- * - Round-trip determinism: register → export → import in fresh ext → same address.
- * - Full-backup import (synthetic payload) + duplicate-address rejection.
+ * Under KDF v2 the only wallet-level secret import is the 24-word recovery phrase
+ * (plain-key + encrypted-key import surfaces were removed).
  *
  * Deferred: true backup file round-trip; passkey import (needs WebAuthn virtualization).
  */
 import { expect } from "vitest"
-import { withTimeoutMessage, clickByTestId, launchExtension, openPopup, waitForHash, test } from "./fixtures/extension"
+import { clickByTestId, launchExtension, openPopup, test, waitForHash } from "./fixtures/extension"
 import {
 	buildSyntheticBackup,
-	LOCAL_L1_CHAIN_ID,
 	CANONICAL_SEED_24,
 	deriveNuloAccountAddress,
 	gotoPopupImport,
-	importEncryptedKey,
 	importFullBackup,
-	importPlainKey,
 	importSeed,
-	makeEncryptedKeyBlob,
-	makeRandomMasterBase64,
+	LOCAL_L1_CHAIN_ID,
+	makeRecoveryTriple,
 	POPUP_IMPORT_SHELL,
 	readActiveAccount,
 	TEST_PASSWORD,
@@ -35,11 +30,9 @@ import {
 
 // ── Standalone import-path tests ────────────────────────────────────────
 
-test("import via plain key creates profile and lands on /popup/general", async ({ freshExtensionPerTest }) => {
-	const masterBase64 = await makeRandomMasterBase64()
-
+test("import via recovery phrase (24-word) creates profile and lands on /popup/general", async ({ freshExtensionPerTest }) => {
 	const page = await gotoPopupImport(freshExtensionPerTest)
-	await importPlainKey(page, masterBase64, TEST_PASSWORD, POPUP_IMPORT_SHELL)
+	await importSeed(page, CANONICAL_SEED_24, TEST_PASSWORD, POPUP_IMPORT_SHELL)
 
 	const address = await readActiveAccount(page)
 	expect(typeof address).toBe("string")
@@ -50,97 +43,14 @@ test("import via plain key creates profile and lands on /popup/general", async (
 	await page.close()
 }, 60_000)
 
-test("import via encrypted key creates profile", async ({ freshExtensionPerTest }) => {
-	const masterBase64 = await makeRandomMasterBase64()
-
-	const page = await gotoPopupImport(freshExtensionPerTest)
-	const encrypted = await makeEncryptedKeyBlob(page, masterBase64, TEST_PASSWORD)
-	await importEncryptedKey(page, encrypted, TEST_PASSWORD, POPUP_IMPORT_SHELL)
-
-	const address = await readActiveAccount(page)
-	expect(address.startsWith("0x")).toBe(true)
-	expect(address.length).toBeGreaterThan(2)
-
-	expect(freshExtensionPerTest.pageErrors).toEqual([])
-	await page.close()
-}, 60_000)
-
-test("import via seed phrase (24-word) creates profile", async ({ freshExtensionPerTest }) => {
-	const page = await gotoPopupImport(freshExtensionPerTest)
-	await importSeed(page, CANONICAL_SEED_24, TEST_PASSWORD, POPUP_IMPORT_SHELL)
-
-	const address = await readActiveAccount(page)
-	expect(address.startsWith("0x")).toBe(true)
-	expect(address.length).toBeGreaterThan(2)
-
-	expect(freshExtensionPerTest.pageErrors).toEqual([])
-	await page.close()
-}, 60_000)
-
-// ── Round-trip tests ────────────────────────────────────────────────────
+// ── Round-trip test ─────────────────────────────────────────────────────
 
 /**
- * Round-trip determinism: register a profile in ext1, export plain key,
- * import in ext2, assert the SAME on-chain address derives.
- *
- *   accountAddress = NuloAccount(secret, salt=Fr.ZERO).address
- *   secret = poseidon2Hash([master, chainId, accountType, index])
+ * Round-trip determinism: register a profile in ext1, export its recovery phrase,
+ * import in ext2, assert the SAME on-chain address derives (NULO-ACCOUNT-KDF v2:
+ * words → PBKDF2 master → deriveAccountSeed → NuloAccount, salt=Fr.ZERO).
  */
-test("round-trip: register → export plain key → import in fresh ext → same address", async ({ registeredExtensionPerTest }) => {
-	const page1 = await openPopup(registeredExtensionPerTest)
-	await waitForHash(page1, "#/popup/general", 15_000)
-	const address1 = await readActiveAccount(page1)
-	expect(address1.startsWith("0x")).toBe(true)
-
-	// Walk through the export-key reveal flow to capture the plain master.
-	await page1.evaluate(() => {
-		window.location.hash = "#/popup/settings/security/export/key"
-	})
-	await waitForHash(page1, "#/popup/settings/security/export/key", 5_000)
-
-	// Step 1: pick the "Plain" variant (the agree-continue button only renders
-	// after a variant is selected).
-	await page1.waitForSelector('[data-testid="key-variant-plain-btn"]', { visible: true, timeout: 5_000 })
-	await clickByTestId(page1, "key-variant-plain-btn")
-
-	// Step 2: agree to the risk disclaimer.
-	await page1.waitForSelector('[data-testid="agree-continue-btn"]', { visible: true, timeout: 5_000 })
-	await clickByTestId(page1, "agree-continue-btn")
-
-	// Unlock to populate `privateKey.value` (rendered in the SecretRevealCard).
-	await page1.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 5_000 })
-	await page1.evaluate((p: string) => {
-		const input = document.querySelector<HTMLInputElement>('[data-testid="unlock-password-input"] input')
-		if (!input) throw new Error("unlock-password-input not found")
-		const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set
-		setter?.call(input, p)
-		input.dispatchEvent(new Event("input", { bubbles: true }))
-	}, TEST_PASSWORD)
-	await clickByTestId(page1, "unlock-submit-btn")
-
-	await page1.waitForSelector('[data-testid="reveal-content"] input', { visible: true, timeout: 10_000 })
-	const masterBase64 = await page1.evaluate(() => {
-		const input = document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')
-		return input?.value ?? ""
-	})
-	expect(masterBase64.length).toBeGreaterThan(0)
-	await page1.close()
-
-	// Launch a fresh extension and import the captured master.
-	const ctx2 = await launchExtension()
-	try {
-		const page2 = await gotoPopupImport(ctx2)
-		await importPlainKey(page2, masterBase64, TEST_PASSWORD, POPUP_IMPORT_SHELL)
-		const address2 = await readActiveAccount(page2)
-		expect(address2).toBe(address1)
-		expect(ctx2.pageErrors).toEqual([])
-		await page2.close()
-	} finally {
-		await ctx2.browser.close()
-	}
-}, 90_000)
-
-test("round-trip: register → export seed → import in fresh ext → same address", async ({ registeredExtensionPerTest }) => {
+test("round-trip: register → export recovery phrase → import in fresh ext → same address", async ({ registeredExtensionPerTest }) => {
 	const page1 = await openPopup(registeredExtensionPerTest)
 	await waitForHash(page1, "#/popup/general", 15_000)
 	const address1 = await readActiveAccount(page1)
@@ -186,58 +96,14 @@ test("round-trip: register → export seed → import in fresh ext → same addr
 	}
 }, 120_000)
 
-test("round-trip: register → export encrypted key → import in fresh ext → same address", async ({ registeredExtensionPerTest }) => {
-	const page1 = await openPopup(registeredExtensionPerTest)
-	await waitForHash(page1, "#/popup/general", 15_000)
-	const address1 = await readActiveAccount(page1)
-	expect(address1.startsWith("0x")).toBe(true)
-
-	await page1.evaluate(() => {
-		window.location.hash = "#/popup/settings/security/export/key"
-	})
-	await waitForHash(page1, "#/popup/settings/security/export/key", 5_000)
-
-	await page1.waitForSelector('[data-testid="key-variant-encrypted-btn"]', { visible: true, timeout: 5_000 })
-	await clickByTestId(page1, "key-variant-encrypted-btn")
-
-	// Poll until exportEncrypted resolves and the blob lands in the card.
-	await page1.waitForSelector('[data-testid="reveal-content"] input', { visible: true, timeout: 10_000 })
-	const encrypted = await withTimeoutMessage(
-		page1
-			.waitForFunction(
-				() => {
-					const v = document.querySelector<HTMLInputElement>('[data-testid="reveal-content"] input')?.value ?? ""
-					return v.length > 0 ? v : null
-				},
-				{ timeout: 10_000, polling: 100 },
-			)
-			.then((handle) => handle.jsonValue()),
-		"encrypted blob never rendered into the reveal card",
-	)
-	expect(encrypted.length).toBeGreaterThan(0)
-	await page1.close()
-
-	const ctx2 = await launchExtension()
-	try {
-		const page2 = await gotoPopupImport(ctx2)
-		await importEncryptedKey(page2, encrypted, TEST_PASSWORD, POPUP_IMPORT_SHELL)
-		const address2 = await readActiveAccount(page2)
-		expect(address2).toBe(address1)
-		expect(ctx2.pageErrors).toEqual([])
-		await page2.close()
-	} finally {
-		await ctx2.browser.close()
-	}
-}, 90_000)
-
 // ── Full-backup import (synthetic-payload route) ────────────────────────────
 
-test("full backup: fresh install → synthetic plain backup → /popup/general", async ({ freshExtensionPerTest }) => {
-	const masterBase64 = await makeRandomMasterBase64()
-	// The account row must be derivation-consistent with the master under the REAL L1 id the
-	// KDF v2 derivation uses — the integrity coordinator blocks a mismatched import at finalize.
+test("full backup: fresh install → synthetic backup → /popup/general", async ({ freshExtensionPerTest }) => {
+	const { masterBase64, entropyBase64 } = await makeRecoveryTriple()
+	// The account row must be derivation-consistent with the master (l1ChainId 31337 = the
+	// synthetic Local Network) — the integrity coordinator blocks a mismatched import at finalize.
 	const accountAddress = await deriveNuloAccountAddress(masterBase64, LOCAL_L1_CHAIN_ID)
-	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, accountAddress }))
+	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, entropyBase64, accountAddress }))
 
 	const page = await gotoPopupImport(freshExtensionPerTest)
 	await importFullBackup(page, filePath, TEST_PASSWORD, POPUP_IMPORT_SHELL)
@@ -256,20 +122,3 @@ test("full backup: fresh install → synthetic plain backup → /popup/general",
 	expect(freshExtensionPerTest.pageErrors).toEqual([])
 	await page.close()
 }, 90_000)
-
-/*
- * REMOVED: "full backup: duplicate-address rejection shows the new copy".
- *
- * It asserted that importing a backup whose account address matches an existing
- * profile's is REFUSED ("An account from this backup is already in your
- * wallet"). Account rows are now keyed by (profileId, chainId, address), so that
- * import succeeds — each profile owns its own row — and the behavior the test
- * described no longer exists.
- *
- * The replacement coverage is deterministic and lives at the unit level, where
- * it does not depend on the import flow's multi-minute recovery envelope:
- *   - `account/composite-key.test.ts` — two same-mnemonic profiles each keep
- *     their own row; deleting one profile's leaves the other intact.
- *   - `account/service.test.ts` — restoring the same address under two profiles
- *     succeeds for both; the same account twice still conflicts.
- */

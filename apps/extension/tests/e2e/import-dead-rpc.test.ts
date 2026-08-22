@@ -33,7 +33,7 @@ import {
 	buildSyntheticBackup,
 	deriveNuloAccountAddress,
 	gotoPopupImport,
-	makeRandomMasterBase64,
+	makeRecoveryTriple,
 	setInputs,
 	submitWhenEnabled,
 	TEST_PASSWORD,
@@ -151,11 +151,11 @@ function startStub(answer: (method: string) => unknown | undefined): Promise<Stu
  *  `rpcUrl` and carries a senders-only account-state slice — the minimum
  *  registrable work that forces the chain-registration leg to engage. */
 async function deadRpcBackup(rpcUrl: string, withAccountState = true): Promise<string> {
-	const master = await makeRandomMasterBase64()
+	const { masterBase64: master, entropyBase64 } = await makeRecoveryTriple()
 	const address = await deriveNuloAccountAddress(master, STUB_CHAIN_ID)
 	const base = buildSyntheticBackup({
 		masterBase64: master,
-		// The stub network's L1 identity — must match what `address` was derived under.
+		entropyBase64,
 		l1ChainId: STUB_CHAIN_ID,
 		accountAddress: address,
 		extraData: withAccountState ? { "account-state": [{ networkId: "syn-network-id", senders: [{ address }], contracts: [] }] } : {},

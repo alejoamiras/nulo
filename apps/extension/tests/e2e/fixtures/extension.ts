@@ -808,7 +808,7 @@ export const test = base.extend<{
 			// Phase 1: setup pre-funded account on-chain (script-side).
 			const { createTestWallet, setupPreFundedAccount, createSponsoredFeeOptions, mintPublicTokens } = await import("./aztec")
 			const { wallet, accounts, node, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
-			let prefunded: { masterBase64: string; accountAddress: { toString(): string } }
+			let prefunded: { words: string[]; masterBase64: string; accountAddress: { toString(): string } }
 			try {
 				const feePayer = accounts[0]
 				if (!feePayer) throw new Error("expected at least one sandbox-deployed test account")
@@ -853,12 +853,12 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 30_000 })
-			await clickByTestId(page, "import-option-private-key")
+			await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 30_000 })
+			await clickByTestId(page, "import-option-seed")
 
-			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 30_000 })
+			await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 30_000 })
 			await page.evaluate(
-				({ secretKey, pwd }: { secretKey: string; pwd: string }) => {
+				({ seed, pwd }: { seed: string; pwd: string }) => {
 					const setVal = (sel: string, v: string) => {
 						const input = document.querySelector<HTMLInputElement>(sel)
 						if (!input) throw new Error(`input not found: ${sel}`)
@@ -868,21 +868,21 @@ export const test = base.extend<{
 					}
 					// F2: profile name is required at submit time.
 					setVal('[data-testid="import-name-input"] input', "Imported Profile")
-					setVal('[data-testid="import-private-key-input"] input', secretKey)
+					setVal('[data-testid="import-seed-input"] input', seed)
 					setVal('[data-testid="import-password-input"] input', pwd)
 					setVal('[data-testid="import-password-confirm-input"] input', pwd)
 				},
-				{ secretKey: prefunded.masterBase64, pwd: TEST_PASSWORD },
+				{ seed: prefunded.words.join(" "), pwd: TEST_PASSWORD },
 			)
 
 			await page.waitForFunction(
 				() => {
-					const btn = document.querySelector<HTMLButtonElement>('[data-testid="import-private-key-submit-btn"]')
+					const btn = document.querySelector<HTMLButtonElement>('[data-testid="import-seed-submit-btn"]')
 					return btn && !btn.disabled
 				},
 				{ timeout: 5_000, polling: 100 },
 			)
-			await clickByTestId(page, "import-private-key-submit-btn")
+			await clickByTestId(page, "import-seed-submit-btn")
 			await waitForHash(page, "#/popup/general", 30_000)
 
 			// Switch to Local Network — popup auto-creates a Local-chain account

@@ -25,7 +25,7 @@ import { expect, inject } from "vitest"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
-import { ensureUnlocked, getAccountAddress, revealSecretKey } from "../fixtures/helpers"
+import { ensureUnlocked, getAccountAddress, revealSeedPhrase } from "../fixtures/helpers"
 import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
@@ -95,27 +95,30 @@ test.skipIf(!hasConfig)(
 		expect(accountAddresses.length).toBe(2)
 
 		// ── Stage 1: frozen derivation reproduces the live wallet's addresses ──
-		step("revealing profile master")
+		// Capture the recovery phrase (plain-key export is gone in KDF v2) and derive the master
+		// test-side through the standard BIP-39 step — the same path the wallet uses.
+		step("revealing recovery phrase")
 		const popup = await openPopup(ctx)
 		await waitForHash(popup, "#/popup/general", 30_000)
-		await revealSecretKey(popup, TEST_PASSWORD, "plain")
-		const masterBase64 = await popup.evaluate(() => {
+		await revealSeedPhrase(popup, TEST_PASSWORD)
+		const words = await popup.evaluate(() => {
 			const scope = document.querySelector('[data-testid="reveal-content"]')
 			const input = scope?.querySelector("input") as HTMLInputElement | null
 			if (!input) throw new Error("reveal-content input not present")
 			return input.value
 		})
 		await popup.close()
-		expect(masterBase64.length).toBeGreaterThan(0)
+		expect(words.split(" ").length).toBe(24)
 
 		step("deriving accounts test-side through the frozen path")
 		const { Fr } = await import("@aztec/aztec.js/fields")
 		const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
+		const { deriveMasterFromMnemonic } = await import("@nulo/wallet-crypto")
 		const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 		const { computeSiloedPrivateInitializationNullifier } = await import("@aztec/stdlib/hash")
 		const { createLogger } = await import("@aztec/foundation/log")
 		const logger = createLogger("frozen-account-canary")
-		const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
+		const master = Fr.fromBuffer(Buffer.from(await deriveMasterFromMnemonic(words.split(" "))))
 		// DELIBERATELY INDEPENDENT recompute of the wallet's NULO-ACCOUNT-KDF v2 account-seed
 		// formula (poseidon2HashWithSeparator = separator unshifted as Fr):
 		// poseidon2Hash([SEP, master, l1ChainId, type, index]) with SEP = NULO_ACCOUNT_SEED_SEP

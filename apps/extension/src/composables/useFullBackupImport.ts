@@ -595,12 +595,25 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			const override = opts.profileName?.value.trim()
 			const profileForRestore = override ? { ...profile, name: override } : profile
 			// Construct the profile-type-discriminated restore secret at the backup
-			// boundary: the v2 `master-key` field is a base64 plain master key for
-			// password profiles and the credentialId for passkey profiles (unchanged
-			// on disk — this only types the transient RPC payload).
+			// boundary: `master-key` is a base64 plain master key for password profiles
+			// and the credentialId for passkey profiles. Epoch-4 password blobs REQUIRE
+			// the `entropy` field (the recovery phrase re-displays from it; the service
+			// verifies the words derive the master before sealing); passkey blobs must
+			// NOT carry one.
+			const entropyField = (backup as { entropy?: unknown }).entropy
+			if (profile.type === "password" && typeof entropyField !== "string") {
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Can't import", "This backup is missing its recovery-phrase entropy.")
+				return
+			}
+			if (profile.type === "passkey" && entropyField !== undefined) {
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Can't import", "A passkey backup must not carry an entropy field.")
+				return
+			}
 			const restoreSecret: RestoreSecret =
 				profile.type === "password"
-					? { type: "password", masterKey: asBase64MasterSecret(masterKey) }
+					? { type: "password", masterKey: asBase64MasterSecret(masterKey), entropy: entropyField as string }
 					: { type: "passkey", credentialId: asBase64CredentialId(masterKey) }
 			const newProfile = await profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData)
 

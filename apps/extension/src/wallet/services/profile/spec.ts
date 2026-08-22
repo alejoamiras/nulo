@@ -13,7 +13,16 @@ export type ProfileType = "password" | "passkey"
  * id in the SAME parameter — a swap that type-checked and only failed at restore.
  * `ProfileService.restore` asserts `secret.type === profile.type` before branching.
  */
-export type RestoreSecret = { type: "password"; masterKey: Base64MasterSecret } | { type: "passkey"; credentialId: Base64CredentialId }
+export type RestoreSecret =
+	| {
+			type: "password"
+			masterKey: Base64MasterSecret
+			/** Base64 of the 32-byte BIP-39 entropy behind the recovery phrase. REQUIRED for
+			 *  epoch-4 password backups; `restore` verifies `PBKDF2(words(entropy)) == masterKey`
+			 *  before sealing either (the backup checksum is integrity-not-auth). */
+			entropy: string
+	  }
+	| { type: "passkey"; credentialId: Base64CredentialId }
 
 export type ProfileInfo = {
 	/** Randomly generated id. */
@@ -36,6 +45,14 @@ export type Profile = ProfileInfo & {
 				type: "password"
 				guard: string
 				secret: string
+				/** Sealed 32-byte BIP-39 entropy (AAD-bound, PasswordSecretBox v2) — the recovery
+				 *  phrase re-displays from THIS; the master derives one-way from the words. */
+				entropy: string
+				/** Master-keyed HMAC over the WHOLE sealed envelope (guard‖secret‖entropy). The
+				 *  passwordless bearer restore verifies it (it cannot decrypt to run the pairing
+				 *  check); a mismatch — a tampered OR cross-profile-transplanted ciphertext in any
+				 *  slot — blocks silent restore and forces a password unlock. */
+				envelopeMac: string
 		  }
 		| {
 				type: "passkey"
@@ -203,22 +220,6 @@ export type Methods = {
 	deleteProfile(id: string): ProfileInfo
 
 	/**
-	 * Imports profile from encrypted secret and signs in.
-	 * @param name Display name.
-	 * @param secret Encrypted secret (base64).
-	 * @param password Password to decrypt (and then encrypt) the secret.
-	 */
-	importEncrypted(name: string, secret: string, password: string): ProfileInfo
-
-	/**
-	 * Imports profile from plain secret and signs in.
-	 * @param name Display name.
-	 * @param secret Plain secret (base64).
-	 * @param password Password to encrypt the secret.
-	 */
-	importPlain(name: string, secret: string, password: string): ProfileInfo
-
-	/**
 	 * Imports a passkey-backed profile using an existing credential and signs in.
 	 *
 	 * @param name Display name.
@@ -228,18 +229,15 @@ export type Methods = {
 	importPasskey(name: string, credentialData?: PasskeyCredentialData): ProfileInfo
 
 	/**
-	 * Imports profile from 24-words mnemonic phrase, representing plain secret, and signs in.
+	 * Imports a profile from its 24-word recovery phrase and signs in. Validates on the
+	 * canonical form (NFKD/lowercase/collapse) BEFORE any persistence: exactly 24 words, all
+	 * on the wordlist, checksum valid. The master derives via the standard BIP-39 PBKDF2 step
+	 * (NULO-ACCOUNT-KDF v2); the entropy is stored sealed so the phrase re-displays.
 	 * @param name Display name.
-	 * @param words 24-words mnemonic phrase.
-	 * @param password Password to encrypt the secret.
+	 * @param mnemonic 24-word recovery phrase.
+	 * @param password Password to encrypt the secrets.
 	 */
 	importMnemonic(name: string, mnemonic: string[], password: string): ProfileInfo
-
-	/**
-	 * Returns encrypted profile secret (base64).
-	 * @param id Profile id.
-	 */
-	exportEncrypted(id: string): string
 
 	/**
 	 * Returns plain profile secret (base64). For passkey profiles, the
@@ -258,9 +256,19 @@ export type Methods = {
 	exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): string
 
 	/**
-	 * Returns 24-words mnemonic phrase, representing plain profile secret.
+	 * Atomic paired export for the Full-Backup builder: the base64 master key AND the base64
+	 * recovery-phrase entropy from ONE unseal, so the two backup fields can never come from
+	 * different row states. Password profiles only.
 	 * @param id Profile id.
-	 * @param password Password to decrypt the secret.
+	 * @param password Password to decrypt the secrets.
+	 */
+	exportBackupMaterial(id: string, password: string): { masterKey: string; entropy: string }
+
+	/**
+	 * Returns the 24-word recovery phrase, re-encoded from the profile's stored entropy after
+	 * the words↔master pairing check (fails closed on a tampered row).
+	 * @param id Profile id.
+	 * @param password Password to decrypt the secrets.
 	 */
 	exportMnemonic(id: string, password: string): string[]
 

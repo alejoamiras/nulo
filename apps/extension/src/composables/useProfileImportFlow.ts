@@ -57,8 +57,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 
 	const selectedImportOption = ref<string | null>(null)
 	const seedPhrase = ref<string | undefined>(undefined)
-	const privateKey = ref<string | undefined>(undefined)
-	const publicKey = ref<string | undefined>(undefined)
 	const password = ref("")
 	const repeatedPassword = ref("")
 	const maxPasswordLength = 128
@@ -106,21 +104,12 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	// an empty name shakes the input instead of silently disabling the buttons.
 	const isAllowedToContinue = computed(() => {
 		if (!password.value || password.value.length < 8) return false
-		if (selectedImportOption.value !== "public_key" && (!repeatedPassword.value || password.value !== repeatedPassword.value))
-			return false
+		if (!repeatedPassword.value || password.value !== repeatedPassword.value) return false
 		return true
 	})
 	const isAllowedToImportBySeedPhrase = computed(() => {
 		if (!isAllowedToContinue.value) return false
 		return seedPhrase.value?.split(" ").length === 24 && password.value.length >= 8
-	})
-	const isAllowedToImportByPrivateKey = computed(() => {
-		if (!isAllowedToContinue.value) return false
-		return !!privateKey.value
-	})
-	const isAllowedToImportByPublicKey = computed(() => {
-		if (!isAllowedToContinue.value) return false
-		return !!publicKey.value
 	})
 
 	async function fetchExistingNames(): Promise<string[]> {
@@ -142,55 +131,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 			await opts.completeImport(profile)
 		} catch (err) {
 			fillUnknownImportError(err)
-		} finally {
-			isImporting.value = false
-		}
-	}
-
-	const handleImportPrivateKey = async () => {
-		if (!isAllowedToImportByPrivateKey.value || isImporting.value) return
-		isImporting.value = true
-		try {
-			const existingNames = await fetchExistingNames()
-			if (!validateName({ existingNames })) {
-				isImporting.value = false
-				return
-			}
-			const profile = await managers.profile.importPlain(trimmedName.value, privateKey.value as string, password.value)
-			await opts.completeImport(profile)
-		} catch (err) {
-			// `profile/service.ts` throws `new Error("Invalid secret length")` —
-			// arrives as an Error instance across the RPC boundary, so match on
-			// `.message`, not string-equality on the value itself.
-			if (err instanceof Error && err.message === "Invalid secret length") {
-				fillError("secret", "Invalid key length")
-			} else {
-				fillUnknownImportError(err)
-			}
-		} finally {
-			isImporting.value = false
-		}
-	}
-
-	const handleImportPublicKey = async () => {
-		if (!isAllowedToImportByPublicKey.value || isImporting.value) return
-		isImporting.value = true
-		try {
-			const existingNames = await fetchExistingNames()
-			if (!validateName({ existingNames })) {
-				isImporting.value = false
-				return
-			}
-			const profile = await managers.profile.importEncrypted(trimmedName.value, publicKey.value as string, password.value)
-			await opts.completeImport(profile)
-		} catch (err) {
-			if (err instanceof Error && err.message === "Invalid password") {
-				fillError("password", "Wrong password")
-			} else if (err instanceof Error && err.message === "Invalid secret length") {
-				fillError("secret", "Invalid encrypted key")
-			} else {
-				fillUnknownImportError(err)
-			}
 		} finally {
 			isImporting.value = false
 		}
@@ -258,8 +198,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	// to retype it after hitting Back.
 	function clearFormState() {
 		selectedImportOption.value = null
-		privateKey.value = undefined
-		publicKey.value = undefined
 		seedPhrase.value = undefined
 		password.value = ""
 		repeatedPassword.value = ""
@@ -287,8 +225,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		// import state
 		selectedImportOption,
 		seedPhrase,
-		privateKey,
-		publicKey,
 		password,
 		repeatedPassword,
 		maxPasswordLength,
@@ -297,8 +233,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		isCopied,
 		// per-method gates
 		isAllowedToImportBySeedPhrase,
-		isAllowedToImportByPrivateKey,
-		isAllowedToImportByPublicKey,
 		// full backup
 		selectedBackup,
 		decryptionPassword,
@@ -313,8 +247,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		showRestoreErrorLog,
 		// handlers
 		handleImportSeed,
-		handleImportPrivateKey,
-		handleImportPublicKey,
 		handleImportPasskey,
 		handlePasswordInput,
 		handleSecretInput,

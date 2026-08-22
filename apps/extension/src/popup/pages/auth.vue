@@ -240,7 +240,7 @@ watch(
 					Delete profile
 				</button>
 				<template #content>
-					Forgot your password? Delete this profile and re-import it with your seed phrase or secret key.
+					Forgot your password? Delete this profile and re-import it with your recovery phrase.
 				</template>
 			</Tooltip>
 		</Flex>
