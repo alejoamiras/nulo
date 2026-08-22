@@ -23,6 +23,7 @@ import { Service } from "@nulo/extension-messaging/background"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import {
 	AccountAddressInconsistencyError,
+	DuplicateWalletError,
 	InvalidPasswordError,
 	ProfileIdConflictError,
 	RestoreTornError,
@@ -33,6 +34,8 @@ import {
 	asBase64MasterSecret,
 	asBase64SecretPrf,
 	asHexUserHandle,
+	asImportedKeysDek,
+	sealDekUnderWrapKey,
 	type PasskeyCredential,
 	type PasskeyCredentialData,
 	type SessionWrappedSecret,
@@ -64,12 +67,16 @@ async function restorePairFor(fill: number): Promise<{ masterKey: string; entrop
 	return pair
 }
 
+/** Deterministic 32-byte source-dek carrier for password restore secrets (any 32B is valid —
+ *  the service only feeds it into the rewrap context). */
+const RESTORE_DEK_B64 = Buffer.from(new Uint8Array(32).fill(0x55)).toString("base64")
+
 /** RestoreSecret password variant for a fill — the standard happy-path shape. */
 async function restoreSecretFor(
 	fill: number,
-): Promise<{ type: "password"; masterKey: ReturnType<typeof asBase64MasterSecret>; entropy: string }> {
+): Promise<{ type: "password"; masterKey: ReturnType<typeof asBase64MasterSecret>; entropy: string; importedKeysDek: string }> {
 	const pair = await restorePairFor(fill)
-	return { type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy }
+	return { type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: RESTORE_DEK_B64 }
 }
 
 /** Fake `IConfig` with `sessionTtl` + `strictSecurityMode`. Default is
@@ -151,8 +158,25 @@ class FakePasskeyService extends Service<Record<string, never>> {
 				const { Fr } = await import("@aztec/foundation/curves/bn254")
 				return Fr.fromBufferReduce(Buffer.from(secret)).toBuffer() as Buffer<ArrayBuffer>
 			},
+			// Deterministic per credential id — mirrors production's same-credential ⇒ same wrap
+			// key property, and a REAL AES-GCM key so dek seal/unseal genuinely round-trips.
+			deriveDekWrapKey: async () => fakeWrapKey(id),
 		} as unknown as PasskeyCredential
 	}
+}
+
+/** Deterministic AES-GCM wrap key per fake credential id (real WebCrypto key). */
+async function fakeWrapKey(credentialId: string): Promise<CryptoKey> {
+	const raw = new Uint8Array(32)
+	for (let i = 0; i < 32; i++) raw[i] = (credentialId.charCodeAt(i % credentialId.length) + i) & 0xff
+	return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt"])
+}
+
+/** A sealed dek blob that unseals under the fake credential's wrap key — the passkey
+ *  RestoreSecret's `dekSealed` carrier. */
+async function fakeDekSealedFor(credentialId: string, fill = 0x66): Promise<string> {
+	const dek = asImportedKeysDek(new Uint8Array(32).fill(fill) as Uint8Array<ArrayBuffer>)
+	return sealDekUnderWrapKey(await fakeWrapKey(credentialId), dek)
 }
 
 /** Build a `PasskeyCredentialData` payload matching the FakePasskeyService's
@@ -451,13 +475,21 @@ describe("ProfileService integration", () => {
 			const profile = await service.createPasskeyProfile("PK")
 
 			const credData = fakeCredentialData(`cred-${profile.id}`, profile.id)
-			const exportPromise = service.exportPlain(profile.id, undefined, credData)
+			// Attach the settle handler SYNCHRONOUSLY at creation. The delete below awaits for
+			// several ticks before we'd otherwise call `.catch`, and exportPlain can reject inside
+			// that window (its own credentialId-refetch races the delete) — a late `.catch` leaves
+			// the rejection momentarily unhandled, which vitest fails the run on. Capturing
+			// value-or-error up front keeps the race assertion identical with no unhandled window.
+			const exportSettled = service.exportPlain(profile.id, undefined, credData).then(
+				(v) => v,
+				(err: unknown) => err,
+			)
 
 			// Race: delete + reimport with a different credentialId in parallel.
 			await service.deleteProfile(profile.id)
 			const newProfile = await service.createPasskeyProfile("PK new")
 
-			const exportResult = await exportPromise.catch((err) => err)
+			const exportResult = await exportSettled
 			if (exportResult instanceof Error) {
 				// Caught the stale-credential race → threw "Invalid profile id". Good.
 				expect(exportResult.message).toMatch(/Invalid profile id/)
@@ -563,7 +595,12 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "px", name: "Doctored", type: "password" },
-					{ type: "password", masterKey: asBase64MasterSecret(good.masterKey), entropy: evil.entropy },
+					{
+						type: "password",
+						masterKey: asBase64MasterSecret(good.masterKey),
+						entropy: evil.entropy,
+						importedKeysDek: RESTORE_DEK_B64,
+					},
 					"pass1234",
 				),
 			).rejects.toThrow(/entropy does not derive/)
@@ -636,6 +673,7 @@ describe("ProfileService integration", () => {
 							const { Fr } = await import("@aztec/foundation/curves/bn254")
 							return Fr.fromBufferReduce(Buffer.from(secret)).toBuffer() as Buffer<ArrayBuffer>
 						},
+						deriveDekWrapKey: async () => fakeWrapKey(`cred-${userHandle}`),
 					} as unknown as PasskeyCredential
 				}
 				public async getKey(): Promise<PasskeyCredential> {
@@ -723,7 +761,7 @@ describe("ProfileService integration", () => {
 		test("opt-out unlock keeps bearer (legacy lenient behavior)", async () => {
 			const { api, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 		}, 30_000)
 
 		test("createProfile honors strict mode (gate applies even on profile creation, not just unlock)", async () => {
@@ -754,7 +792,7 @@ describe("ProfileService integration", () => {
 		test("toggle ON during unlocked session: bearer cleared from persisted record + in-memory", async () => {
 			const { api, config, service } = await makeService({ strict: false })
 			await service.createProfile("P", "pass1234")
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 
 			config.set("strictSecurityMode", true)
 			// onConfigUpdated fires `void clearBearer()` — flush microtasks.
@@ -796,7 +834,7 @@ describe("ProfileService integration", () => {
 
 			// Now the bearer is back — confirms toggle OFF takes effect on
 			// next unlock.
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 		}, 30_000)
 
 		test("SW restart simulation: legacy passhash record → silentClose + profile still unlockable (upgrade-path safety)", async () => {
@@ -833,7 +871,7 @@ describe("ProfileService integration", () => {
 			// re-registration, no data loss (F-11 option (a)).
 			const reunlocked = await service2.unlockProfile(profile.id, "pass1234")
 			expect(reunlocked.id).toBe(profile.id)
-			expect((await readPersistedBearer(api))?.v).toBe(1) // fresh F-11 bearer on re-unlock
+			expect((await readPersistedBearer(api))?.v).toBe(2) // fresh F-11 bearer on re-unlock
 		}, 30_000)
 
 		test("SW restart simulation: clean strict session + strict ON → no in-memory restore (passkey-equivalent)", async () => {
@@ -852,7 +890,7 @@ describe("ProfileService integration", () => {
 			const { api } = await makeService({ strict: false })
 			const built = await makeServiceFromExistingApi(api, { strict: false })
 			await built.service.createProfile("P", "pass1234")
-			expect((await readPersistedBearer(api))?.v).toBe(1)
+			expect((await readPersistedBearer(api))?.v).toBe(2)
 
 			const { service: service2 } = await makeServiceFromExistingApi(api, { strict: false })
 			// Persisted bearer + strict OFF → silent restore.
@@ -960,7 +998,7 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(credentialId, original.id)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				credData,
 			)
@@ -991,7 +1029,7 @@ describe("ProfileService integration", () => {
 
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 			)
 			expect("restoreError" in out && out.restoreError).toBeTruthy()
 			expect(String((out as { restoreError?: unknown }).restoreError)).toMatch(/credentialData is required/)
@@ -1012,7 +1050,7 @@ describe("ProfileService integration", () => {
 			const wrongCred = fakeCredentialData("cred-WRONG", original.id)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				wrongCred,
 			)
@@ -1031,7 +1069,7 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(credentialId, original.id)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				credData,
 			)
@@ -1061,6 +1099,7 @@ describe("ProfileService integration", () => {
 						type: "password",
 						masterKey: asBase64MasterSecret(Buffer.from(new Uint8Array(16)).toString("base64")), // 16 bytes, not 32
 						entropy: Buffer.from(new Uint8Array(32)).toString("base64"),
+						importedKeysDek: RESTORE_DEK_B64,
 					},
 					"pass1234",
 				),
@@ -1079,7 +1118,7 @@ describe("ProfileService integration", () => {
 			await expect(
 				service.restore(
 					{ id: "ignored", name: "P", type: "password" },
-					{ type: "passkey", credentialId: asBase64CredentialId("cred-x") },
+					{ type: "passkey", credentialId: asBase64CredentialId("cred-x"), dekSealed: "AAA=" },
 					"pass1234",
 				),
 			).rejects.toThrow(/secret type does not match/i)
@@ -1122,7 +1161,7 @@ describe("ProfileService integration", () => {
 			const credData = fakeCredentialData(credentialId, userHandle)
 			const out = await service.restore(
 				{ id: "ignored", name: "PK", type: "passkey" },
-				{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+				{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 				undefined,
 				credData,
 			)
@@ -1438,7 +1477,7 @@ describe("F-B24 — torn-import sweep on boot resume", () => {
 	const AGED = ProfileService.TORN_IMPORT_MIN_AGE_MS + 60 * 60 * 1000 // floor + 1h
 
 	const tornRestore = async (service: ProfileService, id = "ignored") => {
-		const out = await service.restore({ id, name: "Torn", type: "password" }, await restoreSecretFor(13), "pass1234")
+		const out = await service.restore({ id, name: "Torn", type: "password" }, await restoreSecretFor(13), "pass1234", undefined, true)
 		if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 		return out
 	}
@@ -2089,9 +2128,10 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 				const credData = fakeCredentialData(credentialId, original.id)
 				const out = await service.restore(
 					{ id: "ignored", name: "PK", type: "passkey" },
-					{ type: "passkey", credentialId: asBase64CredentialId(credentialId) },
+					{ type: "passkey", credentialId: asBase64CredentialId(credentialId), dekSealed: await fakeDekSealedFor(credentialId) },
 					undefined,
 					credData,
+					true,
 				)
 				if ("restoreError" in out && out.restoreError) throw new Error(String(out.restoreError))
 				expect(captured.length).toBeGreaterThan(0)
@@ -2104,9 +2144,14 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 				vi.advanceTimersByTime(31 * 60 * 1000)
 				await service.restore(
 					{ id: "ignored2", name: "PK2", type: "passkey" },
-					{ type: "passkey", credentialId: asBase64CredentialId("cred-fresh2") },
+					{
+						type: "passkey",
+						credentialId: asBase64CredentialId("cred-fresh2"),
+						dekSealed: await fakeDekSealedFor("cred-fresh2"),
+					},
 					undefined,
 					fakeCredentialData("cred-fresh2", "fresh2"),
+					true,
 				)
 
 				// The FIRST (abandoned) restore's stashed secret must now be wiped
@@ -2181,5 +2226,284 @@ describe("account-integrity delegate — the session-open chokepoint", () => {
 			vi.spyOn(api.storage.session, "remove").mockRejectedValue(new Error("session remove failed"))
 			await expect(service.lockActiveProfile()).rejects.toThrow(/did not persist/)
 		}, 30_000)
+	})
+
+	// P4 named integration criteria for the imported-keys DEK (plan §"Phases & validation gates").
+	describe("imported-keys DEK lifecycle", () => {
+		/** Read a persisted profile row straight from storage. */
+		async function readRow(api: FakeBrowserApi, id: string): Promise<Record<string, unknown>> {
+			const key = `nulo:core:profiles@${id}`
+			const raw = (await api.storage.local.get(key))[key]
+			return typeof raw === "string" ? JSON.parse(raw) : (raw as Record<string, unknown>)
+		}
+
+		// (a) every creation path stamps dekSealed + walletFingerprint, both profile types.
+		test("(a) createProfile stamps dekSealed + walletFingerprint", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const row = await readRow(api, p.id)
+			expect(typeof row.dekSealed).toBe("string")
+			expect((row.dekSealed as string).length).toBeGreaterThan(0)
+			expect(typeof row.walletFingerprint).toBe("string")
+			expect((row.walletFingerprint as string).length).toBe(64) // sha256 hex
+		})
+
+		test("(a) importMnemonic + createPasskeyProfile both stamp the two fields", async () => {
+			const { api, service } = await makeService()
+			const words = await wordsForFill(0x21)
+			const imported = await service.importMnemonic("M", words, "pass1234")
+			const importedRow = await readRow(api, imported.id)
+			expect(typeof importedRow.dekSealed).toBe("string")
+			expect(typeof importedRow.walletFingerprint).toBe("string")
+
+			const pk = await service.createPasskeyProfile("PK", fakeCredentialData("cred-pk-a", "uh-pk-a"))
+			const pkRow = await readRow(api, pk.id)
+			expect(typeof pkRow.dekSealed).toBe("string")
+			expect(typeof pkRow.walletFingerprint).toBe("string")
+		})
+
+		// getProfileDek returns the session dek; getProfileDekSealed returns the row blob.
+		test("getProfileDek returns a live dek; a locked profile has none", async () => {
+			const { service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			expect(await service.getProfileDek(p.id)).toBeDefined()
+			const sealed = await service.getProfileDekSealed(p.id)
+			expect(typeof sealed).toBe("string")
+			await service.lockActiveProfile()
+			await expect(service.getProfileDek(p.id)).rejects.toThrow(/locked/)
+		})
+
+		// (d) degraded unlock: a corrupt dek slot opens derived-only, emits the event, no bearer.
+		test("(d) a corrupt dekSealed slot → derived-only unlock, onImportedKeysDegraded, no bearer", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			await service.lockActiveProfile()
+			// Tamper the dek slot at rest.
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.dekSealed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			const degraded: string[] = []
+			service.onImportedKeysDegraded.add((info) => degraded.push(info.id))
+			await service.unlockProfile(p.id, "pass1234")
+			// Session is open (derived-only) but carries NO dek and persisted NO bearer.
+			expect((await service.getActiveProfile())?.id).toBe(p.id)
+			expect(await service.getProfileDek(p.id)).toBeUndefined()
+			expect(degraded).toContain(p.id)
+			const bearerKey = SESSION_STORAGE_ROOT
+			const rawSession = (await api.storage.session.get(bearerKey))[bearerKey]
+			const session = typeof rawSession === "string" ? JSON.parse(rawSession) : rawSession
+			expect(session.bearer).toBeUndefined()
+		})
+
+		// A password change RESEALS the dek — it survives + still round-trips.
+		test("changeProfilePassword reseals the dek (still usable under the new password)", async () => {
+			const { service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const before = await service.getProfileDek(p.id)
+			await service.changeProfilePassword(p.id, "pass1234", "newpass9")
+			const after = await service.getProfileDek(p.id)
+			expect(Array.from(after!)).toEqual(Array.from(before!))
+			// Lock + unlock under the NEW password: the dek unseals (no degradation).
+			await service.lockActiveProfile()
+			await service.unlockProfile(p.id, "newpass9")
+			expect(await service.getProfileDek(p.id)).toBeDefined()
+		})
+
+		// (e)+bearer: SW-restart silent restore recovers the dek via the v2 pair bearer.
+		test("(e) SW-restart silent restore recovers BOTH master and dek", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const dekBefore = await service.getProfileDek(p.id)
+			// Fresh service on the same storage = MV3 SW restart.
+			const { service: restarted } = await makeServiceFromExistingApi(api)
+			expect((await restarted.getActiveProfile())?.id).toBe(p.id)
+			const dekAfter = await restarted.getProfileDek(p.id)
+			expect(Array.from(dekAfter!)).toEqual(Array.from(dekBefore!))
+		})
+
+		// (g) the duplicate-phrase guard: same phrase → DuplicateWalletError unless allowDuplicate.
+		test("(g) importMnemonic rejects a duplicate phrase, then accepts it with allowDuplicate", async () => {
+			const { service } = await makeService()
+			const words = await wordsForFill(0x31)
+			await service.importMnemonic("First", words, "pass1234")
+			await expect(service.importMnemonic("Second", words, "pass1234")).rejects.toBeInstanceOf(DuplicateWalletError)
+			const dup = await service.importMnemonic("Second", words, "pass1234", true)
+			expect(dup.id).toBeDefined()
+		})
+
+		// (h) clone divergence: a fresh destination dek — B cannot equal A's session dek.
+		test("(h) restoring a backup mints a FRESH dek (clone divergence — differs from the source)", async () => {
+			const { service } = await makeService()
+			// Source profile, capture its dek.
+			const src = await service.createProfile("Src", "pass1234")
+			const srcDek = await service.getProfileDek(src.id)
+			await service.lockActiveProfile()
+			// Restore a backup carrying the SAME source dek as its carrier, under a NEW password.
+			const pair = await restorePairFor(0x41)
+			const restored = await service.restore(
+				{ id: "clone", name: "Clone", type: "password" },
+				{
+					type: "password",
+					masterKey: asBase64MasterSecret(pair.masterKey),
+					entropy: pair.entropy,
+					importedKeysDek: Buffer.from(srcDek!).toString("base64"),
+				},
+				"otherpass",
+				undefined,
+				true, // same phrase as nothing here; allowDuplicate keeps the test focused on the dek
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			await service.finalizeRestore(restored.id, "otherpass")
+			const cloneDek = await service.getProfileDek(restored.id)
+			// The restored row's dek is freshly minted — NOT the source dek it carried.
+			expect(Array.from(cloneDek!)).not.toEqual(Array.from(srcDek!))
+		})
+
+		// P4 rider HIGH: a tamper landing BETWEEN restore() and finalizeRestore must not yield a
+		// non-degraded (bearer-backed) session — finalize re-verifies MAC v2.
+		test("a MAC tamper between restore and finalize → derived-only finalize (no bearer)", async () => {
+			const { api, service } = await makeService()
+			const pair = await restorePairFor(0x51)
+			const srcDek = Buffer.from(new Uint8Array(32).fill(0x77)).toString("base64")
+			const restored = await service.restore(
+				{ id: "r", name: "R", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: srcDek },
+				"pass1234",
+				undefined,
+				true,
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			// Corrupt the envelope MAC on the freshly-restored row, THEN finalize.
+			const key = `nulo:core:profiles@${restored.id}`
+			const row = JSON.parse((await api.storage.local.get(key))[key] as string)
+			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			const degraded: string[] = []
+			service.onImportedKeysDegraded.add((info) => degraded.push(info.id))
+			await service.finalizeRestore(restored.id, "pass1234")
+			// Session opened derived-only: no dek, no persisted bearer, warning emitted.
+			expect(await service.getProfileDek(restored.id)).toBeUndefined()
+			expect(degraded).toContain(restored.id)
+			const rawSession = (await api.storage.session.get(SESSION_STORAGE_ROOT))[SESSION_STORAGE_ROOT]
+			const session = typeof rawSession === "string" ? JSON.parse(rawSession) : rawSession
+			expect(session.bearer).toBeUndefined()
+		})
+
+		// P4 rider MEDIUM: deleting a profile mid-restore zeroizes + drops its rewrap context.
+		test("deleteProfile drops the pending rewrap context (no leak past delete)", async () => {
+			const { service } = await makeService()
+			const pair = await restorePairFor(0x61)
+			const srcDek = Buffer.from(new Uint8Array(32).fill(0x77)).toString("base64")
+			const restored = await service.restore(
+				{ id: "d", name: "D", type: "password" },
+				{ type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: srcDek },
+				"pass1234",
+				undefined,
+				true,
+			)
+			if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+			service.setDeletionDelegate({ snapshot: async () => ({ addresses: [], tokenIds: [], networkIds: [] }), runFor: async () => {} })
+			await service.deleteProfile(restored.id)
+			// The context is gone: a later consume returns undefined (nothing to rewrap).
+			expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
+		})
+
+		// Post-impl codex round 2: a password change must neither LAUNDER an uncovered dek (re-MACing
+		// a transplanted slot into a freshly-valid envelope) NOR self-heal by minting a fresh one —
+		// a MAC failure cannot tell a replaced slot from corruption of the MAC field alone, so
+		// minting would silently destroy still-recoverable imported keys. It refuses, and the
+		// backup escape hatch (below) stays open so the refusal is not a dead end.
+		test("changeProfilePassword REFUSES when the stored MAC does not cover the dek", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const before = await service.getProfileDek(p.id)
+			await service.lockActiveProfile()
+			// Break ONLY the MAC: dekSealed still unseals, so the dek and every imported key that
+			// roots in it are still recoverable — exactly the case a mint-fresh would have lost.
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			await service.unlockProfile(p.id, "pass1234")
+			expect(await service.getProfileDek(p.id)).toBeUndefined() // derived-only, as designed
+			await expect(service.changeProfilePassword(p.id, "pass1234", "newpass9")).rejects.toThrow(/integrity check failed/)
+			// Nothing was committed: the OLD password still works and the dek is untouched.
+			await service.lockActiveProfile()
+			await service.unlockProfile(p.id, "pass1234")
+			const material = await service.exportBackupMaterial(p.id, "pass1234")
+			expect(Array.from(Buffer.from(material.importedKeysDek, "base64"))).toEqual(Array.from(before!))
+		})
+
+		// The counterpart of the refusal above: exporting under an unverified dek cannot leak (a
+		// planted dek is the attacker's own key; a genuine one makes the backup correct), so the
+		// export deliberately still works — it is the only non-destructive repair path out of a
+		// MAC-corrupted profile.
+		test("the fresh-auth export RPCs still work when the MAC no longer covers the row", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createProfile("P", "pass1234")
+			const dek = await service.getProfileDek(p.id)
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.envelopeMac = Buffer.from(new Uint8Array(32).fill(0xee)).toString("base64")
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			const material = await service.exportBackupMaterial(p.id, "pass1234")
+			expect(Array.from(Buffer.from(material.importedKeysDek, "base64"))).toEqual(Array.from(dek!))
+			expect(Array.from(await service.exportImportedKeysDek(p.id, "pass1234"))).toEqual(Array.from(dek!))
+		})
+
+		// Post-impl codex round 2: a passkey backup carries `dekSealed` verbatim, so nothing
+		// downstream ever proves it opens — a corrupt slot would yield a backup that reports
+		// success and only fails at restore, when the source profile may be long gone.
+		test("exportPlain refuses a passkey profile whose dekSealed slot does not open", async () => {
+			const { api, service } = await makeService()
+			const p = await service.createPasskeyProfile("PK", fakeCredentialData("cred-x", "uh-x"))
+			const credentialId = await service.getPasskeyCredentialId(p.id)
+			await service.lockActiveProfile()
+			const key = `nulo:core:profiles@${p.id}`
+			const row = await readRow(api, p.id)
+			row.dekSealed = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+			await api.storage.local.set({ [key]: JSON.stringify(row) })
+
+			await expect(service.exportPlain(p.id, undefined, fakeCredentialData(credentialId, "uh-x"))).rejects.toThrow(/unrecoverable/)
+		})
+
+		// Post-impl codex MEDIUM: the stale sweep EXCLUDES the id being consumed, so the TTL has to
+		// be enforced on the consumed entry too — otherwise an abandoned restore's raw SOURCE dek
+		// stays consumable for the whole SW lifetime.
+		test("consumeDekRewrapContext enforces the TTL on the entry it consumes", async () => {
+			vi.useFakeTimers()
+			try {
+				const { service } = await makeService()
+				const pair = await restorePairFor(0x71)
+				const srcDek = Buffer.from(new Uint8Array(32).fill(0x77)).toString("base64")
+				const restored = await service.restore(
+					{ id: "ttl", name: "TTL", type: "password" },
+					{ type: "password", masterKey: asBase64MasterSecret(pair.masterKey), entropy: pair.entropy, importedKeysDek: srcDek },
+					"pass1234",
+					undefined,
+					true,
+				)
+				if ("restoreError" in restored && restored.restoreError) throw new Error(String(restored.restoreError))
+				vi.advanceTimersByTime(31 * 60 * 1000)
+				// No other map operation happened, so the sweep alone would never have freed it.
+				expect(await service.consumeDekRewrapContext(restored.id)).toBeUndefined()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		// (i) same-credential passkey duplicate is a HARD reject (no allowDuplicate escape).
+		test("(i) a same-credential passkey import is hard-rejected", async () => {
+			const { service } = await makeService()
+			await service.createPasskeyProfile("PK", fakeCredentialData("cred-dup", "uh-dup"))
+			await service.lockActiveProfile()
+			// importPasskey with the same credential id — even allowDuplicate can't bypass it.
+			await expect(service.importPasskey("PK2", fakeCredentialData("cred-dup", "uh-dup2"), true)).rejects.toThrow(/already exists/)
+		})
 	})
 })

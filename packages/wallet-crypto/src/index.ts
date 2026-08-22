@@ -22,8 +22,16 @@ export { NULO_ACCOUNT_SEED_SEP, NULO_SEPARATOR_LABELS, NULO_SIGNING_ROOT_SEP } f
 export { derivePxeStoreKey, PXE_STORE_KDF_LABEL } from "./pxe-store-key"
 export { EncryptionKey } from "./encryption-key"
 export { PasswordSecretBox, PROFILE_AAD, type EncryptedProfileSecret, type Sealed } from "./password-secret-box"
-export { computeEnvelopeMac, verifyEnvelopeMac, type MacEnvelope } from "./entropy-mac"
-export { sealImportedSigningKey, unsealImportedSigningKey } from "./imported-account-key-box"
+export { computeEnvelopeMacV2, verifyEnvelopeMacV2, type MacEnvelopeV2 } from "./entropy-mac"
+export { sealImportedSigningKeyV2, unsealImportedSigningKeyV2 } from "./imported-account-key-box"
+export {
+	generateImportedKeysDek,
+	IMPORTED_DEK_AAD,
+	IMPORTED_KEYS_DEK_LEN,
+	sealDekUnderWrapKey,
+	unsealDekUnderWrapKey,
+} from "./imported-keys-dek-box"
+export { computeWalletFingerprint } from "./wallet-fingerprint"
 export { SessionSecretBox, type SessionWrappedSecret } from "./session-secret-box"
 export { PasskeyCredential, type PasskeyCredentialData } from "./passkey-credential"
 export { PASSKEY_PRF_LABEL } from "./constants"
@@ -34,6 +42,7 @@ export {
 	type Base64MasterSecret,
 	type Base64SecretPrf,
 	type HexUserHandle,
+	type ImportedKeysDek,
 	type MasterSecretBytes,
 	type Passhash,
 	asBase64Ciphertext,
@@ -41,6 +50,7 @@ export {
 	asBase64MasterSecret,
 	asBase64SecretPrf,
 	asHexUserHandle,
+	asImportedKeysDek,
 	asMasterSecretBytes,
 	asPasshash,
 } from "./secret-types"

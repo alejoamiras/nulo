@@ -250,6 +250,22 @@ export class ProfileIdConflictError extends WalletError {
 }
 
 /**
+ * A profile with the same wallet fingerprint (same recovery phrase → same master) already exists
+ * on this device. Thrown by `importMnemonic` / `importPasskey` / `restore` unless the caller
+ * passes `allowDuplicate: true` — the UI catches this, shows the warn-and-confirm dialog, and
+ * retries with the override (duplicates are a warned choice, never a hard block — owner policy).
+ * `details.existingProfileName` names the colliding profile for the dialog copy; the error NEVER
+ * carries key material.
+ */
+export class DuplicateWalletError extends WalletError {
+	public static readonly CODE = "DUPLICATE_WALLET"
+
+	public constructor(message = "A profile with this recovery phrase already exists", details?: { existingProfileName?: string }) {
+		super(DuplicateWalletError.CODE, message, details, "DuplicateWalletError")
+	}
+}
+
+/**
  * Closed, code-keyed view of {@link WalletErrorPayload} for the reconstruction
  * switch below. The WIRE type stays the permissive `WalletErrorPayload` (so
  * `toPayload`, `messages.ts`, and the `errorPayload?: unknown` transport boundary
@@ -269,6 +285,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
 	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
+	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -304,6 +321,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new RestoreTornError(known.message, known.details)
 		case ProfileIdConflictError.CODE:
 			return new ProfileIdConflictError(known.message, known.details)
+		case DuplicateWalletError.CODE:
+			return new DuplicateWalletError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

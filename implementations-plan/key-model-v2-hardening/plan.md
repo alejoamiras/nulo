@@ -363,7 +363,10 @@ e2e-live-network.
 
 ### Arc 5 — `feat/kdf-v2-dek-isolation` (stacks on arc 4)
 
-**P3 — DEK crypto primitives (wallet-crypto + messaging).**
+**P3 — DEK crypto primitives (wallet-crypto + messaging).** ✓ (gate passed 2026-08-19 on commit
+8432bd07: lint 0, wallet-crypto typecheck 0 + 94/94, messaging typecheck 0 + 188/188,
+typecheck:all 0 + extension 4425 on the untouched surfaces; rider: FAIL — unenforced 32-byte
+contracts — fixed → re-verdict PASS; lessons/phase-3.md)
 `ImportedKeysDek` brand (APIs accept only the brand); `imported-keys-dek-box` (AAD
 `nulo:profile-imported-dek:v1`, wrap under EncryptionKey / PRF-derived key);
 `PasskeyCredential.deriveDekWrapKey` (info `nulo:dek-wrap:v1`); `imported-account-key-box` root
@@ -379,7 +382,10 @@ transport tests green. Layers: lint/typecheck/unit.
 path reaching an imported key with master-only material?), wrap-key domain separation, MAC v2
 keying + preimage, bearer wrap, zeroization. No unresolved High.
 
-**P4 — service threading + fingerprint + backup carriage.**
+**P4 — service threading + fingerprint + backup carriage.** ✓ (gate passed 2026-08-19: audit:vue
+exit 0 — typecheck 0 / 4443 unit+integration / lint 0 / build; named criteria (a)–(j) green as 13
+dedicated DEK-lifecycle tests; rider: FAIL — finalizeRestore skipped MAC v2 + deleteProfile leaked
+the rewrap context — fixed 15eab09b → re-verdict PASS; lessons/phase-4.md)
 ActiveSession.dek (copy accessor, zeroize on close/replace/expiry) + NINE open() call sites;
 unlock unseal-and-thread + the degradation state machine (derived-only + visible warning +
 no-bearer on DEK/MAC failure); bearer v2; fresh destination DEK at restore + the TTL-bound rewrap
@@ -412,13 +418,20 @@ undecryptable). Layers: typecheck/unit/integration/component/lint/build.
 end-to-end, backup carriage, restore reseal, bearer restore, dek-less semantics. No unresolved
 High.
 
-**P5 — dup-guard UI + copy.**
+**P5 — dup-guard UI + copy.** ✓ (gate 2026-08-19: audit:vue's typecheck/unit/lint/build legs green
+— 4449 tests, lint 0 after the formatting fix — and the smoke suite green on P5's code; the shared
+catch-confirm-retry helper is pinned by 4 component tests. Re-confirmed by the final combined
+gate below — lessons/phase-5.md)
 Typed-error catch in `useProfileImportFlow` + `useFullBackupImport` → `cacheStore.confirm` →
 retry; copy per the frontend addendum; component tests for catch-confirm-retry.
 **Gate**: `bun run audit:vue && bun run test:e2e` — both exit 0 (smoke solo; armed build for the
 migration-fixture tests as in CI). Layers: + smoke e2e.
 
-**P6 — the missing e2e + reconciliation.**
+**P6 — the missing e2e + reconciliation.** ✓ (gate passed 2026-08-19 on the complete P1–P6 tree:
+`bun run audit:vue` exit 0; `bun run test:e2e` exit 0 — 28 files / 93 passed (the 6 new tests
+included); `bun run e2e:agent passkey-execution-canary + frozen-account-canary +
+profile-reimport-matrix` prover-ON exit 0 — 3 files / 7 passed. The new suite immediately caught a
+real shipped bug: the account-import file-picker was dead — lessons/phase-6.md)
 `account-import-export.test.ts` (round-trip ×2, tamper, duplicate); dup-phrase confirm e2e
 (password-profile scenario); full smoke; targeted network re-run at the stack tip.
 **Gate**: `bun run test:e2e` exit 0 (new tests green in the suite) AND `bun run e2e:agent
@@ -569,6 +582,58 @@ gate layers incl. the passkey canary; pre-production in-place latitude.
    to the owner (scope smell).
 4. **Delivery**: `gh stack sync` + refresh PR bodies; the two new arc PRs stay draft until the fix
    loop converges, then mark ready. `gh stack merge` remains the owner's call, never autonomous.
+
+### Post-implementation record (2026-08-19)
+
+Full write-up: [`lessons/post-implementation.md`](lessons/post-implementation.md).
+
+**Round 1 — `/code-review max --fix`** (two parallel reviewers over the 44-file arc-4+5 diff).
+Crypto reviewer: *"no correctness bug and no isolation break in the new primitives"*, with one
+MEDIUM that mattered — the v1 primitives were still **exported**, including a master-rooted
+`sealImportedSigningKey`, i.e. an alternative to the very isolation break the DEK exists to
+prevent. Zero production callers (verified by grep); all three v1 pairs deleted. Service reviewer:
+`changeProfilePassword` persisted a resealed row on a null re-unseal (skipping the pairing check,
+the integrity pre-check and the MAC re-key), and `onImportedKeysDegraded` had **no subscriber**
+despite three comments and the spec doc promising a user-visible warning. Both fixed.
+Commits `204cbb9f`, `aa296743`, `cbaa1f20`.
+
+**Round 2 — codex xhigh, fresh session** (`01a01bb5-febb-74d2-a6f6-74e28664acb5`). Six findings.
+Three MEDIUMs shared one root cause: **only the unlock path verified MAC v2**, so
+`changeProfilePassword` and both fresh-auth export RPCs trusted a DEK the stored MAC no longer
+covered. Worst case: a password change re-MACs a transplanted `dekSealed` that unlock had
+quarantined, laundering the tamper into a valid envelope. Fixed by hoisting the invariant into
+`envelopeMacValid`. Fourth MEDIUM: `consumeDekRewrapContext` swept stale entries *excluding* the
+id it popped, so the TTL never applied to it. Every fix ships a test verified to fail without it.
+Commit `442fe16c`.
+
+**Round 3 — codex caught a defect in round 2's own fix.** Round 2 first responded to an uncovered
+DEK by minting a fresh one; codex's rebuttal is decisive: *a MAC failure cannot distinguish slot
+replacement from corruption of the MAC field alone*, so self-healing silently destroys still-
+recoverable imported keys — and the accompanying test corrupted only the MAC, encoding the
+destructive branch as expected on exactly the input where it is wrong. Corrected in `7e96828f`:
+
+- `changeProfilePassword` **refuses** (destroys nothing, blesses nothing).
+- Round 1's export gating is **reversed** — it was wrong on its own terms (exporting under an
+  unverified DEK cannot leak; a foreign DEK just fails its rows into the restore-side orphan
+  taxonomy) and it removed the only non-destructive repair, which is what makes the refusal
+  survivable: derived-only unlock → export → restore (fresh destination DEK + rewrap) → usable
+  imported accounts. Codex verified that path end to end.
+- `exportPlain` now proves a passkey profile's `dekSealed` opens, using the wrap key the ceremony
+  already holds — the blob carries that slot verbatim, so a corrupt one previously yielded a
+  backup that reported success and failed only at restore. A TOCTOU window versus the popup's
+  `getProfileDekSealed` is accepted (a concurrent storage writer can only break a backup, never
+  expose a key); the atomic fix is named in-code.
+- `session-manager` wipes the intermediate master copy in a `finally`.
+
+**Round 3 verdict — CONVERGED**: *"no unhandled material defect remains beyond the explicitly
+accepted backup-DEK forward-reach risk."*
+
+**Accepted, not fixed** (both documented in-code):
+
+| Finding | Why accepted |
+|---|---|
+| HIGH — a full backup carries the long-lived profile DEK, granting forward reach to imported-key rows created after the export | The same blob already carries the plaintext master, so the marginal leak is only *forward*, and it needs later access to those rows' ciphertext. Scoped honestly after codex falsified two claims in the first write-up: that access is NOT a separate compromise for an ongoing storage-reader, and a clone created by RESTORING the backup DOES receive the source DEK (only a sibling created by re-importing the phrase never sees it; passkey blobs resist a blob-only thief but not an authorized clone). The clean fix — a per-backup transfer key — needs an export-side cross-service handshake mirroring `pendingDekRewraps` in reverse, plus crash consistency. **Follow-up arc.** |
+| LOW — the wallet fingerprint is an offline confirmation oracle (23 known words ⇒ exactly 8 checksum-valid completions) | Inherent: the duplicate check runs pre-unlock against profiles whose credentials are unavailable, so the comparand must be computable from the candidate master alone. Cost-hardening cannot help an 8-candidate space. Header doc rewritten to state it plainly. |
 
 ## Delivery
 

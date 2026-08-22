@@ -340,6 +340,18 @@ export interface UseFullBackupImportOptions {
 	 * duplicate-name auto-suffix at `service.ts:825-840` still applies.
 	 */
 	profileName?: Ref<string>
+	/**
+	 * Duplicate-phrase override from the warn-and-confirm dialog. Set by `confirmDuplicate` while
+	 * it re-runs the restore; the service then accepts the duplicate (soft guard by owner policy).
+	 */
+	allowDuplicate?: Ref<boolean>
+	/**
+	 * Wraps the restore so a `DuplicateWalletError` surfaces the shared warn-and-confirm dialog
+	 * and, on confirm, re-runs with `allowDuplicate` set. Supplied by `useProfileImportFlow` so
+	 * the copy + retry semantics are identical across the seed / passkey / full-backup paths.
+	 * Resolves `undefined` when the user declines. Absent → no dialog (the error propagates).
+	 */
+	confirmDuplicate?: <T>(run: () => Promise<T>) => Promise<T | undefined>
 }
 
 export interface UseFullBackupImportResult {
@@ -611,11 +623,42 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				opts.fillError("full_backup", "Can't import", "A passkey backup must not carry an entropy field.")
 				return
 			}
+			// Epoch-4 shape: the imported-keys DEK carrier is REQUIRED — plaintext beside the
+			// plaintext master for password blobs, the sealed row blob for passkey blobs. The
+			// service uses it only inside the rewrap context (clone divergence: the restored row
+			// gets a FRESH dek; the backup's key rows rewrap onto it).
+			const dekField = (backup as { "imported-keys-dek"?: unknown })["imported-keys-dek"]
+			const dekSealedField = (backup as { "imported-keys-dek-sealed"?: unknown })["imported-keys-dek-sealed"]
+			if (profile.type === "password" && typeof dekField !== "string") {
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Can't import", "This backup is missing its imported-keys key.")
+				return
+			}
+			if (profile.type === "passkey" && typeof dekSealedField !== "string") {
+				restoreStatus.value = "failed"
+				opts.fillError("full_backup", "Can't import", "This backup is missing its imported-keys key.")
+				return
+			}
 			const restoreSecret: RestoreSecret =
 				profile.type === "password"
-					? { type: "password", masterKey: asBase64MasterSecret(masterKey), entropy: entropyField as string }
-					: { type: "passkey", credentialId: asBase64CredentialId(masterKey) }
-			const newProfile = await profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData)
+					? {
+							type: "password",
+							masterKey: asBase64MasterSecret(masterKey),
+							entropy: entropyField as string,
+							importedKeysDek: dekField as string,
+						}
+					: { type: "passkey", credentialId: asBase64CredentialId(masterKey), dekSealed: dekSealedField as string }
+			// The dup guard throws a TYPED error out of restore (it is deliberately rethrown past
+			// restore's restoreError flattening); `confirmDuplicate` surfaces the shared dialog and
+			// re-runs with the override. `undefined` = the user declined → abandon the import
+			// cleanly (no profile was created — the guard runs before the row commit).
+			const runRestore = () =>
+				profileService.restore(profileForRestore, restoreSecret, opts.password.value, credentialData, opts.allowDuplicate?.value)
+			const newProfile = opts.confirmDuplicate ? await opts.confirmDuplicate(runRestore) : await runRestore()
+			if (!newProfile) {
+				restoreStatus.value = ""
+				return
+			}
 
 			if (newProfile.restoreError) {
 				restoreStatus.value = "failed"

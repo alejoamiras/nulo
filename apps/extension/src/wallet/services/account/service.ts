@@ -23,7 +23,7 @@ import {
 	type IAccountContract,
 } from "@nulo/aztec-runtime/account"
 import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
-import { sealImportedSigningKey, unsealImportedSigningKey, zeroize } from "@nulo/wallet-crypto"
+import { type ImportedKeysDek, sealImportedSigningKeyV2, unsealImportedSigningKeyV2, zeroize } from "@nulo/wallet-crypto"
 import { AccountAddressInconsistencyError } from "@nulo/extension-messaging/errors"
 import { ImportedKeysRepository } from "./imported-keys-repository"
 import type { AccountIntegrityBlocked } from "../account-integrity/types"
@@ -312,13 +312,19 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	private async loadImportedAccountContract(profileId: string, account: Account): Promise<IAccountContract> {
 		const keyRow = await this.importedKeys.get(profileId, account.chainId, account.address)
 		if (!keyRow) throw new ImportedAccountUnusableError(account.address, "signing key missing")
-		const master = await this.profileService.getProfileSecret(profileId)
-		if (!master) throw new Error("unauthorized")
+		// The imported-key root is the CREDENTIAL-sealed per-profile DEK, never the master (a
+		// shared recovery phrase means a shared master — the DEK is the isolation boundary).
+		// A DEGRADED session (dek undefined — the slot failed at unlock) quarantines per-account.
+		const dek = await this.profileService.getProfileDek(profileId)
+		if (!dek) throw new ImportedAccountUnusableError(account.address, "imported keys unavailable — unlock again")
 		let skBytes: Uint8Array<ArrayBuffer> | undefined
-		const masterBuf = master.toBuffer() as Uint8Array<ArrayBuffer>
+		let skCopy: Buffer | undefined
 		try {
-			skBytes = await unsealImportedSigningKey(masterBuf, account.chainId, account.address, keyRow.encryptedSigningKey)
-			const signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
+			skBytes = await unsealImportedSigningKeyV2(dek, account.chainId, account.address, keyRow.encryptedSigningKey)
+			// `fromBuffer` copies, so wipe the intermediate too — an anonymous `Buffer.from(skBytes)`
+			// leaves a second plaintext signing key alive until GC even though `skBytes` is wiped.
+			skCopy = Buffer.from(skBytes)
+			const signingKey = GrumpkinScalar.fromBuffer(skCopy)
 			const contract = await NuloAccount.fromSigningKey(signingKey, this.logger)
 			if (contract.address.toString() !== account.address) {
 				throw new ImportedAccountUnusableError(account.address, "address mismatch")
@@ -328,8 +334,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			if (err instanceof ImportedAccountUnusableError) throw err
 			throw new ImportedAccountUnusableError(account.address, "signing key could not be recovered")
 		} finally {
-			zeroize(masterBuf)
+			zeroize(dek)
 			if (skBytes) zeroize(skBytes)
+			if (skCopy) zeroize(skCopy)
 		}
 	}
 
@@ -355,17 +362,26 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (account.type === AccountType.Imported) {
 			const keyRow = await this.importedKeys.get(profileId, chainId, address)
 			if (!keyRow) throw new ImportedAccountUnusableError(address, "signing key missing")
-			const masterBytes = Buffer.from(master, "base64") as Uint8Array<ArrayBuffer>
+			// Fresh-auth posture preserved (audit LOW-2): the DEK unseals under the SUPPLIED
+			// password directly — session-independent, deletion-guarded — never via SessionManager.
+			const dek = await this.profileService.exportImportedKeysDek(profileId, password)
 			let skBytes: Uint8Array<ArrayBuffer> | undefined
+			let skCopy: Buffer | undefined
 			try {
-				skBytes = await unsealImportedSigningKey(masterBytes, chainId, address, keyRow.encryptedSigningKey)
-				signingKey = GrumpkinScalar.fromBuffer(Buffer.from(skBytes))
+				skBytes = await unsealImportedSigningKeyV2(dek, chainId, address, keyRow.encryptedSigningKey)
+				// See loadImportedAccountContract: `fromBuffer` copies, so the intermediate is a
+				// second plaintext signing key and needs its own wipe.
+				skCopy = Buffer.from(skBytes)
+				signingKey = GrumpkinScalar.fromBuffer(skCopy)
 			} finally {
 				if (skBytes) zeroize(skBytes)
-				zeroize(masterBytes)
+				if (skCopy) zeroize(skCopy)
+				zeroize(dek)
 			}
 		} else if (account.type === AccountType.Nulo_v1) {
-			const masterFr = Fr.fromBuffer(Buffer.from(master, "base64"))
+			const masterCopy = Buffer.from(master, "base64")
+			const masterFr = Fr.fromBuffer(masterCopy)
+			zeroize(masterCopy)
 			const seed = await deriveAccountSeed(masterFr, account.l1ChainId, account.type, account.index)
 			signingKey = deriveSigningKeyFromSeed(seed)
 		} else {
@@ -390,60 +406,63 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		password: string,
 	): Promise<Account> {
 		await this.ensureInitialized()
-		// Session-gated master for sealing the key at rest.
-		const master = await this.profileService.getProfileSecret(profileId)
-		if (!master) throw new Error("unauthorized")
+		// Session-gated DEK for sealing the key at rest (the credential-rooted isolation boundary
+		// — never the master). A degraded session cannot ACCEPT new imported material: fail loud.
+		const dek = await this.profileService.getProfileDek(profileId)
+		if (!dek) throw new Error("Imported keys unavailable — unlock again")
+		try {
+			const { signingKey, address: recomputed } = await this.decodeAccountExport(fileBody, password)
+			// The user CONFIRMED this exact address in the UI (the checksum authenticates nothing —
+			// a self-consistent hostile file is caught here).
+			if (recomputed !== expectedAddress) throw new Error("Imported account address does not match the confirmed address")
 
-		const { signingKey, address: recomputed } = await this.decodeAccountExport(fileBody, password)
-		// The user CONFIRMED this exact address in the UI (the checksum authenticates nothing —
-		// a self-consistent hostile file is caught here).
-		if (recomputed !== expectedAddress) throw new Error("Imported account address does not match the confirmed address")
+			return await this.serializePerTuple(profileId, chainId, AccountType.Imported, async () => {
+				const rows = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
+				if (rows.some((x) => x.address === recomputed)) throw new Error("This account is already in your wallet")
+				const sameType = rows.filter((x) => x.type === AccountType.Imported)
+				const index = sameType.length > 0 ? array_max(sameType.map((x) => +x.index)) + 1 : 0
 
-		return this.serializePerTuple(profileId, chainId, AccountType.Imported, async () => {
-			const rows = (await this.liveRows()).filter((x) => x.profileId === profileId && x.chainId === chainId)
-			if (rows.some((x) => x.address === recomputed)) throw new Error("This account is already in your wallet")
-			const sameType = rows.filter((x) => x.type === AccountType.Imported)
-			const index = sameType.length > 0 ? array_max(sameType.map((x) => +x.index)) + 1 : 0
+				// Imported accounts bind to the ACTIVE network's L1 identity (they don't derive from it,
+				// but the row must carry a coherent value for the Account↔Network cross-check). Resolve
+				// it BEFORE the key row is written — a throw here would otherwise orphan a sealed key row
+				// (the compensation below only covers the Account row).
+				const l1ChainId = await this.networkService.getL1ChainIdStored(profileId, chainId)
 
-			// Imported accounts bind to the ACTIVE network's L1 identity (they don't derive from it,
-			// but the row must carry a coherent value for the Account↔Network cross-check). Resolve
-			// it BEFORE the key row is written — a throw here would otherwise orphan a sealed key row
-			// (the compensation below only covers the Account row).
-			const l1ChainId = await this.networkService.getL1ChainIdStored(profileId, chainId)
-
-			let skBytes: Uint8Array<ArrayBuffer> | undefined
-			let masterBuf: Uint8Array<ArrayBuffer> | undefined
-			let sealed: string
-			try {
-				skBytes = signingKey.toBuffer() as Uint8Array<ArrayBuffer>
-				masterBuf = master.toBuffer() as Uint8Array<ArrayBuffer>
-				sealed = await sealImportedSigningKey(masterBuf, chainId, recomputed, skBytes)
-			} finally {
-				if (skBytes) zeroize(skBytes)
-				if (masterBuf) zeroize(masterBuf)
-			}
-			// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
-			// leaves an orphan key (swept on init) rather than an Account that cannot sign.
-			await this.importedKeys.set({ profileId, chainId, address: recomputed, encryptedSigningKey: sealed })
-			const account: Account = {
-				profileId,
-				chainId,
-				address: recomputed,
-				index,
-				type: AccountType.Imported,
-				l1ChainId,
-				name: "Imported account",
-				visible: true,
-			}
-			try {
-				await this.storage.set(accountRowIdOf(account), account)
-			} catch (rowErr) {
-				await this.importedKeys.delete(profileId, chainId, recomputed).catch(() => {})
-				throw rowErr
-			}
-			this.emit("onAccountAdded", account)
-			return account
-		})
+				let skBytes: Uint8Array<ArrayBuffer> | undefined
+				let sealed: string
+				try {
+					skBytes = signingKey.toBuffer() as Uint8Array<ArrayBuffer>
+					sealed = await sealImportedSigningKeyV2(dek, chainId, recomputed, skBytes)
+				} finally {
+					if (skBytes) zeroize(skBytes)
+				}
+				// KEY ROW FIRST, then the Account row — with compensation. A crash between the two
+				// leaves an orphan key (swept on init) rather than an Account that cannot sign.
+				await this.importedKeys.set({ profileId, chainId, address: recomputed, encryptedSigningKey: sealed })
+				const account: Account = {
+					profileId,
+					chainId,
+					address: recomputed,
+					index,
+					type: AccountType.Imported,
+					l1ChainId,
+					name: "Imported account",
+					visible: true,
+				}
+				try {
+					await this.storage.set(accountRowIdOf(account), account)
+				} catch (rowErr) {
+					await this.importedKeys.delete(profileId, chainId, recomputed).catch(() => {})
+					throw rowErr
+				}
+				this.emit("onAccountAdded", account)
+				return account
+			})
+		} finally {
+			// Outer ownership: the dek copy dies on EVERY path (decode failure, duplicate
+			// rejection, l1 lookup throw, seal throw, success).
+			zeroize(dek)
+		}
 	}
 
 	/**
@@ -660,18 +679,51 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		return this.importedKeys.backup(profile.id)
 	}
 
-	/** Restore imported-account key rows. The stored ciphertext is HKDF-bound to `(master,
-	 *  chainId, address)` — NOT profileId — so it stays valid across restore's profile-id remap.
-	 *  Runs BEFORE `reconcileImportedAccounts` (which drops any keyless type-1 Account row). */
+	/** Restore imported-account key rows via the SOURCE→DESTINATION rewrap (clone divergence —
+	 *  final-audit blocker): backup rows are sealed under the SOURCE profile's DEK; the restored
+	 *  row minted a FRESH one. `ProfileService.restore()` stashed both in a TTL-bound context;
+	 *  this consumes it atomically, re-seals every row under the destination DEK, and zeroizes
+	 *  the source immediately. A missing/expired context with rows present fails those rows into
+	 *  the existing orphan taxonomy (`reconcileImportedAccounts` then drops the keyless type-1
+	 *  Account rows) — never silently-kept undecryptable rows. Runs BEFORE the reconcile. */
 	public async restoreImportedKeys(rows: ImportedAccountKey[]): Promise<Restored<ImportedAccountKey>[]> {
 		await this.ensureInitialized()
 		return await this.restoreLock.withLock(async () => {
-			return await restoreRows(rows, async (row) => {
-				const parsed = ImportedAccountKeySchema.parse(row)
-				if (parsed.address.trim().length === 0) throw new Error("empty imported-key address")
-				await this.importedKeys.set(parsed)
-				return parsed
-			})
+			// One context per restore (normalizeAllIds remapped every row to the new profile id).
+			const profileIds = [...new Set(rows.map((r) => (typeof r?.profileId === "string" ? r.profileId : "")))].filter(Boolean)
+			const contexts = new Map<string, { sourceDek: ImportedKeysDek; destinationDek: ImportedKeysDek }>()
+			try {
+				for (const pid of profileIds) {
+					const ctx = await this.profileService.consumeDekRewrapContext(pid)
+					if (ctx) contexts.set(pid, ctx)
+				}
+				return await restoreRows(rows, async (row) => {
+					const parsed = ImportedAccountKeySchema.parse(row)
+					if (parsed.address.trim().length === 0) throw new Error("empty imported-key address")
+					const ctx = contexts.get(parsed.profileId)
+					if (!ctx) throw new Error("no rewrap context for imported key — dropped to the orphan taxonomy")
+					let skBytes: Uint8Array<ArrayBuffer> | undefined
+					try {
+						skBytes = await unsealImportedSigningKeyV2(
+							ctx.sourceDek,
+							parsed.chainId,
+							parsed.address,
+							parsed.encryptedSigningKey,
+						)
+						const resealed = await sealImportedSigningKeyV2(ctx.destinationDek, parsed.chainId, parsed.address, skBytes)
+						const rewrapped = { ...parsed, encryptedSigningKey: resealed }
+						await this.importedKeys.set(rewrapped)
+						return rewrapped
+					} finally {
+						if (skBytes) zeroize(skBytes)
+					}
+				})
+			} finally {
+				for (const ctx of contexts.values()) {
+					zeroize(ctx.sourceDek)
+					zeroize(ctx.destinationDek)
+				}
+			}
 		})
 	}
 

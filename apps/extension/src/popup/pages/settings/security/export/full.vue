@@ -130,17 +130,23 @@ async function handleBackup() {
 	}
 
 	let entropyB64
+	let dekB64
+	let dekSealedB64
 	try {
 		if (isPasskeyProfile.value) {
 			// Passkey blobs carry the credentialId as `master-key` and NEVER an entropy field —
-			// the master re-derives from the passkey PRF at restore.
+			// the master re-derives from the passkey PRF at restore. The imported-keys DEK travels
+			// as the SEALED row blob verbatim (the restore ceremony's wrap key opens it).
 			key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
+			dekSealedB64 = await managers.profile.getProfileDekSealed(appStore.profile.id)
 		} else {
-			// Atomic paired export: master + recovery-phrase entropy from ONE unseal, so the two
-			// backup fields can never come from different row states.
+			// Atomic discriminated export: master + recovery-phrase entropy + imported-keys DEK
+			// from ONE authenticated pass, so the backup fields can never come from different
+			// row states.
 			const material = await managers.profile.exportBackupMaterial(appStore.profile.id, password.value)
 			key = material.masterKey
 			entropyB64 = material.entropy
+			dekB64 = material.importedKeysDek
 		}
 	} catch (error) {
 		if (!isPasskeyProfile.value) {
@@ -170,6 +176,12 @@ async function handleBackup() {
 		// by JSON.stringify). Restore verifies PBKDF2(words(entropy)) == master-key before
 		// sealing either.
 		entropy: entropyB64,
+		// Imported-keys DEK carriers (epoch-4 REQUIRED, per profile type; the other stays
+		// undefined → dropped): plaintext beside the plaintext master for password blobs — the
+		// same trust envelope — and the sealed row blob for passkey blobs. Restore feeds it
+		// ONLY into the rewrap context (the restored row mints a FRESH dek — clone divergence).
+		"imported-keys-dek": dekB64,
+		"imported-keys-dek-sealed": dekSealedB64,
 		// Item 1b: preserve the user's ACTIVE-network selection (a top-level raw network id, like
 		// `master-key` — NOT a slice). Restore resolves it against the restored rows; absent (older
 		// backups / no active network) → the import falls back to the primary network. `undefined`

@@ -23,6 +23,8 @@ const samplePasswordProfile = (id: string): Profile => ({
 	name: "test",
 	type: "password",
 	pxeGeneration: "gen-test",
+	dekSealed: "ZGVrLXNlYWxlZA==",
+	walletFingerprint: "fp-test",
 	guard: "Z3VhcmQ=",
 	secret: "c2VjcmV0",
 	entropy: "ZW50cm9weQ==",
