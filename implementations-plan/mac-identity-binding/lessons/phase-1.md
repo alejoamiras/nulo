@@ -30,3 +30,21 @@ while its name said row 5. Codex caught both by reading, not running. Assert the
 STATE, and make the setup match the story.
 
 LESSONS_FILE=implementations-plan/mac-identity-binding/lessons/phase-1.md
+
+## CI-starvation flake vs real breakage — discriminate by failure MOVEMENT
+
+The first CI run failed three backup/MAC tests; the rerun failed two COMPLETELY DIFFERENT
+tests (opfs purge budget, multicall fee timeout); every one of them passed locally on the
+exact commit, some 3× faster than CI (401s vs 42s). Moving failure sets + healthy parked
+states (`gotoAccounts` timing out while the wallet rendered fine beneath it) = runner
+starvation, not logic. What made it safe to conclude that: the FULL local network suite
+(99 tests incl. every CI-failing file) green on HEAD, plus #433's identical content passing
+the same suites hours earlier. Two same-named failures in a row still demanded the local
+reproduction before trusting "flake" — the repo rule holds: red means flake→rerun or
+breakage→fix, and only a local run distinguishes them.
+
+Also: `-rln` is not "recursive + line numbers" in ripgrep — bare `-r` CONSUMES the next
+letters as its replace-with value and silently mangles output ("v2" printed as "ln"). Use
+`-n` alone.
+
+LESSONS_FILE=implementations-plan/mac-identity-binding/lessons/phase-1.md
