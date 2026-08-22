@@ -8,11 +8,11 @@
  *   (b) derive a passkey-wallet master secret from WebAuthn PRF +
  *       credentialId (`PasskeyCredential`),
  *   (c) derive the per-account signing key from the account seed
- *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v1 in
+ *       (`deriveSigningKeyFromSeed` — NULO-ACCOUNT-KDF v2 in
  *       `@nulo/wallet-crypto`, the signing-key-root model adopted at
- *       Aztec 5.0.0; upstream's `deriveSigningKey` was removed and its
- *       construction vendored verbatim, reference-vectored in
- *       `implementations-plan/aztec-5.0.0-stable/reference/`).
+ *       Aztec 5.0.0; upstream's removed `deriveSigningKey` construction
+ *       under the dedicated Nulo separator, reference-vectored in
+ *       `implementations-plan/key-model-v2/reference/`).
  *
  * Any accidental drift in a refactor here, or a silent upstream change
  * in `@aztec/foundation` or `@aztec/stdlib`, fails one of these tests
@@ -22,7 +22,7 @@
  * ------------------------------------
  * Some vectors are Aztec-stack sensitive: V3 (`Fr.fromBufferReduce`),
  * V7a (`deriveSigningKeyFromSeed` = sha512-to-grumpkin-scalar + the
- * IVSK_M domain separator). When you bump `@aztec/foundation`,
+ * NULO_SIGNING_ROOT_SEP domain separator). When you bump `@aztec/foundation`,
  * `@aztec/stdlib`, or `@aztec/accounts`:
  *
  *   1. Run `bun run test`.
@@ -164,23 +164,22 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 		expect(hex).toBe("f52fbd32b2b3b86ff88ef6c490628285f482af15ddcb29541f94bcf526a3f6c7")
 	})
 
-	// ── V7a: deriveSigningKeyFromSeed(seed) — NULO-ACCOUNT-KDF v1 ────
+	// ── V7a: deriveSigningKeyFromSeed(seed) — NULO-ACCOUNT-KDF v2 ────
 	//
 	// The signing key is the account's OWNERSHIP ROOT under the 5.0.0
 	// signing-key-root model (the privacy secret derives one-way from
 	// it). The construction is upstream's removed `deriveSigningKey`
-	// verbatim — `sha512ToGrumpkinScalar([seed, DomainSeparator.IVSK_M])`
-	// — vendored into `@nulo/wallet-crypto` and REFERENCE-VECTORED in
-	// `implementations-plan/aztec-5.0.0-stable/reference/` (the fixture
-	// value below is regime A/B agreed; it equals the pre-5.0.0 V7a
-	// value because the construction carried over byte-identically).
-	// If this fails, the signing key of every wallet on disk just
-	// changed: stop, never re-pin from this implementation.
-	// AZTEC-SENSITIVE.
+	// under the dedicated Nulo separator —
+	// `sha512ToGrumpkinScalar([seed, NULO_SIGNING_ROOT_SEP])` — and is
+	// REFERENCE-VECTORED in `implementations-plan/key-model-v2/reference/`
+	// (published-5.0.1-tarball provenance; the v1 predecessor vectors
+	// stay archived under `aztec-5.0.0-stable/reference/`). If this
+	// fails, the signing key of every wallet on disk just changed:
+	// stop, never re-pin from this implementation. AZTEC-SENSITIVE.
 	test("V7a — deriveSigningKeyFromSeed(fixedSeed) matches fixture", () => {
 		const seed = Fr.fromHexString("0x0000000000000000000000000000000000000000000000000000000000000042")
 		const signingKey = deriveSigningKeyFromSeed(seed)
-		expect(signingKey.toString()).toBe("0x14a31cb4d33a144675e70634830292153f78e8318e51f26a2f212783eb0a3cbc")
+		expect(signingKey.toString()).toBe("0x2aabed87d5340c673eae6dc5faaa57382b8d773fa38247a80bdafbd5277729e3")
 	})
 
 	// ── V8: PASSKEY_PRF_LABEL spec constant ──────────────────────────

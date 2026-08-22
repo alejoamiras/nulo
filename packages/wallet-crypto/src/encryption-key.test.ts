@@ -36,3 +36,27 @@ test("decryption with wrong key fails", async () => {
 	const key2 = await EncryptionKey.fromPassword("qwe")
 	await expect(() => key2.decrypt(c)).rejects.toThrow()
 })
+
+test("AAD round-trips when both sides supply the same bytes", async () => {
+	const key = await EncryptionKey.fromPassword("qwerty")
+	const aad = new TextEncoder().encode("nulo:profile-master:v2")
+	const payload = new TextEncoder().encode("secret bytes")
+	const c = await key.encrypt(payload, aad)
+	expect(await key.decrypt(c, aad)).toStrictEqual(new Uint8Array(payload))
+})
+
+test("AAD mismatch fails authentication — a ciphertext cannot move between purposes", async () => {
+	const key = await EncryptionKey.fromPassword("qwerty")
+	const payload = new TextEncoder().encode("secret bytes")
+	const sealedAsMaster = await key.encrypt(payload, new TextEncoder().encode("nulo:profile-master:v2"))
+	await expect(key.decrypt(sealedAsMaster, new TextEncoder().encode("nulo:profile-entropy:v1"))).rejects.toThrow()
+	await expect(key.decrypt(sealedAsMaster)).rejects.toThrow()
+})
+
+test("AAD-less ciphertexts stay decryptable without AAD (back-compat)", async () => {
+	const key = await EncryptionKey.fromPassword("qwerty")
+	const payload = new TextEncoder().encode("legacy bytes")
+	const c = await key.encrypt(payload)
+	expect(await key.decrypt(c)).toStrictEqual(new Uint8Array(payload))
+	await expect(key.decrypt(c, new TextEncoder().encode("nulo:profile-master:v2"))).rejects.toThrow()
+})

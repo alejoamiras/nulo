@@ -2100,6 +2100,18 @@ export const getMnemonic = async (entropy: Uint8Array<ArrayBuffer>): Promise<str
 	return words
 }
 
+/**
+ * The ONE mnemonic canonicalization contract, shared by import validation and the BIP-39 KDF
+ * (`@nulo/wallet-crypto` `deriveBip39Seed`) so the same user input can never validate under one
+ * normalization and derive under another: NFKD, lowercase, trimmed, whitespace-collapsed.
+ * Accepts a raw sentence or a word array; returns the canonical word array.
+ */
+export const canonicalizeMnemonic = (input: string | string[]): string[] => {
+	const sentence = Array.isArray(input) ? input.join(" ") : input
+	const normalized = sentence.normalize("NFKD").toLowerCase().trim()
+	return normalized.length === 0 ? [] : normalized.split(/\s+/)
+}
+
 export const getEntropy = async (mnemonic: string[]): Promise<Uint8Array<ArrayBuffer>> => {
 	if (!mnemonic?.length || mnemonic.length % 3 > 0) {
 		throw new Error("Invalid mnemonic length")

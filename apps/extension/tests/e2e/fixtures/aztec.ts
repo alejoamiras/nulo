@@ -475,26 +475,26 @@ export async function setupPreFundedAccount(
 		forceBlock?: () => Promise<unknown>
 	} = {},
 ): Promise<PreFundedAccount> {
-	// Mirrors Nulo's derivation exactly. Constants verified against source-of-truth:
+	// Mirrors Nulo's KDF v2 derivation exactly. Constants verified against source-of-truth:
 	const ACCOUNT_TYPE_NULO_V1 = 0 // account/spec.ts:5 — SECURITY: NEVER change
-	const LOCAL_NETWORK_CHAIN_ID = 0 // network/service.ts:85 — Local hardcodes 0
+	const LOCAL_L1_CHAIN_ID = 31337 // anvil — the EXACT L1 id KDF v2 derives under (NOT the composite 0)
 	const ACCOUNT_INDEX = 0 // first account
 	const publicAmount = opts.publicAmount ?? 1000n * 10n ** 18n
 	const privateAmount = opts.privateAmount ?? 1000n * 10n ** 18n
 
 	// Lazy imports: heavy aztec deps + workspace pkg, only needed when fixture runs.
-	const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
-	const { deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
+	const { deriveAccountSeed, deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 	const { createLogger } = await import("@aztec/foundation/log")
 	const logger = createLogger("setup-pre-funded-account")
 
-	// Step 1 — Derive identity (matches Nulo's account/service.ts:117 formula).
+	// Step 1 — Derive identity via KDF v2's shared seed fn: the extension now derives the
+	// Local-chain account under the REAL l1ChainId (31337), so the script side must too or the
+	// pre-funded address and the imported profile's address silently diverge.
 	// Use Fr.random for the master so the 32-byte buffer stays within BN254 modulus
 	// (Fr.fromBuffer is strict — see session-manager.ts:210).
 	const master = Fr.random()
-	const accountSeed = poseidon2Hash([master, new Fr(LOCAL_NETWORK_CHAIN_ID), new Fr(ACCOUNT_TYPE_NULO_V1), new Fr(ACCOUNT_INDEX)])
-	// Signing-key-root model (NULO-ACCOUNT-KDF v1): seed → signing key (root) → privacy secret.
+	const accountSeed = await deriveAccountSeed(master, LOCAL_L1_CHAIN_ID, ACCOUNT_TYPE_NULO_V1, ACCOUNT_INDEX)
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(accountSeed)
 
 	// Sanity check the derived address against NuloAccount's path so the fixture

@@ -40,6 +40,7 @@ import {
 	POPUP_IMPORT_SHELL,
 	TEST_PASSWORD,
 	buildSyntheticBackup,
+	LOCAL_L1_CHAIN_ID,
 	deriveNuloAccountAddress,
 	gotoPopupImport,
 	importFullBackup,
@@ -108,7 +109,7 @@ test.skipIf(!hasConfig)(
 		const master = await makeRandomMasterBase64()
 		// A derivation-consistent account row is mandatory: the integrity coordinator
 		// re-derives every account before activating an imported profile.
-		const accountAddress = await deriveNuloAccountAddress(master, 0)
+		const accountAddress = await deriveNuloAccountAddress(master, LOCAL_L1_CHAIN_ID)
 		const backupPath = writeBackupToTemp(buildSyntheticBackup({ masterBase64: master, accountAddress }))
 		try {
 			// ── 1. First incarnation: restore the backup, verify baseline health. ─

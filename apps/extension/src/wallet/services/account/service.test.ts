@@ -17,7 +17,7 @@ import { AccountService } from "./service"
 import { accountRowId } from "./spec"
 
 const mkAccount = (address: string, over: Record<string, unknown> = {}) =>
-	({ profileId: "p1", chainId: 1, address, index: 0, type: 0, name: "A", visible: true, ...over }) as never
+	({ profileId: "p1", chainId: 1, address, index: 0, type: 0, l1ChainId: 1, name: "A", visible: true, ...over }) as never
 
 describe("AccountService.restore — validation + provenance (P3)", () => {
 	let accountService: AccountService
@@ -28,7 +28,7 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		api.reset()
 		const services = new ServiceCollection()
 		services.add(svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler() }))
-		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {} }))
+		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
 		accountService = new AccountService(new LoggerStore(new ConfigStore()), api)
 		services.add(accountService)
 		await services.start()

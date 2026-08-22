@@ -17,6 +17,7 @@ import { expect } from "vitest"
 import { withTimeoutMessage, clickByTestId, launchExtension, openPopup, waitForHash, test } from "./fixtures/extension"
 import {
 	buildSyntheticBackup,
+	LOCAL_L1_CHAIN_ID,
 	CANONICAL_SEED_24,
 	deriveNuloAccountAddress,
 	gotoPopupImport,
@@ -233,9 +234,9 @@ test("round-trip: register → export encrypted key → import in fresh ext → 
 
 test("full backup: fresh install → synthetic plain backup → /popup/general", async ({ freshExtensionPerTest }) => {
 	const masterBase64 = await makeRandomMasterBase64()
-	// The account row must be derivation-consistent with the master (chainId 0 = the
-	// synthetic network) — the integrity coordinator blocks a mismatched import at finalize.
-	const accountAddress = await deriveNuloAccountAddress(masterBase64, 0)
+	// The account row must be derivation-consistent with the master under the REAL L1 id the
+	// KDF v2 derivation uses — the integrity coordinator blocks a mismatched import at finalize.
+	const accountAddress = await deriveNuloAccountAddress(masterBase64, LOCAL_L1_CHAIN_ID)
 	const filePath = writeBackupToTemp(buildSyntheticBackup({ masterBase64, accountAddress }))
 
 	const page = await gotoPopupImport(freshExtensionPerTest)

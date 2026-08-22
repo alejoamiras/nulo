@@ -1,0 +1,261 @@
+{
+	"source": "published 5.0.1 tarballs + node:crypto PBKDF2 (cross-implementation reference for the wallet's WebCrypto)",
+	"chain": "words -> PBKDF2-HMAC-SHA512(NFKD, 'mnemonic'+passphrase, 2048, 64B) -> Fr.fromBufferReduce -> poseidon2HashWithSeparator([master,l1ChainId,type,index], NULO_ACCOUNT_SEED_SEP) -> sha512ToGrumpkinScalar([seed, NULO_SIGNING_ROOT_SEP]) -> deriveSecretKeyFromSigningKey -> deriveKeys -> instance(salt=0, immutablesHash) -> address",
+	"separators": {
+		"NULO_ACCOUNT_SEED_SEP": {
+			"label": "nulo:account-seed:v2",
+			"value": 2720999938
+		},
+		"NULO_SIGNING_ROOT_SEP": {
+			"label": "nulo:signing-root:v2",
+			"value": 914717451
+		}
+	},
+	"salt": "0x0000000000000000000000000000000000000000000000000000000000000000",
+	"bip39": [
+		{
+			"entropy": "0000000000000000000000000000000000000000000000000000000000000000",
+			"sentence": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+			"seedTrezor": "bda85446c68413707090a52022edd26a1c9462295029f2e60cd7c4f2bbd3097170af7a4d73245cafa9c3cca8d561a7c3de6f5d4a10be8ed2a5e608d68f92fcc8",
+			"seedEmptyPassphrase": "408b285c123836004f4b8842c89324c1f01382450c0d439af345ba7fc49acf705489c6fc77dbd4e3dc1dd8cc6bc9f043db8ada1e243c4a0eafb290d399480840"
+		},
+		{
+			"entropy": "7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f",
+			"sentence": "legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth useful legal winner thank year wave sausage worth title",
+			"seedTrezor": "bc09fca1804f7e69da93c2f2028eb238c227f2e9dda30cd63699232578480a4021b146ad717fbb7e451ce9eb835f43620bf5c514db0f8add49f5d121449d3e87",
+			"seedEmptyPassphrase": "761914478ebf6fe16185749372e91549361af22b386de46322cf8b1ba7e92e80c4af05196f742be1e63aab603899842ddadf4e7248d8e43870a4b6ff9bf16324"
+		},
+		{
+			"entropy": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+			"sentence": "zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo vote",
+			"seedTrezor": "dd48c104698c30cfe2b6142103248622fb7bb0ff692eebb00089b32d22484e1613912f0a5b694407be899ffd31ed3992c456cdf60f5d4564b8ba3f05a69890ad",
+			"seedEmptyPassphrase": "e28a37058c7f5112ec9e16a3437cf363a2572d70b6ceb3b6965447623d620f14d06bb321a26b33ec15fcd84a3b5ddfd5520e230c924c87aaa0d559749e044fef"
+		}
+	],
+	"unicodePassphrase": {
+		"sentence": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+		"passphrase": "ﬁancé",
+		"seed": "7e651a2278a379f39a007436982541e16c4d0765bfb203c3121a5a7dcccd5c9bd4a2b737fdfe8bad8d62ea952ef84df640936937e74576807500e9f59e3a9041"
+	},
+	"accountSeeds": [
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"l1ChainId": 1,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x303048be3f2a7cba2350fad8f619ac83f8123f1b06c721669de5c70828baa733"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"l1ChainId": 1,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x2188834b1bd5219f41bd61131221140664326df13ad69ae21bec918e9c5caf01"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"l1ChainId": 11155111,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x0d2bc87ad1b8fcbb17a2abbac810b0c3d1649104ee78dfcaf11737e4db2134fd"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"l1ChainId": 11155111,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x094da359f3f498f48e5625be1a9193b0cb3192dacc641586ad86caa00786f68d"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"l1ChainId": 31337,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x133e0fc61d257a6a68aff47d5e657fd156b96ae8f349005f9a25ecf61346c2ee"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"l1ChainId": 31337,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x116ede071c180f6ba887fb4b393b005ce9927589f01bd1c87744c4832e51a489"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"l1ChainId": 1,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x1498edd1c53490db51bd37c5aad109cc23ceb6c26f34539b8eb59154b40cde39"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"l1ChainId": 1,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x2b86f5d08c0b9ec7add2725525eebdf84ada83f107bf36edfcebad62bae8371c"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"l1ChainId": 11155111,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x21aed7f412c7170800d0b38f3bcff1ff318e523911dc10f9e000ca5910bfeef5"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"l1ChainId": 11155111,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x154f8a2580487f80e8830afcd5335cdeeacfaeb8203a710ee04c3e0a7086f220"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"l1ChainId": 31337,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x12885c8252f87f09c573352b6381fc150263fa01adeffd07700208bec242d77e"
+		},
+		{
+			"master": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"l1ChainId": 31337,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x2ceae3f8c771345c43462c6312b4fc735f9a993c6c04dc8155d623977aeb4882"
+		},
+		{
+			"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+			"l1ChainId": 1,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x2b93813bd4d09e51f0886d66ede1b9957954bd9b8693ce994b5d1cc21cd757c9"
+		},
+		{
+			"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+			"l1ChainId": 1,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x0e0e32fed5f2e80f03466a5e7060bded7d62918323996a9bfb1138810a80eb3e"
+		},
+		{
+			"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+			"l1ChainId": 11155111,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x1f50514c6b598ef079f39fb59f1dcdbd4693e13d5aafcb5437204b65c6c6c30d"
+		},
+		{
+			"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+			"l1ChainId": 11155111,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x012866066644c19c64a04f78c435090bf560822bf7f29e6b1900ce248ba45448"
+		},
+		{
+			"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+			"l1ChainId": 31337,
+			"type": 0,
+			"index": 0,
+			"accountSeed": "0x1591665d1bf578ad896d55964bc1d625b87027f1f4cfca57106662567cfb5dc8"
+		},
+		{
+			"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+			"l1ChainId": 31337,
+			"type": 0,
+			"index": 1,
+			"accountSeed": "0x1adc8b016d2f6ac72cc4c81369f2d9eea2b30778ad1ed1bb4de4886b98b31c04"
+		}
+	],
+	"signingChain": [
+		{
+			"seed": "0x0000000000000000000000000000000000000000000000000000000000000042",
+			"signingKey": "0x2aabed87d5340c673eae6dc5faaa57382b8d773fa38247a80bdafbd5277729e3",
+			"secretKey": "0x23fb2f8bb384a3d9bf850b70fee665f66225bd8bab53b10e07b041d7ceb2e20b",
+			"accountPrivacyKeys": {
+				"masterNullifierHidingSecretKey": "0x1d2e99552fdecbcf92b07f63151d64005f38aa553b8aad4cd6858d55fc61ef2f",
+				"masterIncomingViewingSecretKey": "0x134744b8c032985077b13ebc48d237b1faaff98e0cab31875a3ade92da5821aa",
+				"masterOutgoingViewingSecretKey": "0x0a69a3dc1915c436a9cee945d7c2255508081c840138b0bb65494e0a4b2e1a16",
+				"masterTaggingSecretKey": "0x0323256e9d4cda91fc7dabed464039423b2caf20689052f2f63df3450ee3ced8",
+				"masterMessageSigningPublicKey": "0x24a65f3b4be4c3bbd7750488fcfd03c7b547e93c7bc9c6cb4a53d0119a2cc0a218b6768b17dfacd3350c3e81cb5cae58da7ddc869194aa363a9dc9fa95a57043",
+				"masterFallbackPublicKey": "0x2fad71fd2c309e2277268551d95203fdb1e1c80718f534b9ad1a62f4ef8efa031c3832e0224005b02ff838a7e714d8068fac459b6f4ad629112292421906b860"
+			},
+			"masterSecretKeys": {
+				"masterNullifierHidingSecretKey": "0x1d2e99552fdecbcf92b07f63151d64005f38aa553b8aad4cd6858d55fc61ef2f",
+				"masterIncomingViewingSecretKey": "0x134744b8c032985077b13ebc48d237b1faaff98e0cab31875a3ade92da5821aa",
+				"masterOutgoingViewingSecretKey": "0x0a69a3dc1915c436a9cee945d7c2255508081c840138b0bb65494e0a4b2e1a16",
+				"masterTaggingSecretKey": "0x0323256e9d4cda91fc7dabed464039423b2caf20689052f2f63df3450ee3ced8",
+				"masterMessageSigningSecretKey": "0x269257ad276478070ca65925fe0b0df504e1ca46725e4634801405cd39088d9a",
+				"masterFallbackSecretKey": "0x0fb01279f980478eddc967276d10cfc68e65150a4e4716df50e95e826bce1498"
+			},
+			"publicKeys": "0x0a3afe652f06b3e65896d39e65a9d442729ce53f264b4d08271129addcb2b0e824a270a03b8b86fe000af2c5b37f589037c2cc88f56fe4bbde8232e1d07849882d07be4332f44464223a849d296a65f4d6ce4919aecfe1c991f4e538e08a507205d9c15d4b102aa3281f1f1aef2927ad45b3357099438f22942d2db517a532731c1c22451d955c5fc7a7d73ec3caad768eaa9e7fcb2ad891ca88a799aede372a30072e8b9bb4f9746dd42298dddcd67a4fd17ce414bd54b66c32625b9953cd3422f8ef4270f453032cedda0de1b4ea8de81420c9f86e11228c966e66f9520b1b",
+			"address": "0x04d7bb8a4a0239077d7d246279076fdab66f5ed6167bd01882fad6131199457a",
+			"completeAddress": {
+				"address": "0x04d7bb8a4a0239077d7d246279076fdab66f5ed6167bd01882fad6131199457a",
+				"publicKeys": "0x0a3afe652f06b3e65896d39e65a9d442729ce53f264b4d08271129addcb2b0e824a270a03b8b86fe000af2c5b37f589037c2cc88f56fe4bbde8232e1d07849882d07be4332f44464223a849d296a65f4d6ce4919aecfe1c991f4e538e08a507205d9c15d4b102aa3281f1f1aef2927ad45b3357099438f22942d2db517a532731c1c22451d955c5fc7a7d73ec3caad768eaa9e7fcb2ad891ca88a799aede372a30072e8b9bb4f9746dd42298dddcd67a4fd17ce414bd54b66c32625b9953cd3422f8ef4270f453032cedda0de1b4ea8de81420c9f86e11228c966e66f9520b1b",
+				"partialAddress": "0x29d65ae2bbf01762876dd5271701aeec0e4e499a303ea7917b1368530b1e1cb4"
+			}
+		},
+		{
+			"seed": "0x0000000000000000000000000000000000000000000000000000000000001337",
+			"signingKey": "0x1bc7e137bf0ad145b6b4fe7effb154cd89d9fa8f805950e4fee94dc9561cb005",
+			"secretKey": "0x1dda6fd096042321f8ed2b61d368d343916828d13c2a3ee764e1343a3a9b5543",
+			"accountPrivacyKeys": {
+				"masterNullifierHidingSecretKey": "0x266790e6d44b01fad2c2d482fc42cd2496e7b3216fb7d105aadd703b69e05588",
+				"masterIncomingViewingSecretKey": "0x188dc75e6ba04a46a744167d33cdea54348258cc43aef058d12cf5894ba3abc4",
+				"masterOutgoingViewingSecretKey": "0x0b74fd6ec3b092a94d12f7103e01f89e02c53e67f23cb44e7f42039b20dba7e7",
+				"masterTaggingSecretKey": "0x0a5dd04e18e2c515560b3551f4bcf90da2914a9956ca86cddd586c567da4f926",
+				"masterMessageSigningPublicKey": "0x0e0baa2cdd4aad4466d2f5ed1c496b84eddcc8121ee88dab6551c69e8b3bdc8e2237163b145625d87eef0ba534589a8f88b3af30992df6d7149ff6654433178c",
+				"masterFallbackPublicKey": "0x298b754586c8d11a43520f5e3ecbe3631b7f1ac70feff3780643e5aef61b5bb60822ceb525941f0ba627ff4047a0dabe39020a484efca5d46169efbd55b0904b"
+			},
+			"masterSecretKeys": {
+				"masterNullifierHidingSecretKey": "0x266790e6d44b01fad2c2d482fc42cd2496e7b3216fb7d105aadd703b69e05588",
+				"masterIncomingViewingSecretKey": "0x188dc75e6ba04a46a744167d33cdea54348258cc43aef058d12cf5894ba3abc4",
+				"masterOutgoingViewingSecretKey": "0x0b74fd6ec3b092a94d12f7103e01f89e02c53e67f23cb44e7f42039b20dba7e7",
+				"masterTaggingSecretKey": "0x0a5dd04e18e2c515560b3551f4bcf90da2914a9956ca86cddd586c567da4f926",
+				"masterMessageSigningSecretKey": "0x11d502ab2f2c6a70e7247bfafc70697e1384397bb9522b82a25f3a0a96940b1c",
+				"masterFallbackSecretKey": "0x227c395662400ad2a8f8e2d0b6c3f384618ad238f81a52d2e4afde2476a98519"
+			},
+			"publicKeys": "0x273a7ffa4926d33359115e5011e057de6706103a75a0b4410594d03b963aa8c02cfd65b27ad7925b71a76f61f7eb73c51faf88471888f9f255299bd01e269bd01812be7af52c388c8188dd7bd9deac0c02748e6c2fdb0b58ae038baa7955468f10277369b19ba3cdce3d751044a31feaaf7ac71cdae1374f2b7eae64ef9973982ce26a91ff5dbbf9cd3448386affcdb52b61cf5e5d41e11258fc9bfdc60c363e1f16f2423777afb83eff8de51ed6cef8f9ba83ba82f6c4c357f35e828577c297132a054d55f4872441486109565b70db6b29369d4d5bcc0493fecaa8c2ed19f6",
+			"address": "0x1f985fe95f9beccdcf2648fd13b2ba69b706158908e1bd701795110905acfca7",
+			"completeAddress": {
+				"address": "0x1f985fe95f9beccdcf2648fd13b2ba69b706158908e1bd701795110905acfca7",
+				"publicKeys": "0x273a7ffa4926d33359115e5011e057de6706103a75a0b4410594d03b963aa8c02cfd65b27ad7925b71a76f61f7eb73c51faf88471888f9f255299bd01e269bd01812be7af52c388c8188dd7bd9deac0c02748e6c2fdb0b58ae038baa7955468f10277369b19ba3cdce3d751044a31feaaf7ac71cdae1374f2b7eae64ef9973982ce26a91ff5dbbf9cd3448386affcdb52b61cf5e5d41e11258fc9bfdc60c363e1f16f2423777afb83eff8de51ed6cef8f9ba83ba82f6c4c357f35e828577c297132a054d55f4872441486109565b70db6b29369d4d5bcc0493fecaa8c2ed19f6",
+				"partialAddress": "0x2bb3ef9f04805d0d1f2c094150491e52b7673f994e329a062233ad714a90ad34"
+			}
+		}
+	],
+	"fullChain": {
+		"sentence": "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art",
+		"passphrase": "",
+		"seed64": "408b285c123836004f4b8842c89324c1f01382450c0d439af345ba7fc49acf705489c6fc77dbd4e3dc1dd8cc6bc9f043db8ada1e243c4a0eafb290d399480840",
+		"master": "0x08b8faf96bf3e049819483fce11c01c0ba00f2d2a86b0d5215e0eaba5a30f411",
+		"l1ChainId": 31337,
+		"type": 0,
+		"index": 0,
+		"seed": "0x1591665d1bf578ad896d55964bc1d625b87027f1f4cfca57106662567cfb5dc8",
+		"signingKey": "0x036bf77ab2e2e7bb662c29ae3654ce10fe5ede6afebc1e568a47f79124cc9c2b",
+		"secretKey": "0x02194d85b6104995711cf26ab585f78b645555a6e5353151d886a02971ee5352",
+		"accountPrivacyKeys": {
+			"masterNullifierHidingSecretKey": "0x2cd9d0f730310e17506d6120a97e0649fe77dbbff5e5f22da83a21eea5fd74f8",
+			"masterIncomingViewingSecretKey": "0x29dddb5c2969c4d456092aeefcb3cfd90ecebd19cc91e8e654c4e674e70b32de",
+			"masterOutgoingViewingSecretKey": "0x11f4741ff6e4c964dc10e8cfb0db7be6315d3848fa34372db5e899cd5ffbbbdc",
+			"masterTaggingSecretKey": "0x18b98c06ea770f27143a19aac696ea87b55f3782dbce5f210e01218c24ed3869",
+			"masterMessageSigningPublicKey": "0x0d62867ef30ac981c66edcb95c0d980795d966eee12300ae7d9a65618c831a11209bff8d5b91fe3de4d8d044730025830d865312d32a3a0adc67fcbc2f6d0801",
+			"masterFallbackPublicKey": "0x170100d4fa840a5530d55ef9f6c5c0a9db97bb96bbd9881855e7ec3d803c4c1400cc090002fdd7ccbc2f4691d27f01812fe26bd3d595f1fcff5b09632853625f"
+		},
+		"masterSecretKeys": {
+			"masterNullifierHidingSecretKey": "0x2cd9d0f730310e17506d6120a97e0649fe77dbbff5e5f22da83a21eea5fd74f8",
+			"masterIncomingViewingSecretKey": "0x29dddb5c2969c4d456092aeefcb3cfd90ecebd19cc91e8e654c4e674e70b32de",
+			"masterOutgoingViewingSecretKey": "0x11f4741ff6e4c964dc10e8cfb0db7be6315d3848fa34372db5e899cd5ffbbbdc",
+			"masterTaggingSecretKey": "0x18b98c06ea770f27143a19aac696ea87b55f3782dbce5f210e01218c24ed3869",
+			"masterMessageSigningSecretKey": "0x061f9d95f2c30e3fc25308827531123d42253ee5f7bcfa2cb1bf5cde2a51d024",
+			"masterFallbackSecretKey": "0x247d2d5f65e52d0c2ab18ff065d83813a788a1e31ef97d5320626d7ac4eaf254"
+		},
+		"publicKeys": "0x1f0e355dafaa6f904b4ef0c4925aac7b9ef3a2ca1cf8b93db6f2e09129d2dc58056b50835a7be9195816f271ab62b08a5ac748eee8362fbd57194e313147bab52a7ad8cf2664fb99cb0e4c81fadd42b384d15c3d0cdd9f4735acabb56a1d308f25ae137e1e168393ac9bc029cf97d504bb5c9dbf36266d35ff08855e29076662004c0675c54042f74678f6073de4011596287dd38436615e8413ab3ea330c4512670c0f608939fcac980503f075872492f152d893598d06f94dd12f3ec4a139c25801ae2792731eadf36055d286f35b0f0a4495bb50763ee0901750ae5c5e90d",
+		"address": "0x25686646cfe0f3fca182744952fe5237b9fc3ca11ff739fcc950a456d7253e6c",
+		"completeAddress": {
+			"address": "0x25686646cfe0f3fca182744952fe5237b9fc3ca11ff739fcc950a456d7253e6c",
+			"publicKeys": "0x1f0e355dafaa6f904b4ef0c4925aac7b9ef3a2ca1cf8b93db6f2e09129d2dc58056b50835a7be9195816f271ab62b08a5ac748eee8362fbd57194e313147bab52a7ad8cf2664fb99cb0e4c81fadd42b384d15c3d0cdd9f4735acabb56a1d308f25ae137e1e168393ac9bc029cf97d504bb5c9dbf36266d35ff08855e29076662004c0675c54042f74678f6073de4011596287dd38436615e8413ab3ea330c4512670c0f608939fcac980503f075872492f152d893598d06f94dd12f3ec4a139c25801ae2792731eadf36055d286f35b0f0a4495bb50763ee0901750ae5c5e90d",
+			"partialAddress": "0x14a3a3c5e9e6f43b149b71eb294d420f379eedaeb5b9d00775b858e570026ca6"
+		}
+	}
+}
