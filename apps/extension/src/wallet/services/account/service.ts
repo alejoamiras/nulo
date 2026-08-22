@@ -404,6 +404,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		fileBody: string,
 		expectedAddress: string,
 		password: string,
+		name?: string,
 	): Promise<Account> {
 		await this.ensureInitialized()
 		// Session-gated DEK for sealing the key at rest (the credential-rooted isolation boundary
@@ -446,7 +447,9 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 					index,
 					type: AccountType.Imported,
 					l1ChainId,
-					name: "Imported account",
+					// User-chosen display name; the export envelope deliberately carries none (the v1
+					// file format is frozen), so the UI asks at import time.
+					name: (typeof name === "string" && name.trim().slice(0, 40)) || "Imported account",
 					visible: true,
 				}
 				try {

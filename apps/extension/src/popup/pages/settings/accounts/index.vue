@@ -21,10 +21,14 @@ import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
 import { useCacheStore } from "@/stores/cache.store"
 import { copyToClipboard } from "@/utils/clipboard"
-import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const cacheStore = useCacheStore()
+
+const router = useRouter()
+
+/** Account export is password-gated in the service, so passkey profiles get no export entry. */
+const canExportAccounts = computed(() => appStore.profile?.type !== "passkey")
 
 const accounts = computed(() => appStore.accounts.filter((a) => a.visible).sort((a, b) => a.index - b.index))
 const hiddenAccounts = computed(() => appStore.accounts.filter((a) => !a.visible))
@@ -44,8 +48,9 @@ const handleEditAccount = (target) => {
 }
 
 const handleExportAccount = (target) => {
-	cacheStore.accountToExportIdx = target.address
-	popupStore.open("export_account")
+	// Deep-link into the Account backup page with this account preselected (the page skips its
+	// picker). The flow lives with the other backup modes; this icon is the shortcut.
+	router.push(`/popup/settings/security/export/account?address=${target.address}`)
 }
 
 const handleHideAccount = async (acc) => {
@@ -85,18 +90,28 @@ const handleCopyAddress = (target) => {
 						v-for="account in accounts"
 						@click="handleSelectAccount(account)"
 						:title="account.name"
-						:description="trimAddress(account.address, 6, 4, '...')"
 						:icon="account?.address === appStore.account?.address ? 'check-circle' : 'circle'"
 						:iconFillColor="account?.address === appStore.account?.address ? 'primary' : 'tertiary'"
 						data-testid="manage-accounts-row"
 						:data-account-name="account.name"
 					>
+						<!-- Imported marker on the DESCRIPTION line in the address's own mono voice (owner
+						     pick: option B + V4). Exactly ONE truncation mechanism: the address's head span
+						     clips with a CSS ellipsis while the marker and the 4-char tail never shrink, so
+						     the line adapts to whatever width the action icons leave instead of a guessed
+						     trim length fighting the wrapper's own ellipsis. -->
+						<template #description>
+							<Text size="11" weight="500" color="tertiary" mono :class="$style.desc_line">
+								<template v-if="account.type === AccountType.Imported">
+									<span data-testid="account-imported-badge" :class="$style.desc_fixed">imported</span>
+									<span :class="$style.desc_fixed">&nbsp;&#183;&nbsp;</span>
+								</template>
+								<span :class="$style.addr_head">{{ account.address.slice(0, -4) }}</span>
+								<span :class="$style.desc_fixed">{{ account.address.slice(-4) }}</span>
+							</Text>
+						</template>
 						<template #right>
 							<Flex align="center" gap="8">
-								<Badge v-if="account.type === AccountType.Imported" variant="secondary" data-testid="account-imported-badge">
-									Imported
-								</Badge>
-
 								<Tooltip position="end" delay="350">
 									<Icon
 										@click.stop="handleCopyAddress(account.address)"
@@ -110,10 +125,10 @@ const handleCopyAddress = (target) => {
 									<template #content>Copy account address</template>
 								</Tooltip>
 
-								<Tooltip position="end" delay="350">
+								<Tooltip v-if="canExportAccounts" position="end" delay="350">
 									<Icon
 										@click.stop="handleExportAccount(account)"
-										name="upload"
+										name="upload-outline"
 										size="14"
 										color="tertiary"
 										hoverColor="primary"
@@ -165,9 +180,9 @@ const handleCopyAddress = (target) => {
 						Add account
 					</Button>
 					<Button
-						@click="popupStore.open('import_account')"
+						@click="router.push('/popup/settings/accounts/import')"
 						wide
-						variant="secondary"
+						variant="primary_outline"
 						size="large"
 						data-testid="accounts-import-btn"
 					>
@@ -218,6 +233,24 @@ const handleCopyAddress = (target) => {
 
 .content {
 	padding: 16px 24px var(--nav-clearance) 24px;
+}
+
+.desc_line {
+	display: flex;
+	max-width: 100%;
+}
+
+.desc_fixed {
+	flex-shrink: 0;
+}
+
+/* Shrink-only (no grow), so on wide rows the tail sits flush against the head. */
+.addr_head {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .icon_btn {

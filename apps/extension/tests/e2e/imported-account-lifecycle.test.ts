@@ -33,7 +33,7 @@ import {
 	type ExtensionContext,
 } from "./fixtures/extension"
 import { changePassword, closeStuckPopup, ensureUnlocked, lockWallet, waitForToast } from "./fixtures/helpers"
-import { closeImportPopup, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
+import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 
 const NEW_PASSWORD = "changed-password-9"
 
@@ -70,9 +70,7 @@ async function assertImportedStillDecrypts(page: Page, expectedAddress: string, 
 	const body = await exportImportedAccountBody(page, false, password)
 	const previewed = await previewImport(page, body)
 	expect(previewed).toBe(expectedAddress)
-	// This probe never confirms, so it must close the popup THROUGH the UI — a DOM-cleared but
-	// store-open import popup can never be reopened (see closeImportPopup).
-	await closeImportPopup(page)
+	// The probe never confirms; the import PAGE's state simply dies with the next navigation.
 }
 
 // NO retry (the `transfers.test.ts` rationale, sharpened): the scenario is DESTRUCTIVE — a retry
@@ -102,8 +100,7 @@ test("imported account survives lock/unlock, a REAL SW kill, and a password chan
 	const importedAddress = await previewImport(page, foreignBody)
 	expect(importedAddress).toBeTruthy()
 	expect(importedAddress?.startsWith("0x")).toBe(true)
-	await clickByTestId(page, "import-account-submit")
-	await waitForToast(page, "Account imported")
+	await confirmImport(page)
 	await gotoAccounts(page)
 	await page.waitForSelector('[data-testid="account-imported-badge"]', { visible: true, timeout: 20_000 })
 
