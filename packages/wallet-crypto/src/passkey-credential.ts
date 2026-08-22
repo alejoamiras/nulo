@@ -48,8 +48,8 @@ export class PasskeyCredential {
 		try {
 			const credential = fromBase64(params.id)
 			const saltInput = Buffer.concat([PASSKEY_KDF_LABEL, credential])
-			const baseKey = await self.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"])
-			const salt = await self.crypto.subtle.digest("SHA-256", saltInput)
+			const baseKey = await globalThis.crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"])
+			const salt = await globalThis.crypto.subtle.digest("SHA-256", saltInput)
 			return new PasskeyCredential(
 				asBase64CredentialId(params.id),
 				baseKey,
@@ -66,7 +66,7 @@ export class PasskeyCredential {
 	}
 
 	public async deriveMasterSecret(): Promise<MasterSecretBytes> {
-		const masterBits = await self.crypto.subtle.deriveBits(
+		const masterBits = await globalThis.crypto.subtle.deriveBits(
 			{ name: "HKDF", hash: "SHA-256", salt: this.salt, info: PASSKEY_MASTER_LABEL },
 			this.baseKey,
 			256,

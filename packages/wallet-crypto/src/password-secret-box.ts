@@ -216,15 +216,13 @@ export class PasswordSecretBox {
 		encrypted: EncryptedProfileSecret,
 	): Promise<{ secret: MasterSecretBytes; entropy: Uint8Array<ArrayBuffer> } | null> {
 		const guard = await this.tryDecrypt(key, Buffer.from(encrypted.guard, "base64") as Uint8Array<ArrayBuffer>, PROFILE_AAD.guard)
+		let secret: Uint8Array<ArrayBuffer> | undefined
+		let handedOff = false
 		try {
 			if (!guard || !array_equals(guard, ENCRYPTION_GUARD)) {
 				return null
 			}
-			const secret = await this.tryDecrypt(
-				key,
-				Buffer.from(encrypted.secret, "base64") as Uint8Array<ArrayBuffer>,
-				PROFILE_AAD.secret,
-			)
+			secret = await this.tryDecrypt(key, Buffer.from(encrypted.secret, "base64") as Uint8Array<ArrayBuffer>, PROFILE_AAD.secret)
 			// At this point the GUARD decrypted cleanly, so the password IS
 			// correct. A null from here on means a ciphertext is corrupted or
 			// was moved between slots (AAD mismatch) — surfaced as null; the
@@ -235,16 +233,18 @@ export class PasswordSecretBox {
 				Buffer.from(encrypted.entropy, "base64") as Uint8Array<ArrayBuffer>,
 				PROFILE_AAD.entropy,
 			)
-			if (!entropy) {
-				zeroize(secret)
-				return null
-			}
+			if (!entropy) return null
+			handedOff = true
 			return { secret: asMasterSecretBytes(secret), entropy }
 		} finally {
 			// `guard` is just ENCRYPTION_GUARD bytes (a known constant) so
 			// it isn't a secret, but defensible to zero anyway — the
 			// call-site invariant test asserts `zeroize` ran here.
 			zeroize(guard)
+			// Wipe the decrypted master on every non-handoff path: the `!entropy`
+			// return AND any throw between decrypting it and handing it back
+			// (e.g. a malformed/hostile entropy slot throwing in `Buffer.from`).
+			if (secret && !handedOff) zeroize(secret)
 		}
 	}
 

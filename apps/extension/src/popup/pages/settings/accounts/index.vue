@@ -43,6 +43,11 @@ const handleEditAccount = (target) => {
 	popupStore.open("edit_account")
 }
 
+const handleExportAccount = (target) => {
+	cacheStore.accountToExportIdx = target.address
+	popupStore.open("export_account")
+}
+
 const handleHideAccount = async (acc) => {
 	if (accounts.value.length === 1) return
 	// Hiding ANY account reassigns the active one to the first visible account,
@@ -88,6 +93,10 @@ const handleCopyAddress = (target) => {
 					>
 						<template #right>
 							<Flex align="center" gap="8">
+								<Badge v-if="account.type === AccountType.Imported" variant="secondary" data-testid="account-imported-badge">
+									Imported
+								</Badge>
+
 								<Tooltip position="end" delay="350">
 									<Icon
 										@click.stop="handleCopyAddress(account.address)"
@@ -99,6 +108,20 @@ const handleCopyAddress = (target) => {
 									/>
 
 									<template #content>Copy account address</template>
+								</Tooltip>
+
+								<Tooltip position="end" delay="350">
+									<Icon
+										@click.stop="handleExportAccount(account)"
+										name="upload"
+										size="14"
+										color="tertiary"
+										hoverColor="primary"
+										:class="$style.icon_btn"
+										data-testid="account-export-btn"
+									/>
+
+									<template #content>Export account</template>
 								</Tooltip>
 
 								<Tooltip position="end" delay="350">
@@ -131,15 +154,26 @@ const handleCopyAddress = (target) => {
 					</SettingItem>
 				</ItemsContainer>
 
-				<Button
-					@click="popupStore.open('new_account')"
-					wide
-					variant="primary"
-					size="large"
-					data-testid="accounts-new-btn"
-				>
-					Add account
-				</Button>
+				<Flex gap="10">
+					<Button
+						@click="popupStore.open('new_account')"
+						wide
+						variant="primary"
+						size="large"
+						data-testid="accounts-new-btn"
+					>
+						Add account
+					</Button>
+					<Button
+						@click="popupStore.open('import_account')"
+						wide
+						variant="secondary"
+						size="large"
+						data-testid="accounts-import-btn"
+					>
+						Import account
+					</Button>
+				</Flex>
 			</Flex>
 
 			<Flex v-if="hiddenAccounts.length" direction="column" gap="12">

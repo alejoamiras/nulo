@@ -16,7 +16,7 @@ import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vu
 
 /** Services */
 import { managers } from "@/utils/core"
-import { ACCOUNT_SERVICE_NAME, AccountServiceClient } from "@/wallet/services/account/client"
+import { ACCOUNT_SERVICE_NAME, AccountServiceClient, IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/client"
 import { ACCOUNT_STATE_SERVICE_NAME, AccountStateServiceClient } from "@/wallet/services/account-state/client"
 import { AUTH_REGISTRY_SERVICE_NAME, AuthRegistryServiceClient } from "@/wallet/services/auth-registry/client"
 import { CONFIG_SERVICE_NAME, ConfigServiceClient } from "@/wallet/services/config/client"
@@ -60,10 +60,17 @@ let backup = {}
 // registry rejects anything else. (Client instances expose no `name` field:
 // the old `s.name?.replace("-client", "")` keying read `undefined` and
 // silently collapsed every slice onto one bogus key.)
+const importedKeysBackupClient = new AccountServiceClient()
 const backupServices = [
 	{ name: PROFILE_SERVICE_NAME, client: new ProfileServiceClient() },
 	{ name: NETWORK_SERVICE_NAME, client: new NetworkServiceClient() },
 	{ name: ACCOUNT_SERVICE_NAME, client: new AccountServiceClient() },
+	// The imported-keys slice shares AccountService but has its OWN backup name/root — a thin
+	// adapter routes `.backup()` to `backupImportedKeys()`.
+	{
+		name: IMPORTED_KEYS_SERVICE_NAME,
+		client: { backup: () => importedKeysBackupClient.backupImportedKeys(), disconnect: () => importedKeysBackupClient.disconnect() },
+	},
 	{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() },
 	{ name: TOKEN_SERVICE_NAME, client: new TokenServiceClient() },
 	{ name: TOKEN_BALANCE_SERVICE_NAME, client: new TokenBalanceServiceClient() },

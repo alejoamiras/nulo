@@ -53,6 +53,8 @@ export default defineConfig({
 			// Same bb.js WASM limitation (poseidon2HashWithSeparator in the account-seed fan-out
 			// + full-chain address derivation). Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/account/account-seed-vectors.test.ts",
+			// Same bb.js WASM limitation (NuloAccount address derivation in the round-trip KATs).
+			"../../packages/aztec-runtime/src/account/account-export.test.ts",
 			// Same bb.js WASM limitation (poseidon2 in the class-id hash) plus node-only fs
 			// digest reads. Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/account/artifact-freeze.test.ts",

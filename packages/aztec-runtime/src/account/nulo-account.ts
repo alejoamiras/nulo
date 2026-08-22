@@ -22,7 +22,9 @@ import { ExecutionPayload, type TxExecutionRequest } from "@aztec/stdlib/tx"
 // a dynamic import we never trigger — the vendored copy in `./frozen-artifact` is the only
 // artifact this account ever loads (the eager module would double-bundle ~1.4 MB).
 import { SchnorrAccountContract } from "@aztec/accounts/schnorr/lazy"
+import { deriveSecretKeyFromSigningKey } from "@aztec/accounts/utils"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
+import type { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
 import { AccountFeePaymentMethodOptions, DefaultAccountEntrypoint, type DefaultAccountEntrypointOptions } from "@aztec/entrypoints/account"
 import { DefaultMultiCallEntrypoint } from "@aztec/entrypoints/multicall"
 import { APP_MAX_CALLS } from "@aztec/entrypoints/encoding"
@@ -43,7 +45,7 @@ export class NuloAccount implements IAccountContract {
 	private readonly entrypoint: DefaultAccountEntrypoint
 	private readonly authWitnessProvider: AuthWitnessProvider
 
-	constructor(
+	private constructor(
 		// The derived privacy secret key (NEVER the seed and NEVER the signing key): it is the only
 		// key material this class hands to the PXE, and the signing key is not recoverable from it.
 		private readonly secretKey: Fr,
@@ -58,9 +60,28 @@ export class NuloAccount implements IAccountContract {
 	}
 
 	public static async new(seed: Fr, logger: ILogger): Promise<NuloAccount> {
-		// Signing-key-root model (NULO-ACCOUNT-KDF v1): the seed derives the signing key (the
+		// Signing-key-root model (NULO-ACCOUNT-KDF v2): the seed derives the signing key (the
 		// ownership root); the privacy secret derives one-way FROM the signing key.
 		const { signingKey, secretKey } = await deriveNuloAccountKeys(seed)
+		return NuloAccount.fromKeys(signingKey, secretKey, logger)
+	}
+
+	/**
+	 * Build an account directly from its Schnorr signing key — the entry point for IMPORTED
+	 * accounts, which supply the ownership root as external key material (no Nulo seed exists for
+	 * them). The privacy secret is re-derived one-way from the signing key, exactly as the seed
+	 * path does, so an imported account is a first-class `IAccountContract` indistinguishable
+	 * downstream. The frozen artifact/descriptor still fix every non-key input, so the address is
+	 * a pure function of the signing key.
+	 */
+	public static async fromSigningKey(signingKey: GrumpkinScalar, logger: ILogger): Promise<NuloAccount> {
+		const secretKey = await deriveSecretKeyFromSigningKey(signingKey)
+		return NuloAccount.fromKeys(signingKey, secretKey, logger)
+	}
+
+	/** The key-material-agnostic tail shared by `new` (seed-derived) and `fromSigningKey`
+	 *  (imported): keys → frozen instance → complete address → account. */
+	private static async fromKeys(signingKey: GrumpkinScalar, secretKey: Fr, logger: ILogger): Promise<NuloAccount> {
 		const keys = await deriveKeys(secretKey)
 		const accountContract = new SchnorrAccountContract(signingKey)
 		// Every non-key instantiation input comes from the frozen descriptor — the same source the

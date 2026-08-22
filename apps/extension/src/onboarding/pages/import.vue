@@ -145,7 +145,7 @@ onBeforeUnmount(() => {
 		<header :class="$style.hero">
 			<BrutalistTitle main="Import" sub="Profile" />
 			<div :class="$style.hero_bar" />
-			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
+			<Text size="14" color="secondary" height="150">Restore from a recovery phrase, passkey, or full backup.</Text>
 		</header>
 
 		<Flex direction="column" gap="8">
