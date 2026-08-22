@@ -214,7 +214,7 @@ export type Methods = {
 	 * user for confirmation), rejects a duplicate, seals the signing key, and writes the row.
 	 * `password` decrypts an encrypted file (omit/empty for plaintext).
 	 */
-	importAccount(profileId: string, chainId: number, fileBody: string, expectedAddress: string, password: string): Account
+	importAccount(profileId: string, chainId: number, fileBody: string, expectedAddress: string, password: string, name?: string): Account
 
 	/**
 	 * Preview an account-export file WITHOUT writing: decrypt (if needed), validate the envelope,

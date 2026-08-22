@@ -18,8 +18,8 @@ import { rmSync } from "node:fs"
 import { expect } from "vitest"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { clickByTestId, launchExtension, openPopup, registerProfile, replaceInputValue, test, waitForHash } from "./fixtures/extension"
-import { acceptConfirmPopup, closeStuckPopup, navigateByHash, reopenAndRecoverAfterImport, waitForToast } from "./fixtures/helpers"
-import { exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
+import { acceptConfirmPopup, closeStuckPopup, navigateByHash, reopenAndRecoverAfterImport } from "./fixtures/helpers"
+import { confirmImport, exportAccountBody, exportImportedAccountBody, gotoAccounts, previewImport } from "./helpers/account-io"
 import { armBackupDownloadCapture, readCapturedBackupDownload } from "./helpers/backup-export"
 import { writeBackupToTemp } from "./helpers/import-drivers"
 
@@ -49,8 +49,7 @@ test("a full backup carries an imported account; restoring it (dup-confirmed) re
 	await waitForHash(page, "#/popup/general", 30_000)
 	const importedAddress = await previewImport(page, foreignBody)
 	expect(importedAddress).toBeTruthy()
-	await clickByTestId(page, "import-account-submit")
-	await waitForToast(page, "Account imported")
+	await confirmImport(page)
 	await gotoAccounts(page)
 	await page.waitForSelector('[data-testid="account-imported-badge"]', { visible: true, timeout: 20_000 })
 

@@ -83,8 +83,8 @@ const props = defineProps({
 						<Text size="14" weight="500" color="primary" :class="[$style.title, $slots.titleSuffix && $style.titleWithSuffix]"> {{ title }} </Text>
 						<slot name="titleSuffix" />
 					</Flex>
-					<Text v-if="description" size="12" weight="500" color="tertiary" :class="$style.description">
-						{{ description }}
+					<Text v-if="description || $slots.description" size="12" weight="500" color="tertiary" :class="$style.description">
+						<slot name="description">{{ description }}</slot>
 					</Text>
 				</Flex>
 			</Flex>
