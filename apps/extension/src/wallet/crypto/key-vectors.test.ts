@@ -138,19 +138,25 @@ describe("M2.6 — cryptographic derivation vectors", () => {
 	// ── V3: passkey master-secret derivation ─────────────────────────
 	//
 	// Locks: HKDF-SHA256, salt = SHA-256(PASSKEY_KDF_LABEL || credentialId),
-	// info = PASSKEY_MASTER_LABEL, 256 output bits reduced through
-	// Fr.fromBufferReduce (big-endian, mod BN254 Fr modulus).
+	// info = PASSKEY_MASTER_LABEL, 512 output bits (the low-skew reduce form)
+	// reduced through Fr.fromBufferReduce (big-endian, mod BN254 Fr modulus).
 	// AZTEC-SENSITIVE: depends on Fr.fromBufferReduce semantics.
 	// Break it: change PASSKEY_KDF_LABEL — fails.
 	// Input PRF is 32 clean bytes base64-encoded; credentialId is a
 	// short base64 identifier mimicking a real WebAuthn credential.
+	// The expected value is REFERENCE-GENERATED, not captured from this
+	// implementation: implementations-plan/key-model-v2-hardening/reference/
+	// passkey-master-vector.ts recomputes it via node:crypto's HKDF (a
+	// different implementation than the wallet's WebCrypto), so a
+	// consistently mis-wired wallet HKDF cannot self-consistently pass.
+	// Never re-pin from deriveMasterSecret's own output.
 	const V3_PRF_B64 = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="
 	const V3_CREDENTIAL_ID_B64 = "dGVzdC1jcmVkZW50aWFsLWlk"
 
-	test("V3 — PasskeyCredential master secret matches fixture", async () => {
+	test("V3 — PasskeyCredential master secret matches the reference vector", async () => {
 		const credential = await PasskeyCredential.create({ id: V3_CREDENTIAL_ID_B64, prf: V3_PRF_B64 })
 		const master = await credential.deriveMasterSecret()
-		expect(toHex(master)).toBe("2db78e1a82bbf002bd36281f079f797fe194ee2b04249df6e44efb30e879919a")
+		expect(toHex(master)).toBe("23c252cf7215344c6fb3b35da3cf7be9ee99f92cae16ee1c235e26f5c4843e79")
 	})
 
 	// ── V6: getHashHex (backup checksum) ─────────────────────────────

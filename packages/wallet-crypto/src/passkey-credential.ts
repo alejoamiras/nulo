@@ -66,21 +66,30 @@ export class PasskeyCredential {
 	}
 
 	public async deriveMasterSecret(): Promise<MasterSecretBytes> {
+		// 512-bit expand before the field reduce — HKDF-Expand output is IND-random, so a
+		// 64-byte input gives reduce bias ≤ ~2^-258 (the same low-skew form the mnemonic path
+		// uses in mnemonic-master.ts). A 256-bit expand was rejected: reducing 32 bytes mod Fr
+		// leaves residues with 5 or 6 preimages — a 20% relative skew and 253.415-bit
+		// min-entropy (the high-skew case upstream warns about).
 		const masterBits = await globalThis.crypto.subtle.deriveBits(
 			{ name: "HKDF", hash: "SHA-256", salt: this.salt, info: PASSKEY_MASTER_LABEL },
 			this.baseKey,
-			256,
+			512,
 		)
+		// Named copy for the Buffer view Fr reads from — it is master-equivalent OKM and must be
+		// wiped alongside the deriveBits output (mnemonic-master.ts's seed64Copy pattern; an
+		// anonymous `Buffer.from(...)` inline would survive un-zeroized until GC).
+		const masterBitsCopy = Buffer.from(new Uint8Array(masterBits))
 		try {
-			const masterFr = Fr.fromBufferReduce(Buffer.from(new Uint8Array(masterBits)))
+			const masterFr = Fr.fromBufferReduce(masterBitsCopy)
 			// `masterFr.toBuffer()` allocates a fresh Buffer; the returned
 			// reference is the caller's responsibility to zero.
 			return asMasterSecretBytes(masterFr.toBuffer() as Buffer<ArrayBuffer>)
 		} finally {
-			// The deriveBits ArrayBuffer is no longer needed — Fr made its
-			// own copy (verified by `Fr.fromBufferReduce` test in
-			// zeroize.test.ts).
+			// Fr made its own copy (verified by the `Fr.fromBufferReduce` 64-byte
+			// test in zeroize.test.ts) — both local OKM buffers are dead here.
 			zeroize(masterBits)
+			zeroize(masterBitsCopy)
 		}
 	}
 }
