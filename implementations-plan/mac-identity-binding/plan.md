@@ -34,3 +34,25 @@ HOLDS-with-one-low → r5 **APPROVE, no remaining blockers**. Full transcripts:
 `audit:vue` green on HEAD (4562 tests / typecheck / lint / build). No UI or dApp-surface
 changes; e2e fixtures reference no changed API — CI's required smoke + network gates
 verify the PR.
+
+## Phase 2 — the red smoke gate (post-unlock navigation races)
+
+The required `smoke-e2e-status` gate red 6/7 runs on wait-budget overruns over visibly
+healthy wallet states. Attributed to dev (a plain-dev probe PR failed identically), then
+root-caused to four pre-existing post-unlock navigation races whose window widens from
+~100ms to seconds on starved CI runners — real user-facing bugs on any slow machine, fixed
+in this arc because the gate blocks it:
+
+1. Router guard bounced auth-required navigations while `isLogined` lagged the accepted
+   unlock → new `authRequiredGate` decision core consults the authoritative
+   `getActiveProfile()` (unit-tested, incl. SW-respawn backoff + degrade-to-pass).
+2. A stale lock event resuming after its own unlock ejected the fresh session →
+   sequence-token fence in `app.vue`'s profile-event handler.
+3. Export deep-link preselect raced the bootstrap's store refill → re-apply preselect when
+   account rows arrive (never overriding a manual pick).
+4. `auth.vue` navigated only after a seconds-long warm-up, then late-pushed
+   `/popup/general` over wherever the user had gone → navigate first, warm-up
+   fire-and-forget, watcher advances only while still on the auth screen.
+
+Full mechanism writeups, attribution technique (router-wrap probes), validation
+methodology, and known residuals: `lessons/phase-2-smoke-deflake.md`.
