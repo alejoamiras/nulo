@@ -56,3 +56,15 @@ in this arc because the gate blocks it:
 
 Full mechanism writeups, attribution technique (router-wrap probes), validation
 methodology, and known residuals: `lessons/phase-2-smoke-deflake.md`.
+
+## Codex loop, phase 2 (gpt-5.6-sol xhigh, 3 rounds over the full PR + nav fixes)
+
+r7 BREAKS (1 confirmed High — lock cleanup skippable by a transport rejection; 1 confirmed
+Medium — the single-push fix was not atomic and substring-matched `?from=/popup/auth`
+routes; 1 Low; 1 Critical re-opening the adjudicated derived-only residual) → r8 HOLDS (the
+residual REJECTED with a written rebuttal codex accepted point-by-point: "the accepted
+residual stands"; High/Low verified fixed; Medium fix ruled incomplete) → r9 **APPROVE**
+(atomic claim election + exact-path gate verified; no two-push interleaving, no strand).
+Transcripts: `audit-codex-r{7..9}.md`. Reported for a separate fix, out of this PR's scope:
+`utils/core.ts` `refreshBalances` fires `refreshTokenBalance()` unawaited and then
+disconnects the client in `finally`, cancelling its own refresh RPCs (pre-existing on dev).

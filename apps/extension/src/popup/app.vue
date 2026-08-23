@@ -145,7 +145,15 @@ const onActiveProfileChanged = async (profile) => {
 		await bootstrapActiveProfile(profile)
 		return
 	}
-	const profiles = await managers.profile.getProfiles()
+	// Lock cleanup must survive a failed lookup: a transport rejection here (SW churn at the
+	// exact moment of a lock) must not leave the popup rendered as authenticated over a closed
+	// session. The list only picks auth vs register — the cached one is good enough for that.
+	let profiles = appStore.profiles
+	try {
+		profiles = await managers.profile.getProfiles()
+	} catch {
+		// Cached list stands in; the cleanup below runs regardless.
+	}
 	if (seq !== profileEventSeq) return
 	popupStore.closeAll()
 	appStore.isLogined = false

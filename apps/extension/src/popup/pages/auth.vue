@@ -62,6 +62,24 @@ const isAllowedToContinue = computed(() => {
 	return true
 })
 
+/** The single post-unlock advance. Two sites want to leave this screen — the submit handler
+ *  when its isLogined poll releases, and the isLogined watcher (which also covers unlocks this
+ *  handler never sees, e.g. a silent restore landing here) — and both used to push blindly:
+ *  the loser's late push yanked the user from wherever they had navigated to in the gap. The
+ *  claim flag elects one winner atomically (a hash comparison alone cannot — the winner's
+ *  navigation moves the hash only after async route resolution). The exact-path check keeps
+ *  the advance on THIS screen only: a substring test also matched off-screen routes carrying
+ *  `?from=/popup/auth` (profile import / new-profile from the select-profile popup). A failed
+ *  navigation releases the claim so a later attempt isn't locked out. */
+let postAuthNavClaimed = false
+const advancePastAuth = async () => {
+	if (postAuthNavClaimed) return
+	if (window.location.hash.split("?")[0] !== "#/popup/auth") return
+	postAuthNavClaimed = true
+	const failure = await router.push(appStore.pageAwaitingAuth || "/popup/general")
+	if (failure) postAuthNavClaimed = false
+}
+
 const handleUnlockWallet = async () => {
 	if (!isAllowedToContinue.value) return
 
@@ -112,14 +130,10 @@ const handleUnlockWallet = async () => {
 
 		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 
-		// Navigate as soon as the session exists. The transaction/balance warm-up runs against a
-		// service worker that can be seconds away under load; doing it before the push held the
-		// user on this screen — and its late completion pushed them back here from wherever they
-		// had navigated to in the meantime.
-		router.push(appStore.pageAwaitingAuth || "/popup/general")
+		void advancePastAuth()
 
 		void appStore.syncTransactions().catch((err) => console.error(err))
-		refreshBalances(10, appStore.accounts)
+		void refreshBalances(10, appStore.accounts).catch((err) => console.error(err))
 
 		await checkNotificationsForShow(router)
 	} catch (err) {
@@ -147,12 +161,7 @@ watch(
 watch(
 	() => appStore.isLogined,
 	async () => {
-		// Advance only while the user is still ON this screen: isLogined flips when the
-		// activation bootstrap finishes, which can be seconds after an unlock whose submit
-		// handler already navigated away — a blind push here would yank them back.
-		if (appStore.isLogined && window.location.hash.includes("/popup/auth")) {
-			router.push(appStore.pageAwaitingAuth || "/popup/general")
-		}
+		if (appStore.isLogined) await advancePastAuth()
 	},
 )
 </script>

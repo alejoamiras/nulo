@@ -17,7 +17,7 @@ vi.mock("@/utils/core", () => ({
 		account: undefined,
 	},
 	initTransactionService: vi.fn(),
-	refreshBalances: vi.fn(),
+	refreshBalances: vi.fn(async () => undefined),
 }))
 vi.mock("@/composables/usePasskeyCeremony", () => ({
 	usePasskeyCeremony: () => ({ request: { value: null }, runCeremony: vi.fn(), onResolve: vi.fn(), onReject: vi.fn() }),
@@ -27,6 +27,7 @@ vi.mock("@/utils/lastActiveProfile", () => ({
 	getLastActiveProfileId: vi.fn(async () => undefined),
 	setLastActiveProfileId: vi.fn(async () => undefined),
 }))
+vi.mock("@/wallet/services/account/client", () => ({ AccountServiceClient: vi.fn() }))
 const routerPush = vi.fn()
 vi.mock("vue-router", () => ({
 	useRouter: () => ({ push: routerPush, go: vi.fn() }),
@@ -110,5 +111,61 @@ describe("auth.vue — torn-import unlock refusal", () => {
 		await flushPromises()
 		await wrapper.vm.$nextTick()
 		expect(wrapper.find('[data-testid="auth-restore-torn"]').exists()).toBe(false)
+	})
+})
+
+describe("auth.vue — post-unlock navigation is single-shot", () => {
+	beforeEach(() => {
+		routerPush.mockReset()
+		window.location.hash = "#/popup/auth"
+	})
+	afterEach(() => {
+		window.location.hash = ""
+	})
+
+	test("watcher and submit handler race to ONE push even while the hash has not moved yet", async () => {
+		unlockProfile.mockResolvedValue({ id: "p1", name: "P", type: "password" })
+		// The real router moves the hash only AFTER async route resolution — the mock leaves it
+		// untouched to model that window, so only the claim election can stop the second push.
+		routerPush.mockResolvedValue(undefined)
+		const { wrapper, appStore } = mountAuth()
+		await flushPromises()
+
+		await wrapper.find("[data-stub-input]").setValue("pass1234")
+		await wrapper.find("form").trigger("submit")
+		await flushPromises()
+
+		// The submit handler is now inside its isLogined poll; the flip below fires the watcher
+		// (push #1) and then releases the poll, whose own advance must find the claim taken.
+		appStore.isLogined = true
+		await new Promise((r) => setTimeout(r, 350))
+		await flushPromises()
+
+		expect(routerPush).toHaveBeenCalledTimes(1)
+		expect(routerPush).toHaveBeenCalledWith("/popup/general")
+	})
+
+	test("the isLogined watcher never pushes when the popup already left the auth screen", async () => {
+		window.location.hash = "#/popup/send"
+		const { appStore } = mountAuth()
+		await flushPromises()
+
+		appStore.isLogined = true
+		await flushPromises()
+
+		expect(routerPush).not.toHaveBeenCalled()
+	})
+
+	test("a route merely CARRYING ?from=/popup/auth is off-screen: no push (substring regression)", async () => {
+		// The select-profile popup navigates to /popup/import?from=/popup/auth — a substring
+		// hash test matched it and yanked the user out of the import flow.
+		window.location.hash = "#/popup/import?from=/popup/auth"
+		const { appStore } = mountAuth()
+		await flushPromises()
+
+		appStore.isLogined = true
+		await flushPromises()
+
+		expect(routerPush).not.toHaveBeenCalled()
 	})
 })
