@@ -112,10 +112,14 @@ const handleUnlockWallet = async () => {
 
 		initTransactionService(appStore.onTxAdded, appStore.onTxUpdated)
 
-		await appStore.syncTransactions()
-		refreshBalances(10, appStore.accounts)
-
+		// Navigate as soon as the session exists. The transaction/balance warm-up runs against a
+		// service worker that can be seconds away under load; doing it before the push held the
+		// user on this screen — and its late completion pushed them back here from wherever they
+		// had navigated to in the meantime.
 		router.push(appStore.pageAwaitingAuth || "/popup/general")
+
+		void appStore.syncTransactions().catch((err) => console.error(err))
+		refreshBalances(10, appStore.accounts)
 
 		await checkNotificationsForShow(router)
 	} catch (err) {
@@ -143,7 +147,10 @@ watch(
 watch(
 	() => appStore.isLogined,
 	async () => {
-		if (appStore.isLogined) {
+		// Advance only while the user is still ON this screen: isLogined flips when the
+		// activation bootstrap finishes, which can be seconds after an unlock whose submit
+		// handler already navigated away — a blind push here would yank them back.
+		if (appStore.isLogined && window.location.hash.includes("/popup/auth")) {
 			router.push(appStore.pageAwaitingAuth || "/popup/general")
 		}
 	},

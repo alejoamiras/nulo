@@ -130,19 +130,31 @@ watch(
 	},
 )
 
+/** Sequence token for profile events. Handlers await service round-trips, and under load a
+ *  stale LOCK event can resume after its own unlock has already re-activated the profile — its
+ *  routing side effects would eject an active session to the auth screen (observed as e2e
+ *  navigation stalls under CPU restriction). A newer event of either kind supersedes every
+ *  older handler; superseded handlers abandon their mutations instead of racing them. */
+let profileEventSeq = 0
+
 const onActiveProfileChanged = async (profile) => {
+	const seq = ++profileEventSeq
 	if (profile) {
+		// bootstrapActiveProfile carries its own lock-wins guard: a stale profile event whose
+		// session was already locked re-checks getActiveProfile() before flipping isLogined.
 		await bootstrapActiveProfile(profile)
-	} else {
-		popupStore.closeAll()
-		appStore.isLogined = false
-		// Every cached scope goes with the lock, so no profile's activity outlives
-		// it in memory. Switching profiles runs through lock/unlock, which means a
-		// switch deliberately starts cold rather than repainting from cache.
-		appStore.clearActivity()
-		appStore.profiles = await managers.profile.getProfiles()
-		router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
+		return
 	}
+	const profiles = await managers.profile.getProfiles()
+	if (seq !== profileEventSeq) return
+	popupStore.closeAll()
+	appStore.isLogined = false
+	// Every cached scope goes with the lock, so no profile's activity outlives
+	// it in memory. Switching profiles runs through lock/unlock, which means a
+	// switch deliberately starts cold rather than repainting from cache.
+	appStore.clearActivity()
+	appStore.profiles = profiles
+	router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
 }
 
 /** The profile unlocked DERIVED-ONLY: its imported-keys DEK (or the envelope MAC over it) failed,
