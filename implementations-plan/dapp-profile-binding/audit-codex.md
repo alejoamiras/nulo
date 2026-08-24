@@ -15,6 +15,18 @@ Verdict: **reject** (blocking: the guard remains TOCTOU-vulnerable; the stamp so
 
 All findings adopted in revision 2 (plan ledger) — including the approver-bound `Map<key, {at, profileId}>` unification of the marker and the stamp source.
 
-## Final fresh-context pass
+## Final fresh-context pass — round 1 (NEW session `01a03599-e519-7850-8c8d-3aacd77047de`)
+
+Verdict: **reject** (blocking: marker identity/expiry, pre-guard journal access, teardown linkage).
+
+- Marker tuple-keyed → concurrent same-tuple request IDs consume each other; worse, TTL EXPIRY of a stale A marker let an attacker finish an approved handshake after switching to B and mint a B-stamped channel from an A-era approval — stale must TERMINATE, and markers need approval/session identity.
+- N-26 teardown unimplementable as specced: `tabs.onRemoved` supplies only tabId; pre-establishment there's no ActiveSession; upstream `terminateForTab` deletes approved discoveries (`background_connection_handler.js:260`) — the marker must store the tabId linkage; test the wired lifecycle incl. concurrent same-tuple approvals.
+- **Pre-dispatch crossing**: `sendTx` creates its queued journal BEFORE the guard, independently live-reading profile/session/accounts (`queued-journal.ts:102`) — an A-era message can persist a B operation after termination. Guard before journal creation; anchor that lookup; switch-during-journal test.
+- "Completes as A" generally impossible: MAC verification requires A active (`mac-storage.ts:85`) — anchored A-lookup under B returns absent. Specify "A-consistent or fails closed". Discovery + establishment keep live-read; queued-journal must not.
+- E2E fallback insufficient for a Major's gate — existing profile testids make the real A→B switch plausible; require it (or explicit owner waiver). Serializer, unstamped teardown, respond-then-terminate otherwise sound.
+
+All adopted in revision 3 (plan ledger).
+
+## Final pass — round 2 (resumed, on revision 3)
 
 _(appended below)_
