@@ -96,7 +96,9 @@ SECURITY.md "Dependency policy": add the 1.4 pm workflow (`bun pm diff` on every
 
 **Single arc → single PR** to dev via `gh pr create` (no stack ceremony). Branch `worktree-bun-1.4-bump`. Commits, in order: docs(plan) dossier+plan artifacts · chore(deps) pin bump + CI fold · chore(deps) lockfile v2 · chore(deps) dedupe + advisory CI check · feat(scripts) parallel audit:vue/dev:full · chore(ci) bunx renovate + permissions + #25305 outcome · docs(security) pm workflow. PR title (≤93 chars): `chore(deps): bump bun to 1.4.0 (pin dedupe, lockfile v2, parallel scripts, pm workflow)`. PR body MUST carry: the A3 fleet-cutover precondition, the A1 timing note, the dedupe downgrade pairs (incl. the bundle-reachable `string_decoder`), and the local `>=1.4` requirement.
 
-## Post-implementation (self-contained — the implementing session executes THIS, not the skill)
+## Post-implementation — EXECUTED 2026-08-24: steps 1–4b complete (code-review commit b3afc458 · codex loop converged round-3 APPROVE · PR #452 all required checks green incl. 5 network shards + prover-ON canary · machine bun 1.4.0 installed per A3). Remaining: owner squash-merge (step 4 tail), then step 5 close-out.
+
+(Original protocol below, as approved:)
 
 1. Run `/code-review max --fix` on the full implementation diff → skim applied fixes → commit them separately from implementation commits.
 2. Codex post-impl audit (`/codex xhigh`): send the net diff from base ea9be876, a summary of the code-review commits, this plan.md + the Audit log, an explicit adversarial/security ask, and this rule verbatim: *"Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."*
