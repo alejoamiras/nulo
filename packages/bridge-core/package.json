@@ -11,7 +11,7 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit -p tsconfig.scripts.json",
-		"test": "vitest run",
+		"test": "bun --bun vitest run",
 		"test:watch": "vitest",
 		"deploy:sandbox": "bun scripts/deploy-sandbox.ts",
 		"verify:l1": "bun scripts/verify-l1.ts"
