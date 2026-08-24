@@ -4,6 +4,7 @@ import {
 	AssemblyAbortedError,
 	assembleFullBackup,
 	type BackupSource,
+	MAX_BACKUP_FILE_BYTES,
 	collectRestoreErrors,
 	detectBackupType,
 	normalizeAllIds,
@@ -153,6 +154,22 @@ describe("readBackupFile", () => {
 	it("classifies garbage as unknown", async () => {
 		const { selection } = await readBackupFile(makeFile("hello world ###"))
 		expect(selection.type).toBe("unknown")
+	})
+
+	function makeSizedFile(size: number, name = "backup.json"): File {
+		return { name, size, text: async () => "{}" } as unknown as File
+	}
+
+	it("rejects an oversized file before reading it", async () => {
+		const { parseError, selection } = await readBackupFile(makeSizedFile(MAX_BACKUP_FILE_BYTES + 1))
+		expect(parseError?.title).toBe("Backup File Too Large")
+		expect(selection.type).toBe("unknown")
+		expect(selection.backup).toBeNull()
+	})
+
+	it("accepts a file exactly at the limit", async () => {
+		const { parseError } = await readBackupFile(makeSizedFile(MAX_BACKUP_FILE_BYTES))
+		expect(parseError).toBeUndefined()
 	})
 })
 

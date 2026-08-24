@@ -41,6 +41,20 @@ export interface ProcessBackupResult {
 }
 
 export async function readBackupFile(file: File): Promise<ProcessBackupResult> {
+	// Byte-level bound BEFORE reading — text().length counts UTF-16 code
+	// units, so a heavily multi-byte file could otherwise exceed the
+	// advertised ceiling before any later check sees it. Belt over the
+	// pickFile-side cap: this helper must hold its own even for callers that
+	// hand it an arbitrary File.
+	if (file.size > MAX_BACKUP_FILE_BYTES) {
+		return {
+			selection: { name: file.name, backup: null, type: "unknown", profileType: null },
+			parseError: {
+				title: "Backup File Too Large",
+				tooltip: "The backup file is too large to import. Please select a correct backup file.",
+			},
+		}
+	}
 	const text = await file.text()
 	const detectedType = detectBackupType(text)
 	let backup: unknown = null
