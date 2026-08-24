@@ -525,3 +525,21 @@ assuming "transient".
   (tokens-menu trigger) and `switchAccountByAddress` (header selector) both
   need the home screen; a caller parked on a settings page times out on a
   2s internal wait with no useful message. Navigate to general first.
+
+## Post-unlock navigation races (2026-08-23, `implementations-plan/mac-identity-binding/` phase 2)
+
+A smoke failure whose captured page state is a HEALTHY wallet (right account, balances
+rendered) while a `navigateByHash`/agree-gate wait times out is usually NOT the awaited
+element's bug — it's a navigation race yanking the page elsewhere mid-wait. Four such races
+(fixed 2026-08-23) all lived in the window between an accepted unlock and `isLogined`
+flipping at the END of the activation bootstrap: that window is ~100ms warm but SECONDS on a
+starved 2-core CI runner, which is why these fire in CI and "never reproduce" locally.
+
+- Reproduce with `taskset -c 0,1 bun run --cwd apps/extension test:e2e <files>` (~40%
+  failure rate pre-fix). Freeze the tree during comparison loops, run them solo on the host.
+- Attribute with a throwaway probe test that wraps `$router.push/replace` + `hashchange`
+  in-page and records stacks; match stack chunk+offset against the built bundle to name the
+  pusher. Guessing from symptoms produced wrong fixes; attribution produced right ones.
+- The four mechanisms + residuals: `implementations-plan/mac-identity-binding/lessons/phase-2-smoke-deflake.md`.
+  Guard-vs-bootstrap decisions now live in `apps/extension/src/popup/auth-guard.ts` — extend
+  that decision core (it's unit-tested) rather than re-adding flag checks in the router guard.

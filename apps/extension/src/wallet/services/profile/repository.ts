@@ -40,9 +40,13 @@ export class ProfileRepository {
 	 *        for legacy SW startup paths.
 	 */
 	public constructor(browserApi?: BrowserApi) {
+		// Profile rows are the auth-critical root: every sealed-slot/MAC/fingerprint decision
+		// trusts the row fetched BY id. The key-identity guard hides any raw-storage row whose
+		// embedded id disagrees with its storage key, closing the embedded-id transplant bypass.
+		const guard = { requireKeyIdentityMatch: true } as const
 		this.storage = browserApi
-			? new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, browserApi.storage.local)
-			: new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, chrome.storage.local)
+			? new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, browserApi.storage.local, undefined, guard)
+			: new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, chrome.storage.local, undefined, guard)
 	}
 
 	/** Returns the profile with the given id, or `undefined`. */

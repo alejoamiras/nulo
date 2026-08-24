@@ -16,7 +16,7 @@ import {
 	asImportedKeysDek,
 	asMasterSecretBytes,
 	asPasshash,
-	computeEnvelopeMacV2,
+	computeEnvelopeMacV3,
 	type ImportedKeysDek,
 	type MasterSecretBytes,
 } from "@nulo/wallet-crypto"
@@ -110,14 +110,15 @@ function dekBuffer(): ImportedKeysDek {
 const bearerBox = new SessionSecretBox()
 
 /** Password profile whose envelopeMac genuinely verifies against `secret` + `dek` — the bearer
- *  path checks the v2 MAC over the whole 4-slot sealed envelope before committing a restore. */
+ *  path checks the v3 MAC over (id, 4 sealed slots, fingerprint) before committing a restore. */
 async function passwordProfileFor(id = "pid", secret = secretBuffer(), dek = dekBuffer()): Promise<Profile & { type: "password" }> {
 	const profile = passwordProfile(id)
-	profile.envelopeMac = await computeEnvelopeMacV2(secret, dek, {
+	profile.envelopeMac = await computeEnvelopeMacV3(id, secret, dek, {
 		guard: profile.guard,
 		secret: profile.secret,
 		entropy: profile.entropy,
 		dek: profile.dekSealed,
+		walletFingerprint: profile.walletFingerprint,
 	})
 	return profile
 }

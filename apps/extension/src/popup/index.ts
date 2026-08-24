@@ -31,6 +31,7 @@ import "./index.scss"
 
 import { initAppServiceContext, managers } from "@/utils/core"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
+import { authRequiredGate } from "./auth-guard"
 
 // Eagerly open profile + contact service-worker ports at boot. Matches the
 // timing of the previous module-eval init in core.js so no consumer sees a
@@ -65,19 +66,26 @@ router.beforeEach(async (to: RouteLocationNormalized, from: RouteLocationNormali
 		return
 	}
 
+	// Flag-only, deliberately SYNCHRONOUS: isLogined=true exists only AFTER the activation
+	// bootstrap has completed, so this check never needs the authoritative session read. An
+	// async lookup here fires during cold boot (ports not ready → rejects) and its optimistic
+	// degrade redirects to `from` before loadProfile has chosen a destination — stranding the
+	// boot at the bare index route (reproduced under CPU restriction; see
+	// implementations-plan/mac-identity-binding/lessons/phase-1.md).
 	if (to.name === "popup-auth" && appStore.isLogined) {
 		next({ name: from.name || "popup-general" })
 		return
 	}
 
-	if (to.meta.isAuthRequired && !appStore.isLogined && appStore.isSessionChecked) {
-		next({ name: "popup-auth" })
-		return
-	}
-
-	if (to.meta.isAuthRequired && !appStore.isLogined && !appStore.isSessionChecked) {
-		next({ name: "popup-auth" })
-		return
+	// The auth-required gate delegates to authRequiredGate: isLogined lags an accepted unlock
+	// until the activation bootstrap finishes, and a blind bounce here ejects a genuinely
+	// unlocked user mid-navigation (the guard consults the service's active session instead).
+	if (to.meta.isAuthRequired && !appStore.isLogined) {
+		const gate = await authRequiredGate(appStore.isLogined, appStore.isSessionChecked, () => managers.profile.getActiveProfile())
+		if (gate === "auth") {
+			next({ name: "popup-auth" })
+			return
+		}
 	}
 
 	if (!appStore.profile && to.name !== "popup-register" && to.name !== "popup-import" && to.name !== "popup-profile-new") {
