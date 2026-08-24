@@ -86,7 +86,7 @@ Novelty MED (first Bun-runtime test execution here, de-risked by the dossier + p
 
 ## Phases
 
-### Phase 0 — Foundation (no runtime change)
+### Phase 0 — Foundation (no runtime change) ✓ (gate passed 2026-08-24 — [lessons/phase-0.md](lessons/phase-0.md))
 
 - Add `vitest.base.ts`; spread it into every config; add the four minimal configs (`...sharedTest` + explicit `environment: "node"`, nothing else); `biome.json` includes.
 - Add `scripts/ci-cd/test-soak/` (cli, lib + tests, reporter, resolver, fixtures incl. `sourcemap`, cli tests on both engines).

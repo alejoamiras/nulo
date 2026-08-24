@@ -1,6 +1,7 @@
 import vue from "@vitejs/plugin-vue"
 import useAutoImport from "unplugin-auto-import/vite"
 import { defineConfig } from "vitest/config"
+import { sharedTest } from "../../vitest.base"
 import { artifactAliases, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
@@ -23,6 +24,7 @@ export default defineConfig({
 	},
 	define: sharedDefine,
 	test: {
+		...sharedTest,
 		globals: true,
 		environment: "jsdom",
 		setupFiles: "./tests/vitest.setup.ts",
