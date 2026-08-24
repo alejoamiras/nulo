@@ -78,14 +78,14 @@ Round 1 (parallel, independent): codex session `01a034d9-f58f-79f3-b4e6-cc49afc3
 | B-2 | B1 not frozen-installable without its own lock diff (codex High) | **Adopted**: B1 carries the minimal v1-preserving lock update + frozen gate |
 | B-3 | Flip and regen conflated (both) — codex: flip-first on v1 lock; fable: regen-first on hoisted | **Adopted with codex's ordering**: flip on the unchanged v1 lock isolates LAYOUT (the arc's core question) with zero resolution variables; the regen then isolates RESOLUTION on a proven layout. Fable's underlying demand (one root cause per commit) is fully satisfied; its order was the mirror-image split. Recorded as the round's one genuine disagreement, resolved. |
 | B-4 | Store probes must precede the first repo install (codex High) | **Adopted**: Phase 2 is scratch-only discovery |
-| B-5 | Two-install smoke ≠ evidence; same-UID mutation surface; release posture (codex High + fable Med) | **Adopted**: N-way stress + interruption + tree-hash; posture memo framed as risk acceptance; CI per-job clean-store stated as the release answer; registry-mutex named as fallback control |
+| B-5 | Two-install smoke ≠ evidence; same-UID mutation surface; release posture (codex High + fable Med) | **Adopted (as corrected by F-1)**: N-way stress + interruption + tree-hash; posture memo framed as risk acceptance; release control is CONDITIONAL on the Phase 2 CI-cache cell (job-private store or accept-and-verify — never assumed clean); registry-mutex named as fallback control |
 | B-6 | Regen gate not wallet-grade (both, convergent) | **Adopted in full**: full-record diff, added/removed, integrity+resolved byte-identity for frozen scopes, pm-diff regardless of semver class, pm ls --all/peer/bundle-metadata + Noir dup count, advisory delta |
 | B-7 | Excludes cleanup BEFORE regen (fable High) | **Adopted**: Phase 4 commit A (supersedes Arc A's P4 deferral — the regen is exactly the event the stale excludes endanger) |
 | B-8 | Dev-server blind spot (fable High) | **Adopted**: Phase 3 dev boot smoke |
 | B-9 | Vite/CRX validation too indirect (codex Med) | **Adopted**: build:full + firefox + packaged-output assertions + wasm hash cross-linker comparison |
 | B-10 | Remappings hardening (codex Med) | **Adopted**: forge version recorded, effective-mapping assertion, atomic write, stale rejection, portal-artifact unwired, README note |
 | B-11 | sqlite3mc declaration judgment (both) | **Resolved**: sound; codex approved under the delegated gate; fable's lockstep assertion + UPDATE.md full inventory adopted; owner objection window remains open |
-| B-12 | check-fpc-version --mode gate bug (codex Low) | **Adopted**: gate line fixed with verified mode |
+| B-12 | check-fpc-version --mode gate bug (codex Low) | **Adopted (as corrected by F-5)**: script REMOVED from the required local gate (live-testnet RPC → network-dependent operational check, documented manually); the refactor is validated via `test:all` |
 | B-13 | globalStore non-togglable posture (fable Low) | **Adopted**: explicit Phase 5 decision input |
 | B-14 | Outline B (both re-steelmanned) | **Converged: loses; time-bounded fallback only** |
 
