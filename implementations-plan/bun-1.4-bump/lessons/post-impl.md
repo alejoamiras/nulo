@@ -14,3 +14,11 @@ Dispositions in plan.md § Audit log (P1–P5). Verification-before-adoption not
 - P4 rejected-with-reason (expired min-age excludes are a dated, self-documented follow-up touching the @aztec install surface — not this arc).
 
 Round-1 fix gate: `bun run lint:actions` exit 0 · `./scripts/check-no-brand.sh` ok · `bun test scripts/ci-cd/` green (workflow edits re-validated).
+
+## Codex round 2 (resumed) — conditional approve
+
+R2-1 High adopted (excluding-constraint discriminator + ungated twin — implemented to codex's own spec, verdict upheld); R2-2/R2-3 Lows adopted (claim narrowing, wording); P4 relabeled DEFERRED. Fixes: commit 0937b10d. Note: the first round-3 resume was killed mid-inference (no verdict written); one retry completed normally.
+
+## Codex round 3 (resumed) — **APPROVE, no new material findings. LOOP CONVERGED.**
+
+Verbatim: "The three-fact argument is sufficient: ^1.0.5 forces transitive re-resolution, gated resolution selects the eligible old candidate, and the ungated seed proves the young candidate is otherwise selected and resolvable. The ungated twin also correctly isolates lock-retention behavior. The SECURITY wording, ELI5 wording, and P4 disposition are now accurate."
