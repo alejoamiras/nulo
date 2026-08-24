@@ -1,4 +1,5 @@
 import { EncryptionKey } from "@nulo/wallet-crypto"
+import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { createTestingPinia } from "@pinia/testing"
 import { flushPromises, mount } from "@vue/test-utils"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -296,17 +297,19 @@ describe("export/full.vue — error boundary", () => {
 	})
 
 	it("an oversized assembly fails loud instead of shipping an unimportable file", async () => {
-		// One slice inflates the pretty output past MAX_BACKUP_FILE_BYTES (16 MiB).
-		configClient.backup.mockResolvedValue(["x".repeat(17 * 1024 * 1024)])
+		// One slice inflates the pretty output past the shared cap — symbolic
+		// so the fixture tracks MAX_BACKUP_FILE_BYTES recalibrations. The real
+		// assembler serializes the ~64 MiB payload, hence the long timeout.
+		configClient.backup.mockResolvedValue(["x".repeat(MAX_BACKUP_FILE_BYTES + 2048)])
 		const wrapper = mountPage()
 		await reachUnlockAndSubmit(wrapper)
 		await vi.waitFor(
 			() => expect(openToast).toHaveBeenCalledWith({ label: "Backup is too large to create", icon: "warning" }, expect.anything()),
-			{ timeout: 10_000 },
+			{ timeout: 30_000 },
 		)
 		await vi.waitFor(() => expect(wrapper.find("[data-testid='unlock-submit-btn']").exists()).toBe(true))
 		expect(wrapper.find("[data-testid='download-backup-btn']").exists()).toBe(false)
-	})
+	}, 45_000)
 
 	it("unmount mid-run disconnects the run's clients and suppresses all late writes", async () => {
 		const slice = deferred<unknown>()

@@ -11,8 +11,14 @@ import { fromBase64 } from "@/wallet/utils"
  * path refuses larger files before reading them, and the export path refuses
  * to produce a larger artifact — the same constant on both sides is what
  * guarantees an exported backup can never be rejected by its own importer.
+ *
+ * Calibration: a FRESH test wallet's encrypted artifact measures ~22.4 MiB
+ * (base64 ciphertext, dominated by the account-state slice), so 64 MiB gives
+ * ~3x growth headroom while still bounding a decompression bomb to a finite
+ * inflation. Import-side parse amplification of a worst-case file is
+ * ESTIMATED (not proven) at 2-4x transient. Revisit with real-user telemetry.
  */
-export const MAX_BACKUP_FILE_BYTES = 16 * 1024 * 1024
+export const MAX_BACKUP_FILE_BYTES = 64 * 1024 * 1024
 
 export type BackupFileType = "plain" | "encrypted" | "unknown"
 
