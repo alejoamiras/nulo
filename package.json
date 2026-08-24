@@ -32,7 +32,7 @@
     "test:release": "bun test scripts/release/",
     "test:ci-gating": "bun test scripts/ci-cd/",
     "check:imports": "biome check apps/ packages/",
-    "audit:vue": "bun run typecheck:all && bun run test && bun run lint && bun run build",
+    "audit:vue": "bun run --parallel typecheck:all test lint && bun run build",
     "audit:faucet": "bun run typecheck:all && bun run test:faucet && bun run lint && bun run --cwd apps/faucet verify:deployments && bun run build:faucet",
     "prepare": "git config core.hooksPath .githooks"
   },
