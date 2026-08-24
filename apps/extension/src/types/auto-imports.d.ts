@@ -323,7 +323,7 @@ declare global {
   export type { AssetPricing, FeeEstimate } from '../utils/fee-estimation'
   import('../utils/fee-estimation')
   // @ts-ignore
-  export type { FileTooLargeError, FileTooLargeError } from '../utils/files'
+  export type { FileTooLargeError } from '../utils/files'
   import('../utils/files')
   // @ts-ignore
   export type { AssemblyAbortedError, BackupFileType, BackupSelection, ProcessBackupResult, BackupSource, AssembledBackup } from '../utils/full-backup-helpers'
