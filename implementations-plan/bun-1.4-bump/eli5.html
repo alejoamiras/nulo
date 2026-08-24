@@ -1,0 +1,204 @@
+<title>Bun 1.4 Bump</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #faf6ef;
+    --ink: #292317;
+    --muted: #6f6656;
+    --line: #e2d9c8;
+    --card: #f3ecdf;
+    --accent: #9a6a00;
+    --accent-ink: #7c5500;
+    --warn-bg: #f6e3d3;
+    --warn-edge: #b4560a;
+    --warn-ink: #7a3a05;
+    --ok: #3f6f3a;
+    --approve-bg: #e8ecdc;
+    --approve-edge: #5c7a3f;
+    --code-bg: #2b251b;
+    --code-ink: #ede4d2;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #201c15;
+      --ink: #ece4d4;
+      --muted: #a89c86;
+      --line: #3c352a;
+      --card: #2a2419;
+      --accent: #e0a33e;
+      --accent-ink: #e8b45c;
+      --warn-bg: #38271a;
+      --warn-edge: #d97a2e;
+      --warn-ink: #f0c49a;
+      --ok: #8fbb7f;
+      --approve-bg: #27301d;
+      --approve-edge: #7f9e5c;
+      --code-bg: #17130d;
+      --code-ink: #e5dcc9;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #201c15;
+    --ink: #ece4d4;
+    --muted: #a89c86;
+    --line: #3c352a;
+    --card: #2a2419;
+    --accent: #e0a33e;
+    --accent-ink: #e8b45c;
+    --warn-bg: #38271a;
+    --warn-edge: #d97a2e;
+    --warn-ink: #f0c49a;
+    --ok: #8fbb7f;
+    --approve-bg: #27301d;
+    --approve-edge: #7f9e5c;
+    --code-bg: #17130d;
+    --code-ink: #e5dcc9;
+  }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+    line-height: 1.55;
+    margin: 0;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Sora", "Segoe UI", system-ui, sans-serif; line-height: 1.15; text-wrap: balance; }
+  h1 { font-size: 2.1rem; font-weight: 700; margin: 0 0 .4rem; }
+  h2 { font-size: 1.25rem; font-weight: 700; margin: 2.8rem 0 .9rem; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 0 0 .3rem; }
+  p { margin: .65rem 0; }
+  .kicker {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: .75rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--accent); margin-bottom: .8rem;
+  }
+  .lede { font-size: 1.06rem; color: var(--muted); max-width: 40rem; }
+  .warncard {
+    background: var(--warn-bg); border-left: 4px solid var(--warn-edge);
+    color: var(--warn-ink); padding: .9rem 1.1rem; border-radius: 0 8px 8px 0;
+    margin: 1.6rem 0;
+  }
+  .warncard strong { color: inherit; }
+  .phases { display: flex; flex-direction: column; gap: .8rem; margin-top: 1rem; }
+  .phase {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: .9rem 1.1rem;
+  }
+  .phase .num {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    color: var(--accent); font-size: .78rem; letter-spacing: .06em;
+  }
+  .gate { color: var(--muted); font-size: .9rem; margin: .35rem 0 0; }
+  .gate b { color: var(--ok); font-weight: 700; }
+  .decisions {
+    background: var(--approve-bg); border-left: 4px solid var(--approve-edge);
+    border-radius: 0 8px 8px 0; padding: 1rem 1.2rem; margin: 1.4rem 0;
+  }
+  .decisions ol { margin: .5rem 0 0; padding-left: 1.2rem; }
+  .decisions li { margin: .55rem 0; }
+  .decisions .rec { color: var(--accent-ink); font-weight: 700; }
+  ul { padding-left: 1.2rem; }
+  li { margin: .3rem 0; }
+  code {
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .86em;
+    background: var(--card); border: 1px solid var(--line);
+    padding: .05em .35em; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); color: var(--code-ink);
+    border-radius: 8px; padding: 1rem 1.1rem; overflow-x: auto;
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .8rem;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  }
+  pre code { background: none; border: none; padding: 0; }
+  .seedcard { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin: 1rem 0; }
+  .seedcard.rec { border-color: var(--accent); }
+  .seedcard .tag {
+    font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .72rem;
+    letter-spacing: .07em; text-transform: uppercase; color: var(--accent);
+  }
+  .warning-line { color: var(--warn-edge); font-weight: 700; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  .tablewrap { overflow-x: auto; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: "Sora", sans-serif; font-size: .8rem; }
+</style>
+<main>
+  <p class="kicker">plan approval · arc A of the Bun 1.4 goal · blueprint light</p>
+  <h1>Bun 1.4 Bump</h1>
+  <p class="lede">Move the repo's Bun toolchain from 1.3.14 to 1.4.0 and pick up the easy wins that come with it: one shared CI setup instead of a duplicated copy, a cleaner lockfile format, four duplicate packages collapsed, scripts that run their independent steps at the same time, and one less Node-only workaround in CI. Nothing about the wallet's runtime, the Aztec pins, or how tests execute changes in this arc.</p>
+
+  <h2>Why the "light" tier</h2>
+  <p>Every change is a small edit to an existing file, fully revertable, with no novel surface: 0 of the 6 risk dimensions (novelty, blast radius, irreversibility, migration cost, external coupling, security sensitivity) score HIGH. One codex audit ran at maximum effort; it conditionally approved and all five of its conditions are folded in below.</p>
+
+  <div class="warncard">
+    <strong>The one thing that can bite: everyone must move together.</strong> We proved by experiment that Bun 1.3.14 cannot install from the new lockfile this change produces. So the merge has a precondition: the machine-wide Bun (and every active worktree) upgrades to 1.4 first. Until then the PR waits, green but unmerged.
+  </div>
+
+  <h2>Phases</h2>
+  <div class="phases">
+    <div class="phase"><span class="num">PHASE 1</span>
+      <h3>One version, written in one place</h3>
+      <p>Bump the pinned version everywhere it lives, and delete the copy-pasted setup block one CI job kept for itself — it now reuses the shared one.</p>
+      <p class="gate"><b>Proves itself by:</b> workflow linter green, the CI-wiring guard test green, and a search showing no "1.3.14" left behind.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 2</span>
+      <h3>Lockfile format upgrade, nothing else</h3>
+      <p>Let Bun 1.4 rewrite its lockfile to the new format, in a commit that contains only that. We diff every package's name, version, and checksum before/after — if even one actually changed, the phase stops.</p>
+      <p class="gate"><b>Proves itself by:</b> an empty version/checksum diff, a second install changing nothing, and a strict frozen install passing.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 3</span>
+      <h3>Collapse the four duplicate packages — carefully</h3>
+      <p>The lockfile carries four packages at two versions each. Collapsing them can mean small <em>downgrades</em>, and one of the four can end up inside the shipped extension bundle — so each pair gets its release notes read, and we compare what the build actually bundles before and after. CI gets a warning-only check so duplicates never creep back silently.</p>
+      <p class="gate"><b>Proves itself by:</b> zero duplicates reported, the pair-by-pair review written down, unit tests and linters green.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 4</span>
+      <h3>Let independent steps run at once</h3>
+      <p>The pre-PR check runs typecheck, tests, and lint one after another though they don't depend on each other — now they run together, cutting the wait to the slowest one. The dual-browser dev mode drops its helper dependency for the built-in equivalent.</p>
+      <p class="gate"><b>Proves itself by:</b> the full pre-PR check passing end-to-end in its new parallel form, and both dev servers starting under the new command.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 5</span>
+      <h3>Retire a workaround, tighten CI's badge</h3>
+      <p>A config checker in CI had to run through Node because a native piece crashed under old Bun — we proved it works under 1.4 (warm and cold cache) and switch it over. The CI workflow also gets an explicit read-only permission badge. And we test, against a tiny fake package registry we control, whether Bun 1.4 fixed the known gap where its 7-day new-package safety delay skipped indirect dependencies — the docs then say whatever the experiment proves. If the experiment is inconclusive, the warning stays.</p>
+      <p class="gate"><b>Proves itself by:</b> the checker passing under Bun both warm and cold, workflow linter green, and the registry experiment's evidence written down for both Bun versions.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 6</span>
+      <h3>Write down the new routine</h3>
+      <p>The security docs gain the new review commands 1.4 provides (diff a package before trusting it, preview vulnerability fixes, list licenses, list who may run install scripts) and the "everyone on ≥1.4" requirement.</p>
+      <p class="gate"><b>Proves itself by:</b> the docs guard script green, then the whole battery re-run: pre-PR check, every package's test suite, the release-script tests, workflow linter — all green.</p>
+    </div>
+  </div>
+
+  <h2>What the independent audit said</h2>
+  <p>Codex (a different model family, maximum effort, fresh context) returned <strong>conditional approve</strong>. Its five conditions are all adopted — the two big ones were catches we then verified by experiment: the lockfile break for older Bun (now the merge precondition above), and the fact that one duplicate-collapse touches a package that ships inside the extension bundle (now Phase 3's build comparison). It also ruled the new CI duplicate check should warn, not block — adopted. One suggestion was deferred with a written reason: pinning GitHub Actions by commit hash is a repo-wide policy change, queued for its own pass rather than done inconsistently for one action.</p>
+
+  <div class="decisions">
+    <h2 style="margin-top:0">Approved — decisions recorded (owner, 2026-08-24)</h2>
+    <ol>
+      <li><strong>Merge timing (A1): merge when green.</strong> Owner: "a runtime release ≠ npm dependency." Pin stays exactly 1.4.0.</li>
+      <li><strong>Duplicate check (A2): warn-only.</strong> In plain terms: Bun can now flag when the lockfile holds two versions of the same package; the choice was whether CI should <em>fail</em> over that or just warn. It warns — auto-collapsing can quietly downgrade packages, so a human stays in that loop.</li>
+      <li><strong>Fleet upgrade (A3): delegated to the agent.</strong> The agent installs Bun 1.4.0 over the machine-wide binary right before merge; the PR stays unmerged until that's done.</li>
+      <li><strong>Config-checker dependencies (A4): accept and document.</strong> In plain terms: the CI step that validates our Renovate config downloads its checker fresh each run, so the checker's own sub-dependencies aren't pinned by our lockfile. That was already true before this change (via npx) and stays exactly as true after it (via bunx) — the swap changes the runner, not the exposure. Vendoring the checker (a huge dependency tree for one config check) wasn't worth it.</li>
+    </ol>
+  </div>
+
+  <h2>Implementation seeds <span class="muted">(finalized against the approved scope)</span></h2>
+  <p class="warning-line">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
+
+  <div class="seedcard rec">
+    <p class="tag">Recommended for this plan: /goal</p>
+    <p class="muted">Completion is fully transcript-observable (phases ✓ in plan.md, gates printed, PR visible), which is exactly what /goal checks. Survives resume.</p>
+    <pre><code>/goal All six phases marked ✓ in implementations-plan/bun-1.4-bump/plan.md (the phase headers in the file, not just chat), each ✓ backed by its phase's validation gate as written in plan.md reported passing in the transcript; for each phase `LESSONS_FILE=implementations-plan/bun-1.4-bump/lessons/phase-N.md` printed in the transcript; /code-review max --fix complete with fixes committed separately; the codex post-impl fix loop converged (a resumed codex pass quoted reporting no new material findings); a single PR to dev exists (gh pr view output in the transcript) whose body carries the fleet-cutover precondition, the dedupe downgrade pairs, and the >=1.4 local requirement; and the final battery — bun run audit:vue, bun run test:all, bun test scripts/release/ scripts/ci-cd/, bun run lint, bun run lint:actions — all report exit 0 in the transcript, run with the Bun 1.4.0 binary. Constraints: no @aztec/* changes; never weaken CI gates; merge itself stays owner-triggered.</code></pre>
+  </div>
+
+  <div class="seedcard">
+    <p class="tag">Alternative: /loop 15m</p>
+    <pre><code>/loop 15m Drive implementations-plan/bun-1.4-bump forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup. (2) Waiting on CI is fine if it's progressing; use the wait to review the diff or prep the next phase. (3) No task in hand? Start the next pending phase; after each meaningful edit run bun run lint + the touched tests with the 1.4.0 binary; commit conventional. (4) Stuck or facing a judgment call? /codex xhigh, decide together, log consult+verdict in lessons/phase-N.md; hard limits stay hard (no @aztec changes, no gate weakening, no merge). (5) Same step failed 5 times? Stop retrying, reassess with codex. (6) Phase gate green (as WRITTEN in plan.md)? Paste the result, mark ✓ in plan.md, write lessons/phase-N.md, print LESSONS_FILE=..., advance. (7) All six ✓? Run plan.md's Post-implementation section: /code-review max --fix → separate commit → codex post-impl audit with the no-over-engineering rule → resumed fix loop to convergence → gh pr create to dev with the mandated body → wrap-up report, then stop.</code></pre>
+  </div>
+
+  <p class="muted">Full technical plan: <code>implementations-plan/bun-1.4-bump/plan.md</code> in the worktree branch <code>worktree-bun-1.4-bump</code> · recon and the verbatim codex transcript sit beside it.</p>
+</main>
