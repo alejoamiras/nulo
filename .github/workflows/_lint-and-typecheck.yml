@@ -79,6 +79,29 @@ jobs:
       - name: Typecheck all packages
         run: bun run typecheck:all
 
+      # `bun dedupe --check` is advisory: it reds when the lockfile carries two
+      # versions of one package, but collapsing resolves to the RANGE
+      # INTERSECTION — which can silently DOWNGRADE transitives — and
+      # update→dedupe can oscillate. So a human reviews each collapse; this
+      # step only surfaces drift in the step summary. Deliberate future flip
+      # to blocking once a downgrade policy exists.
+      - name: bun dedupe check (advisory)
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          bun dedupe --check > /tmp/dedupe.txt 2>&1
+          code=$?
+          set -e
+          {
+            echo "## bun dedupe --check (advisory, exit=$code)"
+            echo ""
+            echo '```'
+            cat /tmp/dedupe.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
       # `bun audit` is advisory: surfaces npm advisories in the step summary
       # but does not block the PR. Bun 1.3.x exits 0 even when vulnerabilities
       # are present, so we don't gate on the exit code today; promotion to
