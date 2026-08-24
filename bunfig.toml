@@ -28,9 +28,11 @@ linker = "isolated"
 # implementations-plan/bun-1.4-bump/lessons/phase-5.md.
 #
 # CVE bypass: when an advisory drops for a package newer than the gate,
-# temporarily add it to `minimumReleaseAgeExcludes` below, install the
-# patched version, open a follow-up PR removing the exclude after the
-# window passes. See SECURITY.md "Dependency policy".
+# temporarily add a `minimumReleaseAgeExcludes = ["<name>"]` entry here,
+# install the patched version, open a follow-up PR removing it after the
+# window passes. See SECURITY.md "Dependency policy". No exemptions are
+# active today: the @aztec 5.0.1 / @alejoamiras set aged out ~2026-07-23
+# and was removed 2026-08-24 so the gate is REAL for lockfile regeneration.
 #
 # Bun bug #25305 (`bun update --latest` skipped this gate for transitive
 # deps on 1.3.x) is CLOSED on Bun 1.4.0 — verified 2026-08-24 with a
@@ -46,52 +48,3 @@ linker = "isolated"
 # CLI equivalent: --minimum-release-age=604800
 minimumReleaseAge = 604800
 
-# Excludes (the ONLY packages exempt from the 7-day gate). Name-based, so they cover the 5.0.1
-# client re-resolution too:
-# - The @aztec/* 5.0.1 client set (names incl. transitives, enumerated from the lockfile — the
-#   gate bites ANY fresh resolution, not just direct pins): 5.0.1 published 2026-07-15, ages out
-#   ~2026-07-22. TEMPORARY — remove in a follow-up PR after that date. Provenance is checked at
-#   bump time instead (npm audit signatures + attestations; see the aztec-update skill +
-#   implementations-plan/aztec-5.0.1-line/).
-# - @alejoamiras/aztec-accelerator: 5.0.1 published 2026-07-16, ages out ~2026-07-23. Same
-#   follow-up removes it. @alejoamiras/aztec-{standards,fee-payment} STAY 5.0.0 this phase
-#   (identity-coupled — they move to @aztec-foundation / 5.0.1 in P4, re-dated there).
-# The puppeteer closure (aged out 2026-05) and the rc.1 set were dropped once past the
-# window. On Bun 1.3.13+ a frozen-lockfile install of already-pinned versions doesn't trip
-# the gate; it only bites active re-resolution, so dropping aged-out excludes is safe.
-minimumReleaseAgeExcludes = [
-	"@alejoamiras/aztec-accelerator",
-	"@aztec-foundation/aztec-standards",
-	"@alejoamiras/aztec-standards",
-	"@alejoamiras/private-fee-juice",
-	"@aztec/accounts",
-	"@aztec/aztec.js",
-	"@aztec/bb-prover",
-	"@aztec/bb.js",
-	"@aztec/blob-lib",
-	"@aztec/builder",
-	"@aztec/constants",
-	"@aztec/entrypoints",
-	"@aztec/ethereum",
-	"@aztec/foundation",
-	"@aztec/key-store",
-	"@aztec/kv-store",
-	"@aztec/l1-artifacts",
-	"@aztec/native",
-	"@aztec/noir-acvm_js",
-	"@aztec/noir-contracts.js",
-	"@aztec/noir-noir_codegen",
-	"@aztec/noir-noirc_abi",
-	"@aztec/noir-protocol-circuits-types",
-	"@aztec/noir-types",
-	"@aztec/protocol-contracts",
-	"@aztec/pxe",
-	"@aztec/simulator",
-	"@aztec/sqlite3mc-wasm",
-	"@aztec/standard-contracts",
-	"@aztec/stdlib",
-	"@aztec/telemetry-client",
-	"@aztec/wallet-sdk",
-	"@aztec/wallets",
-	"@aztec/world-state",
-]
