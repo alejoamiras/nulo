@@ -111,14 +111,24 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	 * shape: `DappSession.chainId` is the source of truth; no
 	 * `permissions[].chains?: string[]` redundancy.
 	 */
-	public async tryGetDappSessionByOriginAndChain(origin: string, chainId: string): Promise<DappSession | undefined> {
+	public async tryGetDappSessionByOriginAndChain(
+		origin: string,
+		chainId: string,
+		forProfileId?: string,
+	): Promise<DappSession | undefined> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
+		// `forProfileId` ANCHORS the lookup to a caller-known identity: the
+		// dispatch path passes the session's establishment-stamped profile, so
+		// an in-flight message racing a profile switch resolves its OWN
+		// profile's row or nothing — never the newly active profile's. Callers
+		// without a stamped identity (discovery, establishment) omit it and get
+		// the live active profile, as before.
+		const profileId = forProfileId ?? (await this.profileService.getActiveProfile())?.id
+		if (!profileId) {
 			return undefined
 		}
 		const sessions = (await this.storage.getValues()).filter(
-			(x) => x.profileId === profile.id && x.dappMetadata.url === origin && x.chainId === chainId,
+			(x) => x.profileId === profileId && x.dappMetadata.url === origin && x.chainId === chainId,
 		)
 		for (const session of sessions) {
 			if (!(await this.isExpired(session))) {

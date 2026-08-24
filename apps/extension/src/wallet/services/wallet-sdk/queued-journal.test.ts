@@ -71,6 +71,7 @@ function makeDeps(overrides: Partial<TryCreateQueuedJournalDeps> = {}): {
 		dappSession: dappSession as never,
 		networkSvc: networkSvc as never,
 		account: account as never,
+		stampedProfileId: "profile-1",
 		logger,
 		...overrides,
 	}
@@ -113,8 +114,11 @@ function makeAccountStub(addresses: string[] = ["0xabc"]) {
 
 function makeNetworkStub() {
 	return {
+		// The anchored read: profileId-explicit, never the live active profile.
 		// biome-ignore lint/suspicious/noExplicitAny: test stub
-		getNetworks: vi.fn<() => Promise<any[]>>(async () => [{ id: "network-row-1", chainId: 1338 }]),
+		getNetworksRaw: vi.fn<(profileId: string, chainId?: number) => Promise<any[]>>(async () => [
+			{ id: "network-row-1", chainId: 1338 },
+		]),
 	}
 }
 
@@ -187,7 +191,7 @@ describe("tryCreateQueuedJournal", () => {
 
 	test("skips when networkService can't resolve a Network row for the session's chainId", async () => {
 		const { deps, networkSvc, journal } = makeDeps()
-		networkSvc.getNetworks.mockResolvedValueOnce([])
+		networkSvc.getNetworksRaw.mockResolvedValueOnce([])
 		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
 		expect(id).toBeUndefined()
 		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
@@ -357,5 +361,32 @@ describe("tryCreateQueuedJournal — record account", () => {
 
 		expect(id).toBeUndefined()
 		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("a switch racing journal creation is refused: active profile ≠ the session's stamp", async () => {
+		// The message rode a session stamped profile-1, but by the time the
+		// journal path runs, profile-2 is active — no record may be persisted
+		// under either profile (the dispatch guard rejects the message itself).
+		const { deps, profile, journal } = makeDeps()
+		profile.getActiveProfile.mockResolvedValue({ id: "profile-2" })
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("pre-persist belt: a switch landing during the anchored reads is caught at the persist lock", async () => {
+		// First read (entry check) sees the stamped profile; the re-read inside
+		// the creation lock sees the switch — the record must not persist.
+		const { deps, profile, journal } = makeDeps()
+		profile.getActiveProfile.mockResolvedValueOnce({ id: "profile-1" }).mockResolvedValue({ id: "profile-2" })
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeUndefined()
+		expect(await journal.countOperations({ stage: "queued" })).toBe(0)
+	})
+
+	test("the network read is anchored to the stamped profile, not the live one", async () => {
+		const { deps, networkSvc } = makeDeps()
+		await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(networkSvc.getNetworksRaw).toHaveBeenCalledWith("profile-1", expect.anything())
 	})
 })

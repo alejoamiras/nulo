@@ -106,7 +106,10 @@ export interface IDappSessionWriter {
 	 *  per-`(origin, chainId, profileId)` — a `chainId` is REQUIRED so a
 	 *  session remembered on testnet does not silently auto-approve on
 	 *  mainnet. Returns `undefined` when no matching session exists. */
-	tryGetDappSessionByOriginAndChain(origin: string, chainId: string): Promise<IDappSessionRef | undefined>
+	/** `forProfileId` anchors the lookup to a caller-known identity (the
+	 *  dispatcher passes the session's establishment-stamped profile); omitted,
+	 *  the implementation resolves the live active profile. */
+	tryGetDappSessionByOriginAndChain(origin: string, chainId: string, forProfileId?: string): Promise<IDappSessionRef | undefined>
 	getDappSession(id: string): Promise<IDappSessionRef>
 	updateDappSession(
 		id: string,

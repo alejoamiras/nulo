@@ -7,6 +7,7 @@ import type { Fr } from "@aztec/foundation/curves/bn254"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { ILogger } from "../../logger"
 import { LogLevel } from "../../logger"
+import { isPendingVerificationStale, type PendingVerificationEntry } from "./pending-verification"
 
 /** The Nulo chain id derived from a session/discovery's `chainInfo` (chainId ^ version). */
 export function chainInfoToChainId(obj: { chainInfo: { chainId: Fr | string; version: Fr | string } }): number {
@@ -23,11 +24,14 @@ export interface SessionEstablishedDeps {
 		tryGetDappSessionByOriginAndChain(
 			origin: string,
 			chainId: string,
-		): Promise<{ id: string; trustedVerification?: boolean } | undefined>
+		): Promise<{ id: string; profileId: string; trustedVerification?: boolean } | undefined>
 		setVerificationHash(sessionId: string, verificationHash: string): Promise<unknown>
 	}
 	terminateSession: (sessionId: string) => void
-	pendingVerification: Set<string>
+	pendingVerification: Map<string, PendingVerificationEntry>
+	/** Bind the established transport session to the profile that owns it —
+	 *  the dispatch guard and the switch-teardown listener consume this. */
+	stampSessionProfile: (sessionId: string, profileId: string) => void
 	logger: ILogger
 }
 
@@ -53,11 +57,27 @@ export async function handleSessionEstablished(
 	deps: SessionEstablishedDeps,
 ): Promise<boolean> {
 	const chainId = String(chainInfoToChainId(session))
-	// Establish the cleanup key BEFORE any fallible await so `finally` always clears
-	// it — including the missing-row early return that previously leaked (B-13).
-	const verifKey = `${session.origin}|${chainId}`
-	const isNewConnection = deps.pendingVerification.has(verifKey)
+	// The marker is keyed by the transport REQUEST id, which the upstream reuses
+	// verbatim as the sessionId — so this session can only ever see its OWN
+	// approval's marker (a concurrent same-tuple handshake or reconnect cannot
+	// consume it). Read BEFORE any fallible await so `finally` always clears it —
+	// including the missing-row early return that previously leaked (B-13).
+	const marker = deps.pendingVerification.get(session.sessionId)
+	const isNewConnection = marker !== undefined
 	try {
+		// A STALE marker is a DEAD approval: an approved handshake parked past
+		// the freshness window must terminate, never soften into reconnect
+		// semantics (that downgrade would let a parked A-era approval mint a
+		// channel under whichever profile is active by the time it completes).
+		if (marker && isPendingVerificationStale(marker)) {
+			deps.logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Warn,
+				`Session established for ${session.origin} chain ${chainId} on a stale approval — terminating`,
+			)
+			deps.terminateSession(session.sessionId)
+			return false
+		}
 		const dappSession = await deps.dappSessionService.tryGetDappSessionByOriginAndChain(session.origin, chainId)
 		if (!dappSession) {
 			// Revoked between approveDiscovery and key-exchange — terminate so the dApp
@@ -70,9 +90,24 @@ export async function handleSessionEstablished(
 			deps.terminateSession(session.sessionId)
 			return false
 		}
+		// The approving profile must be the validating one: a profile switch
+		// between Allow and key-exchange completion otherwise re-resolves the
+		// row under the NEW profile and would bind an old approval to it.
+		if (marker && dappSession.profileId !== marker.profileId) {
+			deps.logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Warn,
+				`Session established for ${session.origin} chain ${chainId} under profile ${dappSession.profileId} but approved under ${marker.profileId} — terminating`,
+			)
+			deps.terminateSession(session.sessionId)
+			return false
+		}
 		// Persist for the settings/reconnect view (informational). The verify window
 		// does NOT rely on this — it gets the per-session snapshot via its URL (B-06).
 		await deps.dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
+		// Bind the live channel to its owning profile — consumed by the dispatch
+		// guard and the profile-switch teardown.
+		deps.stampSessionProfile(session.sessionId, dappSession.profileId)
 
 		const needsVerification = isNewConnection || !dappSession.trustedVerification
 		if (needsVerification) {
@@ -98,6 +133,6 @@ export async function handleSessionEstablished(
 		deps.terminateSession(session.sessionId)
 		return false
 	} finally {
-		if (isNewConnection) deps.pendingVerification.delete(verifKey)
+		if (isNewConnection) deps.pendingVerification.delete(session.sessionId)
 	}
 }

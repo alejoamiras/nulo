@@ -392,7 +392,10 @@ export class WalletSdkDispatcher {
 		// Closes the TOCTOU window where 6 separate `tryGetDappSessionByOriginAndChain`
 		// calls previously gave different handlers different views of the same
 		// session (e.g. if the session was deleted mid-dispatch).
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		// Anchored to ctx.profileId (the session's establishment-stamped
+		// profile, guard-verified upstream): a profile switch landing mid-await
+		// must not let this lookup resolve the NEW profile's row.
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId), ctx.profileId)
 
 		// Resolve the method's descriptor up front. A method that reaches dispatch()
 		// without a registry row is unsupported (retired, or never-supported) —

@@ -85,11 +85,13 @@ Switch: profile B activates → listener terminates all sessions stamped ≠ B �
 
 ## Phases
 
-### Phase 1 — N-19 + N-26 (pure, low-risk slices first)
+### Phase 1 ✓ — N-19 + N-26 (pure, low-risk slices first)
+_Gate passed: to-json-safe extracted with 9 pins (both c6-2 assertions + ancestor/finally/toJSON-cycle cases); pending-verification module + tab-teardown deletion pins; marker Map migration across all 6 sites._
 Extract + fix `to-json-safe.ts` with the adopted c6-2 assertions + branch coverage; marker Map/TTL conversion across the 6 sites.
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test src/wallet/services/wallet-sdk/`. Pass: exit 0, new + existing wallet-sdk suites green. Layers: lint/typecheck + unit.
 
-### Phase 2 — N-04 (marker binding, stamp, anchored lookup, guard, listener)
+### Phase 2 ✓ — N-04 (marker binding, stamp, anchored lookup, guard, listener)
+_Gate passed: lint 0, vue-tsc clean, 135/135 across wallet-sdk (12 suites incl. the new profile-switch-teardown matrix + guard, establishment profile-binding describe with the r3 interleavings, queued-journal stamp/belt/anchor pins) + dapp-session. The guard was extracted as `enforceSessionProfileBinding` for convention-fit testability._
 Approver-bound marker + side-map + establishment stamping + the `forProfileId` dispatcher-lookup anchor (dapp-session service + wallet-bridge dispatcher — in-scope adjacent, both audits demanded it) + dispatch guard (respond-then-terminate) + `profile-switch-teardown.ts`. Controlled unit tests (codex R1's list): the listener matrix (stamped-B survives / stamped-A terminated / UNSTAMPED terminated / lock touches nothing); guard: mismatch or map-miss → envelope sent then session terminated, capability lookup never reached; **switch-after-guard** (anchored A-lookup under live B is **A-consistent or ABSENT** — MAC verification requires A active, `mac-storage.ts:85` — either way nothing of B is observable: the corrected r3 semantics, pinned via the service's new param); **switch-during-key-exchange** (marker approver A + validated row B → fail-closed terminate; marker A + row A → stamped A); **STALE marker at establishment → terminate + delete**; **the two r3 marker interleavings** (B-reconnect establishing first consumes ONLY its own request-keyed marker — A's marker survives and A's establishment still fail-closes on mismatch; two interactive approvals don't overwrite each other); establishment after the listener ran lands correctly per its marker; **switch-during-journal-creation** and **switch-gated-at-network-resolution** (§4b); **immediate post-tab-close reconnect** (tabId-keyed deletion; reconnect NOT treated as new).
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test src/wallet/services/wallet-sdk/ src/wallet/services/dapp-session/`. Pass: exit 0. Layers: lint/typecheck + unit.
 

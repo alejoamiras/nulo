@@ -32,6 +32,9 @@ import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wal
 import { attachContentListener } from "./content-message-relay"
 import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
 import { toWalletResponseError } from "./error-envelope"
+import { toJsonSafe } from "./to-json-safe"
+import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
+import { enforceSessionProfileBinding, wireProfileSwitchTeardown } from "./profile-switch-teardown"
 
 import type { ServiceCollection } from "@/wallet/base"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -109,7 +112,16 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	 * the dApp holds concurrent sessions on different chains for the same
 	 * origin.
 	 */
-	const pendingVerification = new Set<string>()
+	const pendingVerification = new Map<string, PendingVerificationEntry>()
+
+	/**
+	 * Live-channel identity binding: sessionId → owning profileId, stamped at
+	 * establishment from the validated DappSession row (approver-checked via
+	 * the pending-verification marker). Consumed by the dispatch guard and the
+	 * profile-switch teardown; same lifetime as the upstream activeSessions
+	 * (both die with the SW), cleaned in onSessionTerminated.
+	 */
+	const sessionProfiles = new Map<string, string>()
 
 	/**
 	 * Guard against concurrent discoveries for the same `(origin, chainId)`
@@ -234,6 +246,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					dappSessionService,
 					terminateSession: (sessionId) => handler.terminateSession(sessionId),
 					pendingVerification,
+					stampSessionProfile: (sessionId, profileId) => sessionProfiles.set(sessionId, profileId),
 					logger,
 				})
 				establishmentStatus.set(session.sessionId, validated)
@@ -241,6 +254,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 			},
 
 			onSessionTerminated: (sessionId) => {
+				sessionProfiles.delete(sessionId)
 				sessionQueues.delete(sessionId)
 				decryptLocks.delete(sessionId)
 				establishmentStatus.delete(sessionId)
@@ -282,18 +296,28 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				// bypass the queued-record creation path.
 				const queuedJournalIdPromise: Promise<string | undefined> =
 					message.type === "sendTx"
-						? establishedPromise.then((ok) =>
-								ok
+						? establishedPromise.then((ok) => {
+								// The stamp guard runs BEFORE the durable journal write:
+								// this path independently resolves profile/session/account/
+								// network, so without the anchor an A-era message racing a
+								// switch could persist a B-profile operation. Establishment
+								// stamps before its validation promise resolves, so a
+								// missing stamp here means a superseded/foreign session —
+								// skip the record (the handler's own guard rejects the
+								// message itself).
+								const stampedProfileId = sessionProfiles.get(session.sessionId)
+								return ok && stampedProfileId !== undefined
 									? tryCreateQueuedJournal(message, session, {
 											journal: operationJournal,
 											profile: profileService,
 											dappSession: dappSessionService,
 											networkSvc: networkService,
 											account: accountService,
+											stampedProfileId,
 											logger,
 										})
-									: undefined,
-							)
+									: undefined
+							})
 						: Promise.resolve(undefined)
 
 				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
@@ -309,17 +333,27 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							)
 							return
 						}
-						return handleWalletMessage(session, message, handler, dispatcher, profileService, operationJournal, logger, {
-							// Bind the baton release into the `onExecutionEnqueued`
-							// slot — fired downstream by ExecutionService the instant
-							// the approved request enqueues on the execution mutex
-							// (which preserves execution order). The field name is
-							// shared across DispatchHooks → ExecutionHooks so the wiring
-							// is type-checked end-to-end (a past field-name drift here
-							// is exactly what left this release dead before).
-							onExecutionEnqueued: releaseFifo,
-							queuedJournalId,
-						})
+						return handleWalletMessage(
+							session,
+							message,
+							handler,
+							dispatcher,
+							profileService,
+							operationJournal,
+							sessionProfiles,
+							logger,
+							{
+								// Bind the baton release into the `onExecutionEnqueued`
+								// slot — fired downstream by ExecutionService the instant
+								// the approved request enqueues on the execution mutex
+								// (which preserves execution order). The field name is
+								// shared across DispatchHooks → ExecutionHooks so the wiring
+								// is type-checked end-to-end (a past field-name drift here
+								// is exactly what left this release dead before).
+								onExecutionEnqueued: releaseFifo,
+								queuedJournalId,
+							},
+						)
 					}),
 				)
 				// Safety-net release for handlers that don't call releaseFifo
@@ -388,6 +422,17 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 		}
 	})
 
+	// Profile-bound channel teardown: a switch disconnects every live session
+	// stamped to another profile (and unstamped debris) BEFORE the discovery
+	// drain below can serve the new profile.
+	wireProfileSwitchTeardown({
+		onActiveProfileChanged: profileService.onActiveProfileChanged,
+		getActiveSessions: () => handler.getActiveSessions(),
+		sessionProfiles,
+		terminateSession: (sessionId) => handler.terminateSession(sessionId),
+		logger,
+	})
+
 	/** On unlock, drain any queued discovery requests */
 	profileService.onActiveProfileChanged.add((profile) => {
 		if (profile) {
@@ -426,6 +471,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	// lives in `tab-lifecycle.ts` (Q-04 pilot); it MUST stay registered before
 	// `handler.initialize()`. Handler methods are arrow-wrapped to keep `this`.
 	wireTabLifecycle({
+		onTabTeardown: (tabId) => deletePendingVerificationForTab(pendingVerification, tabId),
 		terminateForTab: (tabId) => handler.terminateForTab(tabId),
 		terminateSession: (sessionId) => handler.terminateSession(sessionId),
 		getActiveSessions: () => handler.getActiveSessions(),
@@ -461,7 +507,7 @@ async function handleDiscovery(
 	profileService: ProfileService,
 	dappInteractionService: DappInteractionService,
 	dappSessionService: DappSessionService,
-	pendingVerification: Set<string>,
+	pendingVerification: Map<string, PendingVerificationEntry>,
 	pendingDiscoveryPromises: Map<string, Promise<void>>,
 	discoveryQueue: DiscoveryQueue,
 	logger: ILogger,
@@ -624,7 +670,7 @@ async function handleDiscovery(
 			const approved = await approveOrRollbackDiscoverySession({
 				discovery,
 				sessionId: newSession.id,
-				dedupeKey,
+				approverProfileId: newSession.profileId,
 				approveDiscovery: (id) => handler.approveDiscovery(id),
 				rejectDiscovery: (id) => handler.rejectDiscovery(id),
 				deleteSession: (id) => dappSessionService.deleteDappSession(id),
@@ -669,6 +715,7 @@ async function handleWalletMessage(
 	dispatcher: WalletSdkDispatcher,
 	profileService: ProfileService,
 	operationJournal: OperationJournalService,
+	sessionProfiles: Map<string, string>,
 	logger: ILogger,
 	hooks?: DispatchHooks,
 ): Promise<void> {
@@ -679,6 +726,27 @@ async function handleWalletMessage(
 
 	try {
 		const profile = await requireActiveProfile(profileService, "Wallet is locked")
+
+		// Identity guard: the channel serves ONLY the profile that established
+		// it (map-miss = fail closed). The dApp gets the error envelope, then
+		// the standard disconnect. `ctx.profileId` below is therefore always
+		// the session's OWN profile, and the dispatcher's session lookup
+		// anchors on it — an in-flight message that outlives a later switch
+		// stays A-consistent or fails closed; it can never observe the new
+		// profile.
+		const mayProceed = await enforceSessionProfileBinding({
+			sessionId: session.sessionId,
+			origin: session.origin,
+			activeProfileId: profile.id,
+			sessionProfiles,
+			respond: () => {
+				response.error = toWalletResponseError(new Error("Session no longer valid — reconnect"))
+				return handler.sendResponse(session.sessionId, response)
+			},
+			terminateSession: (sessionId) => handler.terminateSession(sessionId),
+			logger,
+		})
+		if (!mayProceed) return
 
 		const ctx: SessionContext = {
 			chainId: chainInfoToChainId(session),
@@ -749,48 +817,3 @@ async function handleWalletMessage(
 		)
 	}
 }
-
-/**
- * Recursively convert a value to a JSON-safe structure.
- *
- * JSON.stringify cannot handle BigInt (throws) and silently drops undefined.
- * PXE results are full of BigInt (Fr fields, addresses, etc). This function
- * converts BigInt → string and recurses through arrays/objects so the
- * wallet-sdk's plain JSON.stringify call succeeds.
- */
-function toJsonSafe(value: unknown, seen = new WeakSet()): unknown {
-	if (value === null || value === undefined) return value
-	if (typeof value === "bigint") return value.toString()
-	if (typeof value !== "object") return value
-
-	if (seen.has(value as object)) return "[Circular]"
-	seen.add(value as object)
-
-	if (Array.isArray(value)) return value.map((v) => toJsonSafe(v, seen))
-	if (value instanceof Map) {
-		return Array.from(value.entries(), ([k, v]) => [toJsonSafe(k, seen), toJsonSafe(v, seen)])
-	}
-	if (value instanceof Set) {
-		return Array.from(value, (v) => toJsonSafe(v, seen))
-	}
-	// Objects with a toJSON method (Fr, AztecAddress, etc.) — let JSON.stringify
-	// call it naturally, but still recurse in case the result contains BigInts.
-	const obj = value as Record<string, unknown>
-	if (typeof obj.toJSON === "function") {
-		return toJsonSafe(obj.toJSON(), seen)
-	}
-	const out: Record<string, unknown> = {}
-	for (const key of Object.keys(obj)) {
-		out[key] = toJsonSafe(obj[key], seen)
-	}
-	return out
-}
-
-/**
- * Extract numeric chain ID from ChainInfo or ActiveSession/PendingDiscovery.
- *
- * ChainInfo arrives as serialized JSON (hex strings) after passing through
- * postMessage + JSON.parse, not as Fr instances. We parse the hex strings
- * to numbers and XOR chainId with rollup version, matching the convention
- * used by NetworkService (chainId = l1ChainId ^ rollupVersion).
- */
