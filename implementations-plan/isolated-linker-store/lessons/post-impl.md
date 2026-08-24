@@ -31,3 +31,7 @@ The faucet alias (14f99733) builds locally; a from-scratch clean-room checkout (
 - `puppeteer-core` type-only phantom in `profile-reimport-matrix.test.ts` → `import type { Page } from "puppeteer"`. ADOPTED (vue-tsc clean).
 - Sweep hardening: multiline imports, `require.resolve`, `vi.mock`/`jest.mock`/`mock.module`, `.cjs`. ADOPTED; re-run finds zero real phantoms. Codex's own AST cross-check found none beyond these either.
 - `hoist = false`: RULED to stay a follow-up — pulling it in now would change resolution semantics again, invalidate the completed compatibility evidence, and start from an incomplete detector; land + soak isolated first, then a flip-first gate of its own. ADOPTED (decisions.md #12 stands).
+
+## Codex post-impl round 4 — **APPROVE, no new material findings. LOOP CONVERGED** (4 rounds: r1 conditional → r2 conditional → r3 conditional (CI-found phantoms folded in) → r4 approve).
+
+Verbatim: "The faucet alias resolves to the app's declared polyfill copy, its @nulo/resolve-asset edge is installed, the Puppeteer type import now uses the declared package, and the hardened sweep reports only the documented false positives. The source-only limitation is accurately documented, with clean-room CI retained as the authoritative check."
