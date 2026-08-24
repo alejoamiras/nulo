@@ -52,7 +52,9 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 		// exact double-fire vector that used to start a second assembly and ship
 		// a checksum-corrupt file. The round-trip below passing IS the pin.
 		await page.evaluate(() => {
-			document.querySelector<HTMLButtonElement>('[data-testid="unlock-submit-btn"]')?.click()
+			const btn = document.querySelector<HTMLButtonElement>('[data-testid="unlock-submit-btn"]')
+			if (!btn || btn.disabled) throw new Error("unlock-submit-btn missing or disabled — the poke would silently degrade")
+			btn.click()
 			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
 		})

@@ -53,7 +53,7 @@ vi.mock("@/wallet/services/network/client", () => ({
 }))
 vi.mock("@/wallet/services/account/client", () => ({
 	ACCOUNT_SERVICE_NAME: "account",
-	IMPORTED_KEYS_SERVICE_NAME: "imported-keys",
+	IMPORTED_KEYS_SERVICE_NAME: "imported-account-keys",
 	AccountServiceClient: vi.fn(function () {
 		return accountClient
 	}),
@@ -227,9 +227,10 @@ describe("export/full.vue — re-entry latch", () => {
 		await reachUnlockAndSubmit(wrapper)
 
 		// Latch is closed while the KDF pends: the CTA has already unrendered
-		// (status flipped synchronously) and double Enter is a no-op.
+		// (status flipped synchronously — THAT is the click-side guard) and
+		// double Enter is a no-op.
 		const again = wrapper.find("[data-testid='unlock-submit-btn']")
-		if (again.exists()) await again.trigger("click")
+		expect(again.exists()).toBe(false)
 		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
 		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }))
 		await flushPromises()
@@ -347,5 +348,8 @@ describe("export/full.vue — sealed artifact", () => {
 		expect(await EncryptionKey.getHashHex(JSON.stringify(body))).toBe(checksum)
 		expect(parsed["master-key"]).toBe("mk")
 		expect((parsed.data as Record<string, unknown>).profile).toEqual([{ id: "p1", type: "password" }])
+		// The imported-keys slice key must be the registry's real literal — an
+		// unknown key rejects the whole import.
+		expect(Object.keys(parsed.data as Record<string, unknown>)).toContain("imported-account-keys")
 	})
 })

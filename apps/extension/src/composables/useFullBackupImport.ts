@@ -402,7 +402,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		if (restoreStatus.value === "progress") return
 		try {
 			const file = await opts.pickFile()
-			if (!file) return
+			// A pick that yields no file (the capped wrapper's too-large path)
+			// must also drop any PREVIOUS selection — otherwise the old file's
+			// name and enabled import CTA sit under the new error banner, and
+			// the user can "import" a file the UI just said failed.
+			if (!file) {
+				selectedBackup.value = null
+				return
+			}
 			const { selection, parseError } = await readBackupFile(file)
 			selectedBackup.value = selection
 			if (parseError) {

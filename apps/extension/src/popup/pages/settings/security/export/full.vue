@@ -250,8 +250,10 @@ async function handleBackup() {
 
 		// Export-side half of the shared size invariant: never ship a file the
 		// import gate would reject — fail loud here instead of silently at
-		// restore time.
-		if (result.pretty.length > MAX_BACKUP_FILE_BYTES) {
+		// restore time. Measured in UTF-8 BYTES to match the import side's
+		// `file.size` (string .length counts UTF-16 code units and undercounts
+		// multi-byte content like emoji in profile/contact names).
+		if (new TextEncoder().encode(result.pretty).length > MAX_BACKUP_FILE_BYTES) {
 			backupStatus.value = ""
 			if (isPasskeyProfile.value) isAgreed.value = false
 			openToast({ label: "Backup is too large to create", icon: "warning" }, TOAST_DURATION.LONG)
@@ -282,8 +284,11 @@ async function handleBackup() {
 async function handleEncrypt() {
 	// Same latch + fence discipline as creation: `isBusy` blocks a double
 	// start before Vue re-renders the disabled CTA; the fence suppresses any
-	// stale success/error write after unmount scrubbed the payloads.
-	if (isBusy.value) return
+	// stale success/error write after unmount scrubbed the payloads. The
+	// cross-guard on `isDownloading` (account.vue idiom) stops encryption
+	// starting mid-download — the plaintext file would land on disk while the
+	// page ends up saying "successfully encrypted".
+	if (isBusy.value || isDownloading.value) return
 	if (isPasskeyProfile.value) {
 		showRecommendation.value = false
 		if (!password.value) return
@@ -306,6 +311,7 @@ async function handleEncrypt() {
 		if (gen !== generation) return
 		// Encrypted-side half of the shared size invariant (base64 + AES-GCM
 		// overhead could in principle cross the line a plain file sits under).
+		// Base64 is pure ASCII, so string length IS the byte count here.
 		if (sealed.length > MAX_BACKUP_FILE_BYTES) {
 			backupStatus.value = "finished"
 			openToast({ label: "Backup is too large to create", icon: "warning" }, TOAST_DURATION.LONG)
@@ -324,7 +330,7 @@ async function handleEncrypt() {
 }
 
 async function handleDownloadBackup() {
-	if (isDownloading.value) return
+	if (isDownloading.value || isBusy.value) return
 	isDownloading.value = true
 	const gen = generation
 	const isEncrypted = backupStatus.value === "encrypted"

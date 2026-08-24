@@ -64,6 +64,10 @@ const handlePickFile = async () => {
 		error.value = ""
 	} catch (err) {
 		if (err instanceof FileTooLargeError && gen === generation) {
+			// Drop any previously-picked file too — a stale body under the new
+			// error would let Enter preview the old file and clear the error.
+			fileBody.value = ""
+			fileName.value = ""
 			error.value = "Account file is too large."
 			return
 		}
