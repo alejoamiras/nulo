@@ -89,6 +89,15 @@ watch(
 		applyQueryPreselect()
 	},
 )
+// A deep-link can land while the activation bootstrap is still refilling the store (a fresh
+// unlock re-runs it): at setup the account list is momentarily empty, so the one-shot preselect
+// above finds nothing and the page strands on the picker. Re-apply when the rows arrive — only
+// while nothing is selected, so a manual pick is never overridden.
+watch(accounts, () => {
+	if (route.path !== "/popup/settings/security/export/account") return
+	if (selectedAddress.value) return
+	applyQueryPreselect()
+})
 
 const selectedAccount = computed(() => accounts.value.find((a) => a.address === selectedAddress.value))
 

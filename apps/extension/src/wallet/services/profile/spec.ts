@@ -78,12 +78,15 @@ export type Profile = ProfileInfo & {
 				/** Sealed 32-byte BIP-39 entropy (AAD-bound, PasswordSecretBox v2) — the recovery
 				 *  phrase re-displays from THIS; the master derives one-way from the words. */
 				entropy: string
-				/** HMAC over the WHOLE sealed envelope (guard‖secret‖entropy‖dekSealed), keyed by
-				 *  HKDF(master‖dek) — v2. NOT master-only: the same-phrase attacker HOLDS the
-				 *  master, so a master-keyed tag is forgeable by them; forging v2 requires the
-				 *  victim's DEK. Verified at password unlock AND bearer restore; a mismatch opens
-				 *  DERIVED-ONLY (imported accounts quarantine, no bearer) — never a profile block
-				 *  (A4: imported material must not block derived funds). */
+				/** HMAC over (this row's OWN storage id, the four sealed slots, the plaintext
+				 *  wallet fingerprint), keyed by HKDF(master‖dek) — v3. NOT master-only: the
+				 *  same-phrase attacker HOLDS the master, so a master-keyed tag is forgeable by
+				 *  them; forging v3 additionally requires the victim's DEK. The id binding kills
+				 *  whole-envelope swaps between same-password profiles; the fingerprint binding
+				 *  makes blinding the duplicate guard a detectable tamper. Verified at password
+				 *  unlock AND bearer restore; a mismatch opens DERIVED-ONLY (imported accounts
+				 *  quarantine, no bearer) — never a profile block (A4: imported material must
+				 *  not block derived funds). */
 				envelopeMac: string
 		  }
 		| {

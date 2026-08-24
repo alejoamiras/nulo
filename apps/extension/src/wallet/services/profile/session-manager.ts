@@ -61,7 +61,7 @@ import {
 	type MasterSecretBytes,
 	type Passhash,
 	SessionSecretBox,
-	verifyEnvelopeMacV2,
+	verifyEnvelopeMacV3,
 	zeroize,
 } from "@nulo/wallet-crypto"
 import type { ActiveSession, Profile, ProfileInfo, Session } from "./spec"
@@ -498,17 +498,28 @@ export class SessionManager {
 				await this.silentClose()
 				return
 			}
-			// Envelope-MAC v2 check: this passwordless path can never decrypt the sealed fields to
+			// Envelope-MAC v3 check: this passwordless path can never decrypt the sealed fields to
 			// run the words↔master pairing check, so it verifies the HKDF(master‖dek)-keyed MAC
-			// over the WHOLE 4-slot envelope instead — catching tampered slots AND cross-profile
-			// transplants, and (unlike a master-keyed tag) unforgeable by the same-phrase attacker
-			// who holds the master but not this profile's DEK. Bearer restore requires BOTH a valid
-			// DEK and a valid MAC (rule 3) — any mismatch blocks silent restore; the forced
-			// password unlock runs the full pairing check + the degradation state machine.
-			const envelopeIntact = await verifyEnvelopeMacV2(
+			// over the WHOLE envelope — row id first (a whole-envelope swap between same-password
+			// profiles fails even though every swapped byte, tag included, is authentic), then
+			// the four sealed slots, then the plaintext fingerprint — catching tampered slots,
+			// cross-profile transplants, AND identity swaps, unforgeable by the same-phrase
+			// attacker who holds the master but not this profile's DEK. Bearer restore requires
+			// BOTH a valid DEK and a valid MAC (rule 3) — any mismatch blocks silent restore;
+			// the forced password unlock runs the full pairing check + the degradation machine.
+			const envelopeIntact = await verifyEnvelopeMacV3(
+				// The REQUESTED id from the session record, not the row's self-claimed one —
+				// mirrors the unlock-path belt-and-suspenders on top of EntityStorage's guard.
+				session.profile,
 				pair.master,
 				pair.dek,
-				{ guard: profile.guard, secret: profile.secret, entropy: profile.entropy, dek: profile.dekSealed },
+				{
+					guard: profile.guard,
+					secret: profile.secret,
+					entropy: profile.entropy,
+					dek: profile.dekSealed,
+					walletFingerprint: profile.walletFingerprint,
+				},
 				profile.envelopeMac,
 			)
 			if (!envelopeIntact) {

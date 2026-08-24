@@ -242,6 +242,68 @@ describe("EntityStorage", () => {
 		})
 	})
 
+	/** The id/key consistency guard (opt-in) — the embedded-id transplant bypass closure. */
+	describe("requireKeyIdentityMatch (opt-in)", () => {
+		interface Identified {
+			id?: string | number
+			name: string
+		}
+		test('strict mode ("string"): mismatched, missing, or non-string ids read as undefined', async () => {
+			const guarded = new EntityStorage<Identified>("profiles", api.storage.local, undefined, {
+				requireKeyIdentityMatch: true,
+			})
+			await api.storage.local.set({
+				"profiles@A": JSON.stringify({ id: "B", name: "Bob" }),
+				"profiles@C": JSON.stringify({ id: "C", name: "Carol" }),
+				"profiles@D": JSON.stringify({ name: "NoId" }),
+				"profiles@E": JSON.stringify({ id: 5, name: "NumericIdUnderStringRoot" }),
+				"profiles@6": JSON.stringify({ id: 6, name: "NumericIdMatchingButNonString" }),
+			})
+			expect(await guarded.get("A")).toBeUndefined()
+			expect(await guarded.get("D")).toBeUndefined()
+			expect(await guarded.get("E")).toBeUndefined()
+			expect(await guarded.get("6")).toBeUndefined()
+			expect(await guarded.get("C")).toEqual({ id: "C", name: "Carol" })
+			const all = Object.fromEntries(await guarded.getAll())
+			expect(Object.keys(all)).toEqual(["C"])
+			// The row is hidden, never deleted — repair paths can still see it.
+			expect(await api.storage.local.get("profiles@A")).toHaveProperty("profiles@A")
+		})
+
+		test("numeric mode: positive safe integer whose canonical decimal form equals the suffix", async () => {
+			const guarded = new EntityStorage<Identified>("journal", api.storage.local, undefined, {
+				requireKeyIdentityMatch: true,
+				keyIdentityMode: "numeric",
+			})
+			await api.storage.local.set({
+				"journal@1": JSON.stringify({ id: 1, name: "one" }),
+				"journal@9": JSON.stringify({ id: 5, name: "aliased" }),
+				"journal@3": JSON.stringify({ name: "no-id" }),
+				"journal@4": JSON.stringify({ id: -4, name: "negative" }),
+				"journal@5.5": JSON.stringify({ id: 5.5, name: "fractional" }),
+				// String(1e21) === "1e+21", so a naive String()-comparison guard would ACCEPT
+				// this alias — only the safe-integer check rejects it. Pins that check.
+				"journal@1e+21": JSON.stringify({ id: 1e21, name: "unsafe-exponential" }),
+				"journal@0": JSON.stringify({ id: 0, name: "zero-never-minted" }),
+				"journal@2x": JSON.stringify({ id: "2", name: "string-id-under-numeric-mode" }),
+			})
+			expect(await guarded.get("1")).toEqual({ id: 1, name: "one" })
+			expect(await guarded.get("9")).toBeUndefined()
+			expect(await guarded.get("3")).toBeUndefined()
+			expect(await guarded.get("4")).toBeUndefined()
+			expect(await guarded.get("5.5")).toBeUndefined()
+			expect(await guarded.get("1e+21")).toBeUndefined()
+			expect(await guarded.get("0")).toBeUndefined()
+			expect(await guarded.get("2x")).toBeUndefined()
+		})
+
+		test("without the flag, mismatched embedded ids keep reading (other roots rely on this)", async () => {
+			const unguarded = new EntityStorage<Identified>("contexts", api.storage.local)
+			await api.storage.local.set({ "contexts@full": JSON.stringify({ id: "s1", name: "x" }) })
+			expect(await unguarded.get("full")).toEqual({ id: "s1", name: "x" })
+		})
+	})
+
 	/** The compare-and-delete surface for the F-B23 purge second pass. */
 	describe("raw string accessors", () => {
 		test("rawStringEntries returns the EXACT stored strings, including syntax-broken and validation-failed rows", async () => {
