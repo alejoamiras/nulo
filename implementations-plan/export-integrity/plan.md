@@ -113,7 +113,8 @@ _Gate passed: lint exit 0, vue-tsc clean, 47/47 tests green (files.test.ts + nod
 Implement §N-13. Tests: `files.test.ts` (or `files.caps.test.ts` with node-env pragma) — compressed-input pre-cap rejects; chunk cap rejects a real gzip bomb (tiny input inflating past a small test cap) with `FileTooLargeError` REJECTED not swallowed; uncapped path byte-identical behavior; `full-backup-helpers.test.ts` — oversized `file.size` → `"Backup File Too Large"` parseError, at-limit passes.
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test apps/extension/src/utils/files.test.ts apps/extension/src/utils/full-backup-helpers.test.ts`. Pass: exit 0. Layers: lint/typecheck + unit.
 
-### Phase 3 — integration proof
+### Phase 3 ✓ — integration proof
+_Gate passed: audit:vue exit 0 (371 files / 4612 unit tests, lint, build) + test:e2e exit 0 under the CI arming recipe (31 files passed / 1 by-design skip, 112 tests) — includes the extended roundtrip with the atomic double-Enter poke and the recalibrated 64 MiB cap._
 Extend `backup-roundtrip.test.ts`: the create-click AND two synthetic Enter keydowns execute inside ONE `page.evaluate` task (codex final-pass — separate driver commands are not atomic; in one JS task the click handler's synchronous `"progress"` flip has run before the Enters dispatch, so both land in the keydown no-op arm deterministically). Then the existing flow proceeds unchanged; the import round-trip passing is the UI-level checksum-integrity pin; one-download capture kept as a secondary. Single-execution proof is owned by the component call-count test. Then the full battery.
 **Validation gate** — commands: `bun run audit:vue && bun run test:e2e`. Pass: both exit 0. Layers: all except network e2e (not warranted — no dApp/PXE surface).
 
