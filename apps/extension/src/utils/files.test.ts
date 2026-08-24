@@ -36,8 +36,12 @@ describe("pickFile byte cap", () => {
 	describe.skipIf(typeof CompressionStream === "undefined")("compressed path", () => {
 		test("a gzip bomb rejects with FileTooLargeError instead of falling back", async () => {
 			const gz = await compressData("0".repeat(2 * 1024 * 1024), "gzip")
+			// Construct from RAW BYTES, not the Blob: nesting a Node-realm Blob
+			// (CompressionStream's output) inside a jsdom File breaks that File's
+			// arrayBuffer() on CI's runtime — the decompress then fell into the
+			// warn-and-fallback and the test failed there, not here.
+			const file = new File([await gz.arrayBuffer()], "bomb.json.gz")
 			// Compressed size sails under the cap; only inflation crosses it.
-			const file = new File([gz], "bomb.json.gz")
 			expect(file.size).toBeLessThan(64 * 1024)
 			await expect(pickWith(file, 256 * 1024)).rejects.toBeInstanceOf(FileTooLargeError)
 		})
