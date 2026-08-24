@@ -41,3 +41,9 @@ _(recorded after the codex convergence gate)_
 
 ## Network shard (solo) — DONE
 `bun run e2e:agent --shard=1/5`, host quiet (only a foreign 13-day-old anvil on :8545, avoided by the run's own port pack: anvil :17896 / aztec :30408 / playground :16323). Own sandbox booted; **14 files pass, 19 tests pass, 1 skipped, 0 failed, exit 0 on the FIRST run** — no re-run needed. Real proving + live-network fixtures exercised the isolated layout end to end.
+
+## Decision — KEEP (codex convergence gate, fresh session `codex-Nj7HqUuX`, 2026-08-24)
+
+Verbatim ruling: "RULING: keep." Steelman for abort acknowledged (the committed-speed thesis failed; B1 preserves the correctness fixes on hoisted; the regen is separable). Why keep won: a SHIPPED production asset already depended on hoisting luck — phantom enforcement addresses a demonstrated failure mode; the compatibility tax was exercised across builds, dev server, vitest pools, storybook, forge, packaged outputs and a live network shard; `globalStore` proved togglable and stays out of committed config (no CI/release exposure); Bun ≤1.3 incompatibility is immaterial to the 1.4 fleet; the wallet-grade regeneration adds independent value.
+- `globalStore` recommendation: narrowly, for trusted single-user worktree-heavy dev machines via `~/.bunfig.toml`; never CI, shared hosts, or release-producing environments.
+- No technical blocker. Mechanical items: this record; the commit count in the gate prompt was overstated (24 at ruling time, not 26 — corrected here).
