@@ -308,23 +308,50 @@ Defends against the npm-token-compromise attack pattern (axios 2026-03,
 chalk/debug 2025-09) — those poisoned versions were detected and pulled
 within hours.
 
-Originally specified as 14 days, but Bun 1.3.x applies the gate during
-`bun install --frozen-lockfile` (and during resolution), which blocks
-installs of currently-pinned lockfile entries that happen to be within
-the window. 7 days is the widest setting that passes against the current
-lockfile while still catching the publish-and-pull-within-hours pattern.
-Re-evaluate (push toward 14d) once Bun's gate semantics for frozen
-installs are confirmed/tweaked upstream.
+Originally specified as 14 days, narrowed to 7 because Bun 1.3.x
+erroneously applied the gate during `bun install --frozen-lockfile`,
+blocking installs of currently-pinned lockfile entries inside the
+window. **Retested on Bun 1.4.0 (2026-08-24): that bug is fixed** — a
+14-day gate passes frozen installs cleanly against this lockfile
+(evidence: `implementations-plan/bun-1.4-bump/lessons/phase-5.md`).
+Widening back to 14d is now viable; it is a deliberate policy change to
+make on its own PR, not a side effect of a toolchain bump.
 
 **`bun audit`** runs as an advisory step in `_lint-and-typecheck.yml`. It
 surfaces npm advisories in the GitHub Action step summary but does not
-block PRs (today). Bun 1.3.x exits 0 regardless of `--audit-level`, so
-exit-code gating isn't useful yet; promotion to required is a follow-up
-once we parse the JSON output and tune to actual signal.
+block PRs (today). Bun 1.4 exits 1 on findings (1.3.x always exited 0),
+so exit-code gating is now mechanically possible — the step stays
+advisory deliberately: the pre-existing backlog (41 advisories as of
+2026-08-24 — every one of the 23 HIGH chains classified as dev/build/test
+tooling or the exact-pinned `@aztec` line, none extension-bundle-reachable;
+the 15 moderate + 3 low not individually classified) must be triaged to
+zero first, or a blocking flip is pure noise.
 
 **Bun pinned** to a specific patch version in `package.json#packageManager`
-and in `setup-bun/action.yml` + the commitlint inline step. Cache keys
-include the Bun version so a bump invalidates stale state.
+and in `setup-bun/action.yml` (the commitlint job reuses that composite —
+no third pin site since the 1.4.0 bump). Cache keys include the Bun
+version so a bump invalidates stale state. Local development requires
+bun ≥1.4 (`bun run --parallel` scripts); a future lockfile regeneration
+will move `bun.lock` to `lockfileVersion: 2`, unreadable by Bun ≤1.3.
+
+**1.4 pm review workflow** (use these; they exist as of Bun 1.4):
+
+- `bun pm diff <pkg>@<old> <new>` (both versions EXPLICIT) on every
+  manual bump and Renovate PR review — un-minified diff, flags new
+  install scripts and new `child_process`/`fs`/`net`/`vm` imports.
+  On a checked-out Renovate branch the lockfile already holds the NEW
+  version, so the unqualified `bun pm diff <pkg>` form (lock → latest)
+  reviews the wrong or an empty delta — always name both versions.
+- `bun audit fix --dry-run` for advisory triage — shows the in-range
+  upgrade set without touching anything; `--latest` previews
+  cross-major fixes.
+- `bun pm licenses --prod --json` at release prep.
+- `bun pm ls --trusted` whenever `trustedDependencies` changes — lists
+  exactly which packages may run lifecycle scripts.
+- `bun dedupe --check` runs ADVISORY in CI (`_lint-and-typecheck.yml`):
+  collapsing resolves to the range intersection, which can DOWNGRADE
+  transitives, so a human reviews each collapse (`bun dedupe` locally,
+  then read the lockfile diff) instead of CI auto-failing on drift.
 
 **Lockfile is text (`bun.lock`)** — reviewable in PR diffs, no binary
 opacity. Migrated from `bun.lockb` once Bun 1.3.13's text-lockfile
@@ -407,9 +434,15 @@ the 7-day gate window:
    exclude.
 5. PR description must cite the CVE and link the advisory.
 
-**Bun bug #25305.** `bun update --latest` does not apply
-`minimumReleaseAge` to transitive deps. Workaround for bulk re-resolves:
-delete `bun.lock` first, then re-install.
+**Bun bug #25305 — closed on Bun 1.4.** On 1.3.x, `bun update --latest`
+did not apply `minimumReleaseAge` to transitive deps (workaround was
+deleting `bun.lock` first). Verified fixed on 1.4.0 with a
+positive-control mock-registry probe: when a gated update actually
+re-resolves, direct AND transitive candidates are both held to the gate
+(matrix: `implementations-plan/bun-1.4-bump/lessons/phase-5.md`). One
+nuance remains by design: update never re-gates versions already in
+`bun.lock` — evicting an already-locked too-young version takes a
+deliberate lockfile regeneration.
 
 **`bun pm scan`** is a plugin system for third-party scanners (Socket,
 Snyk, etc.), not a built-in tool. Not configured today; revisit if/when
