@@ -25,3 +25,12 @@ Method: copy manifests/bunfig/patches to scratch, delete bun.lock, `bun install 
 | Advisory delta (`bun audit --audit-level=low`, scratch install of the dry lock) | **40 → 23** (22 → 10 high, 15 → 10 moderate, 3 → 3 low) — 17 advisories retired, none introduced |
 
 Decision: the regeneration is APPROVED for execution against the repo — every wallet-grade class is populated and clean. Post-execution: double-install fixed point + frozen install + the explicit post-regen battery (audit:vue, test:all, identity, smoke, build:full, packaged-output + WASM-hash re-comparison against the Phase 3 record).
+
+## Commit B — executed (real regen)
+
+- `rm bun.lock && bun install` → `lockfileVersion: 2`, 215 packages fetched, exit 0.
+- Real lock vs the reviewed dry lock: identical except `mime-db` re-nesting (the newest-in-range pick that Arc A's dedupe had collapsed) → `bun dedupe` run: **7 collapses**, all already-reviewed material — the Arc A trio (`@opentelemetry/sdk-metrics` 1.30.1→1.28.0 + `semantic-conventions` 1.43.0→1.28.0, both forced by upstream EXACT pins; `string_decoder` 1.3.0→1.1.1 with its inert `safe-buffer` closure delta) plus four nested-copy removals of already-hoisted versions (`undici-types`, `@types/node` ×2 under protobufjs/@types/request, `aria-query`). `dedupe --check`: clean (1,097 packages).
+- Final vs ORIGINAL lock (the PR's actual delta): 1,161 → 1,158 records · 221 in-range version moves · 10 added / 13 removed (consolidations) · **0 frozen-scope violations** · 0 integrity-only drift · 0 bin/script changes.
+- Double-install fixed point: byte-identical. `--frozen-lockfile`: no changes, exit 0.
+- Identity 6/6 + resolver 14/14 on the regenerated tree.
+- Final `bun audit --audit-level=low`: **23 (10 high, 10 moderate, 3 low)** — from 40 (22 high) pre-regen. Zero introduced.
