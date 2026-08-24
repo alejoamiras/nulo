@@ -55,7 +55,10 @@
 <main>
   <p class="kicker">arc B of the Bun 1.4 goal · blueprint mid · codex-convergence gate</p>
   <h1>Isolated Linker Store</h1>
-  <p class="lede">Switch how Bun lays out installed packages so ~30 parallel working copies stop re-copying the same files — installs get dramatically faster by sharing one machine-wide, integrity-checked store. The risk: a handful of our build tools assume the OLD layout. So they get fixed first, on the old layout, where nothing can break — and only then does the switch flip, one measured, reversible step at a time.</p>
+  <p class="lede">Switch how Bun lays out installed packages so every workspace can only see the dependencies it actually declares — closing the "works by luck" gaps a shared pile of packages hides. The risk: a handful of our build tools assume the OLD layout. So they get fixed first, on the old layout, where nothing can break — and only then does the switch flip, one measured, reversible step at a time.</p>
+  <div class="warncard">
+    <strong>Implementation update — the headline changed, honestly.</strong> Measured on this machine, the new layout is <em>not</em> faster to install (1.22s vs 1.17s); the "7× faster" claim only materializes with an optional shared store (0.36s) that stays OFF in the committed config for supply-chain reasons. What the change actually buys is correctness: two undeclared dependencies found and fixed (one of them the source of a shipped database-engine file), six copy-pasted path-guessers replaced by one tested resolver, a permanent identity test, and a wallet-grade dependency refresh that retired 17 security advisories. The keep-or-abort call goes to the Codex gate on those terms.</div>
+  <p class="lede"></p>
 
   <h2>Why the "mid" tier and a heavier gate</h2>
   <p>This changes install topology for a wallet's build — two risk dimensions run hot (blast radius across every build; supply-chain sensitivity of a full dependency re-resolution). Three independent auditors reviewed the plan: two in parallel (Codex + a second Claude), whose conditions were all folded in, and a final fresh-context Codex pass that acts as the approval gate — per your standing "resolve it with Codex to convergence" protocol.</p>
