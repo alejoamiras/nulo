@@ -49,7 +49,7 @@ export function assertEffectiveRemapping(forgeBin: string): void {
 	}
 	const aztecLine = remaps.stdout.split("\n").find((l) => l.startsWith("@aztec/="))
 	const expected = `${resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: import.meta.url })}/`
-	if (!aztecLine || !aztecLine.includes(expected)) {
+	if (!aztecLine?.includes(expected)) {
 		throw new Error(
 			`forge (${version.stdout.split("\n")[0]}) does not see the generated @aztec/ remap.\n` +
 				`effective: ${aztecLine ?? "<none>"}\nexpected suffix: ${expected}`,
