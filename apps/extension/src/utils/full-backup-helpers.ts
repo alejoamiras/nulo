@@ -133,6 +133,10 @@ export async function assembleFullBackup(
 	if (onSlice && !onSlice()) throw new AssemblyAbortedError()
 	const unsigned = JSON.stringify(draft)
 	const checksum = await EncryptionKey.getHashHex(unsigned)
+	// Re-probe after the hash await too: the parse + two stringifies below are
+	// the most expensive steps at large sizes — don't spend them for an
+	// abandoned run.
+	if (onSlice && !onSlice()) throw new AssemblyAbortedError()
 	const sealed = JSON.parse(unsigned) as Record<string, unknown>
 	sealed.checksum = checksum
 	return { compact: JSON.stringify(sealed), pretty: JSON.stringify(sealed, null, 2), checksum }

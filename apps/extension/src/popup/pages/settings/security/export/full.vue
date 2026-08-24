@@ -154,6 +154,7 @@ async function handleBackup() {
 				// BEFORE calling the service. Targeted `get` against this profile's
 				// stored credentialId so the OS prompt is bound to the right key.
 				const credentialId = await managers.profile.getPasskeyCredentialId(appStore.profile.id)
+				if (gen !== generation) return
 				credentialData = await runCeremony({ mode: "get", credentialId })
 			} catch (err) {
 				if (gen !== generation) return
@@ -187,6 +188,7 @@ async function handleBackup() {
 				// the master re-derives from the passkey PRF at restore. The imported-keys DEK travels
 				// as the SEALED row blob verbatim (the restore ceremony's wrap key opens it).
 				key = await managers.profile.exportPlain(appStore.profile.id, password.value, credentialData)
+				if (gen !== generation) return
 				dekSealedB64 = await managers.profile.getProfileDekSealed(appStore.profile.id)
 			} else {
 				// Atomic discriminated export: master + recovery-phrase entropy + imported-keys DEK
@@ -306,7 +308,9 @@ async function handleEncrypt() {
 
 	try {
 		const passhash = await EncryptionKey.getPasshash(password.value)
+		if (gen !== generation) return
 		const key = await EncryptionKey.fromPasshash(passhash)
+		if (gen !== generation) return
 		const sealed = Buffer(await key.encrypt(new TextEncoder().encode(plaintext))).toString("base64")
 		if (gen !== generation) return
 		// Encrypted-side half of the shared size invariant (base64 + AES-GCM
@@ -580,7 +584,7 @@ onBeforeUnmount(() => {
 				<Button
 					v-if="backupStatus === 'finished' || backupStatus === 'encrypting'"
 					@click="handleEncrypt()"
-					:disabled="backupStatus === 'encrypting'"
+					:disabled="backupStatus === 'encrypting' || isDownloading"
 					variant="cta"
 					data-testid="protect-password-btn"
 				>
