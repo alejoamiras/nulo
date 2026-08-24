@@ -51,3 +51,11 @@ Key findings beyond the conditions:
 ## Cap recalibration (resumed final-pass session, post-implementation)
 
 Prompted by e2e measurement (fresh-wallet encrypted artifact = 23,443,420 B ≈ 22.4 MiB; the 16 MiB cap fired on legitimate backups — loud at export, per the invariant's design). Question: MAX_BACKUP_FILE_BYTES = 64 MiB. Verdict: **approve** — "justified by the measured 23.4 MiB fresh-wallet artifact and the shared export/import invariant. A 32 MiB cap leaves inadequate growth margin, while 64 MiB still converts an unbounded decompression surface into a finite one and guarantees oversized legitimate backups fail loudly during export. The 2–4× parse-amplification estimate should remain documented as an estimate, not a proven ceiling." (Documented in the constant's docblock.)
+
+## Post-implementation audit — session `01a034d9-0c55-7473-a35b-2474736a3677` (fresh)
+
+Package: net diff `ea9be876..HEAD` + the code-review commit as a distinct artifact + plan/ledger + the no-over-engineering rule.
+
+**Round 1: conditional approve** (conditions: fence stale decrypt publication; add generation/probe checks between every sensitive await). Findings: (M) the code-review commit's selection-clear opened a stale-decrypt publication race in `decryptBackup` (superseded run could resurrect a selection husk from `{...null}` and wipe the too-large error); (M) work-abandonment fence gaps — credential→ceremony, exportPlain→sealed-DEK, each encrypt KDF step, assembler post-hash derive; (L) Protect CTA enabled-but-inert during download. Verified-correct notes: checksum contract a fixed point end-to-end; all publication fences present; disconnect idempotent; pickFile onchange settles exactly once. Attacker focus: crafted files at the 64 MiB boundary (bounded, not cheap); checksum correctly not treated as authentication.
+
+**Round 2 (resumed, on the fix commit): approve** — "All three conditions are correctly resolved… No new material bugs or regressions found in the fix commit." Loop converged (1 fix round). This approve, given on the final HEAD, doubles as the pre-merge diff sign-off required by the autonomy contract.
