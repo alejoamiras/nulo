@@ -167,8 +167,11 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				return { action: "run", backstopRuns: 0, gestureRuns: 0 }
 			}
 			if (decoded.kind === "absent") {
-				// Stale-key hygiene on unblocked boots.
-				if (hasRetryKey) await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY)
+				// Stale-key hygiene on unblocked boots — TOLERANT on purpose: a
+				// leftover token is at worst consumed as one gesture later, so a
+				// transient remove() failure must not veto a healthy boot (this
+				// is the one gate write where fail-closed protects nothing).
+				if (hasRetryKey) await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY).catch(() => {})
 				return { action: "run", backstopRuns: 0, gestureRuns: 0 }
 			}
 			const s = decoded.status
@@ -180,12 +183,19 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				// Durably claim the gesture and consume the key BEFORE the run:
 				// one tap authorizes one durable attempt, whichever wake executes
 				// it, and the claim survives a kill mid-run (a lost claim would
-				// re-arm the backstop after the user already retried). A failing
-				// write throws → fail closed.
+				// re-arm the backstop after the user already retried). The claim
+				// also stamps lastAttemptAt so the barrier can hold its button
+				// during the authorized run. A failing write throws → fail closed.
 				const claimed = s.gestureRuns + 1
-				await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: { ...s, gestureRuns: claimed } })
+				await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: { ...s, gestureRuns: claimed, claimedAt: clock.now() } })
 				await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY)
 				return { action: "run", backstopRuns: s.backstopRuns, gestureRuns: claimed }
+			}
+			if (hasRetryKey) {
+				// Present-but-invalid token beside a live block: consume it (the
+				// documented contract — ignored AND consumed), fail-closed like
+				// every other write on the blocked paths.
+				await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY)
 			}
 			if (clock.now() - s.lastAttemptAt >= MIGRATION_RETRY_BACKSTOP_MS && s.backstopRuns < 1 && s.gestureRuns === 0) {
 				// The one autonomous run per episode, allowed only BEFORE any
@@ -193,7 +203,7 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				// this ordering is what makes terminal strictly gesture-reached).
 				// Durable claim BEFORE the run — a kill mid-run must not reset it.
 				const claimed = s.backstopRuns + 1
-				await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: { ...s, backstopRuns: claimed } })
+				await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: { ...s, backstopRuns: claimed, claimedAt: clock.now() } })
 				return { action: "run", backstopRuns: claimed, gestureRuns: s.gestureRuns }
 			}
 			return { action: "short-circuit", reason: `storage migration blocked: ${s.kind}` }
@@ -238,6 +248,13 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			// Persist the blocked status so the UI shells render the recovery
 			// screen (MigrationBarrier) instead of a dead popup, then fail
 			// closed: never start services on un-migrated / incompatible data.
+			// A `spentAttempt: false` result recorded NOTHING on the durable
+			// counter (the engine's outer catch — a free transient failure), so
+			// charging the episode's retry allowance for it would park a healthy
+			// wallet behind the barrier for the whole backstop window. Persist it
+			// as instantly-eligible instead: the next ambient wake re-runs, and
+			// because the counter never moved this can never walk to terminal.
+			const freeFailure = migration.kind === "needs-recovery" && migration.spentAttempt === false
 			const blocked: MigrationBlockedStatus = {
 				kind: migration.kind,
 				detail: migration.reason,
@@ -246,8 +263,8 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				// update ships; `backstopRuns` CARRIES the pre-run claim forward
 				// so a failing episode keeps its spent autonomous allowance.
 				atExtensionVersion: manifestVersion,
-				lastAttemptAt: clock.now(),
-				backstopRuns: gateDecision.backstopRuns,
+				lastAttemptAt: freeFailure ? 0 : clock.now(),
+				backstopRuns: freeFailure ? 0 : gateDecision.backstopRuns,
 				gestureRuns: gateDecision.gestureRuns,
 			}
 			// EVERY blocked outcome vetoes in-lifetime retry — not just terminal
@@ -263,9 +280,13 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			logger.log("wallet", LogLevel.Warn, `Storage migration failed on an additive migration; booting degraded: ${migration.reason}`)
 			const degraded: MigrationDegradedStatus = { version: migration.version, error: migration.reason }
 			// A stale blocked status from an EARLIER boot must not outrank the
-			// degraded banner over a wallet that just booted.
+			// degraded banner over a wallet that just booted. The ATTEMPTS clear
+			// matters too: without a blocked key the gate runs the engine on
+			// every ambient wake, and a lingering counter would let those wakes
+			// silently exhaust the budget — a later restore failure would then
+			// arrive instantly terminal with zero gestures.
 			await browserApi.storage.local.set({ [SCHEMA_DEGRADED_KEY]: degraded })
-			await browserApi.storage.local.remove(SCHEMA_BLOCKED_KEY)
+			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_ATTEMPTS_KEY])
 		} else {
 			// Healthy boot clears any stale status from a prior failed run.
 			await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY])

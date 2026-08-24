@@ -741,13 +741,42 @@ describe("Migrator — interruption accounting (kill-loops bound out, exactly on
 		expect(store.has(ATTEMPTS_KEY)).toBe(false)
 	})
 
-	test("a restore-throw marks the retained journal counted (both bump sites)", async () => {
+	test("a resume restore-throw marks the retained journal counted", async () => {
 		const store = new MemStore().seed(ver(0))
 		seedTorn(store)
 		store.failSetKeys = new Set(["acct@a"]) // restore's snapshot re-set fails
 		const r = await new Migrator({ store, migrations: [mig()] }).run()
 		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
 		expect((store.data.get(BACKUP_KEY) as { counted?: boolean }).counted).toBe(true)
+	})
+
+	test("applyOne's own restore-throw marks the retained journal counted too", async () => {
+		// No seeded journal: applyOne arms it, up() throws, and the restore's
+		// snapshot re-set fails — the OTHER bump site must also mark counted, or
+		// every later boot's resume re-counts this same incident.
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		const boom = defineMigration({
+			version: 1,
+			description: "boom",
+			reads: [rootRef("acct")],
+			writes: [rootRef("acct")],
+			up: async () => {
+				throw new Error("up boom")
+			},
+		})
+		store.failSetKeys = new Set(["acct@a"])
+		const r = await new Migrator({ store, migrations: [boom] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect((store.data.get(BACKUP_KEY) as { counted?: boolean }).counted).toBe(true)
+	})
+
+	test("run()'s outer catch reports spentAttempt: false and records nothing", async () => {
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		store.failNextGet = true // the resume's own read throws → outer catch
+		seedTorn(store)
+		const r = await new Migrator({ store, migrations: [mig()] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true, spentAttempt: false })
+		expect(store.has(ATTEMPTS_KEY)).toBe(false)
 	})
 
 	test("stamped-clear debris never bumps", async () => {

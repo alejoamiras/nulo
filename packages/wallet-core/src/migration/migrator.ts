@@ -140,6 +140,10 @@ export class Migrator {
 				kind: "needs-recovery",
 				reason: `unexpected storage failure during migration: ${message(err)}`,
 				retryable: true,
+				// Nothing was recorded on the durable counter (the throw escaped
+				// before/around any counted work) — the host's gate may re-run
+				// immediately instead of charging the episode a free failure.
+				spentAttempt: false,
 			}
 		}
 	}
@@ -391,7 +395,11 @@ export class Migrator {
 
 	private async bumpAttempts(version: number, phase: AttemptRecord["phase"]): Promise<number> {
 		const cur = (await this.store.get(SCHEMA_ATTEMPTS_KEY))[SCHEMA_ATTEMPTS_KEY] as AttemptRecord | undefined
-		const count = cur && cur.version === version ? cur.count + 1 : 1
+		// The counter is the terminalization authority — a corrupt persisted
+		// count (string, NaN, negative) must reset to a fresh episode, never
+		// arithmetic its way into an instant terminal verdict.
+		const prior = cur && cur.version === version && Number.isInteger(cur.count) && cur.count >= 0 ? cur.count : 0
+		const count = prior + 1
 		await this.store.set({ [SCHEMA_ATTEMPTS_KEY]: { version, phase, count } satisfies AttemptRecord })
 		return count
 	}

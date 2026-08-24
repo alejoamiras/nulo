@@ -72,6 +72,13 @@ export type MigrationBlockedStatus = {
 	 *  the remaining budget (this is what makes "terminal only by gesture"
 	 *  airtight even across killed gesture runs). */
 	gestureRuns: number
+	/** Set by the gate's claim writes when it authorizes a run; every run-end
+	 *  persist rewrites the status WITHOUT it. Present ⟺ an authorized run may
+	 *  still be in flight — the barrier holds its Retry button on it so an
+	 *  impatient second tap can't kill the run mid-write and spend another
+	 *  attempt. (The `running` marker can't serve here: the restore-failure
+	 *  state persists running + blocked together with no run in flight.) */
+	claimedAt?: number
 }
 
 /** Per-FIELD tolerant decode of a persisted blocked status. Contract:
@@ -99,6 +106,7 @@ export function decodeBlockedStatus(
 		typeof b.lastAttemptAt === "number" && Number.isFinite(b.lastAttemptAt) && b.lastAttemptAt <= now ? b.lastAttemptAt : 0
 	const backstopRuns = typeof b.backstopRuns === "number" && Number.isInteger(b.backstopRuns) && b.backstopRuns >= 0 ? b.backstopRuns : 1
 	const gestureRuns = typeof b.gestureRuns === "number" && Number.isInteger(b.gestureRuns) && b.gestureRuns >= 0 ? b.gestureRuns : 1
+	const claimedAt = typeof b.claimedAt === "number" && Number.isFinite(b.claimedAt) && b.claimedAt <= now ? b.claimedAt : undefined
 	return {
 		kind: "blocked",
 		status: {
@@ -109,6 +117,7 @@ export function decodeBlockedStatus(
 			lastAttemptAt,
 			backstopRuns,
 			gestureRuns,
+			...(claimedAt !== undefined ? { claimedAt } : {}),
 		},
 	}
 }

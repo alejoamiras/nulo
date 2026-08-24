@@ -31,6 +31,25 @@ const blockedCopy = computed(() => {
 			}
 })
 const retryRequested = ref(false)
+// Hold the Retry button while an authorized run may still be in flight:
+// `claimedAt` is stamped by the gate's claim writes and cleared by every
+// run-END persist, so its presence means "a run this button (or the backstop)
+// authorized hasn't concluded" — an impatient second tap would kill that run
+// mid-write and spend another attempt. Bounded at 5 min so a crashed run
+// can't hold the affordance forever (the next boot's resume clears it by
+// persisting a fresh status anyway). Gating on the `running` marker instead
+// would hide the button in the restore-failure state, which persists
+// running + blocked together with NO run in flight.
+const CLAIM_HOLD_MS = 5 * 60_000
+const nowTick = ref(Date.now())
+const cooldownTimer = setInterval(() => {
+	nowTick.value = Date.now()
+}, 1_000)
+const retryOnCooldown = computed(() => {
+	const at = blocked.value?.claimedAt
+	if (typeof at !== "number" || !Number.isFinite(at)) return false
+	return nowTick.value - at < CLAIM_HOLD_MS
+})
 
 /** Handlers */
 // `refresh()`'s get-snapshot and `onChanged` events ride different IPC
@@ -89,6 +108,7 @@ void refresh()
 
 /** Lifecycle */
 onBeforeUnmount(() => {
+	clearInterval(cooldownTimer)
 	chrome.storage.onChanged.removeListener(onStorageChanged)
 })
 </script>
@@ -105,11 +125,11 @@ onBeforeUnmount(() => {
 					v-if="!blocked.terminal"
 					type="button"
 					:class="$style.retryBtn"
-					:disabled="retryRequested"
+					:disabled="retryRequested || retryOnCooldown"
 					data-testid="migration-retry-btn"
 					@click="requestRetry"
 				>
-					{{ retryRequested ? "Restarting…" : "Retry update" }}
+					{{ retryRequested ? "Restarting…" : retryOnCooldown ? "Retrying…" : "Retry update" }}
 				</button>
 			</div>
 		</div>

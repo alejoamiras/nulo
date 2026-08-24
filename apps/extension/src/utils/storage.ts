@@ -11,11 +11,13 @@
  * raw `chrome.storage.local` outside this file + the composition-root adapter).
  *
  * Deliberately NO timeout: proceeding while a migration is mid-flight is the
- * corruption we're preventing. Liveness leans on the engine's journal — EVERY
- * path out of a run (success, failure, resume, crash + next boot) clears the
- * marker, so a wait here can only outlive the current boot if the SW died
- * mid-migration, and the next boot's resume unblocks it. The shell shows
- * "Updating…" (see `MigrationBarrier.vue`) rather than silently racing.
+ * corruption we're preventing. Liveness leans on the engine's journal — every
+ * ENGINE RUN clears the marker on its way out (success, failure, resume), but
+ * the boot GATE can short-circuit engineless over a blocked status, so a
+ * `running` marker stranded beside a blocked one (the restore-failure state)
+ * keeps waiters here pending until a gesture retry or the backstop authorizes
+ * the next run. The shell covers it: `MigrationBarrier.vue` ranks blocked
+ * above updating, so the user sees the recovery screen, never a silent hang.
  *
  * Residual TOCTOU, accepted: the barrier is check-then-act, not a lock — a
  * write dispatched in the gap between the idle check and the marker being set
