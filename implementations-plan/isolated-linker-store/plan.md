@@ -107,4 +107,4 @@ Unresolved disagreements: one open dispute submitted back to the final-pass sess
 ## Seeds
 
 Drafted in the ELI5; finalized at the convergence gate.
-**ELI5 Artifact**: https://claude.ai/code/artifact/21293181-3ec0-4afb-9650-8e0398282ddf · source: `implementations-plan/isolated-linker-store/eli5.html` (redeploying that file updates the same URL).
+**ELI5 Artifact**: https://claude.ai/code/artifact/a37287ae-4cdf-4baf-821c-21ebbc45b4e6 · source: `implementations-plan/isolated-linker-store/eli5-v2.html` (redeploying that file updates the same URL). The original artifact (`…/21293181-…`, source `eli5.html`) became unwritable after a mid-session account switch; re-published under a new path + URL 2026-08-24 with the implementation-update banner.
