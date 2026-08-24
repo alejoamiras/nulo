@@ -20,3 +20,10 @@ behavior, deliberately preserved (bug-pin rule; changing the threshold is a prod
 Three pins in `apps/extension/src/utils/core.test.ts`, each red against the old code:
 disconnect not called while a refresh is in flight (+ fresh rows skipped); throw path still
 disconnects; one rejected refresh is logged without cutting the rest short.
+
+## Codex loop (gpt-5.6-sol xhigh, 2 rounds)
+
+r1 HOLDS-with-concerns (one Low: the settle-all pin was satisfiable by a fail-fast
+`Promise.all` shape — adopted verbatim) → r2 **APPROVE**. Transcripts: `audit-codex-r{1,2}.md`.
+r1 also independently verified the caller surface (auth.vue fire-and-forget only) and the
+client contract (disconnect synchronously rejects pending requests).
