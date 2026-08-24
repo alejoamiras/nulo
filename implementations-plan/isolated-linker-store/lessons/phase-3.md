@@ -38,3 +38,12 @@
 Honest reading: the blog's "7× faster" is a macOS `clonefileat` + global-store story. On this host the committed default delivers NO install-speed win; the speed story exists ONLY in the opt-in global-store mode (~4×), which the posture memo keeps off the committed config (CI never touches `links/`). Arc B's justification therefore rests on correctness — phantom-dependency elimination, layout-agnostic tooling, executable identity guarantees — with the global store as a per-machine opt-in for worktree-heavy dev boxes. This reframing goes to the Phase 5 keep/abort convergence gate as-is.
 
 Hygiene: the opt-in probe populated 910 entries in the REAL `~/.bun/install/cache/links` (a scratch bunfig override, not the repo's); purged afterwards so the machine's default state matches the committed posture. The scratch worktree was removed + pruned.
+
+## Smoke result (production isolated build) + the ONE real layout consumer the inventory missed
+
+Second smoke run (after the dev-clobber rebuild): **28 files pass, 104 tests pass, 2 fail** — both triaged:
+
+1. `observability.test.ts` — **GENUINE layout consumer, missed by the recon inventory**: it spawned a child vitest via a hardcoded `resolve(pkgDir, "../../node_modules/.bin/vitest")` (repo-root `.bin`, which only exists when deps are hoisted) → ENOENT → `child.status === null`. Reproduced alone on a quiet host (so not concurrency). Fix: resolve from the extension workspace's own `node_modules/.bin/vitest` (vitest is its declared devDependency; the path holds under BOTH linkers). A repo-wide `.bin` sweep found no other repo-owned instance (the `global-setup.ts` hits are the separate aztec-up toolchain). The Phase 3 gate did exactly its job: the inventory was 6-of-7, and the executable gate caught the seventh.
+2. `backup-migration.test.ts` — environmental: its own assertion text names the cause (repo build without `VITE_NULO_E2E_MIGRATION_FIXTURE=1` + runner without `NULO_E2E_MIGRATION_FIXTURE=1`, which `_smoke-e2e.yml` sets for repo-build runs). Rebuilt fixture-armed exactly as CI does.
+
+Re-run of exactly those two files under CI conditions: **9/9 pass**. Phase 3 smoke leg: green.
