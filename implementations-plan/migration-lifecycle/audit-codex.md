@@ -26,6 +26,14 @@ Verdict: **reject** (blocking: autonomous terminalization remains possible; the 
 
 All findings adopted in revision 3 (plan ledger).
 
+## Post-implementation audit — session `01a03576-e50f-7d41-9659-44379e25c297` (fresh; a first attempt died mid-run on a transient CLI failure — logged, retried)
+
+**Round 1: reject** — (B1) `spentAttempt:false` unsound: a throw can escape AFTER a successful bump (journal clear), the host then resets the budget and an ambient wake can terminalize — track whether any bump landed; (B2) the ordinary up-failure path bumps with the journal retained-but-unmarked (a failed clear → resume double-counts) and the swallowing marker write permits false doubles — mark first, non-swallowing; (M3) a gesture spent on a free failure strands (gestureRuns>0 disables the backstop, token consumed) — re-arm the token; (S4) the barrier treats a future claimedAt as on-cooldown forever — clamp age ≥ 0. Verified-correct: degraded-budget clear, token hygiene, invalid-token consumption, corrupt-count reset.
+
+**Round 2 (on the fix commit): conditional approve** — one regression: `attemptRecorded` documented per-run but instance-scoped; reset at `run()` entry + same-instance pin.
+
+**Round 3 (on HEAD): approve.** Loop converged (2 fix rounds). This approve doubles as the pre-merge final-diff sign-off.
+
 ## Final pass — round 2 (resumed, on revision 3)
 
 Verdict: **conditional approve** (conditions: resolve the remaining executable-plan ambiguities). "The core blockers are resolved: stand-down prevents resume-plus-rerun terminalization; the backstop is durably preclaimed and carried forward; manifest-version invalidation covers code-only fixes; per-version accounting removes phase-reset evasion. The accepted marker-gap undercount favors avoiding false terminalization and is adequately disclosed/testable. … With those textual/execution details normalized, the implementation shape is sound and no new architectural blocker is evident."
