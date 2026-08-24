@@ -111,6 +111,18 @@ Verbatim: "VERDICT: conditional approve — conditions: close provenance gaps, n
 
 Rejected: nothing. Disputed: nothing.
 
-## Final — fresh-context codex re-pass (plan v5) — pending
+## Final — fresh-context codex re-pass, round 2 (same session, plan v5) — **conditional approve**
+
+(The first launch of this re-pass was killed by the harness two minutes in — no OOM, 17 GiB free — and relaunched; the relaunch completed.) Verbatim: "conditional approve — conditions: eliminate the remaining reporter environment injection, specify the full/compact artifact flow, and pin the gate's resolver allowlist". Low: "Every previous disposition is otherwise accurately folded."
+
+| # | Finding | Verified? | Disposition |
+|---|---|---|---|
+| F2-1 | [Med] The reporter's per-run `SOAK_RUNTIME_OUT` env var is an environment injection the Node reference claims not to have → derive `runtime.json` from vitest's configured `outputFile`, or attest inertness and correct I7 | ✓ | **ADOPTED** — `onInit(ctx)` writes `runtime.json` to `dirname(ctx.config.outputFile)`; no env var in either mode; I7 corrected |
+| F2-2 | [Med] Artifact flow underspecified (compare needs full inventories but Phase 1 wrote compact paths; no compaction command) → soaks write full files, compare consumes them, a defined command produces the committed compact copies | ✓ | **ADOPTED** — `soak --out full/…` → `compare full/… full/…` → `compact full/… --out …`; Phase 1 commands + gate list the 24 compactions |
+| F2-3 | [Med] `--resolve-allow` is operator-expandable → the gate must forbid the option or pin the four-spec list and print the effective allowlist | ✓ | **ADOPTED** — allowlist is a pinned constant in `lib.ts`, no CLI/config widening (a code change re-gates by the matrix rule); the comparator prints it |
+
+Rejected: nothing. Disputed: nothing.
+
+## Final — fresh-context codex re-pass, round 3 (same session, plan v6) — pending
 
 ## Final — fresh-context codex pass — pending

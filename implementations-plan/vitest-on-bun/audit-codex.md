@@ -94,3 +94,20 @@ VERDICT: conditional approve — conditions: close provenance gaps, normalize ev
 ### Disposition
 
 All twelve findings adopted in plan v5 (table in `lessons/gate-convergence.md`); re-pass requested on the same fresh session.
+
+## Fresh-context session, round 2 — plan v5
+
+### Verdict (verbatim)
+
+VERDICT: conditional approve — conditions: eliminate the remaining reporter environment injection, specify the full/compact artifact flow, and pin the gate's resolver allowlist
+
+### Findings (verbatim)
+
+- [Med] "No environment injection" is not fully folded: the Node-reference command claims none (`plan.md:46`), but the reporter requires a per-run `SOAK_RUNTIME_OUT` environment variable (`plan.md:49`). Derive `runtime.json` from Vitest's configured `outputFile`, or explicitly attest this injected variable as observationally inert and correct I7.
+- [Med] Artifact flow is underspecified. `compare` requires full inventories, full summaries supposedly live under `baselines/full/`, but Phase 1 directs soak outputs to the compact `baselines/{node,bun}/` paths and gives no compaction command. Specify that soaks write full files, comparisons consume those files, and a defined command produces compact committed copies.
+- [Med] `--resolve-allow` remains operator-expandable, while the Phase 1 commands merely say "compare". That permits an unexpected resolution difference to be made green by widening the CLI list. The migration gate must forbid the option or explicitly pin the exact four-spec list and record the effective allowlist in comparator output.
+- [Low] Every previous disposition is otherwise accurately folded: clean/frozen provenance, per-run identity, canonical paths, fixture isolation, source-map checking, narrow post-matrix paths, minimal configs, named-job dispatch evidence, and all three required checks.
+
+### Disposition
+
+All three adopted in plan v6; round-3 re-pass requested.
