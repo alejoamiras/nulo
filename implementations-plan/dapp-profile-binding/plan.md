@@ -142,7 +142,7 @@ Unresolved disputes: none carried.
 - Codex round 1 (session `01a03591-f807-7da0-b4d6-82cbaafc1cd8`): **reject** — 3 blockers — all adopted in revision 2; "hybrid genuinely necessary" + "stamp-based teardown correct" ratify the base shape.
 - Final fresh-context pass round 1 (session `01a03599-e519-7850-8c8d-3aacd77047de`): **reject** — marker identity/expiry (soft-expiry attack), N-26 teardown unimplementable as specced (tabId linkage), the queued-journal pre-dispatch crossing, the completes-as-A overclaim, e2e fallback insufficient. ALL adopted in revision 3 (rows above).
 - Final pass round 2 (resumed, on revision 3): **reject** — 2 residual blockers (tuple-keyed marker's cross-request consumption; journal network resolution unanchored) + 3 textual staleness items. ALL adopted in revision 4: request-keyed marker (`Map<requestId, …>` — the same-tuple residual eliminated, not documented), every profile-scoped journal dependency anchored incl. network + a pre-persist stamp revalidation belt, Phase-2 test list + Security wording corrected.
-- Final pass round 3 (resumed, on revision 4): _pending_
+- Final pass round 3 (on revision 4): **conditional approve** (editorial contradictions only — all corrected same-revision). Round 4 ratification: **approve**. **GATE PASSED** (approval delegated per the goal contract).
 
 ## Seeds
 

@@ -29,4 +29,8 @@ All adopted in revision 3 (plan ledger).
 
 ## Final pass — round 2 (resumed, on revision 3)
 
-_(appended below)_
+Verdict: **reject** — 2 residual blockers: (1) tuple-keyed marker still lets a B-reconnect consume A's marker (trace: A approval → switch → B reconnect establishes first, consumes + terminates on mismatch → A's original request now markerless → validates B's trusted row → B-stamped) and interactive approvals overwrite each other — key by transport requestId; (2) journal anchoring incomplete — `resolveNetworkByChainId` live-reads `getNetworks()`; anchor every profile-scoped dependency or revalidate the stamp pre-persist. Plus 3 textual staleness items. All adopted in revision 4.
+
+## Final pass — rounds 3-4 (on revision 4)
+
+Round 3: **conditional approve** — "remove the remaining contradictory plan text before implementation"; requestId-keying and exhaustive anchoring + pre-persist revalidation confirmed closing the security blockers ("No new security blocker found"). The four editorial items were corrected same-revision. Round 4: **approve** (one line). GATE PASSED.
