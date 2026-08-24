@@ -27,11 +27,11 @@ Project skills in [`.claude/skills/`](./.claude/skills/) are the source of truth
 
 ## Working in this repo
 
-- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.3.14` via `package.json#packageManager` + `setup-bun` action.
+- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.4.0` via `package.json#packageManager` + `setup-bun` action. **Local minimum is 1.4** — the parallel scripts (`audit:vue`, `dev:full`) use `bun run --parallel`. (`bun.lock` is still `lockfileVersion: 1`; 1.4 never migrates existing lockfiles in place — the v2 flip lands with a deliberate future regeneration, which Bun ≤1.3 then cannot read.)
 - **Biome** handles lint + format. Layer-import rules are enforced via `noRestrictedImports` overrides in [`biome.json`](./biome.json); violations fail `bun run lint`.
 - **Commitlint** enforces Conventional Commits (`feat:`, `fix:`, `chore:`, …). Subject line must be lower-case.
 - **Pre-commit hook** (`.githooks/pre-commit`) runs `biome check --staged` followed by `scripts/check-no-brand.sh` (legacy brand and absolute-path guard). **Commit-msg hook** validates the message. Both auto-install on `bun install` via the `prepare` script.
-- **`bun run audit:vue`** is the one-shot pre-PR gate. It runs, in order, `typecheck:all → test → lint → build`. It does NOT run e2e — those are separate (`test:e2e` for smoke, `e2e:agent` for network).
+- **`bun run audit:vue`** is the one-shot pre-PR gate. It runs `typecheck:all`, `test`, and `lint` CONCURRENTLY (`bun run --parallel`, Foreman-prefixed output), then `build` after all three pass. It does NOT run e2e — those are separate (`test:e2e` for smoke, `e2e:agent` for network).
 - **`noExplicitAny`** is enforced as an error. Use `unknown` and cast at usage sites. Suppress with `// biome-ignore lint/suspicious/noExplicitAny: <reason>` only at genuinely untyped boundaries.
 
 ## Branching + merging
@@ -56,10 +56,10 @@ See [`SECURITY.md`](./SECURITY.md) "Dependency policy" for the full version. TL;
 
 - **`minimumReleaseAge = 604800`** (7 days) in `bunfig.toml` — blocks fresh npm publishes. CVE bypass: edit `bunfig.toml` `minimumReleaseAgeExcludes`, install, follow-up PR removes the exclude.
 - **`bun audit`** runs advisory in CI (`_lint-and-typecheck.yml`). Surfaces npm advisories in the step summary; does NOT block PRs today.
-- **Bun bug #25305**: `bun update --latest` doesn't apply the gate to transitives. Workaround for bulk re-resolves: delete `bun.lock` first.
+- **Bun bug #25305 is closed on 1.4**: gated `bun update --latest` now holds transitives to the age gate too (probe evidence in `implementations-plan/bun-1.4-bump/lessons/phase-5.md`). Nuance: already-locked versions are never re-gated — full re-gating = deliberate lockfile regeneration. Review every bump with `bun pm diff`; triage advisories with `bun audit fix --dry-run` (full workflow in SECURITY.md).
 - **`@aztec/*` outside the policy** — exact-pinned, bumped manually. **Any Aztec version bump follows the `aztec-update` skill** ([`.claude/skills/aztec-update/SKILL.md`](./.claude/skills/aztec-update/SKILL.md)): it classifies the bump first (version-only vs a NETWORK RESET — where the redeploy is coupled to the bump, because `verify:deployments` gates the faucet build), then walks the full pin surface (accelerator + `@alejoamiras` takeover packages + patches + min-age excludes + the Noir toolchain/tags + portal-fork pins), the drift detectors, and — on a reset — the candidate-first redeploy + the five live canaries + the client storage-version bump. The running list of types coupled to the `@aztec` shape is logged in [`UPDATE.md`](./UPDATE.md).
 - **Renovate** runs via the Mend hosted App against `renovate.json` at repo root. 7-day age gate (mirrors Bun's), weekly Monday schedule, no auto-merge, Aztec line + `puppeteer` family disabled, `@types/node` capped at `<25`. Config validator runs in CI. The full Renovate policy lives in `SECURITY.md`.
-- **Bun-version Renovate PRs need manual sync**: Renovate bumps `package.json#packageManager` but NOT `.github/actions/setup-bun/action.yml`. Existing CI (`_lint-and-typecheck.yml`) won't catch the drift — review the PR's diff for both files.
+- **Bun-version Renovate PRs need manual sync**: Renovate bumps `package.json#packageManager` but NOT `.github/actions/setup-bun/action.yml` (the version input + its two cache-key occurrences — the ONLY other pin site now that `pr-quick.yml`'s commitlint job reuses the composite). Existing CI (`_lint-and-typecheck.yml`) won't catch the drift — review the PR's diff for both files. A Bun bump also requires the machine-wide local bun ≥ the pinned line before merge (the `--parallel` scripts need it; lockfile-format compatibility joins that list once the lockfile is regenerated to v2).
 
 ## Account-address freeze (production invariant)
 
@@ -360,7 +360,7 @@ Plans + audit transcripts under [`implementations-plan/`](./implementations-plan
 | When | Command |
 |---|---|
 | After any code change | `bun run lint` + `bun run typecheck` (or let the pre-commit hook do it). |
-| Before opening any UI PR | `bun run audit:vue` (typecheck → unit + component tests → lint → build). |
+| Before opening any UI PR | `bun run audit:vue` (typecheck ∥ unit + component tests ∥ lint, then build). |
 | When editing the popup, contracts, or anything user-visible | `bun run test:e2e` (smoke; no Aztec sandbox). |
 | When touching dApp / network / PXE behavior | `bun run e2e:agent` (network suite; owns anvil + aztec + playground per worktree — parallel-safe). |
 | When editing Storybook stories or component visuals | `bun run --cwd apps/extension build-storybook`. |
