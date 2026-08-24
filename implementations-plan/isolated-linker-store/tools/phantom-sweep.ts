@@ -11,7 +11,11 @@ import { join } from "node:path"
 
 const root = process.cwd()
 const workspaces = [...readdirSync(join(root, "apps")).map((d) => `apps/${d}`), ...readdirSync(join(root, "packages")).map((d) => `packages/${d}`)]
-const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s[^'"\n]*?from\s*['"]([^'".][^'"]*)['"]|(?:^|\n)\s*import\s*['"]([^'".][^'"]*)['"]|require\(\s*['"]([^'".][^'"]*)['"]\s*\)|import\(\s*['"]([^'".][^'"]*)['"]\s*\)/g
+// Matches: static import/export-from (incl. MULTILINE specifier lists — `[^'"]*?` spans
+// newlines), side-effect imports, require(), require.resolve(), dynamic import(), and
+// vi.mock()/jest.mock()/mock.module() targets. Still SOURCE-only (see BLIND SPOT above).
+const IMPORT_RE =
+	/(?:^|\n)\s*(?:import|export)\s[^'"]*?from\s*['"]([^'".][^'"]*)['"]|(?:^|\n)\s*import\s*['"]([^'".][^'"]*)['"]|require(?:\.resolve)?\(\s*['"]([^'".][^'"]*)['"]\s*\)|import\(\s*['"]([^'".][^'"]*)['"]\s*\)|(?:vi|jest)\.mock\(\s*['"]([^'".][^'"]*)['"]|mock\.module\(\s*['"]([^'".][^'"]*)['"]/g
 const BUILTIN = /^(node:|bun:|bun$|fs$|path$|url$|crypto$|os$|child_process$|module$|util$|events$|stream$|buffer$|http$|https$|net$|zlib$|assert$|process$|worker_threads$|readline$|tty$|dns$|vm$|perf_hooks$|string_decoder$|timers$|querystring$|constants$|async_hooks$|diagnostics_channel$|inspector$)/
 
 function pkgOf(spec: string): string {
@@ -24,7 +28,7 @@ function walk(dir: string, out: string[]) {
 		const p = join(dir, e)
 		const st = statSync(p)
 		if (st.isDirectory()) walk(p, out)
-		else if (/\.(ts|mts|cts|tsx|vue|js|mjs)$/.test(e)) out.push(p)
+		else if (/\.(ts|mts|cts|tsx|vue|js|mjs|cjs)$/.test(e)) out.push(p)
 	}
 }
 for (const ws of workspaces) {
@@ -38,7 +42,7 @@ for (const ws of workspaces) {
 	for (const f of files) {
 		const src = readFileSync(f, "utf8")
 		for (const m of src.matchAll(IMPORT_RE)) {
-			const spec = (m[1] ?? m[2] ?? m[3] ?? m[4]) as string
+			const spec = (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6]) as string
 			if (!spec || BUILTIN.test(spec) || spec.startsWith("@/") || spec.startsWith("~/") || spec.startsWith("virtual:")) continue
 			const pkg = pkgOf(spec)
 			if (pkg === manifest.name || declared.has(pkg)) continue
