@@ -25,7 +25,7 @@ Bump the repo's Bun toolchain 1.3.14 → 1.4.0 and land the Tier-1 wins that nee
 
 ## Phases
 
-### Phase 1 — Pin bump + CI pin dedupe
+### Phase 1 — Pin bump + CI pin dedupe ✓ (gate green 2026-08-24: actionlint 0 · ci-gating 7/7 · grep clean)
 Bump `package.json#packageManager` → `bun@1.4.0` (exactly — see A1); `setup-bun/action.yml` version + both cache-key occurrences → `1.4.0`; replace pr-quick.yml:199-209 with `uses: ./.github/actions/setup-bun`; update CLAUDE.md:30 (pin prose) and CLAUDE.md:62 (drift note now lists exactly two pin files). Commit the parent dossier + index entries as a preceding docs commit.
 **Validation gate**: `$B run lint:actions` exit 0 · `$B test scripts/ci-cd/` green (behavior-gating still parses the edited workflow) · `grep -rn '1\.3\.14' package.json .github/ CLAUDE.md` returns nothing. Layers: lint(workflows) + unit(ci-gating).
 
