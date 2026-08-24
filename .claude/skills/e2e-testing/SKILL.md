@@ -543,3 +543,9 @@ starved 2-core CI runner, which is why these fire in CI and "never reproduce" lo
 - The four mechanisms + residuals: `implementations-plan/mac-identity-binding/lessons/phase-2-smoke-deflake.md`.
   Guard-vs-bootstrap decisions now live in `apps/extension/src/popup/auth-guard.ts` — extend
   that decision core (it's unit-tested) rather than re-adding flag checks in the router guard.
+
+## Testing product flows that call `chrome.runtime.reload()` (2026-08-24, `implementations-plan/migration-lifecycle/`)
+
+The standing rule above ("never use `runtime.reload()` for state reset") gained a second face: the PRODUCT now calls it legitimately (the migration barrier's Retry button — a deterministic restart, since popup close doesn't kill the SW). Under `--load-extension`, Chrome DISABLES the unpacked extension on `runtime.reload()`: every later `chrome-extension://` goto fails `net::ERR_BLOCKED_BY_CLIENT` until a browser restart — no retry loop recovers it.
+
+Harness pattern: click the button, wait briefly for its pre-reload storage write to land (belt — the handler awaits the write before reloading), then `browser.close()` + relaunch over the same `userDataDir`. Design the product flow so convergence is IMPOSSIBLE without the button's side effect (the migration gate short-circuits without the one-shot token), and the relaunch-based assertion proves the whole chain — no in-harness reload observation needed. Worked example: `tests/e2e/migration.test.ts` `retryAndReopen`.

@@ -83,7 +83,7 @@ function makeDeps() {
 	} as unknown as ClockPort
 	const configLoad = vi.fn(async () => {})
 	const config = { load: configLoad } as unknown as ConfigStore
-	return { deps: { browserApi, clock, config, logger: noopLogger }, configLoad }
+	return { deps: { browserApi, clock, config, logger: noopLogger, manifestVersion: "0.0.0-test" }, configLoad }
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 10))
