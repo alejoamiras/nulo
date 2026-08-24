@@ -7,7 +7,7 @@
 
 Bump the repo's Bun toolchain 1.3.14 → 1.4.0 and land the Tier-1 wins that need no runtime/topology change: pin-surface dedupe, lockfile-v2 migration, `bun dedupe`, `bun run --parallel` scripts, the renovate `npx`→`bunx` swap, and the pm-workflow documentation. Arcs B–D (isolated linker, vitest-on-bun, Bun-native tooling) are explicitly OUT of scope.
 
-**⚠️ Fleet cutover (empirically verified)**: Bun 1.3.14 CANNOT install against the v2 lockfile this PR produces — frozen installs fail (`Ignoring lockfile … lockfile is frozen`), and unfrozen installs would rewrite the format back down, thrashing between agents. **Merging this PR requires the machine-wide bun (and every live worktree/agent) to be on ≥1.4.0 first.** See Ask A3.
+**⚠️ Fleet note (revised during Phase 2 — see its outcome)**: Bun 1.3.14 cannot read a *v2* lockfile (verified), but Bun 1.4 turns out to NEVER migrate an existing v1 lockfile — not on install, not on `--save-text-lockfile`, not on a write (verified) — so this PR ships with the lockfile still at v1 and 1.3.14 agents keep working. The machine-wide upgrade (owner-delegated, Delivery 4b) is still required before merge for the `--parallel` scripts and CI parity, but it is no longer a lockfile-compat hard block. v2's stricter integrity checks arrive whenever the lockfile is deliberately regenerated (earmarked for Arc B, whose linker experiment regenerates it anyway).
 
 ## Scope
 
@@ -29,10 +29,9 @@ Bump the repo's Bun toolchain 1.3.14 → 1.4.0 and land the Tier-1 wins that nee
 Bump `package.json#packageManager` → `bun@1.4.0` (exactly — see A1); `setup-bun/action.yml` version + both cache-key occurrences → `1.4.0`; replace pr-quick.yml:199-209 with `uses: ./.github/actions/setup-bun`; update CLAUDE.md:30 (pin prose) and CLAUDE.md:62 (drift note now lists exactly two pin files). Commit the parent dossier + index entries as a preceding docs commit.
 **Validation gate**: `$B run lint:actions` exit 0 · `$B test scripts/ci-cd/` green (behavior-gating still parses the edited workflow) · `grep -rn '1\.3\.14' package.json .github/ CLAUDE.md` returns nothing. Layers: lint(workflows) + unit(ci-gating).
 
-### Phase 2 — Lockfile v2 migration (own commit, no dep changes)
-`$B install` (unfrozen) to rewrite `bun.lock` → `lockfileVersion: 2`.
-**Semantic lockfile check (codex condition)**: extract the full `name@version + integrity` tuple set pre/post and diff — structural/integrity-field additions and one-time optional-peer placement churn are acceptable; **any resolved-version or integrity change of a real dependency aborts the phase**. Then run `$B install` a second time and assert the lockfile is a fixed point (zero diff), then `$B install --frozen-lockfile`.
-**Validation gate**: `head -3 bun.lock` shows `"lockfileVersion": 2` · tuple diff empty (versions/integrity) · second install produces zero lockfile diff · `$B install --frozen-lockfile` exit 0 · `$B test scripts/release/ scripts/ci-cd/` green. Layers: unit + install integrity.
+### Phase 2 — Lockfile v2 migration ✓-as-DEFERRED (outcome 2026-08-24: not forcible; documented below)
+**OUTCOME (empirical, 2026-08-24): the migration is not forcible and is DEFERRED.** Bun 1.4.0 preserves an existing v1 `bun.lock` on plain install, on `--save-text-lockfile`, and even on a write-triggering change (`bun remove` in a scratch v1 project stayed v1) — the changelog's "run bun install to migrate" does not hold; no `--lockfile-version` flag exists. The only route to v2 is regenerating the lockfile from scratch, which re-resolves every semver range — exactly the churn this arc's resolution-neutrality rule forbids. Decision: ship v1 (1.3.14-readable, fleet risk retired), earmark the deliberate regeneration for Arc B (its isolated-linker experiment regenerates the lockfile anyway, under its own gates).
+**Gate as run**: repo `$B install` → "no changes", lockfile untouched (git status clean) · scratch write-test proves v1 preservation · `$B install --frozen-lockfile` exit 0 (re-verified in Phase 3's gate) · plan + fleet note amended to match reality. The original v2 gate (tuple diff, fixed point) transfers to Arc B's regeneration step.
 
 ### Phase 3 — Dedupe + advisory CI check (own commit)
 `$B dedupe` (collapses the 4 known duplicates). **Downgrade-safety review (codex condition)** — `bun audit` alone is NOT sufficient:
