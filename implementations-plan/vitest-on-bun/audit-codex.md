@@ -53,3 +53,44 @@ VERDICT: conditional approve — conditions: make the soak gate fail-closed, req
 ### Disposition
 
 See `lessons/gate-convergence.md` (adopted / rejected per finding, with verification of the upstream claim) and plan.md v2.
+
+## Rounds 2–3 — same session, plans v2 and v3
+
+Verbatim verdicts and findings are in `lessons/gate-convergence.md` (round 2: "conditional approve — conditions: make provenance comparable across phases, replace the impossible `spawnSync` signal contract, and repair/fail-close sentinel resolution and command metadata"; round 3: "conditional approve — conditions: fix Node lifecycle fidelity, attest ESM resolution, and invalidate stale matrix/dispatch evidence"). Raw responses: the session's `response-1.md` / `response-2.md` (CODEX_DIR recorded in the convergence log).
+
+## Fresh-context final pass — 2026-08-24 — plan v4
+
+Session `01a035de-5ec7-7ae3-b370-2bcc82a01465` · gpt-5.6-sol · xhigh · read-only · NEW session with the consolidated plan + full decision ledger + convergence log.
+
+### Verdict (verbatim)
+
+VERDICT: conditional approve — conditions: close provenance gaps, normalize evidence, isolate fixtures, and make every gate machine-checkable
+
+### Findings (verbatim)
+
+**Adversarial / security**
+- [High] Local soaks trust an unverified `node_modules`. `--no-install` prevents auto-install but does not prove installed bytes match `bun.lock` (`plan.md:41,113`). Require a recorded `bun install --frozen-lockfile` immediately before the clean matrix, or equivalent clean-install attestation.
+- [Med] "No absolute paths" contradicts recorded `argv`, `execPath`, reporter path, and resolver outputs (`plan.md:44,46-49,115`). `Bun.resolveSync` returns a path while Node returns a `file:` URL, causing false resolution differences and leaking home paths. Canonicalize repo paths, file URLs, temporary paths, and resolver errors before comparison/commit.
+- [Med] Compact summaries are review evidence, not tamper-evident: full inventories are gitignored (`plan.md:49`). Avoid calling them "self-attesting"; preserve comparator output/digests in the PR or an immutable run transcript.
+
+**Assumption attack**
+- Facts: [Low] F1's literal "no workflow YAML names `vitest`" is false: `.github/workflows/_network-e2e.yml:20,47,84,126` does. The intended fact—no unit workflow directly invokes Vitest—is correct: `_unit-tests.yml:24-25` calls `test:all`. [Low] The eleven scripts, landing lifecycle, faucet smoke, Vitest defect, versions, Bun pin, and required-check producers check out.
+- Inferences: [Med] The Node reference is not literally the pre-flip environment: it manually reconstructs lifecycle execution and injects `NODE_OPTIONS` (`plan.md:43,46`). Resolve ESM evidence outside the test process, or prove and record that this environment difference is observationally inert.
+- Asks: [Low] No owner decision is silently consumed. A1–A3 are technical choices; policy/scope changes remain A4/A5/A7.
+
+**Implementation critique**
+- [High] Failure fixtures under `scripts/ci-cd/test-soak/fixtures/**` risk direct discovery by recursive `bun test scripts/ci-cd/` (`package.json:33`; `recon.md:38`; `plan.md:41`). Use non-`*.test.*` fixture names plus fixture-local Vitest `include`, otherwise crash/hang controls can crash or hang CI itself.
+- [Med] `sourcemap.sentinel.ts` will not match Vitest's normal test pattern, and its expected nonzero result has no machine-checking command in the Phase 0 gate. Give it a discoverable name/config and a wrapper that requires failure while asserting the exact source location.
+- [Med] The post-matrix allowlist permits all `implementations-plan/**`, including executable probe code, contradicting "any executable change invalidates the matrix". Narrow it to explicit Markdown and baseline-evidence paths.
+- [Low] Do not enable `globals: true` in formerly config-less workspaces merely for convention; preserve their existing defaults and add only `sharedTest` plus explicit Node environment.
+
+**Gates**
+- [High] `compare` does not require `gitDirty === false` or Node `failedRuns === 0`, and the singular runtime record does not prove all N executions used the claimed engine. Require both summaries clean, both `failedRuns === 0`, and one present, consistent reporter record per run.
+- [Med] Unexpected ESM-resolution differences merely require "investigation," with no acceptance rule. Fail automatically outside an exact reviewed allowlist.
+- [Low] Phase 1's command asks for run-level `conclusion`, while its pass rule requires the named job. Standardize on `gh run view <id> --json jobs` and assert `quality-status`; delivery should explicitly assert all three named required checks at PR HEAD.
+
+**looks fine** — Per-script `--bun`, the repo-wide stopgap, one-PR topology, full N=30 matrix, ×5 fan-out, and rejection of the global `bunfig.toml` flip are the right choices. No rejected alternative is better.
+
+### Disposition
+
+All twelve findings adopted in plan v5 (table in `lessons/gate-convergence.md`); re-pass requested on the same fresh session.

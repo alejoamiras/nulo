@@ -79,8 +79,8 @@
     </div>
     <div class="phase">
       <h3>Phase 1 — Switch, then prove it at one commit</h3>
-      <p>Switch every package's <code>test</code> command to Bun (one commit per package, so any one can be reverted alone). Then, at that single commit, run each of the twelve suites 30 times on Node and 30 times on Bun and compare all twelve pairs; run the whole-repo test command five times the way CI runs it (all packages at once); and trigger the real CI pipeline on the branch to see it on GitHub's runners before any pull request exists. A Bun-only failure is never "a flake to retry": either the test assumed something Node-specific and gets fixed to be runtime-neutral, or Bun really differs — then that package stays on Node and the decision comes back to you.</p>
-      <p class="proves">Proves itself by: 24 soak reports with zero failed runs, 12 strict comparisons passing, the 5× whole-repo run green, the dispatched CI run green.</p>
+      <p>Switch every package's <code>test</code> command to Bun (one commit per package, so any one can be reverted alone). Then, at that single commit and after a fresh install from the lockfile, run each of the twelve suites 30 times on Node and 30 times on Bun and compare all twelve pairs strictly (same commit, same installed packages, same list of tests, zero failed runs on either side, every run's engine recorded); run the whole-repo test command five times the way CI runs it (all packages at once); and trigger the real CI pipeline on the branch to see it on GitHub's runners before any pull request exists. Any code change after that proof re-runs the whole proof. A Bun-only failure is never "a flake to retry": either the test assumed something Node-specific and gets fixed to be runtime-neutral, or Bun really differs — then that package stays on Node and the decision comes back to you.</p>
+      <p class="proves">Proves itself by: the recorded fresh install, 24 soak reports with zero failed runs, 12 strict comparisons passing, the 5× whole-repo run green, the CI run tied to that exact commit green.</p>
     </div>
     <div class="phase">
       <h3>Phase 2 — Documentation</h3>

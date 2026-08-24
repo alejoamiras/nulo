@@ -90,6 +90,27 @@ Verbatim verdict: "conditional approve — conditions: fix Node lifecycle fideli
 
 Rejected: nothing. Disputed: nothing. Three resumed rounds reached zero disputes with every finding adopted; per the owner's protocol the gate itself is the fresh-context pass below.
 
-## Final — fresh-context codex pass (plan v4) — pending
+## Final — fresh-context codex pass, round 1 (new session `01a035de-5ec7-7ae3-b370-2bcc82a01465`, xhigh, plan v4) — **conditional approve**
+
+Verbatim: "VERDICT: conditional approve — conditions: close provenance gaps, normalize evidence, isolate fixtures, and make every gate machine-checkable". Looks-fine: "Per-script `--bun`, the repo-wide stopgap, one-PR topology, full N=30 matrix, ×5 fan-out, and rejection of the global `bunfig.toml` flip are the right choices. No rejected alternative is better." Asks: "No owner decision is silently consumed."
+
+| # | Finding | Verified? | Disposition |
+|---|---|---|---|
+| F-1 | [High] Local soaks trust an unverified `node_modules`; `--no-install` does not prove installed bytes match `bun.lock` → recorded `bun install --frozen-lockfile` immediately before the clean matrix | ✓ | **ADOPTED** — clean-install attestation step in Phase 1; `lockfileSha256` in every summary; compare requires equality |
+| F-2 | [Med] "No absolute paths" contradicts recorded argv/execPath/reporter path/resolver outputs; `Bun.resolveSync` returns a path, Node a `file:` URL → canonicalize | ✓ (F14) | **ADOPTED** — canonicalization in `lib.ts` (`<repo>/…`, `<tmp>/…`, `<bun>`/`<node>`, URLs → paths, error messages too), tested |
+| F-3 | [Med] Compact summaries are not tamper-evident; do not call them self-attesting; preserve comparator output/digests | ✓ | **ADOPTED** — wording changed; comparator stdout + digests preserved in `lessons/phase-1.md` and the PR body |
+| F-4 | [Low] F1 "no workflow YAML names vitest" is false (`_network-e2e.yml` does) | ✓ | **ADOPTED** — reworded to "no unit workflow invokes vitest directly" |
+| F-5 | [Med] The Node reference reconstructs lifecycle and injects `NODE_OPTIONS` → resolve ESM evidence outside the test process, or prove the difference inert | ✓ | **ADOPTED** — `resolve-esm.mjs` runs outside the test process (once per summary, workspace-anchored, engine matched to the run records); no environment injection remains; I7 states the residual equivalence claim explicitly |
+| F-6 | [High] Fixtures under `scripts/ci-cd/test-soak/fixtures/**` risk discovery by recursive `bun test scripts/ci-cd/` → crash/hang controls could crash or hang CI | ✓ (`bun test` recurses; F10) | **ADOPTED** — `*.fixture.ts` names, fixture-local `include: ["*.fixture.ts"]`, and `cli.test.ts` asserts no fixture file matches `bun test`'s pattern |
+| F-7 | [Med] `sourcemap.sentinel.ts` would not match vitest's pattern and had no machine check → discoverable name/config + a wrapper requiring failure at the exact location | ✓ | **ADOPTED** — the sentinel becomes the `sourcemap` fixture; `cli.test.ts` requires the run to fail with `sourcemap.fixture.ts:<line>` on both engines |
+| F-8 | [Med] The post-matrix allowlist admitted `implementations-plan/**` including executable probe code → narrow to Markdown + baseline evidence | ✓ | **ADOPTED** — allowlist = `**/*.md` + `implementations-plan/vitest-on-bun/lessons/baselines/**/*.json`; the arc-scoped `tools/probes/` directory no longer exists |
+| F-9 | [Low] Do not add `globals: true` to formerly config-less workspaces | ✓ | **ADOPTED** — `...sharedTest` + explicit `environment: "node"` only |
+| F-10 | [High] `compare` must require `gitDirty === false` on both, `failedRuns === 0` on BOTH, and one consistent reporter record per run | ✓ | **ADOPTED** — per-run runtime records (`runs[i].runtime`), both-sides clean and zero-failure requirements; `failedRun` also true when the runtime record is missing |
+| F-11 | [Med] Resolution differences need an acceptance rule → fail automatically outside an exact reviewed allowlist | ✓ | **ADOPTED** — `--resolve-allow` (default: the four `"bun"`-condition packages); any other differing spec fails the compare |
+| F-12 | [Low] Standardize on `gh run view <id> --json jobs` + assert `quality-status`; delivery asserts all three named required checks at PR HEAD | ✓ | **ADOPTED** |
+
+Rejected: nothing. Disputed: nothing.
+
+## Final — fresh-context codex re-pass (plan v5) — pending
 
 ## Final — fresh-context codex pass — pending
