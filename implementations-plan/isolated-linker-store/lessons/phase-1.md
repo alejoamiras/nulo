@@ -18,3 +18,15 @@
 ## Gate (all under machine bun 1.4.0, hoisted layout)
 
 `bun run audit:vue` exit 0 (4,597 tests incl. the 6 identity assertions; chrome build ✓) · `bun run test:all` exit 0 · resolver 14/14 · `bun install --frozen-lockfile` no changes · `bun test scripts/release/ scripts/ci-cd/` 94/94 · `bun run lint:actions` 0 · `bun run lint` 0 · gen-remappings + `forge remappings` assertion ✓ (forge 1.7.1) · forge build: environmental skip (lib unpopulated), logged.
+
+## Owner-triggered design challenge (post-gate, pre-PR): the resolver mechanism
+
+The owner reopened the design ("looks so monkey-patchy"). Per the convergence protocol, a fresh codex round steelmanned 7 alternatives + 2 it invented (session in scratch; verdict file preserved). Ruling: **the shared package survives every wholesale alternative** (per-caller inlines → the 6-copy drift history; codegen → stale machine-specific state; vendoring → shadow distribution + lockstep re-invention; postinstall links → relocated, less honest complexity; export-map patches → literally monkey-patching third-party manifests AND evicting packages from the global store), **but the three-attempt discovery mechanism loses to `require.resolve.paths(pkg)`** — Node's DOCUMENTED ordered package-search locations, scanned for the first validated `package.json`. Adopted in full:
+
+- `entry` anchors DELETED from the whole API (the ugliest wart — the owner's instinct was correct); pxe/sqlite3mc need no hints.
+- First-match validation by manifest `name`; failure lists the searched locations.
+- NEW containment guard: asset paths escaping the verified package root are rejected (+ test).
+- `/@fs/` normalizer KEPT centralized (codex: distributing it to callers spreads cwd/transform assumptions).
+- Also noted: codex probed that `Bun.resolveSync` currently resolves exports-blocked `pkg/package.json` — an UNDOCUMENTED bypass we deliberately do not rely on.
+
+Re-gate after the rewrite: resolver 14/14 + tsc · identity 6/6 · aztec-runtime 189/189 · bridge-core 223/227 (4 pre-existing skips) · `audit:vue` exit 0 (4,597 tests) · `test:all` exit 0.

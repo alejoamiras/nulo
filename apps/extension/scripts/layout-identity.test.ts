@@ -18,7 +18,6 @@ describe("layout identity — extension-anchored", () => {
 	it("sqlite3mc-wasm: declared pin, in lockstep with the copy @aztec/kv-store consumes", () => {
 		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", {
 			from: fromExtension,
-			entry: "./vendor/jswasm/sqlite3.wasm",
 			expectVersion: "5.0.1",
 			lockstepVia: "@aztec/kv-store",
 		})
@@ -82,14 +81,7 @@ describe("layout identity — cross-workspace anchors (resolution runs from the 
 		expect(existsSync(resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: fromBridgeCore }))).toBe(true)
 	})
 
-	it("aztec-runtime: @aztec/pxe storage metadata via its entry anchor (pxe exports no '.')", () => {
-		expect(
-			existsSync(
-				resolvePackageAsset("@aztec/pxe", "dest/storage/metadata.js", {
-					from: fromAztecRuntime,
-					entry: "./server",
-				}),
-			),
-		).toBe(true)
+	it("aztec-runtime: @aztec/pxe storage metadata (pxe exports no '.' — no hints needed)", () => {
+		expect(existsSync(resolvePackageAsset("@aztec/pxe", "dest/storage/metadata.js", { from: fromAztecRuntime }))).toBe(true)
 	})
 })

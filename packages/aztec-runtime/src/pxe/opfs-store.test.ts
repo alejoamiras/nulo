@@ -28,7 +28,7 @@ function fakeStore(storedStamp: string | undefined) {
 const ROLLUP = "0x00000000000000000000000000000000000000aa"
 
 function resolvePackageFile(pkg: string, file: string): string {
-	return resolvePackageAsset(pkg, file, { from: import.meta.url, entry: pkg === "@aztec/pxe" ? "./server" : undefined })
+	return resolvePackageAsset(pkg, file, { from: import.meta.url })
 }
 
 describe("opfs-store upstream pins", () => {

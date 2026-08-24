@@ -9,37 +9,30 @@ const fromExtension = new URL("../../../apps/extension/package.json", import.met
 const fromBridgeCore = new URL("../../bridge-core/package.json", import.meta.url).href
 const fromAztecRuntime = new URL("../../aztec-runtime/package.json", import.meta.url).href
 
-describe("resolvePackageRoot", () => {
-	test("plain package with unblocked package.json (vitest)", () => {
+describe("resolvePackageRoot (search-path scan — exports maps deliberately ignored)", () => {
+	test("plain package (vitest)", () => {
 		const root = resolvePackageRoot("vitest", { from: import.meta.url })
 		expect(existsSync(`${root}/package.json`)).toBe(true)
 		expect(isUnderNodeModules(root)).toBe(true)
 	})
 
-	test("patched noir package whose exports map blocks ./package.json but exposes '.' under node (attempt 2)", () => {
+	test("patched noir package whose exports map blocks ./package.json", () => {
 		const root = resolvePackageRoot("@aztec/noir-noirc_abi", { from: fromExtension })
 		expect(existsSync(`${root}/nodejs/noirc_abi_wasm.js`)).toBe(true)
 	})
 
-	test("package with NO '.' export resolves via an entry anchor (@aztec/pxe)", () => {
-		const root = resolvePackageRoot("@aztec/pxe", { from: fromAztecRuntime, entry: "./server" })
+	test("package with NO '.' export needs no anchor hints (@aztec/pxe)", () => {
+		const root = resolvePackageRoot("@aztec/pxe", { from: fromAztecRuntime })
 		expect(existsSync(`${root}/dest/storage/metadata.js`)).toBe(true)
 	})
 
-	test("import-condition-only '.' resolves via an entry anchor (@aztec/sqlite3mc-wasm)", () => {
-		const root = resolvePackageRoot("@aztec/sqlite3mc-wasm", {
-			from: fromExtension,
-			entry: "./vendor/jswasm/sqlite3.wasm",
-		})
+	test("import-condition-only '.' needs no anchor hints (@aztec/sqlite3mc-wasm)", () => {
+		const root = resolvePackageRoot("@aztec/sqlite3mc-wasm", { from: fromExtension })
 		expect(existsSync(`${root}/vendor/jswasm/sqlite3-opfs-async-proxy.js`)).toBe(true)
 	})
 
-	test("exports-blocked package WITHOUT an entry anchor throws the instructive error", () => {
-		expect(() => resolvePackageRoot("@aztec/sqlite3mc-wasm", { from: fromExtension })).toThrow(/entry.*anchor/i)
-	})
-
-	test("unknown package throws", () => {
-		expect(() => resolvePackageRoot("@nulo/does-not-exist-ever", { from: import.meta.url })).toThrow()
+	test("unknown package throws listing the searched locations", () => {
+		expect(() => resolvePackageRoot("@nulo/does-not-exist-ever", { from: import.meta.url })).toThrow(/DECLARED dependency.*Searched/s)
 	})
 })
 
@@ -53,6 +46,10 @@ describe("resolvePackageAsset", () => {
 
 	test("missing asset fails loudly at resolve time", () => {
 		expect(() => resolvePackageAsset("vitest", "no/such/file.bin", { from: import.meta.url })).toThrow(/does not exist/)
+	})
+
+	test("asset path escaping the package root is rejected", () => {
+		expect(() => resolvePackageAsset("vitest", "../vite/package.json", { from: import.meta.url })).toThrow(/escapes the package root/)
 	})
 })
 
@@ -68,23 +65,15 @@ describe("resolveExportedAsset", () => {
 
 describe("assertPackageIdentity", () => {
 	test("verifies name + exact version and returns realpath evidence", () => {
-		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", {
-			from: fromExtension,
-			entry: "./vendor/jswasm/sqlite3.wasm",
-			expectVersion: "5.0.1",
-		})
+		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", { from: fromExtension, expectVersion: "5.0.1" })
 		expect(report.realRoot).toBe(realpathSync(report.root))
 		expect(report.version).toBe("5.0.1")
 	})
 
 	test("wrong expectVersion throws with both versions in the message", () => {
-		expect(() =>
-			assertPackageIdentity("@aztec/sqlite3mc-wasm", {
-				from: fromExtension,
-				entry: "./vendor/jswasm/sqlite3.wasm",
-				expectVersion: "9.9.9",
-			}),
-		).toThrow(/5\.0\.1.*9\.9\.9/)
+		expect(() => assertPackageIdentity("@aztec/sqlite3mc-wasm", { from: fromExtension, expectVersion: "9.9.9" })).toThrow(
+			/5\.0\.1.*9\.9\.9/,
+		)
 	})
 
 	test("mustContain verifies the patched noir exports marker (the patch's own content)", () => {
@@ -107,7 +96,6 @@ describe("assertPackageIdentity", () => {
 	test("lockstep: direct extension resolution and the kv-store two-hop realpath to the SAME copy", () => {
 		const report = assertPackageIdentity("@aztec/sqlite3mc-wasm", {
 			from: fromExtension,
-			entry: "./vendor/jswasm/sqlite3.wasm",
 			expectVersion: "5.0.1",
 			lockstepVia: "@aztec/kv-store",
 		})

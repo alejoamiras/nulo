@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { createRequire } from "node:module"
-import { dirname, join, sep } from "node:path"
+import { dirname, join, normalize, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 
 /**
@@ -11,16 +11,17 @@ import { fileURLToPath } from "node:url"
  * no repo-root hoisting is ever assumed. This package exists because six
  * independent copies of a root-walking resolver drifted apart; see
  * implementations-plan/isolated-linker-store/recon.md.
+ *
+ * Discovery deliberately IGNORES exports maps: the whole point is reaching
+ * unexported files (wasm binaries, contract artifacts, storage internals) of
+ * exactly-pinned packages. Instead of guessing exported entries and ascending
+ * from resolved files, it scans `require.resolve.paths(pkg)` — Node's
+ * DOCUMENTED ordered package-search locations for the anchor — for the first
+ * directory whose `<pkg>/package.json` exists and names the right package.
  */
 export interface ResolveOptions {
 	/** The caller's `import.meta.url` (or an absolute file path) — anchors resolution at the declaring workspace. */
 	from: string
-	/**
-	 * Exported subpath to anchor root-discovery when the package's exports map
-	 * blocks `./package.json` AND has no usable `.` export (e.g. `@aztec/pxe`
-	 * exports only subpaths; `@aztec/sqlite3mc-wasm`'s `.` is import-condition-only).
-	 */
-	entry?: string
 }
 
 /**
@@ -42,67 +43,45 @@ function toFileAnchor(from: string): string {
 	return from
 }
 
-function baseDirOf(from: string): string {
-	return dirname(toFileAnchor(from))
-}
-
-function ascendToPackageRoot(startFile: string, pkg: string): string {
-	let dir = dirname(startFile)
-	while (dir !== dirname(dir)) {
-		const manifest = join(dir, "package.json")
-		if (existsSync(manifest)) {
-			try {
-				const name = (JSON.parse(readFileSync(manifest, "utf8")) as { name?: string }).name
-				if (name === pkg) return dir
-			} catch {
-				// Unparseable package.json mid-ascent (e.g. a fixture); keep climbing.
-			}
-		}
-		dir = dirname(dir)
-	}
-	throw new Error(`resolve-asset: walked to filesystem root without finding the package.json of ${pkg}`)
-}
-
 /**
- * Absolute path of `pkg`'s package root, resolved from the declaring workspace.
- * Tries `<pkg>/package.json` first; on an exports-map block, resolves the
- * `entry` subpath (required in that case) and ascends to the matching root.
+ * Absolute path of `pkg`'s package root, resolved from the declaring
+ * workspace's ordered search paths. Never consults exports maps and never
+ * walks from a resolved file — the first search location with a validated
+ * `package.json` wins, which under the isolated linker is the anchor
+ * workspace's own (declared-deps-only) node_modules.
  */
 export function resolvePackageRoot(pkg: string, options: ResolveOptions): string {
 	const require = createRequire(toFileAnchor(options.from))
-	// Attempt 1: packages whose exports map does not block ./package.json (or have none).
-	try {
-		return dirname(require.resolve(`${pkg}/package.json`))
-	} catch {
-		// Attempt 2: exports-mapped packages whose "." satisfies the require
-		// condition set (the patched @aztec/noir-* shape: "." with a node condition).
+	const searchPaths = require.resolve.paths(pkg) ?? []
+	for (const base of searchPaths) {
+		const root = join(base, pkg)
+		const manifest = join(root, "package.json")
+		if (!existsSync(manifest)) continue
 		try {
-			return ascendToPackageRoot(require.resolve(pkg), pkg)
+			const name = (JSON.parse(readFileSync(manifest, "utf8")) as { name?: string }).name
+			if (name === pkg) return root
 		} catch {
-			// Attempt 3: packages with NO usable "." under require (@aztec/pxe has no
-			// "." at all; @aztec/sqlite3mc-wasm's "." is import-condition-only) —
-			// the caller must anchor via an exported subpath.
-			if (!options.entry) {
-				throw new Error(
-					`resolve-asset: ${pkg} blocks ./package.json and its "." export is unusable under require; ` +
-						`pass an { entry } anchor — an exported subpath such as { entry: "./vendor/jswasm/sqlite3.wasm" }.`,
-				)
-			}
-			const anchor = require.resolve(`${pkg}/${options.entry.replace(/^\.\//, "")}`)
-			return ascendToPackageRoot(anchor, pkg)
+			// Unparseable manifest in a search location; keep scanning.
 		}
 	}
+	throw new Error(
+		`resolve-asset: ${pkg} not found in any package-search location of ${toFileAnchor(options.from)} — ` +
+			`is it a DECLARED dependency of that workspace? Searched:\n  ${searchPaths.join("\n  ")}`,
+	)
 }
 
 /**
  * Absolute path of a file inside `pkg`. The file does NOT need to be exported —
  * the package root is found first, then `assetPath` is joined onto it. Throws
- * if the resulting file does not exist (a missing asset must fail loudly at
- * config-load time, not at bundle-serve time).
+ * if the resulting path escapes the package root or does not exist (a missing
+ * asset must fail loudly at config-load time, not at bundle-serve time).
  */
 export function resolvePackageAsset(pkg: string, assetPath: string, options: ResolveOptions): string {
 	const root = resolvePackageRoot(pkg, options)
-	const resolved = join(root, assetPath)
+	const resolved = normalize(join(root, assetPath))
+	if (!resolved.startsWith(root + sep) && resolved !== root) {
+		throw new Error(`resolve-asset: asset path ${assetPath} escapes the package root of ${pkg}`)
+	}
 	if (!existsSync(resolved)) {
 		throw new Error(`resolve-asset: ${pkg} resolved to ${root} but ${assetPath} does not exist inside it`)
 	}
@@ -174,8 +153,7 @@ export function assertPackageIdentity(pkg: string, options: IdentityOptions): Id
 		const viaRoot = resolvePackageRoot(options.lockstepVia, { from: options.from })
 		// Anchor inside the intermediary so ITS dependency edge does the resolving.
 		const viaAnchor = join(viaRoot, "package.json")
-		const lockstepRoot = resolvePackageRoot(pkg, { from: viaAnchor, entry: options.entry })
-		const lockstepReal = realpathSync(lockstepRoot)
+		const lockstepReal = realpathSync(resolvePackageRoot(pkg, { from: viaAnchor }))
 		report.lockstepRealRoot = lockstepReal
 		if (lockstepReal !== realRoot) {
 			throw new Error(
@@ -187,9 +165,7 @@ export function assertPackageIdentity(pkg: string, options: IdentityOptions): Id
 	return report
 }
 
-/** True when `path` (a resolved file/dir) lies inside some node_modules directory of `root`. */
+/** True when `path` (a resolved file/dir) lies inside some node_modules directory. */
 export function isUnderNodeModules(path: string): boolean {
 	return path.split(sep).includes("node_modules")
 }
-
-export { baseDirOf as _baseDirOfForTests }
