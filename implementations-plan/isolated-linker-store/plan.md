@@ -93,4 +93,5 @@ Unresolved disagreements: none (B-3 resolved with recorded reasoning).
 
 ## Seeds
 
-Drafted with the ELI5 after the fresh-context codex final pass; finalized at the convergence gate.
+Drafted in the ELI5; finalized at the convergence gate.
+**ELI5 Artifact**: https://claude.ai/code/artifact/21293181-3ec0-4afb-9650-8e0398282ddf · source: `implementations-plan/isolated-linker-store/eli5.html` (redeploying that file updates the same URL).
