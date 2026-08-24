@@ -1,0 +1,33 @@
+# Recon — dapp-profile-binding (batch 3 of audit-448-remediation)
+
+Base: dev `6fe41b46`. One recon pass over the dApp transport/session layer; file:line cites verified. Distilled load-bearing subset.
+
+## N-04 machinery (verified)
+
+- **Session creation**: `onSessionEstablished` (`wallet-sdk/background.ts:229-241`) records a validation promise into `establishmentStatus` synchronously, delegates to `session-established.ts`. The `ActiveSession` object is UPSTREAM (`@aztec/wallet-sdk` `background_connection_handler.d.ts:34-51`): `{sessionId, sharedKey, verificationHash, tabId, origin, appId, connectedAt, chainInfo}` — **NO profileId field, not ours to extend**. Stamping requires a side-map `Map<sessionId, profileId>` in background.ts's closure — exactly the existing pattern (`sessionQueues:131`, `establishmentStatus:141`, `decryptLocks:350`), cleaned in `onSessionTerminated` (`:243-247`).
+- **Teardown inventory (complete)**: dapp-session-deleted tuple match (`:365-389` — THE template: filter `getActiveSessions()` by origin+chainId, loop `terminateSession`); tab close + cross-origin nav (`tab-lifecycle.ts:47-77`, fail-closed `terminateForTab` on parse errors); establishment-validation failure (`session-established.ts:70,:98`). **`onActiveProfileChanged` (`:392-423`) only drains the discovery queue** — never touches live sessions. No other `terminateSession` callers exist (grepped).
+- **Dispatch reads the active profile TWICE per message, independently**: `requireActiveProfile` at `background.ts:681` (→ `ctx.profileId`) and AGAIN inside `tryGetDappSessionByOriginAndChain` (`dapp-session/service.ts:114-129`, `:116` — `(origin, chainId)` args only; profileId re-derived internally). Neither read is anchored to the establishing profile. `dispatcher.ts:395,565,929,1063,1328` consume ctx.profileId.
+- **Termination propagation is a clean, already-UX-tested chain**: `terminateSession` → `SESSION_DISCONNECTED` to the tab → content script posts `WalletMessageType.DISCONNECT` → the dApp's `ExtensionWallet.handleDisconnect()` rejects in-flight calls, fires `onDisconnect`, marks disconnected (pinned by `session-explicitDisconnect.test.ts` via the playground's `pg-status`). Upstream also downgrades the discovery record to `status:'approved'`, which ages out via the 55 s cutoff.
+- **Plain LOCK today = per-call errors, no teardown**: `requireActiveProfile` throws "Wallet is locked" per message (`wallet-locked-mid-session.test.ts` pins it). So N-04 is precisely: an unlock to a DIFFERENT profile silently *succeeds* where lock errors — reframing how much must change.
+- **Residual race neither option closes for free**: a message dispatched around the switch re-reads the NEW active profile inside `service.ts:116` regardless; kill-on-switch closes it only from when the async listener runs; stamping closes it structurally ONLY with per-call validation against the stamp.
+- **Same-tuple nuance**: a `(origin, chainId)` DappSession row can legitimately exist under BOTH profiles — "terminate only if the new profile lacks a row" under-fixes the linkability concern.
+
+## N-26 (verified)
+
+`pendingVerification` is `const … = new Set<string>()` (`background.ts:112`), key `${origin}|${chainId}`; write `discovery-approval.ts:56` (pre-approve, rollback `:58` only on approve-didn't-land); sole steady-state delete is `session-established.ts:100-102`'s finally. Tab close mid-ECDH → entry never visited → SW-lifetime leak → every later reconnect reads `isNewConnection=true` → spurious emoji re-verify. **Layer convention for TTLs is stamp-on-write / check-on-read / lazy-delete** (`isDiscoveryExpired` + `DISCOVERY_STALE_MS=55s`, `wallet-bridge/discovery-queue.ts:15,23-25`; `DappSessionService.isExpired:322-334`) — NOT alarms (that's the profile session-manager's pattern, different layer). Type change `Set<string>` → `Map<string, number>` ripples 4 signature sites (`background.ts:112,464`; `discovery-approval.ts:30`; `session-established.ts:30`) + 2 test fixtures (`discovery-approval.test.ts:16`; `session-established.test.ts:32`).
+
+## N-19 (verified)
+
+`toJsonSafe` module-private (`background.ts:761-787`), single call site `:695`. The `seen` WeakSet accumulates all visited nodes (never pruned) → a SHARED non-cyclic reference serializes as "[Circular]". Fix = ancestor-chain tracking (add before recursing into children, delete after). **Directory convention**: every other background.ts slice is extracted to its own file + colocated test ("unit-testable without the whole SW service graph" — `session-established.ts`, `discovery-approval.ts`, `tab-lifecycle.ts`, `session-baton.ts`, `queued-journal.ts`); extract `toJsonSafe` the same way. Proof c6-2 (verbatim-copy by necessity) has two assertions to adopt: shared-ref-not-Circular AND true-cycle-still-terminates (guards the naive delete-the-WeakSet misfix). Dead artifact note: `background.ts:789-796` is a dangling JSDoc for the extracted `chainInfoToChainId` — refactor debris in the exact touch region.
+
+## Tests
+
+- NO `background.test.ts`, no composition test wraps `initWalletSdkHandler`. Extracted-slice unit tests are the convention (e.g. `tab-lifecycle.test.ts` injects a deps object + asserts terminate calls across a three-session matrix; `ping-pong.test.ts` builds a REAL upstream `BackgroundConnectionHandler` with `{sendToTab, addContentListener}` mocks).
+- Network e2e: `connect-dapp`, `session-reconnect`, `session-explicitDisconnect`, `session-tabClose`, `session-tabNavigate`, `wallet-locked-mid-session` — **none exercises second-profile-unlock**. This batch touches dApp/network behavior ⇒ the runbook's `e2e:agent` gate applies (solo).
+- Composition layer: admissible (no PXE/bb) but a departure from this directory's unit-test convention — prefer the `tab-lifecycle.test.ts` shape for a new extracted listener.
+
+## Reuse / adapt / collisions
+
+- **Reuse**: the `:365-389` filter-and-terminate idiom; `onSessionTerminated` cleanup block for any new side-map; `isDiscoveryExpired`'s helper shape for the marker TTL; the c6-2 assertions.
+- **Adapt**: `onActiveProfileChanged` gains session teardown (decide: also on lock→undefined? today lock deliberately keeps channels and errors per-call — keep that split); side-map stamped at establishment (session-established has the active profile? verify — validation reads the DappSession row which CARRIES profileId: stamp from there, not from a fresh active-profile read).
+- **Collisions**: in-flight dispatch race (above) — a hybrid (kill on switch + stamp-validate at dispatch) is the only complete closure; 4+2 signature sites for the N-26 type change; the true-cycle pin must survive N-19; `e2e:agent` runs solo per the goal contract.
