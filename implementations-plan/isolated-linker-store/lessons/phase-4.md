@@ -34,3 +34,9 @@ Decision: the regeneration is APPROVED for execution against the repo — every 
 - Double-install fixed point: byte-identical. `--frozen-lockfile`: no changes, exit 0.
 - Identity 6/6 + resolver 14/14 on the regenerated tree.
 - Final `bun audit --audit-level=low`: **23 (10 high, 10 moderate, 3 low)** — from 40 (22 high) pre-regen. Zero introduced.
+
+## Post-regen battery (all under the final v2 lock, isolated layout)
+
+`bun run audit:vue` exit 0 (4,597 tests; chrome build ✓ 5.03s) · `bun run test:all` exit 0 (12 suites, 0 failed) · `build:firefox` exit 0 (0 symlinks, 0 leaked paths) · WASM output hashes **byte-identical** to the hoisted Phase-3 baseline · chrome dist: 0 symlinks, 0 machine/store paths · fixture-armed smoke e2e under CI conditions: **112 pass / 0 fail / 6 release-artifact-only skips**. Generated `auto-imports.d.ts` gained two header comments from the unplugin-auto-import bump — committed separately (644116b0).
+
+History note: the lockfile commit was initially rejected by commitlint (102-char subject) and the lock got swept into the following docs commit by `git add -A`; repaired via soft-reset while still local — the lock is its own commit (7ba9ec48), per the plan's rule.
