@@ -53,12 +53,15 @@ import { TransactionService } from "./services/transaction/service"
 import { IncomingTransferService } from "./services/incoming-transfer/service"
 import { WindowManager } from "./services/window-manager/window-manager"
 import { initWalletSdkHandler } from "./services/wallet-sdk/background"
-import { type MigrationResult, Migrator } from "@nulo/wallet-core/migration"
+import { type MigrationResult, Migrator, SCHEMA_ATTEMPTS_KEY } from "@nulo/wallet-core/migration"
 import {
 	BASELINE_VERSION,
+	decodeBlockedStatus,
+	isValidRetryRequest,
 	migrations,
 	SCHEMA_BLOCKED_KEY,
 	SCHEMA_DEGRADED_KEY,
+	SCHEMA_RETRY_REQUESTED_KEY,
 	type MigrationBlockedStatus,
 	type MigrationDegradedStatus,
 } from "./storage/migrations"
@@ -70,7 +73,17 @@ export interface WalletRuntimeDeps {
 	clock: ClockPort
 	config: ConfigStore
 	logger: LoggerStore
+	/** Manifest version, injected at the construction site — `BrowserApi.runtime`
+	 *  exposes no `getManifest`, and the migration gate needs a build identity
+	 *  to void blocked verdicts (terminal included) once an update ships. */
+	manifestVersion: string
 }
+
+/** Minimum quiet time before the gate authorizes its ONE autonomous engine
+ *  re-run per blocked episode; every other retry needs the barrier's button. */
+const MIGRATION_RETRY_BACKSTOP_MS = 30 * 60_000
+
+type MigrationGateDecision = { action: "run"; backstopRuns: number; gestureRuns: number } | { action: "short-circuit"; reason: string }
 
 /** Handle returned by `createWalletRuntime`. Lifecycle-controlled, not singleton. */
 export interface WalletRuntime {
@@ -99,7 +112,7 @@ const HEARTBEAT_INTERVAL_MS = 10_000
 const UNINSTALL_URL = "https://nulo.sh/forms/uninstall"
 
 export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
-	const { browserApi, clock, config, logger } = deps
+	const { browserApi, clock, config, logger, manifestVersion } = deps
 	const services = new ServiceCollection()
 	let heartbeatHandle: TimerHandle | undefined
 	let reaper: JournalReaper | undefined
@@ -129,6 +142,72 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 			await browserApi.runtime.setUninstallURL(UNINSTALL_URL)
 		} catch (error) {
 			logger.log("wallet", LogLevel.Warn, "Failed to set uninstall URL", getErrorMessage(error))
+		}
+
+		// Migration GATE, before the engine: every MV3 respawn re-evaluates this
+		// module and calls start(), and every engine run on a failing migration
+		// spends one durable attempt — so a persisted non-terminal block must
+		// short-circuit ambient wakes. The engine runs only under an authority:
+		// no blocked status, a version-stamp invalidation (an update shipped —
+		// terminal verdicts must not outlive their build), a consumed Retry
+		// gesture, or the ONE autonomous backstop per episode. The gate FAILS
+		// CLOSED: if its reads/writes fail, no engine this boot (repeated read
+		// faults can neither burn attempts nor bypass a terminal verdict) — the
+		// next respawn retries the gate.
+		const evaluateMigrationGate = async (): Promise<MigrationGateDecision> => {
+			const gate = await browserApi.storage.local.get([SCHEMA_BLOCKED_KEY, SCHEMA_RETRY_REQUESTED_KEY])
+			const retryRequested = isValidRetryRequest(gate[SCHEMA_RETRY_REQUESTED_KEY])
+			const hasRetryKey = SCHEMA_RETRY_REQUESTED_KEY in gate
+			const decoded = decodeBlockedStatus(gate[SCHEMA_BLOCKED_KEY], manifestVersion, clock.now())
+			if (decoded.kind === "invalidated") {
+				// A new build is a new episode: void the verdict AND the engine's
+				// durable attempt budget (inheriting exhausted attempts would make
+				// the new episode's first failure instantly terminal).
+				await browserApi.storage.local.remove([SCHEMA_BLOCKED_KEY, SCHEMA_RETRY_REQUESTED_KEY, SCHEMA_ATTEMPTS_KEY])
+				return { action: "run", backstopRuns: 0, gestureRuns: 0 }
+			}
+			if (decoded.kind === "absent") {
+				// Stale-key hygiene on unblocked boots.
+				if (hasRetryKey) await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY)
+				return { action: "run", backstopRuns: 0, gestureRuns: 0 }
+			}
+			const s = decoded.status
+			if (s.terminal) {
+				if (hasRetryKey) await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY)
+				return { action: "short-circuit", reason: `storage migration blocked: ${s.kind}` }
+			}
+			if (retryRequested) {
+				// Durably claim the gesture and consume the key BEFORE the run:
+				// one tap authorizes one durable attempt, whichever wake executes
+				// it, and the claim survives a kill mid-run (a lost claim would
+				// re-arm the backstop after the user already retried). A failing
+				// write throws → fail closed.
+				const claimed = s.gestureRuns + 1
+				await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: { ...s, gestureRuns: claimed } })
+				await browserApi.storage.local.remove(SCHEMA_RETRY_REQUESTED_KEY)
+				return { action: "run", backstopRuns: s.backstopRuns, gestureRuns: claimed }
+			}
+			if (clock.now() - s.lastAttemptAt >= MIGRATION_RETRY_BACKSTOP_MS && s.backstopRuns < 1 && s.gestureRuns === 0) {
+				// The one autonomous run per episode, allowed only BEFORE any
+				// gesture (a user who already retried owns the remaining budget —
+				// this ordering is what makes terminal strictly gesture-reached).
+				// Durable claim BEFORE the run — a kill mid-run must not reset it.
+				const claimed = s.backstopRuns + 1
+				await browserApi.storage.local.set({ [SCHEMA_BLOCKED_KEY]: { ...s, backstopRuns: claimed } })
+				return { action: "run", backstopRuns: claimed, gestureRuns: s.gestureRuns }
+			}
+			return { action: "short-circuit", reason: `storage migration blocked: ${s.kind}` }
+		}
+		let gateDecision: MigrationGateDecision
+		try {
+			gateDecision = await evaluateMigrationGate()
+		} catch (error) {
+			retrySafe = false
+			throw new Error(`storage migration gate unreadable: ${getErrorMessage(error)}`)
+		}
+		if (gateDecision.action === "short-circuit") {
+			retrySafe = false
+			throw new Error(gateDecision.reason)
 		}
 
 		// Data-preserving storage migration runs FIRST — before config.load() (a
@@ -163,6 +242,13 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 				kind: migration.kind,
 				detail: migration.reason,
 				terminal: migration.kind === "failed" ? migration.terminal : !migration.retryable,
+				// Build identity + gate bookkeeping: the verdict is void once an
+				// update ships; `backstopRuns` CARRIES the pre-run claim forward
+				// so a failing episode keeps its spent autonomous allowance.
+				atExtensionVersion: manifestVersion,
+				lastAttemptAt: clock.now(),
+				backstopRuns: gateDecision.backstopRuns,
+				gestureRuns: gateDecision.gestureRuns,
 			}
 			// EVERY blocked outcome vetoes in-lifetime retry — not just terminal
 			// ones: the engine's durable attempt counter bumps on each run, and
@@ -337,13 +423,15 @@ export function createWalletRuntime(deps: WalletRuntimeDeps): WalletRuntime {
 		// not authoritative about steady-state usage.
 		void (async () => {
 			try {
-				const getBytes = (browserApi.storage.session as { getBytesInUse?: () => Promise<number> }).getBytesInUse
-				const bytes = typeof getBytes === "function" ? await getBytes.call(browserApi.storage.session) : undefined
-				const all = await browserApi.storage.session.get()
+				// The journal lives in storage.LOCAL (it moved off session so
+				// records survive full browser exits); count it there. Count-only:
+				// the storage port strips getBytesInUse, so a byte figure would
+				// always be n/a.
+				const all = await browserApi.storage.local.get()
 				const journalCount = Object.keys(all).filter((k) => k.startsWith("nulo:journal@")).length
-				logger.log("wallet", LogLevel.Info, `session storage: ${bytes ?? "n/a"} bytes, ${journalCount} journal records`)
+				logger.log("wallet", LogLevel.Info, `local storage: ${journalCount} journal records`)
 			} catch (error) {
-				logger.log("wallet", LogLevel.Debug, "session-storage probe skipped", getErrorMessage(error))
+				logger.log("wallet", LogLevel.Debug, "local-storage probe skipped", getErrorMessage(error))
 			}
 		})()
 

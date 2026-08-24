@@ -79,7 +79,7 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 
 logger.log("wallet", LogLevel.Info, "Runtime configured")
 
-const runtime = createWalletRuntime({ browserApi, clock, config, logger })
+const runtime = createWalletRuntime({ browserApi, clock, config, logger, manifestVersion: chrome.runtime.getManifest().version })
 
 // MV3: when an alarm WAKES the SW, only listeners registered synchronously
 // at module scope receive the triggering event — a listener added inside

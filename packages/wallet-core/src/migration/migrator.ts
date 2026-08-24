@@ -41,7 +41,10 @@ import { StagingArea } from "./staging"
 export const SCHEMA_VERSION_KEY = "nulo:schema:version"
 export const SCHEMA_RUNNING_KEY = "nulo:schema:running"
 const SCHEMA_BACKUP_KEY = "nulo:schema:backup"
-const SCHEMA_ATTEMPTS_KEY = "nulo:schema:attempts"
+/** Exported for the host's boot gate: a build-version invalidation of a
+ *  blocked verdict must also reset this durable budget — a new build is a new
+ *  episode, and its first failure must not inherit exhausted attempts. */
+export const SCHEMA_ATTEMPTS_KEY = "nulo:schema:attempts"
 /** Everything under this prefix belongs to the engine: migrations may not
  *  footprint or write it, and adapters (e.g. the backup-import migrator's
  *  scratch read-back) must filter it out of user data. */
