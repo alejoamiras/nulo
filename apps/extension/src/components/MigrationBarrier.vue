@@ -48,7 +48,11 @@ const cooldownTimer = setInterval(() => {
 const retryOnCooldown = computed(() => {
 	const at = blocked.value?.claimedAt
 	if (typeof at !== "number" || !Number.isFinite(at)) return false
-	return nowTick.value - at < CLAIM_HOLD_MS
+	// Raw-storage read — no decoder ran here, so clamp both sides: a crafted
+	// or clock-skewed FUTURE claimedAt must not wedge the button (negative age
+	// would otherwise read as "on cooldown" indefinitely).
+	const age = nowTick.value - at
+	return age >= 0 && age < CLAIM_HOLD_MS
 })
 
 /** Handlers */

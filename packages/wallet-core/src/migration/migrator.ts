@@ -140,10 +140,11 @@ export class Migrator {
 				kind: "needs-recovery",
 				reason: `unexpected storage failure during migration: ${message(err)}`,
 				retryable: true,
-				// Nothing was recorded on the durable counter (the throw escaped
-				// before/around any counted work) — the host's gate may re-run
-				// immediately instead of charging the episode a free failure.
-				spentAttempt: false,
+				// "Free" ONLY when no bump landed this run — a throw can escape
+				// after a successful bump (e.g. the journal clear that follows
+				// it), and labeling that boot unrecorded would hand the host an
+				// extra autonomous retry past the gesture-terminalization bound.
+				...(this.attemptRecorded ? {} : { spentAttempt: false as const }),
 			}
 		}
 	}
@@ -259,9 +260,11 @@ export class Migrator {
 					retryable: attempts < this.maxRetries,
 				}
 			}
-			// Attempts bump BEFORE the journal clear: a kill between the two must
-			// lose the (idempotently re-doable) clear, never the durable count
-			// that bounds retries.
+			// Marker → bump → clear, in that order: the journal is still armed
+			// here, so the bump must be preceded by the counted stamp — a throw
+			// (or kill) after the bump but before the clear would otherwise leave
+			// an armed UNcounted journal for the resume to count a second time.
+			await this.markJournalCounted(backup)
 			const attempts = await this.bumpAttempts(m.version, "up")
 			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
 			return {
@@ -393,6 +396,13 @@ export class Migrator {
 		if (toRemove.length) await this.store.remove(toRemove)
 	}
 
+	/** True once any bump landed durably in THIS run — `run()`'s catch uses it
+	 *  to report `spentAttempt: false` only when genuinely nothing was recorded
+	 *  (a throw can escape AFTER a successful bump, e.g. from the journal clear
+	 *  that follows it; labeling that boot "free" would hand the host an extra
+	 *  autonomous retry and break the gesture-terminalization bound). */
+	private attemptRecorded = false
+
 	private async bumpAttempts(version: number, phase: AttemptRecord["phase"]): Promise<number> {
 		const cur = (await this.store.get(SCHEMA_ATTEMPTS_KEY))[SCHEMA_ATTEMPTS_KEY] as AttemptRecord | undefined
 		// The counter is the terminalization authority — a corrupt persisted
@@ -401,20 +411,18 @@ export class Migrator {
 		const prior = cur && cur.version === version && Number.isInteger(cur.count) && cur.count >= 0 ? cur.count : 0
 		const count = prior + 1
 		await this.store.set({ [SCHEMA_ATTEMPTS_KEY]: { version, phase, count } satisfies AttemptRecord })
+		this.attemptRecorded = true
 		return count
 	}
 
-	/** Best-effort `counted` stamp on a journal that is about to outlive a
-	 *  counted failure. A stamp failure is swallowed: the same storage just
-	 *  failed elsewhere on this path, and the worst case of a lost stamp is one
-	 *  extra counted attempt on a later boot — while refusing to bump here
-	 *  would leave the bounding counter behind reality. */
+	/** `counted` stamp on a journal that is about to outlive a counted failure.
+	 *  NON-swallowing on purpose: a failed stamp must abort the bump (the throw
+	 *  escapes to `run()`'s catch, which reports the boot as unrecorded), so the
+	 *  incident is counted exactly once by a LATER boot's resume instead of
+	 *  possibly twice — never-double beats never-undercount now that the
+	 *  attempt-recorded flag keeps the free-failure classification honest. */
 	private async markJournalCounted(backup: BackupPayload): Promise<void> {
-		try {
-			await this.store.set({ [SCHEMA_BACKUP_KEY]: { ...backup, counted: true } satisfies BackupPayload })
-		} catch {
-			// Swallowed by design — see above.
-		}
+		await this.store.set({ [SCHEMA_BACKUP_KEY]: { ...backup, counted: true } satisfies BackupPayload })
 	}
 
 	/** Every live key covered by the refs. The engine's namespace is excluded

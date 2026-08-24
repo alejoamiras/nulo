@@ -50,10 +50,14 @@ const MIN = 60_000
 function makeStorageArea() {
 	const data = new Map<string, unknown>()
 	let failNextGet = false
+	let failSetKeyOnce: string | undefined
 	return {
 		data,
 		armGetFailure: () => {
 			failNextGet = true
+		},
+		armSetFailure: (key: string) => {
+			failSetKeyOnce = key
 		},
 		get: async (keys?: string | string[]) => {
 			if (failNextGet) {
@@ -65,6 +69,10 @@ function makeStorageArea() {
 			return Object.fromEntries(list.filter((k) => data.has(k)).map((k) => [k, data.get(k)]))
 		},
 		set: async (items: Record<string, unknown>) => {
+			if (failSetKeyOnce && failSetKeyOnce in items) {
+				failSetKeyOnce = undefined
+				throw new Error("injected set failure")
+			}
 			for (const [k, v] of Object.entries(items)) data.set(k, v)
 		},
 		remove: async (keys: string | string[]) => {
@@ -166,6 +174,22 @@ describe("migration gate — ambient wakes spend nothing (adopted c3-1 invariant
 		await boot("0.0.1-next") // update shipped: verdict void, engine runs
 		expect(upRuns).toBe(4)
 		expect(blocked()).toMatchObject({ terminal: false, atExtensionVersion: "0.0.1-next", backstopRuns: 0, gestureRuns: 0 })
+	})
+
+	test("a gesture spent on a FREE failure (nothing recorded) re-arms the token", async () => {
+		const { local, boot } = makeWorld()
+		await boot() // attempt 1 → blocked, gestureRuns 0
+		local.data.set(SCHEMA_RETRY_REQUESTED_KEY, { requestedAt: 0 })
+		// The gesture-authorized run dies BEFORE any counted work: the engine's
+		// journal-arming write throws → run()'s outer catch → spentAttempt:false.
+		local.armSetFailure("nulo:schema:running")
+		await boot()
+		expect(upRuns).toBe(1) // up never executed — a genuinely free failure
+		// The tap must not be stranded (gestureRuns > 0 disables the backstop):
+		// the token is re-armed, and the next ambient wake retries under it.
+		expect(local.data.has(SCHEMA_RETRY_REQUESTED_KEY)).toBe(true)
+		await boot()
+		expect(upRuns).toBe(2)
 	})
 
 	test("a gate read failure fails CLOSED — no engine run this boot", async () => {

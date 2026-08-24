@@ -770,6 +770,36 @@ describe("Migrator — interruption accounting (kill-loops bound out, exactly on
 		expect((store.data.get(BACKUP_KEY) as { counted?: boolean }).counted).toBe(true)
 	})
 
+	test("a journal-clear throw AFTER the bump is NOT reported free, and the resume never double-counts it", async () => {
+		// Ordinary up-throw, restore succeeds, then the journal clear throws:
+		// the bump already landed, so the escaped throw must not carry
+		// spentAttempt:false (a "free" label here would hand the host an extra
+		// autonomous retry past the gesture bound), and the retained journal is
+		// already marked counted, so the next boot resumes silently — attempts
+		// stay at 1 until that boot's own up() runs.
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		const boom = defineMigration({
+			version: 1,
+			description: "boom",
+			reads: [rootRef("acct")],
+			writes: [rootRef("acct")],
+			up: async () => {
+				throw new Error("up boom")
+			},
+		})
+		store.failRemoveKeysOnce = new Set([BACKUP_KEY])
+		const r1 = await new Migrator({ store, migrations: [boom] }).run()
+		expect(r1).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect("spentAttempt" in (r1 as Record<string, unknown>)).toBe(false)
+		expect(store.data.get(ATTEMPTS_KEY)).toMatchObject({ version: 1, count: 1 })
+		expect((store.data.get(BACKUP_KEY) as { counted?: boolean }).counted).toBe(true)
+
+		// Next boot: counted journal resumes silently (no second bump), falls
+		// through to its own up() — which fails and counts as attempt 2.
+		const r2 = await new Migrator({ store, migrations: [boom] }).run()
+		expect(r2).toMatchObject({ kind: "failed", attempts: 2 })
+	})
+
 	test("run()'s outer catch reports spentAttempt: false and records nothing", async () => {
 		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
 		store.failNextGet = true // the resume's own read throws → outer catch

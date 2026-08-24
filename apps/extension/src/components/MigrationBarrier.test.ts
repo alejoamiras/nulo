@@ -64,6 +64,24 @@ describe("MigrationBarrier", () => {
 		expect(w.find("[data-testid='migration-retry-btn']").attributes("disabled")).toBeDefined()
 	})
 
+	test("a fresh claimedAt holds the button; a FUTURE claimedAt does not wedge it", async () => {
+		installChromeStorage({
+			[SCHEMA_BLOCKED_KEY]: { kind: "failed", detail: "x", terminal: false, claimedAt: Date.now() },
+		})
+		const held = mountBarrier()
+		await flushPromises()
+		expect(held.find("[data-testid='migration-retry-btn']").attributes("disabled")).toBeDefined()
+		held.unmount()
+
+		document.body.innerHTML = ""
+		installChromeStorage({
+			[SCHEMA_BLOCKED_KEY]: { kind: "failed", detail: "x", terminal: false, claimedAt: Date.now() + 60 * 60_000 },
+		})
+		const wedgeable = mountBarrier()
+		await flushPromises()
+		expect(wedgeable.find("[data-testid='migration-retry-btn']").attributes("disabled")).toBeUndefined()
+	})
+
 	test("terminal renders NO retry button", async () => {
 		installChromeStorage({ [SCHEMA_BLOCKED_KEY]: { kind: "failed", detail: "kaboom", terminal: true } })
 		const w = mountBarrier()
