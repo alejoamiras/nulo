@@ -15,11 +15,11 @@ See [decisions.md](decisions.md) (13 rulings with reasoning) — highlights: con
 
 ## Gates (final tree)
 
-Local: audit:vue (4,619 tests) · test:all (12 suites) · identity 6/6 · resolver 14/14 · build chrome+firefox (0 symlinks/paths in dist; WASM hashes byte-identical to hoisted) · faucet mainnet+testnet · storybook · dev-server `/@fs/` serving · fixture-armed smoke 112/0 · one solo network shard 19/19 · forge build (lib populated). CI: B1 fully green; B2 green after the phantom rounds (final run on the converged head).
+Local: audit:vue (4,619 tests) · test:all (12 suites) · identity 6/6 · resolver 14/14 · build chrome+firefox (0 symlinks/paths in dist; WASM hashes byte-identical to hoisted) · faucet mainnet+testnet · storybook · dev-server `/@fs/` serving · fixture-armed smoke 112/0 · one solo network shard 19/19 · forge build (lib populated). CI: B1 all green (#454 ready, CLEAN); B2 all 28 checks green on the converged head 10ebd262 (#455 ready) — the three required gates pass; the only red is the non-required Cloudflare preview (follow-up 2).
 
 ## Follow-ups (deliberately not in this arc)
 
 1. `hoist = false` — its own flip-first gate after soak (codex-ruled).
-2. Cloudflare `nulo-tools-testnet` preview failure on both PRs — testnet-project-specific (mainnet passes, lockfile format ruled out; owner confirmed CF Pages is on Bun 1.4) — needs a dashboard look.
+2. **MERGE PRECONDITION (owner, Cloudflare dashboard).** Every B2 head fails ALL THREE Cloudflare Pages previews (`nulo`, `nulo-tools-mainnet`, `nulo-tools-testnet`) while B1's head passes all three minutes apart — B2-specific, not a CF outage. GitHub's clean room builds the faucet fine and the landing builds locally under the isolated linker, so the difference is CF's build environment: the Pages v3 image ships Bun **1.2.15** by default (v2: 1.1.33), only the `BUN_VERSION` env var overrides it (no version file is honored, `packageManager` is ignored), and Bun < 1.4 cannot read the v2 lockfile B2 commits. Fix: `BUN_VERSION=1.4.0` on all three projects for BOTH the Preview and Production environments, retry the #455 preview, confirm green — otherwise the next stable release's `refresh-landing` + `deploy-faucet` hooks would build with a Bun that cannot install. The CF log is dashboard-only; if the retry still fails, it is the next evidence.
 3. The `@scure/bip39@2.2.0`→1.6.0-line consolidation and the 9 in-lockstep major crossings are documented in `lessons/phase-4.md` for the next Aztec bump's reviewer.
 4. Arcs C (vitest-on-bun) and D (Bun-native tooling) per the dossier.

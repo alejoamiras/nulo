@@ -11,9 +11,20 @@ Full code-bearing diff read (24 files, +554/−165; plan docs + lock excluded). 
 
 Verification: resolver 14/14 + tsc · both files lint-clean · `assertEffectiveRemapping("forge")` end-to-end OK — and under the isolated layout the effective remap now points at `packages/bridge-core/node_modules/@aztec/l1-artifacts/...` (the declaring workspace), exactly as designed. Committed separately from implementation commits (ff827403 + the nit follow-up), per protocol.
 
-## Cloudflare Pages previews on the draft PRs — external, non-required, unresolved
+## Cloudflare Pages previews — B2-specific, non-required, a MERGE PRECONDITION for the owner
 
-Both stack PRs show `Cloudflare Pages: nulo-tools-testnet` = failure while `nulo` (landing) and `nulo-tools-mainnet` (same faucet app, same lock, same deps) = success, and the SAME testnet project succeeds on dev's merged head. So the failure is specific to the testnet faucet project on Cloudflare, not to the lockfile format (B1 has the v1 lock and fails identically) nor to the build logic (a clean-checkout `build:testnet` repro only failed on the scratch dir not being a git repo — `nulo-build-meta` shells `git rev-parse`). The Cloudflare build log is dashboard-only (not readable via API); likeliest cause is `verify:deployments` against the testnet manifest on Cloudflare's runner. NOT a required check; surfaced to the owner for a dashboard look before merge.
+An earlier draft of this entry read a testnet-only failure off an intermediate state and blamed the testnet project; the final A/B over the check-runs API (`repos/…/commits/<sha>/check-runs`, Cloudflare entries) says otherwise:
+
+| head | linker / lockfile | `nulo` | `nulo-tools-mainnet` | `nulo-tools-testnet` | completed (UTC) |
+|---|---|---|---|---|---|
+| dev `27935013` (Arc A) | hoisted / v1 | ✅ | ✅ | ✅ | 17:22–17:24 |
+| B1 `af85db95` (#454) | hoisted / v1 (+edges) | ✅ | ✅ | ✅ | 20:55–20:57 |
+| B2 `b947951e` (pre-rebase) | isolated / v2 | ❌ | ❌ | ❌ | 20:52–20:53 |
+| B2 `14f99733` · `ae9af9a6` · `10ebd262` | isolated / v2 | ❌ | ❌ | ❌ | 21:01–21:06 |
+
+B1 passes and B2 fails all three projects within the same minutes → not a Cloudflare outage or quota, and not project-specific. It is not the code either: GitHub's clean-room runner builds the faucet (mainnet + testnet) green on the same heads, and the landing builds locally under the isolated linker in 51 ms (no phantom there). What differs is Cloudflare's build environment: the Pages **v3 build image ships Bun 1.2.15 by default (v2: 1.1.33); only the `BUN_VERSION` env var overrides it — no version file is honored and `packageManager` is ignored** (developers.cloudflare.com/pages/configuration/build-image). Bun ≤ 1.3 reads the v1 text lockfile fine and cannot read the `lockfileVersion: 2` B2 commits — which reproduces the table exactly. Pages env vars are scoped per environment (Production vs Preview), so "BUN_VERSION is set" on Production does not cover PR previews. `started_at == completed_at` on these check-runs is NOT evidence of an instant failure — the passing runs show the same equality (Cloudflare stamps both at completion).
+
+The build log itself is dashboard-only. Ruling: NOT a required check, but merging B2 without fixing it would break the next stable release's `refresh-landing` + `deploy-faucet` Cloudflare deploys (a deploy surface — reserved for the owner). Ask: set `BUN_VERSION=1.4.0` on `nulo`, `nulo-tools-mainnet`, `nulo-tools-testnet` for BOTH Preview and Production, retry the #455 preview, confirm green; if still red, the dashboard log is the next evidence. Documented as the third Bun pin site (CLAUDE.md dependency policy + `apps/faucet/README.md` hosting).
 
 ## CI round 1 on the stack — the isolated linker found what it exists to find
 
