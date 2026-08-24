@@ -38,3 +38,6 @@ _(recorded after the codex convergence gate)_
 
 ## Review tooling persisted
 `tools/lock-records.ts` (full-record extractor + class comparator), `tools/reachability.ts` (prod-bundle closure walk from apps/extension over the lock graph), `tools/provenance.ts` (npm publish-time + attestation lookup per moved package), `tools/consumers.ts` (reverse-dependency lookup) + the review outputs (`regen-diff.txt`, `provenance.txt`). All repo-relative; usable for the next regeneration.
+
+## Network shard (solo) — DONE
+`bun run e2e:agent --shard=1/5`, host quiet (only a foreign 13-day-old anvil on :8545, avoided by the run's own port pack: anvil :17896 / aztec :30408 / playground :16323). Own sandbox booted; **14 files pass, 19 tests pass, 1 skipped, 0 failed, exit 0 on the FIRST run** — no re-run needed. Real proving + live-network fixtures exercised the isolated layout end to end.
