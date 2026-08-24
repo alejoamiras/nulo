@@ -24,6 +24,7 @@ import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { encodeAbiParameters, keccak256, parseAbiParameters } from "viem"
+import { assertEffectiveRemapping, generateRemappings } from "./gen-remappings"
 import { stageForkSource } from "./portal-artifact"
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -53,6 +54,13 @@ function forgeBin(): string {
 	console.error("forge not found - install foundry or set FORGE_BIN.")
 	process.exit(1)
 }
+
+// The EVM root's @aztec/ remap must point at the installed l1-artifacts sources
+// regardless of node_modules layout: regenerate remappings.txt (gitignored,
+// overrides foundry.toml) and assert forge actually sees the mapping before
+// any build/verify runs against EVM_ROOT.
+generateRemappings()
+assertEffectiveRemapping(forgeBin())
 
 /** The vendored portal source must hash-match what the deployed artifact was compiled from. */
 function placePortalSource() {

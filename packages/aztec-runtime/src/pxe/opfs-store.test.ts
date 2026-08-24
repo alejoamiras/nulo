@@ -1,6 +1,5 @@
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
+import { readFileSync } from "node:fs"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { DatabaseVersion } from "@aztec/stdlib/database-version/version"
@@ -29,14 +28,7 @@ function fakeStore(storedStamp: string | undefined) {
 const ROLLUP = "0x00000000000000000000000000000000000000aa"
 
 function resolvePackageFile(pkg: string, file: string): string {
-	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
-	let dir = fileURLToPath(new URL(".", import.meta.url))
-	while (dir !== dirname(dir)) {
-		const candidate = join(dir, "node_modules", ...parts, file)
-		if (existsSync(candidate)) return candidate
-		dir = dirname(dir)
-	}
-	throw new Error(`Cannot find ${pkg}/${file} in any node_modules`)
+	return resolvePackageAsset(pkg, file, { from: import.meta.url, entry: pkg === "@aztec/pxe" ? "./server" : undefined })
 }
 
 describe("opfs-store upstream pins", () => {

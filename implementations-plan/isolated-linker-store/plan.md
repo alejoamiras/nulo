@@ -22,7 +22,7 @@ Adopt Bun's isolated linker + global virtual store for install speed across ~30 
 
 ## Phases
 
-### Phase 1 — B1: `@nulo/resolve-asset` + consumer hardening (HOISTED; independently shippable)
+### Phase 1 — B1: `@nulo/resolve-asset` + consumer hardening (HOISTED; independently shippable) ✓ (gate green 2026-08-24: audit:vue 0 · test:all 0 · identity 6/6 · resolver 14/14 · frozen install · forge remappings asserted)
 Everything in Scope's first sentence through the remappings mechanism + the identity test + the minimal lockfile diff. The `check-fpc-version.ts` refactor is validated by `test:all` (`private-fuel.test.ts` exercises the same resolver path); the script itself is a NETWORK-dependent operational check (`--mode predeploy|require-deployed`, RPCs the live testnet at `AZTEC_NODE_URL`, default v5 testnet) — it is documented in the runbook as `bun scripts/check-fpc-version.ts --mode predeploy` with failures classified environmental, and is deliberately NOT a required local gate (final-pass F-5 correction: the v2 gate line was unexecutable as written).
 **Validation gate**: `bun run audit:vue` 0 · `bun run test:all` 0 · identity test green (incl. lockstep assertion) · resolver unit tests green against real packages · `bun install --frozen-lockfile` 0 (B1's own lock diff proves installable) · `bun test scripts/release/ scripts/ci-cd/` green · `bun run lint:actions` 0 · from `packages/bridge-core`: `bun scripts/gen-remappings.ts` then, in `contracts/bridge/evm`, `forge remappings` output contains the expected `@aztec/=<resolved l1-artifacts path>` line, then `forge build` exit 0 (manual, logged — forge is not in CI). Layers: typecheck+unit+lint+build+install (+manual forge).
 
