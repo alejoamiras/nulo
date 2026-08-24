@@ -1,11 +1,17 @@
 # Bun configuration. Docs: https://bun.com/docs/runtime/bunfig
 
 [install]
-# Keep the classic hoisted node_modules layout. A fresh lockfile on Bun 1.3.13 defaults new
-# workspace resolutions to the ISOLATED linker (per-workspace symlink trees + a .bun store),
-# which breaks this repo's hoisting assumptions: the foundry `@aztec/` remap into root
-# node_modules, resolvePackageFile walkers, and the bridge-core deploy-script paths.
-linker = "hoisted"
+# Isolated linker: per-workspace symlinked node_modules + a .bun store. Kills phantom
+# dependencies (a workspace resolves ONLY what it declares). The old hoisting assumptions
+# (foundry @aztec/ remap, resolvePackageFile walkers, bridge-core script paths) were made
+# layout-agnostic first via @nulo/resolve-asset + generated remappings; the executable
+# guarantee is apps/extension/scripts/layout-identity.test.ts.
+# `globalStore` is DELIBERATELY unset (defaults off): the committed layout uses per-project
+# hardlinked stores, so CI never creates or restores a shared symlink store
+# (~/.bun/install/cache/links). Worktree-heavy dev machines may opt in via their
+# user-level ~/.bunfig.toml. Evidence + posture memo:
+# implementations-plan/isolated-linker-store/lessons/phase-2.md.
+linker = "isolated"
 
 # Supply-chain defense: block packages published in the last 7 days.
 # Recent npm token-compromise attacks (axios 2026-03, chalk/debug 2025-09)
