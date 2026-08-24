@@ -136,7 +136,7 @@
   <p>Every change is a small edit to an existing file, fully revertable, with no novel surface: 0 of the 6 risk dimensions (novelty, blast radius, irreversibility, migration cost, external coupling, security sensitivity) score HIGH. One codex audit ran at maximum effort; it conditionally approved and all five of its conditions are folded in below.</p>
 
   <div class="warncard">
-    <strong>The one thing that can bite: everyone must move together.</strong> We proved by experiment that Bun 1.3.14 cannot install from the new lockfile this change produces. So the merge has a precondition: the machine-wide Bun (and every active worktree) upgrades to 1.4 first. Until then the PR waits, green but unmerged.
+    <strong>Update after implementation: the scary lockfile break didn't materialize.</strong> We proved old Bun can't read the NEW lockfile format — but then discovered Bun 1.4 never converts an existing lockfile at all, so this change ships with the old format and 1.3 agents keep working. The machine-wide Bun still upgrades to 1.4 before merge (the new parallel scripts need it), just no longer as a compatibility emergency.
   </div>
 
   <h2>Phases</h2>
@@ -147,9 +147,9 @@
       <p class="gate"><b>Proves itself by:</b> workflow linter green, the CI-wiring guard test green, and a search showing no "1.3.14" left behind.</p>
     </div>
     <div class="phase"><span class="num">PHASE 2</span>
-      <h3>Lockfile format upgrade, nothing else</h3>
-      <p>Let Bun 1.4 rewrite its lockfile to the new format, in a commit that contains only that. We diff every package's name, version, and checksum before/after — if even one actually changed, the phase stops.</p>
-      <p class="gate"><b>Proves itself by:</b> an empty version/checksum diff, a second install changing nothing, and a strict frozen install passing.</p>
+      <h3>Lockfile format upgrade — deferred, by evidence</h3>
+      <p>The plan was to let Bun 1.4 rewrite its lockfile to the new format in its own commit. Reality: 1.4 never converts an existing lockfile — not on install, not on a forced re-save, not even on a dependency change (we tested all three). The only route is regenerating from scratch, which re-resolves every version — exactly the churn this change forbids. So the format upgrade waits for the next work package, which regenerates the lockfile anyway, and old Bun keeps working meanwhile.</p>
+      <p class="gate"><b>Proved by:</b> the three experiments above, a clean working tree, and the strict frozen install still passing.</p>
     </div>
     <div class="phase"><span class="num">PHASE 3</span>
       <h3>Collapse the four duplicate packages — carefully</h3>

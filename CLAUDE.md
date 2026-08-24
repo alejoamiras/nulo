@@ -27,7 +27,7 @@ Project skills in [`.claude/skills/`](./.claude/skills/) are the source of truth
 
 ## Working in this repo
 
-- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.4.0` via `package.json#packageManager` + `setup-bun` action. **Local minimum is 1.4** — `bun.lock` is `lockfileVersion: 2`, which Bun ≤1.3 cannot read, and the parallel scripts (`audit:vue`, `dev:full`) use `bun run --parallel`.
+- **Bun** is the package manager. No yarn/npm/pnpm. Pinned to `1.4.0` via `package.json#packageManager` + `setup-bun` action. **Local minimum is 1.4** — the parallel scripts (`audit:vue`, `dev:full`) use `bun run --parallel`. (`bun.lock` is still `lockfileVersion: 1`; 1.4 never migrates existing lockfiles in place — the v2 flip lands with a deliberate future regeneration, which Bun ≤1.3 then cannot read.)
 - **Biome** handles lint + format. Layer-import rules are enforced via `noRestrictedImports` overrides in [`biome.json`](./biome.json); violations fail `bun run lint`.
 - **Commitlint** enforces Conventional Commits (`feat:`, `fix:`, `chore:`, …). Subject line must be lower-case.
 - **Pre-commit hook** (`.githooks/pre-commit`) runs `biome check --staged` followed by `scripts/check-no-brand.sh` (legacy brand and absolute-path guard). **Commit-msg hook** validates the message. Both auto-install on `bun install` via the `prepare` script.
