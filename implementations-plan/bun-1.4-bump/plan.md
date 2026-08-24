@@ -124,6 +124,16 @@ Codex round 1 (session `01a03421-a1cb-7882-8a89-a2c47923e700`, xhigh, fresh): **
 
 Unresolved disagreements: none. R2 (C9) is a deliberate deferral, not a dispute.
 
+### Post-impl codex round 1 (fresh session `01a0346f-4f9f-7750-8924-725b12bb425a`): conditional approve
+
+| # | Finding | Disposition |
+|---|---|---|
+| P1 High | The #25305 probe cells didn't force a transitive re-resolution — non-discriminating | **Adopted**: codex's discriminator cell implemented (old parent 1.0.0→1.0.5 upgrade widening child to `^1`); 1.4 held the freshly-resolved child at old → retirement verdict UPHELD with airtight evidence (lessons/phase-5.md round-2 addendum) |
+| P2 Med | `string_decoder`'s closure changed (`safe-buffer` 5.2.1 → nested 5.1.2), "code-identical" overstated | **Adopted + characterized**: verified at bun.lock:2491; `bun pm diff safe-buffer@5.1.2 5.2.1` = one behavioral line (`SafeBuffer.prototype` chain), unused by string_decoder; documented in lessons/phase-3.md + PR body |
+| P3 Med | Unqualified `bun pm diff <pkg>` on a checked-out Renovate branch reviews the wrong delta | **Adopted**: SECURITY.md now mandates the explicit `<pkg>@<old> <new>` form with the rationale |
+| P4 Low | Expired `minimumReleaseAgeExcludes` entries linger | **Rejected for this arc, with reason**: the excludes carry their own dated follow-up-PR removal plan (bunfig comment + SECURITY.md CVE-bypass procedure) and touch the `@aztec` install surface (hard-limit adjacent). Queued as the documented follow-up; noted in the PR body. |
+| P5 Low | Doc truthfulness leftovers (CLAUDE.md sequential audit:vue ×2, drift-note rationale, eli5 lede, re2 comment overstatement, stale audit-exit rationale ×2) | **Adopted, all six**: fixed; the re2 comment now states both facts precisely (bunx runs the validator under Node via shebang; re2-under-Bun separately verified with `bunx --bun` warm+cold); audit comments record 1.4's exit-1-on-findings and the deliberate advisory stance |
+
 ## Seeds
 
 Finalized post-approval; drafts live in the ELI5 companion.

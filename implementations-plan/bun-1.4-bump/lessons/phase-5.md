@@ -18,6 +18,19 @@ Setup: local `Bun.serve` registry (ephemeral port) serving `nulo-probe-parent-25
 
 Verdict: **#25305 is closed on 1.4.0** — when a gated update actually re-resolves, transitives go through the gate. The "delete bun.lock first" workaround is retired from bunfig.toml. Documented nuance (by design, not a bug): update never re-gates versions already present in the lockfile, so evicting an already-locked too-young version still requires a deliberate regeneration.
 
+### Round-2 addendum: the codex-designed DISCRIMINATOR cell (post-impl audit demanded it)
+
+The original "from old lock" cell was not airtight — the young parent was gate-rejected, so nothing proved the child was ever RE-resolved. Fix: `parent@1.0.0` (old) pins `child` EXACTLY `1.0.0`; a new `parent@1.0.5` (also old, >7d) widens the dep to `^1`. Seeding gated at parent=1.0.0/child=1.0.0 and running gated `update --latest`:
+
+| Runtime | DISCRIMINATOR: gated update from exact-old seed |
+|---|---|
+| 1.3.14 | parent → 1.0.5 (allowed old upgrade fired), child freshly resolved under `^1` vs {1.0.0 old, 1.1.0 young} → **1.0.0** |
+| 1.4.0 | parent → 1.0.5, child → **1.0.0** |
+
+The parent MOVED (proving the update path executed and the child constraint genuinely widened), a fresh child resolution happened against a young candidate, and the gate held it — on 1.4.0. This is the airtight transitive-gating proof.
+
+Sharpened description of the 1.3.x bug shape (the discriminator also refines it): 1.3.14 gates transitives fine on FRESH resolution (discriminator + fresh cells) — the original #25305 asymmetry lives in the *latest-lock* cell: an already-locked YOUNG transitive persists while directs get forcibly re-gated (parent pushed down to newest-allowed, child kept at young 1.1.0). 1.4 removes the asymmetry from the other side: locked versions are uniformly never re-gated, and every genuine re-resolution is gated, directs and transitives alike.
+
 Probe engineering note: first driver version deadlocked — `Bun.spawnSync` blocks the event loop that `Bun.serve` (the registry) runs on; the child's registry requests waited on ourselves. Fixed with async `Bun.spawn` + `await exited`. Filed in memory for future in-process-server + subprocess probes.
 
 ## Bonus retest: the Bun 1.3.1 frozen-lockfile gate anomaly

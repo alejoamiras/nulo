@@ -130,7 +130,7 @@
 <main>
   <p class="kicker">plan approval · arc A of the Bun 1.4 goal · blueprint light</p>
   <h1>Bun 1.4 Bump</h1>
-  <p class="lede">Move the repo's Bun toolchain from 1.3.14 to 1.4.0 and pick up the easy wins that come with it: one shared CI setup instead of a duplicated copy, a cleaner lockfile format, four duplicate packages collapsed, scripts that run their independent steps at the same time, and one less Node-only workaround in CI. Nothing about the wallet's runtime, the Aztec pins, or how tests execute changes in this arc.</p>
+  <p class="lede">Move the repo's Bun toolchain from 1.3.14 to 1.4.0 and pick up the easy wins that come with it: one shared CI setup instead of a duplicated copy, four duplicate packages collapsed out of the lockfile, scripts that run their independent steps at the same time, and one less Node-only workaround in CI. (The new lockfile FORMAT turned out not to be reachable in this change — see Phase 2.) Nothing about the wallet's runtime, the Aztec pins, or how tests execute changes in this arc.</p>
 
   <h2>Why the "light" tier</h2>
   <p>Every change is a small edit to an existing file, fully revertable, with no novel surface: 0 of the 6 risk dimensions (novelty, blast radius, irreversibility, migration cost, external coupling, security sensitivity) score HIGH. One codex audit ran at maximum effort; it conditionally approved and all five of its conditions are folded in below.</p>
