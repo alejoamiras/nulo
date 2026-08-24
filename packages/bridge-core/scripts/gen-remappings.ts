@@ -31,7 +31,8 @@ export function generateRemappings(): string {
 		"forge-std/=lib/forge-std/src/",
 	]
 	const target = join(EVM_ROOT, "remappings.txt")
-	const tmp = `${target}.tmp`
+	// Per-process temp name: concurrent verify runs must not rename each other's file.
+	const tmp = `${target}.${process.pid}.tmp`
 	writeFileSync(tmp, `${lines.join("\n")}\n`)
 	renameSync(tmp, target)
 	return target
@@ -49,7 +50,9 @@ export function assertEffectiveRemapping(forgeBin: string): void {
 	}
 	const aztecLine = remaps.stdout.split("\n").find((l) => l.startsWith("@aztec/="))
 	const expected = `${resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: import.meta.url })}/`
-	if (!aztecLine?.includes(expected)) {
+	// Exact-line equality: a substring match would accept `${expected}extra/` and
+	// defeat the stale/unexpected-target rejection this assertion exists for.
+	if (aztecLine?.trim() !== `@aztec/=${expected}`) {
 		throw new Error(
 			`forge (${version.stdout.split("\n")[0]}) does not see the generated @aztec/ remap.\n` +
 				`effective: ${aztecLine ?? "<none>"}\nexpected suffix: ${expected}`,

@@ -22,7 +22,13 @@ forge install foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts Uniswap/v
 
 ## Build / test
 
+The `@aztec/` remap resolves through `packages/bridge-core`'s installed
+`@aztec/l1-artifacts`. Under the repo's isolated linker that package is NOT at the
+repo-root `node_modules` the static `foundry.toml` remap assumes, so generate the
+override file first (it is gitignored; `verify-l1.ts` does this automatically):
+
 ```bash
+bun --cwd packages/bridge-core scripts/gen-remappings.ts   # writes remappings.txt
 forge build
 forge test
 ```

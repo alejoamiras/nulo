@@ -154,8 +154,11 @@ export function assertPackageIdentity(pkg: string, options: IdentityOptions): Id
 	const report: IdentityReport = { root, realRoot, version }
 	if (options.lockstepVia) {
 		const viaRoot = resolvePackageRoot(options.lockstepVia, { from: options.from })
-		// Anchor inside the intermediary so ITS dependency edge does the resolving.
-		const viaAnchor = join(viaRoot, "package.json")
+		// Anchor inside the intermediary's REAL directory so ITS dependency edge does
+		// the resolving. Under the isolated linker the workspace-facing path is a
+		// symlink whose search order falls back into the caller's own node_modules —
+		// which would re-find the direct copy and make this guard circular.
+		const viaAnchor = join(realpathSync(viaRoot), "package.json")
 		const lockstepReal = realpathSync(resolvePackageRoot(pkg, { from: viaAnchor }))
 		report.lockstepRealRoot = lockstepReal
 		if (lockstepReal !== realRoot) {
