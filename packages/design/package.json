@@ -16,7 +16,7 @@
 	"scripts": {
 		"gen:tokens": "bun scripts/gen-tokens.ts",
 		"typecheck": "vue-tsc --noEmit",
-		"test": "vitest run",
+		"test": "bun --bun vitest run",
 		"test:watch": "vitest"
 	},
 	"peerDependencies": {
