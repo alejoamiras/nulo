@@ -1,7 +1,7 @@
 import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 import { flushPromises, mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, test } from "vitest"
-import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY } from "@/wallet/storage/migrations"
+import { beforeEach, describe, expect, test, vi } from "vitest"
+import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY, SCHEMA_RETRY_REQUESTED_KEY } from "@/wallet/storage/migrations"
 import { installChromeStorage } from "../../tests/helpers/chrome-storage-mock"
 import MigrationBarrier from "./MigrationBarrier.vue"
 
@@ -40,12 +40,35 @@ describe("MigrationBarrier", () => {
 		expect(w.find("[data-testid='migration-blocked-detail']").text()).toContain("kaboom at v2")
 	})
 
-	test("blocked non-terminal: restart-to-retry copy", async () => {
+	test("blocked non-terminal: retry copy + a live Retry button", async () => {
 		installChromeStorage({ [SCHEMA_BLOCKED_KEY]: { kind: "failed", detail: "transient", terminal: false } })
 		const w = mountBarrier()
 		await flushPromises()
 		expect(w.text()).toContain("UPDATE INTERRUPTED")
-		expect(w.text()).toContain("reopen the extension")
+		expect(w.text()).toContain("Retry update")
+		expect(w.find("[data-testid='migration-retry-btn']").exists()).toBe(true)
+	})
+
+	test("Retry writes the one-shot gesture token and restarts the extension", async () => {
+		const store = installChromeStorage({ [SCHEMA_BLOCKED_KEY]: { kind: "failed", detail: "transient", terminal: false } })
+		const reload = vi.fn()
+		;(globalThis as { chrome: { runtime?: unknown } }).chrome.runtime = { reload }
+		const w = mountBarrier()
+		await flushPromises()
+		await w.find("[data-testid='migration-retry-btn']").trigger("click")
+		await flushPromises()
+		const token = store.data[SCHEMA_RETRY_REQUESTED_KEY] as { requestedAt?: number }
+		expect(Number.isFinite(token?.requestedAt)).toBe(true)
+		expect(reload).toHaveBeenCalledTimes(1)
+		// The button latches into its restarting state (belt: reload is coming).
+		expect(w.find("[data-testid='migration-retry-btn']").attributes("disabled")).toBeDefined()
+	})
+
+	test("terminal renders NO retry button", async () => {
+		installChromeStorage({ [SCHEMA_BLOCKED_KEY]: { kind: "failed", detail: "kaboom", terminal: true } })
+		const w = mountBarrier()
+		await flushPromises()
+		expect(w.find("[data-testid='migration-retry-btn']").exists()).toBe(false)
 	})
 
 	test("blocked takes precedence over running", async () => {

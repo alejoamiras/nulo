@@ -1,7 +1,7 @@
 <script setup>
 /** Utils */
 import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
-import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY } from "@/wallet/storage/migrations"
+import { SCHEMA_BLOCKED_KEY, SCHEMA_DEGRADED_KEY, SCHEMA_RETRY_REQUESTED_KEY } from "@/wallet/storage/migrations"
 
 /** Reactive state */
 // Raw chrome.storage reads ON PURPOSE (allowlisted in storage-facade-ban):
@@ -27,9 +27,10 @@ const blockedCopy = computed(() => {
 			}
 		: {
 				title: "UPDATE INTERRUPTED",
-				sub: "Your funds are safe. Close and reopen the extension to retry the update.",
+				sub: "Your funds are safe. Tap Retry update — the wallet restarts and retries.",
 			}
 })
+const retryRequested = ref(false)
 
 /** Handlers */
 // `refresh()`'s get-snapshot and `onChanged` events ride different IPC
@@ -65,6 +66,22 @@ function onStorageChanged(changes, area) {
 function dismissDegraded() {
 	degraded.value = null
 }
+// Same allowlisted raw-storage channel as the reads above, plus a
+// DETERMINISTIC restart: closing the popup does not kill the service worker
+// (its rejected single-flight memo is sticky for the lifetime), so the only
+// honest "retry" is writing the one-shot gesture token and reloading the
+// extension — the fresh boot's gate consumes the token and runs the engine.
+async function requestRetry() {
+	if (retryRequested.value) return
+	retryRequested.value = true
+	try {
+		await chrome.storage.local.set({ [SCHEMA_RETRY_REQUESTED_KEY]: { requestedAt: Date.now() } })
+		chrome.runtime.reload()
+	} catch {
+		// The write failed — nothing was requested; let the user tap again.
+		retryRequested.value = false
+	}
+}
 
 /** Service subscriptions (before the initial read, so no change is missed) */
 chrome.storage.onChanged.addListener(onStorageChanged)
@@ -84,6 +101,16 @@ onBeforeUnmount(() => {
 				<span :class="$style.title">{{ blockedCopy.title }}</span>
 				<span :class="$style.sub">{{ blockedCopy.sub }}</span>
 				<span :class="$style.detail" data-testid="migration-blocked-detail">{{ blocked.detail }}</span>
+				<button
+					v-if="!blocked.terminal"
+					type="button"
+					:class="$style.retryBtn"
+					:disabled="retryRequested"
+					data-testid="migration-retry-btn"
+					@click="requestRetry"
+				>
+					{{ retryRequested ? "Restarting…" : "Retry update" }}
+				</button>
 			</div>
 		</div>
 
@@ -170,5 +197,24 @@ onBeforeUnmount(() => {
 	color: var(--txt-primary);
 	cursor: pointer;
 	font-size: 11px;
+}
+
+.retryBtn {
+	margin-top: 8px;
+	padding: 8px 16px;
+
+	border: 1px solid var(--nulo-border);
+	background-color: var(--nulo-surface-low);
+	color: var(--txt-primary);
+
+	font-family: var(--font-headline);
+	font-weight: 700;
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.retryBtn:disabled {
+	opacity: 0.6;
+	cursor: default;
 }
 </style>
