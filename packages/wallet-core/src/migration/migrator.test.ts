@@ -800,6 +800,25 @@ describe("Migrator — interruption accounting (kill-loops bound out, exactly on
 		expect(r2).toMatchObject({ kind: "failed", attempts: 2 })
 	})
 
+	test("attemptRecorded is per-RUN: a counted first run doesn't mask a later free failure on the same instance", async () => {
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		const boom = defineMigration({
+			version: 1,
+			description: "boom",
+			reads: [rootRef("acct")],
+			writes: [rootRef("acct")],
+			up: async () => {
+				throw new Error("up boom")
+			},
+		})
+		const migrator = new Migrator({ store, migrations: [boom] })
+		const r1 = await migrator.run() // counted failure (bump landed)
+		expect(r1).toMatchObject({ kind: "failed", attempts: 1 })
+		store.failNextGet = true // second run dies in the outer catch, pre-bump
+		const r2 = await migrator.run()
+		expect(r2).toMatchObject({ kind: "needs-recovery", retryable: true, spentAttempt: false })
+	})
+
 	test("run()'s outer catch reports spentAttempt: false and records nothing", async () => {
 		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
 		store.failNextGet = true // the resume's own read throws → outer catch

@@ -133,6 +133,9 @@ export class Migrator {
 	 *  an armed backup restores or completes); this session the host's blocked
 	 *  status outranks the updating overlay, so no silent wedge either. */
 	async run(): Promise<MigrationResult> {
+		// Per-RUN flag — run() is reusable, so a bump in an earlier run on the
+		// same instance must not mask a later run's genuinely free failure.
+		this.attemptRecorded = false
 		try {
 			return await this.runInner()
 		} catch (err) {
