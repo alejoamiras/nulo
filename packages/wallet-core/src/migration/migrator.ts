@@ -55,7 +55,16 @@ export const RESERVED_KEYS: readonly string[] = [SCHEMA_VERSION_KEY, SCHEMA_RUNN
 
 const DEFAULT_MAX_RETRIES = 3
 
-type BackupPayload = { version: number; refs: StorageRef[]; entries: Record<string, unknown> }
+/** `counted` marks a retained journal whose failure has already been recorded
+ *  in the attempt counter — the resume path must not count it again. Set
+ *  BEFORE the bump wherever a journal outlives a counted failure, so a kill
+ *  between the two under-counts (never double-counts: the bias is to never
+ *  falsely terminalize). */
+type BackupPayload = { version: number; refs: StorageRef[]; entries: Record<string, unknown>; counted?: true }
+/** Attempt identity is the VERSION alone: kills, up() throws, and restore
+ *  failures of one migration all accumulate on one counter (a per-phase
+ *  identity would let alternating failure kinds reset each other forever).
+ *  `phase` records the LAST failure's kind, informationally. */
 type AttemptRecord = { version: number; phase: "up" | "restore"; count: number }
 
 function isValidRef(r: unknown): r is StorageRef {
@@ -233,6 +242,9 @@ export class Migrator {
 				await this.restore(backup)
 			} catch (restoreErr) {
 				// Journal kept: the next boot retries the restore (bounded).
+				// Marked counted FIRST so the resume path never re-counts this
+				// same incident.
+				await this.markJournalCounted(backup)
 				const attempts = await this.bumpAttempts(m.version, "restore")
 				return {
 					kind: "needs-recovery",
@@ -323,6 +335,7 @@ export class Migrator {
 		try {
 			await this.restore(backup)
 		} catch (err) {
+			await this.markJournalCounted(backup)
 			const attempts = await this.bumpAttempts(backup.version, "restore")
 			return {
 				kind: "needs-recovery",
@@ -330,6 +343,26 @@ export class Migrator {
 				retryable: attempts < this.maxRetries,
 			}
 		}
+		if (backup.counted !== true) {
+			// An armed, uncounted journal means the previous boot's up() was
+			// interrupted before it could resolve — count it, then STAND DOWN:
+			// one boot's authorization covers at most one up() execution, so the
+			// re-attempt belongs to whatever NEXT boot gets authorized (without
+			// this, a resumed kill plus this run's own up() would spend two
+			// attempts under a single authorization and could terminalize on an
+			// autonomous wake). Marker-first + journal-clear-last: any kill in
+			// between under-counts once, never double-counts.
+			await this.markJournalCounted({ ...backup, counted: true })
+			const attempts = await this.bumpAttempts(backup.version, "up")
+			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
+			return {
+				kind: "needs-recovery",
+				reason: `migration ${backup.version} was interrupted mid-write (restored cleanly)`,
+				retryable: attempts < this.maxRetries,
+			}
+		}
+		// A counted journal's failure is already on the books — resume silently;
+		// the run continuing past this point IS this boot's one authorized up().
 		await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
 		return undefined
 	}
@@ -355,9 +388,22 @@ export class Migrator {
 
 	private async bumpAttempts(version: number, phase: AttemptRecord["phase"]): Promise<number> {
 		const cur = (await this.store.get(SCHEMA_ATTEMPTS_KEY))[SCHEMA_ATTEMPTS_KEY] as AttemptRecord | undefined
-		const count = cur && cur.version === version && cur.phase === phase ? cur.count + 1 : 1
+		const count = cur && cur.version === version ? cur.count + 1 : 1
 		await this.store.set({ [SCHEMA_ATTEMPTS_KEY]: { version, phase, count } satisfies AttemptRecord })
 		return count
+	}
+
+	/** Best-effort `counted` stamp on a journal that is about to outlive a
+	 *  counted failure. A stamp failure is swallowed: the same storage just
+	 *  failed elsewhere on this path, and the worst case of a lost stamp is one
+	 *  extra counted attempt on a later boot — while refusing to bump here
+	 *  would leave the bounding counter behind reality. */
+	private async markJournalCounted(backup: BackupPayload): Promise<void> {
+		try {
+			await this.store.set({ [SCHEMA_BACKUP_KEY]: { ...backup, counted: true } satisfies BackupPayload })
+		} catch {
+			// Swallowed by design — see above.
+		}
 	}
 
 	/** Every live key covered by the refs. The engine's namespace is excluded

@@ -83,6 +83,13 @@ const expectJournalClear = (store: MemStore) => {
 	expect(store.has(BACKUP_KEY)).toBe(false)
 }
 
+/** A journal whose failure is already on the attempt counter (see
+ *  BackupPayload.counted): the resume path must not count it again. */
+const countedJournal = (version: number, refs: StorageRef[], entries: Record<string, unknown>) => ({
+	[SCHEMA_RUNNING_KEY]: 99,
+	[BACKUP_KEY]: { version, refs, entries, counted: true },
+})
+
 describe("Migrator — construction", () => {
 	test("rejects non-positive and non-integer versions", () => {
 		const store = new MemStore()
@@ -236,17 +243,27 @@ describe("Migrator — crash-safe journal", () => {
 		expect(store.has(ATTEMPTS_KEY)).toBe(false) // cleared on success
 	})
 
-	test("crash mid-commit → resume restores the declared footprint (incl. tombstoning created rows) + re-runs", async () => {
+	test("crash mid-commit → resume restores the footprint, COUNTS the interruption, and stands down; the next boot re-runs", async () => {
 		// Torn state: committed writes present, journal interrupted, version unstamped.
+		// One boot's authorization covers at most one up(): the resume counts the
+		// interrupted attempt and stands down retryable instead of re-running in
+		// the same boot (a resumed kill plus a same-boot re-run would spend two
+		// attempts under a single authorization).
 		const store = new MemStore()
 			.seed(ver(0))
 			.seed(row("acct", "a", { n: 0, x: 1 })) // committed write from the interrupted run
 			.seed(row("acct", "b", { n: 9 })) // a row the interrupted migration CREATED
 			.seed(journal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
 		const r = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
-		expect(r).toEqual({ kind: "migrated", from: 0, to: 1 })
-		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 }) // re-derived cleanly
+		expect(r).toEqual({ kind: "needs-recovery", reason: expect.stringContaining("interrupted mid-write"), retryable: true })
+		expect(store.obj("acct", "a")).toEqual({ n: 0 }) // restored to pre-shape
 		expect(store.obj("acct", "b")).toBeUndefined() // created row was tombstoned by restore
+		expectJournalClear(store)
+
+		// The next boot (a fresh authorization) re-runs and completes.
+		const r2 = await new Migrator({ store, migrations: [patchRows(1, "acct", { x: 1 })] }).run()
+		expect(r2).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 }) // re-derived cleanly
 		expectJournalClear(store)
 	})
 
@@ -375,7 +392,10 @@ describe("Migrator — crash-safe journal", () => {
 			}),
 		)
 		const noop = defineMigration({ version: 1, description: "n", reads: [], writes: [], up: async () => {} })
-		await new Migrator({ store, migrations: [noop] }).run()
+		const mk = () => new Migrator({ store, migrations: [noop] })
+		await mk().run() // resume counts the interruption + stands down
+		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(0) // crafted 99 NEVER restored
+		await mk().run() // fresh authorization completes the migration
 		expect(store.data.get(SCHEMA_VERSION_KEY)).toBe(1) // stamped by the run, not the crafted 99
 	})
 })
@@ -416,10 +436,14 @@ describe("Migrator — run() never throws (unstructured storage failures)", () =
 		const r = await mk().run()
 		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
 		expect(store.has(BACKUP_KEY)).toBe(true) // load-bearing backup KEPT
-		// Storage heals → the next boot restores the pre-state and re-runs.
+		// Storage heals → the next boot restores the pre-state, counts the
+		// interruption, and stands down; the boot after that re-runs.
 		const r2 = await mk().run()
-		expect(r2).toEqual({ kind: "migrated", from: 0, to: 1 })
-		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 }) // torn state gone
+		expect(r2).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect(store.obj("acct", "a")).toEqual({ n: 0 }) // torn state gone, pre-state restored
+		const r3 = await mk().run()
+		expect(r3).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.obj("acct", "a")).toEqual({ n: 0, x: 1 })
 	})
 
 	test("a cleanup failure AFTER the stamp is SUCCESS — never a restore under the stamped version", async () => {
@@ -638,5 +662,101 @@ describe("Migrator — idempotency (run twice ≡ once)", () => {
 			},
 		})
 		expect(await runTwiceEqualsOnce(append, row("acct", "a", { tags: [] }))).toBe(false)
+	})
+})
+
+describe("Migrator — interruption accounting (kill-loops bound out, exactly once)", () => {
+	const mig = () => patchRows(1, "acct", { x: 1 })
+	const seedTorn = (store: MemStore) =>
+		store.seed(row("acct", "a", { n: 0, torn: true })).seed(journal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
+
+	test("each uncounted resume bumps and stands down; the third reports non-retryable", async () => {
+		const store = new MemStore().seed(ver(0))
+		for (const [i, retryable] of [
+			[1, true],
+			[2, true],
+			[3, false],
+		] as const) {
+			seedTorn(store)
+			const r = await new Migrator({ store, migrations: [mig()] }).run()
+			expect(r).toMatchObject({ kind: "needs-recovery", retryable })
+			expect(store.data.get(ATTEMPTS_KEY)).toMatchObject({ version: 1, count: i })
+			expectJournalClear(store)
+		}
+	})
+
+	test("a counted journal resumes silently — no bump — and the run's own up() is the boot's one attempt", async () => {
+		// The migration then THROWS, so the observable counter isolates the
+		// resume: 1 means only the up-throw counted; 2 would mean a double.
+		const store = new MemStore()
+			.seed(ver(0))
+			.seed(row("acct", "a", { n: 0, torn: true }))
+			.seed(countedJournal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
+		const boom = defineMigration({
+			version: 1,
+			description: "boom",
+			reads: [rootRef("acct")],
+			writes: [rootRef("acct")],
+			up: async () => {
+				throw new Error("up boom")
+			},
+		})
+		const r = await new Migrator({ store, migrations: [boom] }).run()
+		expect(r).toMatchObject({ kind: "failed", attempts: 1 })
+	})
+
+	test("failures accumulate on the PER-VERSION counter across kinds (restore-throw + kill + up-throw)", async () => {
+		// Pre-existing restore-phase count 2, then an uncounted kill resume: the
+		// bump lands on the same version counter → 3 → non-retryable. Under the
+		// old per-(version, phase) identity this reset to 1 forever.
+		const store = new MemStore().seed(ver(0)).seed({ [ATTEMPTS_KEY]: { version: 1, phase: "restore", count: 2 } })
+		seedTorn(store)
+		const r = await new Migrator({ store, migrations: [mig()] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: false })
+		expect(store.data.get(ATTEMPTS_KEY)).toMatchObject({ version: 1, count: 3 })
+	})
+
+	test("B1 sequence: up-throw (1) → killed attempt resumed (2) → stands down, NOT terminal", async () => {
+		const store = new MemStore().seed(ver(0)).seed(row("acct", "a", { n: 0 }))
+		const boom = defineMigration({
+			version: 1,
+			description: "boom",
+			reads: [rootRef("acct")],
+			writes: [rootRef("acct")],
+			up: async () => {
+				throw new Error("first failure")
+			},
+		})
+		const r1 = await new Migrator({ store, migrations: [boom] }).run()
+		expect(r1).toMatchObject({ kind: "failed", attempts: 1, terminal: false })
+		// A (gesture-authorized) second attempt is KILLED mid-up: armed journal.
+		seedTorn(store)
+		const r2 = await new Migrator({ store, migrations: [mig()] }).run()
+		expect(r2).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect(store.data.get(ATTEMPTS_KEY)).toMatchObject({ version: 1, count: 2 })
+		// Crucially: the resume did NOT continue into another up() — a further
+		// boot completes cleanly and clears the counter.
+		const r3 = await new Migrator({ store, migrations: [mig()] }).run()
+		expect(r3).toEqual({ kind: "migrated", from: 0, to: 1 })
+		expect(store.has(ATTEMPTS_KEY)).toBe(false)
+	})
+
+	test("a restore-throw marks the retained journal counted (both bump sites)", async () => {
+		const store = new MemStore().seed(ver(0))
+		seedTorn(store)
+		store.failSetKeys = new Set(["acct@a"]) // restore's snapshot re-set fails
+		const r = await new Migrator({ store, migrations: [mig()] }).run()
+		expect(r).toMatchObject({ kind: "needs-recovery", retryable: true })
+		expect((store.data.get(BACKUP_KEY) as { counted?: boolean }).counted).toBe(true)
+	})
+
+	test("stamped-clear debris never bumps", async () => {
+		const store = new MemStore()
+			.seed(ver(1))
+			.seed(row("acct", "a", { n: 0, x: 1 }))
+			.seed(journal(1, [rootRef("acct")], row("acct", "a", { n: 0 })))
+		const r = await new Migrator({ store, migrations: [mig()] }).run()
+		expect(r).toEqual({ kind: "noop", version: 1 })
+		expect(store.has(ATTEMPTS_KEY)).toBe(false)
 	})
 })

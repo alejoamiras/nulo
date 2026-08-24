@@ -88,7 +88,8 @@ Ambient wake → module eval → `start()` → doStart pre-check reads blocked+r
 
 ## Phases
 
-### Phase 1 — engine: N-18 resume accounting
+### Phase 1 ✓ — engine: N-18 resume accounting
+_Gate passed: lint 0, vue-tsc clean, 47/47 engine tests (41 prior — 3 deliberately re-pinned to the stand-down contract — plus 6 new interruption-accounting pins incl. the B1 sequence)._
 Implement §N-18. Tests in `migrator.test.ts` (existing fixtures): (a) kill→resume cycles — each uncounted resume bumps, STANDS DOWN retryable, and the third reports `retryable:false`; (b) a `counted` journal resumes silently, no bump, and falls through to the run's one `up()`; (c) mixed failures accumulate on the PER-VERSION counter (restore-throw + kill + up-throw → bound; the old phase-reset pins updated deliberately); (d) success clears the counter; (e) restore-throw sets `counted` before bumping (both sites); (f) stamped-clear path (`:317-321`) never bumps; (g) **the B1 sequence pin**: initial up-throw (1) → killed second attempt → single resume boot bumps (2) and stands down WITHOUT executing `up()` again — attempts stay at 2, not terminal; (h) existing crash-safe-journal describe green (updated pins called out individually).
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test packages/wallet-core/src/migration/migrator.test.ts` (adjust invocation to the repo's actual test-path form at impl). Pass: exit 0, new + existing cases green. Layers: lint/typecheck + unit.
 
