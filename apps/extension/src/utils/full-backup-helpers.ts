@@ -3,7 +3,22 @@
  * No vue, no chrome.*, no service clients — safe to import anywhere.
  */
 
+import { EncryptionKey } from "@nulo/wallet-crypto"
 import { fromBase64 } from "@/wallet/utils"
+
+/**
+ * One shared ceiling for backup files, enforced on BOTH sides: the import
+ * path refuses larger files before reading them, and the export path refuses
+ * to produce a larger artifact — the same constant on both sides is what
+ * guarantees an exported backup can never be rejected by its own importer.
+ *
+ * Calibration: a FRESH test wallet's encrypted artifact measures ~22.4 MiB
+ * (base64 ciphertext, dominated by the account-state slice), so 64 MiB gives
+ * ~3x growth headroom while still bounding a decompression bomb to a finite
+ * inflation. Import-side parse amplification of a worst-case file is
+ * ESTIMATED (not proven) at 2-4x transient. Revisit with real-user telemetry.
+ */
+export const MAX_BACKUP_FILE_BYTES = 64 * 1024 * 1024
 
 export type BackupFileType = "plain" | "encrypted" | "unknown"
 
@@ -32,6 +47,20 @@ export interface ProcessBackupResult {
 }
 
 export async function readBackupFile(file: File): Promise<ProcessBackupResult> {
+	// Byte-level bound BEFORE reading — text().length counts UTF-16 code
+	// units, so a heavily multi-byte file could otherwise exceed the
+	// advertised ceiling before any later check sees it. Belt over the
+	// pickFile-side cap: this helper must hold its own even for callers that
+	// hand it an arbitrary File.
+	if (file.size > MAX_BACKUP_FILE_BYTES) {
+		return {
+			selection: { name: file.name, backup: null, type: "unknown", profileType: null },
+			parseError: {
+				title: "Backup File Too Large",
+				tooltip: "The backup file is too large to import. Please select a correct backup file.",
+			},
+		}
+	}
 	const text = await file.text()
 	const detectedType = detectBackupType(text)
 	let backup: unknown = null
@@ -56,6 +85,61 @@ export async function readBackupFile(file: File): Promise<ProcessBackupResult> {
 		selection: { name: file.name, backup, type: detectedType, profileType },
 		parseError,
 	}
+}
+
+/** A backup-slice producer: the service's own name constant plus its backup call. */
+export type BackupSource = { name: string; backup: () => Promise<unknown> }
+
+/** Thrown when the caller's `onSlice` probe reports the run is no longer current. */
+export class AssemblyAbortedError extends Error {
+	constructor() {
+		super("Backup assembly aborted")
+		this.name = "AssemblyAbortedError"
+	}
+}
+
+export interface AssembledBackup {
+	compact: string
+	pretty: string
+	checksum: string
+}
+
+/**
+ * Assembles a full-backup artifact from an envelope and slice sources, sealed
+ * from ONE serialization: the checksum hashes exactly `JSON.stringify(draft)`
+ * with `checksum` the only absent key, and both output strings derive from a
+ * parse of those same bytes — so caller-side mutation of the envelope or slice
+ * object graphs after the awaits cannot skew the artifact, and the import
+ * side's strip-checksum → compact-restringify recompute reproduces the hashed
+ * string exactly (key insertion order survives parse → stringify).
+ *
+ * `onSlice` is a currency probe: consulted before every slice and before
+ * sealing; returning false aborts with `AssemblyAbortedError`.
+ */
+export async function assembleFullBackup(
+	envelope: Record<string, unknown>,
+	sources: BackupSource[],
+	onSlice?: () => boolean,
+): Promise<AssembledBackup> {
+	if ("checksum" in envelope) throw new Error("Backup envelope must not carry a checksum")
+	const data: Record<string, unknown> = {}
+	const draft: Record<string, unknown> = { ...envelope, data }
+	for (const { name, backup } of sources) {
+		if (onSlice && !onSlice()) throw new AssemblyAbortedError()
+		const slice = await backup()
+		if (slice === null || slice === undefined) continue
+		data[name] = slice
+	}
+	if (onSlice && !onSlice()) throw new AssemblyAbortedError()
+	const unsigned = JSON.stringify(draft)
+	const checksum = await EncryptionKey.getHashHex(unsigned)
+	// Re-probe after the hash await too: the parse + two stringifies below are
+	// the most expensive steps at large sizes — don't spend them for an
+	// abandoned run.
+	if (onSlice && !onSlice()) throw new AssemblyAbortedError()
+	const sealed = JSON.parse(unsigned) as Record<string, unknown>
+	sealed.checksum = checksum
+	return { compact: JSON.stringify(sealed), pretty: JSON.stringify(sealed, null, 2), checksum }
 }
 
 interface AccountStateRestoreItem {

@@ -1,5 +1,52 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { downloadFile } from "./files"
+import { FileTooLargeError, compressData, downloadFile, pickFile } from "./files"
+
+/** Drives pickFile's hidden input: grabs it post-append, plants the file, fires onchange. */
+async function pickWith(file: File, maxBytes?: number): Promise<File> {
+	const picked = pickFile(undefined, false, true, maxBytes)
+	const input = document.body.querySelector<HTMLInputElement>('input[type="file"]')
+	if (!input?.onchange) throw new Error("pickFile input not mounted")
+	Object.defineProperty(input, "files", { value: [file] })
+	input.onchange(new Event("change"))
+	return picked
+}
+
+describe("pickFile byte cap", () => {
+	test("rejects an oversized file before any read (plain path)", async () => {
+		const file = new File(["x".repeat(2048)], "big.json")
+		await expect(pickWith(file, 1024)).rejects.toBeInstanceOf(FileTooLargeError)
+	})
+
+	test("uncapped behavior is unchanged", async () => {
+		const file = new File(['{"ok":true}'], "fine.json")
+		const picked = await pickWith(file)
+		expect(await picked.text()).toBe('{"ok":true}')
+	})
+
+	test("an at-limit file passes", async () => {
+		const body = "x".repeat(1024)
+		const picked = await pickWith(new File([body], "edge.json"), 1024)
+		expect(picked.size).toBe(1024)
+	})
+
+	// Stream-dependent: the chunk-cap error thrown INSIDE decompression must
+	// reject the pick, never fall into the warn-and-fallback that would hand
+	// the caller the still-compressed original. (Chunk-cap mechanics
+	// themselves are pinned in files.caps.test.ts under the node env.)
+	describe.skipIf(typeof CompressionStream === "undefined")("compressed path", () => {
+		test("a gzip bomb rejects with FileTooLargeError instead of falling back", async () => {
+			const gz = await compressData("0".repeat(2 * 1024 * 1024), "gzip")
+			// Construct from RAW BYTES, not the Blob: nesting a Node-realm Blob
+			// (CompressionStream's output) inside a jsdom File breaks that File's
+			// arrayBuffer() on CI's runtime — the decompress then fell into the
+			// warn-and-fallback and the test failed there, not here.
+			const file = new File([await gz.arrayBuffer()], "bomb.json.gz")
+			// Compressed size sails under the cap; only inflation crosses it.
+			expect(file.size).toBeLessThan(64 * 1024)
+			await expect(pickWith(file, 256 * 1024)).rejects.toBeInstanceOf(FileTooLargeError)
+		})
+	})
+})
 
 /**
  * `downloads` is a REQUIRED manifest permission, so `downloadFile` must NOT run a

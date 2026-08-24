@@ -402,7 +402,14 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		if (restoreStatus.value === "progress") return
 		try {
 			const file = await opts.pickFile()
-			if (!file) return
+			// A pick that yields no file (the capped wrapper's too-large path)
+			// must also drop any PREVIOUS selection — otherwise the old file's
+			// name and enabled import CTA sit under the new error banner, and
+			// the user can "import" a file the UI just said failed.
+			if (!file) {
+				selectedBackup.value = null
+				return
+			}
 			const { selection, parseError } = await readBackupFile(file)
 			selectedBackup.value = selection
 			if (parseError) {
@@ -449,15 +456,23 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 
 	async function decryptBackup() {
 		if (!decryptionPassword.value) return
+		// Snapshot the selection this decrypt belongs to: a re-pick (or the
+		// too-large clear) during the KDF awaits must not have its error wiped
+		// or its selection resurrected by this run's late publication.
+		const target = selectedBackup.value
+		if (!target) return
 		try {
 			const passhash = await EncryptionKey.getPasshash(decryptionPassword.value)
+			if (selectedBackup.value !== target) return
 			const key = await EncryptionKey.fromPasshash(passhash)
-			const encryptedBytes = new Uint8Array(Buffer.from(selectedBackup.value?.backup as string, "base64"))
+			if (selectedBackup.value !== target) return
+			const encryptedBytes = new Uint8Array(Buffer.from(target.backup as string, "base64"))
 			const decryptedBytes = await key.decrypt(encryptedBytes)
+			if (selectedBackup.value !== target) return
 			const decodedJson = new TextDecoder().decode(decryptedBytes)
 			const backupObject = JSON.parse(decodedJson) as { data?: { profile?: { type?: string; name?: string } } }
 			selectedBackup.value = {
-				...(selectedBackup.value as BackupSelection),
+				...target,
 				backup: backupObject,
 				profileType: backupObject?.data?.profile?.type ?? null,
 			}
@@ -472,6 +487,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			}
 			opts.clearError()
 		} catch {
+			if (selectedBackup.value !== target) return
 			opts.fillError(
 				"full_backup",
 				"Decryption Failed",

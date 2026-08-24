@@ -1805,3 +1805,32 @@ describe("crash-rollback liveness gate", () => {
 		expect(opts.fillError).toHaveBeenCalledWith("full_backup", "Import incomplete", expect.stringContaining("Delete it in Settings"))
 	})
 })
+
+describe("useFullBackupImport — decryptBackup stale-selection fence", () => {
+	it("a decrypt superseded by a re-pick publishes nothing and leaves the new state alone", async () => {
+		const opts = makeOpts()
+		const c = useFullBackupImport(opts)
+		c.selectedBackup.value = { name: "old.txt", backup: "AAAA", type: "encrypted", profileType: null }
+		c.decryptionPassword.value = "pass1234"
+
+		// Hold the first KDF await open so the selection can change mid-flight
+		// (the too-large re-pick path clears it to null).
+		let releaseKdf!: (v: unknown) => void
+		const kdfGate = new Promise((res) => {
+			releaseKdf = res
+		})
+		const passhashSpy = vi.spyOn(EncryptionKey, "getPasshash").mockReturnValue(kdfGate as never)
+
+		const run = c.decryptBackup()
+		c.selectedBackup.value = null
+		releaseKdf("stale-passhash")
+		await run
+
+		// The superseded run must neither resurrect a selection husk nor touch
+		// the error channel (the re-pick's own error must survive).
+		expect(c.selectedBackup.value).toBeNull()
+		expect(opts.clearError).not.toHaveBeenCalled()
+		expect(opts.fillError).not.toHaveBeenCalledWith("full_backup", "Decryption Failed", expect.anything())
+		passhashSpy.mockRestore()
+	})
+})

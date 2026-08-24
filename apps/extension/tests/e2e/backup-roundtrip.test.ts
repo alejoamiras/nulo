@@ -46,9 +46,20 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 		await clickByTestId(page, "agree-continue-btn")
 		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
 		await replaceInputValue(page, '[data-testid="unlock-password-input"]', TEST_PASSWORD)
-		await clickByTestId(page, "unlock-submit-btn")
+		// Re-entry poke, atomic on purpose: the create click AND two document-level
+		// Enter presses run in ONE in-page task, so both Enters land after the
+		// handler's synchronous status flip and before any await resolves — the
+		// exact double-fire vector that used to start a second assembly and ship
+		// a checksum-corrupt file. The round-trip below passing IS the pin.
+		await page.evaluate(() => {
+			const btn = document.querySelector<HTMLButtonElement>('[data-testid="unlock-submit-btn"]')
+			if (!btn || btn.disabled) throw new Error("unlock-submit-btn missing or disabled — the poke would silently degrade")
+			btn.click()
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		})
 
-		// The 11-service backup chain is slow on hosted runners — same budget
+		// The 12-service backup chain is slow on hosted runners — same budget
 		// the security-backup export test uses, with headroom.
 		await page.waitForFunction(
 			() => {

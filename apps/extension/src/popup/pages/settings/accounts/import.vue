@@ -16,7 +16,7 @@ import SecretExportLayout from "@/components/composite/SecretExportLayout.vue"
 import { managers } from "@/utils/core"
 
 /** Utils */
-import { pickFile } from "@/utils"
+import { FileTooLargeError, pickFile } from "@/utils"
 import { trimAddress } from "@/utils/string"
 import { storageLocalSet } from "@/utils/storage"
 
@@ -48,17 +48,29 @@ let generation = 0
 const isProtectedFile = computed(() => fileBody.value.trim().length > 0 && !fileBody.value.trim().startsWith("{"))
 const needsConfirm = computed(() => previewAddress.value.length > 0)
 
+// Coarse pre-read byte gate (×4 headroom over the service's authoritative
+// 64 KiB string-length check, covering UTF-8-bytes vs UTF-16-units skew).
+const MAX_ACCOUNT_FILE_BYTES = 256 * 1024
+
 const handlePickFile = async () => {
 	const gen = generation
 	try {
-		const picked = await pickFile()
+		const picked = await pickFile(undefined, false, true, MAX_ACCOUNT_FILE_BYTES)
 		if (!picked) return
 		const text = (await picked.text()).trim()
 		if (gen !== generation) return
 		fileBody.value = text
 		fileName.value = picked.name ?? ""
 		error.value = ""
-	} catch {
+	} catch (err) {
+		if (err instanceof FileTooLargeError && gen === generation) {
+			// Drop any previously-picked file too — a stale body under the new
+			// error would let Enter preview the old file and clear the error.
+			fileBody.value = ""
+			fileName.value = ""
+			error.value = "Account file is too large."
+			return
+		}
 		// Cancelled picker: leave the form as-is.
 	}
 }

@@ -5,8 +5,9 @@ import { usePopupStore } from "@/stores/popup.store"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileNameField } from "@/composables/useProfileNameField"
-import { pickFile } from "@/utils"
+import { FileTooLargeError, pickFile } from "@/utils"
 import { copyToClipboard } from "@/utils/clipboard"
+import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { managers } from "@/utils/core"
 
 /**
@@ -257,7 +258,25 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		repeatedPassword,
 		fillError,
 		clearError,
-		pickFile,
+		// Capped pick: the byte gate must run inside pickFile (compressed files
+		// inflate in there, before any caller-side .size check could). The cap
+		// error maps to the flow's error banner and the flow exits through its
+		// existing no-file path.
+		pickFile: async () => {
+			try {
+				return await pickFile(undefined, false, true, MAX_BACKUP_FILE_BYTES)
+			} catch (err) {
+				if (err instanceof FileTooLargeError) {
+					fillError(
+						"full_backup",
+						"Backup File Too Large",
+						"The backup file is too large to import. Please select a correct backup file.",
+					)
+					return undefined
+				}
+				throw err
+			}
+		},
 		completeImport: opts.completeImport,
 		runCeremony,
 		profileName,
