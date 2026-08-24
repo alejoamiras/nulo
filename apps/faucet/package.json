@@ -31,6 +31,7 @@
 		"@aztec/noir-noirc_abi": "5.0.1",
 		"@aztec/protocol-contracts": "5.0.1",
 		"@aztec/pxe": "5.0.1",
+		"@aztec/standard-contracts": "5.0.1",
 		"@aztec/stdlib": "5.0.1",
 		"@aztec/wallet-sdk": "5.0.1",
 		"@aztec/wallets": "5.0.1",

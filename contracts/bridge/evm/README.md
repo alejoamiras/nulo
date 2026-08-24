@@ -28,7 +28,8 @@ repo-root `node_modules` the static `foundry.toml` remap assumes, so generate th
 override file first (it is gitignored; `verify-l1.ts` does this automatically):
 
 ```bash
-bun --cwd packages/bridge-core scripts/gen-remappings.ts   # writes remappings.txt
+# from this directory (contracts/bridge/evm):
+bun --cwd ../../../packages/bridge-core scripts/gen-remappings.ts   # writes ./remappings.txt
 forge build
 forge test
 ```
