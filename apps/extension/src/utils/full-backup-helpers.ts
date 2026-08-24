@@ -3,7 +3,16 @@
  * No vue, no chrome.*, no service clients — safe to import anywhere.
  */
 
+import { EncryptionKey } from "@nulo/wallet-crypto"
 import { fromBase64 } from "@/wallet/utils"
+
+/**
+ * One shared ceiling for backup files, enforced on BOTH sides: the import
+ * path refuses larger files before reading them, and the export path refuses
+ * to produce a larger artifact — the same constant on both sides is what
+ * guarantees an exported backup can never be rejected by its own importer.
+ */
+export const MAX_BACKUP_FILE_BYTES = 16 * 1024 * 1024
 
 export type BackupFileType = "plain" | "encrypted" | "unknown"
 
@@ -56,6 +65,57 @@ export async function readBackupFile(file: File): Promise<ProcessBackupResult> {
 		selection: { name: file.name, backup, type: detectedType, profileType },
 		parseError,
 	}
+}
+
+/** A backup-slice producer: the service's own name constant plus its backup call. */
+export type BackupSource = { name: string; backup: () => Promise<unknown> }
+
+/** Thrown when the caller's `onSlice` probe reports the run is no longer current. */
+export class AssemblyAbortedError extends Error {
+	constructor() {
+		super("Backup assembly aborted")
+		this.name = "AssemblyAbortedError"
+	}
+}
+
+export interface AssembledBackup {
+	compact: string
+	pretty: string
+	checksum: string
+}
+
+/**
+ * Assembles a full-backup artifact from an envelope and slice sources, sealed
+ * from ONE serialization: the checksum hashes exactly `JSON.stringify(draft)`
+ * with `checksum` the only absent key, and both output strings derive from a
+ * parse of those same bytes — so caller-side mutation of the envelope or slice
+ * object graphs after the awaits cannot skew the artifact, and the import
+ * side's strip-checksum → compact-restringify recompute reproduces the hashed
+ * string exactly (key insertion order survives parse → stringify).
+ *
+ * `onSlice` is a currency probe: consulted before every slice and before
+ * sealing; returning false aborts with `AssemblyAbortedError`.
+ */
+export async function assembleFullBackup(
+	envelope: Record<string, unknown>,
+	sources: BackupSource[],
+	onSlice?: () => boolean,
+): Promise<AssembledBackup> {
+	if ("checksum" in envelope) throw new Error("Backup envelope must not carry a checksum")
+	const data: Record<string, unknown> = {}
+	const draft: Record<string, unknown> = { ...envelope, data }
+	for (const { name, backup } of sources) {
+		if (onSlice && !onSlice()) throw new AssemblyAbortedError()
+		const slice = await backup()
+		if (slice === null || slice === undefined) continue
+		data[name] = slice
+	}
+	if (onSlice && !onSlice()) throw new AssemblyAbortedError()
+	const unsigned = JSON.stringify(draft)
+	const checksum = await EncryptionKey.getHashHex(unsigned)
+	const sealed = JSON.parse(unsigned) as Record<string, unknown>
+	sealed.checksum = checksum
+	return { compact: JSON.stringify(sealed), pretty: JSON.stringify(sealed, null, 2), checksum }
 }
 
 interface AccountStateRestoreItem {

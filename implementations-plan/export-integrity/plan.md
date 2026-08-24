@@ -103,7 +103,8 @@ Create: click/Enter → latch + `"progress"` (sync) → ceremony/KDF → per-run
 
 ## Phases
 
-### Phase 1 — N-01: assembly extraction + page hardening
+### Phase 1 ✓ — N-01: assembly extraction + page hardening
+_Gate passed: lint exit 0, vue-tsc clean, 42/42 tests green (helpers assembly suite + full.test.ts component pins)._
 Implement §N-01. Tests: `full-backup-helpers.test.ts` — assembly calls each of 12 fakes exactly once (single-execution proof), checksum verifies via the import-side recompute (strip checksum → compact stringify → `getHashHex`), canonical-snapshot immunity (mutating the envelope/slice objects AFTER the sources resolve does not change the outputs), envelope carrying a `checksum` key → throws, `onSlice` false → typed abort + no further source calls, null/undefined slices skipped, envelope `undefined` fields dropped; `full.test.ts` — second click/Enter during busy is a no-op (assembly called once), Enter during `"progress"`/`"encrypting"` no-ops, assembly rejection → status `""` + toast + (passkey) `isAgreed` reset, unmount mid-run → clients disconnected + payload/password scrubbed, double-`handleEncrypt` is a no-op (latch) + stale encrypt writes suppressed after gen bump, oversized assembly output → failure toast not a download (export-side gate), checksum pinned via mocked-`downloadFile` capture (parse pretty payload → strip → recompute — fable condition 3). Shared-constant drift pin: export gate and import gate reference the SAME `MAX_BACKUP_FILE_BYTES` export.
 **Validation gate** — commands: `bun run lint && bun run typecheck && bun run test apps/extension/src/utils/full-backup-helpers.test.ts apps/extension/src/popup/pages/settings/security/export/full.test.ts`. Pass: exit 0, new cases green. Layers: lint/typecheck + unit/component.
 
