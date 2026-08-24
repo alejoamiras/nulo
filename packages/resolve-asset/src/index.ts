@@ -140,7 +140,10 @@ export function assertPackageIdentity(pkg: string, options: IdentityOptions): Id
 		throw new Error(`resolve-asset: ${pkg} is ${version}, expected ${options.expectVersion}`)
 	}
 	if (options.mustContain) {
-		const target = join(realRoot, options.mustContain.file)
+		const target = normalize(join(realRoot, options.mustContain.file))
+		if (!target.startsWith(realRoot + sep)) {
+			throw new Error(`resolve-asset: mustContain.file ${options.mustContain.file} escapes the package root of ${pkg}`)
+		}
 		if (!existsSync(target)) {
 			throw new Error(`resolve-asset: ${pkg} is missing ${options.mustContain.file}`)
 		}

@@ -40,8 +40,13 @@ export function generateRemappings(): string {
 /** Asserts forge actually sees the generated `@aztec/` mapping (and records the forge version). */
 export function assertEffectiveRemapping(forgeBin: string): void {
 	const version = spawnSync(forgeBin, ["--version"], { encoding: "utf8" })
+	if (version.error || version.status !== 0) {
+		throw new Error(`forge not runnable at ${forgeBin}: ${version.error?.message ?? version.stderr}`)
+	}
 	const remaps = spawnSync(forgeBin, ["remappings"], { cwd: EVM_ROOT, encoding: "utf8" })
-	if (remaps.status !== 0) throw new Error(`forge remappings failed: ${remaps.stderr}`)
+	if (remaps.error || remaps.status !== 0) {
+		throw new Error(`forge remappings failed: ${remaps.error?.message ?? remaps.stderr}`)
+	}
 	const aztecLine = remaps.stdout.split("\n").find((l) => l.startsWith("@aztec/="))
 	const expected = `${resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: import.meta.url })}/`
 	if (!aztecLine || !aztecLine.includes(expected)) {
