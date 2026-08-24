@@ -18,16 +18,16 @@ Setup: local `Bun.serve` registry (ephemeral port) serving `nulo-probe-parent-25
 
 Verdict: **#25305 is closed on 1.4.0** — when a gated update actually re-resolves, transitives go through the gate. The "delete bun.lock first" workaround is retired from bunfig.toml. Documented nuance (by design, not a bug): update never re-gates versions already present in the lockfile, so evicting an already-locked too-young version still requires a deliberate regeneration.
 
-### Round-2 addendum: the codex-designed DISCRIMINATOR cell (post-impl audit demanded it)
+### Round-2/3 addendum: the codex-designed DISCRIMINATOR cell, iterated to airtight
 
-The original "from old lock" cell was not airtight — the young parent was gate-rejected, so nothing proved the child was ever RE-resolved. Fix: `parent@1.0.0` (old) pins `child` EXACTLY `1.0.0`; a new `parent@1.0.5` (also old, >7d) widens the dep to `^1`. Seeding gated at parent=1.0.0/child=1.0.0 and running gated `update --latest`:
+Round 2 objection: widening the child dep to `^1` proves nothing — the locked child `1.0.0` *satisfies* `^1`, so the resolver may retain it without consulting the gate. Final design (codex round-2 spec): add `child@1.0.5` (old, >7d) and make `parent@1.0.5` require **`^1.0.5`** — the locked `1.0.0` is EXCLUDED, so the child resolution is provably fresh, choosing between `1.0.5` (old) and `1.1.0` (young). Plus an ungated twin as counter-control.
 
-| Runtime | DISCRIMINATOR: gated update from exact-old seed |
-|---|---|
-| 1.3.14 | parent → 1.0.5 (allowed old upgrade fired), child freshly resolved under `^1` vs {1.0.0 old, 1.1.0 young} → **1.0.0** |
-| 1.4.0 | parent → 1.0.5, child → **1.0.0** |
+| Cell | 1.3.14 | 1.4.0 |
+|---|---|---|
+| DISCRIMINATOR (gated): seed parent=1.0.0/child=1.0.0 → `update --latest` | parent→1.0.5, child (forced fresh) → **1.0.5 old** | parent→1.0.5, child (forced fresh) → **1.0.5 old** |
+| Ungated twin, same seed → `update --latest` | parent→1.1.0, child retained 1.0.0 | parent→1.1.0, child retained 1.0.0 |
 
-The parent MOVED (proving the update path executed and the child constraint genuinely widened), a fresh child resolution happened against a young candidate, and the gate held it — on 1.4.0. This is the airtight transitive-gating proof.
+Three facts close the argument: (1) a FORCED fresh transitive resolution under the gate picks the old candidate (discriminator, both runtimes); (2) fresh resolution WITHOUT the gate picks the young candidate (the matrix's seed cell: child=1.1.0) — so the discriminator's old choice is the gate's doing; (3) the ungated twin shows retention-of-satisfied-locked-versions is runtime inertia independent of the gate (its parent moved to young 1.1.0 whose `^1` admits the locked child, which was retained — with no gate configured).
 
 Sharpened description of the 1.3.x bug shape (the discriminator also refines it): 1.3.14 gates transitives fine on FRESH resolution (discriminator + fresh cells) — the original #25305 asymmetry lives in the *latest-lock* cell: an already-locked YOUNG transitive persists while directs get forcibly re-gated (parent pushed down to newest-allowed, child kept at young 1.1.0). 1.4 removes the asymmetry from the other side: locked versions are uniformly never re-gated, and every genuine re-resolution is gated, directs and transitives alike.
 

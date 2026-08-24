@@ -322,9 +322,10 @@ surfaces npm advisories in the GitHub Action step summary but does not
 block PRs (today). Bun 1.4 exits 1 on findings (1.3.x always exited 0),
 so exit-code gating is now mechanically possible — the step stays
 advisory deliberately: the pre-existing backlog (41 advisories as of
-2026-08-24, all in dev/build/test tooling or the exact-pinned `@aztec`
-line, none extension-bundle-reachable) must be triaged to zero first,
-or a blocking flip is pure noise.
+2026-08-24 — every one of the 23 HIGH chains classified as dev/build/test
+tooling or the exact-pinned `@aztec` line, none extension-bundle-reachable;
+the 15 moderate + 3 low not individually classified) must be triaged to
+zero first, or a blocking flip is pure noise.
 
 **Bun pinned** to a specific patch version in `package.json#packageManager`
 and in `setup-bun/action.yml` (the commitlint job reuses that composite —
