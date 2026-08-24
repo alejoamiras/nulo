@@ -13,8 +13,6 @@ Blueprint mid. Base: stacked on `worktree-bun-1.4-bump` @ b6e5920e (PR #452, gre
 
 ## Part 2 — Layout-sensitive consumer inventory
 
-_Pending: explorer running (first attempt died on a transient API entitlement error; retried). Will be appended verbatim when it lands._
-
 ## Immediate plan-shaping consequences
 
 1. Consumers-first strategy (pre-consult) stands, but the patched-package leg of the identity gate is now EMPIRICAL, not doc-backed.
