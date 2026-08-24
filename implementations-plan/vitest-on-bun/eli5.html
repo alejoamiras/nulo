@@ -1,0 +1,135 @@
+<title>Vitest on Bun</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f7f8f6;
+    --card: #ffffff;
+    --ink: #1c2420;
+    --muted: #5b6660;
+    --line: #d9ded9;
+    --accent: #0f6e63;
+    --accent-soft: #dcefe9;
+    --warn: #9a5b00;
+    --warn-soft: #fbf1df;
+    --code-bg: #eef1ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #121917; --card: #182220; --ink: #e6ebe7; --muted: #9aa8a1; --line: #2a3532;
+      --accent: #4fd1b7; --accent-soft: #173a33; --warn: #e2a54b; --warn-soft: #2d2415; --code-bg: #1e2926;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121917; --card: #182220; --ink: #e6ebe7; --muted: #9aa8a1; --line: #2a3532;
+    --accent: #4fd1b7; --accent-soft: #173a33; --warn: #e2a54b; --warn-soft: #2d2415; --code-bg: #1e2926;
+  }
+  body { background: var(--paper); color: var(--ink); font-family: "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; margin: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 2rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 0.25rem; text-wrap: balance; }
+  h2 { font-size: 1.2rem; font-weight: 600; margin: 2.5rem 0 0.75rem; text-wrap: balance; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.35rem; }
+  p, li { max-width: 65ch; }
+  .eyebrow { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 1.5rem; }
+  .muted { color: var(--muted); font-size: 0.92rem; }
+  code, pre { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  pre code { background: none; padding: 0; }
+  .phases { display: grid; gap: 1rem; }
+  .phase { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 1rem 1.25rem; }
+  .phase p { margin: 0.35rem 0; }
+  .proves { color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
+  .callout { background: var(--accent-soft); border-radius: 6px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+  .callout h2 { margin-top: 0; }
+  .warning { color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 0.75rem 1rem; font-weight: 500; }
+  .seed { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .seed.recommended { border-color: var(--accent); }
+  .tag { display: inline-block; background: var(--accent); color: var(--paper); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.15em 0.6em; border-radius: 999px; margin-left: 0.5rem; vertical-align: middle; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .table-wrap { overflow-x: auto; }
+  a { color: var(--accent); }
+  a:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<main>
+  <p class="eyebrow">Blueprint · mid · Arc C of the Bun 1.4 adoption</p>
+  <h1>Vitest on Bun</h1>
+  <p>Every package's automated tests currently run on Node, even though Bun installs and runs everything else in this repo. Bun 1.4 officially runs Vitest. This plan switches each package's <code>test</code> command to Bun, proves with repeated runs — same commit, both runtimes — that Bun is at least as reliable as Node, and lands it as one pull request that touches no CI workflow file and no dependency. The browser end-to-end tests keep running on Node for now.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>mid.</strong> Rubric: novelty medium (first time tests execute on Bun here, but already de-risked by measurements), blast radius medium (if a switch is wrong, every pull request's quality check goes red — and each switch is one line to revert), irreversibility low, migration cost low, external coupling medium (one real bug between Vitest and Bun, already fixed upstream in Vitest's next major, worked around here), security low. One medium-high dimension → <code>mid</code>: plan + competing outline, codex + fable audits, a fresh-context codex final pass.</p>
+
+  <h2>What we already know (measured, not assumed)</h2>
+  <ul>
+    <li>Switching a package is one line: <code>vitest run</code> → <code>bun --bun vitest run</code>. CI never names Vitest directly, so no workflow changes.</li>
+    <li>Run once on Bun, seven of the ten suites give exactly the same results as on Node. The other three fail — all for a single reason.</li>
+    <li>That reason: JavaScript modules can carry a small "I was converted from an older module style" marker. Bun answers "yes, it's there" for modules where Node answers "no". Vitest trusts that answer and, for one library (<code>zod</code>, used for input validation across the wallet), throws away the export the code needs. Vitest fixed this in May 2026 (issue #10359, fix #10363) — but only in Vitest 5, not the Vitest 4 we use. Turning off that one Vitest feature makes the extension's 4,635 tests pass identically on both runtimes.</li>
+  </ul>
+
+  <h2>Phases</h2>
+  <div class="phases">
+    <div class="phase">
+      <h3>Phase 0 — Foundation (nothing changes runtime yet)</h3>
+      <p>Add one shared test setting (the workaround above, with a note saying exactly when to delete it), give the four packages that had no test config a tiny explicit one, and build a small "soak" tool: it runs a package's real <code>test</code> command N times, records which runtime actually ran (so a "Bun" report can never secretly be Node), and compares two reports strictly — same commit, same list of tests, zero failed runs, no test failing more often than before. The tool ships with tests that make it fail on purpose (a crash, a hang, an unhandled error, missing output), so CI proves the gate can say no.</p>
+      <p class="proves">Proves itself by: lint + typecheck green, every suite still green on Node with the new setting, the tool's own tests green.</p>
+    </div>
+    <div class="phase">
+      <h3>Phase 1 — Switch, then prove it at one commit</h3>
+      <p>Switch every package's <code>test</code> command to Bun (one commit per package, so any one can be reverted alone). Then, at that single commit, run each of the twelve suites 30 times on Node and 30 times on Bun and compare all twelve pairs; run the whole-repo test command five times the way CI runs it (all packages at once); and trigger the real CI pipeline on the branch to see it on GitHub's runners before any pull request exists. A Bun-only failure is never "a flake to retry": either the test assumed something Node-specific and gets fixed to be runtime-neutral, or Bun really differs — then that package stays on Node and the decision comes back to you.</p>
+      <p class="proves">Proves itself by: 24 soak reports with zero failed runs, 12 strict comparisons passing, the 5× whole-repo run green, the dispatched CI run green.</p>
+    </div>
+    <div class="phase">
+      <h3>Phase 2 — Documentation</h3>
+      <p>State the new runtime and the workaround's expiry in the repo's operating docs, fix two stale sentences found on the way (which packages CI tests; the test-suite table), and correct the Bun-adoption dossier.</p>
+      <p class="proves">Proves itself by: lint green, and the final diff matching the planned file list — nothing outside it.</p>
+    </div>
+  </div>
+
+  <h2>Human context</h2>
+  <p><strong>Node vs Bun.</strong> Both run JavaScript; Bun is the one this repo already uses to install packages and run scripts. Running the tests on Bun too removes a second runtime from the picture and, as a side effect, pins the test runtime to an exact version in CI (today's Node there is whatever the runner image ships).</p>
+  <p><strong>Why not flip one global switch?</strong> Bun has a setting that would make <em>everything</em> run on Bun at once — including the build, Storybook, and the browser tests you asked to keep on Node. Per-package lines are explicit and revertable one at a time.</p>
+  <p><strong>Why 30 runs?</strong> A test that fails one time in ten is caught with 96 % confidence; one in twenty with 78 %. It is the agreed budget, not a proof of perfection — which is why the whole-repo run is also repeated and a real CI run is required.</p>
+  <p><strong>What stays on Node:</strong> the Puppeteer browser tests (smoke and network suites) and their helper scripts; the watch-mode commands unless a quick hands-on check shows watch mode behaves on Bun.</p>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><strong>Upstream:</strong> the Vitest bug is fixed in Vitest 5 only. Do you want to ask the Vitest maintainers for a Vitest 4 backport (a comment on issue #10359), or simply wait for Vitest 5 and delete the workaround then? Either way the plan works; this only changes when the workaround retires.</li>
+    <li><strong>If Node itself turns out flaky:</strong> should any suite fail even once in its 30 Node runs, the plan stops and asks you — accepting a known flake budget is a policy decision.</li>
+    <li><strong>If a package genuinely cannot run on Bun:</strong> the plan stops and asks whether to abort or ship a reduced scope.</li>
+  </ul>
+
+  <div class="callout">
+    <h2>Approval decision needed from you</h2>
+    <ul>
+      <li>Confirm scope: all unit/component suites move to Bun; browser end-to-end tests stay on Node; no dependency or CI workflow changes.</li>
+      <li>Confirm tier <code>mid</code>.</li>
+      <li>Confirm the validation plan: 30 runs per suite on both runtimes at one commit, strict comparison, 5× whole-repo run, one real CI dispatch before the PR.</li>
+      <li>Confirm delivery: a single pull request (one foundation commit, one commit per package switch, one docs commit).</li>
+      <li>Pick the upstream option (backport request vs wait) — or defer it; it does not block the work.</li>
+      <li>No security hardening pass is proposed: this changes which engine runs the tests, not any trust boundary.</li>
+      <li>Approve, conditionally approve (with conditions), or reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <p class="muted">Two ways to run the implementation session autonomously. <code>/goal</code> keeps working until a condition holds and survives <code>claude --resume</code>; <code>/loop</code> re-fires on an interval. Completion here is fully observable in the transcript (gate outputs, comparisons, a PR), so <code>/goal</code> is recommended. The session must run inside the plan's worktree (<code>agent-worktree resume vitest-on-bun</code>).</p>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+
+    <div class="seed recommended">
+      <h3>/goal <span class="tag">Recommended</span></h3>
+      <pre><code>/goal All phases (0–2) marked ✓ in implementations-plan/vitest-on-bun/plan.md (the per-phase headers in the file, not the chat), each ✓ backed by its phase's validation gate as written there reported passing in the transcript (12 Node + 12 Bun soak summaries at one commit with failedRuns: 0, 12 `compare`s exiting 0, test:all ×5 green, the dispatched pr-quick.yml quality-status success); for each phase the agent has printed `LESSONS_FILE=implementations-plan/vitest-on-bun/lessons/phase-N.md`; `/code-review max --fix` complete with findings applied and committed separately; the codex fix loop converged — a resumed codex pass reporting no new material findings, quoted in the transcript; ONE PR to dev exists, created only after convergence (`gh pr view` output in the transcript) with quality-status green; `bun run test:all` and `bun run lint` both exit 0 in the transcript. Reserved for the owner: merging, the upstream backport request, a non-zero Node reference, a package that must stay on Node, anything touching @aztec/* or required checks.</code></pre>
+    </div>
+
+    <div class="seed">
+      <h3>/loop (alternative)</h3>
+      <pre><code>/loop 15m Drive implementations-plan/vitest-on-bun forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative), `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. (2) Waiting on a soak, a dispatch or CI is fine — confirm it is progressing; use the wait to prepare the next step. (3) No task in hand? take the next pending step from plan.md; after each edit run `bun run lint` + the touched workspace's `bun run --cwd &lt;ws&gt; test`; commit → push. (4) A decision you'd bring to me? call `/codex xhigh` with full context, iterate to a defensible decision, act, log the consult in lessons/phase-N.md; never merge, never post upstream, never touch @aztec/* or required checks; a non-zero Node reference or a package that must stay on Node → stop and surface. (5) Same step failed 5×? stop, reassess with codex. (6) Phase green = its validation gate in plan.md passes as written: paste the result, mark ✓, write the lessons entry, print `LESSONS_FILE=…`, advance. (7) All phases ✓? run the Post-implementation section (code-review → codex loop → delivery), write the wrap-up (every codex-debated decision with ELI5 context), surface and stop.</code></pre>
+    </div>
+  </section>
+
+  <p class="muted">Full plan, audits and decision trail: <code>implementations-plan/vitest-on-bun/</code> in the repo (<code>plan.md</code>, <code>recon.md</code>, <code>audit-codex.md</code>, <code>audit-fable.md</code>, <code>lessons/</code>).</p>
+</main>
