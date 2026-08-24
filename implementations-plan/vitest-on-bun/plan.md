@@ -1,6 +1,6 @@
 # vitest-on-bun — Arc C of the Bun 1.4 adoption (`/blueprint mid`)
 
-Status: DRAFT v6 — codex rounds 1–3, fable round 1 and the fresh-context codex pass (rounds 1–2) folded (see [lessons/gate-convergence.md](lessons/gate-convergence.md)); awaiting the fresh-context round-3 re-pass. `eli5_mode: artifact` — ELI5 Artifact: https://claude.ai/code/artifact/8086907e-ab23-4627-a33a-d8553df5cf53 (source: `implementations-plan/vitest-on-bun/eli5.html`; redeploy the same path to update).
+Status: **APPROVED v6 — 2026-08-24**, per the owner's standing decision protocol: explicit fresh-context codex `approve` (session `01a035de-…`, round 3) after codex rounds 1–3, fable round 1 and fresh-context rounds 1–2 were all folded with zero disputes (see [lessons/gate-convergence.md](lessons/gate-convergence.md)). Implementing. `eli5_mode: artifact` — ELI5 Artifact: https://claude.ai/code/artifact/8086907e-ab23-4627-a33a-d8553df5cf53 (source: `implementations-plan/vitest-on-bun/eli5.html`; redeploy the same path to update).
 
 ## Goal
 
@@ -197,7 +197,7 @@ Unresolved disagreements after codex r1–r3, fable r1 and the fresh-context pas
 - Codex round 3 (resumed, v3): **conditional approve** — five refinements, all adopted in v4; "no new owner ask is needed beyond those already recorded".
 - Fresh-context codex pass, round 1 (session `01a035de-…`, v4): **conditional approve** — "Per-script `--bun`, the repo-wide stopgap, one-PR topology, full N=30 matrix, ×5 fan-out, and rejection of the global `bunfig.toml` flip are the right choices. No rejected alternative is better."; every condition adopted in v5.
 - Fresh-context codex re-pass, round 2 (v5): **conditional approve** — three Med refinements (reporter env var → derived from `outputFile`; explicit full/compare/compact flow; pinned resolver allowlist with no CLI widening), all adopted in v6; "every previous disposition is otherwise accurately folded".
-- Fresh-context codex re-pass, round 3 (v6): pending.
+- Fresh-context codex re-pass, round 3 (v6): **approve** — "All three round-2 conditions are completely folded … No new High/Med findings remain." **GATE PASSED.**
 
 ## Post-implementation
 
@@ -217,7 +217,7 @@ Single arc → one branch (`worktree-vitest-on-bun`), one PR to `dev` via `gh pr
 
 Rollback: revert a package's flip commit; the base object stays (semantics proven on Node on every suite).
 
-## Seeds (DRAFT — finalized after the approval gate)
+## Seeds (FINAL — approval attached no conditions; identical to the ELI5)
 
 ```
 /goal All phases (0–2) marked ✓ in implementations-plan/vitest-on-bun/plan.md (the per-phase headers in the file, not the chat), each ✓ backed by its phase's validation gate as written there reported passing in the transcript (a recorded frozen install at the matrix commit, 12 Node + 12 Bun soak summaries at that commit with failedRuns: 0, 12 `compare`s exiting 0, test:all ×5 green, the pr-quick.yml dispatch bound to the matrix commit with quality-status success); for each phase the agent has printed `LESSONS_FILE=implementations-plan/vitest-on-bun/lessons/phase-N.md`; `/code-review max --fix` complete with findings applied and committed separately; the codex fix loop converged — a resumed codex pass reporting no new material findings, quoted in the transcript — and the matrix re-run if the loop touched anything executable; ONE PR to dev exists, created only after convergence (`gh pr view` output in the transcript) with quality-status, smoke-e2e-status and network-e2e-status all SUCCESS at its HEAD; `bun run test:all` and `bun run lint` both exit 0 in the transcript. Reserved for the owner: merging, the upstream backport request, a non-zero Node reference, a package that must stay on Node, anything touching @aztec/* or required checks.

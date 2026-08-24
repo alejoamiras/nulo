@@ -123,6 +123,10 @@ Rejected: nothing. Disputed: nothing.
 
 Rejected: nothing. Disputed: nothing.
 
-## Final — fresh-context codex re-pass, round 3 (same session, plan v6) — pending
+## Final — fresh-context codex re-pass, round 3 (same session, plan v6) — **APPROVE**
+
+Verbatim: "VERDICT: approve — [Low] All three round-2 conditions are completely folded: reporter output is environment-free, full→compare→compact flow is explicit, and the resolver allowlist is pinned with no runtime override. [Low] The round-2 disposition table accurately matches v6. No new High/Med findings remain. looks fine"
+
+**Gate passed 2026-08-24.** Tally: codex resumed rounds 1–3 (conditional ×3, all adopted), fable round 1 (conditional, all adopted, one conflict resolved), fresh-context session rounds 1–2 (conditional, all adopted) → round 3 approve. Rejected findings: none. Unresolved disputes: none. Owner-reserved asks carried into implementation: A4 (backport request vs wait), A5 (non-zero Node reference → stop), A7 (a package that must stay on Node → stop), plus the pinned-runtime FYI.
 
 ## Final — fresh-context codex pass — pending
