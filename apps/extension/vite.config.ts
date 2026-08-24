@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join, relative } from "node:path"
+import { readFileSync } from "node:fs"
+import { dirname, relative } from "node:path"
 import { fileURLToPath, URL } from "node:url"
 import { resolveExportedAsset } from "@nulo/resolve-asset"
 import vue from "@vitejs/plugin-vue"
