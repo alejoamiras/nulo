@@ -121,6 +121,7 @@
         "@aztec/wallets": "5.0.1",
         "@nulo/bridge-core": "workspace:*",
         "@nulo/design": "workspace:*",
+        "@nulo/resolve-asset": "workspace:*",
         "@nulo/wallet-crypto": "workspace:*",
         "@nulo/wallet-sdk-schema-patch": "workspace:*",
         "viem": "^2.52.2",

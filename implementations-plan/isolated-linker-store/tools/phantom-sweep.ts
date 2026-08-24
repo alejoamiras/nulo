@@ -1,6 +1,11 @@
 // Phantom-dependency sweep: for every workspace, collect bare-specifier imports in
 // src/ (+ scripts/, tests/ where present) and report packages NOT declared in that
 // workspace's package.json (dependencies + devDependencies + peerDependencies).
+//
+// BLIND SPOT: this reads SOURCE. Build-time plugin injections (e.g. vite-plugin-node-polyfills
+// rewriting `Buffer` into an import of "vite-plugin-node-polyfills/shims/buffer" in every
+// module) never appear in source — only a clean-room build (fresh install, no hoisted root
+// copies) surfaces those. Treat CI as that clean room.
 import { readFileSync, readdirSync, statSync } from "node:fs"
 import { join } from "node:path"
 
