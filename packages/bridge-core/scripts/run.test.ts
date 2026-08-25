@@ -72,8 +72,8 @@ describe("run", () => {
 		assertNoSecret(err)
 	})
 
-	test("never formats or retains argv: an argument spawnSync rejects synchronously", () => {
-		// A NUL byte makes spawnSync throw ERR_INVALID_ARG_VALUE, whose message echoes the value.
+	test("never formats or retains argv: an argument the spawn call rejects synchronously", () => {
+		// A NUL byte makes the spawn call throw ERR_INVALID_ARG_VALUE, whose message echoes the value.
 		const err = capture(() => run(engine, ["-e", "process.exit(0)", `${SECRET}${String.fromCharCode(0)}x`]))
 		expect(err.message).toBe(`${engine} failed (invalid argument)`)
 		expect(err.code).toBe("EINVAL_ARG")
