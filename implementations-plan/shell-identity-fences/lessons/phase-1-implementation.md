@@ -20,6 +20,10 @@ Reviewer-ratified deviations recorded in the plan ledger: single-watcher `awaitP
 - **Three "promised mechanisms" were silently revertible** (producer networkId stamp, stale-task drop across profile switch, fence recombination) — each got a pin proven red by revert-probe. **Lesson: a mechanism the PR body brags about needs a pin that reds when it's deleted; the reviewer greps the diff for claims without discriminating tests.**
 - Ratified bare: `onConnected.add(resnapshotJournal)` — `EventHandler<void>.invoke()` passes undefined, defaults apply; a payload would be a compile error at the invoke site.
 
+## Codex final-diff round 2 — one residual, confirmed empirically
+
+The starvation pin's TASK half was vacuous: mount AWAITS `loadTokens` before starting the task snapshot, so the reconnect emit never overlapped a parked task load — aliasing only `taskFence = journalFence` stayed green (probed before fixing, exactly as codex predicted). Fix: drive the concurrent park through the scope-switch watcher (which begins all three fences together), then emit. Both single-alias probes now red independently. **Lesson: a multi-mechanism pin must be probed per mechanism — the aggregate probe (alias BOTH fences) passed on the strength of one half. And: know which code path actually runs the loads concurrently before claiming a concurrency pin.**
+
 ## Environment/tooling
 
 - Vitest doesn't run the app's auto-import transform: `useToast`/`TOAST_DURATION` must be explicitly imported in components under test, or the suite reds on undefineds the app never sees.
