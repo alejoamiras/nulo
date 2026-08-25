@@ -1,0 +1,14 @@
+# Fable plan audit — shell-identity-fences (round 1)
+
+Independent Plan agent (Fable), read-only, parallel with codex. Verdict on rev 1: **APPROVE-WITH-CHANGES**. Eight findings, all adopted into rev 2:
+
+1. The fence wording permitted a check-AFTER-assign implementation that ships green (nothing discriminates it) — split-statement hunks required + extract the watcher body per the repo's own shell-extraction precedent. → ADOPTED (rev 2 centerpiece, converging with codex #6).
+2. Capturing chainId only deviates from the runbook/report ("network/PROFILE ids") — the profile-timing safety argument is a fragile three-link chain; capture the pair. → ADOPTED.
+3. Rev 1's "throw lands in the existing catch → toast" is FALSE (no toast anywhere in auth.vue; inner catch silently returns; the e2e-recognized benign classes — e.g. lock-cascade "Client disconnected" — must NOT start toasting) — a DISCRIMINATED timeout error only. → ADOPTED.
+4. The literal scopeKey snippet is never-falsy (template-stringified undefined) — kills the `!nv` guard and RPC-storms every bootstrap transition; must collapse to "" like the component's own scope build. Plus: the widened captured guards were unpinned (mid-await flip case). → ADOPTED (collapse + generation-guard pin).
+5. 15 s sits below the repo's own empirical envelope (30 s dominant ×36 in e2e; ensureUnlocked budgets 10 s pre-bootstrap) — 30 s, cited. → ADOPTED.
+6. **`waitForProfileActive` already exists** (tested, bounded, identity-aware) — the alternatives never priced adopting it; demand a ledger entry either way. → ADOPTED as the N-08 mechanism, with the hijack-timeout semantics resolved by the silent-yield discriminator.
+7. N-09 grep re-verification: two real gaps (core.ts:10 header comment; the test TITLE at :63) and rev 1's verification grep was vacuous (basic-grep alternation) — `grep -rnE`. Everything else independently confirmed incl. no auto-import consumers, no indirect storage-key readers, both e2e edit shapes right. → ADOPTED.
+8. Precision: `activeProfile?.id` optional chaining (vue non-strict-null context); shell-side bootstrap toast (openToast wired at app.vue:24) over a store-flag failure channel (over-engineering); `loadTokens()` in N-23's reload branch (A's symbols/decimals otherwise render under B). → ALL ADOPTED.
+
+Verified-sound list (independently checked): the N-05 immunity premise at dev 2665af59; per-instance fence granularity (one app root per realm); the syncTransactions/setupActiveAccount internal fences (self-quarantining); network.id as the scoping identity + TaskService's synchronous pre-await clear making address-only isExecutingTask safe POST-PROFILE-switch; N-08's ordering (profile assigned before isLogined flips; the report's extra isLogined clause redundant at the plan's placement); N-22's verbatim copy equivalence; the adjudication's decision of record and both e2e spec edit shapes.

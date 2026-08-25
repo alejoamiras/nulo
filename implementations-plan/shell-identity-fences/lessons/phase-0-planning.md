@@ -10,3 +10,11 @@
 6. Test strategy silently revertible: ten primitive tests can't prove app.vue wires the fence — EXTRACT the watcher orchestration into a testable unit and pin deferred rapid switches, profile drift, ABA. Smoke/network happy paths are not discriminating.
 
 Holding rev 2 until the parallel Fable audit lands.
+
+## Fable plan audit round 1 (parallel): APPROVE-WITH-CHANGES — eight findings, all adopted
+
+Highlights: the check-after-assign trap in my own fence wording (a literally-followed plan ships a broken fence green); the never-falsy scopeKey (template-stringified undefined kills the not-ready guard and RPC-storms bootstrap); rev 1's false claim about auth.vue's catch→toast (no toast exists; a blanket one would regress deliberately-silenced benign classes); the 30 s empirical envelope; and the decisive find — `waitForProfileActive` already exists, tested, and replaces the hand-rolled wait + guard in one call. Full transcript in audit-fable.md.
+
+Cross-audit observations: zero contradictions between the two round-1 legs — every finding overlapped or complemented. Two adjudicated calls logged in the ledger: (1) bootstrap-failure waiter signaling — codex's signal/join vs fable's bounded-wait + shell toast → fable's smaller shape adopted; (2) codex's newly-found cross-network task gap → OUT of scope (adjudicated-Low finding; requires a TransferContent schema change), watcher-clear improvement kept, residual documented — flagged for final-pass ratification.
+
+Meta-lesson: the plan-audit round caught THREE false claims in my own rev 1 (the catch→toast path, the scopeKey shape, the "existing pattern" fidelity) — all from writing plan prose against remembered rather than re-read code. Rev-1 plans must quote, not paraphrase, the code they patch.
