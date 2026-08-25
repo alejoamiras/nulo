@@ -6,15 +6,18 @@ Findings N-07 (Major, RED proof c2-1), N-16, N-25 (`audit/bugs/2026-08-22-produc
 
 c2-1's scenario provably closed (adopted per the chosen design — see below), `waitForTx` bounded + cancellation-honoring, the controller leak closed with the bug-pinning test corrected; audit:vue + smoke + solo network e2e green; PR merged under all three required gates with codex final-diff sign-off.
 
-## The N-07 design decision (THE mid-tier question — codex-mediated)
+## The N-07 design decision (RESOLVED at the dual-audit round — see ledger)
 
-**Primary outline — (b) claim-eligibility keying, minimal form**: teach `reap()` that a `queued` record is reap-eligible only when it is genuinely orphaned, by keying the queued grace on the arrival clock AND a liveness signal that exists today: on reap-candidacy (age past grace), consult the wallet-sdk's session-FIFO registry — if the record's id is REGISTERED as a live FIFO waiter, spare it. Concretely: a narrow `isLiveWaiter(journalId): boolean` hook injected into the reaper (default: () => false), wired by the composition root to a new exported registry on the wallet-sdk side (a `Set<string>` maintained around `background.ts:308-376`: add at queued-record creation, remove at `releaseFifo`/handler settle). The literal c2-1 proof adopts nearly verbatim (aged + live → survives; aged + NOT live → still reaped, preserving crash detection).
-- Why primary: it keeps the reaper the single arbiter, adds no new timer, makes the proof adoptable as written, and degrades safely — a SW restart clears the set, so genuinely-orphaned records (the grace's raison d'être) still reap.
+**Chosen: (a′) — widen the EXISTING heartbeat to the pre-claim window** (fable's minimal form of the competing outline; overturns rev 1's primary):
 
-**Competing outline — (a) heartbeat session-FIFO waiters**: mirror `executionWaiters` one level up — a second set + 30 s `setInterval` bumping `touchOperation` for ids between arrival and baton grant (wired in `background.ts`). No reaper change. The c2-1 proof cannot adopt literally (a live waiter's `updatedAt` never goes stale); the pin becomes "FIFO wait keeps the record fresh across the grace" (fake-timers, execution-lane.test.ts style).
-- Trade-offs: reuses a proven mechanism verbatim; but adds a second global timer in the SW hot path, duplicates the heartbeat pattern at a different layer, makes staleness-semantics ("updatedAt = alive") do double duty, and weakens the proof's literal adoption.
+- `ExecutionService` gains `beginQueuedWait(journalId)` / `endQueuedWait(journalId)` — thin delegators to the lane's existing private `beginExecutionWait`/`endExecutionWait` (`execution-lane.ts:287-302`), same pattern as `cancelJob` (`execution/service.ts:466-470`).
+- `background.ts`: `beginQueuedWait` once `tryCreateQueuedJournal` resolves an id (:308-332); `endQueuedWait` in the `handlerChain.finally` (:376) — the id is hoisted via a `let` assigned inside the `.then` closure (the `.finally` receives no arguments). NOT at the early `onExecutionEnqueued → releaseFifo` (:365) — releasing there would strand the record between mutex-enqueue and the heartbeat's first 30 s touch.
+- Zero new timers/modules/reaper changes: ONE shared set, the already-running 30 s timer, the dependency direction already in place (`background.ts:91` holds `executionService`). `Set.add` is idempotent, so `acquireSlot`'s own begin/end for the same id compose safely; post-grant the claimed record's stage transitions carry `updatedAt`, exactly today's semantics.
+- Why (a′) over rev 1's registry-spare (b): `updatedAt` is ALREADY the designed liveness channel (its only consumer is `reaper.ts:194`; `touchOperation`'s doc states the crash-detection story) — (b) added a second competing channel plus an inverted reaper←wallet-sdk dependency; (b)-with-a-Set spares a hung handler FOREVER (a promise that never settles is exactly the shape of a hang), regressing the grace's stated purpose, and fixing that needs a Map+ceiling — more machinery; and rev 1's tiebreaker ("the literal proof adopts as written") was FALSE — the proof constructs the reaper hookless, so it stays red under (b) too. Under (a′) the persisted `updatedAt` simply never goes stale for a live waiter, which also removes the FIFO-waiter leg of the mid-sweep race entirely.
+- The c2-1 adoption becomes: (1) an `execution-lane.test.ts` sibling of the existing heartbeat pin (:140-170) proving a pre-claim waiter is touched every 30 s across the grace; (2) the reaper-side negative control (aged + no heartbeat → `stuck_queued` — crash detection intact) colocated in `reaper.test.ts`; (3) a background-wiring pin (begin-after-id; end on settle for BOTH success and throw).
+- N-07's real window (fable F-7): arrival → slot-grant, which includes the op's OWN approval popup (`INTERACTION_TIMEOUT_MS` = 10 min EXACTLY equals the queued grace) — no sibling needed. Naming follows: "pre-claim wait heartbeat", not "fifo".
 
-Both spare the rejected third option (reap-on-FIFO-position). Codex picks or amends; the ledger records it.
+**Plus the shared-ground hardening (BOTH auditors, required under either option) — F-1, the mid-sweep claim race**: `reap()` snapshots `inflight` once and awaits `transitionOperation` per record with NO stage precondition — a record claimed (`queued → pending`, `updatedAt` refreshed) during an earlier record's await is still failed on stale data. Fix: `OperationJournalService.transitionIfStage(id, allowedStages, progress, error)` (the `refileOperationScope` idiom, `service.ts:517-528` — allowedStages checked under the transition lock); `reap()` transitions `queued` records via `transitionIfStage(id, ["queued"], …)` and every other stage via the same guard on its snapshot stage. Codex's sweep-local-snapshot amendment is subsumed (the atomic guard is strictly stronger).
 
 ## Assumptions (verified Facts)
 
@@ -25,31 +28,40 @@ Both spare the rejected third option (reap-on-FIFO-position). Codex picks or ame
 5. **F**: adjudication widened N-25 to the reaped-sentinel path; claim-helper's :101/:160 branches already clean up — the fix covers the REMAINING pre-claim throws uniformly via the finally.
 6. **I** (challenge): the wallet-sdk background handler and the reaper live in the same SW context, so a synchronous registry read from the reaper is race-free enough (single-threaded; the set mutates only between awaits).
 
-## Architecture & implementation (per the primary outline; the competing outline swaps §N-07)
+## Architecture & implementation
 
-### N-07 (b): live-waiter registry + reaper spare
+### N-07 (a′): pre-claim wait heartbeat + stage-guarded reap
 
-- NEW `wallet-sdk/fifo-waiter-registry.ts`: module-scoped `Set<string>` + `registerFifoWaiter(id)` / `releaseFifoWaiter(id)` / `isLiveFifoWaiter(id)` (TSDoc: SW-lifetime, restart clears — that IS the crash-detection story).
-- `background.ts`: after `tryCreateQueuedJournal` resolves an id (:308-332), register; release in the same `.finally` that releases the baton (:376) — exactly one release path.
-- `reaper.ts`: ctor gains optional `isLiveWaiter?: (id: string) => boolean` (default `() => false`); in `reap()`, the `queued` branch spares when `isLiveWaiter(op.id)` (age check unchanged for every other stage; unconditional boot sweep UNCHANGED — a boot has a fresh empty registry, so the sweep still clears genuinely-dead records).
-- Composition root wires the registry into the reaper.
-- Adopted proof: colocated in `reaper.test.ts` conventions (injected `now`), asserting aged+live survives AND aged+not-live reaps (the crash-detection negative control the original proof lacked).
+- `execution-lane.ts`: no mechanism change; `beginExecutionWait`/`endExecutionWait` stay private, reached via the new `ExecutionService.beginQueuedWait`/`endQueuedWait` delegators.
+- `background.ts`: hoisted `let heartbeatId: string | undefined`; assigned + `beginQueuedWait(id)` inside the `queuedJournalIdPromise.then`; `handlerChain.finally(() => { if (heartbeatId) executionService.endQueuedWait(heartbeatId); releaseFifo() })` — end BEFORE releaseFifo in the same callback; establishment-drop early return (:339-346) and guard bails covered because the finally wraps the WHOLE chain.
+- `operation-journal/service.ts`: new `transitionIfStage(id, allowedStages, progress, error)` — re-reads under the transition lock, no-ops (returns a discriminant) when the live stage left `allowedStages`; `reaper.ts` transitions every reap candidate through it keyed on the snapshot stage (F-1).
 
-### N-16: bounded, cancellation-honoring waitForTx
+### N-16: bounded waitForTx (bound only — the dead cancellation branch is CUT)
 
-- `waitForTx(txHash, parentTask?, timeoutMs = 120_000)` — loop exits on: (1) hash left `pending` → complete subtask; (2) timeout → fail subtask + throw a typed timeout error (mirrors `waitForTxProven`); (3) `parentTask?.isFinished` (cancellation observed) → abandon silently WITHOUT completing/failing the subtask (completing a cancelled task throws — recon trap).
-- Callers unchanged (their existing try/catch + `task.fail` handles the new throw); 120 s matches the sibling bound.
+- `waitForTx(txHash, parentTask?, timeoutMs = 120_000)`: loop exits on (1) hash drained → settle subtask complete; (2) timeout → settle subtask failed + throw a typed `TxConfirmationTimeoutError` with honest copy ("not confirmed within Ns" — the tx may still mine; F-12).
+- Settle-exactly-once discipline, task-service throws swallowed defensively on EVERY exit — also closes the pre-existing `Invalid task id` throw after a mid-wait profile switch (`tasks.clear()`): the settle wraps in try/catch; the loop itself never touches task state.
+- NO isFinished/cancellation branch: `validateTaskBeforeFinish` forbids finishing a parent with an open child, so the branch condition is false by construction, taking it would double-throw in the callers, and polling `isFinished` throws after `tasks.clear()` (fable F-5, three ways dead). The adjudicated harm (background poll leak + misleading error) closes with the bound alone; an AbortSignal channel is logged as out-of-scope (codex suggested it; fable showed it's scope creep — resolved in the mediation round).
+- Adjacency (strictly required): `WrappedTask.exists` (non-throwing wrap of `TaskService.hasTask`) used by the settle guard.
 
-### N-25: finally cleanup under queuedJournalId
+### N-25: finally cleanup under BOTH keys
 
-- `runInSlot`'s finally: `if (journalId) deleteController(journalId); else if (params.hooks?.queuedJournalId) deleteController(queuedJournalId)` — covers every pre-claim throw (sentinel AND storage error AND reaped-sentinel) uniformly; the double-delete case is impossible (journalId === queuedJournalId when claimed under the same key, and delete is idempotent anyway).
-- Correct the vacuous pin: keep the existing no-queuedJournalId case (deleteController still not called — nothing registered), ADD the with-queuedJournalId case asserting the delete fires; plus a claim-helper-level test against the REAL Map proving no entry survives a pre-claim sentinel throw end-to-end (real ExecutionLane acquireSlot + throwing claim).
+- `runInSlot`'s finally deletes UNCONDITIONALLY under both: `if (journalId) delete(journalId); if (hooks?.queuedJournalId && hooks.queuedJournalId !== journalId) delete(queuedJournalId)` — `journalId !== queuedJournalId` IS reachable (record-not-found/refile-missing fallbacks mint a fresh id, and their in-helper cleanup is guarded by the incidental `reuseController` coupling — F-9 stops that coupling being load-bearing). Map.delete idempotent; ordering delete-before-releaseSlot preserved (P17).
+- Pins: real-`Map`-backed lane mock in `dapp-send-executor.test.ts`'s `makeHarness` (acquireSlot sets, deleteController deletes — F-6/F-10: `preController` and the map kept consistent) — `map.size === 0` after a claim-throw WITH a queuedJournalId; the existing :590-607 no-queuedJournalId case stays as-is (correctly green); claim-throw ordering pin `deleteController < releaseSlot` (discriminator 8); fresh-id fallback pin under either key (discriminator 9).
 
-## Test plan (succinct; every mechanism revert-probed)
+## Test plan (succinct; every mechanism revert-probed; discriminators from the dual audit)
 
-- N-07: adopted-proof pair (aged+live survives / aged+dead reaps) in `reaper.test.ts`; registry lifecycle unit (register→release→restart-clear semantics via fresh module state); background wiring pinned via `queued-journal.test.ts`-style stub harness asserting register-on-create + release-on-settle. Probes: strip the spare → aged+live reds; strip a release path → a leak-shaped assertion reds.
-- N-16: fake-timers tests — timeout throws typed error + subtask failed; cancellation observed mid-wait → returns without touching the subtask (and no throw); happy path completes. Probe: revert the bound → timeout pin reds (fake timers make the unbounded loop detectable via advance + still-pending).
-- N-25: the corrected executor pins + the real-Map claim-helper leak test. Probe: revert the finally else-branch → both red.
+- N-07: heartbeat pin (execution-lane.test.ts sibling of :140-170 — pre-claim waiter touched across the grace; fake timers + microtask flushes); reaper negative control (aged + untouched → `stuck_queued`); boot-sweep pin (aged + LIVE + `unconditional` → still reaped — discriminator 1); stage-scope pin (`proving` + 40 min + live → reaped — discriminator 2); F-1 pin (two candidates; #2 claimed `queued→pending` during #1's transition await → #2 NOT failed); wiring pins (begin-after-id; end on settle for success AND throw; registry empty after the establishment-drop early return — discriminator 4). Probes: strip the background begin → heartbeat pin reds; strip `transitionIfStage`'s guard → F-1 pin reds.
+- N-16: fake timers with a SHORT injected `timeoutMs` (500 ms — F-13): timeout → typed throw + subtask failed + parent still completable against a REAL TaskService (discriminator 6); happy path → parent completable; mid-wait `tasks.clear()` → no throw (discriminator 7). Probe: revert the bound → timeout pin reds.
+- N-25: as in §N-25. Probe: revert the finally's queuedJournalId delete → the real-Map pin reds.
+
+## Decision ledger (dual audit round 1)
+
+- **N-07 fork — CROSS-AUDITOR DISAGREEMENT, resolved (a′)**: codex called "amendment to (b)" (registry + reaper spare; release at handlerChain.finally; sweep-local snapshot); fable REJECTED (b) with verified facts — rev 1's proof-adoption tiebreaker false (the proof constructs the reaper hookless; red under (b) too), `updatedAt` is the SINGLE-consumer designed liveness channel (a second channel = divergent-change debt + inverted layering), a Set-based liveness spare shields a hung handler forever (F-4; fixing it needs Map+ceiling), and minimal (a′) reuses the existing set/timer with two delegators + two call sites. Adjudicated to (a′) on verified-fact weight; sent back to codex for round-2 consensus per the mediation protocol.
+- **F-1 (BOTH auditors)**: mid-sweep claim race is a live bug under any option — `transitionIfStage` (atomic stage guard under the transition lock) adopted; codex's snapshot amendment subsumed.
+- **N-16 branch (3) CUT (both auditors — fable proved it dead three ways)**: bound-only + settle-exactly-once + `WrappedTask.exists`; codex's AbortSignal alternative logged out-of-scope (fable: the adjudicated harm closes with the bound; a real cancellation channel is new-surface work) — resolved in the round-2 mediation.
+- **N-25**: unconditional both-key delete (fable F-9 — fresh-id fallback reachable, in-helper cleanup coupling-guarded); real-Map executor-layer pin (fable F-6 kills the claim-helper-level test — no finally there; codex agreed the real-Map assertion belongs at the executor); consistency trap F-10 honored.
+- Rejected/cut: `wallet-sdk/fifo-waiter-registry.ts` module (moot under a′); N-16 cancellation branch; claim-helper integration harness; "fifo" naming (F-7 — the window is arrival→slot-grant incl. the op's OWN popup; renamed pre-claim).
+- e2e caveat logged (fable F-11): the network gate is regression safety, not N-07 evidence (10-min wall-clock un-exercisable) — the mechanism pins are the evidence.
 
 ## Validation gates
 
