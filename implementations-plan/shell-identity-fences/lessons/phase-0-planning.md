@@ -18,3 +18,13 @@ Highlights: the check-after-assign trap in my own fence wording (a literally-fol
 Cross-audit observations: zero contradictions between the two round-1 legs — every finding overlapped or complemented. Two adjudicated calls logged in the ledger: (1) bootstrap-failure waiter signaling — codex's signal/join vs fable's bounded-wait + shell toast → fable's smaller shape adopted; (2) codex's newly-found cross-network task gap → OUT of scope (adjudicated-Low finding; requires a TransferContent schema change), watcher-clear improvement kept, residual documented — flagged for final-pass ratification.
 
 Meta-lesson: the plan-audit round caught THREE false claims in my own rev 1 (the catch→toast path, the scopeKey shape, the "existing pattern" fidelity) — all from writing plan prose against remembered rather than re-read code. Rev-1 plans must quote, not paraphrase, the code they patch.
+
+## Final fresh-context codex pass (session `01a03893-6f50-7661-8c3d-ed35272a0c48`): APPROVE-WITH-CHANGES — both adjudicated disagreements OVERTURNED
+
+1. Disagreement #1 (bootstrap-failure signaling): OVERTURNED against my fable-sided ruling — a definitive rejection leaving submit disabled for the remaining 30 s bound fails the runbook's release requirement. Rev 3: `Promise.race` with an identity-keyed `rejectOnBootstrapFailure` channel (pinia `bootstrapFailure` state + typed `BootstrapFailedError`), stale-A toast suppression after B wins, a first-line `isAwaitingResponse` reentry guard, and typed (never message-matched) errors.
+2. The IMMEDIATE post-wait window needed its own check (wait resolves for A → B wins before A's continuation) and the redundant `appStore.profile = activeProfile` write is REMOVED — a stale continuation must have nothing to write.
+3. The extraction must be a handler FACTORY owning begin()/scope-capture/compound-guard — rev 2 still left that glue unpinned in app.vue; tests must park EVERY await boundary.
+4. Disagreement #2 (cross-network task residual): OVERTURNED — `networkId` is in hand at transfer-executor.ts:81-84, so stamping in-memory `TransferContent` is strictly adjacent; `isExecutingTask` compares when present. Plus the token reload needed the fence + synchronous clear (deferred A/B overwrite).
+5. The repo-wide zero-hit grep was impossible by construction (committed docs carry the terms) — scoped to `apps/extension/{src,tests}` + package.json + vite.shared.ts.
+
+Rev 3 committed as plan of record. Meta-lesson: my two "conservative middle path" adjudications both fell to the fresh-context pass — when auditors disagree, the goal's own tiebreak (smaller diff) is not automatically the RIGHT diff; a definitive-failure path that still burns the full timeout is smaller but wrong. Resumed confirmatory re-verdict pending.
