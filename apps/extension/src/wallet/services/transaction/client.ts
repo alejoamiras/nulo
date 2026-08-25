@@ -19,6 +19,14 @@ export class TransactionServiceClient extends ServiceClient<Methods, Events> imp
 	public constructor(name?: string) {
 		super(TRANSACTION_SERVICE_NAME, new LoggerServiceClient(), name)
 	}
+
+	/** Tx rows' own profileId is optional and backup-controlled, so restore
+	 *  requires the authoritative created-profile id as its deletion-fence key.
+	 *  The base client's `restore(...args)` enforces no arity — this typed
+	 *  override makes an omitted id a compile error at the call site. */
+	public override async restore(rows: unknown[], profileId: string): Promise<unknown> {
+		return await super.restore(rows, profileId)
+	}
 }
 // Every client method is a pure request-passthrough; the installer's
 // signature checks the name list in both directions against `Methods`.

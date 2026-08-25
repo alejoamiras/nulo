@@ -697,7 +697,7 @@ describe("useFullBackupImport — backup migration wiring", () => {
 
 		expect(c.restoreStatus.value).toBe("finished")
 		// The v2 migration renamed legacyName → name before the restore ran.
-		expect(contactClient.restore).toHaveBeenCalledWith([{ id: "c1", profileId: "new-id", address: "0xc", name: "Ali" }])
+		expect(contactClient.restore).toHaveBeenCalledWith([{ id: "c1", profileId: "new-id", address: "0xc", name: "Ali" }], "new-id")
 	})
 })
 
@@ -726,7 +726,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		// Only the imported-account tx reaches restore; the foreign one is dropped
 		// BEFORE it can be written (it would otherwise surface in another profile's
 		// activity and never be purged after the subscriber removal).
-		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }])
+		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }], "new-id")
 		// Recorded (console), NOT surfaced as a user-facing restore error — a
 		// dropped foreign/corrupt tx must not flip a clean import to error-mode.
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 transaction"))
@@ -761,10 +761,13 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 
 		await c.restoreBackup()
 
-		expect(transactionClient.restore).toHaveBeenCalledWith([
-			{ hash: "h1", account: "0xA", chainId: 1 },
-			{ hash: "h2", account: "0xB", chainId: 1 },
-		])
+		expect(transactionClient.restore).toHaveBeenCalledWith(
+			[
+				{ hash: "h1", account: "0xA", chainId: 1 },
+				{ hash: "h2", account: "0xB", chainId: 1 },
+			],
+			"new-id",
+		)
 		expect(c.restoreErrorLog.value.transaction).toBeUndefined()
 	})
 
@@ -792,7 +795,7 @@ describe("useFullBackupImport — tx-restore provenance filter (P1)", () => {
 		// The tx's account failed to restore → dropped (allow-set is SUCCESSFUL
 		// accounts). The failed ACCOUNT already surfaces its own restoreError, so
 		// the dropped tx is only console-recorded, not double-flagged.
-		expect(transactionClient.restore).toHaveBeenCalledWith([])
+		expect(transactionClient.restore).toHaveBeenCalledWith([], "new-id")
 		expect(warn).toHaveBeenCalledWith(expect.stringContaining("dropped 1 transaction"))
 		warn.mockRestore()
 	})
@@ -821,7 +824,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 
 		// Only the imported-account authwit reaches restore; the foreign one is
 		// dropped before it can graft into the victim's revocation index.
-		expect(authRegistryClient.restore).toHaveBeenCalledWith([{ id: 1, account: "0xMINE", hash: "0xh1" }])
+		expect(authRegistryClient.restore).toHaveBeenCalledWith([{ id: 1, account: "0xMINE", hash: "0xh1" }], "new-id")
 		warn.mockRestore()
 	})
 
@@ -847,7 +850,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 
 		await c.restoreBackup()
 
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xMINE" }])
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xMINE" }], "new-id")
 		warn.mockRestore()
 	})
 
@@ -873,7 +876,7 @@ describe("useFullBackupImport — account-owned-slice provenance (P3)", () => {
 
 		// 0xMINE was imported on chain 1 only → the chain-2 tx is dropped (an
 		// address-only filter would have admitted it).
-		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }])
+		expect(transactionClient.restore).toHaveBeenCalledWith([{ hash: "h1", account: "0xMINE", chainId: 1 }], "new-id")
 		warn.mockRestore()
 	})
 })
@@ -1083,10 +1086,13 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		// Balance for old token 1 (chain 1) → n1; for old token 2 (chain 2) → n2.
 		// A contract-only key would collapse both onto the last (n2).
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([
-			{ id: 10, token: "n1", account: "0xa" },
-			{ id: 11, token: "n2", account: "0xa" },
-		])
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith(
+			[
+				{ id: 10, token: "n1", account: "0xa" },
+				{ id: 11, token: "n2", account: "0xa" },
+			],
+			"new-id",
+		)
 	})
 
 	it("index-pairs duplicate-contract tokens distinctly — a balance maps to its OWN token by id (not dropped)", async () => {
@@ -1115,7 +1121,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		await c.restoreBackup()
 
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xa" }])
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([{ id: 10, token: "n1", account: "0xa" }], "new-id")
 	})
 
 	it("drops a balance whose account was imported on a DIFFERENT chain than the token (chain-equality cross-check)", async () => {
@@ -1141,7 +1147,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		await c.restoreBackup()
 
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([], "new-id")
 		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
 	})
 
@@ -1173,7 +1179,7 @@ describe("useFullBackupImport — token-balance (chainId,contract) key (P3)", ()
 
 		await c.restoreBackup()
 
-		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([])
+		expect(tokenBalanceClient.restore).toHaveBeenCalledWith([], "new-id")
 		expect(c.restoreErrorLog.value["token-balance"]).toHaveLength(1)
 	})
 
@@ -1395,7 +1401,7 @@ describe("useFullBackupImport — passkey backup", () => {
 	const PASSKEY_DATA = {
 		id: asBase64CredentialId(PASSKEY_CRED_ID),
 		prf: asBase64SecretPrf("AAAA"),
-		userHandle: asHexUserHandle("src-profile-id"),
+		userHandle: asHexUserHandle("new-id"),
 	}
 
 	async function buildPasskeyBackup() {

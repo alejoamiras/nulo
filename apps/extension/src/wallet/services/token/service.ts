@@ -10,6 +10,7 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
@@ -674,6 +675,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public async restore(tokens: Token[]): Promise<Restored<Token>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts): rows written
+		// after a mid-restore deleteProfile must reject, not orphan.
+		const deletion = this.profiles.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			tokens.map((t) => (t as { profileId?: unknown }).profileId),
+		)
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(tokens, async (token) => {
@@ -689,6 +697,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 				// relinked to it, then be rejected by the read codec — leaving an
 				// orphaned balance. Parsing here records it as a restoreError instead.
 				const row = TokenSchema.parse({ ...token, id })
+				assertRestoreEpoch(deletion, epochs, row.profileId)
 				await this.tokens.set(`${id}`, row)
 				return row
 			})

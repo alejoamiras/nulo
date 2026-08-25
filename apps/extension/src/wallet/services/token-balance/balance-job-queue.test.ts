@@ -118,6 +118,7 @@ describe("BalanceJobQueue", () => {
 	test("start subscribes to the ticker; stop cancels", () => {
 		const ticker = new FakeBackgroundTicker()
 		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, makeTaskService().service, {
+			getGeneration: () => 0,
 			onBalanceUpdated: vi.fn(),
 		})
 		expect(ticker.activeSubscriptions).toBe(0)
@@ -132,7 +133,7 @@ describe("BalanceJobQueue", () => {
 		const repo = makeRepo([raw(1)])
 		const tasks = makeTaskService()
 		const { projector, calls } = makeProjector([{ kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated: vi.fn() })
 
 		queue.enqueue(raw(1))
 		queue.enqueue(raw(1)) // should dedup
@@ -147,6 +148,7 @@ describe("BalanceJobQueue", () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
 		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated: vi.fn(),
 		})
 
@@ -166,7 +168,10 @@ describe("BalanceJobQueue", () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
 		const { projector, calls } = makeProjector([])
-		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, {
+			getGeneration: () => 0,
+			onBalanceUpdated: vi.fn(),
+		})
 
 		queue.enqueue(raw(42))
 		// Profile switch cleared the task map: the pre-registered id no longer
@@ -189,7 +194,10 @@ describe("BalanceJobQueue", () => {
 	test("(B-04 reset PIN) reset cancels the TaskService records it drops so none are orphaned", async () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
-		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, {
+			getGeneration: () => 0,
+			onBalanceUpdated: vi.fn(),
+		})
 		queue.enqueue(raw(1))
 		queue.enqueue(raw(2))
 		const droppedIds = [queue.getPendingTaskId(1), queue.getPendingTaskId(2)]
@@ -206,7 +214,10 @@ describe("BalanceJobQueue", () => {
 	test("(B-04 cancel-race PIN) reset tolerates an already-finished task and still clears its pointer", () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
-		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, {
+			getGeneration: () => 0,
+			onBalanceUpdated: vi.fn(),
+		})
 		queue.enqueue(raw(1))
 		const id = queue.getPendingTaskId(1)!
 		// The task finished (completed/failed) between enqueue and reset — cancel now
@@ -221,6 +232,7 @@ describe("BalanceJobQueue", () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
 		const queue = new BalanceJobQueue(ticker, makeRepo(), makeProjector([]).projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated: vi.fn(),
 		})
 
@@ -243,7 +255,7 @@ describe("BalanceJobQueue", () => {
 		const { projector, calls } = makeProjector((input) =>
 			input.map((b) => ({ kind: "ok" as const, id: b.id, privateBalance: "1", publicBalance: "1" })),
 		)
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated: vi.fn() })
 
 		for (let i = 1; i <= 30; i++) queue.enqueue(raw(i))
 
@@ -267,7 +279,7 @@ describe("BalanceJobQueue", () => {
 		const { projector, calls } = makeProjector((input) =>
 			input.map((b) => ({ kind: "ok" as const, id: b.id, privateBalance: "1", publicBalance: "1" })),
 		)
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated: vi.fn() })
 
 		// Interleave: A, B, A. `Queue.priorityPass` pushes to the HEAD,
 		// so the queue order is [A:2, B:3, A:1]. First batch drains
@@ -292,7 +304,7 @@ describe("BalanceJobQueue", () => {
 		const { projector, calls } = makeProjector((input) =>
 			input.map((b) => ({ kind: "ok" as const, id: b.id, privateBalance: "1", publicBalance: "1" })),
 		)
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated: vi.fn() })
 
 		queue.enqueue(raw(1, { account: "0xA" }))
 		queue.enqueue(raw(2, { account: "0xA" }))
@@ -309,7 +321,7 @@ describe("BalanceJobQueue", () => {
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
 		const { projector } = makeProjector([{ kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
 		await queue.tick()
@@ -333,7 +345,7 @@ describe("BalanceJobQueue", () => {
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
 		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed" }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
 		await queue.tick()
@@ -357,7 +369,7 @@ describe("BalanceJobQueue", () => {
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
 		const { projector } = makeProjector([{ kind: "ok", id: 1, privateBalance: "9", publicBalance: "0" }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
 		await queue.tick()
@@ -373,7 +385,7 @@ describe("BalanceJobQueue", () => {
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
 		const { projector } = makeProjector([{ kind: "error", id: 1, error: "sim failed" }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
 		await queue.tick()
@@ -396,6 +408,7 @@ describe("BalanceJobQueue", () => {
 			return [{ kind: "ok" as const, id: 1, privateBalance: "9", publicBalance: "0" }]
 		})
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated,
 			isBalanceInvalidated: (id) => invalidated.has(id),
 		})
@@ -418,6 +431,7 @@ describe("BalanceJobQueue", () => {
 			return [{ kind: "error" as const, id: 1, error: "sim failed" }]
 		})
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated,
 			isBalanceInvalidated: (id) => invalidated.has(id),
 		})
@@ -450,6 +464,7 @@ describe("BalanceJobQueue", () => {
 			{ kind: "ok", id: 2, privateBalance: "9", publicBalance: "0" },
 		])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated,
 			isRowEmittable: (tokenId) => emittable.has(tokenId),
 		})
@@ -479,6 +494,7 @@ describe("BalanceJobQueue", () => {
 			{ kind: "ok", id: 2, privateBalance: "9", publicBalance: "0" },
 		])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated,
 			isRowEmittable: (tokenId) => tokenId !== 1,
 		})
@@ -498,7 +514,7 @@ describe("BalanceJobQueue", () => {
 		const tasks = makeTaskService()
 		const onBalanceUpdated = vi.fn()
 		const { projector } = makeProjector([{ kind: "error", id: 1, error: "x".repeat(5000) }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated })
 
 		queue.enqueue(raw(1))
 		await queue.tick()
@@ -514,6 +530,7 @@ describe("BalanceJobQueue", () => {
 		const onOrphanDetected = vi.fn()
 		const { projector } = makeProjector([{ kind: "ok", id: 1, privateBalance: "100", publicBalance: "50" }])
 		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => 0,
 			onBalanceUpdated,
 			onOrphanDetected,
 		})
@@ -530,7 +547,10 @@ describe("BalanceJobQueue", () => {
 		const ticker = new FakeBackgroundTicker()
 		const tasks = makeTaskService()
 		const { projector, calls } = makeProjector([])
-		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, makeRepo(), projector, tasks.service, {
+			getGeneration: () => 0,
+			onBalanceUpdated: vi.fn(),
+		})
 		await queue.tick()
 		expect(calls.length).toBe(0)
 		expect(tasks.createNewTask).not.toHaveBeenCalled()
@@ -541,7 +561,7 @@ describe("BalanceJobQueue", () => {
 		const repo = makeRepo([raw(1)])
 		const tasks = makeTaskService()
 		const { projector, calls } = makeProjector([{ kind: "ok", id: 1, privateBalance: "1", publicBalance: "1" }])
-		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { onBalanceUpdated: vi.fn() })
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, { getGeneration: () => 0, onBalanceUpdated: vi.fn() })
 
 		queue.start()
 		queue.enqueue(raw(1))
@@ -551,5 +571,73 @@ describe("BalanceJobQueue", () => {
 
 		await ticker.tick()
 		expect(calls.length).toBe(1)
+	})
+
+	test("(N-10) generation fence: an A→B→A switch during the projector await drops the success write", async () => {
+		// The tokens-map membership fence is DISARMED by a round-trip switch (the
+		// map repopulates); only the generation distinguishes the departed context.
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1, { privateBalance: "0", publicBalance: "0" })])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		let generation = 0
+		const { projector } = makeProjector(() => {
+			generation += 2 // A→B→A: two switches while the batch is in flight
+			return [{ kind: "ok" as const, id: 1, privateBalance: "999", publicBalance: "0" }]
+		})
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => generation,
+			onBalanceUpdated,
+		})
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect((await repo.get(1))?.privateBalance).toBe("0") // B-computed value never landed on A's row
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+		expect(tasks.failTask).toHaveBeenCalledWith(expect.any(String), "Profile changed mid-sync")
+	})
+
+	test("(N-10) generation fence guards the FAILURE write too", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1)])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		let generation = 0
+		const { projector } = makeProjector(() => {
+			generation += 2
+			return [{ kind: "error" as const, id: 1, error: "sim failed" }]
+		})
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => generation,
+			onBalanceUpdated,
+		})
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		// The task still fails with the projector error, but no failure record is
+		// stamped onto a row now owned by a different profile context.
+		expect((await repo.get(1))?.syncFailure).toBeUndefined()
+		expect(onBalanceUpdated).not.toHaveBeenCalled()
+		expect(tasks.failTask).toHaveBeenCalledWith(expect.any(String), "sim failed")
+	})
+
+	test("(N-10) positive control: a stable generation writes and emits normally", async () => {
+		const ticker = new FakeBackgroundTicker()
+		const repo = makeRepo([raw(1, { privateBalance: "0", publicBalance: "0" })])
+		const tasks = makeTaskService()
+		const onBalanceUpdated = vi.fn()
+		const { projector } = makeProjector([{ kind: "ok" as const, id: 1, privateBalance: "100", publicBalance: "50" }])
+		const queue = new BalanceJobQueue(ticker, repo, projector, tasks.service, {
+			getGeneration: () => 7,
+			onBalanceUpdated,
+		})
+
+		queue.enqueue(raw(1))
+		await queue.tick()
+
+		expect((await repo.get(1))?.privateBalance).toBe("100")
+		expect(onBalanceUpdated).toHaveBeenCalledTimes(1)
 	})
 })

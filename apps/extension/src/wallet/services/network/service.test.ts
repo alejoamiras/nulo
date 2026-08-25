@@ -18,6 +18,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { CHAIN_IDS } from "@/utils/chain-ids"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
@@ -64,6 +65,7 @@ function harness(seeded: Record<string, NodeInfo | Error>): {
 		getActiveProfile: async () => fakeProfile,
 		onActiveProfileChanged: { add: vi.fn(), remove: vi.fn() },
 		onProfileDeleted: { add: vi.fn(), remove: vi.fn() },
+		getDeletionState: () => new ProfileDeletionState(),
 	} as unknown as ProfileService
 
 	// Reach into the service's protected init via the services map the base
@@ -308,6 +310,7 @@ function setupServiceWithStorage(seeded: Record<string, NodeInfo | Error>): {
 	local: FakeStorageArea
 	session: FakeStorageArea
 	pxeStub: ReturnType<typeof vi.fn>
+	deletionState: ProfileDeletionState
 } {
 	const local = new FakeStorageArea()
 	const session = new FakeStorageArea()
@@ -337,18 +340,20 @@ function setupServiceWithStorage(seeded: Record<string, NodeInfo | Error>): {
 	const service = new NetworkService(logger, browserApi, factory)
 	const fakeProfile = { id: "p1", name: "p1", type: "password" } as const
 	const pxeStub = vi.fn().mockResolvedValue(undefined)
+	const deletionState = new ProfileDeletionState()
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 	;(service as any).profileService = {
 		getActiveProfile: async () => fakeProfile,
 		onActiveProfileChanged: { add: vi.fn(), remove: vi.fn() },
 		onProfileDeleted: { add: vi.fn(), remove: vi.fn() },
+		getDeletionState: () => deletionState,
 	} as unknown as ProfileService
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 	;(service as any).pxeServiceClient = { clearChainState: pxeStub }
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in (skip init() wait)
 	;(service as any).initialized = true
 
-	return { service, factory, local, session, pxeStub }
+	return { service, factory, local, session, pxeStub, deletionState }
 }
 
 /** Convenience: seed a single endpoint URL → chainId mapping for tests
@@ -1044,6 +1049,32 @@ describe("NetworkService public API (M4.10)", () => {
 			const result = await service.restore(oldShape)
 			expect(result).toHaveLength(1)
 			expect(result[0]!.restoreError).toMatch(/BACKUP_TOO_OLD/)
+		})
+
+		test("(N-14) a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+			const { service, local, deletionState } = setupServiceWithStorage({})
+			const mkNet = (id: string, chainId: number): Network => ({
+				id,
+				profileId: "p1",
+				chainId,
+				l1ChainId: chainId,
+				name: `N${chainId}`,
+				primaryEndpointId: "e1",
+				endpoints: [{ id: "e1", rpcUrl: `https://rpc.test/${chainId}` }],
+			})
+			const origSet = local.set.bind(local)
+			let fired = false
+			local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					deletionState.beginDeletion("p1")
+				}
+			}
+			const result = await service.restore([mkNet("n1", 1), mkNet("n2", 2)])
+			expect(result[0]!.restoreError).toBeUndefined()
+			expect(result[1]!.restoreError).toMatch(/deleted/)
+			await expect(service.getNetwork("n2")).rejects.toThrow()
 		})
 
 		test("restore accepts new-shape entries", async () => {

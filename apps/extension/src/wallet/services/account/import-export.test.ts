@@ -8,6 +8,7 @@
  */
 import { GrumpkinScalar } from "@aztec/foundation/curves/grumpkin"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
@@ -50,6 +51,7 @@ async function build() {
 	services.add(
 		svc(PROFILE_SERVICE_NAME, {
 			onProfileDeleted: new EventHandler(),
+			getDeletionState: () => new ProfileDeletionState(),
 			// getProfileSecret → session-gated master Fr (32 bytes of 9).
 			getActiveProfile: async () => ({ id: "p1", name: "P", type: "password" }),
 			getProfileSecret: async () => (await import("@aztec/foundation/curves/bn254")).Fr.fromBuffer(Buffer.from(MASTER_B64, "base64")),

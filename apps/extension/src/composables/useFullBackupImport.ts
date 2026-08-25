@@ -832,7 +832,10 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 			// store key, which is only provisionable once the session is open.
 			const backupServices: Array<{
 				name: string
-				client: { restore: (...args: unknown[]) => Promise<unknown>; disconnect: () => void }
+				// The created-profile id rides along on every restore: services whose
+				// rows carry no profileId (authwits, balances, txs) key their deletion
+				// fence on it; the rest ignore the extra argument.
+				client: { restore: (rows: unknown[], profileId: string) => Promise<unknown>; disconnect: () => void }
 			}> = [
 				{ name: TRANSACTION_SERVICE_NAME, client: new TransactionServiceClient() as never },
 				{ name: TOKEN_BALANCE_SERVICE_NAME, client: new TokenBalanceServiceClient() as never },
@@ -841,6 +844,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				{ name: CONTACT_SERVICE_NAME, client: new ContactServiceClient() as never },
 				{ name: CONFIG_SERVICE_NAME, client: new ConfigServiceClient() as never },
 			]
+			// The profile restore above always ran first; its id is the fence key
+			// every slice restore carries.
+			if (createdProfileId === undefined) {
+				throw new Error("internal: services restore reached without a created profile")
+			}
+			const restoredProfileId = createdProfileId
 			// Whole-loop try/finally: every client is constructed up-front, so a
 			// mid-loop throw (or a non-array slice that skips a client's body) must
 			// still disconnect ALL of them — a per-iteration finally would only
@@ -850,7 +859,7 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 				for (const { name, client } of backupServices) {
 					const sliceData = data[name]
 					if (Array.isArray(sliceData)) {
-						recordRestoreErrors(name, await client.restore(sliceData))
+						recordRestoreErrors(name, await client.restore(sliceData, restoredProfileId))
 					}
 				}
 			} finally {

@@ -7,6 +7,8 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import { Fr } from "@aztec/foundation/curves/bn254"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { ServiceCollection } from "@/wallet/base"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
@@ -19,6 +21,157 @@ import { accountRowId } from "./spec"
 const mkAccount = (address: string, over: Record<string, unknown> = {}) =>
 	({ profileId: "p1", chainId: 1, address, index: 0, type: 0, l1ChainId: 1, name: "A", visible: true, ...over }) as never
 
+// The N-03 fence pins exercise createAccountInternal's ORDERING, not the real
+// key derivation — bb.js WASM does not run in this vitest env (std::bad_cast).
+vi.mock("@nulo/wallet-crypto", async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	deriveAccountSeed: async () => new Fr(7n),
+	unsealImportedSigningKeyV2: async () => new Uint8Array(32),
+	sealImportedSigningKeyV2: async () => "sealed-under-destination",
+}))
+vi.mock("@nulo/aztec-runtime/account", async (importOriginal) => ({
+	...(await importOriginal<Record<string, unknown>>()),
+	NuloAccount: { new: async () => ({ address: { toString: () => "0xderived-addr" } }) },
+}))
+
+describe("AccountService.createAccount — deletion fence (N-03)", () => {
+	function _deferred<T>() {
+		let resolve!: (v: T) => void
+		const promise = new Promise<T>((res) => {
+			resolve = res
+		})
+		return { promise, resolve }
+	}
+
+	async function makeHarness(over: { secret?: Promise<unknown>; probe?: Promise<number> } = {}) {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletion = new ProfileDeletionState()
+		const master = new Fr(42n)
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => deletion,
+				getProfileSecret: () => over.secret ?? Promise.resolve(master),
+			}),
+		)
+		services.add(
+			svc(NETWORK_SERVICE_NAME, {
+				registerChainPurgeSubscriber: () => {},
+				resolveVerifiedL1ChainId: () => over.probe ?? Promise.resolve(1),
+			}),
+		)
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		return { api, deletion, master, service }
+	}
+
+	async function accountRowCount(api: FakeBrowserApi): Promise<number> {
+		const raw = await api.storage.local.get(null)
+		return Object.keys(raw).filter((k) => k.startsWith("nulo:core:accounts@")).length
+	}
+
+	test("a deletion completing DURING the secret await still rejects the write (capture-order pin)", async () => {
+		// Discriminates capture-BEFORE-the-secret-await from capture-after: the
+		// deletion begins AND fully releases while the secret promise is parked,
+		// so a post-await capture would observe the settled post-bump epoch and
+		// pass the pre-write assert — landing the orphan row.
+		const gate = _deferred<unknown>()
+		const h = await makeHarness({ secret: gate.promise })
+		const run = h.service.createAccount("p1", 1, 0, "A")
+		await new Promise((r) => setTimeout(r, 0)) // the run captures its fence, then parks on the secret
+		h.deletion.beginDeletion("p1")
+		h.deletion.release("p1") // deletion fully completed — reservation gone, epoch settled
+		gate.resolve(h.master)
+		await expect(run).rejects.toThrow(/deleted|unauthorized/)
+		expect(await accountRowCount(h.api)).toBe(0)
+	})
+
+	test("a deletion beginning during the network probe rejects the write", async () => {
+		const gate = _deferred<number>()
+		const h = await makeHarness({ probe: gate.promise })
+		const run = h.service.createAccount("p1", 1, 0, "A")
+		await new Promise((r) => setTimeout(r, 0)) // let the run park on the probe
+		h.deletion.beginDeletion("p1")
+		gate.resolve(1)
+		await expect(run).rejects.toThrow(/deleted/)
+		expect(await accountRowCount(h.api)).toBe(0)
+	})
+
+	test("positive control: no deletion → the account row lands", async () => {
+		const h = await makeHarness()
+		const account = await h.service.createAccount("p1", 1, 0, "A")
+		expect(account.address.length).toBeGreaterThan(0)
+		expect(await accountRowCount(h.api)).toBe(1)
+	})
+})
+
+describe("AccountService restore writers — deletion fence (N-14)", () => {
+	async function makeHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletion = new ProfileDeletionState()
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => deletion,
+				consumeDekRewrapContext: async () => ({ sourceDek: {} as never, destinationDek: {} as never }),
+			}),
+		)
+		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		return { api, deletion, service }
+	}
+
+	function armDeletionOnFirstWrite(api: FakeBrowserApi, deletion: ProfileDeletionState) {
+		const origSet = api.storage.local.set.bind(api.storage.local)
+		let fired = false
+		api.storage.local.set = async (items: Record<string, unknown>) => {
+			await origSet(items)
+			if (!fired) {
+				fired = true
+				deletion.beginDeletion("p1")
+			}
+		}
+	}
+
+	test("restore: a deleteProfile beginning DURING the batch rejects every later row write", async () => {
+		const h = await makeHarness()
+		armDeletionOnFirstWrite(h.api, h.deletion)
+		const restored = await h.service.restore([mkAccount("0xr1"), mkAccount("0xr2")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/deleted/)
+		const raw = await h.api.storage.local.get(null)
+		expect(Object.keys(raw).some((k) => k.includes("0xr2"))).toBe(false)
+	})
+
+	test("restoreImportedKeys: a deleteProfile beginning DURING the batch rejects every later rewrap write", async () => {
+		const h = await makeHarness()
+		armDeletionOnFirstWrite(h.api, h.deletion)
+		const mkKey = (address: string) => ({ profileId: "p1", chainId: 1, address, encryptedSigningKey: "sealed-src" })
+		const restored = await h.service.restoreImportedKeys([mkKey("0xk1"), mkKey("0xk2")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/deleted/)
+		const raw = await h.api.storage.local.get(null)
+		expect(Object.keys(raw).some((k) => k.includes("0xk2"))).toBe(false)
+	})
+
+	test("positive control: no deletion → all rows land through both writers", async () => {
+		const h = await makeHarness()
+		const accounts = await h.service.restore([mkAccount("0xr1"), mkAccount("0xr2")])
+		expect(accounts.every((r) => r.restoreError === undefined)).toBe(true)
+		const keys = await h.service.restoreImportedKeys([
+			{ profileId: "p1", chainId: 1, address: "0xk1", encryptedSigningKey: "sealed-src" },
+		])
+		expect(keys[0].restoreError).toBeUndefined()
+	})
+})
+
 describe("AccountService.restore — validation + provenance (P3)", () => {
 	let accountService: AccountService
 	let api: FakeBrowserApi
@@ -27,7 +180,9 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		api = new FakeBrowserApi()
 		api.reset()
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler() }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler(), getDeletionState: () => new ProfileDeletionState() }),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
 		accountService = new AccountService(new LoggerStore(new ConfigStore()), api)
 		services.add(accountService)
@@ -219,7 +374,9 @@ describe("AccountService.sweepOrphanImportedKeys (N-06 / F-B23)", () => {
 
 	const boot = async (api: FakeBrowserApi) => {
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler() }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler(), getDeletionState: () => new ProfileDeletionState() }),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
 		services.add(new AccountService(new LoggerStore(new ConfigStore()), api))
 		await services.start()

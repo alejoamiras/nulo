@@ -15,6 +15,7 @@
  */
 import { describe, expect, test, vi } from "vitest"
 import type { Fr } from "@aztec/foundation/curves/bn254"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
@@ -69,6 +70,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			getActiveProfile: async () => ({ id: "p1" }),
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
+			getDeletionState: () => new ProfileDeletionState(),
 		}),
 	)
 	collection.add(
@@ -183,6 +185,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				getActiveProfile: async () => ({ id: "p1" }),
 				onProfileDeleted: { add: () => {} },
 				onActiveProfileChanged,
+				getDeletionState: () => new ProfileDeletionState(),
 			}),
 		)
 		collection.add(

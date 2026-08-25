@@ -10,6 +10,7 @@
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { describe, expect, test, vi } from "vitest"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
@@ -37,6 +38,7 @@ const ti = (contract: string): TokenInterface =>
 async function makeHarness() {
 	const api = new FakeBrowserApi()
 	api.reset()
+	const deletionState = new ProfileDeletionState()
 	const logger = new LoggerStore(new ConfigStore())
 	const journal = {
 		createOperation: vi.fn(async () => ({ id: "op-1" })),
@@ -49,6 +51,7 @@ async function makeHarness() {
 			getActiveProfile: async () => ({ id: "p1" }),
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
+			getDeletionState: () => deletionState,
 		}),
 	)
 	collection.add(
@@ -68,7 +71,7 @@ async function makeHarness() {
 	const fetchStub = vi.fn(async (): Promise<[string, string, number]> => ["Fetched Name", "FTCH", 9])
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to stub the private simulate-backed fetch
 	;(tokenService as any).fetchTokenMetadata = fetchStub
-	return { tokenService, journal, fetchStub, api }
+	return { tokenService, journal, fetchStub, api, deletionState }
 }
 
 describe("TokenService.addToken — journal/lock machinery (characterization)", () => {
@@ -191,5 +194,33 @@ describe("TokenService.restore — per-row allocation (N-20 boundary)", () => {
 		const raw = await api.storage.local.get(null)
 		expect(raw[`nulo:core:tokens@${max}`]).toBe(junk)
 		expect(restored[0].id).not.toBe(restored[1].id)
+	})
+})
+
+describe("TokenService.restore — deletion fence (N-14)", () => {
+	const mk = (contract: string) => ({ id: 0, profileId: "p1", chainId: 1, contract, name: "T", symbol: "T", decimals: 9 })
+
+	test("a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+		const { tokenService, api, deletionState } = await makeHarness()
+		const origSet = api.storage.local.set.bind(api.storage.local)
+		let fired = false
+		api.storage.local.set = async (items: Record<string, unknown>) => {
+			await origSet(items)
+			if (!fired) {
+				fired = true
+				deletionState.beginDeletion("p1")
+			}
+		}
+		const restored = await tokenService.restore([mk("0xaaa"), mk("0xbbb")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/deleted/)
+		const raw = await api.storage.local.get(null)
+		expect(Object.values(raw).filter((v) => typeof v === "string" && v.includes("0xbbb"))).toHaveLength(0)
+	})
+
+	test("positive control: no deletion → both rows land", async () => {
+		const { tokenService } = await makeHarness()
+		const restored = await tokenService.restore([mk("0xaaa"), mk("0xbbb")])
+		expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
 	})
 })
