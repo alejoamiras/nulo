@@ -18,3 +18,7 @@ Verified-clean for the record: all fence placements (no await between assert and
 
 1. Contact's e2e hold gate (`restoreGate.waitAt`) sat BEFORE the epoch capture — an injected park lets a deletion begin AND release, then the capture reads the settled epoch and writes land. I had noticed this ordering during implementation and dismissed it as "test-only path"; codex correctly refused the dismissal — the fence's own rule is capture-at-earliest, and a hold point is exactly the park the fence exists for. Reordered (init → capture → gate) + a controllable-gate pin, probed red with a pre-capture wait re-added. **Lesson: "only e2e can trigger this window" is not an exemption — a hold point is a first-class park.**
 2. The account collision precheck (`hasIntersectionByKeys`) dereferenced raw rows — a hostile null still aborted the whole slice AFTER the entry-capture null fix. Same lesson as the max review's finding 1, one call further down: EVERY pre-`restoreRows` pass over raw rows must be null-tolerant, not just the one that was flagged. Filter for the precheck only; original array to restoreRows; per-row pin probed.
+
+## Codex final-diff round 2 — SIGN-OFF
+
+Verified at `807c7e20` ("capture precedes the gate with a discriminating begin+release pin; null-safe precheck with the original array still reaching per-row handling; assertions flush against writes"). No remaining fence, contract, pin-vacuity, or hostile-row issue; PR gated only on the battery.
