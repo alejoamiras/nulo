@@ -8,6 +8,18 @@ Findings: **none requiring a change.** Two judgement calls left as they are: `ru
 
 No `fix(review)` commit.
 
-## Codex post-impl audit (fresh session)
+## Codex post-impl round 1 — fresh session `01a037c6-4853-7fe1-9df8-efcf8c7a9264` (gpt-5.6-sol, xhigh, read-only): **conditional approve**
+
+Verbatim: "conditional approve — conditions: correct the secrecy overclaim, add `check:false` secrecy coverage, isolate resolver tests from ambient env, then run the required resumed audit before opening a PR." High: none.
+
+| # | Finding | Verified | Fix (`fix(review)` commit) |
+|---|---|---|---|
+| Med | `live-intent.ts:101` comment says `run` "never echoes argv in a failure" — false in the presence of child stderr (codex reproduced: a child that prints its own argv puts the secret on all four surfaces); the documented child-output boundary, but a dangerous assurance next to key handling | ✓ | comment reworded ("adds nothing from argv to a failure — what `cast` itself prints to stderr is kept verbatim"); `run.ts` header states the three boundaries |
+| Low | the `check: false` secrecy contract is untested (the ENOENT case checked only `.code`; a regression returning the raw `error`/`spawnargs` would pass) | ✓ | new case: the ENOENT `check: false` result has exactly the keys `code, exitCode, signal, stderr, stdout` and neither `inspect` nor `JSON.stringify` contains the secret |
+| Low | resolver tests assume `RUN_TEST_UNSET` is unset (`RUN_TEST_UNSET=/operator/tool` bypasses candidate/PATH/not-found); `RUN_TEST_BIN` not restored | ✓ | `beforeAll` clears both, `afterAll` restores prior values |
+
+What looked fine (verbatim gist): the scoped guarantee holds (no argv / raw spawn error stored; synchronous throws → fixed reason; `check: false` returns only scalar status + child text); git boundaries correct against 2.53; no shell/flag injection left through git/forge/cast/bun for the reviewed inputs; exit handling, soft-fails, trimming, options, laziness, resolver order match prior behaviour; strict validation rejects only incomplete/custom `forked-v1` JSON, never a valid current candidate; the legacy path remains usable.
+
+## Codex post-impl round 2 (resumed)
 
 Pending.
