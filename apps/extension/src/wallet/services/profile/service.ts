@@ -2245,9 +2245,9 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 							return this.getProfileInfo(newProfile)
 						} catch (err) {
 							// Build restoreError INSIDE the locked callback so it runs
-							// before lock.leave() — byte-equivalent to the pre-refactor
-							// catch-before-leave order (toRestoreError may invoke a
-							// custom err.toString()).
+							// before the lock releases (withLock's finally) — byte-
+							// equivalent to the pre-refactor catch-before-release order
+							// (toRestoreError may invoke a custom err.toString()).
 							// The duplicate-phrase verdict must REACH the UI as its typed self
 							// (confirm-retry), never flattened into a dead-end restoreError.
 							if (err instanceof DuplicateWalletError) throw err
@@ -2310,8 +2310,8 @@ export class ProfileService extends Service<Methods, Events> implements ServiceS
 
 					// Only the storage tail is locked — the WebAuthn ceremony +
 					// credentialId-bind above run UNLOCKED, and their early throws
-					// must NOT reach a lock.leave() (the prior single try/finally
-					// called leave() even when enter() was never reached).
+					// must NOT reach a lock release (the prior single try/finally
+					// released even when the acquisition was never reached).
 					return await this.runExclusive(async () => {
 						if (id && ((await this.repo.contains(id)) || this.deletionState.isReserved(id))) {
 							throw new Error("Passkey profile already exists")

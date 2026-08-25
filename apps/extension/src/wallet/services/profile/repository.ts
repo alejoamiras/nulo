@@ -84,12 +84,12 @@ export class ProfileRepository {
 	 * with a locked re-verification before `set()`:
 	 *
 	 *     const id = await repo.generateUniqueId()     // unlocked
-	 *     await facadeLock.enter()
-	 *     while (await repo.contains(id)) {            // re-verify
-	 *       id = await repo.generateUniqueId()          //   under lock
-	 *     }
-	 *     await repo.set(id, profile)
-	 *     facadeLock.leave()
+	 *     await facadeLock.withLock(async () => {
+	 *       while (await repo.contains(id)) {          // re-verify
+	 *         id = await repo.generateUniqueId()        //   under lock
+	 *       }
+	 *       await repo.set(id, profile)
+	 *     })
 	 *
 	 * This mirrors the existing pattern in `createPasskeyProfile`,
 	 * where the WebAuthn prompt between generation and persistence

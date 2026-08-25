@@ -1062,6 +1062,11 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				if (existing) {
 					if (existing.blockTimestamp === undefined) {
 						const ts = await blockTimestampFor(note.l2BlockNumber)
+						// The PXE-bound await above is the CS's park point: a lock
+						// watchdog handoff there lets a destructive lifecycle bumper
+						// (purge/delete) run to completion — writing after it would
+						// resurrect what it wiped. Re-check before the write.
+						if (this.serviceEpoch !== epochAtStart) return
 						if (ts !== undefined) {
 							await this.repo.upsertRecord({ ...existing, blockTimestamp: ts })
 						}
@@ -1102,6 +1107,12 @@ export class IncomingTransferService extends Service<Methods, Events> implements
 				}
 
 				const blockTimestamp = await blockTimestampFor(note.l2BlockNumber)
+				// Same park-point discipline as the backfill branch: nothing may be
+				// written (outbox row, record, Added emit) after a mid-await epoch
+				// move — the other awaits in this CS are fast storage/config reads,
+				// and every DESTRUCTIVE bumper holds this lock, so the two PXE-bound
+				// awaits are the only revocation windows that matter.
+				if (this.serviceEpoch !== epochAtStart) return
 				const record = this.buildRecord({
 					note,
 					profileId,

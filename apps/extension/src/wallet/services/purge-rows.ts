@@ -5,7 +5,7 @@
  * fleet relies on.
  *
  * The caller owns row loading on purpose: `await this.ensureInitialized()`, any
- * `this.lock.enter()/leave()`, the `.filter(predicate)`, and any post-loop
+ * `this.lock.withLock(...)` framing, the `.filter(predicate)`, and any post-loop
  * cleanup all stay visibly caller-side. That keeps each service's lock-vs-
  * lockless discipline auditable at its own call site rather than buried behind
  * a `load` callback here.
