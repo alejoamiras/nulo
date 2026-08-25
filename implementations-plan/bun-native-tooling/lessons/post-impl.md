@@ -20,6 +20,6 @@ Verbatim: "conditional approve — conditions: correct the secrecy overclaim, ad
 
 What looked fine (verbatim gist): the scoped guarantee holds (no argv / raw spawn error stored; synchronous throws → fixed reason; `check: false` returns only scalar status + child text); git boundaries correct against 2.53; no shell/flag injection left through git/forge/cast/bun for the reviewed inputs; exit handling, soft-fails, trimming, options, laziness, resolver order match prior behaviour; strict validation rejects only incomplete/custom `forked-v1` JSON, never a valid current candidate; the legacy path remains usable.
 
-## Codex post-impl round 2 (resumed)
+## Codex post-impl round 2 (resumed) — **APPROVE — LOOP CONVERGED** (r1 conditional → r2 approve)
 
-Pending.
+Verbatim: "approve". No code changed after `aaa282f8` (`fix(review)`). Delivery follows: one PR to `dev`, the three required checks asserted at its HEAD, merge reserved for the owner.
