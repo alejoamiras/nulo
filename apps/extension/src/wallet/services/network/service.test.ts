@@ -1077,6 +1077,34 @@ describe("NetworkService public API (M4.10)", () => {
 			await expect(service.getNetwork("n2")).rejects.toThrow()
 		})
 
+		test("(N-14) a deletion that begins AND completes mid-restore still rejects later rows (entry-capture pin)", async () => {
+			// After begin+release the profile is unreserved and the epoch settled —
+			// a lazy per-row capture would pass; the entry-captured epoch has moved.
+			const { service, local, deletionState } = setupServiceWithStorage({})
+			const mkNet = (id: string, chainId: number): Network => ({
+				id,
+				profileId: "p1",
+				chainId,
+				l1ChainId: chainId,
+				name: `N${chainId}`,
+				primaryEndpointId: "e1",
+				endpoints: [{ id: "e1", rpcUrl: `https://rpc.test/${chainId}` }],
+			})
+			const origSet = local.set.bind(local)
+			let fired = false
+			local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					deletionState.beginDeletion("p1")
+					deletionState.release("p1")
+				}
+			}
+			const result = await service.restore([mkNet("n1", 1), mkNet("n2", 2)])
+			expect(result[0]!.restoreError).toBeUndefined()
+			expect(result[1]!.restoreError).toMatch(/deleted/)
+		})
+
 		test("restore accepts new-shape entries", async () => {
 			const { service } = setupServiceWithStorage({})
 			const newShape: Network[] = [

@@ -277,7 +277,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(
 			deletion,
-			contacts.map((c) => (c as { profileId?: unknown }).profileId),
+			contacts.map((c) => (c as { profileId?: unknown } | null)?.profileId),
 		)
 
 		return await this.lock.withLock(async () => {

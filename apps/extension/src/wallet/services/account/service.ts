@@ -642,7 +642,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(
 			deletion,
-			accounts.map((a) => (a as { profileId?: unknown }).profileId),
+			accounts.map((a) => (a as { profileId?: unknown } | null)?.profileId),
 		)
 
 		// Serialise the whole restore: the intersection check + the writes must be
@@ -730,7 +730,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(
 			deletion,
-			rows.map((r) => (r as { profileId?: unknown }).profileId),
+			rows.map((r) => (r as { profileId?: unknown } | null)?.profileId),
 		)
 		return await this.restoreLock.withLock(async () => {
 			// One context per restore (normalizeAllIds remapped every row to the new profile id).

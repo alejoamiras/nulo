@@ -680,7 +680,7 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		const deletion = this.profiles.getDeletionState()
 		const epochs = captureRestoreEpochs(
 			deletion,
-			tokens.map((t) => (t as { profileId?: unknown }).profileId),
+			tokens.map((t) => (t as { profileId?: unknown } | null)?.profileId),
 		)
 
 		return await this.lock.withLock(async () => {

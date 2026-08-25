@@ -1401,7 +1401,7 @@ describe("useFullBackupImport — passkey backup", () => {
 	const PASSKEY_DATA = {
 		id: asBase64CredentialId(PASSKEY_CRED_ID),
 		prf: asBase64SecretPrf("AAAA"),
-		userHandle: asHexUserHandle("new-id"),
+		userHandle: asHexUserHandle("src-profile-id"),
 	}
 
 	async function buildPasskeyBackup() {

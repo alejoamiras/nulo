@@ -435,7 +435,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(
 			deletion,
-			fpcs.map((f) => (f as { profileId?: unknown }).profileId),
+			fpcs.map((f) => (f as { profileId?: unknown } | null)?.profileId),
 		)
 
 		return await this.lock.withLock(async () => {

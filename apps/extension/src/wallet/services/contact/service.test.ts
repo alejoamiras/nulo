@@ -345,5 +345,35 @@ describe("ContactService (port-migrated)", () => {
 			const restored = await contactService.restore(rows)
 			expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
 		})
+
+		test("a deletion that begins AND completes mid-restore still rejects later rows (entry-capture pin)", async () => {
+			// Discriminates entry capture from the rejected lazy design: after
+			// begin+release the profile is no longer reserved and the epoch is
+			// settled — a capture taken lazily at row 2 would observe the settled
+			// value and land the orphan; the entry-captured epoch has moved.
+			const origSet = api.storage.local.set.bind(api.storage.local)
+			let fired = false
+			api.storage.local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					const d = profile.getDeletionState()
+					d.beginDeletion(profileA.id)
+					d.release(profileA.id)
+				}
+			}
+			const restored = await contactService.restore(rows)
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(restored[1].restoreError).toMatch(/deleted/)
+		})
+
+		test("a hostile null row is a per-row restoreError, never a whole-slice abort", async () => {
+			// Backup slices are attacker-controlled; normalizeAllIds preserves
+			// non-object elements. The entry capture must tolerate them (null-safe
+			// read) so the documented per-row contract holds.
+			const restored = await contactService.restore([rows[0], null as never])
+			expect(restored[0].restoreError).toBeUndefined()
+			expect(typeof restored[1].restoreError).toBe("string")
+		})
 	})
 })
