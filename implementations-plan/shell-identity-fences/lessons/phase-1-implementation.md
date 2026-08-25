@@ -24,6 +24,10 @@ Reviewer-ratified deviations recorded in the plan ledger: single-watcher `awaitP
 
 The starvation pin's TASK half was vacuous: mount AWAITS `loadTokens` before starting the task snapshot, so the reconnect emit never overlapped a parked task load — aliasing only `taskFence = journalFence` stayed green (probed before fixing, exactly as codex predicted). Fix: drive the concurrent park through the scope-switch watcher (which begins all three fences together), then emit. Both single-alias probes now red independently. **Lesson: a multi-mechanism pin must be probed per mechanism — the aggregate probe (alias BOTH fences) passed on the strength of one half. And: know which code path actually runs the loads concurrently before claiming a concurrency pin.**
 
+## Codex final-diff round 3 — SIGN-OFF
+
+Verified at `89d1c4b9` ("test-only, clean worktree, both loads parked concurrently through the synchronous scope watcher; the pin discriminates each single-fence alias independently"), contingent only on the full battery completing green before the PR opens.
+
 ## Environment/tooling
 
 - Vitest doesn't run the app's auto-import transform: `useToast`/`TOAST_DURATION` must be explicitly imported in components under test, or the suite reds on undefineds the app never sees.
