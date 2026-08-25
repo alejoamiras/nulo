@@ -21,25 +21,37 @@ import { DappSessionService } from "./service"
 let activeProfile: { id: string } | undefined
 
 function makeProfileStub() {
+	// One deterministic HMAC key per profile so MAC-storage writes/reads verify
+	// within a test without a real key hierarchy.
+	const keys = new Map<string, Promise<CryptoKey>>()
 	return {
 		name: PROFILE_SERVICE_NAME,
 		dependencies: [],
 		onProfileDeleted: new EventHandler(),
 		getActiveProfile: vi.fn(async () => activeProfile),
+		deriveDappSessionMacKey: vi.fn(async (profileId: string) => {
+			let key = keys.get(profileId)
+			if (!key) {
+				key = crypto.subtle.generateKey({ name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]) as Promise<CryptoKey>
+				keys.set(profileId, key)
+			}
+			return key
+		}),
 		async start() {},
 	}
 }
 
-async function makeService(): Promise<DappSessionService> {
+async function makeService(): Promise<{ service: DappSessionService; profileStub: ReturnType<typeof makeProfileStub> }> {
 	const logger = new LoggerStore(new ConfigStore())
 	const browserApi = new FakeBrowserApi()
 	browserApi.reset()
 	const service = new DappSessionService(logger, browserApi)
 	const collection = new ServiceCollection()
-	collection.add(makeProfileStub() as never)
+	const profileStub = makeProfileStub()
+	collection.add(profileStub as never)
 	collection.add(service)
 	await collection.start()
-	return service
+	return { service, profileStub }
 }
 
 beforeEach(() => {
@@ -48,20 +60,37 @@ beforeEach(() => {
 
 describe("DappSessionService active-profile guards (Q19 preservation pins)", () => {
 	test('getDappSessions throws "Profile locked" when the wallet is locked', async () => {
-		const svc = await makeService()
+		const { service: svc } = await makeService()
 		activeProfile = undefined
 		await expect(svc.getDappSessions()).rejects.toThrow("Profile locked")
 	})
 
 	test('addDappSession throws "Wallet is locked" when the wallet is locked', async () => {
-		const svc = await makeService()
+		const { service: svc } = await makeService()
 		activeProfile = undefined
 		await expect(svc.addDappSession({} as never, [], [], 0 as never, "1")).rejects.toThrow("Wallet is locked")
 	})
 
 	test("tryGetDappSessionByOriginAndChain SILENTLY returns undefined when locked (deliberate non-thrower, NOT swept)", async () => {
-		const svc = await makeService()
+		const { service: svc } = await makeService()
 		activeProfile = undefined
 		await expect(svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1")).resolves.toBeUndefined()
+	})
+})
+
+describe("tryGetDappSessionByOriginAndChain anchoring", () => {
+	test("forProfileId filters to the given profile and bypasses the live-profile read (silently revertible without this pin)", async () => {
+		const { service: svc, profileStub } = await makeService()
+		await svc.addDappSession({ url: "https://dapp.example" } as never, [], [], 0 as never, "1")
+
+		profileStub.getActiveProfile.mockClear()
+		const anchored = await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p1")
+		expect(anchored?.profileId).toBe("p1")
+		// The anchored path must never consult the live profile — that read is
+		// exactly the switch-race the anchor exists to close.
+		expect(profileStub.getActiveProfile).not.toHaveBeenCalled()
+
+		const foreign = await svc.tryGetDappSessionByOriginAndChain("https://dapp.example", "1", "p2")
+		expect(foreign).toBeUndefined()
 	})
 })

@@ -33,6 +33,7 @@ function makeDeps(over: Partial<SessionEstablishedDeps> = {}) {
 		terminateSession: terminate,
 		pendingVerification: new Map<string, PendingVerificationEntry>(),
 		stampSessionProfile: stamp,
+		isSessionLive: () => true,
 		logger: noopLogger,
 		...over,
 	}
@@ -159,5 +160,15 @@ describe("handleSessionEstablished — profile binding (N-04)", () => {
 		const { deps } = makeDeps({ pendingVerification })
 		await handleSessionEstablished(makeSession(), deps)
 		expect(pendingVerification.get("sess-OTHER")).toBe(other) // survives intact
+	})
+
+	test("a session terminated mid-validation is never stamped and opens no verify window", async () => {
+		const pendingVerification = new Map([["sess-1", marker("prof-A")]])
+		const { deps, stamp } = makeDeps({ pendingVerification, isSessionLive: () => false })
+		const ok = await handleSessionEstablished(makeSession(), deps)
+		expect(ok).toBe(false)
+		expect(stamp).not.toHaveBeenCalled()
+		expect(chrome.windows.create).not.toHaveBeenCalled()
+		expect(pendingVerification.has("sess-1")).toBe(false) // marker still cleared
 	})
 })

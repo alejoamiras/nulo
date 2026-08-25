@@ -29,11 +29,12 @@ describe("pending-verification marker", () => {
 		expect([...markers.keys()]).toEqual(["r3"])
 	})
 
-	test("an immediate reconnect after tab close reads a clean set (no 90 s poisoning)", () => {
+	test("tab close leaves no orphaned marker (map hygiene until the TTL would reap it)", () => {
 		const markers = new Map<string, PendingVerificationEntry>([["r1", entry()]])
 		deletePendingVerificationForTab(markers, 7)
-		// The reconnect's establishment sees NO marker → trusted-reconnect
-		// branch, no spurious re-verification.
+		// Request-keyed markers mean a reconnect NEVER reads a prior handshake's
+		// entry regardless of deletion (new requestId) — this deletion is pure
+		// hygiene so a closed tab's approval doesn't linger for the 90 s TTL.
 		expect(markers.get("r1")).toBeUndefined()
 	})
 })

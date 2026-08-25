@@ -2056,3 +2056,26 @@ describe("dispatcher — arg guards: order, tolerance, batch-leg validation", ()
 		)
 	})
 })
+
+describe("dispatcher session-lookup anchoring", () => {
+	test("dispatch() anchors the entry lookup to ctx.profileId (silently revertible without this pin)", async () => {
+		const session = makeSession()
+		const { writer } = makeSessionWriter(session)
+		const seen: Array<[string, string, string | undefined]> = []
+		const dispatcher = makeDispatcher(
+			{
+				...writer,
+				tryGetDappSessionByOriginAndChain: async (origin, chainId, forProfileId) => {
+					seen.push([origin, chainId, forProfileId])
+					return session
+				},
+			},
+			async () => ({ granted: [], rejected: [] }) as never,
+		)
+		await dispatcher.dispatch("requestCapabilities", [{ capabilities: [] }], ctx).catch(() => {})
+		// The third argument is the establishment-stamped profile from ctx — an
+		// in-flight dispatch racing a profile switch must resolve its OWN
+		// profile's row, never the newly active one.
+		expect(seen).toEqual([["https://test.example", "0", "test-profile"]])
+	})
+})

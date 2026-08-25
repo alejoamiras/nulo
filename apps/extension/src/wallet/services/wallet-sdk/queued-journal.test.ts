@@ -389,4 +389,10 @@ describe("tryCreateQueuedJournal — record account", () => {
 		await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
 		expect(networkSvc.getNetworksRaw).toHaveBeenCalledWith("profile-1", expect.anything())
 	})
+
+	test("the dapp-session lookup is anchored to the stamped profile (silently revertible without this pin)", async () => {
+		const { deps, dappSession } = makeDeps()
+		await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(dappSession.tryGetDappSessionByOriginAndChain).toHaveBeenCalledWith(expect.anything(), expect.anything(), "profile-1")
+	})
 })

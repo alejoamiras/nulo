@@ -28,6 +28,11 @@ export interface SessionEstablishedDeps {
 		setVerificationHash(sessionId: string, verificationHash: string): Promise<unknown>
 	}
 	terminateSession: (sessionId: string) => void
+	/** Whether the transport session is still in the handler's active set — a
+	 *  switch-teardown can terminate a mid-validation session, and stamping a
+	 *  dead one would leak a `sessionProfiles` entry and pop a verify window
+	 *  for a closed channel. */
+	isSessionLive: (sessionId: string) => boolean
 	pendingVerification: Map<string, PendingVerificationEntry>
 	/** Bind the established transport session to the profile that owns it —
 	 *  the dispatch guard and the switch-teardown listener consume this. */
@@ -69,6 +74,12 @@ export async function handleSessionEstablished(
 		// the freshness window must terminate, never soften into reconnect
 		// semantics (that downgrade would let a parked A-era approval mint a
 		// channel under whichever profile is active by the time it completes).
+		// The terminate costs the dApp ONE round trip, not the approval — the
+		// DappSession row survives and upstream restores an approved discovery,
+		// so a re-handshake lands in the marker-less branch below. The
+		// cross-profile floors there are the live-profile row lookup and the
+		// `!trustedVerification` gate; the 90 s TTL is NOT a security boundary
+		// and nothing may lean on it as one.
 		if (marker && isPendingVerificationStale(marker)) {
 			deps.logger.log(
 				"wallet-sdk-bg",
@@ -100,6 +111,20 @@ export async function handleSessionEstablished(
 				`Session established for ${session.origin} chain ${chainId} under profile ${dappSession.profileId} but approved under ${marker.profileId} — terminating`,
 			)
 			deps.terminateSession(session.sessionId)
+			return false
+		}
+		// Upstream inserts into `activeSessions` BEFORE this handler runs, so a
+		// profile-switch teardown can have terminated this session mid-validation.
+		// Establishing a dead channel would leak its stamp and pop a verify window
+		// for nothing. The residual window between this check and the stamp is
+		// benign: upstream delivers no messages for a deleted session and the
+		// dispatch guard fails closed on the leftover stamp.
+		if (!deps.isSessionLive(session.sessionId)) {
+			deps.logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Warn,
+				`Session ${session.sessionId} for ${session.origin} terminated during validation — skipping establishment`,
+			)
 			return false
 		}
 		// Persist for the settings/reconnect view (informational). The verify window

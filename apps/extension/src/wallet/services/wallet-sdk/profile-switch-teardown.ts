@@ -23,6 +23,7 @@
  */
 import type { ILogger } from "@/wallet/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
+import { getErrorMessage } from "@nulo/wallet-core/utils"
 
 export interface ProfileSwitchTeardownDeps {
 	onActiveProfileChanged: { add(listener: (profile: { id: string } | undefined) => void): unknown }
@@ -77,7 +78,17 @@ export function wireProfileSwitchTeardown(deps: ProfileSwitchTeardownDeps): void
 				LogLevel.Info,
 				`Profile switch: terminating session ${session.sessionId} (${session.origin}) bound to ${stamped ?? "no"} profile`,
 			)
-			deps.terminateSession(session.sessionId)
+			try {
+				deps.terminateSession(session.sessionId)
+			} catch (err) {
+				// One failing teardown must not shield the remaining foreign
+				// sessions; the dispatch guard fail-closes whatever survives.
+				deps.logger.log(
+					"wallet-sdk-bg",
+					LogLevel.Warn,
+					`Profile switch: failed to terminate ${session.sessionId}: ${getErrorMessage(err)}`,
+				)
+			}
 		}
 	})
 }

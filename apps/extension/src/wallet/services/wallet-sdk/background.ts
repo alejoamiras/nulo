@@ -107,10 +107,11 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 	)
 
 	/**
-	 * Track new connections (user-approved via popup) keyed by
-	 * `(origin, chainId)` so verification fires for the right session when
-	 * the dApp holds concurrent sessions on different chains for the same
-	 * origin.
+	 * Track new connections (user-approved via popup) keyed by the discovery
+	 * REQUEST id — which upstream reuses verbatim as the sessionId — so
+	 * establishment can only ever read its OWN approval's marker: concurrent
+	 * same-`(origin, chainId)` handshakes and reconnects can't cross-consume,
+	 * and the entry's `profileId` pins WHO approved for the skew check.
 	 */
 	const pendingVerification = new Map<string, PendingVerificationEntry>()
 
@@ -247,6 +248,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					terminateSession: (sessionId) => handler.terminateSession(sessionId),
 					pendingVerification,
 					stampSessionProfile: (sessionId, profileId) => sessionProfiles.set(sessionId, profileId),
+					isSessionLive: (sessionId) => handler.getActiveSessions().some((s) => s.sessionId === sessionId),
 					logger,
 				})
 				establishmentStatus.set(session.sessionId, validated)
@@ -696,6 +698,32 @@ async function handleDiscovery(
 }
 
 /**
+ * Transition a still-`queued` journal record to `failed`. The record is the
+ * source of truth (not a mutable flag): "handler claimed then failed" already
+ * carries its terminal state; "failed before claim" is ours to close so the
+ * UI doesn't show a permanently-stuck "Queued..." card.
+ */
+async function failQueuedIfUnclaimed(
+	operationJournal: OperationJournalService,
+	journalId: string,
+	message: string,
+	logger: ILogger,
+): Promise<void> {
+	try {
+		const record = await operationJournal.getOperation(journalId)
+		if (record?.progress?.stage === "queued") {
+			await operationJournal.transitionOperation(
+				journalId,
+				{ stage: "failed" },
+				{ kind: "popup_bound", message, normalizedRaw: null },
+			)
+		}
+	} catch (transitionError) {
+		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed: ${getErrorMessage(transitionError)}`)
+	}
+}
+
+/**
  * Handle an incoming wallet message from a connected dApp.
  *
  * Dispatches the method call to the WalletSdkDispatcher, then encrypts
@@ -705,8 +733,9 @@ async function handleDiscovery(
  * local mirror) so the `onExecutionEnqueued` baton wiring is type-checked
  * against the dispatcher's expectation — preventing a recurrence of the
  * field-name drift that left the release dead. `onExecutionEnqueued` rides
- * to the sendTx path; `queuedJournalId` is used here (catch block) to decide
- * whether an unclaimed `queued` record should be transitioned to `failed`.
+ * to the sendTx path; `queuedJournalId` is used here (identity-guard fail
+ * and catch paths) to decide whether an unclaimed `queued` record should be
+ * transitioned to `failed`.
  */
 async function handleWalletMessage(
 	session: ActiveSession,
@@ -746,7 +775,15 @@ async function handleWalletMessage(
 			terminateSession: (sessionId) => handler.terminateSession(sessionId),
 			logger,
 		})
-		if (!mayProceed) return
+		if (!mayProceed) {
+			// The guard's early return bypasses the catch below — close a
+			// pre-created queued record here too, or it sits at "Queued..."
+			// until the reaper's stuck sweep.
+			if (hooks?.queuedJournalId) {
+				await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, "Session no longer valid — reconnect", logger)
+			}
+			return
+		}
 
 		const ctx: SessionContext = {
 			chainId: chainInfoToChainId(session),
@@ -776,34 +813,8 @@ async function handleWalletMessage(
 		const logMsg = typeof response.error === "string" ? response.error : jsonStringify(response.error)
 		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}: ${logMsg}`)
 
-		// If a queued journal record exists and is STILL at queued stage,
-		// the handler failed before claiming it. Transition to failed so
-		// the UI doesn't show a permanently-stuck "Queued..." card.
-		// Use the journal record as source of truth (not a mutable flag)
-		// to disambiguate "handler claimed and then failed" (terminal state
-		// already correct) from "handler failed before claim" (we own the
-		// terminal state).
 		if (hooks?.queuedJournalId) {
-			try {
-				const record = await operationJournal.getOperation(hooks.queuedJournalId)
-				if (record?.progress?.stage === "queued") {
-					await operationJournal.transitionOperation(
-						hooks.queuedJournalId,
-						{ stage: "failed" },
-						{
-							kind: "popup_bound",
-							message: getErrorMessage(error),
-							normalizedRaw: null,
-						},
-					)
-				}
-			} catch (transitionError) {
-				logger.log(
-					"wallet-sdk",
-					LogLevel.Warn,
-					`Failed to mark queued record ${hooks.queuedJournalId} as failed: ${getErrorMessage(transitionError)}`,
-				)
-			}
+			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
 		}
 	}
 
