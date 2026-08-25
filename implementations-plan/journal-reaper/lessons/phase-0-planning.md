@@ -12,6 +12,12 @@
 - **N-16 branch (3) dead** (codex finding 1 + fable F-5, which proved it three ways: `validateTaskBeforeFinish` forbids finishing a parent with an open child so `isFinished` can't fire; taking the branch double-throws in the callers; polling `isFinished` throws after `tasks.clear()`). Cut; bound-only + settle-exactly-once + `WrappedTask.exists`. Codex's AbortSignal alternative parked as out-of-scope (fable: adjudicated harm closes with the bound; no caller can deliver a cancel today) — put to codex for round-2 concurrence.
 - **N-25 test placement**: both auditors killed my claim-helper-level real-Map test (no finally there — it cannot observe the fix); the pin moves to a real-Map-backed lane mock in the executor harness. Plus fable F-9: `journalId !== queuedJournalId` IS reachable (fresh-id fallbacks), so unconditional both-key delete.
 
+## Final fresh-context gate — REJECT ×5 (the pipeline's third final-gate overturn)
+
+The fresh auditor found the hole BOTH round-1 auditors missed **because they were arguing about mechanisms**: fable killed (b)'s Set-spare for shielding a hung handler forever, then blessed (a′) as "inheriting the shipped trade" — but the shipped trade was scoped to the bounded mutex wait; extended to the unbounded pre-claim window, perpetual `touchOperation` IS the same forever-shield. **Lesson: when an auditor kills design X for hazard H and endorses design Y, explicitly re-test Y against H — hazards usually attach to the PROPERTY (here: unbounded liveness signaling), not the mechanism.** Fix: bounded 30-min heartbeat lease on a separate `queuedWaiters` Map.
+
+Also caught: pre-acquire `cancelJob` never prunes the waiter (cap-bypass growth under cancel/arrival cycles); `failQueuedIfUnclaimed` has the same unguarded read/transition race the reaper had (one CAS helper serves both — **when you build a guarded-transition primitive, sweep for every other caller of the unguarded one**); the N-16 settle discipline needed the full exit-path enumeration (esp. startSubtask-throws → zero settles); five discriminators were green-under-regression (begin/end placement, double-settle, delete-after-release) — each got a placement/count pin.
+
 ## Traps recorded for implementation
 
 - F-10: an executor test passing `hooks.queuedJournalId` with `preController: undefined` constructs an unreachable production state — mock consistently.
