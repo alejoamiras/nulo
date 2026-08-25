@@ -15,7 +15,7 @@
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "bun --bun vitest run"
 	},
 	"dependencies": {
 		"@alejoamiras/aztec-accelerator": "5.0.1",
