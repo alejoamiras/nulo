@@ -23,8 +23,6 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 // Uniswap V4 PoolManager on Sepolia (same deployment the bridge rides).
 address constant CANONICAL_PM = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
-// Fallback public RPC.
-string constant MAINNET_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
 
 contract MinimalWETH {
     string public name = "WETH";
@@ -125,7 +123,11 @@ contract BlackhatV4ForkTest is Test {
     V4Seeder seeder;
 
     function setUp() public {
-        string memory rpc = vm.envOr("MAINNET_RPC_URL", MAINNET_RPC);
+        string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return;
+        }
         vm.createSelectFork(rpc);
 
         pm = IPoolManager(CANONICAL_PM);
@@ -200,27 +202,7 @@ contract BlackhatV4ForkTest is Test {
         fuelSwap.swap(address(tokenX), 100 ether, 1 wei, path, dirs);
     }
 
-    /// DEBUG: raw PM swap probes on both pools.
-    function test_DEBUG_rawPmProbes() public {
-        RawSwapper raw = new RawSwapper(pm);
-        PoolKey memory poolA = PoolKey({
-            currency0: Currency.wrap(address(0)),
-            currency1: Currency.wrap(address(tokenX)),
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(address(0))
-        });
-        // fund raw swapper, then sell X (zeroForOne=false)
-        tokenX.mint(address(raw), 1000 ether);
-        mockFj.mint(address(raw), 1000 ether);
-        vm.deal(address(raw), 100 ether);
-
-        (int128 o0, int128 o1) = raw.go(poolA, false, 1 ether);
-        emit log_named_int("sellX delta0(native)", o0);
-        emit log_named_int("sellX delta1(X)", o1);
-    }
-
-    /// Sanity: a LEGIT all-native-final route (single-hop WETH→native→FJ) still works on the
+/// Sanity: a LEGIT all-native-final route (single-hop WETH→native→FJ) still works on the
     /// canonical PM — proving the harness itself is sound and only the hostile shape fails.
     function test_FG_sanity_legitSingleHopNativeRouteExecutes() public {
         PoolKey[] memory path = new PoolKey[](1);
