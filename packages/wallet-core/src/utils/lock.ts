@@ -3,9 +3,17 @@ import { type ILogger, LogLevel } from "../logger/interfaces"
 /** Maximum time a lock can be held before being force-released (ms). */
 const MAX_HOLD_MS = 5 * 60_000 // 5 minutes
 
+/**
+ * Opaque per-acquisition ownership proof. Minted at HANDOFF (never at
+ * enqueue), so a queued waiter can only ever observe a ticket that is
+ * current the instant it is granted. Unforgeable by construction (symbol).
+ */
+export type LockTicket = symbol
+
 export class Lock {
-	private readonly queue: (() => void)[] = []
+	private readonly queue: ((ticket: LockTicket) => void)[] = []
 	private locked = false
+	private currentTicket: LockTicket | null = null
 	private readonly name?: string
 	private readonly logger?: ILogger
 	private acquiredAt = 0
@@ -17,8 +25,9 @@ export class Lock {
 	 *   `leave()` within this many ms (best-effort safety net). Defaults to
 	 *   {@link MAX_HOLD_MS}; pass `null` to disable the watchdog entirely — for
 	 *   a caller that previously hand-rolled a watchdog-less serialization and
-	 *   must stay byte-for-byte equivalent (a wedged op then blocks its queue
-	 *   until the SW dies, exactly as before).
+	 *   must stay byte-for-byte equivalent, or one whose long holds are BY
+	 *   DESIGN (a force-release there would admit a second critical section
+	 *   into a legitimately-running one; queueing is the correct semantic).
 	 */
 	constructor(name?: string, logger?: ILogger, maxHoldMs: number | null = MAX_HOLD_MS) {
 		this.name = name
@@ -26,7 +35,7 @@ export class Lock {
 		this.maxHoldMs = maxHoldMs
 	}
 
-	public async enter() {
+	public async enter(): Promise<LockTicket> {
 		// INVARIANT (hardened): once enter()'s promise resolves, ownership HAS
 		// transferred — that equivalence is what withLock's leave-iff-entered
 		// contract depends on. Logging and timer-arming are best-effort: a
@@ -42,7 +51,7 @@ export class Lock {
 		if (waiting && this.logger) {
 			this.tryLog(LogLevel.Debug, `Lock: waiting (queue: ${this.queue.length})`)
 		}
-		await new Promise<void>((resolve) => {
+		const ticket = await new Promise<LockTicket>((resolve) => {
 			this.queue.push(resolve)
 			this.dispatch()
 		})
@@ -53,24 +62,7 @@ export class Lock {
 			}
 			this.acquiredAt = Date.now()
 		}
-		// Safety net: force-release if holder never calls leave(). Arming is
-		// best-effort under the same never-reject invariant — a throwing
-		// setTimeout must not reject enter() after ownership transferred.
-		// Skipped entirely when the watchdog is disabled (maxHoldMs === null).
-		if (this.maxHoldMs !== null) {
-			const maxHoldMs = this.maxHoldMs
-			try {
-				this.forceReleaseTimer = setTimeout(() => {
-					if (this.locked) {
-						this.tryLog(LogLevel.Error, `Lock: force-released after ${maxHoldMs}ms (holder did not call leave)`)
-						this.leave()
-					}
-				}, maxHoldMs)
-			} catch {
-				// Swallowed by design: an unarmed safety timer is strictly better
-				// than a rejected enter() while holding the lock.
-			}
-		}
+		return ticket
 	}
 
 	/**
@@ -81,15 +73,28 @@ export class Lock {
 	 * callers that genuinely need split acquisition.
 	 */
 	public async withLock<T>(fn: () => Promise<T> | T): Promise<T> {
-		await this.enter()
+		const ticket = await this.enter()
 		try {
 			return await fn()
 		} finally {
-			this.leave()
+			this.leave(ticket)
 		}
 	}
 
-	public leave() {
+	/**
+	 * Release the lock — but ONLY for its current owner. A stale ticket (the
+	 * holder was force-released and the lock has moved on) is a logged no-op:
+	 * anything else would let the displaced holder's late `finally` release
+	 * the CURRENT holder's acquisition, collapsing mutual exclusion. The
+	 * ticket check MUST stay the first statement — clearing the timer before
+	 * it would let a stale leave disarm the current holder's watchdog while
+	 * every ownership assertion still passes.
+	 */
+	public leave(ticket: LockTicket) {
+		if (ticket !== this.currentTicket) {
+			this.tryLog(LogLevel.Warn, "Lock: stale leave() ignored (holder was force-released; lock has moved on)")
+			return
+		}
 		if (this.forceReleaseTimer) {
 			clearTimeout(this.forceReleaseTimer)
 			this.forceReleaseTimer = undefined
@@ -101,6 +106,7 @@ export class Lock {
 			}
 			this.acquiredAt = 0
 		}
+		this.currentTicket = null
 		this.locked = false
 		this.dispatch()
 	}
@@ -117,7 +123,36 @@ export class Lock {
 	private dispatch() {
 		if (!this.locked && this.queue.length) {
 			this.locked = true
-			this.queue.shift()!()
+			const ticket = Symbol("lock-ticket")
+			this.currentTicket = ticket
+			// Safety net: force-release if the holder never calls leave(). The
+			// callback guards on ITS OWN ticket (not just `locked`) so a timer
+			// whose grant was already superseded can never force-release the
+			// successor. Arming is best-effort under enter()'s never-reject
+			// invariant (dispatch runs inside the enter() promise executor).
+			// LIMITATION (accepted, documented): a force-release admits the next
+			// waiter while the displaced holder's critical section may still be
+			// RUNNING — tickets stop the displaced holder from releasing anyone
+			// else's turn, they cannot un-run its remaining code. Locks whose
+			// long holds are by design must pass `maxHoldMs: null` instead.
+			if (this.maxHoldMs !== null) {
+				const maxHoldMs = this.maxHoldMs
+				try {
+					this.forceReleaseTimer = setTimeout(() => {
+						if (this.currentTicket === ticket) {
+							this.tryLog(LogLevel.Error, `Lock: force-released after ${maxHoldMs}ms (holder did not call leave)`)
+							this.forceReleaseTimer = undefined
+							this.currentTicket = null
+							this.locked = false
+							this.dispatch()
+						}
+					}, maxHoldMs)
+				} catch {
+					// Swallowed by design: an unarmed safety timer is strictly better
+					// than a rejected enter() while holding the lock.
+				}
+			}
+			this.queue.shift()!(ticket)
 		}
 	}
 }
