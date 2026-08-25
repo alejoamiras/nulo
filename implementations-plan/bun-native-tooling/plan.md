@@ -1,6 +1,6 @@
 # bun-native-tooling — Arc D of the Bun 1.4 adoption (`/blueprint light`)
 
-Status: **APPROVED v5 — 2026-08-25**, per the owner's standing decision protocol: explicit fresh-context codex `approve` (session `01a037aa-…`, round 3) after codex rounds 1–3 and fresh-context rounds 1–2 were all folded with zero disputes (see [lessons/gate-convergence.md](lessons/gate-convergence.md)). Implementing. `eli5_mode: artifact` — ELI5 source: `implementations-plan/bun-native-tooling/eli5.html` (Artifact URL recorded below once published). Owner absent; every clarifying question is resolved by the standing decision protocol (codex to convergence, explicit fresh-context approve). Reserved lines (merging, required checks, `@aztec/*`, publish/deploy, feature removal, irreversible data ops) are not touched.
+Status: **APPROVED v5 — 2026-08-25**, per the owner's standing decision protocol: explicit fresh-context codex `approve` (session `01a037aa-…`, round 3) after codex rounds 1–3 and fresh-context rounds 1–2 were all folded with zero disputes (see [lessons/gate-convergence.md](lessons/gate-convergence.md)). Implementing. `eli5_mode: artifact` — ELI5 Artifact: https://claude.ai/code/artifact/7d4672c0-c282-42a4-afb1-e48b6270f065 (source: `implementations-plan/bun-native-tooling/eli5.html`; redeploy the same path to update). Owner absent; every clarifying question is resolved by the standing decision protocol (codex to convergence, explicit fresh-context approve). Reserved lines (merging, required checks, `@aztec/*`, publish/deploy, feature removal, irreversible data ops) are not touched.
 
 ## Goal
 
@@ -45,7 +45,7 @@ Novelty LOW (a process primitive; the release scripts already shell natively), b
 
 ## Phases
 
-### Phase 0 — Primitive + tests + dry-run baseline
+### Phase 0 — Primitive + tests + dry-run baseline ✓ (gate passed 2026-08-25 — [lessons/phase-0.md](lessons/phase-0.md))
 
 `run.ts` + `run.test.ts`; nothing else changes. Record the pre-migration `verify-l1 --dry-run` output for BOTH manifests in `lessons/phase-0.md` (testnet: the default config; mainnet: `--config apps/faucet/public/mainnet-bridge.json` — chain 1, the `circle-proxy` token skip, its own validation path). Validation gate — `bun run --cwd packages/bridge-core typecheck && bun run --cwd packages/bridge-core test && bun run --cwd packages/bridge-core vitest run scripts/run.test.ts && bun run --cwd packages/bridge-core --bun vitest run scripts/run.test.ts && bun run lint`. The two explicit invocations pin the engines regardless of what the package `test` script is: `bun run … vitest run` executes the vitest bin by its shebang (Node 24.18, verified `vitest/4.1.10 linux-x64 node-v24.18.0`), `bun run … --bun vitest run` executes it on Bun — so the gate stays honest before AND after Arc C merges. Pass: all exit 0. Layers: typecheck · unit (both engines, explicitly) · lint.
 
