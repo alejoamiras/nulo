@@ -28,7 +28,6 @@
  */
 import { randomInt } from "node:crypto"
 import { createHash } from "node:crypto"
-import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -51,6 +50,7 @@ import { appendJournal, type CandidateManifest, readJournal, resolveResume, writ
 import { resolveDeployerKeys } from "./deployer-keys"
 import { requirePinnedSigner } from "./live-intent"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { run } from "./run"
 import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 // ── Canonical mainnet identity (same pins as DeployBridgeMainnet.s.sol / discover-mainnet-fuel.ts) ──
@@ -506,8 +506,8 @@ async function main() {
 
 	if (process.env.ETHERSCAN_API_KEY) {
 		console.log("\nVerifying the candidate's L1 sources on Etherscan…")
-		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
-		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
+		const v = run("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit", check: false })
+		if (v.exitCode !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
 	}
 	console.log(JSON.stringify(manifest, null, 2))
 }
