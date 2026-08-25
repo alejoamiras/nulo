@@ -237,3 +237,30 @@ export function extractPrimaryMethodFromSendTx(message: WalletMessage): string |
 	const exec = args[0] as { calls?: Array<{ name?: string }> } | undefined
 	return pickPrimaryMethod(exec?.calls)
 }
+
+/**
+ * Transition a still-`queued` journal record to `failed`. The record is the
+ * source of truth (not a mutable flag): "handler claimed then failed" already
+ * carries its terminal state; "failed before claim" is ours to close so the
+ * UI doesn't show a permanently-stuck "Queued..." card. The stage check MUST
+ * ride `transitionIfStage`'s lock-held re-read — a separate read-then-
+ * transition legally turned a mid-flight `queued → pending` claim into
+ * `pending → failed`, failing an op the user had just approved.
+ */
+export async function failQueuedIfUnclaimed(
+	operationJournal: OperationJournalService,
+	journalId: string,
+	message: string,
+	logger: ILogger,
+): Promise<void> {
+	try {
+		await operationJournal.transitionIfStage(
+			journalId,
+			["queued"],
+			{ stage: "failed" },
+			{ kind: "popup_bound", message, normalizedRaw: null },
+		)
+	} catch (transitionError) {
+		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed: ${getErrorMessage(transitionError)}`)
+	}
+}

@@ -316,6 +316,24 @@ describe("pre-claim wait heartbeat (N-07)", () => {
 		}
 	})
 
+	test("lease expiry of the LAST waiter stops the heartbeat timer (no zombie interval)", async () => {
+		vi.useFakeTimers()
+		try {
+			const { lane } = makeLane()
+			const timer = () => (lane as unknown as { executionHeartbeatTimer?: unknown }).executionHeartbeatTimer
+			lane.beginQueuedWait("solo")
+			expect(timer()).toBeDefined()
+			await vi.advanceTimersByTimeAsync(95 * 60_000) // past the 90-min ceiling
+			// endQueuedWait never fires for a lease-removed entry — the trailing
+			// stop check inside the heartbeat is the ONLY path that can clear
+			// the interval once the collections empty this way.
+			expect(queuedWaiters(lane).size).toBe(0)
+			expect(timer()).toBeUndefined()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("ownership migrates at mutex enqueue: the queued entry vanishes, the execution wait takes over", async () => {
 		const { lane } = makeLane()
 		lane.beginQueuedWait("mig-1")

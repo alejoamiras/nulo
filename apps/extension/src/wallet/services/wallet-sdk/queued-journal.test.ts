@@ -13,7 +13,13 @@ import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import { MAX_QUEUED_GLOBAL, MAX_QUEUED_PER_SESSION, tryCreateQueuedJournal, type TryCreateQueuedJournalDeps } from "./queued-journal"
+import {
+	MAX_QUEUED_GLOBAL,
+	MAX_QUEUED_PER_SESSION,
+	failQueuedIfUnclaimed,
+	tryCreateQueuedJournal,
+	type TryCreateQueuedJournalDeps,
+} from "./queued-journal"
 
 function makeSession(sessionId = "session-A"): ActiveSession {
 	return {
@@ -394,5 +400,38 @@ describe("tryCreateQueuedJournal — record account", () => {
 		const { deps, dappSession } = makeDeps()
 		await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
 		expect(dappSession.tryGetDappSessionByOriginAndChain).toHaveBeenCalledWith(expect.anything(), expect.anything(), "profile-1")
+	})
+})
+
+describe("failQueuedIfUnclaimed — CAS against a concurrent claim (N-07)", () => {
+	test("a record claimed (queued→pending) is NOT failed — the lock-held re-read stands down", async () => {
+		const { deps, journal } = makeDeps()
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		expect(id).toBeDefined()
+		// The claim lands first. A racy read-then-transition with a stale
+		// "queued" snapshot would now legally run pending→failed; the CAS's
+		// re-read under the transition lock must stand down instead. Stub the
+		// LEGACY read path so a reverted implementation reads a stale snapshot.
+		await journal.transitionOperation(id as string, { stage: "pending" })
+		const staleSnapshot = { id, progress: { stage: "queued" } }
+		vi.spyOn(journal, "getOperation").mockResolvedValueOnce(staleSnapshot as never)
+		await failQueuedIfUnclaimed(journal, id as string, "boom", deps.logger)
+		vi.restoreAllMocks()
+		expect((await journal.getOperation(id as string))?.progress.stage).toBe("pending")
+	})
+
+	test("a still-queued record IS failed with the popup_bound kind (positive control)", async () => {
+		const { deps, journal } = makeDeps()
+		const id = await tryCreateQueuedJournal(makeSendTxMessage(), makeSession(), deps)
+		await failQueuedIfUnclaimed(journal, id as string, "session gone", deps.logger)
+		const rec = await journal.getOperation(id as string)
+		expect(rec?.progress.stage).toBe("failed")
+		expect(rec?.error?.kind).toBe("popup_bound")
+	})
+
+	test("a missing record is a silent no-op (byte-equivalent to the legacy behavior)", async () => {
+		const { deps, journal } = makeDeps()
+		await failQueuedIfUnclaimed(journal, "no-such-id", "gone", deps.logger)
+		expect(await journal.countOperations({ stage: "failed" })).toBe(0)
 	})
 })

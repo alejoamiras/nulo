@@ -57,7 +57,7 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
-import { tryCreateQueuedJournal } from "./queued-journal"
+import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
 import { chainSendTxWithVouching } from "./queued-wait-vouching"
 import { createSessionBaton } from "./session-baton"
 import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
@@ -710,33 +710,6 @@ async function handleDiscovery(
 			LogLevel.Warn,
 			`Discovery rejected for ${discovery.origin}: ${error instanceof Error ? error.message : String(error)}`,
 		)
-	}
-}
-
-/**
- * Transition a still-`queued` journal record to `failed`. The record is the
- * source of truth (not a mutable flag): "handler claimed then failed" already
- * carries its terminal state; "failed before claim" is ours to close so the
- * UI doesn't show a permanently-stuck "Queued..." card.
- */
-async function failQueuedIfUnclaimed(
-	operationJournal: OperationJournalService,
-	journalId: string,
-	message: string,
-	logger: ILogger,
-): Promise<void> {
-	try {
-		// CAS under the transition lock: a separate read + transition raced a
-		// concurrent claim — a legal `queued → pending` landing between the two
-		// would legally become `pending → failed` here, failing a claimed op.
-		await operationJournal.transitionIfStage(
-			journalId,
-			["queued"],
-			{ stage: "failed" },
-			{ kind: "popup_bound", message, normalizedRaw: null },
-		)
-	} catch (transitionError) {
-		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed: ${getErrorMessage(transitionError)}`)
 	}
 }
 

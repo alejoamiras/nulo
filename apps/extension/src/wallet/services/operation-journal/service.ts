@@ -503,18 +503,6 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	}
 
 	/**
-	 * Move a row to a new scope IN PLACE — same journal id — provided its
-	 * CURRENT stage (re-read under the transition lock) is one of
-	 * `allowedStages`. Cancellation identity is the point: `cancelJob`
-	 * addresses the row by id, so a delete+recreate re-file freed the id and a
-	 * cancel that had suspended before its transition resumed onto a missing
-	 * row and silently no-oped while execution continued under the
-	 * replacement. Keeping the id makes both lock orders safe: if the cancel
-	 * serialized first the stage left the allowed set and this refuses; if the
-	 * re-file serialized first the cancel still finds the same row (and the
-	 * same registered controller) under the new scope.
-	 */
-	/**
 	 * Conditionally transition: re-reads under the transition lock and no-ops
 	 * (with a discriminant) when the record left `allowedStages` or — when
 	 * `ifUpdatedAtIs` is given — when `updatedAt` moved since the caller's
@@ -546,6 +534,18 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		})
 	}
 
+	/**
+	 * Move a row to a new scope IN PLACE — same journal id — provided its
+	 * CURRENT stage (re-read under the transition lock) is one of
+	 * `allowedStages`. Cancellation identity is the point: `cancelJob`
+	 * addresses the row by id, so a delete+recreate re-file freed the id and a
+	 * cancel that had suspended before its transition resumed onto a missing
+	 * row and silently no-oped while execution continued under the
+	 * replacement. Keeping the id makes both lock orders safe: if the cancel
+	 * serialized first the stage left the allowed set and this refuses; if the
+	 * re-file serialized first the cancel still finds the same row (and the
+	 * same registered controller) under the new scope.
+	 */
 	public async refileOperationScope(
 		id: string,
 		scope: { profileId?: string; networkId: string; accountAddress: string },
