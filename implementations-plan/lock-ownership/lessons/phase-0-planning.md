@@ -11,3 +11,18 @@ Six findings, adjudicated:
 6. **Doc examples reference the raw API** (VALID, trivial): update profile/repository.ts:83-92 + purge-rows.ts:7-10 examples.
 
 Holding rev 2 until the parallel Fable audit lands (fold both rounds at once).
+
+## Fable plan audit round 1 (parallel): APPROVE-WITH-CHANGES
+
+Six findings — the converse-ordering fence hole, the vacuous N-17 pin + the GOLD watchdog-handoff recomposition, the f1-1 harness/fence contradiction, the check-first `leave` order + watchdog-own-ticket liveness pins, rationale corrections (storage.session is browser-session-lifetime; `if (!active) return` is the primary benignity), doc adjacencies. All adopted into rev 2; full transcript in audit-fable.md. Notably fable REFUTED codex's blanket-N-17 ask with a mechanistic census — the round's one cross-auditor disagreement.
+
+## Final fresh-context codex pass (session 01a0377c-e5b7-7eb0-8fdc-404326250345): REJECT on rev 2 → rev 3
+
+Five findings, all adopted:
+1. Mutex ordering hole — a close entering DURING B's artifact section captured the already-bumped generation (bump-first) and passed its re-check against B's completed artifacts. Fix: **bump LAST = the commit point**.
+2. `session.set` rejection indeterminacy — bump-first + reject could stand a close down with A's bearer persisted. Fix: bump-last + best-effort compensating delete on rejection, never bump on reject; rejection-after-write test added.
+3. The artifact mutex's own DEFAULT watchdog recreated N-12 at the 5-min mark (stalled delete → B admitted → A's tail clears B's alarm). Fix: `maxHoldMs: null` on the mutex, documented load-bearing.
+4. N-17: final pass ruled FOR the two-site placement (disagreement resolved unanimously) but fixed the pin — pre-seed allowed trust, assert post-handoff effects only (the unknown-trust write/emit land pre-park).
+5. Both simpler f1-1 orderings pass on revert — the MID-ARTIFACT ordering is the load-bearing pin; added.
+
+Meta-lesson (recurring at every gate this pipeline has run): the first "atomic" design is rarely atomic at the right BOUNDARY — the commit point must be the LAST act of the winning section, and every companion test must be checked for pass-on-revert before it's trusted. Round-3 re-verdict pending on rev 3 (e89bd1b9).
