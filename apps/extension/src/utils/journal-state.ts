@@ -264,6 +264,10 @@ function failedSubtitleFor(kind: JobErrorKind): string {
 			return "Simulation failed"
 		case "prover":
 			return "Couldn't generate proof"
+		case "duplicate_initialization":
+			// The first-tx init race: another device/tx initialized the account
+			// first. Honest and actionable — a plain retry succeeds once synced.
+			return "Account already initialized — retry after sync"
 		// popup_bound, transfer, dapp_execute, unknown, and any other / future
 		// kind all fall through to the generic copy. The kind is still preserved
 		// in the journal record's error.kind field for debugging / future

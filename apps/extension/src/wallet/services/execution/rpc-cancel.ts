@@ -34,7 +34,7 @@
  * wrong-toast UX bug.
  */
 
-import { JobCancelledError, WalletError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
 /** Minimal task surface needed for the cancel conversion. Avoids importing
@@ -72,9 +72,15 @@ export function classifyOperationCatch(error: unknown, task: CancellableTask, er
 		return { status: "cancelled", jobId: error.jobId, reason: "user" }
 	}
 	task.fail(error)
-	// A typed WalletError's code rides the failed variant so the dispatcher
-	// can re-materialize the class — the result is plain data across the
-	// boundary, and without the code the dApp error envelope can never
-	// discriminate the failure.
-	return { status: "failed", error: errorMessage(error), code: error instanceof WalletError ? error.code : undefined }
+	// ONLY DuplicateInitializationError rides the code channel: it is the one
+	// executor failure whose dApp discrimination is a ratified contract, and
+	// its reconstruction is lossless (message-only). A blanket WalletError
+	// pass-through would be unsound — e.g. TooManyPendingError deliberately
+	// reconstructs as base WalletError, and detail-dependent classes lose
+	// their details through this message-only channel.
+	return {
+		status: "failed",
+		error: errorMessage(error),
+		code: error instanceof DuplicateInitializationError ? error.code : undefined,
+	}
 }

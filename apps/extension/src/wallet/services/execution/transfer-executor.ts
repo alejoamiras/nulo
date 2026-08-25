@@ -147,8 +147,6 @@ export class TransferExecutor {
 			let network: Network
 			let nonce: { toString(): string }
 			let feePaymentMethod: AccountFeePaymentMethodOptions
-			// Reused estimates leave this undefined — unknown provenance must
-			// classify GENERIC (never a false "initialized elsewhere").
 			let initializesAccount: boolean | undefined
 			// Activity-feed inputs — captured separately from the FPC-mutated
 			// `buildAndEstimate` txCalls so the persisted record stays just
@@ -169,6 +167,8 @@ export class TransferExecutor {
 			if (reused) {
 				this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
 				txRequest = reused.txRequest
+				// The entry retains the exact build — its provenance rides along.
+				initializesAccount = reused.initializesAccount
 				nonce = reused.nonce
 				feePaymentMethod = reused.feePaymentMethod
 				activityToken = reused.token
@@ -279,7 +279,13 @@ export class TransferExecutor {
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
 		checkCancelled()
 
-		const { txRequest, network, nonce, feePaymentMethod } = await this.deps.buildAndEstimate(op, op.feeSettings, undefined, signal)
+		const {
+			txRequest,
+			network,
+			nonce,
+			feePaymentMethod,
+			initializesAccount: builtInitializes,
+		} = await this.deps.buildAndEstimate(op, op.feeSettings, undefined, signal)
 		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
@@ -322,6 +328,7 @@ export class TransferExecutor {
 						primaryEndpointUrl: primary.rpcUrl,
 						pendingHashes,
 						txRequest,
+						initializesAccount: builtInitializes,
 						nonce,
 						feePaymentMethod,
 						token: { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals },

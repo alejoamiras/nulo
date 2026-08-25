@@ -99,6 +99,10 @@ export type TransferEstimateReuseEntry = {
 	readonly pendingHashes: readonly string[]
 	/** Built downstream state — reused on confirm. */
 	readonly txRequest: TxExecutionRequest
+	/** Provenance travels WITH the cached request: the entry retains the
+	 *  exact build, so the confirm leg classifies an existing-nullifier
+	 *  rejection with the same fidelity as a fresh build. */
+	readonly initializesAccount: boolean
 	readonly nonce: { toString(): string }
 	readonly feePaymentMethod: AccountFeePaymentMethodOptions
 	/** Inputs for the activity-feed record. We persist a transfer-only

@@ -363,6 +363,7 @@ export class DappSendExecutor {
 				pendingHashes: this.deps.getPendingForAccount(operation.accountAddress).map((tx) => tx.hash),
 				fpcIdentity,
 				txRequest: built.txRequest,
+				initializesAccount: built.initializesAccount,
 				nonce: built.nonce,
 				feePaymentMethod: built.feePaymentMethod,
 				txCalls: built.txCalls,
@@ -557,9 +558,6 @@ export class DappSendExecutor {
 				let txCalls: FeeEstimate["txCalls"]
 				let feePaymentMethod: FeeEstimate["feePaymentMethod"]
 				let pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
-				// Reused estimates leave this undefined: the stash persists only the
-				// request fields, and an unknown provenance must classify GENERIC
-				// (never a false "initialized elsewhere").
 				let initializesAccount: boolean | undefined
 
 				if (reused) {
@@ -573,6 +571,8 @@ export class DappSendExecutor {
 					if (!profile) throw new Error("Wallet locked")
 					account = await this.deps.getAccountContract(profile.id, network.chainId, op.accountAddress)
 					txRequest = reused.txRequest
+					// The entry retains the exact build — its provenance rides along.
+					initializesAccount = reused.initializesAccount
 					nonce = reused.nonce
 					txCalls = reused.txCalls
 					feePaymentMethod = reused.feePaymentMethod
