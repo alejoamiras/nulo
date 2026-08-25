@@ -52,6 +52,7 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 	} as never
 	const built = {
 		txRequest: makeTxRequest(),
+		initializesAccount: true,
 		node: { kind: "node" },
 		pxe: { kind: "pxe" },
 		account: { address: "0xacct-addr" },
@@ -139,14 +140,18 @@ describe("TransferExecutor.execute", () => {
 			fnName: "transfer_private",
 			args: ["0xme", "0xyou", 5n],
 		}
-		const { executor, deps } = makeHarness({
-			estimateReuse: { tryConsume: vi.fn(async () => snapshot), stash: vi.fn() } as never,
+		const { executor, deps, proveAndSend } = makeHarness({
+			estimateReuse: { tryConsume: vi.fn(async () => ({ ...snapshot, initializesAccount: true })), stash: vi.fn() } as never,
 		})
 		const result = await executor.execute(makeReq(), "est-1")
 
 		expect(result).toBe("0xhash")
 		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		// (N-15) the cached build's provenance reaches the send context — a
+		// dropped executor assignment would classify a real init race generic.
+		const reuseCtx = (proveAndSend.mock.calls[0] as unknown[])[0] as { initializesAccount?: boolean }
+		expect(reuseCtx.initializesAccount).toBe(true)
 		// Reuse path resolves its own network/node/pxe/account bindings.
 		expect(deps.getNetwork).toHaveBeenCalledWith("net-1")
 		expect(deps.getAccountContract).toHaveBeenCalledWith("p1", 7, "0xme")
@@ -213,6 +218,10 @@ describe("TransferExecutor.estimateFee", () => {
 			primaryEndpointId: "e1",
 			pendingHashes: ["0xpending"],
 			baseFeeFingerprint: "2:3",
+			// (N-15) the stash persists the BUILD's provenance (the harness build
+			// sets true) — a hardcoded false here would strip classification
+			// from every estimate→confirm transfer.
+			initializesAccount: true,
 			fnName: "transfer_private",
 		})
 	})
