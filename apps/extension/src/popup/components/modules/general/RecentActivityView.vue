@@ -17,6 +17,7 @@ import { ContentKind, TaskStatus } from "@/wallet/services/task/spec"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
 import { OriginType } from "@/wallet/services/transaction/spec"
+import { createRunFence } from "@/composables/runFence"
 
 /** Utils */
 import { usePrices } from "@/composables/usePrices"
@@ -149,13 +150,22 @@ const awaitingAccountTxs = computed(() => {
 const executingTask = ref(null)
 const executingSubtasks = ref([])
 
+/** One scope fence for every scope-keyed loader in this component: any newer
+ *  trigger (scope switch, mount, reconnect, event-driven resnapshot) supersedes
+ *  older in-flight loads, so an A→B→A round-trip cannot revalidate a stale run
+ *  (captured-equality alone would). */
+const scopeFence = createRunFence()
+
 /** Tokens lookup — UI Transfer tasks carry a tokenId; we resolve to symbol +
  *  decimals so the awaiting card can mirror TransactionCard (icon + amount). */
 const tokens = ref([])
 const tokenService = new TokenServiceClient()
-async function loadTokens() {
+async function loadTokens(isCurrent = scopeFence.begin()) {
 	if (!appStore.profile || !appStore.network) return
-	tokens.value = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	const fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
+	// A deferred fetch for the OLD scope must not overwrite the new scope's map.
+	if (!isCurrent()) return
+	tokens.value = fetched
 }
 
 // Keep the local tokens map fresh as new tokens are added during this
@@ -588,14 +598,16 @@ journalService.onOperationDeleted.add(onJournalDeleted)
  * `subscribeWithSnapshot`). The Phase 2 reaper is what generates those
  * terminal transitions during SW down windows.
  */
-async function resnapshotJournal() {
+async function resnapshotJournal(isCurrent = scopeFence.begin()) {
 	try {
-		// Captured-account guard: snapshot the account we FETCH for and drop the
-		// result if the active account changed during the await (A→B, A→B→A). A late
-		// A snapshot must never clobber B's journal view.
+		// Generation guard (not captured-equality): equality re-validates on
+		// A→B→A, letting the ABA run's stale snapshot land. Every trigger is a
+		// run on the shared scope fence — a standalone call (mount, reconnect,
+		// journal event) begins its own run; the scope watcher passes ITS run
+		// so the clear + both reloads share one supersede unit.
 		const captured = appStore.account?.address
 		const ops = await journalService.getOperations({ accountAddress: captured })
-		if (captured !== appStore.account?.address) return
+		if (!isCurrent() || captured !== appStore.account?.address) return
 		journalOps.value = ops.sort((a, b) => b.createdAt - a.createdAt)
 		// v4 cancel-dupe (snapshot path): catches close-popup-mid-cancel-and-
 		// reopen + SW disconnect mid-cancel. Uses 30s window to avoid
@@ -622,6 +634,11 @@ function isExecutingTask(task) {
 	// (matches the active account AND, in token-mode, the page's token).
 	if (task.content.kind === ContentKind.Transfer && task.origin?.type === OriginType.UI) {
 		if (task.content.senderAddress !== appStore.account?.address) return false
+		// Network scoping when the task carries it: same-address profiles/networks
+		// otherwise render a foreign network's in-flight card (TaskService clears
+		// on PROFILE change only). Tasks minted before the field keep the
+		// address-only semantics.
+		if (task.content.networkId !== undefined && task.content.networkId !== appStore.network?.id) return false
 		if (props.token && task.content.tokenId !== props.token.id) return false
 		return true
 	}
@@ -678,12 +695,12 @@ const handleSelectTerminal = (op) => {
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
  *  the new account's view. `isExecutingTask` already fails closed on uncorrelated
  *  dApp tasks and scopes UI transfers by `senderAddress`. */
-async function loadExecutingTaskSnapshot() {
+async function loadExecutingTaskSnapshot(isCurrent = scopeFence.begin()) {
 	const captured = appStore.account?.address
 	try {
 		// Newest-first replay — otherwise concurrent tasks could surface the older one.
 		const allTasks = await taskService.getTasks()
-		if (captured !== appStore.account?.address) return
+		if (!isCurrent() || captured !== appStore.account?.address) return
 		const matching = allTasks.filter((t) => isExecutingTask(t)).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
 		const activeExec = matching[0]
 		if (activeExec) {
@@ -700,21 +717,35 @@ async function loadExecutingTaskSnapshot() {
  *  feed root), so a switch A→B must synchronously clear what B could SEE of A's
  *  progress, then reload for B. `flush: 'sync'` clears BEFORE Vue paints the new
  *  account — a default (post-nextTick) watcher would leave a one-tick window
- *  rendering A's journal/task rows under B. The reload is captured-account
- *  guarded (see `resnapshotJournal` / `loadExecutingTaskSnapshot`). Keyed on
- *  address so a rename (same address) does not reset the feed. Incoming transfers
- *  are reset separately by `useIncomingTransfers`' own sync scope watcher. */
+ *  rendering A's journal/task rows under B. Keyed on the FULL scope triple
+ *  (profile, network, address): two profiles restored from one phrase share an
+ *  address, so an address-only key no-oped on a same-address switch and left
+ *  the predecessor's progress card rendering. The key COLLAPSES to "" while any
+ *  part is missing (bare interpolation would stringify undefined into a
+ *  never-falsy key, killing the not-ready guard and firing throwaway RPCs on
+ *  every bootstrap transition). A rename (same triple) still does not reset.
+ *  Incoming transfers are reset separately by `useIncomingTransfers`' own sync
+ *  scope watcher. */
+const scopeTripleKey = () => {
+	const p = appStore.profile?.id
+	const n = appStore.network?.id
+	const a = appStore.account?.address
+	return p && n && a ? `${p} ${n} ${a}` : ""
+}
 watch(
-	() => appStore.account?.address,
+	scopeTripleKey,
 	(nv, ov) => {
 		if (nv === ov) return
+		const isCurrent = scopeFence.begin()
 		journalOps.value = []
 		executingTask.value = null
 		executingSubtasks.value = []
 		pendingCancelJobIds.value = new Set()
+		tokens.value = []
 		if (!nv) return
-		resnapshotJournal()
-		loadExecutingTaskSnapshot()
+		resnapshotJournal(isCurrent)
+		loadExecutingTaskSnapshot(isCurrent)
+		loadTokens(isCurrent)
 	},
 	{ flush: "sync" },
 )
@@ -723,7 +754,7 @@ watch(
  *  captured-account guards at the STATE level (a render filter alone can mask a
  *  containment gap). Placed after the declarations it references (temporal dead
  *  zone) rather than in the macro block. */
-defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows })
+defineExpose({ journalOps, executingTask, executingSubtasks, pendingCancelJobIds, hasOrphanExecutingTask, recentActivityRows, tokens })
 
 onMounted(async () => {
 	await loadTokens()

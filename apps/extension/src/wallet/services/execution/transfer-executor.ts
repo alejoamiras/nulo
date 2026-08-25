@@ -80,7 +80,7 @@ export class TransferExecutor {
 	public async execute(req: TransferRequest, precomputedEstimateId?: string, fence?: ExecutionFence): Promise<string> {
 		const { networkId, accountAddress, tokenId, transferType, recipientAddress, amount } = req
 		const origin: LocalTxOrigin = { type: OriginType.UI }
-		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount)
+		const transferContent = new TransferContent(tokenId, transferType, accountAddress, recipientAddress, amount, networkId)
 		const transferTask = this.deps.tasks.startNewTask(transferContent, undefined, origin)
 
 		// Durable record of this in-flight operation. Survives SW restart
