@@ -1212,8 +1212,16 @@ async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> 
  *  flows where the SW pushes a navigation while another popup window has
  *  focus, the rAF-driven poll can stall — the hash transition lands but
  *  this `waitForFunction` never observes it. Time-based polling avoids
- *  the throttling regardless of focus state. */
-export async function waitForHash(page: Page, expectedHash: string, timeout = 5_000): Promise<void> {
+ *  the throttling regardless of focus state.
+ *
+ *  The 15s default budgets for the bare-default call sites, which are all
+ *  cold-boot openers (`openPopup` → first route): SW start + Vue mount +
+ *  session hydration exceeds 5s under parallel-agent host load, which made
+ *  the alphabetically-last files (the `sw-*` family, paying a fresh cold
+ *  boot per single-test file at peak accumulated load) the suite's dominant
+ *  flake. A genuinely broken route fails at any timeout; call sites that
+ *  need a tighter bound pass one explicitly. */
+export async function waitForHash(page: Page, expectedHash: string, timeout = 15_000): Promise<void> {
 	await page.waitForFunction((hash: string) => window.location.hash === hash, { timeout, polling: 200 }, expectedHash)
 }
 
