@@ -64,4 +64,8 @@ What looked fine (verbatim gist): git separators valid; manifest/cast validation
 
 ## Fresh-context round 2 — resumed, plan v5
 
+Verbatim: "conditional approve — remaining condition: `plan.md:9` — Definition of Done still contains the old gate: it assumes package `test` is Node-only and requires only testnet's four-line dry-run. Replace it with the explicit Node+Bun `run.test.ts` invocations and require both testnet and mainnet baselines. Phases 0–1 are otherwise correct." — a v5 omission (the Done sentence was not updated with the gates). Folded: Done now names both explicit engine invocations and both manifests' baselines. No other change.
+
+## Fresh-context round 3 — resumed, the Done fix
+
 Pending.
