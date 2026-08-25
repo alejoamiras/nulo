@@ -100,7 +100,8 @@ const sha256 = (p: string) => createHash("sha256").update(readFileSync(p)).diges
 
 /** Run `cast` with an ARGV array — NEVER a shell string. A node-returned address containing shell
  *  metacharacters must not be able to execute commands (the deployer key is in this process's env
- *  AND in this argv); `run` never touches a shell and never echoes argv in a failure. */
+ *  AND in this argv); `run` never touches a shell and adds nothing from argv to a failure — what
+ *  `cast` itself prints to stderr is kept verbatim. */
 function cast(args: string[]): string {
 	return run(castBin(), args, { stdio: ["ignore", "pipe", "pipe"] }).stdout.trim()
 }

@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { inspect } from "node:util"
-import { afterAll, describe, expect, test } from "vitest"
+import { afterAll, beforeAll, describe, expect, test } from "vitest"
 import { git, resolveBin, run, RunError } from "./run"
 
 // The engine running this test is the scripted child, so every case runs under Node and under Bun.
@@ -72,6 +72,12 @@ describe("run", () => {
 		assertNoSecret(err)
 	})
 
+	test("never formats or retains argv: the check: false result carries only status and child text", () => {
+		const res = run("definitely-not-a-binary-xyz", ["--private-key", SECRET], { check: false })
+		expect(Object.keys(res).sort()).toEqual(["code", "exitCode", "signal", "stderr", "stdout"])
+		for (const surface of [inspect(res), JSON.stringify(res)]) expect(surface).not.toContain(SECRET)
+	})
+
 	test("never formats or retains argv: an argument the spawn call rejects synchronously", () => {
 		// A NUL byte makes the spawn call throw ERR_INVALID_ARG_VALUE, whose message echoes the value.
 		const err = capture(() => run(engine, ["-e", "process.exit(0)", `${SECRET}${String.fromCharCode(0)}x`]))
@@ -83,7 +89,20 @@ describe("run", () => {
 
 describe("resolveBin", () => {
 	const dir = mkdtempSync(join(tmpdir(), "run-test-"))
-	afterAll(() => rmSync(dir, { recursive: true, force: true }))
+	// The ambient environment must not steer these cases: both variables are cleared for the block
+	// and restored afterwards.
+	const saved = { RUN_TEST_BIN: process.env.RUN_TEST_BIN, RUN_TEST_UNSET: process.env.RUN_TEST_UNSET }
+	beforeAll(() => {
+		delete process.env.RUN_TEST_BIN
+		delete process.env.RUN_TEST_UNSET
+	})
+	afterAll(() => {
+		rmSync(dir, { recursive: true, force: true })
+		for (const [name, value] of Object.entries(saved)) {
+			if (value === undefined) delete process.env[name]
+			else process.env[name] = value
+		}
+	})
 
 	test("the env override wins verbatim", () => {
 		process.env.RUN_TEST_BIN = "/opt/somewhere/tool"

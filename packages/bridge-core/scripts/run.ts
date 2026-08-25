@@ -1,9 +1,11 @@
 /**
  * The one process primitive for bridge-core's operator scripts: argv arrays only (never a shell
  * string), utf8 text, throw-by-default with `check: false` for callers that interpret failure
- * themselves. It never formats or retains argv — `cast` receives the deployer key as an argument;
- * Node's own spawn error carries argv as an enumerable `spawnargs`, and its synchronous
- * ERR_INVALID_ARG_VALUE throw (a NUL byte in an argument) echoes the offending value.
+ * themselves. It adds nothing from argv to a failure — `cast` receives the deployer key as an
+ * argument; Node's own spawn error carries argv as an enumerable `spawnargs`, and its synchronous
+ * ERR_INVALID_ARG_VALUE throw (a NUL byte in an argument) echoes the offending value. Outside that
+ * guarantee: the child's own stdout/stderr are kept verbatim, argv is visible to `ps` while the
+ * child runs, and the environment is inherited.
  */
 
 import { type SpawnSyncOptions, spawnSync } from "node:child_process"
