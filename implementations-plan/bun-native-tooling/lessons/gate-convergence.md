@@ -68,4 +68,4 @@ Verbatim: "conditional approve — remaining condition: `plan.md:9` — Definiti
 
 ## Fresh-context round 3 — resumed, the Done fix
 
-Pending.
+Verbatim: "approve". **GATE PASSED** (2026-08-25). Convergence: codex r1 conditional → r2 conditional (D-10 rejected) → r3 "design converged" (wording) → fresh r1 conditional (4 Med / 3 Low) → fresh r2 conditional (one leftover sentence) → fresh r3 approve. Rejected by me: nothing. Disputes: none. The decision ledger (D-1…D-19) is complete.

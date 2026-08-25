@@ -1,6 +1,6 @@
 # bun-native-tooling — Arc D of the Bun 1.4 adoption (`/blueprint light`)
 
-Status: **DRAFT v5 — 2026-08-25**, codex rounds 1–3 + fresh-context round 1 folded (see [lessons/gate-convergence.md](lessons/gate-convergence.md)); at fresh-context round 2, which is the gate. Owner absent; every clarifying question is resolved by the standing decision protocol (codex to convergence, explicit fresh-context approve). Reserved lines (merging, required checks, `@aztec/*`, publish/deploy, feature removal, irreversible data ops) are not touched.
+Status: **APPROVED v5 — 2026-08-25**, per the owner's standing decision protocol: explicit fresh-context codex `approve` (session `01a037aa-…`, round 3) after codex rounds 1–3 and fresh-context rounds 1–2 were all folded with zero disputes (see [lessons/gate-convergence.md](lessons/gate-convergence.md)). Implementing. `eli5_mode: artifact` — ELI5 source: `implementations-plan/bun-native-tooling/eli5.html` (Artifact URL recorded below once published). Owner absent; every clarifying question is resolved by the standing decision protocol (codex to convergence, explicit fresh-context approve). Reserved lines (merging, required checks, `@aztec/*`, publish/deploy, feature removal, irreversible data ops) are not touched.
 
 ## Goal
 
@@ -112,6 +112,12 @@ One branch (`worktree-bun-native-tooling`) off `dev`, one PR via `gh pr create`,
 
 Rollback: revert the PR (six per-file commits are individually revertible).
 
-## Seeds
+## Seeds (FINAL — approval attached no conditions; identical to the ELI5)
 
-Filled at approval.
+```
+/goal All phases (0–2) marked ✓ in implementations-plan/bun-native-tooling/plan.md, each ✓ backed by its validation gate as written there passing in the transcript (typecheck + bridge-core tests + run.test.ts under both explicit engine invocations + lint for Phase 0; the per-file gate, the rg proving no direct child_process call outside run.ts, the 18-row static audit and the identical verify-l1 --dry-run output for both manifests for Phase 1; lint + test:all + a docs-only diff for Phase 2); for each phase `LESSONS_FILE=implementations-plan/bun-native-tooling/lessons/phase-N.md` printed; `/code-review max --fix` complete with findings applied and committed separately; the codex fix loop converged (a resumed codex pass reporting no new material findings, quoted); ONE PR to dev exists, created only after convergence, with quality-status, smoke-e2e-status and network-e2e-status all SUCCESS at its HEAD; `bun run test:all` and `bun run lint` exit 0 in the transcript. Reserved for the owner: merging, deleting the legacy TokenPortal path, the key-in-argv question, the soft-fail policy, anything touching @aztec/* or required checks.
+```
+
+```
+/loop 15m Drive implementations-plan/bun-native-tooling forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative), `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. (2) Waiting on CI is fine — confirm it is progressing; use the wait to prepare the next step. (3) No task in hand? take the next pending step from plan.md; after each edit run `bun run lint` + `bun run --cwd packages/bridge-core typecheck` + `bun run --cwd packages/bridge-core test`; commit → push. (4) A decision you'd bring to me? call `/codex xhigh` with full context, iterate to a defensible decision, act, log the consult in lessons/phase-N.md; never merge, never delete the legacy path, never touch @aztec/* or required checks. (5) Same step failed 5×? stop, reassess with codex. (6) Phase green = its validation gate in plan.md passes as written: paste the result, mark ✓, write the lessons entry, print `LESSONS_FILE=…`, advance. (7) All phases ✓? run the Post-implementation section (code-review → codex loop → delivery), write the wrap-up (every codex-debated decision with ELI5 context), surface and stop.
+```
