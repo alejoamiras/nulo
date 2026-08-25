@@ -42,7 +42,10 @@ export class BalanceRepository {
 		await this.storage.delete(`${id}`)
 	}
 
-	/** Allocate a fresh numeric id: `max(existing ids) + 1`. */
+	/** Allocate a fresh numeric id via the hardened allocator: max(allocatable
+	 *  ids) + 1 on every legitimate store, with hostile keys excluded and a
+	 *  safe, physically-free candidate guaranteed (downward gap-fill at the
+	 *  hostile boundary). */
 	public async allocateId(): Promise<number> {
 		return nextNumericId(this.storage)
 	}
