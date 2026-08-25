@@ -68,13 +68,14 @@ export async function enforceSessionProfileBinding(args: {
 }
 
 /**
- * Monotonic count of ACTUAL profile-identity switches (truthy → different
- * truthy). Lock emits `undefined` and bumps nothing; unlock back into the
- * SAME profile bumps nothing — so an epoch comparison across a dispatch
- * suppresses exactly the cross-identity interleavings (including switch-
- * then-lock, where an active-profile identity check would read `undefined`
- * and wave the response through) while the pinned lock/unlock flows stay
- * untouched.
+ * Monotonic count of profile-identity switches (truthy → different truthy),
+ * PLUS one bump on the first truthy emission of an SW lifetime — the silent
+ * restore emits nothing, so an unknown baseline must count as potentially
+ * switched. Lock emits `undefined` and bumps nothing; unlock back into the
+ * SAME known profile bumps nothing — so an epoch comparison across a dispatch
+ * suppresses the cross-identity interleavings (including switch-then-lock,
+ * where an active-profile identity check would read `undefined` and wave the
+ * response through) while the pinned lock/unlock flows stay untouched.
  */
 export interface ProfileSwitchEpoch {
 	current(): number
