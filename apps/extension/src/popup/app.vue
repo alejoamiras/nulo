@@ -133,7 +133,21 @@ const onActiveProfileChanged = async (profile) => {
 	if (profile) {
 		// bootstrapActiveProfile carries its own lock-wins guard: a stale profile event whose
 		// session was already locked re-checks getActiveProfile() before flipping isLogined.
-		await bootstrapActiveProfile(profile)
+		// The wrap is load-bearing: an emitter-callback rejection would otherwise become an
+		// unhandled rejection that silently starves the unlock flow's activation wait. The
+		// identity-keyed failure record releases that waiter IMMEDIATELY (never the full
+		// timeout); the toast fires only while this profile is still the relevant one, so a
+		// stale A-failure cannot toast over B's successful unlock.
+		try {
+			await bootstrapActiveProfile(profile)
+			appStore.bootstrapFailure = null
+		} catch (err) {
+			console.error("bootstrap failed", err)
+			appStore.bootstrapFailure = { profileId: profile.id, message: err instanceof Error ? err.message : String(err) }
+			if (!appStore.isLogined || appStore.profile?.id === profile.id) {
+				openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
+			}
+		}
 		return
 	}
 	// Lock cleanup must survive a failed lookup: a transport rejection here (SW churn at the
