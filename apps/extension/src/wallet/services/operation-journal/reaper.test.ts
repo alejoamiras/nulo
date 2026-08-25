@@ -190,15 +190,15 @@ describe("JournalReaper.reap", () => {
 		const recA = await service.createOperation(VALID_INPUT)
 		const recB = await service.createOperation(VALID_INPUT)
 
-		// Sabotage one transition by intercepting transitionOperation.
-		const spy = vi.spyOn(service, "transitionOperation")
+		// Sabotage one transition by intercepting the reaper's CAS entry point.
+		const spy = vi.spyOn(service, "transitionIfStage")
 		spy.mockImplementationOnce(async () => {
 			throw new Error("synthetic mid-reap failure")
 		})
 		// All subsequent calls fall through to the original.
 		spy.mockImplementation(async (...args) => {
 			spy.mockRestore()
-			return service.transitionOperation(...args)
+			return service.transitionIfStage(...args)
 		})
 
 		const reaper = new JournalReaper(service, api.alarms, logger, () => recA.updatedAt + 3 * 60_000)
@@ -231,6 +231,81 @@ describe("JournalReaper.reap", () => {
 		const after = await service.getOperation(rec.id)
 		expect(after?.progress.stage).toBe("failed")
 		expect(after?.error?.kind).toBe("stale_on_resume")
+	})
+
+	test("(N-07 CAS) a candidate CLAIMED during an earlier candidate's gated transition is not failed", async () => {
+		// Two aged queued records; while the reaper's first transition runs, the
+		// second record is claimed (queued → pending) — the snapshot-based sweep
+		// used to fail it anyway on stale data.
+		const queuedInput = {
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "s1",
+			initialStage: { stage: "queued" },
+		} as NewOperationInput
+		const recA = await service.createOperation(queuedInput)
+		const recB = await service.createOperation(queuedInput)
+
+		const originalTransitionIfStage = service.transitionIfStage.bind(service)
+		const spy = vi.spyOn(service, "transitionIfStage")
+		spy.mockImplementationOnce(async (...args) => {
+			// During candidate #1's gated transition, #2 gets claimed.
+			await service.transitionOperation(recB.id, { stage: "pending" })
+			return originalTransitionIfStage(...args)
+		})
+
+		const reaper = new JournalReaper(service, api.alarms, logger, () => recA.updatedAt + 11 * 60_000)
+		await reaper.reap()
+		spy.mockRestore()
+
+		expect((await service.getOperation(recA.id))?.progress.stage).toBe("failed")
+		expect((await service.getOperation(recB.id))?.progress.stage).toBe("pending") // spared — claim won
+	})
+
+	test("(N-07 CAS) a candidate TOUCHED same-stage during the sweep is not failed on obsolete age", async () => {
+		const queuedInput = {
+			...VALID_INPUT,
+			kind: "dapp_execute",
+			origin: "dapp",
+			sessionId: "s1",
+			initialStage: { stage: "queued" },
+		} as NewOperationInput
+		const recA = await service.createOperation(queuedInput)
+		const recB = await service.createOperation(queuedInput)
+
+		const originalTransitionIfStage = service.transitionIfStage.bind(service)
+		const spy = vi.spyOn(service, "transitionIfStage")
+		let touched = false
+		spy.mockImplementation(async (...args) => {
+			// A heartbeat touch lands for the OTHER candidate mid-sweep: same
+			// stage, fresh age. Touch whichever record this call is NOT for.
+			if (!touched) {
+				touched = true
+				const otherId = args[0] === recA.id ? recB.id : recA.id
+				// Real 2ms separation: Date.now() collides within a tick, and a
+				// same-ms touch is invisible to the equality CAS (gc.test.ts lesson).
+				await new Promise((r) => setTimeout(r, 2))
+				await service.touchOperation(otherId)
+			}
+			return originalTransitionIfStage(...args)
+		})
+
+		const reaper = new JournalReaper(service, api.alarms, logger, () => recA.updatedAt + 11 * 60_000)
+		await reaper.reap()
+		spy.mockRestore()
+
+		const stages = [(await service.getOperation(recA.id))?.progress.stage, (await service.getOperation(recB.id))?.progress.stage]
+		expect(stages.filter((s) => s === "failed")).toHaveLength(1)
+		expect(stages.filter((s) => s === "queued")).toHaveLength(1) // the touched one spared on the age CAS
+	})
+
+	test("(N-07) the unconditional boot sweep is age-blind: a freshly TOUCHED prior-lifetime record still reaps", async () => {
+		const rec = await service.createOperation(VALID_INPUT)
+		await service.touchOperation(rec.id) // fresh updatedAt — irrelevant to the boot sweep
+		const reaper = new JournalReaper(service, api.alarms, logger, () => rec.updatedAt + 1_000)
+		await reaper.reap({ unconditional: true, bootCutoff: Date.now() + 60_000 }) // created before cutoff
+		expect((await service.getOperation(rec.id))?.progress.stage).toBe("failed") // crash detection intact
 	})
 })
 

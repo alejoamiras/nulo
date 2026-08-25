@@ -28,6 +28,7 @@ import {
 	type Methods,
 	type Events,
 	TxSchema,
+	TxConfirmationTimeoutError,
 } from "./spec"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 
@@ -219,12 +220,55 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		})
 	}
 
-	public async waitForTx(txHash: string, parentTask?: WrappedTask) {
-		const waitForTxTask = parentTask?.startSubtask(new StepContent("Waiting for transaction"))
-		while (this.pending.has(txHash)) {
-			await sleep(100)
+	/**
+	 * Poll until `txHash` leaves the pending queue (submitted — NOT proven; see
+	 * the callers' `waitForTxProven` for public-effect visibility), bounded by
+	 * `timeoutMs`. A locked wallet stalls the sync worker indefinitely, so an
+	 * unbounded wait spun for the whole lock period holding its task open —
+	 * which also blocked the task tree's GC (roots need `finishedAt`).
+	 *
+	 * Exit contract (each settles the subtask at most once; task-service
+	 * throws are swallowed — the registry can be cleared mid-wait by a
+	 * profile switch, and the wait's outcome must not be replaced by a
+	 * bookkeeping error): drained → complete; timeout → fail + typed
+	 * {@link TxConfirmationTimeoutError} (the tx may still mine — the copy
+	 * says "not confirmed", never "failed").
+	 */
+	public async waitForTx(txHash: string, parentTask?: WrappedTask, timeoutMs = 120_000) {
+		let waitForTxTask: WrappedTask | undefined
+		try {
+			waitForTxTask = parentTask?.startSubtask(new StepContent("Waiting for transaction"))
+		} catch {
+			// A stale/cleared parent must not abort the wait — the wait is the
+			// job; the subtask is progress decoration.
 		}
-		waitForTxTask?.complete()
+		let settled = false
+		const settle = (outcome: "complete" | "fail", message?: string): void => {
+			if (settled) return
+			settled = true
+			try {
+				if (!waitForTxTask?.exists) return
+				if (outcome === "complete") waitForTxTask.complete()
+				else waitForTxTask.fail(new Error(message ?? "wait failed"))
+			} catch {
+				// Task bookkeeping must never replace the wait's outcome.
+			}
+		}
+		const deadline = Date.now() + timeoutMs
+		try {
+			while (this.pending.has(txHash)) {
+				if (Date.now() >= deadline) {
+					const message = `Transaction not confirmed within ${Math.round(timeoutMs / 1000)}s — it may still complete`
+					settle("fail", message)
+					throw new TxConfirmationTimeoutError(message)
+				}
+				await sleep(100)
+			}
+			settle("complete")
+		} catch (err) {
+			settle("fail", getErrorMessage(err))
+			throw err
+		}
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {

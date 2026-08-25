@@ -514,6 +514,38 @@ export class OperationJournalService extends Service<Methods, Events> implements
 	 * re-file serialized first the cancel still finds the same row (and the
 	 * same registered controller) under the new scope.
 	 */
+	/**
+	 * Conditionally transition: re-reads under the transition lock and no-ops
+	 * (with a discriminant) when the record left `allowedStages` or — when
+	 * `ifUpdatedAtIs` is given — when `updatedAt` moved since the caller's
+	 * snapshot (equality CAS; a monotonic check would mishandle clock rollback).
+	 * The reaper's sweep decisions ride this: its snapshot goes stale across the
+	 * per-record awaits, and an unconditional transition would fail a record
+	 * that was claimed or heartbeat-touched mid-sweep.
+	 */
+	public async transitionIfStage(
+		id: string,
+		allowedStages: readonly JobProgress["stage"][],
+		progress: JobProgress,
+		error?: JobError | null,
+		opts?: { ifUpdatedAtIs?: number },
+	): Promise<
+		| { outcome: "transitioned"; record: OperationRecord }
+		| { outcome: "missing" }
+		| { outcome: "stage"; stage: JobProgress["stage"] }
+		| { outcome: "touched" }
+	> {
+		await this.ensureInitialized()
+		return await this.transitionLock.withLock(async () => {
+			const existing = await this._loadValidated(id)
+			if (!existing) return { outcome: "missing" }
+			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
+			if (opts?.ifUpdatedAtIs !== undefined && existing.updatedAt !== opts.ifUpdatedAtIs) return { outcome: "touched" }
+			const record = await this._transitionLocked(id, progress, error)
+			return { outcome: "transitioned", record }
+		})
+	}
+
 	public async refileOperationScope(
 		id: string,
 		scope: { profileId?: string; networkId: string; accountAddress: string },

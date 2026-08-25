@@ -19,7 +19,8 @@ import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
 import { svc } from "../composition-harness"
-import { TransactionService } from "./service"
+import { TaskService } from "@/wallet/services/task/service"
+import { TransactionService, TxConfirmationTimeoutError } from "./service"
 
 const ACCOUNT = "0xacc"
 
@@ -235,5 +236,97 @@ describe("TransactionService.restore — deletion fence (N-14, threaded profileI
 	test("positive control: no deletion → both rows land", async () => {
 		const restored = await service.restore([mkTx("0xh1"), mkTx("0xh2")], "p1")
 		expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
+	})
+})
+
+describe("TransactionService.waitForTx — bounded wait (N-16)", () => {
+	let service: TransactionService
+	let taskService: TaskService
+
+	beforeEach(async () => {
+		vi.useFakeTimers()
+		const api = new FakeBrowserApi()
+		api.reset()
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, { getActiveProfile: async () => undefined, getDeletionState: () => new ProfileDeletionState() }),
+		)
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		service = new TransactionService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+		taskService = new TaskService(new LoggerStore(new ConfigStore()))
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	const seedPending = (hash: string) => {
+		// The in-memory pending map is what waitForTx polls; the locked-wallet
+		// stall is simulated simply by never draining it.
+		;(service as unknown as { pending: Map<string, unknown> }).pending.set(hash, { hash })
+	}
+
+	test("timeout: typed throw + subtask failed EXACTLY once + parent still completable (real TaskService)", async () => {
+		seedPending("0xhang")
+		const parent = taskService.startNewTask({ kind: 0 } as never)
+		const failSpy = vi.spyOn(taskService, "failTask")
+		const run = service.waitForTx("0xhang", parent, 500)
+		const outcome = expect(run).rejects.toThrow(/not confirmed within 1s|not confirmed within 0s/)
+		await vi.advanceTimersByTimeAsync(700)
+		await outcome
+		expect(failSpy).toHaveBeenCalledTimes(1) // the subtask, once
+		parent.complete() // the child settled → the parent tree can finish (GC unblocked)
+		expect(parent.isFinished).toBe(true)
+	})
+
+	test("drain: subtask completed EXACTLY once; parent completable", async () => {
+		seedPending("0xok")
+		const parent = taskService.startNewTask({ kind: 0 } as never)
+		const completeSpy = vi.spyOn(taskService, "completeTask")
+		const run = service.waitForTx("0xok", parent, 5_000)
+		await vi.advanceTimersByTimeAsync(300)
+		;(service as unknown as { pending: Map<string, unknown> }).pending.delete("0xok")
+		await vi.advanceTimersByTimeAsync(200)
+		await run
+		expect(completeSpy).toHaveBeenCalledTimes(1)
+		parent.complete()
+		expect(parent.isFinished).toBe(true)
+	})
+
+	test("mid-wait registry clear (profile switch): no throw, one swallowed settle", async () => {
+		seedPending("0xswitch")
+		const parent = taskService.startNewTask({ kind: 0 } as never)
+		const run = service.waitForTx("0xswitch", parent, 5_000)
+		await vi.advanceTimersByTimeAsync(200)
+		;(taskService as unknown as { tasks: Map<string, unknown> }).tasks.clear() // profile switch
+		;(service as unknown as { pending: Map<string, unknown> }).pending.delete("0xswitch")
+		await vi.advanceTimersByTimeAsync(200)
+		await run // resolves — the cleared registry must not replace the outcome
+	})
+
+	test("stale parent at entry: startSubtask throws → zero settles, the wait still completes", async () => {
+		seedPending("0xstale")
+		const parent = taskService.startNewTask({ kind: 0 } as never)
+		;(taskService as unknown as { tasks: Map<string, unknown> }).tasks.clear() // parent gone BEFORE the wait
+		const completeSpy = vi.spyOn(taskService, "completeTask")
+		const failSpy = vi.spyOn(taskService, "failTask")
+		const run = service.waitForTx("0xstale", parent, 5_000)
+		await vi.advanceTimersByTimeAsync(100)
+		;(service as unknown as { pending: Map<string, unknown> }).pending.delete("0xstale")
+		await vi.advanceTimersByTimeAsync(200)
+		await run
+		expect(completeSpy).not.toHaveBeenCalled()
+		expect(failSpy).not.toHaveBeenCalled()
+	})
+
+	test("no parent task: the bare wait times out with the typed error", async () => {
+		seedPending("0xbare")
+		const run = service.waitForTx("0xbare", undefined, 500)
+		const outcome = expect(run).rejects.toBeInstanceOf(TxConfirmationTimeoutError)
+		await vi.advanceTimersByTimeAsync(700)
+		await outcome
 	})
 })

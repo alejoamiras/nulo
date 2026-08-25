@@ -79,8 +79,23 @@ export class ExecutionLane {
 	 *  waiting record "stuck" — the Nth concurrent sendTx can wait (N-1)×per-tx
 	 *  while queued, which can exceed the 10-min queued / 2-min pending grace. */
 	private readonly executionWaiters = new Set<string>()
+	/** Journal ids in the PRE-CLAIM window (message arrival → mutex enqueue):
+	 *  the session-FIFO wait behind earlier same-session requests plus this
+	 *  request's own approval popup — a legitimate wait the reaper's queued
+	 *  grace cannot distinguish from a lost handler. id → registeredAt. The
+	 *  heartbeat vouches for these only within {@link MAX_QUEUED_WAIT_HEARTBEAT_MS}:
+	 *  unbounded vouching would shield a genuinely hung queue from the reaper
+	 *  forever, defeating the grace's purpose. Ownership migrates to
+	 *  `executionWaiters` at mutex enqueue (`acquireSlot`). */
+	private readonly queuedWaiters = new Map<string, number>()
 	private executionHeartbeatTimer?: ReturnType<typeof setInterval>
 	private static readonly EXECUTION_WAIT_HEARTBEAT_MS = 30_000
+	/** Deliberate product ceiling on pre-claim vouching, sized to the admission
+	 *  cap: 8 queued per session permits a target behind seven legitimate
+	 *  ≤10-min approval popups plus its own (≈80 min). Beyond the ceiling the
+	 *  heartbeat stops and the reaper's queued grace takes over, so a hung
+	 *  queue resolves honestly (~ceiling + grace) instead of never. */
+	private static readonly MAX_QUEUED_WAIT_HEARTBEAT_MS = 90 * 60_000
 
 	private static readonly EXECUTION_ORIGIN_CAP = 8
 	private static readonly EXECUTION_LANE_CAP = 32
@@ -189,6 +204,11 @@ export class ExecutionLane {
 			controller.abort()
 			this.activeControllers.delete(jobId)
 		}
+		// A pre-acquire cancel has no controller to abort, but the record may
+		// still be vouched for in the pre-claim window — prune it, or repeated
+		// cancel/arrival cycles grow the map past the admission cap (which
+		// counts only live `queued` rows).
+		this.endQueuedWait(jobId)
 	}
 
 	/** Resolve the execution-mutex key for a dApp sendTx: `(profileId, chainId)`,
@@ -285,7 +305,35 @@ export class ExecutionLane {
 	}
 
 	private beginExecutionWait(journalId: string): void {
+		// Ownership migration: a pre-claim waiter reaching the mutex hands its
+		// liveness vouching to the execution set — exactly one owner per id.
+		this.queuedWaiters.delete(journalId)
 		this.executionWaiters.add(journalId)
+		this.ensureHeartbeatTimer()
+	}
+
+	private endExecutionWait(journalId: string): void {
+		this.executionWaiters.delete(journalId)
+		this.maybeStopHeartbeatTimer()
+	}
+
+	/** Start vouching for a record in the pre-claim window (see
+	 *  {@link queuedWaiters}). Called by the wallet-sdk handler at
+	 *  queued-record creation via the {@link ExecutionService} delegator. */
+	public beginQueuedWait(journalId: string): void {
+		if (this.executionWaiters.has(journalId)) return
+		this.queuedWaiters.set(journalId, Date.now())
+		this.ensureHeartbeatTimer()
+	}
+
+	/** Stop vouching (handler settled without reaching the mutex, or the
+	 *  backstop after settlement). Idempotent. */
+	public endQueuedWait(journalId: string): void {
+		this.queuedWaiters.delete(journalId)
+		this.maybeStopHeartbeatTimer()
+	}
+
+	private ensureHeartbeatTimer(): void {
 		if (!this.executionHeartbeatTimer) {
 			this.executionHeartbeatTimer = setInterval(() => {
 				void this.heartbeatExecutionWaiters()
@@ -293,16 +341,16 @@ export class ExecutionLane {
 		}
 	}
 
-	private endExecutionWait(journalId: string): void {
-		this.executionWaiters.delete(journalId)
-		if (this.executionWaiters.size === 0 && this.executionHeartbeatTimer) {
+	private maybeStopHeartbeatTimer(): void {
+		if (this.executionWaiters.size === 0 && this.queuedWaiters.size === 0 && this.executionHeartbeatTimer) {
 			clearInterval(this.executionHeartbeatTimer)
 			this.executionHeartbeatTimer = undefined
 		}
 	}
 
 	private async heartbeatExecutionWaiters(): Promise<void> {
-		// Snapshot — touchOperation awaits and the set can mutate mid-iteration.
+		// Snapshot — touchOperation awaits and the collections can mutate
+		// mid-iteration.
 		for (const id of [...this.executionWaiters]) {
 			try {
 				await this.deps.operationJournal.touchOperation(id)
@@ -311,6 +359,21 @@ export class ExecutionLane {
 				// settle removes it from the wait-set.
 			}
 		}
+		const now = Date.now()
+		for (const [id, registeredAt] of [...this.queuedWaiters]) {
+			// Lease expiry: stop vouching past the ceiling — the reaper's grace
+			// takes over and a hung queue resolves honestly instead of never.
+			if (now - registeredAt > ExecutionLane.MAX_QUEUED_WAIT_HEARTBEAT_MS) {
+				this.queuedWaiters.delete(id)
+				continue
+			}
+			try {
+				await this.deps.operationJournal.touchOperation(id)
+			} catch {
+				// Record gone — harmless; the settle backstop removes it.
+			}
+		}
+		this.maybeStopHeartbeatTimer()
 	}
 
 	/**

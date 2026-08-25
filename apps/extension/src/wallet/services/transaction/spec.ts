@@ -216,3 +216,13 @@ export type Events = {
 	onTransactionUpdated: Tx
 	onTransactionDeleted: Tx
 }
+
+/** The bounded `waitForTx` expired before the tx left the pending queue. The
+ *  tx may still mine — "not confirmed", never "failed"; callers surface it
+ *  as an honest timeout rather than a generic transport error. */
+export class TxConfirmationTimeoutError extends Error {
+	public constructor(message: string) {
+		super(message)
+		this.name = "TxConfirmationTimeoutError"
+	}
+}
