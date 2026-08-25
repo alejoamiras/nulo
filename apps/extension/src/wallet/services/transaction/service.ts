@@ -1,4 +1,5 @@
 import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -518,8 +519,16 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		return txs
 	}
 
-	public async restore(txs: Tx[]): Promise<Restored<Tx>[]> {
+	public async restore(txs: Tx[], profileId: string): Promise<Restored<Tx>[]> {
 		await this.ensureInitialized()
+		// Deletion fence keyed on the composable's authoritative created-profile
+		// id — tx rows' own profileId is optional AND backup-controlled, so it
+		// cannot anchor the fence. Fail closed: dispatch has no schema validation.
+		if (typeof profileId !== "string" || profileId.length === 0) {
+			throw new Error("restore requires the created profile id")
+		}
+		const deletion = this.deletionState
+		const epochs = captureRestoreEpochs(deletion, [profileId])
 
 		return await this.lock.withLock(async () => {
 			// The two guard rejections THROW (not push-and-continue) so restoreRows
@@ -546,6 +555,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 				// H: validate + canonicalize the persisted shape (mirror the read
 				// codec) so a malformed row is recorded, not written + codec-hidden.
 				const row = TxSchema.parse(tx)
+				assertRestoreEpoch(deletion, epochs, profileId)
 				await this.txs.set(row.hash, row)
 				return row
 			})

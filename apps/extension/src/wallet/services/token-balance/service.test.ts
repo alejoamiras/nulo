@@ -18,6 +18,7 @@ import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
 import { ACCOUNT_SERVICE_NAME } from "@/wallet/services/account/spec"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
@@ -134,17 +135,27 @@ describe("TokenBalanceService.purgeForTokens — F-B23 raw second pass", () => {
 describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 	let service: TokenBalanceService
 	let seedRepo: BalanceRepository
+	let deletionState: ProfileDeletionState
+	let rawApi: FakeBrowserApi
 
 	beforeEach(async () => {
 		const api = new FakeBrowserApi()
 		api.reset()
+		rawApi = api
+		deletionState = new ProfileDeletionState()
 		seedRepo = new BalanceRepository(api)
 		// restore() gates on ensureInitialized(), so run the real lifecycle over
 		// stub peers. A no-op ticker keeps the balance queue from scheduling a real
 		// interval (no open handle / background poll in the unit run).
 		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged: new EventHandler(), getActiveProfile: async () => undefined }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged: new EventHandler(),
+				getActiveProfile: async () => undefined,
+				getDeletionState: () => deletionState,
+			}),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler() }))
 		services.add(
@@ -172,7 +183,7 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to the private fence
 		;(service as any).invalidatedBalanceIds.add(5)
 
-		const [restored] = await service.restore([balance(999, 1)])
+		const [restored] = await service.restore([balance(999, 1)], "p1")
 		expect(restored.restoreError).toBeUndefined()
 		expect(restored.id).toBe(6) // allocator's 5 was fenced → skipped
 		// The new row's own projections are NOT suppressed by the fence.
@@ -186,14 +197,14 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 		// a later getValues() cleanup). restore() must parse-reject it up front.
 		const bad = { id: 5, token: 1, account: 123, updatedAt: 0 } as unknown as TokenBalanceRaw
 
-		const [restored] = await service.restore([bad])
+		const [restored] = await service.restore([bad], "p1")
 
 		expect(restored.restoreError).toBeTruthy()
 		expect(await seedRepo.getAll()).toEqual([])
 	})
 
 	test("writes a valid row under a freshly allocated id (input id is ignored)", async () => {
-		const [restored] = await service.restore([balance(999, 1)])
+		const [restored] = await service.restore([balance(999, 1)], "p1")
 
 		expect(restored.restoreError).toBeUndefined()
 		const all = await seedRepo.getAll()
@@ -204,11 +215,32 @@ describe("TokenBalanceService.restore — hostile-row validation (P1)", () => {
 	test("a malformed row does not abort the batch — the valid sibling still lands", async () => {
 		const bad = { id: 5, token: 1, account: 123, updatedAt: 0 } as unknown as TokenBalanceRaw
 
-		const restored = await service.restore([bad, balance(7, 2)])
+		const restored = await service.restore([bad, balance(7, 2)], "p1")
 
 		expect(restored[0].restoreError).toBeTruthy()
 		expect(restored[1].restoreError).toBeUndefined()
 		expect((await seedRepo.getAll()).map((b) => b.token)).toEqual([2])
+	})
+
+	test("(N-14) a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+		const origSet = rawApi.storage.local.set.bind(rawApi.storage.local)
+		let fired = false
+		rawApi.storage.local.set = async (items: Record<string, unknown>) => {
+			await origSet(items)
+			if (!fired) {
+				fired = true
+				deletionState.beginDeletion("p1")
+			}
+		}
+		const restored = await service.restore([balance(1, 1), balance(2, 2)], "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/deleted/)
+		expect((await seedRepo.getAll()).map((b) => b.token)).toEqual([1])
+	})
+
+	test("(N-14) fails closed when the created-profile id is missing", async () => {
+		await expect(service.restore([balance(1, 1)], undefined as never)).rejects.toThrow(/profile id/)
+		expect(await seedRepo.getAll()).toEqual([])
 	})
 })
 
@@ -236,7 +268,13 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 
 		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged: new EventHandler(), getActiveProfile: async () => undefined }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged: new EventHandler(),
+				getActiveProfile: async () => undefined,
+				getDeletionState: () => new ProfileDeletionState(),
+			}),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler() }))
 		services.add(
@@ -281,7 +319,13 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 
 		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged, getActiveProfile: async () => ({ id: "A", name: "A" }) }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged,
+				getActiveProfile: async () => ({ id: "A", name: "A" }),
+				getDeletionState: () => new ProfileDeletionState(),
+			}),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccounts }))
 		services.add(
@@ -328,7 +372,13 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		const onActiveProfileChanged = new EventHandler<never>()
 		const noopTicker = { subscribe: () => ({ cancel: () => {} }) } as never
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onActiveProfileChanged, getActiveProfile: async () => ({ id: "A", name: "A" }) }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onActiveProfileChanged,
+				getActiveProfile: async () => ({ id: "A", name: "A" }),
+				getDeletionState: () => new ProfileDeletionState(),
+			}),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(
 			svc(ACCOUNT_SERVICE_NAME, { onAccountAdded: new EventHandler(), getAccounts: async () => [{ address: "0xa", chainId: 1 }] }),

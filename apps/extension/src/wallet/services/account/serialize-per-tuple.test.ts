@@ -13,6 +13,7 @@
 
 import { beforeEach, describe, expect, test } from "vitest"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { ServiceCollection } from "@/wallet/base"
 import { LoggerStore } from "@/wallet/logger"
@@ -56,6 +57,7 @@ describe("AccountService.serializePerTuple — rejection emits NO unhandledrejec
 		services.add(
 			svc(PROFILE_SERVICE_NAME, {
 				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => new ProfileDeletionState(),
 				// The reject lever: an absent master secret makes createAccountInternal
 				// throw "unauthorized" before touching bb.js.
 				getProfileSecret: async () => undefined,

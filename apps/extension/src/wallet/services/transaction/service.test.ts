@@ -179,3 +179,61 @@ describe("TransactionService.addTransaction — D13 execution fence", () => {
 		expect(tx.hash).toBe("0xh4")
 	})
 })
+
+describe("TransactionService.restore — deletion fence (N-14, threaded profileId)", () => {
+	let service: TransactionService
+	let deletionState: ProfileDeletionState
+	let api: FakeBrowserApi
+
+	beforeEach(async () => {
+		api = new FakeBrowserApi()
+		api.reset()
+		deletionState = new ProfileDeletionState()
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { getActiveProfile: async () => ({ id: "p1" }), getDeletionState: () => deletionState }))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		service = new TransactionService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+	})
+
+	const mkTx = (hash: string) =>
+		({
+			chainId: 1,
+			account: "0xa",
+			nonce: "0",
+			feePaymentMethod: 0,
+			hash,
+			createdAt: 0,
+			updatedAt: 0,
+			status: 5,
+			origin: { type: "wallet" },
+			calls: [{ contract: "0xc", method: "m", args: [] }],
+		}) as never
+
+	test("a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+		const origSet = api.storage.local.set.bind(api.storage.local)
+		let fired = false
+		api.storage.local.set = async (items: Record<string, unknown>) => {
+			await origSet(items)
+			if (!fired) {
+				fired = true
+				deletionState.beginDeletion("p1")
+			}
+		}
+		const restored = await service.restore([mkTx("0xh1"), mkTx("0xh2")], "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/deleted/)
+		await expect(service.getTransaction("0xh2")).rejects.toThrow()
+	})
+
+	test("fails closed when the created-profile id is missing", async () => {
+		await expect(service.restore([mkTx("0xh1")], undefined as never)).rejects.toThrow(/profile id/)
+	})
+
+	test("positive control: no deletion → both rows land", async () => {
+		const restored = await service.restore([mkTx("0xh1"), mkTx("0xh2")], "p1")
+		expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
+	})
+})

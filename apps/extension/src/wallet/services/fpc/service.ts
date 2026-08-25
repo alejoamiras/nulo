@@ -7,6 +7,7 @@ import { requireActiveProfile } from "@/wallet/services/profile/require-active-p
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -429,6 +430,13 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async restore(fpcs: FpcInfo[]): Promise<Restored<FpcInfo>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts): rows written
+		// after a mid-restore deleteProfile must reject, not orphan.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			fpcs.map((f) => (f as { profileId?: unknown } | null)?.profileId),
+		)
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(fpcs, async (fpc) => {
@@ -456,6 +464,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 				// Parse the persisted shape so a malformed backup fpc is recorded as
 				// restoreError, not silently written + codec-hidden on read.
 				StoredFpcSchema.parse(stored)
+				assertRestoreEpoch(deletion, epochs, stored.profileId)
 				await this.storage.set(id, stored)
 				return { ...stored, isProtocol: false }
 			})

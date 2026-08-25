@@ -53,6 +53,14 @@ export type BalanceJobQueueCallbacks = {
 	 *  failure record onto a foreign profile's row — or emitting it through a
 	 *  token lookup that throws — must be skipped, not attempted. */
 	isRowEmittable?: (tokenId: number) => boolean
+	/** Profile generation, captured at syncBatch entry and re-read immediately
+	 *  before every post-projection write. The projector resolves LIVE
+	 *  active-profile handles mid-flight, so an A→B→A switch repopulates the
+	 *  token map and disarms `isRowEmittable` while the in-flight result was
+	 *  computed under the departed context. REQUIRED (not optional): an
+	 *  omitted wiring would silently disable the fence while queue-level
+	 *  tests stay green. */
+	getGeneration: () => number
 }
 
 export class BalanceJobQueue {
@@ -162,7 +170,7 @@ export class BalanceJobQueue {
 	/** Persist a failure record onto the LIVE row (re-read, never the batch's
 	 *  possibly-stale copy — a deleted row must stay deleted) and emit the
 	 *  updated row so every listener re-renders the failed state. */
-	private async writeSyncFailure(id: number, message: string, at: number): Promise<void> {
+	private async writeSyncFailure(id: number, message: string, at: number, gen: number): Promise<void> {
 		const current = await this.repo.get(id)
 		if (!current) return
 		// Foreign-profile rows (unknown token in the active map) get NO failure
@@ -175,6 +183,9 @@ export class BalanceJobQueue {
 		}
 		// Fence check with NO await between it and the write dispatch.
 		if (this.callbacks.isBalanceInvalidated?.(id)) return
+		// Generation fence: silent return, not failTask — this helper holds no
+		// taskId; both callers have already failed the task before writing.
+		if (gen !== this.callbacks.getGeneration()) return
 		await this.repo.set(updated)
 		// Re-check AFTER the awaited write: a token deleted during the await must
 		// not be emitted — the service's token lookup would throw and the outer
@@ -184,6 +195,11 @@ export class BalanceJobQueue {
 	}
 
 	private async syncBatch(batch: TokenBalanceRaw[]): Promise<void> {
+		// Generation captured BEFORE any await: the projector resolves live
+		// active-profile handles mid-flight, so an A→B→A switch during it
+		// repopulates the token map (disarming isRowEmittable) while these
+		// results were computed under the departed profile's context.
+		const gen = this.callbacks.getGeneration()
 		// The task id THIS batch owns per balance id — captured up front so a
 		// concurrent queue reset (profile switch) that re-registers a newer task
 		// for the same id can't cause us to complete/fail/delete the wrong record.
@@ -223,7 +239,7 @@ export class BalanceJobQueue {
 					// untouched — the last-known value keeps rendering). Without
 					// this write, "failed" and "still running" are identical in
 					// storage once the in-memory task record dies with the SW.
-					await this.writeSyncFailure(result.id, result.error, now)
+					await this.writeSyncFailure(result.id, result.error, now, gen)
 					continue
 				}
 
@@ -257,6 +273,13 @@ export class BalanceJobQueue {
 					this.tasks.failTask(taskId, "Token no longer active")
 					continue
 				}
+				// Generation fence (A→B→A): the map-membership check above is
+				// disarmed by a round-trip switch; the generation is not. No
+				// await between this check and the write dispatch.
+				if (gen !== this.callbacks.getGeneration()) {
+					this.tasks.failTask(taskId, "Profile changed mid-sync")
+					continue
+				}
 				await this.repo.set(updated)
 				this.tasks.completeTask(taskId)
 				// Re-check AFTER the awaited write — same batch-abort hazard as the
@@ -277,7 +300,7 @@ export class BalanceJobQueue {
 				const task = this.tasks.getTaskSync(taskId)
 				if (!task.finishedAt) {
 					this.tasks.failTask(taskId, errorMessage)
-					await this.writeSyncFailure(tb.id, errorMessage, Date.now())
+					await this.writeSyncFailure(tb.id, errorMessage, Date.now(), gen)
 				}
 			}
 		} finally {

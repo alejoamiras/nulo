@@ -19,6 +19,14 @@ export class TokenBalanceServiceClient extends ServiceClient<Methods, Events> im
 	public constructor(name?: string) {
 		super(TOKEN_BALANCE_SERVICE_NAME, new LoggerServiceClient(), name)
 	}
+
+	/** Balance rows carry no profileId, so restore requires the authoritative
+	 *  created-profile id as its deletion-fence key. The base client's
+	 *  `restore(...args)` enforces no arity — this typed override makes an
+	 *  omitted id a compile error at the call site. */
+	public override async restore(rows: unknown[], profileId: string): Promise<unknown> {
+		return await super.restore(rows, profileId)
+	}
 }
 // Every client method is a pure request-passthrough; the installer's
 // signature checks the name list in both directions against `Methods`.

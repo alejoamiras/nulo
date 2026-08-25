@@ -1,5 +1,6 @@
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { toRestoreError } from "@/utils/restore-error"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { validateParams } from "@nulo/extension-messaging/zod"
@@ -782,6 +783,13 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 */
 	public async restore(networks: unknown[]): Promise<Restored<Network>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts): rows written
+		// after a mid-restore deleteProfile must reject, not orphan.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			networks.map((n) => (n as { profileId?: unknown } | null)?.profileId),
+		)
 		const result: Restored<Network>[] = []
 		return await this.lock.withLock(async () => {
 			const existing = await this.storage.getValues()
@@ -816,6 +824,7 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 					}
 					const id = await preferOrReallocId(this.storage, candidate.id, sourceIds)
 					const stored: Network = { ...candidate, id }
+					assertRestoreEpoch(deletion, epochs, stored.profileId)
 					await this.storage.set(id, stored)
 					existing.push(stored)
 					result.push(stored)

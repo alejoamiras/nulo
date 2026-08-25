@@ -1,4 +1,5 @@
 import { Fr } from "@aztec/foundation/curves/bn254"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { deriveAccountSeed, deriveSigningKeyFromSeed } from "@nulo/wallet-crypto"
 import { LogLevel, type ILogger } from "@/wallet/logger"
@@ -211,6 +212,16 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		if (type !== AccountType.Nulo_v1) {
 			throw new Error("unsupported account type")
 		}
+		// D13: capture the deletion fence BEFORE the first await. The secret read
+		// releases the profile lock before this frame resumes, so a deletion's
+		// continuation can interleave in that gap — an epoch captured after the
+		// await could already be post-bump, and the pre-write assert below would
+		// pass a doomed write.
+		const deletion = this.profileService.getDeletionState()
+		if (deletion.isReserved(profileId)) {
+			throw new Error("unauthorized")
+		}
+		const epoch = deletion.capture(profileId)
 		// Auth gate FIRST — an unauthorized caller must never trigger the custom-network probe
 		// inside resolveVerifiedL1ChainId below.
 		const master = await this.profileService.getProfileSecret(profileId)
@@ -237,6 +248,10 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			name,
 			visible: true,
 		}
+		// A deletion that began during the probe/derivation bumped the epoch — the
+		// purge has already harvested addresses, so writing now would mint a row it
+		// can never reclaim. No await between this assert and the write.
+		deletion.assertCurrent(profileId, epoch)
 		await this.storage.set(accountRowIdOf(account), account)
 		this.emit("onAccountAdded", account)
 		return account
@@ -622,6 +637,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 
 	public async restore(accounts: Account[]): Promise<Restored<Account>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts): rows written
+		// after a mid-restore deleteProfile must reject, not orphan.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			accounts.map((a) => (a as { profileId?: unknown } | null)?.profileId),
+		)
 
 		// Serialise the whole restore: the intersection check + the writes must be
 		// atomic w.r.t. a concurrent restore, or two imports of the same address
@@ -630,8 +652,12 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			// Identity is the full row id, not the address alone: two profiles restored
 			// from the same mnemonic legitimately derive the same address, and each owns
 			// its own row. This whole-batch collision check stays OUTSIDE restoreRows —
-			// it aborts the entire restore, not a single row.
-			const collides = hasIntersectionByKeys(await this.liveRows(), accounts, ["profileId", "chainId", "address"])
+			// it aborts the entire restore, not a single row. Non-object rows are
+			// excluded HERE only (the key extraction would throw on a hostile null,
+			// aborting the slice); they still flow to restoreRows, which records
+			// each as its own restoreError.
+			const collidable = accounts.filter((a): a is Account => typeof a === "object" && a !== null)
+			const collides = hasIntersectionByKeys(await this.liveRows(), collidable, ["profileId", "chainId", "address"])
 			if (collides) throw new Error("Duplicate account")
 
 			const seen = new Set<string>()
@@ -659,6 +685,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 				const rowId = accountRowIdOf(parsed)
 				if (seen.has(rowId)) throw new Error("duplicate account address in batch")
 				seen.add(rowId)
+				assertRestoreEpoch(deletion, epochs, parsed.profileId)
 				await this.storage.set(rowId, parsed)
 				return parsed
 			})
@@ -702,6 +729,13 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	 *  Account rows) — never silently-kept undecryptable rows. Runs BEFORE the reconcile. */
 	public async restoreImportedKeys(rows: ImportedAccountKey[]): Promise<Restored<ImportedAccountKey>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts) — the rewrap
+		// awaits are long enough for a rollback deleteProfile to complete.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			rows.map((r) => (r as { profileId?: unknown } | null)?.profileId),
+		)
 		return await this.restoreLock.withLock(async () => {
 			// One context per restore (normalizeAllIds remapped every row to the new profile id).
 			const profileIds = [...new Set(rows.map((r) => (typeof r?.profileId === "string" ? r.profileId : "")))].filter(Boolean)
@@ -726,6 +760,7 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 						)
 						const resealed = await sealImportedSigningKeyV2(ctx.destinationDek, parsed.chainId, parsed.address, skBytes)
 						const rewrapped = { ...parsed, encryptedSigningKey: resealed }
+						assertRestoreEpoch(deletion, epochs, rewrapped.profileId)
 						await this.importedKeys.set(rewrapped)
 						return rewrapped
 					} finally {

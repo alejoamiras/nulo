@@ -15,6 +15,7 @@
 
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { EventHandler } from "@nulo/wallet-core/utils"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { beforeEach, describe, expect, test } from "vitest"
 import { ServiceCollection } from "@/wallet/base"
 import { ConfigStore } from "@/wallet/config"
@@ -50,7 +51,9 @@ describe("AccountService — composite storage key", () => {
 		api = new FakeBrowserApi()
 		api.reset()
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler() }))
+		services.add(
+			svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler(), getDeletionState: () => new ProfileDeletionState() }),
+		)
 		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
 		accountService = new AccountService(new LoggerStore(new ConfigStore()), api)
 		services.add(accountService)

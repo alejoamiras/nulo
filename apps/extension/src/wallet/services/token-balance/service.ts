@@ -1,5 +1,6 @@
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { getTokenInfo } from "@/wallet/services/token/utils"
@@ -111,6 +112,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 				},
 				isBalanceInvalidated: (id) => this.invalidatedBalanceIds.has(id),
 				isRowEmittable: (tokenId) => this.tokens.has(tokenId),
+				getGeneration: () => this.profileGeneration,
 			},
 			this.logger,
 		)
@@ -401,8 +403,16 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		return (await this.repo.getAll()).filter((b) => ownedTokenIds.has(b.token))
 	}
 
-	public async restore(tokenBalances: TokenBalanceRaw[]): Promise<Restored<TokenBalanceRaw>[]> {
+	public async restore(tokenBalances: TokenBalanceRaw[], profileId: string): Promise<Restored<TokenBalanceRaw>[]> {
 		await this.ensureInitialized()
+		// Deletion fence keyed on the composable's authoritative created-profile
+		// id — balance rows carry NO profileId, so only the threaded id can
+		// anchor it. Fail closed: dispatch has no schema validation.
+		if (typeof profileId !== "string" || profileId.length === 0) {
+			throw new Error("restore requires the created profile id")
+		}
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(deletion, [profileId])
 		return await restoreRows(tokenBalances, async (tb) => {
 			const id = await this.allocateUnfencedId()
 			// Parse the exact persisted shape: an unvalidated restore row that fails
@@ -410,6 +420,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 			// on read AND to a later getValues() cleanup). Parse here so a malformed
 			// backup row is recorded as restoreError, never written.
 			const row = TokenBalanceRawSchema.parse({ ...tb, id })
+			assertRestoreEpoch(deletion, epochs, profileId)
 			await this.repo.set(row)
 			return row
 		})

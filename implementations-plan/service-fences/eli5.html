@@ -1,0 +1,26 @@
+<title>Service Fences</title>
+<style>
+:root { --bg: #faf9f6; --ink: #1c1b18; --accent: #8a5a2b; --dim: #6b675e; --card: #f1efe9; }
+body { background: var(--bg); color: var(--ink); font-family: Georgia, serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; color: var(--accent); margin-top: 1.6rem; }
+.card { background: var(--card); border-left: 3px solid var(--accent); padding: .7rem 1rem; margin: .8rem 0; }
+code { font-family: ui-monospace, monospace; font-size: .92em; }
+small { color: var(--dim); }
+</style>
+<h1>Service fences (batch 7 of the audit remediation)</h1>
+<p>Three places in the wallet's background services could finish a slow job and write its result <em>after the world changed underneath it</em>. This batch teaches each one to check "is my authorization still valid?" at the last moment before writing — the same trick the transaction service already uses.</p>
+
+<h2>1 · Creating an account vs deleting the profile (N-03)</h2>
+<div class="card">Creating an account takes seconds (it probes the network and derives keys). If you delete the profile mid-way, the deletion's cleanup finishes first — then the account creation wakes up and writes a row for a profile that no longer exists. That orphan row survives forever. Fix: note the profile's "deletion counter" <em>before</em> the slow work starts; just before writing, verify the counter hasn't moved.</div>
+
+<h2>2 · Restoring a backup vs cancelling it (N-14)</h2>
+<div class="card">If a backup import times out, the popup rolls everything back by deleting the half-created profile — but the background restore loop may still be writing rows. Those land after the cleanup and become invisible junk. Fix: every restore writer notes the deletion counter when it starts and re-checks it before each row; rows arriving after a deletion are recorded as errors instead of written.</div>
+
+<h2>3 · Balance refresh vs switching profiles (N-10)</h2>
+<div class="card">A balance refresh computed under profile A can land after you switch to B and back — writing B-flavoured numbers onto A's row. Fix: the refresh notes the profile "generation" when it starts and drops its result if the generation moved.</div>
+
+<h2>What deliberately does NOT change</h2>
+<p><small>No UI, no storage shapes (no migration), no crypto. A similar-shaped gap in dApp-session storage was found during recon but is outside the audit's findings — logged, not touched. The audit's suggested <code>getSecretWithFence</code> helper doesn't exist; the real <code>ProfileDeletionState</code> API is used instead.</small></p>
+
+<h2>Paper trail</h2>
+<p><small>Plan: <a href="plan.md">plan.md</a> · recon: <a href="recon.md">recon.md</a> · lessons: <a href="./lessons/phase-0-planning.md">phase-0-planning.md</a>. Codex gate: round 1 REJECT ×5 (two capture-ordering bugs caught), round 2 APPROVE-WITH-CHANGES (typed client override, fail-closed validation) — all adopted.</small></p>

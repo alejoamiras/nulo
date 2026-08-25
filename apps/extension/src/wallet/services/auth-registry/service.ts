@@ -1,4 +1,5 @@
 import type { ILogger } from "@/wallet/logger"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
@@ -447,8 +448,17 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		})
 	}
 
-	public async restore(authwits: Authwit[]): Promise<Restored<Authwit>[]> {
+	public async restore(authwits: Authwit[], profileId: string): Promise<Restored<Authwit>[]> {
 		await this.ensureInitialized()
+		// Deletion fence keyed on the composable's authoritative created-profile
+		// id — authwit rows carry NO profileId (unscoped numeric keys), so only
+		// the threaded id can anchor it. Fail closed: dispatch has no schema
+		// validation.
+		if (typeof profileId !== "string" || profileId.length === 0) {
+			throw new Error("restore requires the created profile id")
+		}
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(deletion, [profileId])
 
 		return await this.lock.withLock(async () => {
 			// Duplicate identity is the compound (account, hash) — hashes are
@@ -502,6 +512,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				if (seen.has(pairKey)) {
 					throw new Error("authwit already exists (account+hash)")
 				}
+				assertRestoreEpoch(deletion, epochs, profileId)
 				await this.authwits.set(`${id}`, row)
 				occupied.add(`${id}`)
 				seen.add(pairKey)

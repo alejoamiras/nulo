@@ -427,7 +427,7 @@ describe("cross-profile isolation (standing gate)", () => {
 		test("(P2/B) restore never overwrites an existing tx — hash-collision is create-only", async () => {
 			// h1 already exists (seeded, owned by A1). A crafted backup reuses that
 			// hash with a DIFFERENT account; a pre-fix upsert would ERASE the original.
-			const [res] = await txService.restore([mkTx("h1", "0xattacker")])
+			const [res] = await txService.restore([mkTx("h1", "0xattacker")], p1.id)
 			expect(res.restoreError).toBeDefined()
 			expect((await txService.getTransaction("h1")).account).toBe(A1)
 		})
@@ -445,7 +445,7 @@ describe("cross-profile isolation (standing gate)", () => {
 				origin: { type: "wallet" },
 				calls: [{ contract: "0xc", method: "m", args: [] }],
 			}
-			const [res] = await txService.restore([pending as never])
+			const [res] = await txService.restore([pending as never], p1.id)
 			expect(res.restoreError).toBeDefined()
 			await expect(txService.getTransaction("hp")).rejects.toThrow()
 			expect((await txService.getTransactions(A1)).map((t) => t.hash)).not.toContain("hp")

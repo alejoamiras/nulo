@@ -5,6 +5,7 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
@@ -264,12 +265,21 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	}
 
 	public async restore(contacts: Contact[]): Promise<Restored<Contact>[]> {
+		await this.ensureInitialized()
+		// Deletion fence captured at entry — before the e2e hold gate, the lock,
+		// and the collision reads — so a deleteProfile completing during ANY later
+		// park (including an injected gate) rejects every subsequent row write
+		// instead of landing orphans post-purge.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			contacts.map((c) => (c as { profileId?: unknown } | null)?.profileId),
+		)
 		// E2e hold point: "service-restore" parks a PRE-finalize import RPC here
 		// (this service restores inside the per-service loop, before
 		// finalizeRestore), so a crash test can kill the worker at a known
 		// pre-finalize phase. Production resolves immediately.
 		await this.restoreGate.waitAt("service-restore")
-		await this.ensureInitialized()
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {
@@ -278,6 +288,7 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 				// Parse the persisted shape so a malformed backup contact is recorded as
 				// restoreError, not silently written + codec-hidden on read.
 				ContactSchema.parse(written)
+				assertRestoreEpoch(deletion, epochs, written.profileId)
 				await this.storage.set(id, written)
 				return written
 			})
