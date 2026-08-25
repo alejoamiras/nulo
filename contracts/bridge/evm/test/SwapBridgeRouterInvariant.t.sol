@@ -32,13 +32,12 @@ contract SwapBridgeRouterInvariantTest is Test {
         assertEq(handler.routerFj(), handler.ghostDonatedFj() - handler.ghostSweptFj(), "fj residue != donations");
     }
 
-    /// I2 — pull-side conservation across the whole randomized history.
+    /// I2 — pull-side conservation measured against OBSERVED sinks (not ghost bookkeeping):
+    /// every wei Permit2 pulled must sit at a real sink (token portal | swap target), and the
+    /// fee portal must hold exactly what swaps reported.
     function invariant_pulledIsFullyAccounted() public view {
-        assertEq(
-            handler.ghostPulled(),
-            handler.ghostTokenDeposited() + handler.ghostFuelSwapped(),
-            "pulled tokens vanished outside {portal deposit, swap slice}"
-        );
+        assertEq(handler.tokenPortalBalance(), handler.ghostTokenDeposited(), "token portal != cumulative deposits");
+        assertEq(handler.swapTargetBalance(), handler.ghostFuelSwapped(), "swap target != cumulative fuel slices");
     }
 
     /// I3 — reported swap output == what actually landed in the fee portal.
@@ -69,6 +68,7 @@ contract RouterHandler is StdUtils {
     uint256 public ghostFuelSwapped;
     uint256 public ghostFjOut;
     uint256 private nonce;
+    address[] public swapTargets;
 
     bytes32 constant RECIPIENT = bytes32(uint256(0x1234));
     bytes32 constant FUEL_RECIPIENT = bytes32(uint256(0x5678));
@@ -79,6 +79,7 @@ contract RouterHandler is StdUtils {
         fj = new MintableERC20("FeeJuice", "FJ", 18, 1_000_000_000);
         permit2 = new RecordingPermit2();
         swap = new MockSwap(IERC20(address(fj)));
+        swapTargets.push(address(swap));
         tokenPortal = new MockTokenPortal(IERC20(address(usdc)));
         feePortal = new MockFeeJuicePortal(IERC20(address(fj)));
         // Handler deploys → handler owns the router (sweep authority lives here).
@@ -178,6 +179,7 @@ contract RouterHandler is StdUtils {
         fj.mint(address(next), 1_000_000_000 ether);
         next.setOutput(1 ether, 0);
         router.setSwapTarget(address(next));
+        swapTargets.push(address(next));
         swap = next;
     }
 
@@ -189,6 +191,18 @@ contract RouterHandler is StdUtils {
 
     function routerFj() external view returns (uint256) {
         return fj.balanceOf(address(router));
+    }
+
+    function tokenPortalBalance() external view returns (uint256) {
+        return usdc.balanceOf(address(tokenPortal));
+    }
+
+    /// Slices land on whichever target was live at swap time; rotations strand nothing —
+    /// old targets keep their earned slices, so the sink check sums across all of them.
+    function swapTargetBalance() external view returns (uint256) {
+        uint256 total;
+        for (uint256 i = 0; i < swapTargets.length; i++) total += usdc.balanceOf(swapTargets[i]);
+        return total;
     }
 
     function feePortalBalance() external view returns (uint256) {

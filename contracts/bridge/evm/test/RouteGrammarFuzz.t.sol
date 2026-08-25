@@ -53,6 +53,7 @@ contract RouteGrammarFuzzTest is Test {
         address cur = sellIn;
         for (uint256 i = 0; i < len; i++) {
             address out = i + 1 == len ? FJ : (seed % 2 == 0 ? WETH : address(uint160(0xA000 + i)));
+            if (out == cur) out = address(uint160(0xB000 + i)); // never a self-pool
             if (cur < out) {
                 s.path[i] = _key(cur, out);
                 s.dirs[i] = true;
