@@ -171,4 +171,17 @@ describe("handleSessionEstablished — profile binding (N-04)", () => {
 		expect(chrome.windows.create).not.toHaveBeenCalled()
 		expect(pendingVerification.has("sess-1")).toBe(false) // marker still cleared
 	})
+
+	test("a termination landing during the hash write is caught by the second gate (no stamp, no window)", async () => {
+		const isSessionLive = vi.fn().mockReturnValueOnce(true).mockReturnValueOnce(false)
+		const { deps, stamp } = makeDeps({
+			pendingVerification: new Map([["sess-1", marker("prof-A")]]),
+			isSessionLive,
+		})
+		const ok = await handleSessionEstablished(makeSession(), deps)
+		expect(ok).toBe(false)
+		expect(stamp).not.toHaveBeenCalled()
+		expect(chrome.windows.create).not.toHaveBeenCalled()
+		expect(isSessionLive).toHaveBeenCalledTimes(2)
+	})
 })

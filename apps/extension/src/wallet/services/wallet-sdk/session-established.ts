@@ -130,6 +130,18 @@ export async function handleSessionEstablished(
 		// Persist for the settings/reconnect view (informational). The verify window
 		// does NOT rely on this — it gets the per-session snapshot via its URL (B-06).
 		await deps.dappSessionService.setVerificationHash(dappSession.id, session.verificationHash)
+		// Second liveness gate: the await above is itself a window the
+		// switch-teardown can land in — a session confirmed dead here must not
+		// be stamped and must not pop a verify window. (The stamp wiring also
+		// self-compensates; see `stampSessionProfileGuarded`.)
+		if (!deps.isSessionLive(session.sessionId)) {
+			deps.logger.log(
+				"wallet-sdk-bg",
+				LogLevel.Warn,
+				`Session ${session.sessionId} for ${session.origin} terminated during establishment — not stamping`,
+			)
+			return false
+		}
 		// Bind the live channel to its owning profile — consumed by the dispatch
 		// guard and the profile-switch teardown.
 		deps.stampSessionProfile(session.sessionId, dappSession.profileId)

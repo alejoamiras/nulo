@@ -67,6 +67,24 @@ export async function enforceSessionProfileBinding(args: {
 	return false
 }
 
+/**
+ * Stamp a session's owning profile with terminate-race compensation: the
+ * switch-teardown can terminate a mid-validation session, and termination is
+ * FINAL — so after setting, a dead session's stamp is pure leak and is
+ * deleted again. Every interleaving converges: terminate-before-set (the
+ * check catches it), terminate-after-set (`onSessionTerminated` deletes),
+ * terminate-between (both delete, idempotent).
+ */
+export function stampSessionProfileGuarded(
+	sessionProfiles: Map<string, string>,
+	sessionId: string,
+	profileId: string,
+	isSessionLive: (sessionId: string) => boolean,
+): void {
+	sessionProfiles.set(sessionId, profileId)
+	if (!isSessionLive(sessionId)) sessionProfiles.delete(sessionId)
+}
+
 export function wireProfileSwitchTeardown(deps: ProfileSwitchTeardownDeps): void {
 	deps.onActiveProfileChanged.add((profile) => {
 		if (!profile) return // lock — pinned semantics, no teardown

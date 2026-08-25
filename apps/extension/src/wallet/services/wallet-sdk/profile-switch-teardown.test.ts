@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import type { ILogger } from "@/wallet/logger"
-import { enforceSessionProfileBinding, wireProfileSwitchTeardown } from "./profile-switch-teardown"
+import { enforceSessionProfileBinding, stampSessionProfileGuarded, wireProfileSwitchTeardown } from "./profile-switch-teardown"
 
 const noopLogger = { log: () => {} } as unknown as ILogger
 
@@ -111,5 +111,19 @@ describe("enforceSessionProfileBinding — the dispatch guard", () => {
 		})
 		expect(await enforceSessionProfileBinding(args)).toBe(false)
 		expect(terminateSession).toHaveBeenCalledWith("s1")
+	})
+})
+
+describe("stampSessionProfileGuarded", () => {
+	test("a live session's stamp survives", () => {
+		const map = new Map<string, string>()
+		stampSessionProfileGuarded(map, "s1", "prof-A", () => true)
+		expect(map.get("s1")).toBe("prof-A")
+	})
+
+	test("a session terminated before the stamp is compensated (no leaked entry)", () => {
+		const map = new Map<string, string>()
+		stampSessionProfileGuarded(map, "s1", "prof-A", () => false)
+		expect(map.has("s1")).toBe(false)
 	})
 })
