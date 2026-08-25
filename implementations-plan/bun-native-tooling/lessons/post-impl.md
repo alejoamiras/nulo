@@ -23,3 +23,7 @@ What looked fine (verbatim gist): the scoped guarantee holds (no argv / raw spaw
 ## Codex post-impl round 2 (resumed) — **APPROVE — LOOP CONVERGED** (r1 conditional → r2 approve)
 
 Verbatim: "approve". No code changed after `aaa282f8` (`fix(review)`). Delivery follows: one PR to `dev`, the three required checks asserted at its HEAD, merge reserved for the owner.
+
+## Merge-from-dev resolution (post-approve; arcs B + C landed first)
+
+`git merge origin/dev` at `79bbf567`: two conflicts. `implementations-plan/index.md` — row union (B/C rows from dev, this arc's row kept). `packages/bridge-core/scripts/verify-l1.ts` — B1 (#454) had added a remappings guard (`generateRemappings()` + `assertEffectiveRemapping(forgeBin())`) into the file this arc rewrote; resolved as the union: this arc's structure + B1's guard, called through the `forge()` wrapper. Because B1's `gen-remappings.ts` carried two direct `spawnSync` sites, it was migrated to `run(..., { check: false })` in the same resolution commit — keeping the "spawn only through run.ts" invariant true on the merged tree (the `rg` check stays run.ts-only). Verified at the merge commit: frozen install (v2 lockfile, isolated linker), typecheck, 238 package tests, biome, lint, and `verify:l1 --dry-run` printing B's `remappings OK` line (forge 1.7.1, the isolated-layout l1-artifacts path) followed by the four baseline ✓ lines — B's resolver and this arc's primitive proven together.
