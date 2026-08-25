@@ -1,0 +1,13 @@
+# Planning lessons — lock-ownership (batch 4)
+
+## Codex plan audit round 1 (session 01a0376b-b8d9-7c02-b8df-5f537c641b04, xhigh, fresh): REJECT
+
+Six findings, adjudicated:
+1. **N-12 fence is TOCTOU** (VALID, redesign): the per-leg gen check precedes the await — a close suspended INSIDE `session.delete()` (which targets the SINGLETON `nulo:core:session` key) still deletes B's row after B writes it; same shape for the alarm clear. Rev 2 direction: a session-manager-INTERNAL artifact mutex (never held across facade calls → no reentrancy trap): open's artifact section {bump generation + write row + schedule alarm} atomic under it; close's artifact section {in-lock gen re-check → delete + clear}. Ordering under the mutex makes both interleavings correct.
+2. **Failed open leaves A's bearer restorable** (VALID): bump-at-open-ENTRY stands a close down without B's row ever landing → A's persisted bearer survives its own close. Fixed by the same redesign — the bump moves INSIDE the artifact section, atomic with B's write, so stand-down implies B's row exists (and, singleton key, A's row is gone). Plus a sync-head identity guard: `close(expected?)` no-ops when `activeSession` is no longer the observed session (an off-lock `getActive` close racing an `open` could otherwise nuke B's in-memory session/DEK).
+3. **N-17 gaps not exhaustive** (VALID): also getTrust→setTrust (:1080→:1087), markBalanceDirty→upsertRecord (:1117→:1118), and the two emit sites; `hydrateSchedulers` bumps the epoch LOCK-FREE so mid-CS drift is real. Rev 2: re-check before EVERY mutation/emit in the CS.
+4. **N-17 pin silently green on revert** (VALID — batch-3 lesson recurring): `onTokenDeleted` queues on the same serviceLock, so it cannot bump while the CS is parked. Rev 2 pin: use the lock-free bump path while parked; assert record+outbox+trust+emits.
+5. **Tickets ≠ restored mutual exclusion under watchdog fire** (VALID, half-adopt): H1/H2 overlap during a by-design >5-min hold is inherent to any force-release. Rev 2: `maxHoldMs: null` for the NETWORK service lock specifically (its 30-min hold is by design; queueing is the correct semantic; a wedged clearChainState already wedges the PXE profile barrier anyway) + document the accepted limitation for other locks + per-timer ticket capture (the timer verifies `currentTicket === its ticket` before privileged release) + a pin that H1's stale leave does NOT clear H2's watchdog timer.
+6. **Doc examples reference the raw API** (VALID, trivial): update profile/repository.ts:83-92 + purge-rows.ts:7-10 examples.
+
+Holding rev 2 until the parallel Fable audit lands (fold both rounds at once).
