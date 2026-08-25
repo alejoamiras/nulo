@@ -1,0 +1,44 @@
+<title>Shell Identity Fences</title>
+<style>
+  :root { --bg: #f7f8f6; --ink: #1a1c19; --muted: #676b64; --accent: #3f6212; --card: #ffffff; --line: #e2e5df; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #151713; --ink: #e8eae4; --muted: #9aa093; --accent: #a3e635; --card: #1d201b; --line: #32362f; }
+  }
+  :root[data-theme="dark"] { --bg: #151713; --ink: #e8eae4; --muted: #9aa093; --accent: #a3e635; --card: #1d201b; --line: #32362f; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, sans-serif; max-width: 46rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.6rem; margin: 0 0 .25rem; } h2 { font-size: 1.1rem; margin: 2rem 0 .5rem; color: var(--accent); }
+  .sub { color: var(--muted); margin-top: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  a { color: var(--accent); }
+</style>
+
+<h1>Shell Identity Fences</h1>
+<p class="sub">Batch 6 — four "who am I acting for?" fixes in the popup UI, plus the owner-approved deletion of a dead (and dangerous) legacy path. Plan of record: <a href="plan.md">plan.md</a> (rev 4, approved through a 3-round dual audit).</p>
+
+<div class="card">
+<h2>The wrong-passenger problem (N-05)</h2>
+<p>When you switch networks, the popup fetches your accounts for the new network. If you switch again mid-fetch, the OLD fetch could still land its results — showing accounts from a chain you already left. Now every fetch carries a ticket for the run it belongs to and throws its results away if a newer switch superseded it. The logic moved into its own tested module instead of living untestably in the app shell.</p>
+</div>
+
+<div class="card">
+<h2>The frozen-spinner problem (N-08)</h2>
+<p>After typing your password, the popup waited in a loop for "unlocked!" — forever, if anything in the unlock pipeline failed. The spinner froze and the button stayed dead until you closed the popup. Now the wait is bounded (30 s, matched to real-world timing), a failure anywhere in the pipeline releases it IMMEDIATELY with an honest error message, and a continuation that lost an identity race writes nothing.</p>
+</div>
+
+<div class="card">
+<h2>The wrong-receipt problem (N-23)</h2>
+<p>The home screen's activity list reset itself only when your ADDRESS changed. Two profiles restored from the same phrase share an address — so switching between them kept the other profile's in-flight transfer card on screen. The reset now keys on profile + network + address together, in-flight loads carry run tickets, and transfer tasks remember which network they belong to.</p>
+</div>
+
+<div class="card">
+<h2>The silent-failure problem (N-22)</h2>
+<p>Renaming a profile could fail without telling you — the one dialog in its family with a silent error path. It now shows the same "Something went wrong" toast as its siblings.</p>
+</div>
+
+<div class="card">
+<h2>The dead trapdoor (N-09 — removal, owner-approved)</h2>
+<p>A legacy "network was reset" modal — which has never been shown to any user — carried a button that would have deleted whichever profile happened to be active. The audit rated its remedy "affirmatively wrong". The whole path (modal template, its trigger, the version stamp it read, the build flag feeding it) is deleted. The notification system itself stays: real failure notices still work.</p>
+</div>
+
+<h2>How we know it works</h2>
+<p>Every fence has a test that parks it mid-operation, forces the race, and proves the stale run writes nothing — chosen so quietly reverting any mechanism turns a test red. The removal is verified by a scoped search that must come back empty.</p>
