@@ -205,9 +205,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	 *  syncs — so allocation skips PAST fenced ids instead of releasing them.
 	 *  A worker restart forgets the fence safely: no old projection survives it. */
 	private async allocateUnfencedId(): Promise<number> {
-		let id = await this.repo.allocateId()
-		while (this.invalidatedBalanceIds.has(id)) id++
-		return id
+		return await this.repo.allocateIdAvoiding(this.invalidatedBalanceIds)
 	}
 
 	private async createTokenBalance(token: Token, account: Account, gen?: number) {

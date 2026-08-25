@@ -68,7 +68,7 @@ async function makeHarness() {
 	const fetchStub = vi.fn(async (): Promise<[string, string, number]> => ["Fetched Name", "FTCH", 9])
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in to stub the private simulate-backed fetch
 	;(tokenService as any).fetchTokenMetadata = fetchStub
-	return { tokenService, journal, fetchStub }
+	return { tokenService, journal, fetchStub, api }
 }
 
 describe("TokenService.addToken — journal/lock machinery (characterization)", () => {
@@ -161,5 +161,35 @@ describe("TokenService.addToken — journal/lock machinery (characterization)", 
 			expect.objectContaining({ origin: "seed", title: "SEED", subtitle: "Default token" }),
 		)
 		expect(journal.setOperationMeta).not.toHaveBeenCalled()
+	})
+})
+
+describe("TokenService.restore — per-row allocation (N-20 boundary)", () => {
+	test("a hostile MAX_SAFE_INTEGER key is never overwritten — each row re-allocates instead of id++", async () => {
+		// A shared `id++` cursor assumed forward-contiguous free space: with a
+		// physical key at MAX_SAFE_INTEGER the allocator gap-fills DOWNWARD, and
+		// the old increment then stepped onto (and overwrote) the occupied
+		// boundary key. Per-row re-allocation always lands on free keys.
+		const { tokenService, api } = await makeHarness()
+		const max = String(Number.MAX_SAFE_INTEGER)
+		const junk = JSON.stringify({ junk: true })
+		await api.storage.local.set({ [`nulo:core:tokens@${max}`]: junk })
+
+		const mk = (contract: string) => ({
+			id: 0,
+			profileId: "p1",
+			chainId: 1,
+			contract,
+			name: "T",
+			symbol: "T",
+			decimals: 9,
+		})
+		const restored = await tokenService.restore([mk("0xaaa"), mk("0xbbb")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeUndefined()
+		// Both landed on fresh keys; the hostile key's raw bytes are intact.
+		const raw = await api.storage.local.get(null)
+		expect(raw[`nulo:core:tokens@${max}`]).toBe(junk)
+		expect(restored[0].id).not.toBe(restored[1].id)
 	})
 })

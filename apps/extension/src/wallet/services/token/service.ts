@@ -676,17 +676,20 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		await this.ensureInitialized()
 
 		return await this.lock.withLock(async () => {
-			// Shared numeric cursor across the batch: ids are one global sequence,
-			// so a single write consumes an id and the next row picks up after it.
-			let id = await nextNumericId(this.tokens)
 			return await restoreRows(tokens, async (token) => {
-				// Validate the persisted shape BEFORE consuming an id/writing: a token
-				// with e.g. `chainId: "1:"` would otherwise "succeed", have a balance
+				// Per-row allocation through the hardened allocator: a shared
+				// `id++` cursor assumed a forward-contiguous free space, which the
+				// allocator's hostile-boundary gap-fill deliberately does not
+				// guarantee — incrementing past it could land on (and overwrite)
+				// an occupied key. Each successful write is visible to the next
+				// row's allocation, so the batch still sequences.
+				const id = await nextNumericId(this.tokens)
+				// Validate the persisted shape BEFORE writing: a token with e.g.
+				// `chainId: "1:"` would otherwise "succeed", have a balance
 				// relinked to it, then be rejected by the read codec — leaving an
 				// orphaned balance. Parsing here records it as a restoreError instead.
 				const row = TokenSchema.parse({ ...token, id })
 				await this.tokens.set(`${id}`, row)
-				id++
 				return row
 			})
 		})

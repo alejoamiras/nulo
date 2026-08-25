@@ -47,6 +47,19 @@ export class BalanceRepository {
 		return nextNumericId(this.storage)
 	}
 
+	/** Allocate a fresh id treating `avoid` (fence-invalidated ids) as
+	 *  occupied. Blindly incrementing past a fenced id assumed a forward-
+	 *  contiguous free space, which the allocator's hostile-boundary gap-fill
+	 *  does not guarantee — a step past the fence could land on (and
+	 *  overwrite) a physically occupied key. Feeding the fence in as pseudo-
+	 *  keys lets the one allocator resolve occupancy, safety, and the fence
+	 *  together. */
+	public async allocateIdAvoiding(avoid: ReadonlySet<number>): Promise<number> {
+		return nextNumericId({
+			getKeys: async () => [...(await this.storage.getKeys()), ...[...avoid].map((n) => String(n))],
+		})
+	}
+
 	/** Check whether a persisted balance exists for (token, account).
 	 *  Used by the projector write loop to guard against writing
 	 *  balances for records deleted mid-sync. */
