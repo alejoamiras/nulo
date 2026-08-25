@@ -12,7 +12,7 @@ declare const LOCK_TICKET_BRAND: unique symbol
  * identity) AND type-branded — a bare `symbol` variable does not typecheck,
  * so a wrong-symbol `leave()` is a compile error, not just a runtime no-op.
  */
-export type LockTicket = symbol & { readonly [LOCK_TICKET_BRAND]?: never }
+export type LockTicket = symbol & { readonly [LOCK_TICKET_BRAND]: never }
 
 export class Lock {
 	private readonly queue: ((ticket: LockTicket) => void)[] = []
@@ -127,7 +127,8 @@ export class Lock {
 	private dispatch() {
 		if (!this.locked && this.queue.length) {
 			this.locked = true
-			const ticket = Symbol("lock-ticket")
+			// The one trusted mint site — the only place the brand is applied.
+			const ticket = Symbol("lock-ticket") as LockTicket
 			this.currentTicket = ticket
 			// Safety net: force-release if the holder never calls leave(). The
 			// callback guards on ITS OWN ticket (not just `locked`) so a timer

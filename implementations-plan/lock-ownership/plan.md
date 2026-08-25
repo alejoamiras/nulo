@@ -79,7 +79,7 @@ Tests (**f1-1 adoption**, colocated, FakeBrowserApi):
 ## Security & Adversarial Considerations
 
 - Ticket minted at HANDOFF only; `leave(stale)` no-ops (never throws — it sits in `withLock`'s finally); the ticket CHECK precedes any timer/state mutation in `leave` (liveness-load-bearing order); the watchdog callback guards on its OWN ticket.
-- The artifact mutex is private and leaf-level: it never wraps calls into facade-locked code, so no reentrancy or lock-ordering cycle is possible. Its own watchdog stays DEFAULT (its legs are storage/alarms ops, never >5-min by design).
+- The artifact mutex is private and leaf-level: it never wraps calls into facade-locked code, so no reentrancy or lock-ordering cycle is possible. Its watchdog is DISABLED (`maxHoldMs: null`, load-bearing — see §N-12): a force-release would re-admit a successor's section into a stalled close's.
 - The N-12 head identity-guard is sync (no TOCTOU); the artifact re-check happens INSIDE the mutex (no check→await gap).
 - FIFO assumption: the mutex removes the plan's prior reliance on `chrome.storage`/`chrome.alarms` dispatch-order FIFO (both audits flagged it); ordering is now enforced by the mutex itself.
 - No attacker-controlled input in any of the three changes.

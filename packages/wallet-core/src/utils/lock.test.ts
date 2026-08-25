@@ -110,6 +110,11 @@ describe("Lock", () => {
 		// The lock is untouched: an acquire still works normally.
 		const t = await lock.enter()
 		lock.leave(t)
+		// COMPILE PIN: the brand is required, so a bare symbol must not
+		// typecheck into leave() — runtime identity is the second belt.
+		const bare: symbol = Symbol("bare")
+		// @ts-expect-error a bare symbol is not a LockTicket
+		void (() => lock.leave(bare))
 	})
 
 	test("finally release after async throw: next caller can enter", async () => {
