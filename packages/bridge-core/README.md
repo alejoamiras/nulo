@@ -26,6 +26,7 @@ and the sandbox deploy script drive these functions; the proven reference for ev
 | `bun run test` | vitest — 41 tests (pure fns + mocked-L1 orchestrations). |
 | `bun run typecheck` | `tsc --noEmit`. |
 | `bun run deploy:sandbox [--smoke]` | Deploy the full L1+L2 stack to a local aztec sandbox; `--smoke` runs deposit public/private + withdraw public/private end-to-end. Env-pointed via `SANDBOX_L1_RPC` / `SANDBOX_NODE_URL` (default `:8545` / `:8080`). |
+| `bun run verify:l1 [--config <manifest>] [--dry-run]` | Etherscan source verification of the bridge's L1 contracts for the live testnet manifest (or a `--config` candidate/mainnet one); `--dry-run` builds the standard-json without a key. Needs `forge` (`FORGE_BIN` → PATH → `~/.aztec/current/bin/forge`). The rest of the deploy/verify/canary scripts are the operator runbook in `.claude/skills/aztec-update/SKILL.md`. |
 
 ## Key invariants
 
@@ -34,5 +35,6 @@ and the sandbox deploy script drive these functions; the proven reference for ev
 - **The Permit2 witness is cross-pinned.** `l1.ts`'s `BridgeWitness` member list + `BRIDGE_WITNESS_TYPE` must stay byte-identical to `SwapBridgeRouter._hashBridgeWitness` (Solidity). `l1.test.ts` pins the hashes; `bridge-evm`'s fork test proves a post-signature tamper reverts.
 - **Tests run under vitest, not `bun:test`.** `@aztec/foundation` calls `expect.addEqualityTesters` at import, which `bun:test`'s `expect` lacks — so any test that (transitively) imports `Fr`/`AztecAddress` throws at import. Always `import { … } from "vitest"`.
 - **Claim retry budget is 200×3s** (`flows.ts`, `deploy-sandbox.ts`) to tolerate slow/settling sandboxes (72s L2 slots + inbox lag); harmless on a settled sandbox (resolves in the first retries).
+- **Scripts spawn other programs ONLY through `scripts/run.ts`** — argv arrays, never a shell string (`run(bin, args)` throws `RunError` on any failure; `{ check: false }` for the callers that interpret a non-zero exit themselves; `resolveBin` finds `forge`/`cast` by one rule: `FORGE_BIN`/`CAST_BIN` override, then PATH or the Aztec toolchain folders). The primitive never formats or retains argv in a failure — `cast` receives `PRIVATE_KEY` as an argument — but argv is visible in `ps` while a child runs, child output is verbatim, and the environment is inherited. Values that reach `git`/`forge`/`cast` are validated first (git behind `--end-of-options`/`--`, manifest addresses through the schema, the key/addresses by shape); argv closes shell injection, not a hostile flag.
 
 See [`implementations-plan/faucet-bridge/`](../../implementations-plan/faucet-bridge/) for the plan + lessons, and `SwapBridgeRouterPermit2Fork.t.sol` (bridge-evm) for the real-V4/Permit2 swap proof.
