@@ -49,7 +49,7 @@ async function flush() {
 
 function lastRequestId(): number {
 	const calls = capturePortMessage(SERVICE).mock.calls
-	return (calls.at(-1)?.[0] as { content: { requestId: number } }).content.requestId
+	return (calls.at(-1) as [{ content: { requestId: number } }])[0].content.requestId
 }
 
 // ── Client: hostile inbound ───────────────────────────────────────────
@@ -64,21 +64,17 @@ describe("client — hostile inbound messages", () => {
 		expect(seen).toEqual([{ n: 1 }])
 	})
 
-	test.each([
-		"toString",
-		"constructor",
-		"__proto__",
-		"connect",
-		"disconnect",
-		"nonexistent",
-	])("hostile event name %s is dropped (no throw, no invoke)", async (event) => {
-		const c = new HClient()
-		await c.connect()
-		const seen: unknown[] = []
-		c.onPing.add((p) => seen.push(p))
-		expect(() => emitPortMessage(SERVICE, { type: MessageType.Event, content: { event, payload: { n: 9 } } })).not.toThrow()
-		expect(seen).toHaveLength(0)
-	})
+	test.each(["toString", "constructor", "__proto__", "connect", "disconnect", "nonexistent"])(
+		"hostile event name %s is dropped (no throw, no invoke)",
+		async (event) => {
+			const c = new HClient()
+			await c.connect()
+			const seen: unknown[] = []
+			c.onPing.add((p) => seen.push(p))
+			expect(() => emitPortMessage(SERVICE, { type: MessageType.Event, content: { event, payload: { n: 9 } } })).not.toThrow()
+			expect(seen).toHaveLength(0)
+		},
+	)
 
 	test("a replayed response for a settled id is dropped (idempotent, no double-settle)", async () => {
 		const c = new HClient()
@@ -96,19 +92,14 @@ describe("client — hostile inbound messages", () => {
 		).not.toThrow()
 	})
 
-	test.each([
-		null,
-		undefined,
-		42,
-		"str",
-		{},
-		{ type: MessageType.Response },
-		{ type: 999, content: {} },
-	])("malformed inbound %s is dropped without throwing", async (msg) => {
-		const c = new HClient()
-		await c.connect()
-		expect(() => emitPortMessage(SERVICE, msg)).not.toThrow()
-	})
+	test.each([null, undefined, 42, "str", {}, { type: MessageType.Response }, { type: 999, content: {} }])(
+		"malformed inbound %s is dropped without throwing",
+		async (msg) => {
+			const c = new HClient()
+			await c.connect()
+			expect(() => emitPortMessage(SERVICE, msg)).not.toThrow()
+		},
+	)
 })
 
 // ── Service: hostile requests ─────────────────────────────────────────
@@ -122,22 +113,16 @@ describe("service — hostile requests", () => {
 		expect(client.captureResponse()).not.toHaveBeenCalled()
 	})
 
-	test.each([
-		"__proto__",
-		"constructor",
-		"prototype",
-		"hasOwnProperty",
-		"valueOf",
-		"start",
-		"emit",
-		"echo ",
-	])("hostile / non-registered method %s → no response, not invoked", async (method) => {
-		new HService()
-		const client = connectServiceClient(SERVICE)
-		client.sendToService({ type: MessageType.Request, content: { requestId: 1, method, params: wrapParams([]) } })
-		await flush()
-		expect(client.captureResponse()).not.toHaveBeenCalled()
-	})
+	test.each(["__proto__", "constructor", "prototype", "hasOwnProperty", "valueOf", "start", "emit", "echo "])(
+		"hostile / non-registered method %s → no response, not invoked",
+		async (method) => {
+			new HService()
+			const client = connectServiceClient(SERVICE)
+			client.sendToService({ type: MessageType.Request, content: { requestId: 1, method, params: wrapParams([]) } })
+			await flush()
+			expect(client.captureResponse()).not.toHaveBeenCalled()
+		},
+	)
 
 	test("a registered method with hostile params (array-shaped object) still replies, never crashes", async () => {
 		new HService()

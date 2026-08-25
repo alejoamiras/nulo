@@ -287,7 +287,7 @@ describe("useContactImportExport — export", () => {
 
 		await api.exportContacts()
 
-		const payload = JSON.parse((vi.mocked(downloadFile).mock.calls.at(-1)?.[0] as { data: string }).data)
+		const payload = JSON.parse((vi.mocked(downloadFile).mock.calls.at(-1) as [{ data: string }])[0].data)
 		expect(payload.contacts[0]).toEqual({ name: "Legacy", address: mixedCase, isSender: true })
 	})
 

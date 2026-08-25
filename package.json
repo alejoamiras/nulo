@@ -37,7 +37,7 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.1",
+    "@biomejs/biome": "2.5.9",
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2"
   },

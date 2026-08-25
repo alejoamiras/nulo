@@ -65,15 +65,13 @@ describe("private-fuel keystone", () => {
 		},
 	]
 
-	it.each(vectors)("deriveBridgeSecret + secretHash match the pinned vector (salt=$salt)", async ({
-		salt,
-		claimer,
-		secret,
-		secretHash,
-	}) => {
-		expect(deriveBridgeSecret(salt, claimer).toString()).toBe(secret)
-		expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
-	})
+	it.each(vectors)(
+		"deriveBridgeSecret + secretHash match the pinned vector (salt=$salt)",
+		async ({ salt, claimer, secret, secretHash }) => {
+			expect(deriveBridgeSecret(salt, claimer).toString()).toBe(secret)
+			expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
+		},
+	)
 
 	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact at the CANONICAL salt matches PRIVATE_FPC_ADDRESS", async () => {
 		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))

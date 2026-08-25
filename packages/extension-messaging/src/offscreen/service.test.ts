@@ -120,20 +120,17 @@ describe("envelope validation", () => {
 	})
 
 	// D10: non-registered callables (inherited, framework, public non-RPC) rejected.
-	test.each([
-		"toString",
-		"constructor",
-		"start",
-		"emit",
-		"emitPing",
-	])("rejects the non-registered callable %s (RPC-surface guard)", async (method) => {
-		const svc = new TestService()
-		const spy = vi.spyOn(svc as unknown as Record<string, () => void>, "emitPing")
-		emitMessage(request(1, method as keyof Methods, []))
-		await flush()
-		expect(responses()).toHaveLength(0)
-		expect(spy).not.toHaveBeenCalled()
-	})
+	test.each(["toString", "constructor", "start", "emit", "emitPing"])(
+		"rejects the non-registered callable %s (RPC-surface guard)",
+		async (method) => {
+			const svc = new TestService()
+			const spy = vi.spyOn(svc as unknown as Record<string, () => void>, "emitPing")
+			emitMessage(request(1, method as keyof Methods, []))
+			await flush()
+			expect(responses()).toHaveLength(0)
+			expect(spy).not.toHaveBeenCalled()
+		},
+	)
 })
 
 // ── Success path ──────────────────────────────────────────────────────
