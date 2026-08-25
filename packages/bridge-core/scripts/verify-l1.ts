@@ -23,6 +23,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { encodeAbiParameters, keccak256, parseAbiParameters } from "viem"
 import { evmAddress, parseCandidateManifest } from "../src/candidate-schema"
+import { assertEffectiveRemapping, generateRemappings } from "./gen-remappings"
 import { forgeBin, stageForkSource } from "./portal-artifact"
 import { run } from "./run"
 
@@ -88,6 +89,13 @@ function requireLegacyForgeInputs(raw: unknown): void {
 		fail(`bridge manifest l1ChainId must be a positive integer when present: ${JSON.stringify(chainId)}`)
 	}
 }
+
+// The EVM root's @aztec/ remap must point at the installed l1-artifacts sources
+// regardless of node_modules layout: regenerate remappings.txt (gitignored,
+// overrides foundry.toml) and assert forge actually sees the mapping before
+// any build/verify runs against EVM_ROOT.
+generateRemappings()
+assertEffectiveRemapping(forge())
 
 /** The vendored portal source must hash-match what the deployed artifact was compiled from. */
 function placePortalSource() {

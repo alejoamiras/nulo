@@ -9,7 +9,6 @@ import { useProfileCreateFlow } from "@/composables/useProfileCreateFlow"
 
 /** Services */
 import type { ProfileInfo } from "@/wallet/services/profile/spec"
-import { setSentinel } from "@/utils/core"
 
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
@@ -50,7 +49,6 @@ const {
 	onCreated: async (profile) => {
 		await bootstrapActiveProfile(profile as ProfileInfo)
 		await setLastActiveProfileId((profile as ProfileInfo).id)
-		await setSentinel()
 		router.push("/onboarding/learn")
 	},
 	notifyCreateFailed: (isPasskey) => {

@@ -54,7 +54,7 @@ import type { ConfigProp, IConfig } from "@/wallet/config"
 import { type ILogger, LogLevel } from "@/wallet/logger"
 import { ValueStorage } from "@/wallet/storage"
 import type { AlarmEvent, AlarmsPort, BrowserApi } from "@nulo/wallet-core/ports"
-import { AlarmDispatcher, getErrorMessage } from "@nulo/wallet-core/utils"
+import { AlarmDispatcher, getErrorMessage, Lock } from "@nulo/wallet-core/utils"
 import {
 	asImportedKeysDek,
 	type ImportedKeysDek,
@@ -116,6 +116,25 @@ export class SessionManager {
 	 *  session the alarm just closed. Defaults to a pass-through for the
 	 *  lock-agnostic legacy/test paths (which never wire the alarm). */
 	private readonly runExclusive: <T>(fn: () => Promise<T>) => Promise<T>
+	/** Serializes the session ARTIFACT operations (row write/delete, alarm
+	 *  schedule/clear) across every entry point — including the off-lock
+	 *  expiry close from `getActive` that the facade lock cannot serialize
+	 *  (wrapping it there would self-deadlock: the facade lock is
+	 *  non-reentrant and `getActive` is reached from inside it). Leaf-level:
+	 *  nothing inside an artifact section calls back into facade-locked
+	 *  code, so no lock-ordering cycle is possible. Watchdog DISABLED —
+	 *  a force-release would admit a successor's artifact section into a
+	 *  stalled close's, recreating the very interleaving this serializes
+	 *  away; the sections are short storage/alarm ops with no by-design
+	 *  long holds. */
+	private readonly artifactLock: Lock
+	/** Bumped as the LAST act of a successful open's artifact section — the
+	 *  COMMIT point. A close captures it at entry and re-checks inside the
+	 *  mutex: a mismatch means a successor fully landed (stand down, its
+	 *  artifacts are not ours to destroy); a match means no successor has
+	 *  committed (safe to delete whatever the row holds — the current
+	 *  session's record or a failed open's debris). */
+	private sessionGeneration = 0
 
 	/**
 	 * @param config      Reactive config — SessionManager subscribes to
@@ -157,6 +176,7 @@ export class SessionManager {
 		// Pass-through default keeps the lock-agnostic contract for callers
 		// that don't wire the alarm (legacy SW path / unit tests).
 		this.runExclusive = runExclusive ?? ((fn) => fn())
+		this.artifactLock = new Lock("session-artifacts", logger, null)
 		// SessionManager has no dispose method (SW-lifetime singleton);
 		// we don't store the unsubscribe handle. If a future teardown
 		// path emerges, capture this return value.
@@ -177,7 +197,11 @@ export class SessionManager {
 		}
 		if (this.isExpired(this.activeSession.session)) {
 			this.logger.log(LOG_SOURCE, LogLevel.Debug, "Session expired")
-			await this.close()
+			// Pass the OBSERVED session: this close runs off the facade lock
+			// (getActive is reached both inside and outside it), and a
+			// concurrent open may have replaced the session by the time the
+			// close's head runs — the identity guard stands it down.
+			await this.close(this.activeSession)
 			return undefined
 		}
 		return this.activeSession
@@ -263,40 +287,54 @@ export class SessionManager {
 			} finally {
 				zeroize(secretCopy)
 			}
-			// Wipe a replaced session's DEK before dropping the reference (close/replace/expiry
-			// discipline); store a COPY of the caller-owned dek.
-			zeroize(this.activeSession?.dek)
-			this.activeSession = { profile, session, secret, dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined }
-			this.onChange(this.toInfo(profile))
-			try {
-				await this.session.set(session)
-			} catch (error) {
-				this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", getErrorMessage(error))
-				// The write failed, so the persisted record is now indeterminate — it
-				// may still hold a PRIOR profile's session that restore() would
-				// reactivate on the next SW start (wrong profile). Best-effort clear it.
-				await this.session.delete().catch(() => {})
-				// Read back: if we CANNOT confirm the record is gone (storage fully
-				// down / delete also failed), do NOT report this open as a degraded
-				// success — undo the in-memory transition so `openSessionVerified`'s
-				// post-open `isActive` check surfaces the failure to the RPC caller
-				// (no false "unlocked as B"). NOTE: a stale prior record we couldn't
-				// delete stays on disk; a restart then restores that record — but it is
-				// the user's own last durably-persisted session (or an unparseable
-				// partial write → silent-close → locked), never a secret exposure. This
-				// residual is unavoidable while storage is fully unavailable.
-				if (await this.hasPersistedSession()) {
-					zeroize(this.activeSession?.dek)
-					this.activeSession = undefined
-					this.onChange(undefined)
-					return
+			// The ARTIFACT SECTION: serialized against any in-flight close so a
+			// stale expiry close can never destroy this open's row/alarm (and
+			// vice versa: a queued close entered before us cleans its OWN
+			// predecessor first, then we land cleanly after).
+			await this.artifactLock.withLock(async () => {
+				// Wipe a replaced session's DEK before dropping the reference
+				// (close/replace/expiry discipline); store a COPY of the caller-owned dek.
+				zeroize(this.activeSession?.dek)
+				this.activeSession = { profile, session, secret, dek: dek ? asImportedKeysDek(new Uint8Array(dek)) : undefined }
+				this.onChange(this.toInfo(profile))
+				try {
+					await this.session.set(session)
+				} catch (error) {
+					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to persist opened session (in-memory only)", getErrorMessage(error))
+					// The write failed, so the persisted record is now indeterminate — it
+					// may still hold a PRIOR profile's session that restore() would
+					// reactivate on the next SW start (wrong profile). Best-effort clear it.
+					await this.session.delete().catch(() => {})
+					// Read back: if we CANNOT confirm the record is gone (storage fully
+					// down / delete also failed), do NOT report this open as a degraded
+					// success — undo the in-memory transition so `openSessionVerified`'s
+					// post-open `isActive` check surfaces the failure to the RPC caller
+					// (no false "unlocked as B"). NOTE: a stale prior record we couldn't
+					// delete stays on disk; a restart then restores that record — but it is
+					// the user's own last durably-persisted session (or an unparseable
+					// partial write → silent-close → locked), never a secret exposure. This
+					// residual is unavoidable while storage is fully unavailable.
+					// The generation is NOT bumped on this path — a pending close still
+					// owns whatever the row holds and completes its cleanup.
+					if (await this.hasPersistedSession()) {
+						zeroize(this.activeSession?.dek)
+						this.activeSession = undefined
+						this.onChange(undefined)
+						return
+					}
 				}
-			}
-			// Schedule the proactive lock alarm AFTER state is committed.
-			// If alarm scheduling fails (port error, browser throttling),
-			// log + fall back to the reactive `isExpired` check — never
-			// block session-open on alarm wiring.
-			await this.scheduleLockAlarm(session.lockedAt)
+				// Schedule the proactive lock alarm AFTER state is committed.
+				// If alarm scheduling fails (port error, browser throttling),
+				// log + fall back to the reactive `isExpired` check — never
+				// block session-open on alarm wiring.
+				await this.scheduleLockAlarm(session.lockedAt)
+				// COMMIT POINT — last act of the section (a confirmed-gone-row
+				// degraded success commits too: the in-memory session is a real
+				// successor and its predecessor's bearer is confirmed erased).
+				// From here a stale close's generation re-check mismatches and
+				// stands down.
+				this.sessionGeneration++
+			})
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to open profile session", getErrorMessage(error))
 		}
@@ -304,9 +342,20 @@ export class SessionManager {
 
 	/** Clears persisted + in-memory session. Emits `onChange(undefined)`
 	 *  iff a session was actually open (idempotent when already closed).
-	 *  Safe to call multiple times. */
-	public async close(): Promise<void> {
+	 *  Safe to call multiple times.
+	 *
+	 *  `expected` (the expiry path passes the session it OBSERVED): when the
+	 *  active session is no longer that exact object, a successor already
+	 *  replaced it — this stale close must not touch the successor's
+	 *  in-memory state or artifacts, so it returns untouched. */
+	public async close(expected?: ActiveSession): Promise<void> {
 		try {
+			// Identity guard — synchronous, so there is no TOCTOU between the
+			// check and the in-memory head below.
+			if (expected && this.activeSession !== expected) {
+				return
+			}
+			const gen = this.sessionGeneration
 			// B-01: memory-first + asymmetric-to-open. Clear the in-memory session
 			// FIRST so a rejecting `session.delete` can't leave the secret live in
 			// memory after an explicit lock. Unlike open(), a swallowed delete
@@ -319,17 +368,28 @@ export class SessionManager {
 				this.activeSession = undefined
 				this.onChange(undefined)
 			}
-			try {
-				await this.session.delete()
-			} catch (error) {
-				this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to delete persisted session on close", getErrorMessage(error))
-			}
-			// Cancel any pending lock alarm. Idempotent — `clear()` returns
-			// `false` if no alarm exists. Run after state-clear so a racing
-			// alarm fire that arrives during this call sees
-			// `activeSession === undefined` and short-circuits in
-			// `onAlarmFired`.
-			await this.clearLockAlarm()
+			// The ARTIFACT SECTION: a successor open that COMMITTED (bumped the
+			// generation) while we were en route owns the row and the alarm now —
+			// stand down entirely rather than destroy them. A matching generation
+			// means no successor committed: whatever the row holds (our session,
+			// or a failed open's debris) is ours to clean.
+			await this.artifactLock.withLock(async () => {
+				if (this.sessionGeneration !== gen) {
+					this.logger.log(LOG_SOURCE, LogLevel.Info, "Stale close stood down — a newer session committed its artifacts")
+					return
+				}
+				try {
+					await this.session.delete()
+				} catch (error) {
+					this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to delete persisted session on close", getErrorMessage(error))
+				}
+				// Cancel any pending lock alarm. Idempotent — `clear()` returns
+				// `false` if no alarm exists. Run after state-clear so a racing
+				// alarm fire that arrives during this call sees
+				// `activeSession === undefined` and short-circuits in
+				// `onAlarmFired`.
+				await this.clearLockAlarm()
+			})
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to close profile session", getErrorMessage(error))
 		}
@@ -358,14 +418,24 @@ export class SessionManager {
 				const since = Date.now()
 				session.session.since = since
 				session.session.lockedAt = this.sessionTtl > 0 ? since + this.sessionTtl : undefined
-				await this.session.set(session.session)
-				// Cancel + recreate the alarm against the new `lockedAt`.
-				// The previous alarm's `scheduledTime` no longer matches
-				// the persisted `lockedAt`, so the gate in `onAlarmFired`
-				// would ignore a late-firing stale delivery anyway — but
-				// cancelling avoids the spurious fire entirely.
-				await this.clearLockAlarm()
-				await this.scheduleLockAlarm(session.session.lockedAt)
+				// Artifact section: serialized so a concurrent close cannot
+				// interleave between the row write and the alarm swap (a
+				// re-persist landing after a close's delete would resurrect
+				// the row). The identity re-check stands down if the session
+				// was closed/replaced while we queued.
+				await this.artifactLock.withLock(async () => {
+					if (this.activeSession !== session) {
+						return
+					}
+					await this.session.set(session.session)
+					// Cancel + recreate the alarm against the new `lockedAt`.
+					// The previous alarm's `scheduledTime` no longer matches
+					// the persisted `lockedAt`, so the gate in `onAlarmFired`
+					// would ignore a late-firing stale delivery anyway — but
+					// cancelling avoids the spurious fire entirely.
+					await this.clearLockAlarm()
+					await this.scheduleLockAlarm(session.session.lockedAt)
+				})
 			}
 		} catch (error) {
 			this.logger.log(LOG_SOURCE, LogLevel.Error, "Failed to refresh profile session", getErrorMessage(error))
@@ -597,7 +667,11 @@ export class SessionManager {
 	}
 
 	/** Close without emitting — used by `restore` so init-time cleanup
-	 *  doesn't fire onChange before any subscriber exists. */
+	 *  doesn't fire onChange before any subscriber exists.
+	 *  INVARIANT: init-only, pre-`ensureInitialized` — no concurrent open()
+	 *  can exist yet, which is why these legs run unfenced (no generation
+	 *  check, no artifact mutex). If a post-init caller ever appears, it
+	 *  must go through close() instead. */
 	private async silentClose(): Promise<void> {
 		try {
 			await this.session.delete()

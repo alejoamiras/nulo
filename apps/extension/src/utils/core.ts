@@ -7,8 +7,8 @@
  * caused phantom ports when multiple popup surfaces loaded the bundle.
  *
  * The public shape (`managers`, `isBackgroundConnected`, `initTransactionService`,
- * `refreshBalances`, `setSentinel`, `checkSentinel`) is preserved — every
- * existing consumer keeps working unchanged. Under the hood:
+ * `refreshBalances`) is preserved — every existing consumer keeps working
+ * unchanged. Under the hood:
  *   1. `managers` is a Proxy; client construction is deferred until first
  *      access (or until `initAppServiceContext()` is called explicitly).
  *   2. `initAppServiceContext()` is the explicit boot hook. Called from
@@ -26,7 +26,6 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
-import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Reactive: true when the long-lived port to the service worker is open. */
 export const isBackgroundConnected = ref(false)
@@ -181,14 +180,4 @@ export function initTransactionService(onTransactionAdded: (tx: Tx) => void, onT
 	transactionService.onTransactionUpdated.add(onTransactionUpdated)
 	transactionService.connect()
 	managers.transaction = transactionService
-}
-
-const sentinelPath = "nulo:ui:sentinel"
-
-export async function setSentinel(): Promise<void> {
-	await storageLocalSet({ [sentinelPath]: __SENTINEL__ })
-}
-
-export async function checkSentinel(): Promise<boolean> {
-	return (await storageLocalGet(sentinelPath))[sentinelPath] === __SENTINEL__
 }

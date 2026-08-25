@@ -57,7 +57,14 @@ const config: StorybookConfig = {
 		// (RouterLink, ref, computed, Spinner, Icon, ...). Without these
 		// plugins, Button.vue's <Spinner v-if="loading"> and
 		// <Icon :name=...> render as unresolved tags.
-		viteConfig.plugins = viteConfig.plugins ?? []
+		// Drop the app's inherited unplugin-vue-components instance: it writes
+		// src/types/components.d.ts from ITS scan, and under storybook that scan is
+		// narrower than the app's (stories, not the full app tree), so a storybook
+		// build would silently delete still-used global component declarations.
+		// Storybook's own instance below is dts: false.
+		viteConfig.plugins = (viteConfig.plugins ?? [])
+			.flat()
+			.filter((p) => !(p && typeof p === "object" && "name" in p && p.name === "unplugin-vue-components"))
 		viteConfig.plugins.push(
 			useAutoImport({
 				imports: ["vue", "vue-router"],

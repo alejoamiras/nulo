@@ -352,9 +352,10 @@ describe("TokenBalanceService.onActiveProfileChanged — token-map rebuild gener
 		// Park inside the id ALLOCATION (before repo.set) so a switch lands past the
 		// loop-level fence but inside createTokenBalance's own await window.
 		let resolveAlloc!: (id: number) => void
-		vi.spyOn((service as never as { repo: { allocateId: () => Promise<number> } }).repo, "allocateId").mockImplementation(
-			() => new Promise((r) => (resolveAlloc = r as never)),
-		)
+		vi.spyOn(
+			(service as never as { repo: { allocateIdAvoiding: (avoid: ReadonlySet<number>) => Promise<number> } }).repo,
+			"allocateIdAvoiding",
+		).mockImplementation(() => new Promise((r) => (resolveAlloc = r as never)))
 		const setSpy = vi.spyOn((service as never as { repo: { set: (b: unknown) => Promise<void> } }).repo, "set")
 
 		void onTokenAdded.invoke(tokenRaw(100, "A"))

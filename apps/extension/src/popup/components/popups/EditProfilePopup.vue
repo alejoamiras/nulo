@@ -3,7 +3,7 @@
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { TOAST_DURATION, useToast } from "@/composables/toast"
 import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
@@ -83,7 +83,11 @@ const handleUpdateProfile = async () => {
 		emit("onClose")
 
 		openToast({ label: "Profile is updated" })
-	} catch (err) {
+	} catch {
+		// The rejection previously vanished with zero user feedback — the sole
+		// silent outlier in the popup family; the family's standard error toast
+		// handles it, and the finally still releases the latch.
+		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
 	} finally {
 		isProfileUpdateInProgress.value = false
 	}

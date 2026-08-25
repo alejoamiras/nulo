@@ -13,8 +13,8 @@ The bump is low-risk (Bun-API surface is tooling-only) and the wins are in the p
 - All app builds are Vite 8 (crxjs MV3, bespoke WASM-emit plugins). Vite is **not** replaceable by `bun build` — no Vue SFC support, no MV3 pipeline. Out of scope permanently.
 - `bunfig.toml` pins `linker = "hoisted"` (isolated broke the `@aztec/*` remap, the `resolvePackageFile` walker in `apps/extension/vite.shared.ts`, and bridge-core deploy paths) and `minimumReleaseAge = 604800`.
 - `bun.lock` is text, `lockfileVersion: 1`, `configVersion: 1`.
-- Bun version pin surface: `package.json#packageManager`, `.github/actions/setup-bun/action.yml` (version + 2 cache-key occurrences), a **duplicated inline pin** in `.github/workflows/pr-quick.yml`'s commitlint job (version + 2 cache keys), plus CLAUDE.md prose.
-- Already Bun-native today: `scripts/release/{auto-unstick-run,open-sync-pr-run}.ts` (`Bun.$`), `packages/design/scripts/gen-tokens.ts` (`Bun.write`), `scripts/lockfile-exception-diff.ts` (`Bun.file`), `Bun.YAML` in `scripts/ci-cd/behavior-gating.test.ts`.
+- Bun version pin surface (as of Arc A's merge): `package.json#packageManager` + `.github/actions/setup-bun/action.yml` (version + 2 cache-key occurrences) + CLAUDE.md prose — the `pr-quick.yml` inline duplicate was folded into the composite by Arc A. (Arc B adds the out-of-repo Cloudflare Pages `BUN_VERSION` env var.)
+- Already Bun-native today: `scripts/release/auto-unstick-run.ts` (`Bun.file`), `packages/design/scripts/gen-tokens.ts` (`Bun.write`), `scripts/lockfile-exception-diff.ts` (`Bun.file`), `Bun.YAML` in `scripts/ci-cd/behavior-gating.test.ts`. (An earlier draft credited `Bun.$` to the release scripts; Arc C's recon missed it, Arc D's found it — `scripts/release/{open-sync-pr-run,auto-unstick-run}.ts` use `$` via `await import("bun")`, invisible to a literal `Bun.$` grep.)
 
 ## Pre-flight checks already cleared (2026-08-24 read of the breaking changes)
 
@@ -43,6 +43,8 @@ Branch experiment: `linker = "isolated"` + global virtual store. 1.4 changes the
 - **Abort criterion**: if `@aztec` resolution can't be made sound with hoist patterns, keep hoisted and close the arc as *rejected with evidence* in lessons.
 
 ## Arc C — `/blueprint mid` — `vitest-on-bun`
+
+**Status: implemented** (`implementations-plan/vitest-on-bun/` — plan approved by fresh-context codex; every unit/component suite incl. the faucet's jsdom smoke on Bun; the ONE Bun-side failure class, vitest 4's `interopDefault` + Bun's namespace `__esModule`, stopgapped by `deps.interopDefault: false` until vitest ≥ 5.0.0-beta.3; 12-suite × 2-engine × 30-run matrix at one commit all `COMPARE OK`; `test:watch` stays on Node). The faucet (unit + jsdom smoke) was missing from the order below — it sits with the Vue suites.
 
 Move Vitest suites to `bun --bun vitest run`, package by package, in the codex-corrected order (`wallet-crypto` is jsdom, not pure-node — see lessons/pre-arc-consults.md): `landing` (tiny node control) → low-complexity node packages → `bridge-core` (node, heavy Aztec/WASM graph) → leaf jsdom packages → Vue suites → extension aggregate. E2E configs stay on Node in this arc. 1.4 claims Vitest works including `--coverage` (V8 provider via `node:inspector`) and both pools; the Vite-8-under-Bun blockers (`dns.promises` exports, `pipe()` drain) are fixed.
 

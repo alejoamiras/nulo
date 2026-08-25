@@ -1,0 +1,120 @@
+<title>Isolated Linker Store</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #faf6ef; --ink: #292317; --muted: #6f6656; --line: #e2d9c8;
+    --card: #f3ecdf; --accent: #9a6a00; --accent-ink: #7c5500;
+    --warn-bg: #f6e3d3; --warn-edge: #b4560a; --warn-ink: #7a3a05;
+    --ok: #3f6f3a; --approve-bg: #e8ecdc; --approve-edge: #5c7a3f;
+    --code-bg: #2b251b; --code-ink: #ede4d2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #201c15; --ink: #ece4d4; --muted: #a89c86; --line: #3c352a;
+      --card: #2a2419; --accent: #e0a33e; --accent-ink: #e8b45c;
+      --warn-bg: #38271a; --warn-edge: #d97a2e; --warn-ink: #f0c49a;
+      --ok: #8fbb7f; --approve-bg: #27301d; --approve-edge: #7f9e5c;
+      --code-bg: #17130d; --code-ink: #e5dcc9;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #201c15; --ink: #ece4d4; --muted: #a89c86; --line: #3c352a;
+    --card: #2a2419; --accent: #e0a33e; --accent-ink: #e8b45c;
+    --warn-bg: #38271a; --warn-edge: #d97a2e; --warn-ink: #f0c49a;
+    --ok: #8fbb7f; --approve-bg: #27301d; --approve-edge: #7f9e5c;
+    --code-bg: #17130d; --code-ink: #e5dcc9;
+  }
+  body { background: var(--paper); color: var(--ink); font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif; line-height: 1.55; margin: 0; padding: 3rem 1.25rem 5rem; }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2, h3 { font-family: "Sora", "Segoe UI", system-ui, sans-serif; line-height: 1.15; text-wrap: balance; }
+  h1 { font-size: 2.1rem; font-weight: 700; margin: 0 0 .4rem; }
+  h2 { font-size: 1.25rem; font-weight: 700; margin: 2.8rem 0 .9rem; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 0 0 .3rem; }
+  p { margin: .65rem 0; }
+  .kicker { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .75rem; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin-bottom: .8rem; }
+  .lede { font-size: 1.06rem; color: var(--muted); max-width: 40rem; }
+  .warncard { background: var(--warn-bg); border-left: 4px solid var(--warn-edge); color: var(--warn-ink); padding: .9rem 1.1rem; border-radius: 0 8px 8px 0; margin: 1.6rem 0; }
+  .phases { display: flex; flex-direction: column; gap: .8rem; margin-top: 1rem; }
+  .phase { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: .9rem 1.1rem; }
+  .phase .num { font-family: "JetBrains Mono", ui-monospace, monospace; color: var(--accent); font-size: .78rem; letter-spacing: .06em; }
+  .gate { color: var(--muted); font-size: .9rem; margin: .35rem 0 0; }
+  .gate b { color: var(--ok); font-weight: 700; }
+  .decisions { background: var(--approve-bg); border-left: 4px solid var(--approve-edge); border-radius: 0 8px 8px 0; padding: 1rem 1.2rem; margin: 1.4rem 0; }
+  .decisions ol { margin: .5rem 0 0; padding-left: 1.2rem; }
+  .decisions li { margin: .55rem 0; }
+  code { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .86em; background: var(--card); border: 1px solid var(--line); padding: .05em .35em; border-radius: 4px; }
+  pre { background: var(--code-bg); color: var(--code-ink); border-radius: 8px; padding: 1rem 1.1rem; overflow-x: auto; font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .8rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  pre code { background: none; border: none; padding: 0; }
+  .seedcard { border: 1px solid var(--line); border-radius: 8px; padding: 1rem 1.1rem; margin: 1rem 0; }
+  .seedcard.rec { border-color: var(--accent); }
+  .seedcard .tag { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; color: var(--accent); }
+  .warning-line { color: var(--warn-edge); font-weight: 700; }
+  .muted { color: var(--muted); font-size: .9rem; }
+</style>
+<main>
+  <p class="kicker">arc B of the Bun 1.4 goal · blueprint mid · codex-convergence gate</p>
+  <h1>Isolated Linker Store</h1>
+  <p class="lede">Switch how Bun lays out installed packages so every workspace can only see the dependencies it actually declares — closing the "works by luck" gaps a shared pile of packages hides. The risk: a handful of our build tools assume the OLD layout. So they get fixed first, on the old layout, where nothing can break — and only then does the switch flip, one measured, reversible step at a time.</p>
+  <div class="warncard">
+    <strong>Implementation update — the headline changed, honestly.</strong> Measured on this machine, the new layout is <em>not</em> faster to install (1.22s vs 1.17s); the "7× faster" claim only materializes with an optional shared store (0.36s) that stays OFF in the committed config for supply-chain reasons. What the change actually buys is correctness: two undeclared dependencies found and fixed (one of them the source of a shipped database-engine file), six copy-pasted path-guessers replaced by one tested resolver, a permanent identity test, and a wallet-grade dependency refresh that retired 17 security advisories. The keep-or-abort call goes to the Codex gate on those terms.</div>
+  <p class="lede"></p>
+
+  <h2>Why the "mid" tier and a heavier gate</h2>
+  <p>This changes install topology for a wallet's build — two risk dimensions run hot (blast radius across every build; supply-chain sensitivity of a full dependency re-resolution). Three independent auditors reviewed the plan: two in parallel (Codex + a second Claude), whose conditions were all folded in, and a final fresh-context Codex pass that acts as the approval gate — per your standing "resolve it with Codex to convergence" protocol.</p>
+
+  <div class="warncard">
+    <strong>What the recon found before any plan existed:</strong> six copy-pasted versions of the same path-guessing helper; one build step that locates a critical database engine via a package NOBODY declares (works today purely by hoisting luck); one script pointing at a package by its OLD name — dead code nobody noticed; and the contract-compiler config hard-wired to the old layout. Two of these were genuine pre-existing bugs, found because we looked.
+  </div>
+
+  <h2>Phases</h2>
+  <div class="phases">
+    <div class="phase"><span class="num">PHASE 1 · SHIPS ALONE AS PR "B1"</span>
+      <h3>Fix how tools find packages — before touching anything</h3>
+      <p>One tiny shared helper replaces the six copies and the hard-wired paths; the two undeclared dependencies get declared; the dead script gets fixed; the contract compiler gets its mapping generated and verified instead of guessed. A new "identity test" then proves every special file is the RIGHT file from the RIGHT package — a proof that keeps running forever after. All of this is pure hardening: worth merging even if the switch is later abandoned.</p>
+      <p class="gate"><b>Proves itself by:</b> the full pre-PR battery + the new identity test + a clean strict install, all on the unchanged layout.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 2</span>
+      <h3>Interrogate the shared store — in a sandbox, not the repo</h3>
+      <p>The store's exact behavior is under-documented, so we test it on throwaway projects first: can it be turned off, what's the default, does it survive 5–10 simultaneous installs, kills mid-install, and two different patches of the same package. The result is a written risk memo — evidence, honestly labeled as evidence rather than proof.</p>
+      <p class="gate"><b>Proves itself by:</b> the probe matrix + the posture memo.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 3 · PR "B2" BEGINS</span>
+      <h3>Flip the layout — with the dependency list frozen</h3>
+      <p>The switch flips while the lockfile stays byte-identical, so if anything breaks it can ONLY be the layout. The gate is broad: both browser builds, the dev server (a specific blind spot an auditor caught), tests, and proof that the shipped extension bytes are identical to before.</p>
+      <p class="gate"><b>Proves itself by:</b> identity test on the new layout + full battery + dev-server boot + byte-identical WASM outputs.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 4</span>
+      <h3>The one dependency re-resolution — reviewed like wallet code</h3>
+      <p>First, expired exceptions to our 7-day new-package safety delay are removed (their own overdue TODO) so the safety net is real. Then the lockfile is regenerated once, and EVERY change is reviewed: checksums and sources — not just version numbers — must be untouched for the frozen Aztec packages, and anything reaching the shipped bundle gets a line-by-line package diff regardless of how innocent the version bump looks.</p>
+      <p class="gate"><b>Proves itself by:</b> the written review covering every change class + the full battery re-run.</p>
+    </div>
+    <div class="phase"><span class="num">PHASE 5</span>
+      <h3>Measure, validate end-to-end, decide</h3>
+      <p>Fresh-copy install timings confront the "7× faster" claim with real numbers; the full battery plus one real-network test round runs solo. Then the keep-or-abort decision — and aborting still keeps Phase 1's hardening.</p>
+      <p class="gate"><b>Proves itself by:</b> everything green including the network round + the timings table + the decision written down with its reasoning.</p>
+    </div>
+  </div>
+
+  <h2>Decisions already made (via the convergence protocol)</h2>
+  <div class="decisions">
+    <ol>
+      <li><strong>Fix-first beats bridge-first.</strong> A 10-line config bridge could fake the old layout — all three reviews steelmanned it and all three ruled it out: it preserves the disease (undeclared dependencies) and defers the same work. Kept only as a labeled emergency fallback.</li>
+      <li><strong>Flip-then-regenerate, not both at once.</strong> The two auditors split on the order; resolved: flip with the dependency list frozen (any failure is attributable), regenerate second. One root cause per step.</li>
+      <li><strong>The one flag still open for you:</strong> declaring <code>@aztec/sqlite3mc-wasm</code> at its EXISTING 5.0.1 pin (it's already in your tree — this just writes it down). Both auditors judged it sound and Codex approved it under your delegated gate, with a permanent test that keeps it locked to the copy Aztec's own packages use. Your objection window stays open until B1 merges.</li>
+    </ol>
+  </div>
+
+  <h2>Implementation seeds <span class="muted">(drafts — finalized at the convergence gate)</span></h2>
+  <p class="warning-line">Use exactly ONE per session — they don't compose.</p>
+  <div class="seedcard rec">
+    <p class="tag">Recommended: /goal</p>
+    <pre><code>/goal All five phases marked ✓ in implementations-plan/isolated-linker-store/plan.md (headers in the file), each backed by its gate as WRITTEN there reported passing in the transcript; LESSONS_FILE=implementations-plan/isolated-linker-store/lessons/phase-N.md printed per phase; /code-review max --fix applied+committed; the codex post-impl loop converged (resumed pass quoted: no new material findings); the gh stack exists with B1 + B2 PRs green (gh pr view output in transcript) and the keep/abort decision recorded; owner pinged for merges. Constraints: no @aztec version-line changes; network shard runs solo; lockfile events in their own commits; merges stay the owner's.</code></pre>
+  </div>
+  <div class="seedcard">
+    <p class="tag">Alternative: /loop 15m</p>
+    <pre><code>/loop 15m Drive implementations-plan/isolated-linker-store forward per its plan.md. Never idle. Each firing: read plan.md+lessons (authoritative), git status/log; advance the current phase; run the fast layers after each meaningful edit; gate green (as WRITTEN) → paste result, mark ✓, write lessons, print LESSONS_FILE, advance; stuck or judgment call → /codex xhigh to convergence, log the round; 5 fails on one step → reassess with codex; all ✓ → post-impl protocol from plan.md then gh stack submit and ping the owner. Hard limits: no @aztec version changes, no gate weakening, no merges, network shard solo.</code></pre>
+  </div>
+
+  <p class="muted">Full technical plan: <code>implementations-plan/isolated-linker-store/plan.md</code> (worktree branch <code>worktree-isolated-linker-store</code>) · recon + both round-1 audit transcripts + the decision ledger sit beside it · Arc A's companion: the "Bun 1.4 Bump" artifact.</p>
+</main>

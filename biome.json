@@ -6,6 +6,8 @@
 		"includes": [
 			"apps/**",
 			"packages/**",
+			"vitest.base.ts",
+			"scripts/ci-cd/test-soak/**",
 			"!**/node_modules",
 			"!**/dist",
 			"!**/target",
