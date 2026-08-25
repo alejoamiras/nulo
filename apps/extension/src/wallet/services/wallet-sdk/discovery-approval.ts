@@ -1,4 +1,5 @@
 import type { PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
+import type { PendingVerificationEntry } from "./pending-verification"
 import { isDiscoveryExpired } from "@nulo/wallet-bridge"
 import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
 
@@ -23,14 +24,16 @@ import { type ILogger, LogLevel } from "@nulo/wallet-core/logger"
 export async function approveOrRollbackDiscoverySession(args: {
 	discovery: PendingDiscovery
 	sessionId: string
-	dedupeKey: string
+	/** The profile whose DappSession row this approval created — bound into the
+	 *  marker so establishment can fail-close an approve/validate profile skew. */
+	approverProfileId: string
 	approveDiscovery: (requestId: string) => boolean
 	rejectDiscovery: (requestId: string) => void
 	deleteSession: (sessionId: string) => Promise<unknown>
-	pendingVerification: Set<string>
+	pendingVerification: Map<string, PendingVerificationEntry>
 	logger: ILogger
 }): Promise<boolean> {
-	const { discovery, sessionId, dedupeKey, approveDiscovery, rejectDiscovery, deleteSession, pendingVerification, logger } = args
+	const { discovery, sessionId, approverProfileId, approveDiscovery, rejectDiscovery, deleteSession, pendingVerification, logger } = args
 
 	if (isDiscoveryExpired(discovery)) {
 		try {
@@ -49,13 +52,15 @@ export async function approveOrRollbackDiscoverySession(args: {
 		return false
 	}
 
-	// Schedule verification before approving so onSessionEstablished can find the
-	// entry, but if the SDK reports the approval didn't land (the request was
-	// already gone) undo it — a stale pendingVerification entry would otherwise
-	// leak for the SW's lifetime.
-	pendingVerification.add(dedupeKey)
+	// Schedule verification before approving so onSessionEstablished can find
+	// the entry, keyed by the REQUEST id (which the upstream reuses as the
+	// sessionId) so concurrent same-tuple handshakes can never consume each
+	// other's markers. If the SDK reports the approval didn't land (the request
+	// was already gone) undo it — a leaked entry would otherwise persist for
+	// the SW's lifetime.
+	pendingVerification.set(discovery.requestId, { at: Date.now(), profileId: approverProfileId, tabId: discovery.tabId })
 	if (!approveDiscovery(discovery.requestId)) {
-		pendingVerification.delete(dedupeKey)
+		pendingVerification.delete(discovery.requestId)
 		logger.log("wallet-sdk", LogLevel.Warn, `Discovery approve did not land (already gone): ${discovery.origin}`)
 		return false
 	}

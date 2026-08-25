@@ -2,18 +2,19 @@ import type { PendingDiscovery } from "@aztec/wallet-sdk/extension/handlers"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { describe, expect, test, vi } from "vitest"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
+import type { PendingVerificationEntry } from "./pending-verification"
 
 const noopLogger: ILogger = { log: () => {} }
 
 const discoveryAt = (requestId: string, timestamp: number): PendingDiscovery =>
-	({ requestId, origin: "https://a.com", status: "pending", timestamp }) as unknown as PendingDiscovery
+	({ requestId, origin: "https://a.com", status: "pending", timestamp, tabId: 7 }) as unknown as PendingDiscovery
 
 function harness() {
 	return {
 		approve: vi.fn(() => true), // SDK: approval landed (requestId still pending)
 		reject: vi.fn(),
 		del: vi.fn(async () => {}),
-		pv: new Set<string>(),
+		pv: new Map<string, PendingVerificationEntry>(),
 	}
 }
 
@@ -27,7 +28,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		const approved = await approveOrRollbackDiscoverySession({
 			discovery: discoveryAt("r1", Date.now() - 61_000), // expired by the decision point
 			sessionId: "S1",
-			dedupeKey: "https://a.com|1",
+			approverProfileId: "prof-A",
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -48,7 +49,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		const approved = await approveOrRollbackDiscoverySession({
 			discovery: discoveryAt("r1", Date.now() - 61_000),
 			sessionId: "S1",
-			dedupeKey: "k",
+			approverProfileId: "prof-A",
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -66,7 +67,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		const approved = await approveOrRollbackDiscoverySession({
 			discovery: discoveryAt("r1", Date.now() - 5_000), // well within the window
 			sessionId: "S1",
-			dedupeKey: "https://a.com|1",
+			approverProfileId: "prof-A",
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,
@@ -78,7 +79,9 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		expect(h.approve).toHaveBeenCalledWith("r1")
 		expect(h.del).not.toHaveBeenCalled() // no rollback
 		expect(h.reject).not.toHaveBeenCalled()
-		expect(h.pv.has("https://a.com|1")).toBe(true) // verification scheduled
+		const entry = h.pv.get("r1") // keyed by the REQUEST id, not the tuple
+		expect(entry).toMatchObject({ profileId: "prof-A", tabId: 7 })
+		expect(Number.isFinite(entry?.at)).toBe(true)
 	})
 
 	// The SDK's approveDiscovery returns false when the requestId is already gone
@@ -90,7 +93,7 @@ describe("approveOrRollbackDiscoverySession (B-16)", () => {
 		const approved = await approveOrRollbackDiscoverySession({
 			discovery: discoveryAt("r1", Date.now() - 5_000), // fresh — reaches the approve branch
 			sessionId: "S1",
-			dedupeKey: "https://a.com|1",
+			approverProfileId: "prof-A",
 			approveDiscovery: h.approve,
 			rejectDiscovery: h.reject,
 			deleteSession: h.del,

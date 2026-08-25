@@ -82,8 +82,11 @@ test("fails first, passes on retry", () => {
 		const pkgDir = resolve(__dirname, "../..")
 		// The INSTALLED vitest binary + absolute reporter path: bunx could fall
 		// back to registry resolution on a runner where the local bin is absent,
-		// which would test a different vitest than the suite runs.
-		const vitestBin = resolve(pkgDir, "../../node_modules/.bin/vitest")
+		// which would test a different vitest than the suite runs. Resolved from
+		// THIS workspace's .bin (vitest is a declared devDependency here), which
+		// holds under both the hoisted and the isolated linker — the repo-root
+		// .bin only exists when dependencies are hoisted.
+		const vitestBin = resolve(pkgDir, "node_modules/.bin/vitest")
 		const reporterAbs = join(__dirname, "retry-error-reporter.ts")
 		const child = spawnSync(vitestBin, ["run", "--root", dir, "--retry", "1", "--reporter", "default", "--reporter", reporterAbs], {
 			cwd: pkgDir,

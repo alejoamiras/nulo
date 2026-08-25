@@ -67,7 +67,7 @@ function makeDispatcher(): { dispatcher: WalletSdkDispatcher; sent: () => string
 		}),
 	}
 	const network: INetworkRef = { id: "net-0", chainId: CHAIN }
-	const networkReader: INetworkReader = { getNetworks: async () => [network] }
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
 	const accountReader: IAccountReader = {
 		getAccounts: async () => [
 			{ address: ADDR_A, name: "Account 1", chainId: CHAIN },

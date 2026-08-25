@@ -209,7 +209,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	) {
 		super(NETWORK_SERVICE_NAME, logger)
 		this.storage = new EntityStorage<Network>(NETWORK_STORAGE_ROOT, browserApi.storage.local, (raw) => NetworkRowSchema.parse(raw))
-		this.lock = new Lock("network", logger)
+		// Watchdog DISABLED: deleteNetwork legitimately holds this lock across
+		// purgeChain → clearChainState, which rides the 30-minute prove-tx
+		// envelope (it drains behind an in-flight proof). A force-release would
+		// admit a concurrent network mutator into the middle of that cascade;
+		// queueing behind it is the correct semantic.
+		this.lock = new Lock("network", logger, null)
 		this.nodeFactory = nodeFactory ?? new AztecNodeFactoryAdapter()
 	}
 

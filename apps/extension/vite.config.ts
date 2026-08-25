@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join, relative } from "node:path"
+import { readFileSync } from "node:fs"
+import { dirname, relative } from "node:path"
 import { fileURLToPath, URL } from "node:url"
+import { resolveExportedAsset } from "@nulo/resolve-asset"
 import vue from "@vitejs/plugin-vue"
 import usePages from "vite-plugin-pages"
 import useAutoImport from "unplugin-auto-import/vite"
@@ -240,26 +241,27 @@ export default defineConfig({
 			name: "sqlite3mc-wasm-emit",
 			apply: "build",
 			generateBundle() {
-				// The package's exports map doesn't expose ./package.json, so resolve by walking the
-				// node_modules chain from this config (hoisted install ⇒ the repo root hit).
-				const vendor = (() => {
-					let dir = dirname(fileURLToPath(import.meta.url))
-					while (dir !== dirname(dir)) {
-						const candidate = join(dir, "node_modules", "@aztec", "sqlite3mc-wasm")
-						if (existsSync(candidate)) return candidate
-						dir = dirname(dir)
-					}
-					throw new Error("sqlite3mc-wasm-emit: cannot locate @aztec/sqlite3mc-wasm in any node_modules")
-				})()
+				// Both files are condition-less exported subpaths, so they resolve directly —
+				// layout-agnostically — through this workspace's DECLARED @aztec/sqlite3mc-wasm
+				// dependency (the identity test pins that declaration in lockstep with the copy
+				// @aztec/kv-store consumes).
 				this.emitFile({
 					type: "asset",
 					fileName: "assets/sqlite3.wasm",
-					source: readFileSync(join(vendor, "vendor/jswasm/sqlite3.wasm")),
+					source: readFileSync(
+						resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3.wasm", {
+							from: import.meta.url,
+						}),
+					),
 				})
 				this.emitFile({
 					type: "asset",
 					fileName: "assets/sqlite3-opfs-async-proxy.js",
-					source: readFileSync(join(vendor, "vendor/jswasm/sqlite3-opfs-async-proxy.js")),
+					source: readFileSync(
+						resolveExportedAsset("@aztec/sqlite3mc-wasm", "./vendor/jswasm/sqlite3-opfs-async-proxy.js", {
+							from: import.meta.url,
+						}),
+					),
 				})
 			},
 		},

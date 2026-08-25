@@ -1224,3 +1224,14 @@ describe("NetworkService.probeNodeStatus (bounded probe)", () => {
 		await expect(service.probeNodeStatus(network.id, 1)).rejects.toThrow()
 	})
 })
+
+describe("NetworkService lock configuration", () => {
+	test("the service lock's watchdog is DISABLED — deleteNetwork's 30-min clearChainState drain is a by-design hold", () => {
+		const logger = new LoggerStore(new ConfigStore())
+		const service = new NetworkService(logger, new FakeBrowserApi())
+		// A force-release mid-cascade would admit a concurrent network mutator
+		// into the purge pipeline; queueing behind it is the correct semantic.
+		const lock = (service as unknown as { lock: { maxHoldMs: number | null } }).lock
+		expect(lock.maxHoldMs).toBeNull()
+	})
+})

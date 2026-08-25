@@ -17,7 +17,9 @@
 		"verify:l1": "bun scripts/verify-l1.ts"
 	},
 	"dependencies": {
+		"@nulo/resolve-asset": "workspace:*",
 		"@nulo/wallet-crypto": "workspace:*",
+		"zod": "^4.4.3",
 		"@aztec/aztec.js": "5.0.1",
 		"@aztec/accounts": "5.0.1",
 		"@aztec/constants": "5.0.1",

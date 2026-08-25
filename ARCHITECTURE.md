@@ -170,7 +170,7 @@ Capability *bundles* — the playground's helper concept for grouping capabiliti
 
 Two primitives:
 
-- **`Lock`** (`apps/extension/src/wallet/utils/lock.ts`) — single-flight queue per service. Methods that mutate service state acquire the lock; readers and writers serialize behind it. Includes a `MAX_HOLD_MS` force-release to avoid deadlocks.
+- **`Lock`** (`packages/wallet-core/src/utils/lock.ts`) — single-flight queue per service. Methods that mutate service state acquire the lock; readers and writers serialize behind it. Ownership-ticketed: `enter()` returns a per-grant `LockTicket` and `leave(ticket)` no-ops for anyone but the current owner, so the 5-minute force-release watchdog (there to avoid deadlocks; disable with `maxHoldMs: null` for by-design long holds) cannot let a displaced holder release its successor's turn.
 - **`ReadWriteGuard`** (`packages/wallet-core/src/utils/rw-guard.ts`) — multi-reader / single-writer guard. `read(fn)` runs in parallel with other reads; `write(fn)` drains readers, then runs exclusively. Manual `enterWrite()` / `leaveWrite()` for destructive ops that span multiple awaits (profile switch / delete). Writers have FIFO priority — a reader arriving while a writer is queued waits behind that writer. Force-release at `MAX_READER_DRAIN_MS` is a debuggability aid, not a correctness path.
 
 Service startup is **phase-ordered**, not parallel: `ServiceCollection.start()` (`packages/wallet-core/src/base/index.ts`) runs services in topological phases derived from each service's `dependencies` array. Phase 0 runs everything with no declared deps in parallel; each subsequent phase awaits the previous. Cycles and unknown deps throw named errors at boot.

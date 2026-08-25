@@ -113,10 +113,9 @@ test("full backup: fresh install → synthetic backup → /popup/general", async
 	expect(address.length).toBeGreaterThan(2)
 
 	const storage = await page.evaluate(async () => {
-		return await chrome.storage.local.get(["nulo:ui:lastActiveProfile", "nulo:ui:sentinel", "nulo:ui:activeAccount"])
+		return await chrome.storage.local.get(["nulo:ui:lastActiveProfile", "nulo:ui:activeAccount"])
 	})
 	expect(storage["nulo:ui:lastActiveProfile"]).toBeTruthy()
-	expect(storage["nulo:ui:sentinel"]).toBeTruthy()
 	expect(storage["nulo:ui:activeAccount"]).toBeTruthy()
 
 	expect(freshExtensionPerTest.pageErrors).toEqual([])

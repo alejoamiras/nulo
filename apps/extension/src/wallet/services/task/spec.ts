@@ -91,6 +91,12 @@ export class TransferContent implements ITaskContent {
 		public readonly senderAddress: string,
 		public readonly recipientAddress: string,
 		public readonly amount: bigint,
+		/** Scoping identity for same-address cross-network views: two profiles
+		 *  restored from one phrase share an address, and TaskService clears on
+		 *  PROFILE change only — without the network id, an address-only match
+		 *  renders another network's in-flight transfer card. Optional so
+		 *  in-flight tasks minted before this field keep address-only semantics. */
+		public readonly networkId?: string,
 	) {}
 }
 

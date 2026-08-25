@@ -1,0 +1,80 @@
+<title>Dapp Profile Binding</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground:#FAF9F6; --surface:#FFFFFF; --ink:#1C1E21; --muted:#5B6068;
+  --line:#DDD9D0; --accent:#0E7C66; --accent-ink:#0A5A4B; --card:#F1EFEA; --warn:#A86412;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#151719; --surface:#1D2023; --ink:#E8E6E1; --muted:#A0A6AD;
+    --line:#34393E; --accent:#3FBF9F; --accent-ink:#6FD3B9; --card:#24282C; --warn:#D99A4E;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#151719; --surface:#1D2023; --ink:#E8E6E1; --muted:#A0A6AD;
+  --line:#34393E; --accent:#3FBF9F; --accent-ink:#6FD3B9; --card:#24282C; --warn:#D99A4E;
+}
+* { box-sizing:border-box }
+body { margin:0; background:var(--ground); color:var(--ink); font-family:"Source Serif 4",Georgia,serif; font-size:17px; line-height:1.65 }
+.wrap { max-width:720px; margin:0 auto; padding:48px 24px 96px }
+h1,h2,h3 { font-family:"Archivo",sans-serif; text-wrap:balance }
+h1 { font-size:34px; font-weight:800; letter-spacing:-0.015em; margin:8px 0 12px }
+h2 { font-size:20px; font-weight:700; margin:44px 0 12px }
+h3 { font-size:15.5px; font-weight:700; margin:0 0 6px }
+p { margin:0 0 13px }
+.eyebrow { font-family:"Archivo",sans-serif; font-size:12px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent) }
+.phase { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent); padding:16px 18px 10px; margin:0 0 12px }
+.phase p { font-size:15.5px }
+.gate { font-size:13.5px; color:var(--muted); border-top:1px dashed var(--line); margin-top:6px; padding-top:8px }
+.note { background:var(--card); padding:14px 18px; margin:14px 0; font-size:15px }
+pre { background:var(--card); padding:14px 16px; overflow-x:auto; font-family:"JetBrains Mono",monospace; font-size:12.5px; line-height:1.5; white-space:pre-wrap }
+.warnline { color:var(--warn); font-family:"Archivo",sans-serif; font-size:13.5px; font-weight:600 }
+ul { margin:0 0 13px; padding-left:22px } li { margin-bottom:7px } li::marker { color:var(--accent) }
+.muted { color:var(--muted); font-size:14px }
+a { color:var(--accent-ink) }
+</style>
+<div class="wrap">
+<div class="eyebrow">Nulo · remediation batch 3 of 9</div>
+<h1>Dapp Profile Binding</h1>
+<p>Profiles exist so your identities stay separate. But today, a website connected to your wallet under profile A keeps its live connection when you switch to profile B — and if B ever approved that site too, the site's requests quietly start answering from B's world instead. Even without that, the site learns that A and B live in the same wallet — the exact thing profiles are meant to hide. Two smaller flaws ride along: closing a tab at the wrong moment makes the wallet needlessly re-run its emoji verification on every future reconnect, and a quirk in how responses are packaged can corrupt values a website receives.</p>
+
+<h2>What changes, in plain words</h2>
+<ul>
+<li><strong>Connections belong to one profile, forever.</strong> Every connection is stamped at birth with the profile that approved it. Switch profiles, and connections stamped to the old one are cleanly disconnected — the site sees the same "disconnected" it would if you'd clicked disconnect yourself, and can simply reconnect under the new profile if it's welcome there.</li>
+<li><strong>Even split-second stragglers can't cross identities.</strong> A request already in progress during the switch finishes entirely under the profile that accepted it — the lookup that used to "helpfully" read whichever profile is active now uses the stamp instead. And an approval caught mid-handshake by a switch is refused outright rather than mis-assigned.</li>
+<li><strong>No more phantom re-verification.</strong> The little marker that says "this connection still needs the emoji check" is cleaned up when its tab closes and expires on its own as a backstop — a closed-at-the-wrong-moment tab no longer haunts future reconnects. First-time verification is enforced by a separate mechanism and is untouched.</li>
+<li><strong>Honest response packaging.</strong> The serializer confused "the same value appears twice" with "infinite loop" and stamped the second appearance "[Circular]". It now only flags true loops.</li>
+</ul>
+
+<h2>Why this level of ceremony (tier: mid)</h2>
+<p>Profile isolation is a core promise of the product — one high-risk dimension — but the surface is one service layer with well-tested teardown machinery already in place. Mid tier: plan, competing options, two independent reviewers, fresh-eyes final pass.</p>
+
+<h2>Phases</h2>
+<div class="phase"><h3>Phase 1 — The two clean fixes</h3>
+<p>Fix the response serializer (with tests adopted from the audit's proof) and give the verification marker its timestamp and cleanup.</p>
+<p class="gate">Proves itself by: the service layer's unit suites, extended, all green.</p></div>
+<div class="phase"><h3>Phase 2 — Stamp, guard, and switch teardown</h3>
+<p>Stamp connections with their approving profile, refuse mismatched requests (politely — the site gets a proper error, then the disconnect), disconnect old-profile connections on switch, and anchor the request pipeline to the stamped identity so nothing can cross even mid-flight.</p>
+<p class="gate">Proves itself by: a matrix of unit tests covering every ordering the reviewers could think of — switches landing before, during, and after requests and handshakes.</p></div>
+<div class="phase"><h3>Phase 3 — Prove it in a real browser</h3>
+<p>A new live-network rehearsal: connect a real test dApp under profile A, switch to B in the wallet, watch the dApp show "disconnected", confirm a follow-up call fails cleanly, reconnect under B. This drives the in-wallet profile switcher in automation for the first time — some test scaffolding gets built along the way.</p>
+<p class="gate">Proves itself by: the full check battery plus the live-network suite, run solo, all green.</p></div>
+
+<h2>Human context</h2>
+<p>The reviewers earned their keep a third time. One proved the original plan's "stamp at connection time" read the wrong source — a switch during the handshake could stamp the NEW profile onto a connection the OLD one initiated (now the approval itself carries the identity, and a mismatch refuses the connection). The other showed a request already inside the pipeline could still consult the new profile's permissions mid-flight (now the pipeline is anchored to the stamp). Both changes came out of a formal reject verdict — the process working as designed.</p>
+
+<h2>Open questions</h2>
+<ul><li>None blocking. If the in-wallet profile switcher proves undrivable in the browser harness after honest effort, the switch scenario is pinned at the unit level instead and the deviation documented — not silently dropped.</li></ul>
+
+<div class="note"><strong>Approval:</strong> delegated per your standing instruction — ships once the final fresh-eyes review approves and every check is green. Full technical plan: <span class="muted">implementations-plan/dapp-profile-binding/plan.md</span>.</div>
+
+<h2>Implementation seeds</h2>
+<p class="muted">Not needed for the active autonomous run. For a standalone re-run:</p>
+<p class="warnline">Use exactly one per session — they replace each other.</p>
+<h3>Recommended: /goal</h3>
+<pre>/goal All 3 phases marked ✓ in implementations-plan/dapp-profile-binding/plan.md, each ✓ backed by its validation gate reported passing in the transcript; /code-review max --fix applied+committed; codex post-impl loop converged (quoted); PR to dev green; bun run audit:vue, test:e2e, and e2e:agent all exit 0 in the transcript.</pre>
+<h3>Alternative: /loop</h3>
+<pre>/loop 15m Drive implementations-plan/dapp-profile-binding forward per plan.md. Reality-check plan.md + lessons/ + git status; next pending phase step; validate with the phase's gate after each meaningful edit; ✓ only when the written gate passes; decisions via /codex xhigh; log consults in lessons/; after all phases ✓ run the plan's Post-implementation section verbatim.</pre>
+</div>

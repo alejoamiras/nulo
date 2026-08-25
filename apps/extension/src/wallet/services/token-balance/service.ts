@@ -202,12 +202,12 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	/** Allocate an id that was never fenced this worker lifetime. Reusing a
 	 *  fenced id would either let a deleted row's in-flight projection write
 	 *  onto the new incarnation (ABA) or permanently suppress the new row's
-	 *  syncs — so allocation skips PAST fenced ids instead of releasing them.
+	 *  syncs — so fenced ids are treated as OCCUPIED (never released; the
+	 *  allocator resolves fence + physical occupancy + safety together, which
+	 *  at the hostile boundary can gap-fill downward rather than skip past).
 	 *  A worker restart forgets the fence safely: no old projection survives it. */
 	private async allocateUnfencedId(): Promise<number> {
-		let id = await this.repo.allocateId()
-		while (this.invalidatedBalanceIds.has(id)) id++
-		return id
+		return await this.repo.allocateIdAvoiding(this.invalidatedBalanceIds)
 	}
 
 	private async createTokenBalance(token: Token, account: Account, gen?: number) {

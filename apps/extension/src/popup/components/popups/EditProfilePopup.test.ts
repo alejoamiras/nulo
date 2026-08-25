@@ -26,6 +26,7 @@ vi.mock("@/wallet/services/profile/client", () => ({
 
 vi.mock("@/composables/toast", () => ({
 	useToast: () => ({ openToast: openToastMock }),
+	TOAST_DURATION: { SHORT: 2_000, LONG: 5_000 },
 }))
 
 const appStoreState = { profile: { id: "p1", name: "Main" } }
@@ -243,6 +244,20 @@ describe("EditProfilePopup — Enter-submit wiring (usePopupEntity)", () => {
 		pressEnterOnInput()
 		await flushPromises()
 		expect(profileServiceMock.changeProfileName).not.toHaveBeenCalled()
+		await dispose(w)
+	})
+
+	test("(N-22) a rejected rename shows the family-standard error toast and releases the latch", async () => {
+		profileServiceMock.changeProfileName.mockRejectedValueOnce(new Error("port closed"))
+		const w = await mountShown()
+		await typeName(w, "Renamed")
+		pressEnterOnInput()
+		await flushPromises()
+		expect(openToastMock).toHaveBeenCalledWith(expect.objectContaining({ label: "Something went wrong", icon: "warning" }), 5_000)
+		// Latch released: a retry reaches the service again.
+		pressEnterOnInput()
+		await flushPromises()
+		expect(profileServiceMock.changeProfileName).toHaveBeenCalledTimes(2)
 		await dispose(w)
 	})
 })

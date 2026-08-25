@@ -50,6 +50,11 @@ export const useAppStore = defineStore("app", () => {
 	const isLogined = ref<boolean>(false)
 	const isSessionChecked = ref<boolean>(false)
 	const pageAwaitingAuth = ref<string>("")
+	/** Identity-keyed record of a DEFINITIVE bootstrap failure. The unlock
+	 *  flow's activation wait joins on it so a failed bootstrap releases the
+	 *  waiter immediately instead of burning the full timeout; cleared at the
+	 *  start of every unlock attempt and on any successful bootstrap. */
+	const bootstrapFailure = ref<{ profileId: string; message: string } | null>(null)
 
 	/**
 	 * Point at the remembered account, or the first one.
@@ -442,6 +447,7 @@ export const useAppStore = defineStore("app", () => {
 		isLogined,
 		isSessionChecked,
 		pageAwaitingAuth,
+		bootstrapFailure,
 		accounts,
 		setupActiveAccount,
 		selectAccount,

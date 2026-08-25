@@ -827,6 +827,111 @@ describe("IncomingTransferService — account lifecycle (P5 carry)", () => {
 })
 
 describe("IncomingTransferService — scanContract dedup + emit semantics", () => {
+	test("(N-17 composed pin) a watchdog handoff mid-park lets onTokenDeleted wipe — the revoked CS writes nothing", async () => {
+		// The production hazard end-to-end: the note-CS parks on its PXE-bound
+		// blockTimestamp await while HOLDING the serviceLock; the queued
+		// onTokenDeleted (which bumps the lifecycle epoch FIRST inside the
+		// lock) cannot run until the lock's 5-minute watchdog hands over; the
+		// revoked CS then resumes with a moved epoch and must write NOTHING —
+		// no record resurrection, no outbox row, no Added emit. Trust is
+		// pre-seeded `trusted` so every pre-park branch is quiet and the
+		// assertions are pure post-handoff effects (an unknown-trust write
+		// lands BEFORE the park and could never discriminate the re-check).
+		vi.useFakeTimers()
+		try {
+			const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+			const token = makeTokenStub([tokenA])
+			const noteSvc = makeNoteStub({ [tokenA.contract]: [note()] })
+			let releaseTimestamp!: () => void
+			noteSvc.getBlockTimestamp.mockImplementation(
+				() =>
+					new Promise<number>((resolve) => {
+						releaseTimestamp = () => resolve(1_234)
+					}),
+			)
+			const { service } = await bootService({ network, token, note: noteSvc })
+			trust.set(trustKey("p1", "n1", tokenA.contract), {
+				profileId: "p1",
+				networkId: "n1",
+				contract: tokenA.contract,
+				state: "trusted",
+				updatedAt: 0,
+			})
+			const added = vi.fn()
+			service.onIncomingTransferAdded.add(added)
+
+			const scanP = scan(service) // parks at blockTimestampFor, serviceLock held
+			await vi.advanceTimersByTimeAsync(0)
+			// The deletion queues BEHIND the parked CS (its epoch bump is inside
+			// the same lock) — nothing has been wiped or written yet.
+			token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(records.size).toBe(0)
+
+			// The serviceLock watchdog fires → handoff → the deletion bumps the
+			// epoch and wipes the token's rows.
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1)
+
+			// The revoked CS resumes — its post-park re-check must stand down.
+			releaseTimestamp()
+			await scanP
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(records.size).toBe(0) // no resurrection
+			expect(outbox.size).toBe(0) // no post-park outbox write
+			expect(added).not.toHaveBeenCalled() // no post-park emit
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("(N-17 composed pin, backfill branch) a handoff mid-park cannot resurrect an existing record via the timestamp backfill", async () => {
+		// Same watchdog-handoff composition as the new-record pin, driven down
+		// the EXISTING-record branch: the CS parks on the backfill's
+		// blockTimestamp await; the queued deletion wipes the record; the
+		// revoked CS's backfill upsert must stand down (its re-check), never
+		// re-add the wiped record.
+		vi.useFakeTimers()
+		try {
+			const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+			const token = makeTokenStub([tokenA])
+			const n = note()
+			const noteSvc = makeNoteStub({ [tokenA.contract]: [n] })
+			let releaseTimestamp!: () => void
+			noteSvc.getBlockTimestamp.mockImplementation(
+				() =>
+					new Promise<number>((resolve) => {
+						releaseTimestamp = () => resolve(1_234)
+					}),
+			)
+			const { service } = await bootService({ network, token, note: noteSvc })
+			// Existing record for the SAME nullifier, timestamp missing → the
+			// scan takes the backfill branch and parks.
+			seedNote({
+				siloedNullifier: n.siloedNullifier,
+				contract: tokenA.contract,
+				tokenId: tokenA.id,
+				blockTimestamp: undefined,
+			})
+
+			const scanP = scan(service)
+			await vi.advanceTimersByTimeAsync(0)
+			token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" })
+			await vi.advanceTimersByTimeAsync(0)
+
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1) // handoff → wipe
+			expect(records.size).toBe(0)
+
+			releaseTimestamp()
+			await scanP
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(records.size).toBe(0) // the backfill did not resurrect it
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("first note from unknown contract → pending state + Pending emit (visibility=true)", async () => {
 		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
 		const token = makeTokenStub([tokenA])

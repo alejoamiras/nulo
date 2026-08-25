@@ -206,3 +206,59 @@ describe("AccountService.restore — validation + provenance (P3)", () => {
 		expect(accounts.map((a) => a.address)).toEqual(["0xaaa", "0xbbb"])
 	})
 })
+
+describe("AccountService.sweepOrphanImportedKeys (N-06 / F-B23)", () => {
+	// The sweep runs awaited inside init(), so each case seeds raw storage FIRST
+	// and then boots a fresh service — survival/deletion after start() is the
+	// assertion. The live-set must come from the PHYSICAL key space: a codec-
+	// hidden (or even non-string-valued) account row still counts as occupied,
+	// so a data-integrity failure can never cascade into deleting the sealed
+	// imported signing key behind it.
+	const ACCOUNT_KEY = (address: string) => `nulo:core:accounts@${accountRowId("p1", 1, address)}`
+	const IMPORTED_KEY = (address: string) => `nulo:core:imported-account-keys@${accountRowId("p1", 1, address)}`
+
+	const boot = async (api: FakeBrowserApi) => {
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { onProfileDeleted: new EventHandler() }))
+		services.add(svc(NETWORK_SERVICE_NAME, { registerChainPurgeSubscriber: () => {}, getL1ChainIdStored: async () => 1 }))
+		services.add(new AccountService(new LoggerStore(new ConfigStore()), api))
+		await services.start()
+	}
+
+	test("a TRUE orphan key row (no account key at all) is reaped — proves the sweep ran", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		await api.storage.local.set({ [IMPORTED_KEY("0xorphan")]: JSON.stringify({ sealed: "AAAA" }) })
+		await boot(api)
+		const raw = await api.storage.local.get(null)
+		expect(raw[IMPORTED_KEY("0xorphan")]).toBeUndefined()
+	})
+
+	test("a codec-hidden (malformed string) account row keeps its imported-key row alive", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		await api.storage.local.set({
+			[ACCOUNT_KEY("0xhidden")]: "{ not json at all",
+			[IMPORTED_KEY("0xhidden")]: JSON.stringify({ sealed: "AAAA" }),
+			[IMPORTED_KEY("0xorphan")]: JSON.stringify({ sealed: "BBBB" }), // control: sweep still reaps
+		})
+		await boot(api)
+		const raw = await api.storage.local.get(null)
+		expect(raw[IMPORTED_KEY("0xhidden")]).toBeDefined() // survived
+		expect(raw[IMPORTED_KEY("0xorphan")]).toBeUndefined() // control reaped
+	})
+
+	test("a non-string-VALUED account row keeps its imported-key row alive (the getKeys discriminator)", async () => {
+		// rawStringEntries skips non-string values — only the physical key space
+		// (getKeys) sees this row. A live-set built any narrower deletes the key.
+		const api = new FakeBrowserApi()
+		api.reset()
+		await api.storage.local.set({
+			[ACCOUNT_KEY("0xobj")]: { not: "a string" },
+			[IMPORTED_KEY("0xobj")]: JSON.stringify({ sealed: "AAAA" }),
+		})
+		await boot(api)
+		const raw = await api.storage.local.get(null)
+		expect(raw[IMPORTED_KEY("0xobj")]).toBeDefined()
+	})
+})
