@@ -9,6 +9,19 @@ const unlockProfile = vi.fn()
 const initTransactionServiceMock = vi.fn()
 const setLastActiveProfileIdMock = vi.fn(async () => undefined)
 const openToastMock = vi.fn()
+// Controllable activation wait: defaults to the REAL implementation; the
+// window-1 drift pin overrides one call to simulate the wait resolving in the
+// exact microtask where a different unlock has already won (unreachable
+// deterministically through the real watcher — Vue batches the flips).
+const waitHolder = vi.hoisted(() => ({
+	mock: vi.fn(),
+	real: undefined as unknown as (...a: unknown[]) => Promise<void>,
+}))
+vi.mock("@/composables/unlockWait", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("@/composables/unlockWait")>()
+	waitHolder.real = mod.awaitProfileActivation as (...a: unknown[]) => Promise<void>
+	return { ...mod, awaitProfileActivation: (...a: unknown[]) => waitHolder.mock(...(a as [])) }
+})
 
 vi.mock("@/utils/core", () => ({
 	managers: {
@@ -46,6 +59,7 @@ beforeEach(() => {
 	initTransactionServiceMock.mockReset()
 	setLastActiveProfileIdMock.mockReset()
 	setLastActiveProfileIdMock.mockResolvedValue(undefined)
+	waitHolder.mock.mockReset().mockImplementation((...a: unknown[]) => waitHolder.real(...a))
 	vi.stubGlobal("chrome", {
 		storage: {
 			local: {
@@ -145,8 +159,8 @@ describe("auth.vue — post-unlock navigation is single-shot", () => {
 		await wrapper.find("form").trigger("submit")
 		await flushPromises()
 
-		// The submit handler is now inside its isLogined poll; the flip below fires the watcher
-		// (push #1) and then releases the poll, whose own advance must find the claim taken.
+		// The submit handler is parked in its activation wait; the flip below fires the
+		// watcher (push #1) and resolves the wait, whose continuation must find the claim taken.
 		appStore.isLogined = true
 		await new Promise((r) => setTimeout(r, 350))
 		await flushPromises()
@@ -241,6 +255,36 @@ describe("auth.vue — bounded activation wait (N-08)", () => {
 		await submitUnlock(wrapper) // latch held — must be a no-op
 		expect(unlockProfile).toHaveBeenCalledTimes(1)
 		resolveUnlock(undefined)
+	})
+
+	test("IMMEDIATE post-wait drift: a stale continuation persists nothing (window 1)", async () => {
+		// The wait "resolves" for p1 in the exact microtask where a different
+		// unlock already won — the continuation's FIRST check must stand down
+		// before setLastActiveProfileId, or the stale run persists p1 as
+		// last-active OVER the winner.
+		unlockProfile.mockResolvedValue({ id: "p1", name: "P", type: "password" })
+		waitHolder.mock.mockResolvedValueOnce(undefined)
+		const { wrapper, appStore } = mountAuth()
+		appStore.profile = { id: "p2", name: "Q", type: "password" } as never // the winner is installed
+		appStore.isLogined = true
+		await submitUnlock(wrapper)
+		await flushPromises()
+		expect(setLastActiveProfileIdMock).not.toHaveBeenCalled()
+		expect(initTransactionServiceMock).not.toHaveBeenCalled()
+	})
+
+	test("a stale bootstrapFailure record from a prior attempt does not insta-reject the next attempt", async () => {
+		unlockProfile.mockResolvedValue({ id: "p1", name: "P", type: "password" })
+		const { wrapper, appStore } = mountAuth()
+		appStore.bootstrapFailure = { profileId: "p1", message: "old failure" }
+		await submitUnlock(wrapper) // clears the record before waiting
+		appStore.profile = { id: "p1", name: "P", type: "password" } as never
+		appStore.isLogined = true
+		await flushPromises()
+		// The attempt SUCCEEDED — the stale record neither rejected the wait
+		// nor produced a failure branch.
+		expect(initTransactionServiceMock).toHaveBeenCalled()
+		expect(openToastMock).not.toHaveBeenCalled()
 	})
 
 	test("post-setLastActiveProfileId drift: a resumed stale continuation replaces nothing", async () => {

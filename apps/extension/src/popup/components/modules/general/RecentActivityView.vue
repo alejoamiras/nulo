@@ -150,17 +150,22 @@ const awaitingAccountTxs = computed(() => {
 const executingTask = ref(null)
 const executingSubtasks = ref([])
 
-/** One scope fence for every scope-keyed loader in this component: any newer
- *  trigger (scope switch, mount, reconnect, event-driven resnapshot) supersedes
- *  older in-flight loads, so an A→B→A round-trip cannot revalidate a stale run
- *  (captured-equality alone would). */
-const scopeFence = createRunFence()
+/** PER-LOADER scope fences: a newer trigger of the SAME loader supersedes its
+ *  older in-flight run (A→B→A cannot revalidate a stale run — captured-equality
+ *  alone would), while independent loaders never cross-cancel — one shared
+ *  fence let a standalone journal reconnect silently kill parked token/task
+ *  loads AFTER the switch-clear, starving the feed until an unrelated event.
+ *  The scope watcher begins all three so its clear + reloads form one
+ *  supersede unit per loader. */
+const journalFence = createRunFence()
+const taskFence = createRunFence()
+const tokensFence = createRunFence()
 
 /** Tokens lookup — UI Transfer tasks carry a tokenId; we resolve to symbol +
  *  decimals so the awaiting card can mirror TransactionCard (icon + amount). */
 const tokens = ref([])
 const tokenService = new TokenServiceClient()
-async function loadTokens(isCurrent = scopeFence.begin()) {
+async function loadTokens(isCurrent = tokensFence.begin()) {
 	if (!appStore.profile || !appStore.network) return
 	const fetched = await tokenService.getTokens(appStore.profile.id, appStore.network.chainId)
 	// A deferred fetch for the OLD scope must not overwrite the new scope's map.
@@ -173,7 +178,12 @@ async function loadTokens(isCurrent = scopeFence.begin()) {
 // render with the "Token" placeholder until the user re-opens the
 // extension: the tokenById lookup misses because `tokens` was only
 // populated once at mount.
-tokenService.onTokenAdded.add(loadTokens)
+// Wrapped: EventHandler invokes callbacks WITH the payload — a bare
+// registration would feed the TokenInfo object into loadTokens' isCurrent
+// default parameter and TypeError after the first await (the listener dies).
+tokenService.onTokenAdded.add(() => {
+	loadTokens()
+})
 
 function tokenById(id) {
 	return tokens.value.find((t) => t.id === id)
@@ -598,7 +608,7 @@ journalService.onOperationDeleted.add(onJournalDeleted)
  * `subscribeWithSnapshot`). The Phase 2 reaper is what generates those
  * terminal transitions during SW down windows.
  */
-async function resnapshotJournal(isCurrent = scopeFence.begin()) {
+async function resnapshotJournal(isCurrent = journalFence.begin()) {
 	try {
 		// Generation guard (not captured-equality): equality re-validates on
 		// A→B→A, letting the ABA run's stale snapshot land. Every trigger is a
@@ -695,7 +705,7 @@ const handleSelectTerminal = (op) => {
  *  a late snapshot for the previous account (A→B) is dropped, never assigned into
  *  the new account's view. `isExecutingTask` already fails closed on uncorrelated
  *  dApp tasks and scopes UI transfers by `senderAddress`. */
-async function loadExecutingTaskSnapshot(isCurrent = scopeFence.begin()) {
+async function loadExecutingTaskSnapshot(isCurrent = taskFence.begin()) {
 	const captured = appStore.account?.address
 	try {
 		// Newest-first replay — otherwise concurrent tasks could surface the older one.
@@ -736,16 +746,18 @@ watch(
 	scopeTripleKey,
 	(nv, ov) => {
 		if (nv === ov) return
-		const isCurrent = scopeFence.begin()
+		const journalRun = journalFence.begin()
+		const taskRun = taskFence.begin()
+		const tokensRun = tokensFence.begin()
 		journalOps.value = []
 		executingTask.value = null
 		executingSubtasks.value = []
 		pendingCancelJobIds.value = new Set()
 		tokens.value = []
 		if (!nv) return
-		resnapshotJournal(isCurrent)
-		loadExecutingTaskSnapshot(isCurrent)
-		loadTokens(isCurrent)
+		resnapshotJournal(journalRun)
+		loadExecutingTaskSnapshot(taskRun)
+		loadTokens(tokensRun)
 	},
 	{ flush: "sync" },
 )

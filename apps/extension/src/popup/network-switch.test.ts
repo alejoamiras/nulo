@@ -176,13 +176,18 @@ describe("createNetworkSwitchHandler (N-05)", () => {
 
 	test("captured scope is passed to the calls — never a live re-read", async () => {
 		const h = makeDeps()
-		h.client.getAccounts.mockResolvedValueOnce([])
-		// Scope object mutates AFTER capture; the calls must use the captured values.
-		const handler = createNetworkSwitchHandler(h.deps)
-		const run = handler()
+		const gate = _deferred<never[]>()
+		h.client.getAccounts.mockReturnValueOnce(gate.promise as never)
+		const run = createNetworkSwitchHandler(h.deps)()
+		// getScope now returns a DIFFERENT scope mid-run while the LIVE scope still
+		// matches the captured one — a live re-read would leak p9/9 into the calls;
+		// the guard must not trip (it compares live against the CAPTURED scope).
+		h.setScope({ profileId: "p9", chainId: 9 })
+		gate.resolve([]) // empty chain → the post-await calls carry the scope values
 		await run
-		expect(h.client.getAccounts).toHaveBeenCalledWith("p1", 1, true)
 		expect(h.client.ensureDefaultAccount).toHaveBeenCalledWith("p1", 1, expect.anything(), "Account")
+		expect(h.client.getAccounts).toHaveBeenLastCalledWith("p1", 1, true)
+		expect(h.setAccounts).toHaveBeenCalledWith([ACCOUNT])
 	})
 
 	test("rapid double-switch: only the second run's results land", async () => {

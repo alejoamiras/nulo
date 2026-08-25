@@ -16,8 +16,6 @@ import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
-/** Services */
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"

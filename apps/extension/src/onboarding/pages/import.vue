@@ -9,8 +9,6 @@ import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 
-/** Services */
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 
