@@ -78,9 +78,15 @@ export class ServiceCollection {
 				.map((r, i) => ({ r, name: phase[i]?.name ?? `service#${i}` }))
 				.filter((x): x is { r: PromiseRejectedResult; name: string } => x.r.status === "rejected")
 			if (failures.length > 0) {
+				// The message folds each ROOT CAUSE in, not just names: a failed
+				// boot's log line prints message/stack only, and with retry vetoed
+				// for the SW lifetime that line is the entire post-mortem.
+				const summary = failures
+					.map((f) => `${f.name}: ${f.r.reason instanceof Error ? f.r.reason.message : String(f.r.reason)}`)
+					.join("; ")
 				throw new AggregateError(
 					failures.map((f) => f.r.reason),
-					`ServiceCollection.start failed in phase: ${failures.map((f) => f.name).join(", ")}`,
+					`ServiceCollection.start failed in phase — ${summary}`,
 				)
 			}
 		}

@@ -31,10 +31,8 @@ describe("PasskeyService PATH-B window budget (N-21)", () => {
 		expect(opts.timeoutMs).toBe(2 * PASSKEY_TIMEOUT + 60_000)
 	})
 
-	test("the window ceiling strictly exceeds two full ceremony legs (relationship pin)", () => {
-		// PASSKEY_TIMEOUT is the per-leg WebAuthn timeout; the fallback runs two
-		// legs. A ceiling at or below 2 legs re-opens the force-close race.
-		expect(2 * PASSKEY_TIMEOUT + 60_000).toBeGreaterThan(2 * PASSKEY_TIMEOUT)
-		expect(PASSKEY_TIMEOUT).toBe(180_000) // the spec constant this derives from
-	})
+	// (No separate constant-relationship pin: an earlier draft asserted
+	// `2*T + slack > 2*T`, a tautology. The consumer pin above is the real
+	// discriminator — it observes the value the WindowManager actually
+	// receives, so a hard-coded regression at the call site reds too.)
 })

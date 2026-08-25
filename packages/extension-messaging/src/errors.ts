@@ -305,6 +305,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
 	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
+	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -342,6 +343,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new ProfileIdConflictError(known.message, known.details)
 		case DuplicateWalletError.CODE:
 			return new DuplicateWalletError(known.message, known.details)
+		case DuplicateInitializationError.CODE:
+			return new DuplicateInitializationError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

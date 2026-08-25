@@ -84,14 +84,17 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	initializesAccount?: boolean
 }
 
-/** The node/validator texts that identify an existing-nullifier rejection —
- *  Aztec 5.0's send-time validator ("Invalid tx: Existing nullifier") and the
- *  simulation-phase variants ("Attempted to emit duplicate [siloed]
- *  nullifier"). Mined REVERTED receipts carry NO error data and are never
- *  classified. */
+/** The send-time validator text for a nullifier-tree membership collision —
+ *  Aztec 5.0's "Invalid tx: Existing nullifier". Deliberately NARROW: the
+ *  validator's sibling text "Duplicate nullifier in tx" means the same
+ *  nullifier twice WITHIN one tx (a malformed tx, no race involved), and the
+ *  simulator's "Attempted to emit duplicate nullifier" texts never reach the
+ *  send catch — matching either would label a wallet/dApp bug as a benign
+ *  race and prescribe an infinite retry. Mined REVERTED receipts carry NO
+ *  error data and are never classified. */
 function isExistingNullifierError(error: unknown): boolean {
 	const message = error instanceof Error ? error.message : String(error)
-	return /existing nullifier|duplicate (siloed )?nullifier/i.test(message)
+	return /existing nullifier/i.test(message)
 }
 
 export class ExecutionCoordinator {

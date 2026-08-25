@@ -34,7 +34,7 @@
  * wrong-toast UX bug.
  */
 
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledError, WalletError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
 /** Minimal task surface needed for the cancel conversion. Avoids importing
@@ -62,7 +62,9 @@ export function maybeRethrowAsRpcCancel(error: unknown, task: Pick<CancellableTa
  * Returns the OperationResult variant for the caller to push into its
  * results array. The caller still owns logging.
  */
-export type CancelOrFailResult = { status: "cancelled"; jobId?: string; reason: "user" } | { status: "failed"; error: string }
+export type CancelOrFailResult =
+	| { status: "cancelled"; jobId?: string; reason: "user" }
+	| { status: "failed"; error: string; code?: string }
 
 export function classifyOperationCatch(error: unknown, task: CancellableTask, errorMessage: (e: unknown) => string): CancelOrFailResult {
 	if (error instanceof JobCancelledSentinel) {
@@ -70,5 +72,9 @@ export function classifyOperationCatch(error: unknown, task: CancellableTask, er
 		return { status: "cancelled", jobId: error.jobId, reason: "user" }
 	}
 	task.fail(error)
-	return { status: "failed", error: errorMessage(error) }
+	// A typed WalletError's code rides the failed variant so the dispatcher
+	// can re-materialize the class — the result is plain data across the
+	// boundary, and without the code the dApp error envelope can never
+	// discriminate the failure.
+	return { status: "failed", error: errorMessage(error), code: error instanceof WalletError ? error.code : undefined }
 }

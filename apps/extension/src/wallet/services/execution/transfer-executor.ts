@@ -21,6 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
@@ -251,7 +252,13 @@ export class TransferExecutor {
 			// Journal already in `cancelled` (cancelJob did it); convert the
 			// internal sentinel to the structured RPC-boundary error here.
 			maybeRethrowAsRpcCancel(error, transferTask)
-			await markJournal({ stage: "failed" }, normalizeError(error, "transfer"))
+			// A classified initialization race keeps its own kind on the transfer
+			// path too — the flag was threaded here precisely so a first-tx popup
+			// transfer classifies the same as a dApp send.
+			await markJournal(
+				{ stage: "failed" },
+				normalizeError(error, error instanceof DuplicateInitializationError ? "duplicate_initialization" : "transfer"),
+			)
 			transferTask.fail(error)
 			throw error
 		} finally {
