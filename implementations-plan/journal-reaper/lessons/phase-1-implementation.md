@@ -13,3 +13,7 @@
 2. My `transitionIfStage` insertion orphaned `refileOperationScope`'s TSDoc (doc block left attached to the wrong method) — relocated. **Lesson: inserting a method between a doc block and its method is a silent doc corruption; check the neighbor below the insertion point.**
 3. Zombie heartbeat interval: when lease expiry empties the collections, the trailing in-heartbeat stop is the ONLY stop path — it existed but was unpinned (strip stayed green). Pin added + probed.
 - Ratified as-shipped: `cancelJob`'s prune skipped on early returns (bounded by the finally backstop + lease); the reviewer's concurrency/leak/proof-adoption lenses all came back clean, including the RPC-allowlist verification for the new service methods.
+
+## Codex final-diff — SIGN-OFF
+
+No blockers: lease lifecycle composes (ownership migration, cancel pruning, bounded expiry, timer shutdown); `transitionIfStage` discriminants match all three call sites; the decomposed pins preserve c2-1's guarantee while the proof's artificially aged-yet-live state is "correctly no longer constructed"; hostile dApps can't reach the vouching API or choose waiter ids, and the caps + lease bound every growth path. Contingent only on the battery completing green.
