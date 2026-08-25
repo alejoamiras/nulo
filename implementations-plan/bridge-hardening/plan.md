@@ -41,7 +41,9 @@ donations, reentrancy posture, sole-consumer invariant, recipient-committed clai
 ### Arc 2 — H-1 fix: deployer-only initializer guard (`fix`)
 - DEVIATION from the approved constructor-init, discovered during implementation: a portal
   constructor would need the L2 bridge address, but that address is deterministically derived
-  FROM the deployed portal address (bridge ctor args = [proxy, portal]) — circular. The
+  FROM the deployed portal address (bridge ctor args = [proxy, portal]). Under DIRECT EOA CREATE
+  that address is nonce-predictable pre-broadcast, so constructor-init is feasible; it was still
+  declined to avoid restructuring both conductors mid-flight. The
   equivalent fix: the constructor pins `msg.sender` as an immutable `initializer`, and
   `initialize` reverts `NotInitializer` for anyone else. The front-run dies; both conductors'
   two-phase flow survives unchanged.
@@ -86,3 +88,29 @@ PR titles ≤93 chars budgeting the squash `(#NN)` suffix; conventional commits,
 - v4-core MUST be installed at `@v4.0.0` (README pin); latest moves structs and breaks the build.
 - `SwapBridgeRouterPermit2Fork` positive flows require maintained testnet state (live pools/
   balances); they fail against fresh public-RPC forks. Replay/tamper/deadline variants pass anywhere.
+
+## Tracked follow-ups
+
+- Path-filtered bridge-contracts CI job (forge tests currently ungated on dev).
+- TXE suite CI gating (run-txe-tests.sh behind a self-hosted/manual gate until the oracle server ships in CI images).
+- Partial-fill regression via fake PoolManager harness; `should_fail_with` upgrade for bare Noir negative tests.
+
+## Status (post-execution)
+
+| Arc | Branch / PR | State |
+|---|---|---|
+| 1 blackhat tests | #435 | ✅ landed on stack |
+| 2 H-1 guard | #436 | ✅ (deviation: guarded initializer, not constructor-init — circularity; corrected in round-2: ctor-init IS feasible under direct CREATE, kept guard for zero-flow-change) |
+| 3 M-1 delta settlement | #437 | ✅ + production-shape regressions |
+| 4 fuzz/invariants | #438 | ✅ |
+| 5 halmos formal | #439 | ✅ 4 checks |
+| 6 econ audit | #440 | ✅ matrix + deadline 600s pinned |
+| 7 frontend review | #441 | ✅ fuel-target helper extracted/tested |
+| 8 testnet redeploy | — | ⏳ BLOCKED: needs operator env (PRIVATE_KEY, BRIDGE_DEPLOYER_SECRET_TESTNET) |
+| 9 TXE suite | #442 | ✅ 16/16 via run-txe-tests.sh |
+| 10 TS mirror | #443 | ✅ conformance oracle + txe-ts map |
+| codex loop | #444 | ✅ 4 rounds → SHIP pending Arc 8 |
+
+Codex session transcript: gpt-5.6-sol xhigh, session 01a025b9-a997-7e20-a075-122542ba69cd.
+Round highlights: caught partial-fill stranding (High), reverse-unwrap gap, the
+immutable-vs-runtime-hash deploy aborter, and this stack's own broken topology.

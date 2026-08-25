@@ -36,7 +36,13 @@ contract RouteGrammarFuzzTest is Test {
     }
 
     function _key(address c0, address c1) internal pure returns (PoolKey memory) {
-        return PoolKey({currency0: Currency.wrap(c0), currency1: Currency.wrap(c1), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))});
+        return PoolKey({
+            currency0: Currency.wrap(c0),
+            currency1: Currency.wrap(c1),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
     }
 
     struct Shape {
@@ -53,7 +59,6 @@ contract RouteGrammarFuzzTest is Test {
         address cur = sellIn;
         for (uint256 i = 0; i < len; i++) {
             address out = i + 1 == len ? FJ : (seed % 2 == 0 ? WETH : address(uint160(0xA000 + i)));
-            if (out == cur) out = address(uint160(0xB000 + i)); // never a self-pool
             if (cur < out) {
                 s.path[i] = _key(cur, out);
                 s.dirs[i] = true;
@@ -130,6 +135,21 @@ contract RouteGrammarFuzzTest is Test {
         h.exposeValidate(s.input, s.path, s.dirs);
     }
 
+    /// The reverse discontinuity (a hop emitting native that a WETH-selling hop then spends)
+    /// must be rejected: settlement bridges ONLY WETH→native at the final boundary.
+    function testFuzz_reverseNativeUnwrap_rejected() public {
+        PoolKey[] memory p = new PoolKey[](2);
+        bool[] memory d = new bool[](2);
+        // hop0: sell USDC into {native/USDC} → outputs native ETH
+        p[0] = _key(address(0), USDC);
+        d[0] = false;
+        // hop1: sell WETH into {WETH/FJ} → consumes never-funded WETH
+        p[1] = _key(WETH, FJ);
+        d[1] = true;
+        vm.expectRevert(bytes("UniswapFuelSwap: hop discontinuity"));
+        h.exposeValidate(USDC, p, d);
+    }
+
     function testFuzz_discontinuity_rejected(uint256 seed) public {
         Shape memory s = _ercChain(USDC, seed, 2);
         // Break the handoff: hop0 now outputs a token hop1 does not sell.
@@ -140,5 +160,4 @@ contract RouteGrammarFuzzTest is Test {
         vm.expectRevert(bytes("UniswapFuelSwap: hop discontinuity"));
         h.exposeValidate(s.input, s.path, s.dirs);
     }
-
 }

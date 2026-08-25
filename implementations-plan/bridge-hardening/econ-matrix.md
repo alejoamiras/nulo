@@ -63,3 +63,20 @@ Line-review of `useDeposit`/`useWithdraw`/`fuelClaim` against this matrix:
   no fee field by construction (`buildWithdrawSendOpts`) — nothing to drift.
 - `fuelSlice >= amount` and quote-vs-`minFuelFj` guards match the router's own requires; the UI
   cannot sign an intent the router would reject on those bounds.
+
+## Codex round-1 outcomes (fixes in hardening/codex-r1-fixes)
+
+- **Partial-fill hardening (High)**: V4 may return early with unconsumed input when the price
+  limit is reached; `unlockCallback` now asserts per-hop input consumption EXACTLY equals the
+  requested amount (`UniswapFuelSwap: partial fill`), so a drained pool can no longer strand
+  the remainder inside the swap contract while the router's slice check passes.
+- **One-directional unwrap (Medium)**: `_validateRoute` now sanctions ONLY WETH→native at the
+  final boundary; the reverse (native out → WETH sold, nothing wraps the owed WETH) is
+  rejected. Regression test added to RouteGrammarFuzz.
+- **Immutable-aware portal verification (Medium)**: constructor-patched `initializer` makes raw
+  runtime-code-hash equality impossible; conductors now use `assertRuntimeMatchesTemplate`
+  (diff confined to zero-words encoding the broadcaster) + explicit initializer==broadcaster
+  assert. The old check would have aborted every future deploy AFTER spending gas.
+- Accepted/corrected: "circularity" claim corrected — direct-CREATE addresses are predictable
+  from EOA+nonce, so constructor-init remains a cleaner end-state option for the operator.
+  Vacuous-`should_fail` and mock-blindness caveats already documented in lessons.

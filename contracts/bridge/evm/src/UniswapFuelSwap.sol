@@ -49,19 +49,10 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
     }
 
     // ─── Events ──────────────────────────────────────────────────────
-    event SwapExecuted(
-        address indexed caller,
-        address indexed inputToken,
-        uint256 inputAmount,
-        uint256 outputAmount
-    );
+    event SwapExecuted(address indexed caller, address indexed inputToken, uint256 inputAmount, uint256 outputAmount);
 
     // ─── Constructor ─────────────────────────────────────────────────
-    constructor(
-        address _poolManager,
-        address _feeJuice,
-        address _weth
-    ) Ownable(msg.sender) {
+    constructor(address _poolManager, address _feeJuice, address _weth) Ownable(msg.sender) {
         require(_poolManager != address(0), "UniswapFuelSwap: zero poolManager");
         require(_feeJuice != address(0), "UniswapFuelSwap: zero feeJuice");
         require(_weth != address(0), "UniswapFuelSwap: zero weth");
@@ -128,12 +119,8 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
     function unlockCallback(bytes calldata data) external override returns (bytes memory) {
         require(msg.sender == address(poolManager), "UniswapFuelSwap: unauthorized callback");
 
-        (
-            address inputToken,
-            uint256 inputAmount,
-            PoolKey[] memory path,
-            bool[] memory zeroForOnes
-        ) = abi.decode(data, (address, uint256, PoolKey[], bool[]));
+        (address inputToken, uint256 inputAmount, PoolKey[] memory path, bool[] memory zeroForOnes) =
+            abi.decode(data, (address, uint256, PoolKey[], bool[]));
 
         // Touched currencies and their net deltas (positive = PM owes us, negative = we owe PM).
         // A route touches at most 2*path.length + 1 distinct currencies; bound accordingly.
@@ -146,17 +133,23 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
         // ── Execute each hop ─────────────────────────────────────────
         for (uint256 i = 0; i < path.length; i++) {
             // Exact input swap: negative amountSpecified = exact input
+            uint256 wanted = currentAmount;
             BalanceDelta delta = poolManager.swap(
                 path[i],
                 IPoolManager.SwapParams({
                     zeroForOne: zeroForOnes[i],
-                    amountSpecified: -int256(currentAmount),
-                    sqrtPriceLimitX96: zeroForOnes[i]
-                        ? TickMath.MIN_SQRT_PRICE + 1
-                        : TickMath.MAX_SQRT_PRICE - 1
+                    amountSpecified: -int256(wanted),
+                    sqrtPriceLimitX96: zeroForOnes[i] ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
                 }),
                 ""
             );
+
+            // V4 may return EARLY with unconsumed input (price limit reached). Our limits are
+            // the extreme bounds so that should be unreachable, but a drained/thin pool must
+            // never let a partial fill strand the unconsumed remainder in this contract:
+            // assert the input side was consumed EXACTLY.
+            int128 inputDelta = zeroForOnes[i] ? delta.amount0() : delta.amount1();
+            require(uint256(int256(-inputDelta)) == wanted, "UniswapFuelSwap: partial fill");
 
             // Output is the positive delta (token we receive from the pool)
             int128 outputDelta = zeroForOnes[i] ? delta.amount1() : delta.amount0();
@@ -164,8 +157,12 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
             currentAmount = uint256(int256(outputDelta));
 
             bool zfo = zeroForOnes[i];
-            touched = _accumulate(currencies, deltas, touched, _side(path[i], zfo, true), int256(zfo ? delta.amount0() : delta.amount1()));
-            touched = _accumulate(currencies, deltas, touched, _side(path[i], zfo, false), int256(zfo ? delta.amount1() : delta.amount0()));
+            touched = _accumulate(
+                currencies, deltas, touched, _side(path[i], zfo, true), int256(zfo ? delta.amount0() : delta.amount1())
+            );
+            touched = _accumulate(
+                currencies, deltas, touched, _side(path[i], zfo, false), int256(zfo ? delta.amount1() : delta.amount0())
+            );
         }
 
         // ── Settlement: takes first (so bridged WETH is in hand), then pays ──
@@ -228,16 +225,10 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
      *      4. Every hop uses a hookless pool (hooks == address(0)).
      *      5. Each hop's output feeds the next hop's input (WETH<->ETH allowed).
      */
-    function _validateRoute(
-        address inputToken,
-        PoolKey[] calldata path,
-        bool[] calldata zeroForOnes
-    ) internal view {
+    function _validateRoute(address inputToken, PoolKey[] calldata path, bool[] calldata zeroForOnes) internal view {
         // First hop must sell inputToken
         PoolKey calldata first = path[0];
-        address firstInput = zeroForOnes[0]
-            ? Currency.unwrap(first.currency0)
-            : Currency.unwrap(first.currency1);
+        address firstInput = zeroForOnes[0] ? Currency.unwrap(first.currency0) : Currency.unwrap(first.currency1);
 
         // For native ETH pools, the input side is address(0) which maps to WETH
         if (firstInput == address(0)) {
@@ -248,9 +239,8 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
 
         // Last hop must output feeJuice
         PoolKey calldata last = path[path.length - 1];
-        address lastOutput = zeroForOnes[path.length - 1]
-            ? Currency.unwrap(last.currency1)
-            : Currency.unwrap(last.currency0);
+        address lastOutput =
+            zeroForOnes[path.length - 1] ? Currency.unwrap(last.currency1) : Currency.unwrap(last.currency0);
         require(lastOutput == feeJuice, "UniswapFuelSwap: last hop must output feeJuice");
 
         // Every hop must use a hookless pool — we only route through our own
@@ -261,16 +251,16 @@ contract UniswapFuelSwap is IUnlockCallback, Ownable2Step {
         for (uint256 i = 0; i < path.length; i++) {
             require(address(path[i].hooks) == address(0), "UniswapFuelSwap: hooks not allowed");
             if (i + 1 < path.length) {
-                address outI =
-                    zeroForOnes[i] ? Currency.unwrap(path[i].currency1) : Currency.unwrap(path[i].currency0);
+                address outI = zeroForOnes[i] ? Currency.unwrap(path[i].currency1) : Currency.unwrap(path[i].currency0);
                 address inNext = zeroForOnes[i + 1]
                     ? Currency.unwrap(path[i + 1].currency0)
                     : Currency.unwrap(path[i + 1].currency1);
-                // The WETH<->native-ETH unwrap is only settleable on the FINAL hop: settlement
-                // withdraws WETH to cover a native debt, and only the last hop's output leaves
-                // the contract. Allowing it earlier validates a route that then reverts at
-                // settlement, so restrict the discontinuity to the last boundary.
-                bool nativeUnwrap = (outI == weth && inNext == address(0)) || (outI == address(0) && inNext == weth);
+                // The ONLY sanctioned discontinuity is WETH→native on the FINAL boundary:
+                // settlement bridges exactly that direction (take WETH, unwrap, settle ETH), and
+                // only the last hop's output leaves the contract. The reverse — a hop emitting
+                // native that a WETH-selling hop then "spends" — would pass naive continuity
+                // while nothing ever wraps the owed WETH.
+                bool nativeUnwrap = outI == weth && inNext == address(0);
                 bool continuous = outI == inNext || (nativeUnwrap && i + 1 == path.length - 1);
                 require(continuous, "UniswapFuelSwap: hop discontinuity");
             }
