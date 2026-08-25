@@ -40,6 +40,7 @@ import type { ILogger } from "@/wallet/logger"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import { StepContent, type TaskService, type WrappedTask } from "@/wallet/services/task/service"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 
 /** Journal patches the shared pipeline tail emits. Structural subset of
  *  the operation-journal patch shape — callers bind their own journal id
@@ -76,6 +77,21 @@ export interface ProveAndSendContext<TOffchain = unknown> {
 	 *  txHash string; everything else the record needs is closed over.
 	 *  Return value ignored (addTransaction returns the created record). */
 	recordTransaction: (txHash: string) => Promise<unknown>
+	/** Build provenance: true iff the tx request wrapped the account ctor
+	 *  (first-tx multicall). Gates the send-path existing-nullifier
+	 *  classification — without it, an ordinary double-spend would be
+	 *  mislabeled "account initialized elsewhere". */
+	initializesAccount?: boolean
+}
+
+/** The node/validator texts that identify an existing-nullifier rejection —
+ *  Aztec 5.0's send-time validator ("Invalid tx: Existing nullifier") and the
+ *  simulation-phase variants ("Attempted to emit duplicate [siloed]
+ *  nullifier"). Mined REVERTED receipts carry NO error data and are never
+ *  classified. */
+function isExistingNullifierError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : String(error)
+	return /existing nullifier|duplicate (siloed )?nullifier/i.test(message)
 }
 
 export class ExecutionCoordinator {
@@ -135,16 +151,23 @@ export class ExecutionCoordinator {
 		}
 	}
 
-	/** Wrap `node.sendTx` in a TaskService step. */
-	public async sendTxTask(node: AztecNode, tx: Tx, parentTask?: WrappedTask): Promise<void> {
+	/** Wrap `node.sendTx` in a TaskService step. When `initializesAccount` is
+	 *  true, an existing-nullifier rejection is re-thrown as the typed
+	 *  {@link DuplicateInitializationError} BEFORE `task.fail`, so the task
+	 *  carries the honest copy instead of the raw validator text. */
+	public async sendTxTask(node: AztecNode, tx: Tx, parentTask?: WrappedTask, initializesAccount?: boolean): Promise<void> {
 		const step = new StepContent("Sending transaction")
 		const task = parentTask ? parentTask.startSubtask(step) : this.tasks.startNewTask(step)
 		try {
 			await node.sendTx(tx)
 			task.complete()
 		} catch (error) {
-			task.fail(error)
-			throw error
+			const classified =
+				initializesAccount === true && isExistingNullifierError(error)
+					? new DuplicateInitializationError(undefined, { cause: error instanceof Error ? error.message : String(error) })
+					: error
+			task.fail(classified)
+			throw classified
 		}
 	}
 
@@ -176,7 +199,7 @@ export class ExecutionCoordinator {
 		const txHash = tx.getTxHash()
 		await ctx.markJournal({ stage: "submitting", txHash: txHash.toString() })
 		ctx.checkCancelled()
-		await this.sendTxTask(ctx.node, tx, ctx.parentTask)
+		await this.sendTxTask(ctx.node, tx, ctx.parentTask, ctx.initializesAccount)
 		await ctx.recordTransaction(txHash.toString())
 		await ctx.markJournal({ stage: "succeeded", txHash: txHash.toString() })
 		return { txHash, offchainOutput }

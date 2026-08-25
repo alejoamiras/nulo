@@ -87,6 +87,7 @@ export type KnownJobErrorKind =
 	| "prover"
 	| "transfer"
 	| "dapp_execute"
+	| "duplicate_initialization"
 	| "network_unreachable"
 	| "contract_invalid"
 	| "metadata_fetch"
@@ -113,6 +114,7 @@ const KNOWN_JOB_ERROR_KIND_TABLE = {
 	prover: true,
 	transfer: true,
 	dapp_execute: true,
+	duplicate_initialization: true,
 	network_unreachable: true,
 	contract_invalid: true,
 	metadata_fetch: true,

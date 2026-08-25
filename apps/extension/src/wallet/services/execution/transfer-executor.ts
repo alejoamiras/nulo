@@ -146,6 +146,9 @@ export class TransferExecutor {
 			let network: Network
 			let nonce: { toString(): string }
 			let feePaymentMethod: AccountFeePaymentMethodOptions
+			// Reused estimates leave this undefined — unknown provenance must
+			// classify GENERIC (never a false "initialized elsewhere").
+			let initializesAccount: boolean | undefined
 			// Activity-feed inputs — captured separately from the FPC-mutated
 			// `buildAndEstimate` txCalls so the persisted record stays just
 			// the user-intent transfer (no `pay_fee` / `fee_entrypoint_*`
@@ -182,6 +185,7 @@ export class TransferExecutor {
 				activityArgs = args
 
 				const built = await this.deps.buildAndEstimate(op, op.feeSettings, transferTask)
+				initializesAccount = built.initializesAccount
 				txRequest = built.txRequest
 				node = built.node
 				pxe = built.pxe
@@ -201,6 +205,7 @@ export class TransferExecutor {
 				pxe,
 				node,
 				txRequest,
+				initializesAccount,
 				scopes: [account.address],
 				parentTask: transferTask,
 				checkCancelled,

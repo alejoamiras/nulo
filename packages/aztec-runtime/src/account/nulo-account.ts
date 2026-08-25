@@ -141,6 +141,7 @@ export class NuloAccount implements IAccountContract {
 		options: DefaultAccountEntrypointOptions,
 		chainInfo: ChainInfo,
 		gasSettingsRPC?: PartialGasSettingsRPC,
+		outMeta?: { initializesAccount?: boolean },
 	): Promise<TxExecutionRequest> {
 		// Use the shared `completeFeeOptions` translator so both the
 		// standard and fast paths produce identical `GasSettings` for
@@ -171,9 +172,15 @@ export class NuloAccount implements IAccountContract {
 		const initWitness = await node.getNullifierMembershipWitness("latest", initNullifier)
 		if (!initWitness) {
 			this.logger.log(this.name, LogLevel.Debug, "init nullifier NOT found, wrapping deploy + entrypoint via MulticallEntrypoint")
+			// Provenance for the send-path classifier: an existing-nullifier
+			// rejection is only "duplicate initialization" when THIS build
+			// wrapped the ctor — the same text on a non-initializing tx is an
+			// ordinary double-spend and must stay generic.
+			if (outMeta) outMeta.initializesAccount = true
 			return this.buildWithInitialization(current, chainInfo, gasSettings, options)
 		}
 
+		if (outMeta) outMeta.initializesAccount = false
 		return this.entrypoint.createTxExecutionRequest(current, gasSettings, chainInfo, options)
 	}
 

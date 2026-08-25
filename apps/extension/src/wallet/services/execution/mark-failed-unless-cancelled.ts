@@ -1,4 +1,5 @@
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 
 /**
  * Shared catch-arm disposition for the three dapp-send pipelines
@@ -32,5 +33,9 @@ export function markFailedUnlessCancelled(
 	if (error instanceof JobCancelledSentinel) {
 		throw error
 	}
-	return lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, "dapp_execute"))
+	// A classified initialization-race failure keeps its own kind: retry
+	// policy and observability must distinguish "lost the first-tx race —
+	// wait for sync, retry" from a generic dApp execution failure.
+	const kind = error instanceof DuplicateInitializationError ? "duplicate_initialization" : "dapp_execute"
+	return lane.markJournal(journalId, { stage: "failed" }, normalizeError(error, kind))
 }

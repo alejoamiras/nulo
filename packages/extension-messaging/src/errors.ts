@@ -173,6 +173,25 @@ export class TooManyPendingError extends WalletError {
 	}
 }
 
+/**
+ * A first (account-initializing) transaction lost the initialization race:
+ * the node rejected it with an existing-nullifier error while the wallet
+ * KNOWS it wrapped the account constructor (another device, or a re-send
+ * against a node that lagged behind the earlier init). Classification is
+ * provenance-gated — a bare existing-nullifier rejection on a
+ * NON-initializing tx is an ordinary double-spend and must stay generic.
+ */
+export class DuplicateInitializationError extends WalletError {
+	public static readonly CODE = "DUPLICATE_INITIALIZATION"
+
+	public constructor(
+		message = "Another first transaction initialized this account — wait for network sync, then retry.",
+		details?: unknown,
+	) {
+		super(DuplicateInitializationError.CODE, message, details, "DuplicateInitializationError")
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"

@@ -421,13 +421,24 @@ export class DappSendExecutor {
 				await markJournal({ stage: "simulating" })
 				checkCancelled()
 
-				const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-					await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
+				const {
+					txRequest,
+					node,
+					pxe,
+					account,
+					network,
+					nonce,
+					txCalls,
+					feePaymentMethod,
+					pendingPublicAuthwits,
+					initializesAccount,
+				} = await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
 
 				const { txHash } = await this.deps.coordinator.proveAndSend({
 					pxe,
 					node,
 					txRequest,
+					initializesAccount,
 					scopes: [account.address],
 					parentTask,
 					checkCancelled,
@@ -546,6 +557,10 @@ export class DappSendExecutor {
 				let txCalls: FeeEstimate["txCalls"]
 				let feePaymentMethod: FeeEstimate["feePaymentMethod"]
 				let pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
+				// Reused estimates leave this undefined: the stash persists only the
+				// request fields, and an unknown provenance must classify GENERIC
+				// (never a false "initialized elsewhere").
+				let initializesAccount: boolean | undefined
 
 				if (reused) {
 					this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
@@ -567,8 +582,18 @@ export class DappSendExecutor {
 					// fee calls conflict with the discovery simulation's dummy fee
 					// method. Probe-free validated pipeline, as always.
 					checkCancelled()
-					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-						await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask))
+					;({
+						txRequest,
+						node,
+						pxe,
+						account,
+						network,
+						nonce,
+						txCalls,
+						feePaymentMethod,
+						pendingPublicAuthwits,
+						initializesAccount,
+					} = await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask))
 				} else {
 					const { built, discoveredActions } = await this.deps.estimateWithDiscovery.estimate(
 						op,
@@ -583,7 +608,18 @@ export class DappSendExecutor {
 						)
 					}
 					checkCancelled()
-					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } = built)
+					;({
+						txRequest,
+						node,
+						pxe,
+						account,
+						network,
+						nonce,
+						txCalls,
+						feePaymentMethod,
+						pendingPublicAuthwits,
+						initializesAccount,
+					} = built)
 				}
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
@@ -591,6 +627,7 @@ export class DappSendExecutor {
 					pxe,
 					node,
 					txRequest,
+					initializesAccount,
 					scopes: [account.address, ...sendAdditionalScopes],
 					parentTask,
 					checkCancelled,

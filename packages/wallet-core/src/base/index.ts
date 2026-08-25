@@ -65,7 +65,24 @@ export class ServiceCollection {
 	public async start() {
 		const phases = topologicalPhases([...this.services.values()])
 		for (const phase of phases) {
-			await Promise.all(phase.map((svc) => svc.start(this)))
+			// allSettled, not reject-fast Promise.all: a mid-phase failure must
+			// not leave still-starting siblings running unobserved (their late
+			// side effects would land against a "failed" boot with nothing
+			// tracking them). Every sibling settles before the phase fails, the
+			// aggregate names EVERY failed service, and no later phase starts.
+			// Deliberate limit: services that started successfully stay live —
+			// IService has no stop hook, so this is a phase barrier and honest
+			// diagnostics, not rollback.
+			const results = await Promise.allSettled(phase.map((svc) => svc.start(this)))
+			const failures = results
+				.map((r, i) => ({ r, name: phase[i]?.name ?? `service#${i}` }))
+				.filter((x): x is { r: PromiseRejectedResult; name: string } => x.r.status === "rejected")
+			if (failures.length > 0) {
+				throw new AggregateError(
+					failures.map((f) => f.r.reason),
+					`ServiceCollection.start failed in phase: ${failures.map((f) => f.name).join(", ")}`,
+				)
+			}
 		}
 	}
 }
