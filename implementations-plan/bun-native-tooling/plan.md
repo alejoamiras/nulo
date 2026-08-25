@@ -53,7 +53,7 @@ Novelty LOW (a process primitive; the release scripts already shell natively), b
 
 Validation gate — after EACH file: `bun run --cwd packages/bridge-core typecheck && bun run --cwd packages/bridge-core test && bun run lint`; after the last: the `grep` in Done returns only `run.ts`; the static behaviour audit per site in `lessons/phase-1.md` (18 rows: old API → new call; `cwd`/`env`/`stdio`/`maxBuffer` semantics; `.trim()` on captured stdout where the old code trimmed; exit-code path; soft-fail preserved?; input validation added?; resolution lazy?); `verify-l1 --dry-run` for BOTH manifests prints exactly the Phase 0 baseline lines (testnet: four ✓; mainnet: the circle-proxy skip line + three ✓ — key-free, forge on PATH; if the toolchain is unusable on the running host, record the exact blocker instead). Live conductors (`live-intent`, `deploy-bridge-*`, `restore-swap`) cannot be smoke-run without keys and a network — the next `aztec-update` run is their operational proof (owner Ask A2). Layers: typecheck · unit · lint · static audit · key-free dry-run.
 
-### Phase 2 — Docs + dossier corrections
+### Phase 2 — Docs + dossier corrections ✓ (gate passed 2026-08-25 — [lessons/phase-2.md](lessons/phase-2.md))
 
 README, `.env.example`, adoption-map, `implementations-plan/index.md`. Validation gate — `bun run lint && bun run test:all`; `git diff --name-only <last Phase 1 commit>..HEAD` is `*.md` + `.env.example` only. Pass: exit 0, diff conforms.
 
