@@ -26,3 +26,7 @@ Five findings, all adopted:
 5. Both simpler f1-1 orderings pass on revert — the MID-ARTIFACT ordering is the load-bearing pin; added.
 
 Meta-lesson (recurring at every gate this pipeline has run): the first "atomic" design is rarely atomic at the right BOUNDARY — the commit point must be the LAST act of the winning section, and every companion test must be checked for pass-on-revert before it's trusted. Round-3 re-verdict pending on rev 3 (e89bd1b9).
+
+## Gate round 3 (resumed final pass): APPROVE-WITH-CHANGES → GATE PASSED
+
+Bump-last verified sound across "normal, mid-artifact, completed-open, double-close, and restart interleavings"; the watchdog-free artifact mutex endorsed. One folded specification: the rejection branch must preserve session-manager's pinned MEMORY-FIRST DEGRADED SUCCESS contract (:216-220) — compensate → read back → confirmed-absent ⇒ install B + schedule + bump (committed degraded successor); unconfirmable ⇒ abort unbumped (pending close retries). Rev 4 is the plan of record. Gate arc total: 3 rounds, 12 adopted findings, 1 cross-auditor disagreement resolved unanimously, 0 unresolved.
