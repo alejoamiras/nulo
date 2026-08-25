@@ -30,6 +30,7 @@
         "@aztec/protocol-contracts": "5.0.1",
         "@aztec/pxe": "5.0.1",
         "@aztec/simulator": "5.0.1",
+        "@aztec/sqlite3mc-wasm": "5.0.1",
         "@aztec/stdlib": "5.0.1",
         "@aztec/wallet-sdk": "5.0.1",
         "@codemirror/autocomplete": "^6.20.3",
@@ -44,6 +45,7 @@
         "@nulo/bridge-core": "workspace:*",
         "@nulo/design": "workspace:*",
         "@nulo/extension-messaging": "workspace:*",
+        "@nulo/resolve-asset": "workspace:*",
         "@nulo/wallet-bridge": "workspace:*",
         "@nulo/wallet-core": "workspace:*",
         "@nulo/wallet-crypto": "workspace:*",
@@ -191,6 +193,7 @@
         "zod": "^4.4.3",
       },
       "devDependencies": {
+        "@nulo/resolve-asset": "workspace:*",
         "chrome-types": "^0.1.429",
         "typescript": "^6.0.3",
         "vitest": "^4.1.9",
@@ -211,8 +214,10 @@
         "@aztec/noir-contracts.js": "5.0.1",
         "@aztec/stdlib": "5.0.1",
         "@aztec/wallets": "5.0.1",
+        "@nulo/resolve-asset": "workspace:*",
         "@nulo/wallet-crypto": "workspace:*",
         "viem": "npm:@aztec/viem@2.38.2",
+        "zod": "^4.4.3",
       },
       "devDependencies": {
         "@types/node": "^24.13.2",
@@ -257,6 +262,15 @@
       "optionalPeers": [
         "zod",
       ],
+    },
+    "packages/resolve-asset": {
+      "name": "@nulo/resolve-asset",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/node": "^24.10.1",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.9",
+      },
     },
     "packages/wallet-bridge": {
       "name": "@nulo/wallet-bridge",
@@ -711,6 +725,8 @@
     "@nulo/landing": ["@nulo/landing@workspace:apps/landing"],
 
     "@nulo/playground": ["@nulo/playground@workspace:apps/playground"],
+
+    "@nulo/resolve-asset": ["@nulo/resolve-asset@workspace:packages/resolve-asset"],
 
     "@nulo/wallet-bridge": ["@nulo/wallet-bridge@workspace:packages/wallet-bridge"],
 

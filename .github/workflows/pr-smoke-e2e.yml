@@ -57,6 +57,8 @@ jobs:
               - 'packages/design/package.json'
               - 'packages/extension-messaging/src/**'
               - 'packages/extension-messaging/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
               - 'packages/wallet-bridge/src/**'
               - 'packages/wallet-bridge/package.json'
               - 'packages/wallet-core/src/**'
