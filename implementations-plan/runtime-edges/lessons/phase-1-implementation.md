@@ -10,6 +10,14 @@
 
 Verified clean by the review: provenance threading complete (all four contexts, both reuse branches undefined, no stale-true path), the N-28 settle-before-throw semantics + all callers, no other 5-min assumptions, comment/TSDoc conventions.
 
+## Codex final-diff round 1 — CHANGES ×3, all adopted
+
+1. **My "reused estimates → undefined provenance" rule was wrong**: the reuse caches retain the EXACT built request, so the flag rides the entry (REQUIRED field, stash + restore, consume pin). I'd reasoned "the stash persists only request fields" — but the stash is MINE to extend; treating its shape as fixed made the normal estimate→confirm path bypass the entire fix. **Lesson: before declaring provenance "unavailable" on a path, check whether the path's own data structure is in this diff's power to extend.**
+2. **My wire generalization was unsound**: stamping `code` for EVERY WalletError collided with deliberate reconstruction policy (TooManyPending → base WalletError per an existing pin) and dropped `details` for detail-dependent classes. Narrowed to exactly DuplicateInitializationError. **Lesson: a "correct generalization" of an error channel needs the full subclass matrix — when the ask is one type, ship one type.**
+3. The provenance assignments themselves were unpinned (coordinator tests inject `true` manually; stripping nulo-account's assignments stayed green) — new real-account pins in aztec-runtime (node env runs the actual derivation; node/entrypoint stubbed at the instance seam), probed red. Plus the journal-state UI mapping I'd missed ("Account already initialized — retry after sync") with its pin.
+
+Also this round: the battery's smoke red was the KNOWN cold-boot flake — at 15 s now (the deflake default engaged) but racing my own codex xhigh process on the host. Re-run policy: keep MY OWN concurrent work off the host during smoke too, not just network.
+
 ## Codex plan-gate lessons already in phase-0; this phase's addendum
 
 - The biome 2.5.9 line rejects unformatted code as ERRORS while the legacy warnings stay warnings — a `bun run lint` exit 1 with untouched-file warnings means MY files have a format error hiding among them; `grep "Formatter would have printed" -B6` finds it fast.
