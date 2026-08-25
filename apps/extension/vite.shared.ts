@@ -36,7 +36,6 @@ export const srcDir = fileURLToPath(new URL("./src", import.meta.url))
 /** Compile-time `define` constants shared by the build + unit configs. */
 export const sharedDefine: Record<string, string> = {
 	__VERSION__: JSON.stringify(packageJson.version),
-	__SENTINEL__: JSON.stringify(packageJson.sentinel),
 	__AZTEC_VERSION__: JSON.stringify(packageJson.dependencies["@aztec/pxe"] ?? "unknown"),
 	__NAME__: JSON.stringify(packageJson.name),
 	__DISPLAY_NAME__: JSON.stringify(packageJson.displayName),

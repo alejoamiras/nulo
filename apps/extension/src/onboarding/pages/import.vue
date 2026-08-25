@@ -9,9 +9,6 @@ import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 
-/** Services */
-import { setSentinel } from "@/utils/core"
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 
@@ -41,7 +38,6 @@ const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
 	await setLastActiveProfileId(p.id)
-	await setSentinel()
 	const outcome = await completeImportWithRecovery({
 		waitForActive: async () => {
 			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")

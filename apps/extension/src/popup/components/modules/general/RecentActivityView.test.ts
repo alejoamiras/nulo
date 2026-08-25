@@ -45,6 +45,7 @@ const H = vi.hoisted(() => {
 		// per-call-controllable data fns
 		getOperations: vi.fn(),
 		getTasks: vi.fn(),
+		getTokens: vi.fn(),
 		getIncomingTransfers: vi.fn(),
 		incomingConnect: vi.fn(),
 		configConnect: vi.fn(),
@@ -132,7 +133,7 @@ vi.mock("@/wallet/services/token/client", () => ({
 	TokenServiceClient: vi.fn(function () {
 		return {
 			disconnect: vi.fn(),
-			getTokens: vi.fn().mockResolvedValue([]),
+			getTokens: H.getTokens,
 			onTokenAdded: H.tokenAdded,
 		}
 	}),
@@ -223,6 +224,7 @@ const vmOf = (wrapper: ReturnType<typeof mountView>) => wrapper.vm as any
 beforeEach(() => {
 	H.getOperations.mockReset().mockResolvedValue([])
 	H.getTasks.mockReset().mockResolvedValue([])
+	H.getTokens.mockReset().mockResolvedValue([])
 	H.getIncomingTransfers.mockReset().mockResolvedValue([])
 	H.incomingConnect.mockReset().mockResolvedValue(undefined)
 	H.configConnect.mockReset().mockResolvedValue(undefined)
@@ -354,5 +356,137 @@ describe("RecentActivityView — account-switch containment (Layer A)", () => {
 		const vm = vmOf(wrapper)
 		const incoming = vm.recentActivityRows.filter((r: { type: string }) => r.type === "incoming")
 		expect(incoming.map((r: { inc: { siloedNullifier: string } }) => r.inc.siloedNullifier)).toEqual(["sn-active"])
+	})
+})
+
+describe("RecentActivityView — scope-triple containment (N-23)", () => {
+	test("a SAME-ADDRESS profile switch resets + reloads (the address-only key no-oped here)", async () => {
+		H.getTasks.mockResolvedValue([uiTransferTask(ACCT_A)])
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeTruthy()
+
+		H.getTasks.mockResolvedValue([]) // the new profile's world is empty
+		H.store.current.profile = { id: "p2" } // same address, new profile
+		await nextTick()
+		expect(vm.executingTask).toBeNull() // sync clear fired despite identical address
+		await flushPromises()
+		expect(vm.executingTask).toBeNull() // reload found nothing to resurrect
+	})
+
+	test("a SAME-ADDRESS network switch does not re-accept the old network's transfer task", async () => {
+		const taskOnNet1 = {
+			...uiTransferTask(ACCT_A),
+			content: { kind: H.ContentKind.Transfer, senderAddress: ACCT_A, tokenId: undefined, networkId: "net-1" },
+		}
+		H.getTasks.mockResolvedValue([taskOnNet1])
+		const wrapper = mountView()
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeTruthy()
+
+		// TaskService clears on PROFILE change only — the old-network task is
+		// still returned; the networkId comparison is what must drop it.
+		H.store.current.network = { id: "net-2", chainId: 2 }
+		await nextTick()
+		expect(vm.executingTask).toBeNull()
+		await flushPromises()
+		expect(vm.executingTask).toBeNull() // not re-accepted from the reload
+	})
+
+	test("a deferred OLD-scope token fetch cannot overwrite the new scope's map", async () => {
+		const slow = deferred<Array<{ id: number; symbol: string }>>()
+		H.getTokens.mockReturnValueOnce(slow.promise) // mount's load (old scope) parks
+		const wrapper = mountView()
+		await flushPromises()
+
+		H.getTokens.mockResolvedValue([{ id: 2, symbol: "FRESH" }])
+		H.store.current.profile = { id: "p2" } // switch → sync clear + fenced reload
+		await nextTick()
+		await flushPromises()
+		slow.resolve([{ id: 9, symbol: "STALE" }]) // the OLD run resumes last
+		await flushPromises()
+
+		const vm = vmOf(wrapper)
+		expect(vm.tokens.map((t: { symbol: string }) => t.symbol)).toEqual(["FRESH"])
+	})
+
+	test("collapse: a missing scope part clears state and fires NO reload RPCs", async () => {
+		const wrapper = mountView()
+		await flushPromises()
+		H.getOperations.mockClear()
+		H.getTasks.mockClear()
+
+		H.store.current.network = null // scope collapses to ""
+		await nextTick()
+		await flushPromises()
+		expect(H.getOperations).not.toHaveBeenCalled()
+		expect(H.getTasks).not.toHaveBeenCalled()
+		const vm = vmOf(wrapper)
+		expect(vm.journalOps).toEqual([])
+		expect(vm.executingTask).toBeNull()
+	})
+
+	test("a parked OLD-profile getTasks resolving after a same-address switch cannot land", async () => {
+		const slow = deferred<Array<ReturnType<typeof uiTransferTask>>>()
+		H.getTasks.mockReturnValueOnce(slow.promise) // mount's task load parks
+		const wrapper = mountView()
+		await flushPromises()
+
+		H.getTasks.mockResolvedValue([]) // the new profile's world is empty
+		H.store.current.profile = { id: "p2" } // same address, new profile
+		await nextTick()
+		await flushPromises()
+		slow.resolve([uiTransferTask(ACCT_A)]) // the OLD profile's run resumes last
+		await flushPromises()
+		expect(vmOf(wrapper).executingTask).toBeNull()
+	})
+
+	test("a standalone journal resnapshot does not starve parked task/token loads", async () => {
+		// Per-loader fences: a journal-only begin() (reconnect resnapshot) must not
+		// supersede task/token loads still in flight. The mount path serializes
+		// (it awaits loadTokens first), so the CONCURRENT park is driven through
+		// the scope-switch watcher, which starts all three loads together.
+		const wrapper = mountView()
+		await flushPromises() // mount settles on the fast default mocks
+
+		const slowTasks = deferred<Array<ReturnType<typeof uiTransferTask>>>()
+		const slowTokens = deferred<Array<{ id: number; symbol: string }>>()
+		H.getTasks.mockReturnValueOnce(slowTasks.promise)
+		H.getTokens.mockReturnValueOnce(slowTokens.promise)
+		H.store.current.profile = { id: "p2" } // switch → watcher fires all three loads
+		await nextTick()
+		expect(H.getTasks).toHaveBeenCalled() // both parked RPCs are in flight
+		expect(H.getTokens).toHaveBeenCalled()
+
+		H.journalConnected.emit() // journal-only resnapshot while BOTH are parked
+		await flushPromises()
+		slowTasks.resolve([uiTransferTask(ACCT_A)])
+		slowTokens.resolve([{ id: 3, symbol: "LIVE" }])
+		await flushPromises()
+
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeTruthy()
+		expect(vm.tokens.map((t: { symbol: string }) => t.symbol)).toEqual(["LIVE"])
+	})
+
+	test("ABA: an A→B→A round-trip does not let A's stale first-run snapshot land", async () => {
+		const slowOps = deferred<Array<ReturnType<typeof inFlightTransferOp>>>()
+		H.getOperations.mockReturnValueOnce(slowOps.promise) // A's mount snapshot parks
+		const wrapper = mountView()
+		await flushPromises()
+
+		H.getOperations.mockResolvedValue([]) // B's and the return-A's snapshots are empty
+		H.store.current.profile = { id: "p2" } // A→B
+		await nextTick()
+		H.store.current.profile = { id: "p1" } // B→A (captured-equality would revalidate!)
+		await nextTick()
+		await flushPromises()
+
+		slowOps.resolve([inFlightTransferOp(ACCT_A, "op-stale")]) // A's ORIGINAL run resumes
+		await flushPromises()
+		const vm = vmOf(wrapper)
+		expect(vm.journalOps.map((o: { id: string }) => o.id)).not.toContain("op-stale")
 	})
 })
