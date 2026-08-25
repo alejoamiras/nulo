@@ -28,8 +28,6 @@ declare global {
   const MAX_BACKUP_FILE_BYTES: typeof import('../utils/full-backup-helpers').MAX_BACKUP_FILE_BYTES
   const MAX_CONTACT_IMPORT_BYTES: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_BYTES
   const MAX_CONTACT_IMPORT_ROWS: typeof import('../utils/contacts-export-format').MAX_CONTACT_IMPORT_ROWS
-  const PREFLIGHT_ATTEMPT_TIMEOUT_MS: typeof import('../composables/importPreflight').PREFLIGHT_ATTEMPT_TIMEOUT_MS
-  const PREFLIGHT_BACKOFF_WAITS_MS: typeof import('../composables/importPreflight').PREFLIGHT_BACKOFF_WAITS_MS
   const TESTNET_L1_CHAIN_ID: typeof import('../utils/chain-ids').TESTNET_L1_CHAIN_ID
   const TESTNET_ROLLUP_VERSION: typeof import('../utils/chain-ids').TESTNET_ROLLUP_VERSION
   const THEME_HINT_KEY: typeof import('../utils/general').THEME_HINT_KEY
@@ -46,8 +44,6 @@ declare global {
   const buildJournalTerminalCardProps: typeof import('../utils/journal-state').buildJournalTerminalCardProps
   const capitalize: typeof import('../utils/string').capitalize
   const categoricalLabel: typeof import('../utils/journal-state').categoricalLabel
-  const checkNotificationsForShow: typeof import('../composables/notification.js').checkNotificationsForShow
-  const checkSentinel: typeof import('../utils/core').checkSentinel
   const clampDecimals: typeof import('../utils/amount').clampDecimals
   const collectRestoreErrors: typeof import('../utils/full-backup-helpers').collectRestoreErrors
   const comma: typeof import('../utils/amount').comma
@@ -87,7 +83,6 @@ declare global {
   const getNetwork: typeof import('../utils/core').getNetwork
   const getOriginLabel: typeof import('../utils/tx-enrichment').getOriginLabel
   const getPrimaryCall: typeof import('../utils/tx-enrichment').getPrimaryCall
-  const getTemplate: typeof import('../composables/notification.js').getTemplate
   const getThousandSeparator: typeof import('../utils/amount').getThousandSeparator
   const getTransaction: typeof import('../utils/core').getTransaction
   const getTxCategory: typeof import('../utils/tx-enrichment').getTxCategory
@@ -166,7 +161,6 @@ declare global {
   const sanitizeJournalSubtitle: typeof import('../utils/journal-state').sanitizeJournalSubtitle
   const sanitizeString: typeof import('../utils/string').sanitizeString
   const setLastActiveProfileId: typeof import('../utils/lastActiveProfile').setLastActiveProfileId
-  const setSentinel: typeof import('../utils/core').setSentinel
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
@@ -205,7 +199,6 @@ declare global {
   const useFullBackupImport: typeof import('../composables/useFullBackupImport').useFullBackupImport
   const useFullscreenPopupSetting: typeof import('../composables/fullscreenPopupSetting').useFullscreenPopupSetting
   const useId: typeof import('vue').useId
-  const useInFlightSend: typeof import('../composables/useInFlightSend').useInFlightSend
   const useIncomingTransfers: typeof import('../composables/useIncomingTransfers').useIncomingTransfers
   const useLink: typeof import('vue-router').useLink
   const useModel: typeof import('vue').useModel

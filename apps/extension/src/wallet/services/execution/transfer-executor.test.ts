@@ -94,6 +94,17 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 }
 
 describe("TransferExecutor.execute", () => {
+	test("the task's TransferContent is stamped with the request's networkId", async () => {
+		// The producer stamp is what lets the activity view scope transfer tasks
+		// per network — a UI test supplying the field manually cannot see it vanish.
+		const { executor, deps } = makeHarness()
+		await executor.execute(makeReq())
+		const content = (deps.tasks.startNewTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			networkId?: string
+		}
+		expect(content.networkId).toBe("net-1")
+	})
+
 	test("rebuild path: planner + buildAndEstimate, transfer-only activity record, scopes = [account.address]", async () => {
 		const { executor, deps, task, proveAndSend } = makeHarness()
 		const result = await executor.execute(makeReq())

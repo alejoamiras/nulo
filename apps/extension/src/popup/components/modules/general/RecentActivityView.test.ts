@@ -428,6 +428,42 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 		expect(vm.executingTask).toBeNull()
 	})
 
+	test("a parked OLD-profile getTasks resolving after a same-address switch cannot land", async () => {
+		const slow = deferred<Array<ReturnType<typeof uiTransferTask>>>()
+		H.getTasks.mockReturnValueOnce(slow.promise) // mount's task load parks
+		const wrapper = mountView()
+		await flushPromises()
+
+		H.getTasks.mockResolvedValue([]) // the new profile's world is empty
+		H.store.current.profile = { id: "p2" } // same address, new profile
+		await nextTick()
+		await flushPromises()
+		slow.resolve([uiTransferTask(ACCT_A)]) // the OLD profile's run resumes last
+		await flushPromises()
+		expect(vmOf(wrapper).executingTask).toBeNull()
+	})
+
+	test("a standalone journal resnapshot does not starve parked task/token loads", async () => {
+		// Per-loader fences: a journal-only begin() (reconnect resnapshot) must not
+		// supersede the task/token loads still in flight from the mount.
+		const slowTasks = deferred<Array<ReturnType<typeof uiTransferTask>>>()
+		const slowTokens = deferred<Array<{ id: number; symbol: string }>>()
+		H.getTasks.mockReturnValueOnce(slowTasks.promise)
+		H.getTokens.mockReturnValueOnce(slowTokens.promise)
+		const wrapper = mountView()
+		await flushPromises()
+
+		H.journalConnected.emit() // journal-only resnapshot mid-park
+		await flushPromises()
+		slowTasks.resolve([uiTransferTask(ACCT_A)])
+		slowTokens.resolve([{ id: 3, symbol: "LIVE" }])
+		await flushPromises()
+
+		const vm = vmOf(wrapper)
+		expect(vm.executingTask).toBeTruthy()
+		expect(vm.tokens.map((t: { symbol: string }) => t.symbol)).toEqual(["LIVE"])
+	})
+
 	test("ABA: an A→B→A round-trip does not let A's stale first-run snapshot land", async () => {
 		const slowOps = deferred<Array<ReturnType<typeof inFlightTransferOp>>>()
 		H.getOperations.mockReturnValueOnce(slowOps.promise) // A's mount snapshot parks
