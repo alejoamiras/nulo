@@ -1,6 +1,6 @@
 # vitest-on-bun — Arc C of the Bun 1.4 adoption (`/blueprint mid`)
 
-Status: **APPROVED v6 — 2026-08-24**, per the owner's standing decision protocol: explicit fresh-context codex `approve` (session `01a035de-…`, round 3) after codex rounds 1–3, fable round 1 and fresh-context rounds 1–2 were all folded with zero disputes (see [lessons/gate-convergence.md](lessons/gate-convergence.md)). Implementing. `eli5_mode: artifact` — ELI5 Artifact: https://claude.ai/code/artifact/8086907e-ab23-4627-a33a-d8553df5cf53 (source: `implementations-plan/vitest-on-bun/eli5.html`; redeploy the same path to update).
+Status: **APPROVED v6 — 2026-08-24**, per the owner's standing decision protocol: explicit fresh-context codex `approve` (session `01a035de-…`, round 3) after codex rounds 1–3, fable round 1 and fresh-context rounds 1–2 were all folded with zero disputes (see [lessons/gate-convergence.md](lessons/gate-convergence.md)). Delivered 2026-08-25: PR #459 to dev (owner merge). `eli5_mode: artifact` — ELI5 Artifact: https://claude.ai/code/artifact/8086907e-ab23-4627-a33a-d8553df5cf53 (source: `implementations-plan/vitest-on-bun/eli5.html`; redeploy the same path to update).
 
 ## Goal
 
