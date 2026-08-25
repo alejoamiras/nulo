@@ -485,7 +485,16 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 			// a malformed or duplicate row must neither block nor poison a valid
 			// sibling.
 			return await restoreRows(authwits, async (authwit) => {
-				while (occupied.has(`${id}`)) id++
+				// The safe-integer guard lives INSIDE the loop condition: a hostile
+				// decodable row can sit at MAX_SAFE_INTEGER, past which the float
+				// cursor stops advancing (id++ is a no-op) — an unguarded skip
+				// loop would spin forever under the service-wide lock, and an
+				// unguarded write would land key-identity-hidden on read. Fail
+				// the ROW (restoreRows tags it), never the service.
+				while (Number.isSafeInteger(id) && occupied.has(`${id}`)) id++
+				if (!Number.isSafeInteger(id)) {
+					throw new Error("authwit id space exhausted (hostile id boundary)")
+				}
 				// Parse the persisted shape so a malformed backup authwit is recorded
 				// as restoreError, not silently written + codec-hidden on read.
 				const row = AuthwitSchema.parse({ ...authwit, id })

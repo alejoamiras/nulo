@@ -252,6 +252,26 @@ describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 		expect(restored[1].restoreError).toBeUndefined()
 	})
 
+	test("(N-24) a hostile decodable row at MAX_SAFE_INTEGER fails the ROW — no hang, no hidden write", async () => {
+		// Past MAX_SAFE_INTEGER the float cursor stops advancing (id++ is a
+		// no-op): an unguarded skip loop spins forever under the service lock,
+		// and an unguarded write lands key-identity-hidden on read. Both
+		// boundary keys are seeded so the loop's own guard (not just the
+		// post-loop check) is what exits.
+		const max = Number.MAX_SAFE_INTEGER
+		await api.storage.local.set({
+			[`nulo:core:auth-registry@${max}`]: JSON.stringify({ id: max, account: A, hash: "0xmax", content: {} }),
+			[`nulo:core:auth-registry@${max + 1}`]: JSON.stringify({ junk: true }),
+		})
+		const restored = await service.restore([authwit(A, "0xnew1"), authwit(A, "0xnew2")])
+		expect(restored[0].restoreError).toBeTruthy()
+		expect(restored[1].restoreError).toBeTruthy()
+		// Nothing landed at (or past) the unsafe boundary beyond the seeds.
+		const raw = await api.storage.local.get(null)
+		const authKeys = Object.keys(raw).filter((k) => k.startsWith("nulo:core:auth-registry@"))
+		expect(authKeys).toHaveLength(2)
+	}, 10_000)
+
 	test("(N-24) a codec-hidden raw row's pair still blocks its duplicate, and its key is never overwritten", async () => {
 		// Seed a raw row that carries a valid (account, hash) but a codec-breaking
 		// content — decoded reads hide it, yet its identity must still dedupe and

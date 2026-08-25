@@ -3,8 +3,10 @@
  * store picks one explicitly rather than re-deriving it. Both scan the store's OWN
  * keys (the id space is per-root), so allocation is correct without a shared cursor.
  *
- * `nextNumericId` mirrors `array_max((getKeys).map(+)) + 1` — the token /
- * token-balance / auth-registry cursor. `nextRandomId` mirrors the
+ * `nextNumericId` allocates max(allocatable ids) + 1 over the store's physical
+ * keys, where "allocatable" means canonical AND safe-integer (hostile keys are
+ * excluded, and the returned candidate itself must be safe and physically
+ * free) — the token / token-balance cursor. `nextRandomId` mirrors the
  * `do getRandomHex while contains` collision-avoidance loop — the contact / fpc /
  * network string ids. The structural param types keep these decoupled from
  * `EntityStorage` (any object with the one method works).
