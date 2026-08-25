@@ -717,8 +717,11 @@ describe("ProfileService integration", () => {
 			expect(await fresh.exportPlain(imported.id, "otherpass1")).toBe(master)
 
 			await expect(fresh.importMnemonic("Short", words.slice(0, 12), "otherpass1")).rejects.toThrow(/Invalid mnemonic length/)
-			const corrupted = [...words.slice(0, 23), words[0] === "abandon" ? "zoo" : "abandon"]
-			await expect(fresh.importMnemonic("BadSum", corrupted, "otherpass1")).rejects.toThrow(/Invalid checksum|Invalid mnemonic/)
+			// A word off the BIP-39 list fails wordlist validation on EVERY run. Swapping the last word
+			// for another list word is a random outcome: ~1/256 forms a valid checksum for a different
+			// phrase, and if the swap equals the original word the import is a DUPLICATE, not invalid.
+			const corrupted = [...words.slice(0, 23), "notaword"]
+			await expect(fresh.importMnemonic("BadWord", corrupted, "otherpass1")).rejects.toThrow(/Invalid checksum|Invalid mnemonic/)
 		}, 30_000)
 
 		test("restore rejects a doctored backup whose entropy does not derive the master (H3)", async () => {
