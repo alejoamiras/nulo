@@ -1,0 +1,15 @@
+# Phase 1 — implementation + review arc
+
+## Environment findings
+
+- bb.js WASM does not run in the extension's vitest env (`std::bad_cast`) — the N-03 pins mock `deriveAccountSeed`/`NuloAccount.new` (the fence's subject is ORDERING, not crypto; the real derivation is covered by the aztec-runtime KATs + network e2e).
+- Making `getGeneration` REQUIRED (codex plan round 1) forced 22 test constructions to declare it — exactly the omission-is-a-type-error property the requirement buys.
+- Six pre-existing test files stubbed ProfileService without `getDeletionState`; the fences surfaced every one at typecheck/run time. A fence that widens a service's dependency surface widens every stub of that service.
+
+## Max review — REQUEST-CHANGES, 2 substantive findings, both adopted
+
+1. **MAJOR (empirically proven by the reviewer): the entry captures dereferenced raw rows without a null guard at 5 sites.** Backup slices are attacker-controlled and `normalizeAllIds` deliberately preserves non-object elements — a single crafted `null` row TypeErrored the whole `.map()` BEFORE `restoreRows`, converting the documented per-row `restoreError` contract into a whole-import abort + rollback. Fix: the null-safe `(r as {...} | null)?.profileId` form (the diff already used it at the network site). **Lesson: hardening code sits at the SAME trust boundary as the code it guards — an entry capture over hostile rows must be exactly as hostile-input-tolerant as the row loop it protects. Probe new pre-loop code with a `null` element as a matter of course.**
+2. **The entry-capture property itself was unpinned**: every N-14 pin used `beginDeletion` WITHOUT `release`, so the rejected lazy-capture design would still pass them (row 2 sees the profile reserved → same `/deleted/` error). The plan mandated an entry-race case; it hadn't shipped. Fix: begin+RELEASE variants on the two structural shapes (contact = locked `restoreRows`, network = hand-rolled) — after release the profile is unreserved and the epoch settled, so ONLY an entry-captured epoch still rejects. Both probed red under a simulated lazy capture (`assertRestoreEpoch(deletion, captureRestoreEpochs(deletion, [pid]), pid)` at the write). **Lesson: when a review overturns a design (lazy → entry capture), the pin must discriminate the OVERTURNED design, not just any deletion — `beginDeletion` without `release` tests the reservation, not the capture point.**
+3. Nit adopted: reverted a sed-collateral fixture drift (`userHandle` "src-profile-id" → "new-id") — an overly-broad global replace during test updates; targeted seds only.
+
+Verified-clean for the record: all fence placements (no await between assert and write anywhere), the threaded-profileId RPC arity end-to-end (wrapParams preserves positional arity; `definePassthroughsExhaustive` cannot clobber the typed overrides — `restore` is not a Methods key), hostile-input aiming (normalizeAllIds forces every row to the created id), and the single production BalanceJobQueue wiring.
