@@ -57,7 +57,8 @@ import { OperationJournalService } from "@/wallet/services/operation-journal/ser
 import { type DispatchHooks, DiscoveryQueue, isDiscoveryExpired, type SessionContext, WalletSdkDispatcher } from "@nulo/wallet-bridge"
 import { jsonStringify, getErrorMessage, KeyedLock } from "@nulo/wallet-core/utils"
 import { approveOrRollbackDiscoverySession } from "./discovery-approval"
-import { tryCreateQueuedJournal } from "./queued-journal"
+import { failQueuedIfUnclaimed, tryCreateQueuedJournal } from "./queued-journal"
+import { chainSendTxWithVouching } from "./queued-wait-vouching"
 import { createSessionBaton } from "./session-baton"
 import { chainInfoToChainId, handleSessionEstablished } from "./session-established"
 import { wireTabLifecycle } from "./tab-lifecycle"
@@ -331,8 +332,17 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							})
 						: Promise.resolve(undefined)
 
-				const handlerChain = queuedJournalIdPromise.then((queuedJournalId) =>
-					prev.then(async () => {
+				// Pre-claim liveness: the record ages in `queued` through the whole
+				// session-FIFO wait + its own approval popup — a legitimate wait
+				// the reaper's grace cannot distinguish from a lost handler. The
+				// begin/end PLACEMENT invariants live (unit-pinned) in
+				// `queued-wait-vouching.ts`.
+				chainSendTxWithVouching({
+					queuedJournalIdPromise,
+					prev,
+					vouch: executionService,
+					releaseFifo,
+					run: async (queuedJournalId) => {
 						// B-13: re-gate execution behind the baton. A session that
 						// failed/lost establishment must not execute either — not just skip
 						// its journal. Same promise as the journal gate, so it resolves once.
@@ -366,14 +376,8 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 								queuedJournalId,
 							},
 						)
-					}),
-				)
-				// Safety-net release for handlers that don't call releaseFifo
-				// explicitly (every non-sendTx path) — preserves backward-
-				// compatible FIFO semantics for those. `.catch(() => {})` on
-				// the ignored side prevents an unhandled-rejection warning
-				// if the handler throws.
-				handlerChain.finally(releaseFifo).catch(() => {})
+					},
+				})
 				sessionQueues.set(
 					key,
 					baton.catch(() => {}),
@@ -706,32 +710,6 @@ async function handleDiscovery(
 			LogLevel.Warn,
 			`Discovery rejected for ${discovery.origin}: ${error instanceof Error ? error.message : String(error)}`,
 		)
-	}
-}
-
-/**
- * Transition a still-`queued` journal record to `failed`. The record is the
- * source of truth (not a mutable flag): "handler claimed then failed" already
- * carries its terminal state; "failed before claim" is ours to close so the
- * UI doesn't show a permanently-stuck "Queued..." card.
- */
-async function failQueuedIfUnclaimed(
-	operationJournal: OperationJournalService,
-	journalId: string,
-	message: string,
-	logger: ILogger,
-): Promise<void> {
-	try {
-		const record = await operationJournal.getOperation(journalId)
-		if (record?.progress?.stage === "queued") {
-			await operationJournal.transitionOperation(
-				journalId,
-				{ stage: "failed" },
-				{ kind: "popup_bound", message, normalizedRaw: null },
-			)
-		}
-	} catch (transitionError) {
-		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed: ${getErrorMessage(transitionError)}`)
 	}
 }
 

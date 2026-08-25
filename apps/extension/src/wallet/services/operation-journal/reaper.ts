@@ -215,15 +215,25 @@ export class JournalReaper {
 				? `SW restart with non-terminal record in ${stage} — unrecoverable`
 				: `${stage} stage exceeded grace window (${age}ms ≥ ${grace}ms)`
 			try {
-				await this.journal.transitionOperation(
+				// CAS transition: the snapshot goes stale across this loop's awaits —
+				// a record claimed (stage moved) or heartbeat-touched (updatedAt
+				// moved) since the snapshot must NOT be failed on obsolete age. The
+				// boot sweep is age-blind by design, so it pins only the stage.
+				const result = await this.journal.transitionIfStage(
 					op.id,
+					[stage],
 					{ stage: "failed" },
 					{ kind, message: `Job declared lost: ${reason}`, normalizedRaw: null },
+					unconditional ? undefined : { ifUpdatedAtIs: op.updatedAt },
 				)
-				this.logger.log(LOG_SOURCE, LogLevel.Warn, `reaped ${op.id} (${stage}, ${kind}, age=${age}ms)`)
+				if (result.outcome === "transitioned") {
+					this.logger.log(LOG_SOURCE, LogLevel.Warn, `reaped ${op.id} (${stage}, ${kind}, age=${age}ms)`)
+				} else {
+					this.logger.log(LOG_SOURCE, LogLevel.Debug, `reap stood down for ${op.id}: ${result.outcome}`)
+				}
 			} catch (err) {
 				// Most common cause: the record was terminated by its
-				// owning flow between getOperations and transitionOperation
+				// owning flow between getOperations and the transition
 				// (e.g. cancelJob landed first). Log + move on.
 				this.logger.log(LOG_SOURCE, LogLevel.Debug, `reap skipped ${op.id}: ${getErrorMessage(err)}`)
 			}

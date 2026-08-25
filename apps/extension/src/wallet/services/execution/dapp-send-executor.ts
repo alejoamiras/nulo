@@ -232,6 +232,13 @@ export class DappSendExecutor {
 			throw error
 		} finally {
 			if (journalId) this.deps.lane.deleteController(journalId)
+			// A pre-claim throw leaves `journalId` unset while `acquireSlot`
+			// already registered the pre-controller under `queuedJournalId`;
+			// the fresh-id fallbacks also make the two keys DIFFER after a
+			// successful claim. Delete under both (idempotent) — always before
+			// the slot release, matching the P17 ordering contract.
+			const queuedKey = params.hooks?.queuedJournalId
+			if (queuedKey && queuedKey !== journalId) this.deps.lane.deleteController(queuedKey)
 			releaseSlot()
 		}
 	}

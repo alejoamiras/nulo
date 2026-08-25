@@ -606,6 +606,98 @@ describe("DappSendExecutor — P17 slot-scaffold oracle (ordering + no-leak on e
 		expect(deps.lane.deleteController).not.toHaveBeenCalled()
 	})
 
+	// Real-Map-backed lane mock (N-25): acquireSlot REGISTERS under the queued
+	// id exactly as the production lane does, and deleteController deletes —
+	// so the pins observe the Map, not just call choreography. The mock keeps
+	// `preController` and the Map consistent (a queuedJournalId with an
+	// undefined preController is a state production cannot reach).
+	function makeRealMapLane(
+		claimBehavior: (map: Map<string, AbortController>) => Promise<{ journalId: string; controller: AbortController }>,
+	) {
+		const map = new Map<string, AbortController>()
+		const releaseLocal = vi.fn()
+		const order: string[] = []
+		const lane = {
+			registerController: vi.fn(),
+			deleteController: vi.fn((id: string) => {
+				order.push(`delete:${id}`)
+				map.delete(id)
+			}),
+			acquireSlot: vi.fn(async (_net: string, queuedJournalId?: string) => {
+				let preController: AbortController | undefined
+				if (queuedJournalId) {
+					preController = new AbortController()
+					map.set(queuedJournalId, preController)
+				}
+				return {
+					release: releaseLocal.mockImplementation(() => {
+						order.push("release")
+					}),
+					preController,
+				}
+			}),
+			claimOrCreateJournal: vi.fn(async () => claimBehavior(map)),
+			beginJournal: vi.fn(),
+			markJournal: vi.fn(async () => {}),
+		}
+		return { lane, map, releaseLocal, order }
+	}
+
+	test("(N-25) claim-throw WITH a queuedJournalId: the pre-registered controller is deleted — map empty, delete before release", async () => {
+		const h = makeRealMapLane(async () => {
+			throw new JobCancelledSentinel("q-1")
+		})
+		const { executor } = makeHarness({ lane: h.lane as never })
+		await expect(
+			executor.executeSendTransaction(
+				{
+					kind: "send_transaction",
+					networkId: "net-1",
+					accountAddress: "0xacct",
+					feeSettings: { paymentMethod: { kind: "fj" } },
+					actions: [{ kind: "call", contract: "0xc", method: "m", args: [] }],
+				} as never,
+				ORIGIN,
+				undefined,
+				undefined,
+				{ queuedJournalId: "q-1" } as never,
+			),
+		).rejects.toBeInstanceOf(JobCancelledSentinel)
+		expect(h.map.size).toBe(0) // no entry survives the pre-claim throw
+		// EVERY delete precedes the slot release (the P17 oracle checks only the first).
+		const releaseIdx = h.order.indexOf("release")
+		for (const [i, entry] of h.order.entries()) {
+			if (entry.startsWith("delete:")) expect(i).toBeLessThan(releaseIdx)
+		}
+	})
+
+	test("(N-25) fresh-id fallback: journalId !== queuedJournalId → NEITHER key survives", async () => {
+		const h = makeRealMapLane(async (map) => {
+			// The record-not-found fallback mints a fresh id and re-registers
+			// under it (the stale queued key was deleted in-helper on THIS path,
+			// but the finally must not depend on that coupling).
+			const controller = new AbortController()
+			map.set("fresh-9", controller)
+			return { journalId: "fresh-9", controller }
+		})
+		const { executor, deps } = makeHarness({ lane: h.lane as never })
+		await executor.executeSendTransaction(
+			{
+				kind: "send_transaction",
+				networkId: "net-1",
+				accountAddress: "0xacct",
+				feeSettings: { paymentMethod: { kind: "fj" } },
+				actions: [{ kind: "call", contract: "0xc", method: "m", args: [] }],
+			} as never,
+			ORIGIN,
+			undefined,
+			undefined,
+			{ queuedJournalId: "q-1" } as never,
+		)
+		expect(deps.lane).toBe(h.lane)
+		expect(h.map.size).toBe(0) // both the queued key and the fresh key are gone
+	})
+
 	test("NO_FROM path: proveAndSend throws → failed journal + deleteController + releaseSlot (no leak)", async () => {
 		collectOffchainEffectsMock.mockReturnValue([])
 		const { executor, deps, releaseSlot } = makeHarness({

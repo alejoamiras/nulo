@@ -468,6 +468,19 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		return this.lane.cancelJob(jobId)
 	}
 
+	/** Start pre-claim liveness vouching for a queued journal record — see
+	 *  {@link ExecutionLane.beginQueuedWait}. Called by the wallet-sdk handler
+	 *  at queued-record creation; SW-internal, never RPC-exposed. */
+	public beginQueuedWait(journalId: string): void {
+		this.lane.beginQueuedWait(journalId)
+	}
+
+	/** Stop pre-claim vouching (handler settled). Idempotent backstop — the
+	 *  normal removal is the ownership migration at mutex enqueue. */
+	public endQueuedWait(journalId: string): void {
+		this.lane.endQueuedWait(journalId)
+	}
+
 	public async estimateOperationFee(
 		operation: Operation,
 		feeSettings: FeeSettings,
