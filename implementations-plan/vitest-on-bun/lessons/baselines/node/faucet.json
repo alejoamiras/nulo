@@ -18,7 +18,7 @@
 		"script": "test",
 		"runtimeMode": "node",
 		"filters": [],
-		"gitSha": "f800dc1734d3b0e72a13d885073aee952ca78be5",
+		"gitSha": "e10cc91e96e00c6a8fa8cd1010892efc928f1a52",
 		"gitDirty": false,
 		"lockfileSha256": "e4600156928e48e1f113261508ab8f6dee59c9f358fa9e4c1ee6e2eb334952de",
 		"vitestVersion": "4.1.10",
@@ -67,7 +67,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12071,
+			"wallMs": 12564,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -105,6 +105,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -118,7 +119,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12050,
+			"wallMs": 13927,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -156,6 +157,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -169,7 +171,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12055,
+			"wallMs": 14553,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -207,6 +209,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -220,7 +223,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12014,
+			"wallMs": 14529,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -258,6 +261,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -271,7 +275,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12027,
+			"wallMs": 14589,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -309,6 +313,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -322,7 +327,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12170,
+			"wallMs": 13911,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -360,6 +365,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -373,7 +379,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12169,
+			"wallMs": 12692,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -411,6 +417,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -424,7 +431,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11996,
+			"wallMs": 13573,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -462,6 +469,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -475,7 +483,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11975,
+			"wallMs": 14149,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -513,6 +521,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -526,7 +535,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12223,
+			"wallMs": 14120,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -564,6 +573,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -577,7 +587,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12086,
+			"wallMs": 13263,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -615,6 +625,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -628,7 +639,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12044,
+			"wallMs": 13372,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -666,6 +677,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -679,7 +691,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12157,
+			"wallMs": 14383,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -717,6 +729,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -730,7 +743,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11994,
+			"wallMs": 14331,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -768,6 +781,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -781,7 +795,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12161,
+			"wallMs": 13918,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -819,6 +833,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -832,7 +847,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12125,
+			"wallMs": 14134,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -870,6 +885,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -883,7 +899,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12057,
+			"wallMs": 14435,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -921,6 +937,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -934,7 +951,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11943,
+			"wallMs": 13689,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -972,6 +989,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -985,7 +1003,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11967,
+			"wallMs": 14066,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1023,6 +1041,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1036,7 +1055,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12091,
+			"wallMs": 14029,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1074,6 +1093,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1087,7 +1107,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12140,
+			"wallMs": 13728,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1125,6 +1145,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1138,7 +1159,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11916,
+			"wallMs": 13621,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1176,6 +1197,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1189,7 +1211,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12013,
+			"wallMs": 14041,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1227,6 +1249,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1240,7 +1263,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12097,
+			"wallMs": 14012,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1278,6 +1301,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1291,7 +1315,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12157,
+			"wallMs": 13800,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1329,6 +1353,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1342,7 +1367,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12020,
+			"wallMs": 13662,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1380,6 +1405,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1393,7 +1419,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12032,
+			"wallMs": 13878,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1431,6 +1457,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1444,7 +1471,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11984,
+			"wallMs": 13884,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1482,6 +1509,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1495,7 +1523,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 12049,
+			"wallMs": 14171,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1533,6 +1561,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,
@@ -1546,7 +1575,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 11943,
+			"wallMs": 13917,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<node>",
@@ -1584,6 +1613,7 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
 			"collected": 542,

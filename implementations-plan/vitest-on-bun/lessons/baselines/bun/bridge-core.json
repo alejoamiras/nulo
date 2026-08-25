@@ -18,7 +18,7 @@
 		"script": "test",
 		"runtimeMode": "script",
 		"filters": [],
-		"gitSha": "f800dc1734d3b0e72a13d885073aee952ca78be5",
+		"gitSha": "e10cc91e96e00c6a8fa8cd1010892efc928f1a52",
 		"gitDirty": false,
 		"lockfileSha256": "e4600156928e48e1f113261508ab8f6dee59c9f358fa9e4c1ee6e2eb334952de",
 		"vitestVersion": "4.1.10",
@@ -67,7 +67,7 @@
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3676,
+			"wallMs": 4000,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -102,20 +102,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3624,
+			"wallMs": 4131,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -150,20 +151,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3640,
+			"wallMs": 4121,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -198,20 +200,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3692,
+			"wallMs": 4245,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -246,20 +249,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3646,
+			"wallMs": 3983,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -294,20 +298,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3617,
+			"wallMs": 4032,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -342,20 +347,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3608,
+			"wallMs": 4173,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -390,20 +396,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3608,
+			"wallMs": 4146,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -438,20 +445,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3678,
+			"wallMs": 4032,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -486,20 +494,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3646,
+			"wallMs": 4059,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -534,20 +543,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3641,
+			"wallMs": 4029,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -582,20 +592,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3703,
+			"wallMs": 3838,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -630,20 +641,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3677,
+			"wallMs": 3830,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -678,20 +690,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3646,
+			"wallMs": 3688,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -726,20 +739,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3690,
+			"wallMs": 3704,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -774,20 +788,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3648,
+			"wallMs": 3956,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -822,20 +837,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3605,
+			"wallMs": 4068,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -870,20 +886,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3683,
+			"wallMs": 3908,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -918,20 +935,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3638,
+			"wallMs": 3943,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -966,20 +984,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3644,
+			"wallMs": 3978,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1014,20 +1033,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3633,
+			"wallMs": 3930,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1062,20 +1082,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3692,
+			"wallMs": 4106,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1110,20 +1131,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3650,
+			"wallMs": 4005,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1158,20 +1180,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3634,
+			"wallMs": 3898,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1206,20 +1229,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3659,
+			"wallMs": 3715,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1254,20 +1278,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3660,
+			"wallMs": 3719,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1302,20 +1327,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3672,
+			"wallMs": 3953,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1350,20 +1376,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3636,
+			"wallMs": 3885,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1398,20 +1425,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3658,
+			"wallMs": 3967,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1446,20 +1474,21 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		},
 		{
 			"exitCode": 0,
 			"signal": null,
-			"wallMs": 3635,
+			"wallMs": 4082,
 			"timedOut": false,
 			"runtime": {
 				"execPath": "<bun>",
@@ -1494,18 +1523,19 @@
 				"pool": "forks",
 				"maxWorkers": null
 			},
+			"hookFailed": false,
 			"missingJson": false,
 			"success": true,
-			"collected": 223,
+			"collected": 227,
 			"passed": 223,
 			"failed": 0,
 			"skipped": 4,
 			"todo": 0,
 			"failing": [],
-			"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d"
+			"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa"
 		}
 	],
-	"inventoryDigest": "f2ecfd355db8104f7475a887bf74099ddfb6c01bf84256108f210f857cde019d",
+	"inventoryDigest": "7c6e4bf99cd9113b182d6e34a949e58a72c88f18a35a2fb7d3da33e961409cfa",
 	"failedRuns": 0,
 	"failing": {}
 }
