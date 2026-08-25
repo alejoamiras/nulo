@@ -4,7 +4,7 @@ Findings N-07 (Major, RED proof c2-1), N-16, N-25 (`audit/bugs/2026-08-22-produc
 
 ## Success criterion
 
-c2-1's scenario provably closed (adopted per the chosen design — see below), `waitForTx` bounded + cancellation-honoring, the controller leak closed with the bug-pinning test corrected; audit:vue + smoke + solo network e2e green; PR merged under all three required gates with codex final-diff sign-off.
+c2-1's scenario provably closed (adopted per the chosen design — see below), `waitForTx` bounded with honest timeout semantics, the controller leak closed with the bug-pinning test corrected; audit:vue + smoke + solo network e2e green; PR merged under all three required gates with codex final-diff sign-off.
 
 ## The N-07 design decision (RESOLVED at the dual-audit round — see ledger)
 
@@ -22,7 +22,7 @@ c2-1's scenario provably closed (adopted per the chosen design — see below), `
 ## Assumptions (verified Facts)
 
 1. **F**: queued grace = `now − updatedAt ≥ 10 min` (`reaper.ts:77,:193-195`); heartbeat covers only `acquireSlot` waiters (`execution-lane.ts:239-283`); the session-FIFO wait is unheartbeated (`background.ts:276-347`).
-2. **F**: c2-1 proof backdates a queued record and asserts survival of a non-unconditional reap — green only under (b)-family fixes; under (a) the scenario means "dead" and SHOULD reap.
+2. **F**: the c2-1 proof constructs the reaper HOOKLESS and backdates a record — it adopts literally under NEITHER option (fable-verified); under (a′) the adoption splits into the heartbeat-freshness pin + the aged-untouched-reaps negative control.
 3. **F**: `waitForTx` = unbounded 100 ms spin (`transaction/service.ts:221-227`); two callers (auth-registry :229/:278); sibling `waitForTxProven` has `timeoutMs = 120_000`; `WrappedTask.complete()` on a cancelled task throws.
 4. **F**: `runInSlot`'s finally deletes only under `journalId` (`dapp-send-executor.ts:234`), which is unset on every pre-claim throw; `acquireSlot` registered under `queuedJournalId` at `execution-lane.ts:242`; the existing test at `dapp-send-executor.test.ts:590-607` pins the leak with `queuedJournalId` undefined (vacuous vs the fix).
 5. **F**: adjudication widened N-25 to the reaped-sentinel path; claim-helper's :101/:160 branches already clean up — the fix covers the REMAINING pre-claim throws uniformly via the finally.
@@ -34,7 +34,8 @@ c2-1's scenario provably closed (adopted per the chosen design — see below), `
 
 - `execution-lane.ts`: no mechanism change; `beginExecutionWait`/`endExecutionWait` stay private, reached via the new `ExecutionService.beginQueuedWait`/`endQueuedWait` delegators.
 - `background.ts`: hoisted `let heartbeatId: string | undefined`; assigned + `beginQueuedWait(id)` inside the `queuedJournalIdPromise.then`; `handlerChain.finally(() => { if (heartbeatId) executionService.endQueuedWait(heartbeatId); releaseFifo() })` — end BEFORE releaseFifo in the same callback; establishment-drop early return (:339-346) and guard bails covered because the finally wraps the WHOLE chain.
-- `operation-journal/service.ts`: new `transitionIfStage(id, allowedStages, progress, error)` — re-reads under the transition lock, no-ops (returns a discriminant) when the live stage left `allowedStages`; `reaper.ts` transitions every reap candidate through it keyed on the snapshot stage (F-1).
+- `operation-journal/service.ts`: new `transitionIfStage(id, allowedStages, progress, error, opts?: { ifUpdatedAtIs?: number })` — re-reads under the transition lock, no-ops (returns a discriminant) when the live stage left `allowedStages` OR when `ifUpdatedAtIs` is given and the live `updatedAt` moved (codex round 2: a same-stage `touchOperation` landing mid-sweep must also void the candidacy — stage-only guarding still fails on obsolete age). `reaper.ts` transitions every candidate via `transitionIfStage(id, [snapshotStage], …, { ifUpdatedAtIs: snapshotUpdatedAt })` (F-1 + age guard).
+- Heartbeat-teardown clarity (codex round 2): `acquireSlot`'s existing `endExecutionWait` physically removes the same Set entry at slot grant — safe, because by then creation+30 s touches have left `updatedAt` fresh; the `handlerChain.finally` release covers paths that never reach `acquireSlot`. Finalization is a BACKSTOP, not the sole removal.
 
 ### N-16: bounded waitForTx (bound only — the dead cancellation branch is CUT)
 
@@ -50,7 +51,7 @@ c2-1's scenario provably closed (adopted per the chosen design — see below), `
 
 ## Test plan (succinct; every mechanism revert-probed; discriminators from the dual audit)
 
-- N-07: heartbeat pin (execution-lane.test.ts sibling of :140-170 — pre-claim waiter touched across the grace; fake timers + microtask flushes); reaper negative control (aged + untouched → `stuck_queued`); boot-sweep pin (aged + LIVE + `unconditional` → still reaped — discriminator 1); stage-scope pin (`proving` + 40 min + live → reaped — discriminator 2); F-1 pin (two candidates; #2 claimed `queued→pending` during #1's transition await → #2 NOT failed); wiring pins (begin-after-id; end on settle for success AND throw; registry empty after the establishment-drop early return — discriminator 4). Probes: strip the background begin → heartbeat pin reds; strip `transitionIfStage`'s guard → F-1 pin reds.
+- N-07: heartbeat pin (execution-lane.test.ts sibling of :140-170 — pre-claim waiter touched across the grace; fake timers + microtask flushes); reaper negative control (aged + untouched → `stuck_queued`); boot-sweep pin (aged + LIVE + `unconditional` → still reaped — discriminator 1); stage-scope pin (`proving` + 40 min + live → reaped — discriminator 2); F-1 pin (two candidates; #2 claimed `queued→pending` during #1's transition await → #2 NOT failed); age-guard pin (codex round 2: #2 TOUCHED same-stage during #1's gated transition → #2 survives); wiring pins (begin-after-id; end on settle for success AND throw; registry empty after the establishment-drop early return — discriminator 4). Probes: strip the background begin → heartbeat pin reds; strip `transitionIfStage`'s guard → F-1 pin reds.
 - N-16: fake timers with a SHORT injected `timeoutMs` (500 ms — F-13): timeout → typed throw + subtask failed + parent still completable against a REAL TaskService (discriminator 6); happy path → parent completable; mid-wait `tasks.clear()` → no throw (discriminator 7). Probe: revert the bound → timeout pin reds.
 - N-25: as in §N-25. Probe: revert the finally's queuedJournalId delete → the real-Map pin reds.
 
@@ -58,7 +59,8 @@ c2-1's scenario provably closed (adopted per the chosen design — see below), `
 
 - **N-07 fork — CROSS-AUDITOR DISAGREEMENT, resolved (a′)**: codex called "amendment to (b)" (registry + reaper spare; release at handlerChain.finally; sweep-local snapshot); fable REJECTED (b) with verified facts — rev 1's proof-adoption tiebreaker false (the proof constructs the reaper hookless; red under (b) too), `updatedAt` is the SINGLE-consumer designed liveness channel (a second channel = divergent-change debt + inverted layering), a Set-based liveness spare shields a hung handler forever (F-4; fixing it needs Map+ceiling), and minimal (a′) reuses the existing set/timer with two delegators + two call sites. Adjudicated to (a′) on verified-fact weight; sent back to codex for round-2 consensus per the mediation protocol.
 - **F-1 (BOTH auditors)**: mid-sweep claim race is a live bug under any option — `transitionIfStage` (atomic stage guard under the transition lock) adopted; codex's snapshot amendment subsumed.
-- **N-16 branch (3) CUT (both auditors — fable proved it dead three ways)**: bound-only + settle-exactly-once + `WrappedTask.exists`; codex's AbortSignal alternative logged out-of-scope (fable: the adjudicated harm closes with the bound; a real cancellation channel is new-surface work) — resolved in the round-2 mediation.
+- **N-16 branch (3) CUT (both auditors — fable proved it dead three ways)**: bound-only + settle-exactly-once + `WrappedTask.exists`; codex's AbortSignal alternative logged out-of-scope (fable: the adjudicated harm closes with the bound; a real cancellation channel is new-surface work).
+- **Round 2 — CONSENSUS**: codex WITHDREW (b) ("(a′) wins on architecture and failure semantics"); confirmed AbortSignal not required this batch; amended `transitionIfStage` with the `ifUpdatedAtIs` age guard + its pin; clarified the heartbeat's physical teardown (acquireSlot's end at slot grant is the normal removal; the finally is the backstop). Zero unresolved disagreements.
 - **N-25**: unconditional both-key delete (fable F-9 — fresh-id fallback reachable, in-helper cleanup coupling-guarded); real-Map executor-layer pin (fable F-6 kills the claim-helper-level test — no finally there; codex agreed the real-Map assertion belongs at the executor); consistency trap F-10 honored.
 - Rejected/cut: `wallet-sdk/fifo-waiter-registry.ts` module (moot under a′); N-16 cancellation branch; claim-helper integration harness; "fifo" naming (F-7 — the window is arrival→slot-grant incl. the op's OWN popup; renamed pre-claim).
 - e2e caveat logged (fable F-11): the network gate is regression safety, not N-07 evidence (10-min wall-clock un-exercisable) — the mechanism pins are the evidence.
@@ -69,8 +71,8 @@ audit:vue → armed smoke → SOLO network e2e (`e2e:agent`) — dApp/journal be
 
 ## Security & adversarial considerations
 
-- The registry is SW-internal (no RPC surface, no attacker input); ids are journal ids the SW itself minted. A hostile dApp cannot pin records alive: registration happens only for records the wallet itself created at arrival, and release is tied to the baton lifecycle the wallet drives.
-- The spare must NOT extend to the boot sweep: a crashed SW restarts with an empty registry, so pre-crash records reap normally — crash detection preserved (pinned).
+- The heartbeat set is SW-internal (no RPC surface, no attacker input); ids are journal ids the SW itself minted, added only for records the wallet created at arrival, removed on handler settlement. A hostile dApp cannot keep a record fresh beyond its own handler's lifetime — the finally releases on every path.
+- Crash detection preserved structurally: a dead SW stops heartbeating, `updatedAt` goes stale, the boot sweep (unconditional, updatedAt-blind) still clears prior-lifetime records (pinned).
 - `waitForTx`'s timeout error is typed and honest ("timed out waiting for confirmation"), replacing the misleading 60 s transport error the adjudication flagged.
 - N-25 removes a growth vector (Map entries surviving until SW death).
 
