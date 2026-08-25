@@ -230,9 +230,11 @@ describe("SessionManager artifact fence (N-12 / f1-1 adoption)", () => {
 		expect(await api.alarms.clear(SESSION_TTL_ALARM_NAME)).toBe(false) // alarm already cleared
 	})
 
-	test("rejection-after-write, CONFIRMED branch: compensation deletes, then B commits as a degraded in-memory successor", async () => {
-		const { api, manager } = setup()
+	test("rejection-after-write, CONFIRMED branch: compensation deletes, B commits — a PENDING close stands down", async () => {
+		const { api, emits, manager } = setup()
 		const { events, rawSet } = instrument(api)
+		await manager.open(profileA, secretBuffer())
+		expireActive(manager)
 
 		// session.set WRITES then rejects (indeterminate-write simulation).
 		api.storage.session.set = async (items: Record<string, unknown>) => {
@@ -244,37 +246,112 @@ describe("SessionManager artifact fence (N-12 / f1-1 adoption)", () => {
 			return rawSet(items)
 		}
 
-		await manager.open(profileB, secretBuffer())
+		// A's expiry close heads first; its lock-emit drives open(B) into the
+		// mutex ahead of the close's queued section (the pending close).
+		let opening: Promise<void> | undefined
+		const origPush = emits.push.bind(emits)
+		let fired = false
+		emits.push = (p: ProfileInfo | undefined) => {
+			const n = origPush(p)
+			if (p === undefined && !fired) {
+				fired = true
+				opening = manager.open(profileB, secretBuffer())
+			}
+			return n
+		}
+		await manager.getActive() // close(A): head → open(B) races in → close queues
+		await opening
+		await new Promise((r) => setTimeout(r, 0))
 
-		// Compensation deleted the half-written row; the degraded in-memory
-		// session COMMITTED (alarm scheduled; a later expiry close would be
-		// its own, not a predecessor's).
+		// B committed as a degraded in-memory successor (row compensated away,
+		// alarm live, generation bumped) — so the pending close STOOD DOWN:
+		// B's alarm survives and the in-memory session is B's.
 		expect(await readRow(api)).toBeUndefined()
 		expect((manager as unknown as { activeSession?: ActiveSession }).activeSession?.profile.id).toBe("prof-B")
-		expect(events).toContain("alarm-create")
+		const lastClear = events.lastIndexOf("alarm-clear")
+		expect(events.lastIndexOf("alarm-create")).toBeGreaterThan(lastClear)
 	})
 
-	test("rejection-after-write, UNCONFIRMABLE branch: nothing installs, nothing bumps — a later close still owns cleanup", async () => {
-		const { api, manager } = setup()
+	test("rejection-after-write, UNCONFIRMABLE branch: no install, NO BUMP — the pending close completes cleanup (bump-first reverts red)", async () => {
+		const { api, emits, manager } = setup()
 		const { rawSet, rawRemove } = instrument(api)
+		await manager.open(profileA, secretBuffer())
+		expireActive(manager)
 
-		// set writes-then-rejects AND the compensation delete also fails →
-		// read-back sees the row → the open must NOT report a degraded success.
+		// set writes-then-rejects; the FIRST remove (open's compensation) also
+		// fails → read-back sees the row → open uninstalls WITHOUT bumping.
+		// Later removes (the pending close's delete) succeed.
 		api.storage.session.set = async (items: Record<string, unknown>) => {
 			await rawSet(items)
 			throw new Error("storage flaked after write")
 		}
-		api.storage.session.remove = async () => {
-			throw new Error("delete also failed")
+		let removeCalls = 0
+		api.storage.session.remove = async (keys: string | string[]) => {
+			removeCalls += 1
+			if (removeCalls === 1) throw new Error("delete also failed")
+			return rawRemove(keys)
 		}
 
-		await manager.open(profileB, secretBuffer())
-		expect((manager as unknown as { activeSession?: ActiveSession }).activeSession).toBeUndefined()
+		// The pending close: A's expiry close heads first (captures the
+		// PRE-open generation), open(B) wins the mutex via the lock-emit.
+		let opening: Promise<void> | undefined
+		const origPush = emits.push.bind(emits)
+		let fired = false
+		emits.push = (p: ProfileInfo | undefined) => {
+			const n = origPush(p)
+			if (p === undefined && !fired) {
+				fired = true
+				opening = manager.open(profileB, secretBuffer())
+			}
+			return n
+		}
+		await manager.getActive()
+		await opening
+		await new Promise((r) => setTimeout(r, 0))
 
-		// The generation never bumped: a subsequent close() runs its legs for
-		// real (no stand-down) — once storage recovers, the leftover row goes.
-		api.storage.session.remove = rawRemove
-		await manager.close()
+		// The failed open never bumped → the pending close's re-check MATCHED
+		// and it completed cleanup: the half-written row is GONE. (Under a
+		// bump-first revert the close stands down and B's rejected row
+		// survives — this assertion is the bump-LAST discriminator.)
 		expect(await readRow(api)).toBeUndefined()
+		expect((manager as unknown as { activeSession?: ActiveSession }).activeSession).toBeUndefined()
+	})
+
+	test("mid-open expiry close (parked at the bearer wrap, pre-section): close completes fully, then B lands intact", async () => {
+		const { api, manager } = setup()
+		const { events } = instrument(api)
+		await manager.open(profileA, secretBuffer())
+		expireActive(manager)
+
+		// Park open(B) at wrapPair — the section's one slow crypto await,
+		// deliberately OUTSIDE the mutex — so the expiry close can run to
+		// completion while B prepares.
+		const gate = _deferred()
+		const box = (manager as unknown as { sessionSecretBox: { wrapPair: () => Promise<unknown> } }).sessionSecretBox
+		box.wrapPair = async () => {
+			await gate.promise
+			return { v: 2 } as never // dummy bearer — the row stores it opaquely
+		}
+		const dek = new Uint8Array(new ArrayBuffer(32)) as Uint8Array<ArrayBuffer>
+		const opening = manager.open(profileB, secretBuffer(), asPasshash(new ArrayBuffer(32)), asImportedKeysDek(dek))
+		await new Promise((r) => setTimeout(r, 0))
+
+		await manager.getActive() // A expired → close runs to COMPLETION (row + alarm gone)
+		expect(await readRow(api)).toBeUndefined()
+
+		gate.resolve()
+		await opening
+		expect(await readRow(api)).toBe("prof-B")
+		const lastClear = events.lastIndexOf("alarm-clear")
+		expect(events.lastIndexOf("alarm-create")).toBeGreaterThan(lastClear)
+		expect((manager as unknown as { activeSession?: ActiveSession }).activeSession?.profile.id).toBe("prof-B")
+	})
+
+	test("the artifact mutex's watchdog is DISABLED (load-bearing config)", () => {
+		const { manager } = setup()
+		// A default 5-min force-release would re-admit a successor's section
+		// into a stalled close's — the N-12 interleaving reborn inside the fix.
+		const lock = (manager as unknown as { artifactLock: { maxHoldMs: number | null } }).artifactLock
+		expect(lock.maxHoldMs).toBeNull()
 	})
 })

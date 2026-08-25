@@ -3,12 +3,16 @@ import { type ILogger, LogLevel } from "../logger/interfaces"
 /** Maximum time a lock can be held before being force-released (ms). */
 const MAX_HOLD_MS = 5 * 60_000 // 5 minutes
 
+declare const LOCK_TICKET_BRAND: unique symbol
+
 /**
  * Opaque per-acquisition ownership proof. Minted at HANDOFF (never at
  * enqueue), so a queued waiter can only ever observe a ticket that is
- * current the instant it is granted. Unforgeable by construction (symbol).
+ * current the instant it is granted. Runtime-unforgeable (per-grant symbol
+ * identity) AND type-branded — a bare `symbol` variable does not typecheck,
+ * so a wrong-symbol `leave()` is a compile error, not just a runtime no-op.
  */
-export type LockTicket = symbol
+export type LockTicket = symbol & { readonly [LOCK_TICKET_BRAND]?: never }
 
 export class Lock {
 	private readonly queue: ((ticket: LockTicket) => void)[] = []

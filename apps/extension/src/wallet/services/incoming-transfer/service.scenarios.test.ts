@@ -885,6 +885,53 @@ describe("IncomingTransferService — scanContract dedup + emit semantics", () =
 		}
 	})
 
+	test("(N-17 composed pin, backfill branch) a handoff mid-park cannot resurrect an existing record via the timestamp backfill", async () => {
+		// Same watchdog-handoff composition as the new-record pin, driven down
+		// the EXISTING-record branch: the CS parks on the backfill's
+		// blockTimestamp await; the queued deletion wipes the record; the
+		// revoked CS's backfill upsert must stand down (its re-check), never
+		// re-add the wiped record.
+		vi.useFakeTimers()
+		try {
+			const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
+			const token = makeTokenStub([tokenA])
+			const n = note()
+			const noteSvc = makeNoteStub({ [tokenA.contract]: [n] })
+			let releaseTimestamp!: () => void
+			noteSvc.getBlockTimestamp.mockImplementation(
+				() =>
+					new Promise<number>((resolve) => {
+						releaseTimestamp = () => resolve(1_234)
+					}),
+			)
+			const { service } = await bootService({ network, token, note: noteSvc })
+			// Existing record for the SAME nullifier, timestamp missing → the
+			// scan takes the backfill branch and parks.
+			seedNote({
+				siloedNullifier: n.siloedNullifier,
+				contract: tokenA.contract,
+				tokenId: tokenA.id,
+				blockTimestamp: undefined,
+			})
+
+			const scanP = scan(service)
+			await vi.advanceTimersByTimeAsync(0)
+			token.onTokenDeleted.invoke({ ...tokenA, profileId: "p1" })
+			await vi.advanceTimersByTimeAsync(0)
+
+			await vi.advanceTimersByTimeAsync(5 * 60_000 + 1) // handoff → wipe
+			expect(records.size).toBe(0)
+
+			releaseTimestamp()
+			await scanP
+			await vi.advanceTimersByTimeAsync(0)
+
+			expect(records.size).toBe(0) // the backfill did not resurrect it
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	test("first note from unknown contract → pending state + Pending emit (visibility=true)", async () => {
 		const network = makeNetworkStub([{ id: "n1", chainId: 1 }])
 		const token = makeTokenStub([tokenA])
