@@ -169,8 +169,11 @@
     the binary refresh as a separate first PR; reviewer 2 preferred a single PR. The plan ships
     two PRs (isolating the binary variable won), and the disagreement is recorded rather than
     hidden.</li>
-    <li><strong>Final fresh-eyes review:</strong> <span id="final-verdict">running now — the
-    approval gate opens only once its verdict is recorded here and in the plan.</span></li>
+    <li><strong>Final fresh-eyes review:</strong> <span id="final-verdict"><span class="pill ok">conditional
+    approve</span> — its conditions (make every check copy-paste runnable, forbid the silent
+    prover fallback across the whole test suite, tighten the two-PR handoff and rollback order,
+    turn the funding probe into a pass/fail floor) are ALL integrated into the plan. It judged
+    the merged result of the two earlier reviews "architecturally coherent".</span></li>
   </ul>
 
   <h2>Open questions for you</h2>
@@ -189,8 +192,9 @@
     alternative — a new extension major — is its own future decision). <em>Default: hold.</em></li>
     <li><strong>5 · Optional hardening:</strong> make the CI canary fail loudly if zero proof
     requests reached the native prover (today that count is informational; a separate required
-    check already guards it indirectly). Small change, but it tightens a required gate.
-    <em>Approve or defer?</em></li>
+    check already guards it indirectly). Small change, but it tightens a required gate — and if
+    approved it ships in the FIRST PR so the gate everything else trusts is already guarded.
+    <em>The final reviewer recommends approving. Approve or defer?</em></li>
   </ul>
 
   <div class="approval">

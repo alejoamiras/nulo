@@ -48,7 +48,8 @@ misbehaves, it reds on a line already known-good, and reverting it is one tiny P
    compute `expected_sha256` of the **extracted binary** (`tar -xzO accelerator-server |
    shasum -a 256`).
 3. Edit `.github/workflows/_network-e2e.yml`: `version: "2.0.0"` + the new `expected_sha256`
-   (+ any start-flag/env adaptations step 1 mandates). `bun run lint:actions`.
+   (+ any start-flag/env adaptations step 1 mandates; explicit loopback bind flag). If Ask 5 is
+   approved, the fail-on-zero-`/prove` enforcement lands HERE too. `bun run lint:actions`.
 4. Local pre-flight on the OLD line: start the 2.0.0 binary on `127.0.0.1:59833`, build with
    `VITE_NULO_ACCELERATOR_REQUIRED=1`, run
    `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts`, assert ≥1
@@ -72,11 +73,13 @@ a rebased branch.
    compile.sh needs it; e2e uses the exact version dir + `E2E_REQUIRE_SETUP=1`). Record the
    installed 5.2.0 tree's identity in lessons (the install channel is an unpinned vendor
    script — see Security).
-3. Re-run the read-only SponsoredFPC probes and record: instance existence
-   (`node_getContract`) AND fee-juice balances via
-   `node_getPublicStorageAt(FeeJuice, deriveStorageSlotInMap(balancesSlot, fpc))` for both
-   generations. Plan-time snapshot (2026-08-25): `0x1441…970c` ≈ 1400.7e18, **`0x2ece…315b` ≈
-   969.8e18 — the post-bump instance is deployed AND funded**.
+3. Re-run the read-only SponsoredFPC probes with PASS CRITERIA, not just recording (final-pass
+   High 1): `node_getContract` non-null for BOTH generations AND the 5.2.0 instance's fee-juice
+   balance (`node_getPublicStorageAt(FeeJuice, deriveStorageSlotInMap(balancesSlot, fpc))`)
+   above a one-sponsored-tx-plus-margin floor (use 10× the current network min-fee estimate as
+   the margin). Below the floor or null ⇒ STOP and reopen Ask 2 with the owner. Plan-time
+   snapshot (2026-08-25): `0x1441…970c` ≈ 1400.7e18, **`0x2ece…315b` ≈ 969.8e18 — deployed AND
+   funded, orders of magnitude above any sane floor**.
 4. Operational note for the owner: Phase 4's full suite occupies this machine solo for its
    duration (the suite mass-fails under concurrent load).
 
@@ -92,17 +95,21 @@ with output; `~/.aztec/versions/5.2.0/bin/` present; layers: none (read-only pro
    (2). Counting method (fable C4 — the off-by-ones were the held standards line): count
    `"@aztec/` keys minus `@aztec/viem`; `@aztec-foundation/*` is a DIFFERENT scope and must not
    move. Do NOT touch: `@alejoamiras/*`, `@aztec-foundation/*`, `@aztec/viem`.
-2. Patches: generate the `@5.2.0` patches against the REAL installed 5.2.0 packages (bun patch
-   flow: `bun patch @aztec/noir-acvm_js@5.2.0`, apply the exports-map fix, `bun patch --commit`;
-   same for `noir-noirc_abi`) — do NOT blind-copy the 5.0.1 files (patch bodies contain no
-   version strings; the only version-coupled artifact is a bun-generated `.bun-tag-<hash>`
-   marker). **Keep the `@5.0.1` keys** (the accelerator SDK's nested copies still match them);
-   pin down bun's behavior for an UNUSED patch key in lessons (in case a future re-resolution
-   drops the nested copies). If upstream fixed the exports maps at 5.2.0, drop the 5.2.0 patch
-   instead (verify the browser build resolves the web entry) and record the decision (D4).
+2. **First install, THEN patch** (final-pass High 4 — `bun patch` operates on an INSTALLED
+   package): run the initial `bun install` right after the pin edits (the 5.2.0 packages
+   install unpatched — fine, the patches only fix bundler/node export resolution), then
+   generate the `@5.2.0` patches (`bun patch @aztec/noir-acvm_js@5.2.0`, apply the exports-map
+   fix, `bun patch --commit`; same for `noir-noirc_abi`), then REINSTALL so both patched
+   generations apply. Do NOT blind-copy the 5.0.1 files (patch bodies contain no version
+   strings; the only version-coupled artifact is a bun-generated `.bun-tag-<hash>` marker).
+   **Keep the `@5.0.1` keys** (the accelerator SDK's nested copies still match them); pin down
+   bun's behavior for an UNUSED patch key in lessons. If upstream fixed the exports maps at
+   5.2.0, drop the 5.2.0 patch instead (verify the browser build resolves the web entry) and
+   record the decision (D4).
 3. `apps/extension/scripts/layout-identity.test.ts`: `expectVersion` ×2 → `"5.2.0"`.
-4. `bun install` (targeted re-resolution; isolated linker stays; NO `rm bun.lock` unless bun
-   reports unresolvable conflicts — D1). **Per-mode expected observations** (disposition in
+4. The installs above are targeted re-resolution (isolated linker stays; NO `rm bun.lock`
+   unless bun reports unresolvable conflicts — D1). **Per-mode expected observations**
+   (disposition in
    lessons; only the accelerator nests — fable C2): (a) accelerator keeps private
    `@aztec/*@5.0.1` copies via real `dependencies`; (b) `@alejoamiras/private-fee-juice`'s
    exact-5.0.1 `peerDependencies` become unsatisfiable — PRE-DECIDED acceptable outcomes:
@@ -116,21 +123,24 @@ with output; `~/.aztec/versions/5.2.0/bin/` present; layers: none (read-only pro
    `bun scripts/lockfile-exception-diff.ts /tmp/bun.lock.base bun.lock` — disposition EVERY
    `exceptions/added/removed` entry by family in lessons (no blanket acceptance; the script
    auto-groups `@aztec/*`+`@alejoamiras/*` as intended-scope, so eyeball that group too for the
-   held pins staying 5.0.1). **Residue reachability check** (D5, executable — fable's demotion
-   reversed): write the ~30-line script (`scripts/` or the plan dir) that walks `bun.lock` and
-   asserts every remaining `@aztec/*@5.0.1` entry is reachable ONLY from the three held
-   packages — including PEER edges (accelerator `dependencies`; private-fee-juice
-   `peerDependencies` per the Phase 1.4 outcome; standards none) — and reds on any other 5.0.1
-   referrer; it re-runs in every later gate. Then `bun install --frozen-lockfile` must pass
-   clean (the gate is real — any too-young transitive fails here; disposition per-name with the
-   owner, never blanket-exclude).
-6. **Provenance (execute + transcribe; aimed at BUN's tree — fable)**: primary = for each name
-   actually ADDED/CHANGED in `bun.lock` (from the exception-diff output), check
-   `npm view <name>@<version> dist.signatures` (registry signature present); secondary = the
-   scratch-npm `npm i --package-lock-only` + `npm audit signatures` sweep, noting explicitly
-   that npm's resolver graph ≠ bun's (the per-name pass over bun.lock's additions is what
-   covers OUR tree). Upstream ships registry `signatures` but NO SLSA `attestations`
-   (unchanged posture). Paste outputs into lessons.
+   held pins staying 5.0.1; have it emit canonical resolved `name@version`, not nested graph
+   keys). **Residue reachability script** (D5, executable; final-pass High 6 spec): a small
+   script (name it `scripts/aztec-hold-residue-check.ts`) that (a) asserts every remaining
+   `@aztec/*@5.0.1` lock entry belongs to the dependency CLOSURE of the three held packages
+   (ancestry, not just immediate referrers — including peer edges per the Phase 1.4 outcome),
+   and (b) verifies RUNTIME resolution: from each consumer workspace,
+   `realpath`/`require.resolve` the key `@aztec` modules and assert the accelerator's resolve
+   lands on 5.0.1 copies while workspace code lands on 5.2.0. It reds on any other 5.0.1
+   referrer and is INVOKED BY NAME in every later validation gate. Then
+   `bun install --frozen-lockfile` must pass clean (any too-young transitive failing here is
+   the gate working — disposition per-name with the owner, never blanket-exclude).
+6. **Provenance (execute + transcribe; VERIFY, don't just observe — final-pass High 7)**: build
+   the scratch npm project's package.json from the exception-diff's EXACT resolved
+   `name@version` list (so npm's lock matches bun's resolution for the changed set), then
+   `npm i --package-lock-only` + `npm audit signatures` — the step that cryptographically
+   VERIFIES registry signatures (metadata presence alone proves nothing). Cross-check bun.lock
+   integrity hashes against the scratch npm lock for the same versions. Upstream ships registry
+   `signatures` but NO SLSA `attestations` (unchanged posture). Paste outputs into lessons.
 
 **Validation gate** — commands: `bun install` (clean; BOTH patch generations reported applied),
 `bun run --cwd apps/extension test scripts/layout-identity.test.ts`, the two lockfile checks
@@ -162,22 +172,30 @@ Log: `lessons/phase-1.md`.
 HOLD verdict doesn't waste the largest manual block; fable + codex alignment, D8.)
 
 **Validation gate** — commands: `bun run typecheck:all` && `bun run test:all` && `bun run lint`
-&& the freeze-invariant diff `git diff 21244d4a...HEAD --stat -- packages/aztec-runtime/src/account/ contracts/`
-(must be EMPTY) && `git status --porcelain packages/aztec-runtime/src/account/ contracts/`
-(must be empty); pass criteria: all exit 0 / empty; boundary + re-diff verdicts logged; layers:
-typecheck + lint + full unit. Log: `lessons/phase-2.md`.
+&& the freeze-invariant diff `git diff <BASELINE>...HEAD --stat -- packages/aztec-runtime/src/account/ contracts/`
+(must be EMPTY; `<BASELINE>` = the PR-1 baseline re-pinned after PR-0 merges — see Delivery)
+&& `git status --porcelain packages/aztec-runtime/src/account/ contracts/` (must be empty)
+&& `bun scripts/aztec-hold-residue-check.ts`; pass criteria: all exit 0 / empty; boundary
+verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`.
 
 ## Phase 3 — Fail-fast checkpoint: first build + prover-ON canary
 
 Runs BEFORE the full battery (codex H2): the two go/no-go unknowns (prover boundary at runtime;
 bb pairing) get answered at the earliest buildable moment.
 
-1. Start accelerator-server **2.0.0** (the PR-0 binary) on `127.0.0.1:59833` with the Phase A
-   flags. Confirm `/health`.
+1. Start accelerator-server **2.0.0** (the PR-0 binary) with an EXPLICIT loopback bind
+   (`127.0.0.1:59833` passed as a flag, not assumed as default — final-pass Medium) and the
+   Phase A origin flags; assert the listening socket (`ss -tlnp | grep 59833` or `/health`)
+   before any test.
 2. `VITE_NULO_ACCELERATOR_REQUIRED=1` canary via
    `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts` (agent.sh builds the
    wallet; verify its build-stamp assertions). **Assert ≥1 `Received /prove request`** in the
-   server log and record WHICH bb version served it — this decides D3 (`BB_BINARY_PATH`).
+   server log. **D3 decision procedure** (final-pass High 3): run once with the EXACT
+   CI-equivalent seed (`BB_BINARY_PATH` pointing at the 5.2.0 toolchain's bb, as
+   `_network-e2e.yml` would set it) and record BOTH the SDK-requested version
+   (`x-aztec-version`) and the bb executable the server actually ran; on mismatch, clear the
+   server's bb cache / unset the seed and rerun to confirm the unseeded path — only then choose
+   keep vs drop.
 3. Print the `dist/chrome` size delta vs the baseline build (the dual-generation bundling's
    "size cost accepted" gets a number).
 4. A red canary that survives triage = **HOLD the line** (default; Ask 4) — surface to the
@@ -213,11 +231,13 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
    `BRIDGE_MANIFEST=public/testnet-bridge.json bun run --cwd apps/faucet verify:deployments`
    (opt-in manifest lane, `apps/faucet/scripts/verify-deployments.ts:146`).
 4. `bun run test:e2e` (smoke; sandbox-free).
-5. **Full local network suite prover-ON**: accelerator-server 2.0.0 up,
-   `bun run e2e:agent` (machine solo — the suite mass-fails under concurrent load; single
-   re-run for known-flake fingerprints only, logged). This is the native-proof gate for the
-   fee flows (private-fee-juice boundary) and the passkey canary — capture `/prove` activity
-   during the fee-method tests as evidence (CI's fee shard proves via WASM only).
+5. **Full local network suite prover-ON, fallback-proof** (final-pass Critical 1): accelerator-
+   server 2.0.0 up, then `VITE_NULO_ACCELERATOR_REQUIRED=1 bun run e2e:agent` — the required-
+   mode build makes silent WASM fallback IMPOSSIBLE for the whole suite, not just the canary
+   (machine solo — the suite mass-fails under concurrent load; single re-run for known-flake
+   fingerprints only, logged). This is the native-proof gate for the fee flows
+   (private-fee-juice boundary) and the passkey canary — capture per-fee-flow `/prove`
+   evidence from the server log (CI's fee shard proves via WASM only).
 
 **Validation gate** — commands: steps 1–5; pass criteria: all exit 0; verify:deployments rows
 all `[OK]` in BOTH lanes; suite green with fee-flow `/prove` evidence; re-diff verdicts logged
@@ -231,9 +251,9 @@ per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lesson
    silently-wrong seed. If kept, note the served-bb evidence in the workflow comment.
 2. `.github/actions/setup-aztec/action.yml`: remove the snappy pin step iff Phase 0 proved the
    5.2.0 install load-clean; otherwise keep + refresh comment.
-3. If Ask 5 approved: make the canary shard's `/prove`-count enforcing (fail on zero) instead
-   of advisory.
-4. `bun run lint:actions`.
+3. `bun run lint:actions`. (Ask 5's fail-on-zero-`/prove` hardening, if approved, ships in
+   **PR-0** — Phase A — so it guards PR-0's own "authoritative" CI canary and everything after;
+   final-pass Critical 2.)
 
 **Validation gate** — commands: `bun run lint:actions`; pass criteria: exit 0 + workflow diff
 reviewed line-by-line in lessons; layers: workflow lint (the PR's own CI canary is the real
@@ -266,7 +286,7 @@ account surface. **Three distinct held-package binding modes** (verified in `bun
 
 | Package | Declaration | Post-bump runtime binding | Hazard mode | Pin/gate |
 |---|---|---|---|---|
-| `@alejoamiras/aztec-accelerator` | exact-5.0.1 `dependencies` | nested private 5.0.1 copies (dual-class world) | object identity across the prover slot | duck-typed upstream; D2 structural diff; Phase 3 canary |
+| `@alejoamiras/aztec-accelerator` | exact-5.0.1 `dependencies` | HYBRID in the bundle: nested 5.0.1 stdlib/foundation/bb-prover + Vite-deduped **5.2.0** acvm/abi leaves (final-pass note) | object identity across the prover slot | duck-typed upstream; D2 structural diff; Phase 3 canary |
 | `@alejoamiras/private-fee-juice` | exact-5.0.1 `peerDependencies` | binds to workspace **5.2.0** modules (or nests — per the Phase 1.4 pre-decided outcome) | 5.0.1-compiled wrappers on 5.2.0 APIs | peer-warning disposition; `private-fuel.test.ts`; Phase 4 fee flows prover-ON |
 | `@aztec-foundation/aztec-standards` | none | binds to workspace **5.2.0** modules | same | `descriptors-real-artifact.test.ts`; token e2e |
 
@@ -340,7 +360,8 @@ before the full battery, CI wiring, and docs.
   localhost-only, CI single-tenant caveat per its release notes), and a silent address-regime
   shift — mitigated by the freeze tests being UNTOUCHABLE gates measured against the pinned
   baseline OID; any red = STOP, never re-pin.
-- **Fund safety**: no broadcasts anywhere in the plan (all e2e is local-sandbox). The 5.2.0
+- **Fund safety**: no broadcasts anywhere in the plan's phases (all e2e is local-sandbox; the
+  ONLY candidate broadcast is the optional post-merge Ask-2 canary, owner-gated). The 5.2.0
   SponsoredFPC funding question is answered READ-ONLY (fable C1): plan-time probe shows
   `0x2ece…315b` holds ≈969.8e18 fee juice (vs ≈1400.7e18 on the 5.0.1 instance) — deployed,
   funded, in active ecosystem use; Phase 0 refreshes the number. FPC canonical descriptors and
@@ -422,10 +443,12 @@ before the full battery, CI wiring, and docs.
    tax accepted). Confirm.
 4. Red canary or red freeze test surviving triage ⇒ HOLD the line (default) — the alternative
    (new extension major) is a separate deliberate plan. Confirm the default.
-5. **Canary-shard hardening** (from codex C2): make the `/prove`-count check enforcing (fail on
-   zero) in the canary lane, closing the theoretical green-without-native-proving path that the
-   owner-controlled rollback var opens. Small workflow edit, touches required-gate semantics —
-   approve or defer?
+5. **Canary-shard hardening** (from codex C2; final pass RECOMMENDS APPROVE): make the
+   `/prove`-count check enforcing (fail on zero) in the canary lane, closing the theoretical
+   green-without-native-proving path that the owner-controlled rollback var opens. The
+   kill-switch keeps working for the non-required/manual lanes. If approved it ships in PR-0
+   (Phase A), so PR-0's own CI canary — the gate everything else trusts — is already guarded.
+   Small workflow edit, touches required-gate semantics — approve or defer?
 
 ## Decision ledger
 
@@ -468,7 +491,14 @@ before the full battery, CI wiring, and docs.
 - **PR-0**: `chore(ci): bump accelerator-server to 2.0.0 (sha-pinned, headless flags)` —
   Phase A only. Opened after its own quality loop; merged (owner) on green required checks.
 - **PR-1**: `chore(deps): bump @aztec js line to 5.2.0 (noir, standards, accelerator held)` —
-  Phases 0–6, rebased on merged PR-0. Opened ONLY after the Post-implementation loops converge.
+  Phases 0–6. Opened ONLY after the Post-implementation loops converge.
+
+**Handoff protocol** (final-pass High 5): PR-1's branch is cut FRESH from dev after PR-0
+merges; at that moment re-pin the plan baseline (`<BASELINE>` := the post-PR-0-merge dev OID —
+recorded in lessons and used by every freeze-diff gate; the original recon baseline `21244d4a`
+stays the recon reference only). PR-1 must be up-to-date with dev at merge time (re-run CI on a
+rebase if dev moved). **Rollback order is PR-1 first, then PR-0** — reverting PR-0 alone would
+create the untested 1.0.6-binary + 5.2.0-line pairing.
 
 Check `mergeable` after opening each (a CONFLICTING PR runs zero CI silently). No PR before its
 quality loop converges. Merge is the owner's call.
@@ -497,8 +527,13 @@ diff from the plan baseline `21244d4a` minus PR-0's merged content, before PR-1 
    fixes; commit; log the round in `lessons/`; RESUME the same codex session with the fix diff.
    Repeat until a round yields no new material findings; still churning after 3 rounds ⇒ stop
    and surface.
-4. **Final full re-gate AFTER the loops** (fable C5): `bun run audit:vue && bun run test:all`
-   must pass on the post-fix-loop tree — the pre-loop runs do NOT count.
+4. **Final full re-gate AFTER the loops** (fable C5 + final-pass High 2 — pre-loop runs do NOT
+   count): `bun run audit:vue && bun run test:all && bun run lint:actions &&
+   bun scripts/aztec-hold-residue-check.ts` plus the freeze diff
+   (`git diff <BASELINE>...HEAD -- packages/aztec-runtime/src/account/ contracts/` empty), plus
+   a RERUN of the required-mode canary (Phase 3's command) whenever the loop diff touched
+   runtime code (docs/comments-only loop diffs may skip it — state which applied), plus any
+   phase gate whose surface the loops touched.
 5. **Delivery**: only now `gh pr create` (title + labels per Delivery §; body = summary + gate
    evidence). `gh pr checks --watch`; red required check = flake→re-run or breakage→fix, NEVER
    neutralize. Owner merges. After PR-1 merges: watch the FIRST post-merge nightly/soak run for
@@ -523,10 +558,22 @@ boundary. Owner can schedule separately.
   counts + patch procedure; C5 seed count + post-loop re-gate)` — ALL FIVE conditions resolved
   in this revision (C1 answered empirically at plan time: the 5.2.0 instance is funded);
   triage + the one disputed item (single-vs-two-PR) in [audit-fable.md](audit-fable.md).
-- **Final fresh-context codex pass**: pending — required verdict format
-  `approve | conditional approve (…) | reject (…)` before the approval gate.
+- **Final fresh-context codex pass** (new session, full decision trail): `conditional approve
+  (with conditions: hard-enforce native proving, repair post-review and PR-handoff gates, and
+  make the patch/residue/provenance checks executable)` — ALL conditions integrated in this
+  revision (full-suite required-mode, Phase-0 funding floor, expanded post-loop re-gate, D3
+  seed A/B procedure, install-then-patch ordering, PR handoff/baseline/rollback protocol,
+  residue closure+realpath spec, provenance verification aim, hybrid sub-mode, explicit bind,
+  stale-criterion cleanup). Consolidation judged "architecturally coherent"; D7 "defensible
+  once its handoff and rollback rules are corrected" (now corrected). Round 2 recorded in
+  [audit-codex.md](audit-codex.md).
 
 ## Seeds (DRAFT — finalized after approval)
+
+ELI5 companion: published Artifact at
+`https://claude.ai/code/artifact/8ffef5f5-6bd3-4851-8f4e-1e86e2676d23` (source:
+`implementations-plan/aztec-5.2.0-js-line/eli5.html` — redeploying that file updates the same
+URL; keep both in sync on any material plan change).
 
 Recommended: `/goal` (completion is transcript-observable).
 

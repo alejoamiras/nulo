@@ -81,4 +81,37 @@ removed; seeds enumerate every phase header explicitly.
   covers the fee flows natively and CI already WASM-proves them; a CI-native fee lane is noted
   as an optional follow-up.
 
-(Round 2 — final fresh-context pass — recorded below when run.)
+# Codex audit — round 2 (final fresh-context pass, new session, xhigh, gpt-5.6-sol)
+
+Verdict: **conditional approve** (conditions: hard-enforce native proving; repair post-review
+and PR-handoff gates; make the patch/residue/provenance checks executable). Consolidation
+judged "architecturally coherent"; the D7 two-PR split "defensible once its handoff and
+rollback rules are corrected". ALL conditions adopted:
+
+- **Critical 1**: Phase 4's full suite now runs `VITE_NULO_ACCELERATOR_REQUIRED=1` (silent WASM
+  fallback impossible suite-wide) with per-fee-flow `/prove` evidence.
+- **Critical 2**: Ask 5's fail-on-zero enforcement, if approved, ships in PR-0 (guarding PR-0's
+  own authoritative CI canary); final pass recommends approving it — recommendation surfaced,
+  decision stays the owner's.
+- **High 1**: Phase 0's SponsoredFPC probe got PASS CRITERIA (non-null both generations +
+  balance above a 10×-min-fee floor; below ⇒ STOP + reopen Ask 2).
+- **High 2**: post-loop re-gate expanded (audit:vue, test:all, lint:actions, residue script,
+  freeze diff, canary rerun when the loop diff touched runtime code, any touched phase gate).
+- **High 3**: D3 decided by an explicit A/B (CI-equivalent `BB_BINARY_PATH` seed run, record
+  requested-vs-executed bb, clear cache/unset and rerun on mismatch).
+- **High 4**: Phase 1 reordered install→patch→reinstall (`bun patch` needs the package
+  installed).
+- **High 5**: two-PR handoff protocol added (PR-1 cut fresh from post-PR-0 dev; baseline
+  re-pinned to that OID for all freeze-diff gates; up-to-date CI at merge; rollback order PR-1
+  then PR-0 — reverting PR-0 alone creates the untested 1.0.6+5.2.0 pairing).
+- **High 6**: residue script spec = dependency-CLOSURE ancestry + per-workspace
+  `realpath`/`require.resolve` runtime verification, named `scripts/aztec-hold-residue-check.ts`,
+  invoked by name in every later gate.
+- **High 7**: provenance = scratch npm lock built from the exception-diff's exact resolved
+  set → `npm audit signatures` (cryptographic verification) + bun-vs-npm integrity cross-check.
+- **Medium**: accelerator's bundle mode documented as HYBRID (nested 5.0.1 + Vite-deduped
+  5.2.0 acvm/abi leaves); explicit loopback bind + socket assert; stale Phase-2 re-diff gate
+  criterion removed; "no broadcasts" qualified (Ask-2 canary is the one candidate, post-merge,
+  owner-gated).
+
+Nothing rejected in round 2.
