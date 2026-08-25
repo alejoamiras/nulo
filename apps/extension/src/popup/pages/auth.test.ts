@@ -29,7 +29,6 @@ vi.mock("@/composables/toast", () => ({
 vi.mock("@/composables/usePasskeyCeremony", () => ({
 	usePasskeyCeremony: () => ({ request: { value: null }, runCeremony: vi.fn(), onResolve: vi.fn(), onReject: vi.fn() }),
 }))
-vi.mock("@/composables/notification", () => ({ checkNotificationsForShow: vi.fn() }))
 vi.mock("@/utils/lastActiveProfile", () => ({
 	getLastActiveProfileId: vi.fn(async () => undefined),
 	setLastActiveProfileId: (...args: unknown[]) => setLastActiveProfileIdMock(...(args as [])),

@@ -487,14 +487,13 @@ test("passkey full-backup: in-session round-trip (register → reset → import 
 		const addressAfter = await readActiveAccount(page)
 		expect(addressAfter).toBe(addressBefore)
 
-		// Storage sentinels populated post-import (same as the password
+		// Durable UI pointers populated post-import (same as the password
 		// round-trip test in import-paths.test.ts).
 		const storage = await page.evaluate(async () => {
-			const r = await chrome.storage.local.get(["nulo:ui:lastActiveProfile", "nulo:ui:sentinel", "nulo:ui:activeAccount"])
+			const r = await chrome.storage.local.get(["nulo:ui:lastActiveProfile", "nulo:ui:activeAccount"])
 			return r
 		})
 		expect(storage["nulo:ui:lastActiveProfile"]).toBeTruthy()
-		expect(storage["nulo:ui:sentinel"]).toBeTruthy()
 		expect(storage["nulo:ui:activeAccount"]).toBeTruthy()
 
 		// Lock-cascade benign errors are the same shape as other Path A tests.

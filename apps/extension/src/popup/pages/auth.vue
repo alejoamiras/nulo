@@ -12,7 +12,6 @@ import AuthProfilePill from "@/popup/components/modules/auth/AuthProfilePill.vue
 import PasskeyCeremonyDialog from "@/components/passkey/PasskeyCeremonyDialog.vue"
 
 /** Composables */
-import { checkNotificationsForShow } from "@/composables/notification"
 import { awaitProfileActivation, BootstrapFailedError, UnlockTimeoutError } from "@/composables/unlockWait"
 import { TOAST_DURATION, useToast } from "@/composables/toast"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
@@ -173,8 +172,6 @@ const handleUnlockWallet = async () => {
 
 		void appStore.syncTransactions().catch((err) => console.error(err))
 		void refreshBalances(10, appStore.accounts).catch((err) => console.error(err))
-
-		await checkNotificationsForShow(router)
 	} catch (err) {
 		console.error(err)
 	}

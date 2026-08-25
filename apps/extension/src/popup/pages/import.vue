@@ -17,7 +17,6 @@ import { useToast } from "@/composables/toast"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
 /** Services */
-import { setSentinel } from "@/utils/core"
 
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
@@ -73,7 +72,6 @@ onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 const { hydrateKnownProfile } = useProfileBootstrap()
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
-	await setSentinel()
 	const outcome = await completeImportWithRecovery({
 		waitForActive: (ms) => waitForProfileActive(appStore, profile.id, ms),
 		recover: async () => (await hydrateKnownProfile())?.id === profile.id && appStore.isLogined,

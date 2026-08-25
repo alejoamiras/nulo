@@ -1,6 +1,6 @@
 import type { Router } from "vue-router"
 import type { useAppStore } from "@/stores/app.store"
-import { initTransactionService, managers, setSentinel } from "@/utils/core"
+import { initTransactionService, managers } from "@/utils/core"
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { storageLocalSet } from "@/utils/storage"
 import { AccountServiceClient } from "@/wallet/services/account/client"
@@ -37,8 +37,6 @@ export async function activateCreatedProfile(profile: { id: string }, deps: { ap
 	await storageLocalSet({
 		"nulo:ui:activeAccount": appStore.account?.address,
 	})
-
-	await setSentinel()
 
 	router.push("/popup/general")
 }
