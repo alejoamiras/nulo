@@ -25,4 +25,19 @@ Rejected: nothing. Open for round 2: D-10 (delete the dead legacy branch under s
 
 ## Round 2 — resumed, plan v2
 
+Verbatim verdict: "conditional approve — conditions: sanitize/remove `RunError.cause`, preserve the validated legacy TokenPortal path, accept both private-key formats, and reconcile the remaining plan/recon contradictions."
+
+| # | Finding | Verified | Disposition (plan v3) |
+|---|---|---|---|
+| High | `RunError.cause` = the raw spawn error; Node's spawn error has an enumerable `spawnargs` → argv leaks via `util.inspect`/`JSON.stringify`; the sentinel test must cover the ENOENT path | ✓ (Node docs: `spawnargs` on the error; the draft carried `cause`) | adopted — `code` string only, no raw error anywhere (also not in the `check: false` result); second sentinel test on ENOENT (D-11) |
+| Med | "failures never echo argv" overclaims while `stderr` is retained (a child may print its own argv) | ✓ | adopted — guarantee reworded: the primitive never formats or retains argv; child-owned output verbatim (D-12) |
+| Med | Accept bare 64-hex keys as cast does | ✓ | adopted — `/^(?:0x)?[0-9a-fA-F]{64}$/` (D-13) |
+| Low | `resolveBin(prefer)` justified; keep forge centralized; show `prefer` in the type | ✓ | adopted (D-14) |
+| Low | recon rows stale vs v2 (helpers "collapse", Bun `$` "reuse", raw-ref git form) | ✓ | adopted — rows rewritten |
+| **D-10 ruling** | Deleting the legacy TokenPortal path = feature removal — codex cannot approve; `--config` accepts arbitrary manifests and `verify-l1.ts:106-129` supports legacy explicitly | ✓ (`verify-l1.ts:30-34` takes any `--config` path) | **rejected as proposed**; adopted the smallest alternative: strict-parse `forked-v1`, narrow validation of only the forge-bound fields on the legacy path, no second schema |
+
+Rejected by me: nothing. Codex's "Linux/macOS only" (r1) corrected by the bunfig docs (Windows Job Object) — codex confirmed in r2.
+
+## Round 3 — resumed, plan v3
+
 Pending.
