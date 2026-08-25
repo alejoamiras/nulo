@@ -445,15 +445,22 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 
 	test("a standalone journal resnapshot does not starve parked task/token loads", async () => {
 		// Per-loader fences: a journal-only begin() (reconnect resnapshot) must not
-		// supersede the task/token loads still in flight from the mount.
+		// supersede task/token loads still in flight. The mount path serializes
+		// (it awaits loadTokens first), so the CONCURRENT park is driven through
+		// the scope-switch watcher, which starts all three loads together.
+		const wrapper = mountView()
+		await flushPromises() // mount settles on the fast default mocks
+
 		const slowTasks = deferred<Array<ReturnType<typeof uiTransferTask>>>()
 		const slowTokens = deferred<Array<{ id: number; symbol: string }>>()
 		H.getTasks.mockReturnValueOnce(slowTasks.promise)
 		H.getTokens.mockReturnValueOnce(slowTokens.promise)
-		const wrapper = mountView()
-		await flushPromises()
+		H.store.current.profile = { id: "p2" } // switch → watcher fires all three loads
+		await nextTick()
+		expect(H.getTasks).toHaveBeenCalled() // both parked RPCs are in flight
+		expect(H.getTokens).toHaveBeenCalled()
 
-		H.journalConnected.emit() // journal-only resnapshot mid-park
+		H.journalConnected.emit() // journal-only resnapshot while BOTH are parked
 		await flushPromises()
 		slowTasks.resolve([uiTransferTask(ACCT_A)])
 		slowTokens.resolve([{ id: 3, symbol: "LIVE" }])
