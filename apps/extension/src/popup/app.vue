@@ -9,7 +9,8 @@ import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { shouldAdvanceToGeneral } from "./should-advance-to-general"
 import { defaultConfig } from "@/wallet/config"
-import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
+import { AccountServiceClient } from "@/wallet/services/account/client"
+import { createNetworkSwitchHandler } from "@/popup/network-switch"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Composables */
@@ -96,38 +97,28 @@ watch(
 	},
 )
 
-/** todo: ref */
+// Identity-fenced network-switch orchestration — the body lives in
+// `network-switch.ts` so its fence is unit-testable (this shell has no
+// harness). The factory owns run invalidation, scope capture, and the
+// generation+live-scope guard at every await boundary.
 watch(
 	() => appStore.network,
-	async () => {
-		if (!appStore.network) return
-
-		appStore.syncNetworkStatus()
-
-		// Re-fetch accounts for the new chain, and auto-create a default if
-		// the chain has NO accounts yet. The earlier comment here said
-		// auto-create lives ONLY in `initAccount()` to avoid a duplicate-
-		// account race during initial profile load. The empty-list guard
-		// below preserves that property: when `initAccount()` already
-		// created the default for the current chain, `getAccounts()` returns
-		// non-empty and we skip the second `ensureDefaultAccount` call.
-		// When the user switches to a chain with no prior accounts (which
-		// is the common case for the freshly-deployed Local Network in
-		// e2e), `getAccounts` returns empty and we deterministically derive
-		// + persist a default. Without this, the popup is stranded with
-		// `account = undefined` indefinitely on freshly-switched chains
-		// and every reader of `appStore.account.address` (NewTokenPopup,
-		// NewContactPopup, EditContactPopup, etc.) silently fails.
-		managers.account?.disconnect()
-		managers.account = new AccountServiceClient()
-		appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
-		if (appStore.accounts.length === 0) {
-			await managers.account.ensureDefaultAccount(appStore.profile.id, appStore.network.chainId, AccountType.Nulo_v1, "Account")
-			appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
-		}
-		await appStore.setupActiveAccount()
-		await appStore.syncTransactions()
-	},
+	createNetworkSwitchHandler({
+		getScope: () =>
+			appStore.network && appStore.profile ? { profileId: appStore.profile.id, chainId: appStore.network.chainId } : undefined,
+		liveScopeMatches: (scope) => appStore.profile?.id === scope.profileId && appStore.network?.chainId === scope.chainId,
+		syncNetworkStatus: () => appStore.syncNetworkStatus(),
+		replaceAccountClient: () => {
+			managers.account?.disconnect()
+			managers.account = new AccountServiceClient()
+			return managers.account
+		},
+		setAccounts: (accounts) => {
+			appStore.accounts = accounts
+		},
+		setupActiveAccount: () => appStore.setupActiveAccount(),
+		syncTransactions: () => appStore.syncTransactions(),
+	}),
 )
 
 /** Sequence token for profile events. Handlers await service round-trips, and under load a
