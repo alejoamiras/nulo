@@ -95,7 +95,7 @@ Novelty MED (first Bun-runtime test execution here, de-risked by the dossier + p
 
 Validation gate — commands: `bun run lint && bun run typecheck:all && bun run test:all && bun run --cwd apps/faucet test:e2e && bun run test:ci-gating` (the last runs `lib.test.ts` + `cli.test.ts`, i.e. the `passing`/`crash`/`hang`/`unhandled-rejection`/`no-json`/`sourcemap` fixtures on both engines prove the tool reports failure and the sentinel's `file:line`). Pass: all exit 0. Layers: lint/typecheck · unit (all workspaces) · bun:test.
 
-### Phase 1 — Flip + full matrix at one commit + real-runner dispatch
+### Phase 1 — Flip + full matrix at one commit + real-runner dispatch ✓ (gate passed 2026-08-25 at matrix commit `f800dc17` — [lessons/phase-1.md](lessons/phase-1.md))
 
 - Per-workspace flip commits (11 `test` scripts; extension `test:components`; faucet `test:e2e`; the three `test:watch` conditionally after their watch smokes). HEAD after the last flip commit is the **matrix commit**; the tree must be clean when the soaks run.
 - **Clean-install attestation**: at the matrix commit, `bun install --frozen-lockfile` (exit 0 recorded in `lessons/phase-1.md` with the `bun.lock` sha256, which every summary also carries as `lockfileSha256`) BEFORE any soak.
