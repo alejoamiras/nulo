@@ -10,3 +10,9 @@
 Implementation verdict: "correct, complete against the plan's mechanics"; findings were tests/docs only: (1) bump-last unpinned [the big one — see above]; (2) fence ordering 7 missing (park at wrapPair, close completes, B lands); (3) backfill re-check unpinned (probed red after adding the backfill composed pin); (4) doc sweep 2/3 undone (purge-rows.ts — the plan's path was wrong, it lives at services/purge-rows.ts — two profile/service comment frames, ARCHITECTURE.md's wrong-path + never-existed `MAX_HOLD_MS` static); (5) `LockTicket` unbranded (now `symbol & brand` — bare symbols no longer typecheck); (6) the two load-bearing `maxHoldMs: null` constructions comment-guarded only (config pins added for the network lock + artifact mutex).
 
 Codex final-diff sign-off pending (resumed gate session).
+
+## Codex final-diff loop (resumed gate session): REQUEST-CHANGES → APPROVE
+
+Round 1 (post-review-hardening diff): one technical catch — the `LockTicket` brand's OPTIONAL property was vacuous (a bare `symbol` still assigned; the documented compile-time guarantee was false). Verified everything else clean: no missed runtime interleaving (close-before-open, onChange-queued close, bump-last, both rejection branches, double-close, arbitrary force-release chains), review commit confirmed runtime-inert. Fixed in `dfc6dcc9`: required brand member, single trusted mint-site cast, `@ts-expect-error` compile pin, repo-wide typecheck green; plus the stale plan §Security artifact-watchdog line. Round 2: **APPROVE** ("ready for PR, subject to the stated green battery").
+
+Consult tally for batch 4: plan gate 3 rounds (dual audit + final pass, 12 findings adopted, 1 disagreement resolved unanimously) + final-diff 2 rounds (1 finding adopted) — all in session `01a0377c-e5b7-7eb0-8fdc-404326250345` post-gate; zero unresolved disagreements.
