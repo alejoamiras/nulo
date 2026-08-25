@@ -137,10 +137,11 @@ describe("AuthRegistryService.reconcileFromTx — dropped is non-destructive", (
 
 describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 	let service: AuthRegistryService
+	let api: FakeBrowserApi
 	beforeEach(async () => {
 		// restore() gates on ensureInitialized(); run the real lifecycle over stub
 		// peers (init only subscribes to onAccountDeleted + onTransactionUpdated).
-		const api = new FakeBrowserApi()
+		api = new FakeBrowserApi()
 		api.reset()
 		const services = new ServiceCollection()
 		services.add(svc(PROFILE_SERVICE_NAME, {}))
@@ -216,4 +217,73 @@ describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 		// The original row is untouched and still lists.
 		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xh1", "0xh2", "0xh3", "0xh4", "0xh5"])
 	}, 15_000)
+
+	// N-24 pins — restore dedupes on the compound (account, hash), matching the
+	// live-write path's invariant. Duplicates from a cloned/re-imported backup
+	// otherwise each mint a fresh id and silently burn per-account cap headroom.
+
+	test("(N-24) an intra-batch duplicate (account, hash) is restoreError-tagged; the first lands", async () => {
+		const restored = await service.restore([authwit(A, "0xdup"), authwit(A, "0xdup")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeTruthy()
+		expect(await service.getAuthwits(A)).toHaveLength(1)
+	})
+
+	test("(N-24) a pair already in storage (live-recorded) blocks its restore", async () => {
+		await service.recordPendingAuthwits(A, [{ hash: "0xlive", content }], "0xtx")
+		const [restored] = await service.restore([authwit(A, "0xlive")])
+		expect(restored.restoreError).toBeTruthy()
+		expect(await service.getAuthwits(A)).toHaveLength(1)
+	})
+
+	test("(N-24) the same hash under TWO accounts restores clean — the key is compound, not bare-hash", async () => {
+		const restored = await service.restore([authwit("0xalice", "0xshared"), authwit("0xbob", "0xshared")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeUndefined()
+		expect(await service.getAuthwits("0xalice")).toHaveLength(1)
+		expect(await service.getAuthwits("0xbob")).toHaveLength(1)
+	})
+
+	test("(N-24) delimiter-forged pairs are distinct — ('a::b','c') and ('a','b::c') both land", async () => {
+		// An in-band string delimiter would collapse these two identities; the
+		// JSON-array encoding keeps them injective.
+		const restored = await service.restore([authwit("a::b", "c"), authwit("a", "b::c")])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeUndefined()
+	})
+
+	test("(N-24) a hostile decodable row at MAX_SAFE_INTEGER fails the ROW — no hang, no hidden write", async () => {
+		// Past MAX_SAFE_INTEGER the float cursor stops advancing (id++ is a
+		// no-op): an unguarded skip loop spins forever under the service lock,
+		// and an unguarded write lands key-identity-hidden on read. Both
+		// boundary keys are seeded so the loop's own guard (not just the
+		// post-loop check) is what exits.
+		const max = Number.MAX_SAFE_INTEGER
+		await api.storage.local.set({
+			[`nulo:core:auth-registry@${max}`]: JSON.stringify({ id: max, account: A, hash: "0xmax", content: {} }),
+			[`nulo:core:auth-registry@${max + 1}`]: JSON.stringify({ junk: true }),
+		})
+		const restored = await service.restore([authwit(A, "0xnew1"), authwit(A, "0xnew2")])
+		expect(restored[0].restoreError).toBeTruthy()
+		expect(restored[1].restoreError).toBeTruthy()
+		// Nothing landed at (or past) the unsafe boundary beyond the seeds.
+		const raw = await api.storage.local.get(null)
+		const authKeys = Object.keys(raw).filter((k) => k.startsWith("nulo:core:auth-registry@"))
+		expect(authKeys).toHaveLength(2)
+	}, 10_000)
+
+	test("(N-24) a codec-hidden raw row's pair still blocks its duplicate, and its key is never overwritten", async () => {
+		// Seed a raw row that carries a valid (account, hash) but a codec-breaking
+		// content — decoded reads hide it, yet its identity must still dedupe and
+		// its numeric key must stay occupied.
+		await api.storage.local.set({
+			"nulo:core:auth-registry@1": JSON.stringify({ id: 1, account: A, hash: "0xhidden", content: null }),
+		})
+		const restored = await service.restore([authwit(A, "0xhidden"), authwit(A, "0xnew")])
+		expect(restored[0].restoreError).toBeTruthy() // hidden pair blocks its duplicate
+		expect(restored[1].restoreError).toBeUndefined()
+		// The hidden row's raw bytes are intact (key @1 not clobbered by the cursor).
+		const raw = (await api.storage.local.get("nulo:core:auth-registry@1"))["nulo:core:auth-registry@1"]
+		expect(JSON.parse(raw as string)).toMatchObject({ id: 1, hash: "0xhidden", content: null })
+	})
 })

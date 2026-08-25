@@ -110,15 +110,26 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		this.networkService.registerChainPurgeSubscriber(async (profileId, chainId) => this.clearChainState(profileId, chainId))
 		// Orphan sweep: an imported-key row with no matching Account row is dead weight (a torn
 		// import that wrote the key but crashed before the Account row). Remove it so the store
-		// stays 1:1. Best-effort — a failure here must never wedge service start.
-		void this.sweepOrphanImportedKeys().catch((err) =>
-			this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "imported-key orphan sweep failed", String(err)),
-		)
+		// stays 1:1. AWAITED: the sweep deletes real key rows, and a fire-and-forget run raced
+		// importAccount's key-first write order (snapshot accounts → import writes the key row →
+		// sweep deletes it → import writes the account row). Awaited inside init, no service
+		// call can interleave; a failure is logged and must never wedge service start.
+		try {
+			await this.sweepOrphanImportedKeys()
+		} catch (err) {
+			this.logger.log(ACCOUNT_SERVICE_NAME, LogLevel.Error, "imported-key orphan sweep failed", String(err))
+		}
 	}
 
-	/** Delete imported-key rows whose Account row is gone. */
+	/** Delete imported-key rows whose Account row is gone. The live-set comes from
+	 *  the PHYSICAL key space (`getKeys` — the widest raw view, non-string values
+	 *  included): a codec-hidden account row still counts as occupied, so a data-
+	 *  integrity failure can never cascade into deleting the sealed imported
+	 *  signing key behind it (F-B23 discipline: no hideable view feeds a
+	 *  destructive operation). Genuinely-deleted accounts have no physical key,
+	 *  so true orphans are still reaped. */
 	private async sweepOrphanImportedKeys(): Promise<void> {
-		const accountKeys = new Set((await this.liveRows()).map((a) => accountRowIdOf(a)))
+		const accountKeys = new Set(await this.storage.getKeys())
 		for (const id of await this.importedKeys.allRowIds()) {
 			if (!accountKeys.has(accountRowId(id.profileId, id.chainId, id.address))) {
 				await this.importedKeys.delete(id.profileId, id.chainId, id.address)

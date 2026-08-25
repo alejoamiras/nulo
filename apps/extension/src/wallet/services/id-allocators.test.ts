@@ -13,6 +13,59 @@ describe("nextNumericId", () => {
 	test("empty store starts at 1", async () => {
 		expect(await nextNumericId({ getKeys: async () => [] })).toBe(1)
 	})
+
+	// N-20 hardening pins. The audit's own proof (c5-3) was defective — it
+	// compared two pure reads of an UNMUTATED store, which are equal in every
+	// implementation — so these replace it: a direct exclusion assertion and a
+	// state-mutating write-back loop (the form that is genuinely red pre-fix).
+
+	test("(N-20) a huge junk key contributes nothing to the max", async () => {
+		// "999…9" coerced to 1e21 under the old `+x`, where float64's ulp exceeds
+		// 1 — the allocator pinned onto one forever-colliding id.
+		expect(await nextNumericId({ getKeys: async () => ["0", "1", "999999999999999999999"] })).toBe(2)
+	})
+
+	test("(N-20) canonical-but-unsafe keys contribute nothing", async () => {
+		// Both round-trip String(Number(x)) exactly, so a canonical check alone
+		// admits them; the safe-integer bound is what excludes them.
+		expect(await nextNumericId({ getKeys: async () => ["1", "1e+21"] })).toBe(2)
+		expect(await nextNumericId({ getKeys: async () => ["1", "9007199254740992"] })).toBe(2)
+	})
+
+	test("(N-20) alias keys contribute nothing", async () => {
+		expect(await nextNumericId({ getKeys: async () => ["2", "0x10", "01", " 1", "1e3", "-1", "1.5"] })).toBe(3)
+	})
+
+	test("(N-20) write-back loop: allocation stays strictly increasing with a poisoned key present", async () => {
+		// The production usage shape: allocate, persist, allocate again. Under the
+		// old coercion every round returned the same collapsed float and each
+		// write clobbered the same row.
+		const keys = ["0", "999999999999999999999"]
+		const store = { getKeys: async () => keys }
+		const a = await nextNumericId(store)
+		keys.push(String(a))
+		const b = await nextNumericId(store)
+		keys.push(String(b))
+		const c = await nextNumericId(store)
+		expect(a).toBe(1)
+		expect(b).toBe(2)
+		expect(c).toBe(3)
+	})
+
+	test("(N-20) a MAX_SAFE_INTEGER key cannot push the candidate unsafe — gap-fill stays safe and free", async () => {
+		// max+1 would be 2^53 (unsafe, pins under +1). The candidate clamps and
+		// walks down to the first physically-free key; uniqueness is the
+		// contract, not monotonicity.
+		const max = String(Number.MAX_SAFE_INTEGER)
+		const first = await nextNumericId({ getKeys: async () => [max] })
+		expect(Number.isSafeInteger(first)).toBe(true)
+		expect(String(first)).not.toBe(max)
+		// Write-back keeps producing fresh, safe, free ids.
+		const keys = [max, String(first)]
+		const second = await nextNumericId({ getKeys: async () => keys })
+		expect(Number.isSafeInteger(second)).toBe(true)
+		expect(keys).not.toContain(String(second))
+	})
 })
 
 describe("nextRandomId", () => {
