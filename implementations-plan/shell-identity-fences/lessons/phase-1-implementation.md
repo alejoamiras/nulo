@@ -13,6 +13,13 @@ Two pins were VACUOUS and had to be made discriminating (proved by revert-probe 
 
 Reviewer-ratified deviations recorded in the plan ledger: single-watcher `awaitProfileActivation` over the specced `Promise.race` (the losing branch would leak its watcher for the full 30 s bound on every unlock), and no auth-side toast on `BootstrapFailedError` (the shell owns that toast; double-toasting rejected).
 
+## Codex final-diff round 1 — CHANGES ×3, all adopted
+
+- **Stale auto-import decls survive rebuilds**: unplugin-auto-import MERGES with the existing dts, so deleted symbols (`checkSentinel`, `checkNotificationsForShow`, …) persisted through every build under `@ts-nocheck`. Clean regeneration = delete the generated files and rebuild. **Lesson: after deleting auto-importable symbols, the dts must be clean-regenerated, not just rebuilt — and the removal grep must NOT carve out generated files.**
+- **The truthy profile branch ignored the seq token the falsy branch already used**: a stale bootstrap could clear a newer run's `bootstrapFailure` record or toast over the winner. Fix reused the existing `profileEventSeq` as a compare-and-commit gate via the extracted `runFencedBootstrap` (test-less app.vue → extract, again). Codex's scenario was real; the fix was 3 guard lines + a factory seam.
+- **Three "promised mechanisms" were silently revertible** (producer networkId stamp, stale-task drop across profile switch, fence recombination) — each got a pin proven red by revert-probe. **Lesson: a mechanism the PR body brags about needs a pin that reds when it's deleted; the reviewer greps the diff for claims without discriminating tests.**
+- Ratified bare: `onConnected.add(resnapshotJournal)` — `EventHandler<void>.invoke()` passes undefined, defaults apply; a payload would be a compile error at the invoke site.
+
 ## Environment/tooling
 
 - Vitest doesn't run the app's auto-import transform: `useToast`/`TOAST_DURATION` must be explicitly imported in components under test, or the suite reds on undefineds the app never sees.
