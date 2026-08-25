@@ -12,13 +12,13 @@
  * Toolchain pin: forge 1.4.1 + solc 0.8.30 (l1-contracts foundry.toml: optimizer=true,
  * evm_version=prague). Captured from a clean build of upstream/NuloTokenPortal.sol.
  */
-import { spawnSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { keccak256 } from "viem"
+import { resolveBin, run } from "./run"
 
 /** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). Re-pinned after the
  *  monorepo restructure repathed ONE header-comment line inside the fork
@@ -44,12 +44,16 @@ export const VENDORED_FORK = join(EVM_ROOT, "upstream", "NuloTokenPortal.sol")
 export const PORTAL_BUILD_JSON = join(EVM_ROOT, "upstream", "NuloTokenPortal.build.json")
 const STAGE_REL = join("test", "portals", "NuloTokenPortal.sol")
 
+let forge: string | undefined
+
+/** `FORGE_BIN` → PATH → the Aztec-bundled forge; resolved on first use, never at import. */
 export function forgeBin(): string {
-	if (process.env.FORGE_BIN) return process.env.FORGE_BIN
-	if (spawnSync("forge", ["--version"], { stdio: "ignore" }).status === 0) return "forge"
-	const aztec = join(homedir(), ".aztec", "current", "bin", "forge")
-	if (existsSync(aztec)) return aztec
-	throw new Error("forge not found - install foundry or set FORGE_BIN.")
+	forge ??= resolveBin("forge", {
+		envVar: "FORGE_BIN",
+		candidates: [join(homedir(), ".aztec", "current", "bin", "forge")],
+		prefer: "path",
+	})
+	return forge
 }
 
 export function l1ContractsRoot(): string {
@@ -85,13 +89,13 @@ export function buildForkInL1Root(): BuiltPortal {
 	const l1Root = l1ContractsRoot()
 	stageForkSource(l1Root)
 	const { FOUNDRY_PROFILE: _omit, ...env } = process.env
-	const res = spawnSync(forgeBin(), ["build", STAGE_REL, "--use", PORTAL_PIN.solc], {
+	const res = run(forgeBin(), ["build", STAGE_REL, "--use", PORTAL_PIN.solc], {
 		cwd: l1Root,
 		env,
-		encoding: "utf8",
 		maxBuffer: 64 * 1024 * 1024,
+		check: false,
 	})
-	if (res.status !== 0) throw new Error(`forge build failed:\n${res.stdout ?? ""}${res.stderr ?? ""}`)
+	if (res.exitCode !== 0) throw new Error(`forge build failed:\n${res.stdout}${res.stderr}`)
 	const a = JSON.parse(readFileSync(join(l1Root, "out", "NuloTokenPortal.sol", "NuloTokenPortal.json"), "utf8"))
 	const bytecode = a.bytecode.object as `0x${string}`
 	const deployedBytecode = a.deployedBytecode.object as `0x${string}`

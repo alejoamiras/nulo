@@ -12,11 +12,11 @@
  * Run before any forge invocation in `contracts/bridge/evm` (verify-l1.ts does
  * this automatically): `bun scripts/gen-remappings.ts` from packages/bridge-core.
  */
-import { spawnSync } from "node:child_process"
 import { existsSync, renameSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { resolvePackageAsset } from "@nulo/resolve-asset"
+import { run } from "./run"
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const EVM_ROOT = join(here, "..", "..", "..", "contracts", "bridge", "evm")
@@ -40,13 +40,13 @@ export function generateRemappings(): string {
 
 /** Asserts forge actually sees the generated `@aztec/` mapping (and records the forge version). */
 export function assertEffectiveRemapping(forgeBin: string): void {
-	const version = spawnSync(forgeBin, ["--version"], { encoding: "utf8" })
-	if (version.error || version.status !== 0) {
-		throw new Error(`forge not runnable at ${forgeBin}: ${version.error?.message ?? version.stderr}`)
+	const version = run(forgeBin, ["--version"], { check: false })
+	if (version.code !== undefined || version.exitCode !== 0) {
+		throw new Error(`forge not runnable at ${forgeBin}: ${version.code ?? version.stderr}`)
 	}
-	const remaps = spawnSync(forgeBin, ["remappings"], { cwd: EVM_ROOT, encoding: "utf8" })
-	if (remaps.error || remaps.status !== 0) {
-		throw new Error(`forge remappings failed: ${remaps.error?.message ?? remaps.stderr}`)
+	const remaps = run(forgeBin, ["remappings"], { cwd: EVM_ROOT, check: false })
+	if (remaps.code !== undefined || remaps.exitCode !== 0) {
+		throw new Error(`forge remappings failed: ${remaps.code ?? remaps.stderr}`)
 	}
 	const aztecLine = remaps.stdout.split("\n").find((l) => l.startsWith("@aztec/="))
 	const expected = `${resolvePackageAsset("@aztec/l1-artifacts", "l1-contracts/src", { from: import.meta.url })}/`

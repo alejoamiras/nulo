@@ -17,7 +17,6 @@
  * Promote afterwards with:  live-intent.ts promote <intent> --bridge-only --restore-swap
  * (minFuelFj carries from the old arc — recalibrate via fuel-testnet.ts when convenient.)
  */
-import { execSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -26,6 +25,7 @@ import { parseCandidateManifest } from "../src/candidate-schema"
 import { quoteFuelPath } from "../src/quote"
 import { buildFuelRoute } from "../src/route"
 import { writeCandidateAtomic } from "./deploy-manifest"
+import { git } from "./run"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const here = dirname(fileURLToPath(import.meta.url))
@@ -92,9 +92,12 @@ async function main(): Promise<void> {
 	if (live.l1.fuel?.swap) throw new Error("live manifest already has a swap block — nothing to restore; STOP")
 	if (!live.l1.fuel?.core) throw new Error("live manifest has no fuel.core — wrong starting state; STOP")
 
-	// The carried swap config comes from the COMMITTED pre-cutover manifest — never hand-typed.
+	// The carried swap config comes from the COMMITTED pre-cutover manifest — never hand-typed. The
+	// operator's ref is resolved to a commit OID first, behind `--end-of-options`, so it can only ever
+	// name a commit — never an option to `rev-parse` or `show`.
+	const fromOid = git(["rev-parse", "--verify", "--end-of-options", `${fromRef}^{commit}`], repoRoot)
 	const prior = parseCandidateManifest(
-		JSON.parse(execSync(`git show ${fromRef}:apps/faucet/public/testnet-bridge.json`, { cwd: repoRoot, encoding: "utf8" })),
+		JSON.parse(git(["show", "--end-of-options", `${fromOid}:apps/faucet/public/testnet-bridge.json`], repoRoot)),
 	)
 	const priorSwap = prior.l1.fuel?.swap
 	if (!priorSwap) throw new Error(`--from ${fromRef} manifest has no swap block; STOP`)

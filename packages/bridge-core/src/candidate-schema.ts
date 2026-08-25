@@ -7,7 +7,7 @@
  */
 import z from "zod"
 
-const evmAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte 0x hex address")
+export const evmAddress = z.string().regex(/^0x[0-9a-fA-F]{40}$/, "expected a 20-byte 0x hex address")
 const aztecAddress = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "expected a 32-byte 0x hex address")
 /** Wei/base-unit amounts travel as decimal strings (BigInt-safe). */
 const decimalString = z.string().regex(/^\d+$/, "expected a base-10 integer string")
