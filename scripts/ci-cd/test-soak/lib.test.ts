@@ -52,6 +52,7 @@ function run(partial: Partial<RunRecord> = {}): RunRecord {
 		failing: [],
 		failureMessages: {},
 		inventoryDigest: "d",
+		hookFailed: false,
 		...partial,
 	}
 }
@@ -117,6 +118,32 @@ describe("parseVitestJson", () => {
 		expect(parsed.statuses.get("src/a.test.ts :: a skipped")).toBe("skipped")
 		expect(digestStatuses(parsed.statuses)).toHaveLength(64)
 	})
+	test("identically named tests in one file get occurrence suffixes instead of collapsing", () => {
+		const parsed = parseVitestJson(
+			{
+				success: true,
+				numTotalTests: 3,
+				testResults: [
+					{
+						name: "/repo/apps/x/src/dup.test.ts",
+						status: "passed",
+						assertionResults: [
+							{ fullName: "same name", status: "passed" },
+							{ fullName: "same name", status: "passed" },
+							{ fullName: "same name", status: "skipped" },
+						],
+					},
+				],
+			},
+			canon,
+		)
+		expect([...parsed.statuses.keys()]).toEqual([
+			"src/dup.test.ts :: same name",
+			"src/dup.test.ts :: same name #2",
+			"src/dup.test.ts :: same name #3",
+		])
+		expect(parsed.collected).toBe(3)
+	})
 	test("a file that failed to load becomes a failed <file> entry", () => {
 		const parsed = parseVitestJson(
 			{
@@ -146,6 +173,7 @@ describe("isFailedRun", () => {
 		expect(isFailedRun(run({ success: false }))).toBe(true)
 		expect(isFailedRun(run({ timedOut: true }))).toBe(true)
 		expect(isFailedRun(run({ runtime: null }))).toBe(true)
+		expect(isFailedRun(run({ hookFailed: true }))).toBe(true)
 	})
 })
 
@@ -211,6 +239,26 @@ describe("compareSummaries", () => {
 		const regressed = summary("bun")
 		regressed.inventory["src/a.test.ts :: a passes"] = { statuses: { passed: 1, failed: 1 }, observations: 2, failures: 1 }
 		expect(compareSummaries(summary("node"), regressed).problems.join("\n")).toContain("candidate failed 1× vs reference 0×")
+	})
+	test("a stored failedRuns of 0 is never trusted over the rows", () => {
+		const b = summary("bun")
+		b.runs[1] = run({ runtime: { execPath: "<bun>", versions: { bun: "1.4.0", node: "26.3.0" } }, exitCode: 1, timedOut: true })
+		const result = compareSummaries(summary("node"), b)
+		expect(result.ok).toBe(false)
+		expect(result.problems.join("\n")).toContain("1 run row(s) fail the gate")
+		expect(result.problems.join("\n")).toContain("failedRuns=0 disagrees with 1 failing row(s)")
+	})
+	test("status counts are compared exactly, not just their names", () => {
+		const b = summary("bun")
+		const id = "src/a.test.ts :: a passes"
+		const a = summary("node")
+		a.inventory[id] = { statuses: { passed: 1, skipped: 1 }, observations: 2, failures: 0 }
+		b.inventory[id] = { statuses: { passed: 1, skipped: 1 }, observations: 2, failures: 0 }
+		expect(compareSummaries(a, b).ok).toBe(true)
+		b.inventory[id] = { statuses: { skipped: 1, passed: 1 }, observations: 2, failures: 0 }
+		expect(compareSummaries(a, b).ok).toBe(true)
+		a.inventory[id] = { statuses: { passed: 2 }, observations: 2, failures: 0 }
+		expect(compareSummaries(a, b).problems.join("\n")).toContain(`"${id}": statuses`)
 	})
 	test("inventory membership must be identical", () => {
 		const b = summary("bun")

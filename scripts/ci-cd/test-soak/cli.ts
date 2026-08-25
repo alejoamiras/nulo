@@ -74,35 +74,49 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 	})
 }
 
+const KILL_GRACE_MS = 5_000
+
+/**
+ * Resolves when the child has exited. On timeout the child's whole process group is killed and
+ * the exit is still awaited (bounded by a grace period), so a timed-out run never returns with
+ * the group alive; on every exit any residual group member is killed as well.
+ */
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<{ code: number | null; signal: string | null; timedOut: boolean }> {
 	return new Promise((resolvePromise) => {
 		let settled = false
-		const timer = setTimeout(() => {
+		let timedOut = false
+		const exited = new Promise<{ code: number | null; signal: string | null }>((resolveExit) => {
+			child.on("exit", (code, signal) => resolveExit({ code, signal: signal ?? null }))
+			child.on("error", () => resolveExit({ code: null, signal: "ERROR" }))
+		})
+		const finish = (code: number | null, signal: string | null) => {
 			if (settled) return
 			settled = true
+			clearTimeout(timer)
 			if (child.pid) killGroup(child.pid)
-			resolvePromise({ code: null, signal: "SIGKILL", timedOut: true })
+			resolvePromise({ code, signal, timedOut })
+		}
+		const timer = setTimeout(() => {
+			timedOut = true
+			if (child.pid) killGroup(child.pid)
+			const grace = new Promise<{ code: number | null; signal: string | null }>((resolveGrace) =>
+				setTimeout(() => resolveGrace({ code: null, signal: "SIGKILL" }), KILL_GRACE_MS),
+			)
+			Promise.race([exited, grace]).then(({ signal }) => finish(null, signal ?? "SIGKILL"))
 		}, timeoutMs)
-		child.on("exit", (code, signal) => {
-			if (settled) return
-			settled = true
-			clearTimeout(timer)
-			resolvePromise({ code, signal: signal ?? null, timedOut: false })
-		})
-		child.on("error", () => {
-			if (settled) return
-			settled = true
-			clearTimeout(timer)
-			resolvePromise({ code: null, signal: "ERROR", timedOut: false })
-		})
+		exited.then(({ code, signal }) => finish(code, signal))
 	})
 }
 
-function runHook(argv: string[], cwd: string): number {
+/** Lifecycle hooks get the same process-group + timeout treatment as the run itself. */
+async function runHook(argv: string[], cwd: string, timeoutMs: number): Promise<{ status: number | null; timedOut: boolean }> {
 	const [cmd, ...args] = argv
-	if (!cmd) return 0
-	const result = spawnSync(cmd, args, { cwd, stdio: "inherit" })
-	return result.status ?? 1
+	if (!cmd) return { status: 0, timedOut: false }
+	const child = spawn(cmd, args, { cwd, detached: true, stdio: ["ignore", "inherit", "inherit"] })
+	activeGroup = child.pid ?? null
+	const exit = await waitForExit(child, timeoutMs)
+	activeGroup = null
+	return { status: exit.code, timedOut: exit.timedOut }
 }
 
 function emptyRun(partial: Partial<RunRecord>): RunRecord {
@@ -122,6 +136,7 @@ function emptyRun(partial: Partial<RunRecord>): RunRecord {
 		failing: [],
 		failureMessages: {},
 		inventoryDigest: digestStatuses(new Map()),
+		hookFailed: false,
 		...partial,
 	}
 }
@@ -142,8 +157,13 @@ export async function runOnce(opts: RunOnceOptions): Promise<RunOutcome> {
 	const started = Date.now()
 	try {
 		for (const hook of opts.before ?? []) {
-			const status = runHook(hook, opts.spawnCwd)
-			if (status !== 0) return { run: emptyRun({ exitCode: status, wallMs: Date.now() - started }), statuses: new Map() }
+			const pre = await runHook(hook, opts.spawnCwd, opts.timeoutMs)
+			if (pre.status !== 0 || pre.timedOut) {
+				return {
+					run: emptyRun({ exitCode: pre.status, timedOut: pre.timedOut, hookFailed: true, wallMs: Date.now() - started }),
+					statuses: new Map(),
+				}
+			}
 		}
 		const [cmd, ...args] = argv
 		if (!cmd) throw new Error("empty launcher")
@@ -157,7 +177,13 @@ export async function runOnce(opts: RunOnceOptions): Promise<RunOutcome> {
 		child.stderr?.on("data", keepTail)
 		const exit = await waitForExit(child, opts.timeoutMs)
 		activeGroup = null
-		if (!exit.timedOut) for (const hook of opts.after ?? []) runHook(hook, opts.spawnCwd)
+		let hookFailed = false
+		if (!exit.timedOut) {
+			for (const hook of opts.after ?? []) {
+				const post = await runHook(hook, opts.spawnCwd, opts.timeoutMs)
+				if (post.status !== 0 || post.timedOut) hookFailed = true
+			}
+		}
 		const wallMs = Date.now() - started
 
 		let runtime: RuntimeRecord | null = null
@@ -166,7 +192,7 @@ export async function runOnce(opts: RunOnceOptions): Promise<RunOutcome> {
 			const raw = JSON.parse(readFileSync(runtimeFile, "utf8")) as RuntimeRecord
 			runtime = { ...raw, execPath: canonicalExecPath(raw.execPath, canon) }
 		}
-		const base = { exitCode: exit.code, signal: exit.signal, wallMs, timedOut: exit.timedOut, runtime }
+		const base = { exitCode: exit.code, signal: exit.signal, wallMs, timedOut: exit.timedOut, runtime, hookFailed }
 		if (!existsSync(resultsFile)) {
 			return { run: emptyRun({ ...base, failureMessages: { "<run>": canon.text(tail).slice(-2000) } }), statuses: new Map() }
 		}
@@ -350,7 +376,7 @@ async function soak(argv: string[]): Promise<number> {
 			cwd: relative(repoRoot, wsDir),
 			script: args.script,
 			runtimeMode: args.runtime,
-			filters: args.filters,
+			filters: args.filters.map((filter) => canon.text(filter)),
 			gitSha,
 			gitDirty,
 			lockfileSha256,

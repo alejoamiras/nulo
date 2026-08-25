@@ -69,6 +69,8 @@ export interface RunRecord {
 	failing: string[]
 	failureMessages: Record<string, string>
 	inventoryDigest: string
+	/** A `pre`/`post` lifecycle hook failed or timed out (Node reference mode). */
+	hookFailed: boolean
 }
 
 export interface InventoryEntry {
@@ -174,6 +176,9 @@ export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedR
 	let failed = 0
 	let skipped = 0
 	let todo = 0
+	// Identically named tests in one file get deterministic occurrence suffixes (vitest reports
+	// assertions in definition order), so none is silently collapsed into another's key.
+	const seen = new Map<string, number>()
 	for (const file of json.testResults) {
 		const rel = canon.relFile(file.name)
 		if (file.assertionResults.length === 0 && file.status === "failed") {
@@ -185,7 +190,10 @@ export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedR
 			continue
 		}
 		for (const assertion of file.assertionResults) {
-			const id = `${rel} :: ${assertion.fullName}`
+			const base = `${rel} :: ${assertion.fullName}`
+			const occurrence = (seen.get(base) ?? 0) + 1
+			seen.set(base, occurrence)
+			const id = occurrence === 1 ? base : `${base} #${occurrence}`
 			const status = normalizeStatus(assertion.status)
 			statuses.set(id, status)
 			if (status === "passed") passed += 1
@@ -207,8 +215,8 @@ export function digestStatuses(statuses: Map<string, string>): string {
 }
 
 /** Every way a run can fail the gate; a run that produced no engine record is not evidence. */
-export function isFailedRun(run: Pick<RunRecord, "exitCode" | "timedOut" | "missingJson" | "success" | "runtime">): boolean {
-	return run.timedOut || run.missingJson || run.exitCode !== 0 || run.success !== true || run.runtime === null
+export function isFailedRun(run: Pick<RunRecord, "exitCode" | "timedOut" | "missingJson" | "success" | "runtime" | "hookFailed">): boolean {
+	return run.timedOut || run.missingJson || run.hookFailed || run.exitCode !== 0 || run.success !== true || run.runtime === null
 }
 
 export function buildInventory(runs: Map<string, string>[]): { inventory: Record<string, InventoryEntry>; digest: string } {
@@ -303,6 +311,11 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 			else if (hasBun !== expectBun)
 				problems.push(`${label}: run ${index} ran on ${hasBun ? "Bun" : "Node"}, expected ${expectBun ? "Bun" : "Node"}`)
 		}
+		// Never trust the stored count: re-derive it from the rows, then require both to be zero.
+		const failedRows = side.runs.filter(isFailedRun).length
+		if (failedRows !== 0) problems.push(`${label}: ${failedRows} run row(s) fail the gate`)
+		if (side.failedRuns !== failedRows)
+			problems.push(`${label}: failedRuns=${side.failedRuns} disagrees with ${failedRows} failing row(s)`)
 		if (side.failedRuns !== 0) problems.push(`${label}: failedRuns=${side.failedRuns}, expected 0`)
 		for (const [id, entry] of Object.entries(side.inventory)) {
 			if (entry.observations !== side.meta.runs)
@@ -325,8 +338,9 @@ export function compareSummaries(a: SoakSummary, b: SoakSummary): CompareResult 
 		const entryA = a.inventory[id]
 		const entryB = b.inventory[id]
 		if (!entryA || !entryB) continue
-		const statusesA = Object.keys(entryA.statuses).sort().join(",")
-		const statusesB = Object.keys(entryB.statuses).sort().join(",")
+		// Exact status-count records: `{passed:1, skipped:29}` must not pass as `{passed:29, skipped:1}`.
+		const statusesA = JSON.stringify(Object.entries(entryA.statuses).sort())
+		const statusesB = JSON.stringify(Object.entries(entryB.statuses).sort())
 		if (statusesA !== statusesB) problems.push(`"${id}": statuses ${statusesA} vs ${statusesB}`)
 		if (entryB.failures > entryA.failures)
 			problems.push(`"${id}": candidate failed ${entryB.failures}× vs reference ${entryA.failures}×`)

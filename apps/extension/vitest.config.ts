@@ -28,9 +28,9 @@ export default defineConfig({
 		globals: true,
 		environment: "jsdom",
 		setupFiles: "./tests/vitest.setup.ts",
-		// Pick up co-located tests in extracted @nulo/* workspace packages
-		// (same pattern as source-first exports — no per-package vitest
-		// config, extension remains the single test runner).
+		// Also pick up the co-located tests of the extracted @nulo/* workspace
+		// packages: they run standalone under their own configs AND here under the
+		// extension's jsdom setup, so the aggregate re-runs them (see ARCHITECTURE §14).
 		include: [
 			"src/**/*.test.ts",
 			// e2e infra helpers that are pure TS (no sandbox) — e.g. the

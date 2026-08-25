@@ -17,7 +17,8 @@ for (const spec of specs) {
 		resolves[spec] = { esm: isBun ? Bun.resolveSync(spec, wsDir) : import.meta.resolve(spec, parent) }
 	} catch (error) {
 		const code = error && typeof error === "object" && "code" in error ? String(error.code) : "ERR_RESOLVE"
-		resolves[spec] = { error: code }
+		const message = error instanceof Error ? error.message : String(error)
+		resolves[spec] = { error: `${code}: ${message}` }
 	}
 }
 console.log(JSON.stringify({ engine: isBun ? "bun" : "node", resolves }))

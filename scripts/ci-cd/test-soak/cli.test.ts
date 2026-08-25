@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { readdirSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -72,12 +73,21 @@ for (const engine of ["node", "bun"] as const) {
 			expect(run.exitCode === 0).toBe(false)
 		})
 
-		test("hang: the tool's timeout kills the process group and marks the run timed out", async () => {
+		test("hang: the tool's timeout kills the process group, marks the run timed out, leaves no survivor", async () => {
 			const { run } = await runFixture(engine, "hang", 8_000)
 			expect(run.timedOut).toBe(true)
 			expect(run.missingJson).toBe(true)
 			expect(isFailedRun(run)).toBe(true)
+			const survivors = spawnSync("pgrep", ["-f", join(fixtures, "hang")], { encoding: "utf8" })
+			expect(survivors.stdout.trim()).toBe("")
 		}, 30_000)
+
+		test("no-json: a run that ends without a report (launcher killed) is a failed run, not a timeout", async () => {
+			const { run } = await runFixture(engine, "no-json")
+			expect(run.missingJson).toBe(true)
+			expect(run.timedOut).toBe(false)
+			expect(isFailedRun(run)).toBe(true)
+		})
 
 		test("unhandled rejection: the exit code carries it (vitest's JSON `success` does not)", async () => {
 			const { run } = await runFixture(engine, "unhandled-rejection")
