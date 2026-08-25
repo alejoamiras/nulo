@@ -131,6 +131,7 @@ describe("parseVitestJson", () => {
 							{ fullName: "same name", status: "passed" },
 							{ fullName: "same name", status: "passed" },
 							{ fullName: "same name", status: "skipped" },
+							{ fullName: "same name #2", status: "passed" },
 						],
 					},
 				],
@@ -141,8 +142,9 @@ describe("parseVitestJson", () => {
 			"src/dup.test.ts :: same name",
 			"src/dup.test.ts :: same name #2",
 			"src/dup.test.ts :: same name #3",
+			"src/dup.test.ts :: same name ##2",
 		])
-		expect(parsed.collected).toBe(3)
+		expect(parsed.collected).toBe(4)
 	})
 	test("a file that failed to load becomes a failed <file> entry", () => {
 		const parsed = parseVitestJson(

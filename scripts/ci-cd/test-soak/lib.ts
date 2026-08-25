@@ -177,7 +177,8 @@ export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedR
 	let skipped = 0
 	let todo = 0
 	// Identically named tests in one file get deterministic occurrence suffixes (vitest reports
-	// assertions in definition order), so none is silently collapsed into another's key.
+	// assertions in definition order), so none is silently collapsed into another's key. A literal
+	// `#` in a name is doubled first, so a real "name #2" can never collide with a generated one.
 	const seen = new Map<string, number>()
 	for (const file of json.testResults) {
 		const rel = canon.relFile(file.name)
@@ -190,7 +191,7 @@ export function parseVitestJson(json: VitestJson, canon: Canonicalizer): ParsedR
 			continue
 		}
 		for (const assertion of file.assertionResults) {
-			const base = `${rel} :: ${assertion.fullName}`
+			const base = `${rel} :: ${assertion.fullName.replaceAll("#", "##")}`
 			const occurrence = (seen.get(base) ?? 0) + 1
 			seen.set(base, occurrence)
 			const id = occurrence === 1 ? base : `${base} #${occurrence}`

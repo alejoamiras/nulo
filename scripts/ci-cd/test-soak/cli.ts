@@ -78,8 +78,8 @@ const KILL_GRACE_MS = 5_000
 
 /**
  * Resolves when the child has exited. On timeout the child's whole process group is killed and
- * the exit is still awaited (bounded by a grace period), so a timed-out run never returns with
- * the group alive; on every exit any residual group member is killed as well.
+ * the exit is awaited for a bounded grace period; whether the exit was observed or not, the
+ * group kill is retried before returning, and every exit path sweeps residual group members.
  */
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<{ code: number | null; signal: string | null; timedOut: boolean }> {
 	return new Promise((resolvePromise) => {

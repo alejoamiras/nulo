@@ -10,11 +10,13 @@ if (!wsDir || specs.length === 0) {
 	process.exit(2)
 }
 const isBun = typeof Bun !== "undefined"
-const parent = pathToFileURL(wsDir.endsWith("/") ? wsDir : `${wsDir}/`).href
+// One trailing-slash base for both engines, so an unresolvable spec yields the same message text.
+const base = wsDir.endsWith("/") ? wsDir : `${wsDir}/`
+const parent = pathToFileURL(base).href
 const resolves = {}
 for (const spec of specs) {
 	try {
-		resolves[spec] = { esm: isBun ? Bun.resolveSync(spec, wsDir) : import.meta.resolve(spec, parent) }
+		resolves[spec] = { esm: isBun ? Bun.resolveSync(spec, base) : import.meta.resolve(spec, parent) }
 	} catch (error) {
 		const code = error && typeof error === "object" && "code" in error ? String(error.code) : "ERR_RESOLVE"
 		const message = error instanceof Error ? error.message : String(error)
