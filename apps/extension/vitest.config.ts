@@ -63,6 +63,9 @@ export default defineConfig({
 			// Same bb.js WASM limitation (address derivation + init-hash poseidon2) + node crypto.
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/account/instantiation-descriptor.test.ts",
+			// Same bb.js WASM limitation (NuloAccount.new key derivation is live poseidon2).
+			// Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/account/nulo-account.test.ts",
 			// Node-only (fs + import.meta.url file resolution — jsdom's URL isn't file-scheme).
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/pxe/opfs-store.test.ts",

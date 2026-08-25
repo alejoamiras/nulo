@@ -31,3 +31,7 @@ Also this round: the battery's smoke red was the KNOWN cold-boot flake — at 15
 ## Codex final-diff round 3 — SIGN-OFF
 
 APPROVE, diff ready for PR: "Both provenance paths are now non-vacuously pinned through the actual proveAndSend context. The positive/negative classifier tests correctly red any blanket WalletError pass-through, and the narrowed TSDoc matches runtime policy. No overshoot." Arc closed: plan gate ×5 → max review ×5 → fd CHANGES ×3 → fr2 CHANGES ×2 → fr3 APPROVE.
+
+## Battery round 1 — audit:vue red: the KNOWN bb.js-under-jsdom family
+
+`nulo-account.test.ts` passed standalone (aztec-runtime node env) but crashed the extension AGGREGATE lane (`BBApiException: std::bad_cast` in poseidon2 — `NuloAccount.new` derives keys). This is the DOCUMENTED limitation with an established convention: every aztec-runtime suite touching live poseidon2 is excluded from `apps/extension/vitest.config.ts`'s aggregate include and runs in the package's own node-env suite via `test:all` (which IS the CI unit gate — `_unit-tests.yml` runs `bun run test:all`, so the pins still gate PRs). Joined the family with the standard comment. **Lesson: when adding a package test that constructs real Aztec account machinery, check the aggregate's exclude list FIRST — the `std::bad_cast` family is pre-triaged; standalone-green ≠ aggregate-green.**
