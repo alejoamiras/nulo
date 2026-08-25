@@ -28,3 +28,7 @@ Meta-lesson: the plan-audit round caught THREE false claims in my own rev 1 (the
 5. The repo-wide zero-hit grep was impossible by construction (committed docs carry the terms) — scoped to `apps/extension/{src,tests}` + package.json + vite.shared.ts.
 
 Rev 3 committed as plan of record. Meta-lesson: my two "conservative middle path" adjudications both fell to the fresh-context pass — when auditors disagree, the goal's own tiebreak (smaller diff) is not automatically the RIGHT diff; a definitive-failure path that still burns the full timeout is smaller but wrong. Resumed confirmatory re-verdict pending.
+
+## Confirmatory re-verdict: APPROVE-WITH-NITS → GATE PASSED
+
+"Rev 3 substantively closes all five concerns with discriminating tests and correct interleaving ownership." Sole nit: two ledger rows still recorded the superseded round-1 adjudications — corrected in rev 4 (the plan of record). Gate arc total: dual round-1 (6+8 findings, zero contradictions) → final pass (5 items, BOTH middle-path adjudications overturned) → confirmatory approve. Zero unresolved disagreements.

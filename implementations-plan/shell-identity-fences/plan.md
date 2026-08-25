@@ -1,4 +1,4 @@
-# shell-identity-fences — batch 6 of audit-448-remediation (rev 3)
+# shell-identity-fences — batch 6 of audit-448-remediation (rev 4, gate-approved)
 
 Fixes **N-05 (Major)**, **N-08 (Major, split verdict)**, **N-23 (Low)**, **N-22 (Minor)** and executes the **owner-authorized N-09 REMOVAL**. Spec: runbook batch 6; recon: [recon.md](./recon.md); audits: [audit-codex.md](./audit-codex.md) + [audit-fable.md](./audit-fable.md) (round 1: codex REJECT ×6, fable APPROVE-WITH-CHANGES ×8 — all folded below). Base: dev `2665af59`. Tier: **mid**.
 
@@ -46,7 +46,7 @@ As rev 1, plus: the timeout discriminator cannot silence NEW error classes (it m
 ## Phases
 
 1. `runFence` + `network-switch` extraction + N-05 wiring + tests.
-2. N-08 (waitForProfileActive adoption + discriminated timeout + drift re-check + shell toast) + N-22 + N-23 + tests.
+2. N-08 (waitForProfileActive + the bootstrap-failure JOIN + typed errors + reentry guard + both drift re-checks) + N-22 + N-23 (incl. `TransferContent.networkId` + fenced token reload) + tests.
 3. N-09 removal (inventory + round-1 additions) + regenerated types + `grep -rnE` verification.
 4. Battery: audit:vue + SMOKE (required) + full solo network (the two edited specs are members). Host shared with NOTHING.
 5. Post-impl: max review → codex final-diff loop → PR → checks → squash-merge.
@@ -56,7 +56,7 @@ As rev 1, plus: the timeout discriminator cannot silence NEW error classes (it m
 - Extraction over inline (BOTH audits; silently-revertible wiring in test-less app.vue was the recurring pipeline lesson).
 - Full scope capture {profileId, chainId} passed to all three calls (runbook conformance; codex + fable).
 - `waitForProfileActive` ADOPTED (fable's find; deletes the hand-rolled wait + guard); hijack semantics handled by the silent-yield discriminator (the "misleading timeout on hijack" trade-off resolved in code, not accepted as UX).
-- 30 s bound (empirically grounded); discriminated toast only (regression trap); shell-side bootstrap toast over a waiter-signal channel (adjudicated codex/fable disagreement → fable's smaller shape; LOGGED).
-- N-23: collapse-to-empty key; per-loader generations over equality (ABA); loadTokens in reload; the cross-network task residual OUT (adjudicated-Low finding; schema change not strictly required — flagged for final-pass ratification).
+- 30 s bound (empirically grounded); discriminated toast only (regression trap); bootstrap failure = identity-keyed JOIN (`Promise.race` + `bootstrapFailure` channel + typed errors) — the round-1 shell-toast-only adjudication was OVERTURNED at the final gate (a definitive rejection must release the waiter immediately).
+- N-23: collapse-to-empty key; per-loader generations over equality (ABA); FENCED loadTokens with synchronous clear in reload; `TransferContent.networkId` stamped at the executor — the round-1 out-of-scope residual ruling was OVERTURNED at the final gate (the value is in hand; strictly adjacent).
 - N-09: ordering pin replaced not deleted; grep -rnE.
 - Gate arc: round-1 dual audit (codex REJECT ×6 / fable APPROVE-WITH-CHANGES ×8, zero contradictions) → rev 2 → final fresh-context pass **APPROVE-WITH-CHANGES** with BOTH adjudicated disagreements OVERTURNED: (1) bootstrap failure gets an identity-keyed JOIN releasing the waiter immediately (+ typed errors, reentry guard, immediate-post-wait check, redundant profile assignment removed); (2) `TransferContent.networkId` IS strictly adjacent (value in hand at the executor) — the cross-network card gap closes fully; plus handler-factory extraction (all glue pinned) and the scoped verification grep. Rev 3 = plan of record; resumed re-verdict (pending) is confirmatory.
