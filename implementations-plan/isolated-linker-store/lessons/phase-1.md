@@ -30,3 +30,7 @@ The owner reopened the design ("looks so monkey-patchy"). Per the convergence pr
 - Also noted: codex probed that `Bun.resolveSync` currently resolves exports-blocked `pkg/package.json` — an UNDOCUMENTED bypass we deliberately do not rely on.
 
 Re-gate after the rewrite: resolver 14/14 + tsc · identity 6/6 · aztec-runtime 189/189 · bridge-core 223/227 (4 pre-existing skips) · `audit:vue` exit 0 (4,597 tests) · `test:all` exit 0.
+
+## Forge build gate — now PASSED (post-impl round 1 closed the environmental skip)
+
+`forge install foundry-rs/forge-std OpenZeppelin/openzeppelin-contracts Uniswap/v4-core@v4.0.0 --no-git` populated `contracts/bridge/evm/lib/` (the README prerequisite). Then `gen-remappings.ts` + `forge build`: **exit 0** under the isolated layout (forge 1.7.1; only forge-lint warnings on pre-existing unsafe-typecast sites). The `@aztec/` sources resolved through the generated remap to bridge-core's declared `@aztec/l1-artifacts`.

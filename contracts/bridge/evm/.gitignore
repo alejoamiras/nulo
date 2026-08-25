@@ -4,4 +4,4 @@ broadcast/
 lib/
 foundry.lock
 remappings.txt
-remappings.txt.tmp
+remappings.txt.*.tmp
