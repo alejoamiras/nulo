@@ -76,7 +76,7 @@ test("a full backup carries an imported account; restoring it (dup-confirmed) re
 	// below would "pass" by restoring nothing.
 	const parsedBackup = JSON.parse(backupJson) as { data?: Record<string, unknown> }
 	expect(Array.isArray(parsedBackup.data?.["imported-account-keys"])).toBe(true)
-	expect((parsedBackup.data?.["imported-account-keys"] as unknown[]).length).toBe(1)
+	expect((parsedBackup.data?.["imported-account-keys"] as unknown[] | undefined)?.length).toBe(1)
 
 	const filePath = writeBackupToTemp(backupJson, "backup-with-imported-account.json")
 	try {

@@ -116,7 +116,7 @@ describe("EditFpcPopup — Enter wiring + initialization window", () => {
 		const w = await mountShown()
 		expect(fpcServiceMock.getFpc).toHaveBeenCalledWith("fpc-1")
 		const input = w.findAll("input").find((i) => i.attributes("data-input-label") === "Name")
-		expect((input?.element as HTMLInputElement).value).toBe("Sponsor")
+		expect((input?.element as HTMLInputElement | undefined)?.value).toBe("Sponsor")
 	})
 
 	test("a MISSING row closes the popup instead of rendering a dead form", async () => {
