@@ -1,0 +1,36 @@
+# Codex audits — dapp-profile-binding
+
+Session `01a03591-f807-7da0-b4d6-82cbaafc1cd8`, xhigh, read-only, cwd = this worktree. Dispositions in plan.md's ledger.
+
+## Round 1 — on revision 1
+
+Verdict: **reject** (blocking: the guard remains TOCTOU-vulnerable; the stamp source is not reliably the approving row; N-26 still misclassifies immediate reconnects for 90 s).
+
+- Hybrid genuinely necessary (teardown = disconnect signal; stamping = identity isolation; either alone incomplete). Stamp-based teardown correct; tuple-based under-fixes.
+- TOCTOU: `requireActiveProfile` + adjacent guard are interleaving-safe (profile listeners fire synchronously), but once `dispatcher.dispatch` reaches its first await a switch can land and the lookup independently reads live profile B (`service.ts:114`) — B's grants/row with A's captured context; termination doesn't cancel the running callback.
+- Stamp source unsafe: establishment's "validated row" comes through the live-profile lookup (`session-established.ts:61`) — approval under A + activation change before lookup returns a same-tuple B row and stamps the A-era channel B. Required ask: bind approval to the exact profile/row.
+- `getActiveSessions()` is a synchronous snapshot — a key exchange completing after the listener escapes teardown. Map-miss policy self-contradicts between the listener and Phase 2. SW restart safe for identity (both maps in-memory; upstream forgets sessions).
+- N-26: 90 s not justified by the 55 s cutoff (separate phases); an orphan marker still poisons an immediate reconnect for the full window. The true verification floor is `!trustedVerification` — marker expiry can never skip a first verification.
+- Tests: two-profile e2e realistic but the "queued call" race needs a deterministic gate; the capability-lookup spy lacks a seam; add switch-after-guard, switch-during-key-exchange, and immediate post-tab-close reconnect controlled tests. toJsonSafe: sound if cleanup is try/finally and toJSON recurses in-frame.
+
+All findings adopted in revision 2 (plan ledger) — including the approver-bound `Map<key, {at, profileId}>` unification of the marker and the stamp source.
+
+## Final fresh-context pass — round 1 (NEW session `01a03599-e519-7850-8c8d-3aacd77047de`)
+
+Verdict: **reject** (blocking: marker identity/expiry, pre-guard journal access, teardown linkage).
+
+- Marker tuple-keyed → concurrent same-tuple request IDs consume each other; worse, TTL EXPIRY of a stale A marker let an attacker finish an approved handshake after switching to B and mint a B-stamped channel from an A-era approval — stale must TERMINATE, and markers need approval/session identity.
+- N-26 teardown unimplementable as specced: `tabs.onRemoved` supplies only tabId; pre-establishment there's no ActiveSession; upstream `terminateForTab` deletes approved discoveries (`background_connection_handler.js:260`) — the marker must store the tabId linkage; test the wired lifecycle incl. concurrent same-tuple approvals.
+- **Pre-dispatch crossing**: `sendTx` creates its queued journal BEFORE the guard, independently live-reading profile/session/accounts (`queued-journal.ts:102`) — an A-era message can persist a B operation after termination. Guard before journal creation; anchor that lookup; switch-during-journal test.
+- "Completes as A" generally impossible: MAC verification requires A active (`mac-storage.ts:85`) — anchored A-lookup under B returns absent. Specify "A-consistent or fails closed". Discovery + establishment keep live-read; queued-journal must not.
+- E2E fallback insufficient for a Major's gate — existing profile testids make the real A→B switch plausible; require it (or explicit owner waiver). Serializer, unstamped teardown, respond-then-terminate otherwise sound.
+
+All adopted in revision 3 (plan ledger).
+
+## Final pass — round 2 (resumed, on revision 3)
+
+Verdict: **reject** — 2 residual blockers: (1) tuple-keyed marker still lets a B-reconnect consume A's marker (trace: A approval → switch → B reconnect establishes first, consumes + terminates on mismatch → A's original request now markerless → validates B's trusted row → B-stamped) and interactive approvals overwrite each other — key by transport requestId; (2) journal anchoring incomplete — `resolveNetworkByChainId` live-reads `getNetworks()`; anchor every profile-scoped dependency or revalidate the stamp pre-persist. Plus 3 textual staleness items. All adopted in revision 4.
+
+## Final pass — rounds 3-4 (on revision 4)
+
+Round 3: **conditional approve** — "remove the remaining contradictory plan text before implementation"; requestId-keying and exhaustive anchoring + pre-persist revalidation confirmed closing the security blockers ("No new security blocker found"). The four editorial items were corrected same-revision. Round 4: **approve** (one line). GATE PASSED.

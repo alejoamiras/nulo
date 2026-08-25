@@ -93,6 +93,23 @@ export async function connect(): Promise<void> {
 	const pending = await provider.establishSecureChannel(APP_ID)
 	wallet = await pending.confirm()
 
+	// Wallet-INITIATED disconnects (session termination, profile switch) arrive
+	// via the provider's onDisconnect push — without this subscription the
+	// harness only ever observes its own dApp-initiated disconnect() and the
+	// test driver cannot see the wallet drop the channel. `onDisconnect` lives
+	// on the concrete ExtensionWallet handle, not the schema-level Wallet type.
+	// The identity check pins the callback to THIS handle: a superseded
+	// handle's late heartbeat-death event must not tear down a reconnection.
+	const handle = wallet as unknown as { onDisconnect?: (cb: () => void) => () => void }
+	const subscribedHandle = wallet
+	handle.onDisconnect?.(() => {
+		if (wallet !== subscribedHandle) return
+		if (getState().status !== "connected") return
+		provider = null
+		wallet = null
+		setState({ status: "disconnected", accounts: [], selectedAccount: null, chainId: null })
+	})
+
 	setState({ status: "connected", accounts: [], selectedAccount: null })
 }
 

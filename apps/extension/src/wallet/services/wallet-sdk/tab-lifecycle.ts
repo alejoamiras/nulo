@@ -8,6 +8,10 @@ export interface TabLifecycleDeps {
 	terminateForTab: (tabId: number) => void
 	terminateSession: (sessionId: string) => void
 	getActiveSessions: () => Array<{ sessionId: string; origin: string; tabId: number }>
+	/** Extra per-tab cleanup (e.g. dropping pending-verification markers whose
+	 *  handshake died with the tab — before establishment there is no
+	 *  ActiveSession to reach them through, so the tabId is the only key). */
+	onTabTeardown?: (tabId: number) => void
 	logger: ILogger
 }
 
@@ -46,6 +50,7 @@ export function wireTabLifecycle(deps: TabLifecycleDeps): void {
 	// Terminate sessions when a tab is closed
 	chrome.tabs.onRemoved.addListener((tabId) => {
 		deps.terminateForTab(tabId)
+		deps.onTabTeardown?.(tabId)
 	})
 
 	// Terminate sessions when a tab navigates to a different origin.

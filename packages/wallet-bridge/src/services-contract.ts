@@ -27,7 +27,14 @@ import type { AccessLevel, DappPermissions, IAccountRef, IDappSessionRef, INetwo
 import type { LocalTxOrigin } from "./transaction-origin"
 
 export interface INetworkReader {
-	getNetworks(chainId?: number): Promise<INetworkRef[]>
+	/** Profile-ANCHORED network read (the extension's lock-free
+	 *  `getNetworksRaw`). The dispatcher must never resolve networks via the
+	 *  ACTIVE profile: an in-flight dApp message racing a profile switch would
+	 *  build its operation on the NEW profile's network row, and accountless
+	 *  mutations (registerSender/registerContract) would then write into the
+	 *  new profile's world. Anchoring here + the execution-side row-ownership
+	 *  check turn that race into a fail-closed error. */
+	getNetworksRaw(profileId: string, chainId?: number): Promise<INetworkRef[]>
 }
 
 export interface IAccountReader {
@@ -105,8 +112,11 @@ export interface IDappSessionWriter {
 	/** Look up a remembered session by `(origin, chainId)`. Sessions are
 	 *  per-`(origin, chainId, profileId)` — a `chainId` is REQUIRED so a
 	 *  session remembered on testnet does not silently auto-approve on
-	 *  mainnet. Returns `undefined` when no matching session exists. */
-	tryGetDappSessionByOriginAndChain(origin: string, chainId: string): Promise<IDappSessionRef | undefined>
+	 *  mainnet. `forProfileId` anchors the lookup to a caller-known identity
+	 *  (the dispatcher passes the session's establishment-stamped profile);
+	 *  omitted, the implementation resolves the live active profile. Returns
+	 *  `undefined` when no matching session exists. */
+	tryGetDappSessionByOriginAndChain(origin: string, chainId: string, forProfileId?: string): Promise<IDappSessionRef | undefined>
 	getDappSession(id: string): Promise<IDappSessionRef>
 	updateDappSession(
 		id: string,
