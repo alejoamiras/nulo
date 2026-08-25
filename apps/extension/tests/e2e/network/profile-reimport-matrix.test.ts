@@ -49,7 +49,7 @@ import {
 	writeBackupToTemp,
 } from "../helpers/import-drivers"
 import { readProfileGen } from "../helpers/crash-truth"
-import type { Page } from "puppeteer-core"
+import type { Page } from "puppeteer"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
 const hasConfig = aztecConfig !== undefined

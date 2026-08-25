@@ -26,7 +26,7 @@ Always runs on every PR. Lightweight gates:
 
 - `commitlint` — Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, …; lower-case subject, 100-char header cap). On PRs to `dev`: every commit in `base..head`. On PRs to `main`: **skipped** — the promote PR's merge subject is an intentional non-conventional release-note line (`release: promote dev → main …`, > 100 chars, no `release` type by design), the bot Release PR (`chore(main): release X.Y.Z`) is reliably conventional anyway, and the dev squash subjects in the range are already-merged + immutable (re-linting them spuriously failed required `Quality` on long historical subjects).
 - `lint-and-typecheck` — biome over the repo + `bun run typecheck:all` (vue-tsc across all packages).
-- `unit-tests` — `bun run test:all` (vitest across all workspaces; `--if-present` skips `playground` + `landing`).
+- `unit-tests` — `bun run test:all` (vitest across all workspaces; `--if-present` skips only `playground`, which has no `test` script — `landing` has one and runs). Every workspace `test` script is `bun --bun vitest run`, so the suites execute on the pinned Bun (`setup-bun`), not on the runner image's ambient Node; the Puppeteer e2e jobs still run vitest under Node.
 - `build-extension` — chrome + firefox builds.
 
 The `quality-status` aggregator at the end is the required check on `main` / `dev` branch protection (the bare job/check-run name; the old required context `Quality / Status` was a phantom that never matched a produced check — see [CLAUDE.md § Branching](./CLAUDE.md#branching--merging) and `implementations-plan/required-check-mismatch/`).

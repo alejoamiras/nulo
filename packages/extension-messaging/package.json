@@ -13,7 +13,7 @@
 		"./zod": "./src/zod-helpers.ts"
 	},
 	"scripts": {
-		"test": "vitest run --passWithNoTests",
+		"test": "bun --bun vitest run --passWithNoTests",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

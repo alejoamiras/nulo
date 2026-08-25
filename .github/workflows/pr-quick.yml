@@ -99,6 +99,8 @@ jobs:
               - 'packages/design/package.json'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
             playground:
               - 'apps/playground/**'
             landing:
@@ -111,6 +113,8 @@ jobs:
               - 'apps/faucet/**'
               - 'packages/bridge-core/src/**'
               - 'packages/bridge-core/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
               - 'packages/wallet-crypto/src/**'
               - 'packages/wallet-crypto/package.json'
               - 'packages/wallet-core/src/**'

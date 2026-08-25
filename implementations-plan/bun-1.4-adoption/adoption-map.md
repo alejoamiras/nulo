@@ -13,8 +13,8 @@ The bump is low-risk (Bun-API surface is tooling-only) and the wins are in the p
 - All app builds are Vite 8 (crxjs MV3, bespoke WASM-emit plugins). Vite is **not** replaceable by `bun build` — no Vue SFC support, no MV3 pipeline. Out of scope permanently.
 - `bunfig.toml` pins `linker = "hoisted"` (isolated broke the `@aztec/*` remap, the `resolvePackageFile` walker in `apps/extension/vite.shared.ts`, and bridge-core deploy paths) and `minimumReleaseAge = 604800`.
 - `bun.lock` is text, `lockfileVersion: 1`, `configVersion: 1`.
-- Bun version pin surface: `package.json#packageManager`, `.github/actions/setup-bun/action.yml` (version + 2 cache-key occurrences), a **duplicated inline pin** in `.github/workflows/pr-quick.yml`'s commitlint job (version + 2 cache keys), plus CLAUDE.md prose.
-- Already Bun-native today: `scripts/release/{auto-unstick-run,open-sync-pr-run}.ts` (`Bun.$`), `packages/design/scripts/gen-tokens.ts` (`Bun.write`), `scripts/lockfile-exception-diff.ts` (`Bun.file`), `Bun.YAML` in `scripts/ci-cd/behavior-gating.test.ts`.
+- Bun version pin surface (as of Arc A's merge): `package.json#packageManager` + `.github/actions/setup-bun/action.yml` (version + 2 cache-key occurrences) + CLAUDE.md prose — the `pr-quick.yml` inline duplicate was folded into the composite by Arc A. (Arc B adds the out-of-repo Cloudflare Pages `BUN_VERSION` env var.)
+- Already Bun-native today: `scripts/release/auto-unstick-run.ts` (`Bun.file`), `packages/design/scripts/gen-tokens.ts` (`Bun.write`), `scripts/lockfile-exception-diff.ts` (`Bun.file`), `Bun.YAML` in `scripts/ci-cd/behavior-gating.test.ts`. (An earlier draft credited `Bun.$` to the release scripts; Arc C's recon missed it, Arc D's found it — `scripts/release/{open-sync-pr-run,auto-unstick-run}.ts` use `$` via `await import("bun")`, invisible to a literal `Bun.$` grep.)
 
 ## Pre-flight checks already cleared (2026-08-24 read of the breaking changes)
 
@@ -44,22 +44,25 @@ Branch experiment: `linker = "isolated"` + global virtual store. 1.4 changes the
 
 ## Arc C — `/blueprint mid` — `vitest-on-bun`
 
+**Status: implemented** (`implementations-plan/vitest-on-bun/` — plan approved by fresh-context codex; every unit/component suite incl. the faucet's jsdom smoke on Bun; the ONE Bun-side failure class, vitest 4's `interopDefault` + Bun's namespace `__esModule`, stopgapped by `deps.interopDefault: false` until vitest ≥ 5.0.0-beta.3; 12-suite × 2-engine × 30-run matrix at one commit all `COMPARE OK`; `test:watch` stays on Node). The faucet (unit + jsdom smoke) was missing from the order below — it sits with the Vue suites.
+
 Move Vitest suites to `bun --bun vitest run`, package by package, in the codex-corrected order (`wallet-crypto` is jsdom, not pure-node — see lessons/pre-arc-consults.md): `landing` (tiny node control) → low-complexity node packages → `bridge-core` (node, heavy Aztec/WASM graph) → leaf jsdom packages → Vue suites → extension aggregate. E2E configs stay on Node in this arc. 1.4 claims Vitest works including `--coverage` (V8 provider via `node:inspector`) and both pools; the Vite-8-under-Bun blockers (`dns.promises` exports, `pipe()` drain) are fixed.
 
 - Watch: bb.js-WASM exclusions, coverage parity, and 1.4's bun-as-node **no longer auto-loading `.env`**.
 - A package flips only after two consecutive green runs; any flake delta → investigate before proceeding.
 
-## Arc D — `/blueprint light` — `bun-native-tooling` (after C; bridge-core parts anytime)
+## Arc D — `/blueprint light` — `bun-native-tooling` (after C; bridge-core parts anytime) — **IMPLEMENTED as Node-API hardening** ([bun-native-tooling/plan.md](../bun-native-tooling/plan.md))
 
-- `node:child_process` → `Bun.$`/`Bun.spawn` in `packages/bridge-core/scripts/*` (`live-intent.ts`, `portal-artifact.ts`, `verify-l1.ts`, deploy scripts). `Bun.$` interpolation is literal-by-default — a security upgrade over the `execFileSync` pattern, but verify `cast`/`forge` invocations keep non-shell argument passing.
-- The e2e supervisor (`global-setup.ts`, `lockfile.ts`, `reap.ts`) migrates **only** if Arc C moved the e2e configs to Bun. Then adopt: `spawnSync({ detached })` (now actually forwarded), live `process.ppid` getter, `child.kill()` false-on-dead, and evaluate `--no-orphans` — it SIGKILLs all descendants on parent death; confirm it cannot kill another agent's processes before enabling (run-isolation ownership rules).
+- ~~`node:child_process` → `Bun.$`/`Bun.spawn` in `packages/bridge-core/scripts/*`~~ **Premise declined on recon evidence (codex-converged, Q1)**: the argv-array `execFileSync`/`spawnSync` sites were already shell-free, so `Bun.$` was no security upgrade for them (Bun's own docs add an ARGUMENT-injection caveat); the real surface was three interpolated `execSync` shell strings, closed by argv arrays on `node:child_process`. Shipped: one argv-only primitive (`packages/bridge-core/scripts/run.ts` — throw-by-default, `check: false` opt-out, never formats or retains argv, lazy `resolveBin`), all 18 sites migrated, git separators (`--end-of-options`/`--`/`--literal-pathspecs`), forge/cast input validation, `CAST_BIN` + un-pinned cast resolution. No `bun-types` (not a dependency here), no lockfile change.
+- Corrected claims: the release scripts DO use Bun's `$` (`scripts/release/{open-sync-pr-run,auto-unstick-run}.ts`, via `await import("bun")` — the earlier "none found" grepped for the literal `Bun.$`); `Bun.spawn`'s `Subprocess.kill()` returns `void` (the "false-on-dead" boolean is Node's `ChildProcess.kill()`); `Bun.spawnSync` has no `encoding`/`.status` and does not throw on non-zero exit.
+- The e2e supervisor (`global-setup.ts`, `lockfile.ts`, `reap.ts`) stays on Node: Arc C left the e2e configs on Node, so the precondition never held. `--no-orphans` (`run.noOrphans`; Bun docs: `PR_SET_PDEATHSIG` + a `/proc` DESCENDANT walk on Linux, kqueue + libproc on macOS, a Job Object on Windows — a descendant tree, not a process group) is **not enabled anywhere**; the controlled probe that would clear it for a future supervisor migration is in the Arc D plan (Q4): an isolated fixture, a test-spawned non-descendant sentinel, kill only the recorded parent PID, identity-check PIDs before cleanup — never a real sibling agent.
 
 ## Open questions → resolve via codex (`/codex` at xhigh), log consults in the owning arc's `lessons/`
 
 1. ~~hoistPattern strategy for `@aztec/*` under the isolated linker (Arc B)~~ **RESOLVED** ([lessons/pre-arc-consults.md](lessons/pre-arc-consults.md)): make consumers layout-agnostic FIRST on hoisted, then flip; hoist patterns are an emergency bridge only. **Arc B correction**: the consumer list is wider than bunfig's three (also sqlite3mc emission, `extract-bb-wasm.ts`, `opfs-store.test.ts`, bridge-core artifact walkers); patched noir packages stay project-local by design.
 2. ~~jsdom suites on the Bun runtime (Arc C)~~ **RESOLVED** (same file): probe now, promote package-by-package with a retry-0 flake baseline (N=30 small / N=10+30 extension) — two greens is smoke, not proof. **Arc C correction (verified)**: `wallet-crypto` is a jsdom suite, NOT pure-node; corrected order: `landing` (node control) → low-complexity node → `bridge-core` → leaf jsdom → Vue suites → extension aggregate.
 3. ~~`bun dedupe --check` blocking vs advisory (Arc A)~~ **RESOLVED**: advisory (Arc A audit, `../bun-1.4-bump/audit-codex.md`).
-4. `--no-orphans` compatibility with multi-agent run isolation (Arc D) — consult inside Arc D's blueprint.
+4. ~~`--no-orphans` compatibility with multi-agent run isolation (Arc D)~~ **RESOLVED** (Arc D blueprint, codex-converged): not enabled — no consumer exists (the e2e supervisor stayed on Node); Bun's docs specify a descendant-tree kill, and the controlled clearing probe is recorded in `bun-native-tooling/plan.md` Q4 for whichever arc migrates the supervisor.
 5. ~~Transitive `minimumReleaseAge` verification method (Arc A)~~ **RESOLVED**: mock-registry positive-control probe (Arc A audit; executed in Arc A Phase 5).
 
 ## Explicitly NOT moving

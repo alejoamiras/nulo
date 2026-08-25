@@ -21,7 +21,6 @@
  * packages/bridge-core/.env; AZTEC_NODE_URL defaults to the public testnet RPC.
  */
 import { randomInt } from "node:crypto"
-import { spawnSync } from "node:child_process"
 import { existsSync, readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -43,6 +42,7 @@ import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { run } from "./run"
 import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
 import { createL1Clients, createL2Wallet, createNode, sepoliaChain, stopwatch } from "./script-bootstrap"
@@ -537,8 +537,8 @@ async function main() {
 
 	if (process.env.ETHERSCAN_API_KEY) {
 		console.log("\nETHERSCAN_API_KEY set — verifying the candidate's L1 sources on Etherscan…")
-		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
-		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
+		const v = run("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit", check: false })
+		if (v.exitCode !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
 	} else {
 		console.log("\nETHERSCAN_API_KEY not set — run `bun run verify:l1 --config <candidate>` to verify L1 sources.")
 	}

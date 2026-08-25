@@ -17,14 +17,15 @@
  * candidate manifest instead of the live testnet-bridge.json.
  */
 
-import { spawnSync } from "node:child_process"
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs"
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
-import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { encodeAbiParameters, keccak256, parseAbiParameters } from "viem"
-import { stageForkSource } from "./portal-artifact"
+import { evmAddress, parseCandidateManifest } from "../src/candidate-schema"
+import { assertEffectiveRemapping, generateRemappings } from "./gen-remappings"
+import { forgeBin, stageForkSource } from "./portal-artifact"
+import { run } from "./run"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const configArg = process.argv.indexOf("--config")
@@ -44,15 +45,57 @@ if (!dryRun && !apiKey) {
 	process.exit(1)
 }
 
-function forgeBin(): string {
-	if (process.env.FORGE_BIN) return process.env.FORGE_BIN
-	const probe = spawnSync("forge", ["--version"], { stdio: "ignore" })
-	if (probe.status === 0) return "forge"
-	const aztec = join(homedir(), ".aztec", "current", "bin", "forge")
-	if (existsSync(aztec)) return aztec
-	console.error("forge not found - install foundry or set FORGE_BIN.")
+function fail(message: string): never {
+	console.error(message)
 	process.exit(1)
 }
+
+const obj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {})
+
+/** A legacy (pre-`forked-v1`) manifest skips the strict schema; only the values forge receives are checked. */
+function requireLegacyForgeInputs(raw: unknown): void {
+	const l1 = obj(obj(raw).l1)
+	const fuel = obj(l1.fuel)
+	const core = obj(fuel.core)
+	const swap = obj(fuel.swap)
+	const addresses: Array<[string, unknown]> = [
+		["l1.usdc", l1.usdc],
+		["l1.portal", l1.portal],
+		...(fuel.core
+			? ([
+					["l1.fuel.core.router", core.router],
+					["l1.fuel.core.permit2", core.permit2],
+					["l1.fuel.core.feeJuicePortal", core.feeJuicePortal],
+					["l1.fuel.core.swapTarget", core.swapTarget],
+				] as Array<[string, unknown]>)
+			: []),
+		...(fuel.swap
+			? ([
+					["l1.fuel.swap.poolManager", swap.poolManager],
+					["l1.fuel.swap.feeJuice", swap.feeJuice],
+					["l1.fuel.swap.weth", swap.weth],
+				] as Array<[string, unknown]>)
+			: []),
+	]
+	for (const [path, value] of addresses) {
+		if (!evmAddress.safeParse(value).success) fail(`bridge manifest ${path} is not a 20-byte 0x address: ${JSON.stringify(value)}`)
+	}
+	const contract = obj(l1.token).sourceContract
+	if (contract !== undefined && contract !== "MintableERC20" && contract !== "TestUsdc") {
+		fail(`bridge manifest l1.token.sourceContract must be MintableERC20 or TestUsdc: ${JSON.stringify(contract)}`)
+	}
+	const chainId = obj(raw).l1ChainId
+	if (chainId !== undefined && !(Number.isInteger(chainId) && (chainId as number) > 0)) {
+		fail(`bridge manifest l1ChainId must be a positive integer when present: ${JSON.stringify(chainId)}`)
+	}
+}
+
+// The EVM root's @aztec/ remap must point at the installed l1-artifacts sources
+// regardless of node_modules layout: regenerate remappings.txt (gitignored,
+// overrides foundry.toml) and assert forge actually sees the mapping before
+// any build/verify runs against EVM_ROOT.
+generateRemappings()
+assertEffectiveRemapping(forge())
 
 /** The vendored portal source must hash-match what the deployed artifact was compiled from. */
 function placePortalSource() {
@@ -71,11 +114,19 @@ function placePortalSource() {
 	copyFileSync(VENDORED_PORTAL, dest)
 }
 
+function forge(): string {
+	try {
+		return forgeBin()
+	} catch (e) {
+		return fail(e instanceof Error ? e.message : String(e))
+	}
+}
+
 function runForge(root: string, label: string, args: string[]): boolean {
 	// The shipped artifacts were built with each project's default profile.
 	const { FOUNDRY_PROFILE: _omitted, ...env } = process.env
-	const res = spawnSync(forgeBin(), args, { cwd: root, env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
-	const out = `${res.stdout ?? ""}${res.stderr ?? ""}`
+	const res = run(forge(), args, { cwd: root, env, maxBuffer: 64 * 1024 * 1024, check: false })
+	const out = `${res.stdout}${res.stderr}`
 	if (dryRun) {
 		try {
 			const json = JSON.parse(res.stdout)
@@ -87,7 +138,7 @@ function runForge(root: string, label: string, args: string[]): boolean {
 			return false
 		}
 	}
-	if (res.status === 0 || /already verified/i.test(out)) {
+	if (res.exitCode === 0 || /already verified/i.test(out)) {
 		console.log(out.trim())
 		console.log(`✓ ${label} verified`)
 		return true
@@ -97,6 +148,17 @@ function runForge(root: string, label: string, args: string[]): boolean {
 }
 
 const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"))
+// Every value handed to forge comes from this file: a `forked-v1` manifest must pass the strict
+// schema, an older one is checked on exactly the fields that reach forge.
+if (obj(obj(config).l1).portalSource === "forked-v1") {
+	try {
+		parseCandidateManifest(config)
+	} catch (e) {
+		fail(e instanceof Error ? e.message : String(e))
+	}
+} else {
+	requireLegacyForgeInputs(config)
+}
 const token = config.l1.token
 if (!token) {
 	console.error("bridge manifest has no l1.token constructor record - redeploy or backfill it.")

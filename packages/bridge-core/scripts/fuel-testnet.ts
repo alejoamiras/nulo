@@ -13,6 +13,7 @@
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
@@ -178,20 +179,15 @@ async function main() {
 	// needs NO on-chain deploy (codex 019ee697); the private-kernel oracle DOES need both the instance +
 	// class preimages, so registerContract (not just the class). The canonical salt reproduces the pinned
 	// PRIVATE_FPC_ADDRESS from the 5.0.0 artifact.
+	// The artifact package was RENAMED @alejoamiras/aztec-fee-payment → private-fee-juice
+	// (see src/private-fpc-canonical.json); the old hardcoded root-node_modules path was dead
+	// code on both counts. Resolved layout-agnostically from this declaring workspace.
 	const privateFpcArtifact = loadContractArtifact(
 		JSON.parse(
 			readFileSync(
-				join(
-					here,
-					"..",
-					"..",
-					"..",
-					"node_modules",
-					"@alejoamiras",
-					"aztec-fee-payment",
-					"target",
-					"private_contract-PrivateFPC.json",
-				),
+				resolvePackageAsset("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json", {
+					from: import.meta.url,
+				}),
 				"utf8",
 			),
 		),
