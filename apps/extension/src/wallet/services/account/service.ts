@@ -652,8 +652,12 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 			// Identity is the full row id, not the address alone: two profiles restored
 			// from the same mnemonic legitimately derive the same address, and each owns
 			// its own row. This whole-batch collision check stays OUTSIDE restoreRows —
-			// it aborts the entire restore, not a single row.
-			const collides = hasIntersectionByKeys(await this.liveRows(), accounts, ["profileId", "chainId", "address"])
+			// it aborts the entire restore, not a single row. Non-object rows are
+			// excluded HERE only (the key extraction would throw on a hostile null,
+			// aborting the slice); they still flow to restoreRows, which records
+			// each as its own restoreError.
+			const collidable = accounts.filter((a): a is Account => typeof a === "object" && a !== null)
+			const collides = hasIntersectionByKeys(await this.liveRows(), collidable, ["profileId", "chainId", "address"])
 			if (collides) throw new Error("Duplicate account")
 
 			const seen = new Set<string>()

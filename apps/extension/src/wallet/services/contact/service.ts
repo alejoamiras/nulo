@@ -265,20 +265,21 @@ export class ContactService extends Service<Methods, Events> implements ServiceS
 	}
 
 	public async restore(contacts: Contact[]): Promise<Restored<Contact>[]> {
-		// E2e hold point: "service-restore" parks a PRE-finalize import RPC here
-		// (this service restores inside the per-service loop, before
-		// finalizeRestore), so a crash test can kill the worker at a known
-		// pre-finalize phase. Production resolves immediately.
-		await this.restoreGate.waitAt("service-restore")
 		await this.ensureInitialized()
-		// Deletion fence captured at entry — before the lock and collision reads —
-		// so a deleteProfile beginning during any later await rejects every
-		// subsequent row write instead of landing orphans post-purge.
+		// Deletion fence captured at entry — before the e2e hold gate, the lock,
+		// and the collision reads — so a deleteProfile completing during ANY later
+		// park (including an injected gate) rejects every subsequent row write
+		// instead of landing orphans post-purge.
 		const deletion = this.profileService.getDeletionState()
 		const epochs = captureRestoreEpochs(
 			deletion,
 			contacts.map((c) => (c as { profileId?: unknown } | null)?.profileId),
 		)
+		// E2e hold point: "service-restore" parks a PRE-finalize import RPC here
+		// (this service restores inside the per-service loop, before
+		// finalizeRestore), so a crash test can kill the worker at a known
+		// pre-finalize phase. Production resolves immediately.
+		await this.restoreGate.waitAt("service-restore")
 
 		return await this.lock.withLock(async () => {
 			return await restoreRows(contacts, async (contact) => {

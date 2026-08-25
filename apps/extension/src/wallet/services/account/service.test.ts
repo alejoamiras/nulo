@@ -161,6 +161,16 @@ describe("AccountService restore writers — deletion fence (N-14)", () => {
 		expect(Object.keys(raw).some((k) => k.includes("0xk2"))).toBe(false)
 	})
 
+	test("a hostile null row is a per-row restoreError, never a whole-slice abort", async () => {
+		// The collision precheck extracts keys from every row — a raw null must be
+		// excluded there (it would TypeError and abort the slice) yet still flow
+		// to restoreRows for its own per-row error.
+		const h = await makeHarness()
+		const restored = await h.service.restore([mkAccount("0xr1"), null as never])
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(typeof restored[1].restoreError).toBe("string")
+	})
+
 	test("positive control: no deletion → all rows land through both writers", async () => {
 		const h = await makeHarness()
 		const accounts = await h.service.restore([mkAccount("0xr1"), mkAccount("0xr2")])

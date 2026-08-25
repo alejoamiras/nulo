@@ -375,5 +375,32 @@ describe("ContactService (port-migrated)", () => {
 			expect(restored[0].restoreError).toBeUndefined()
 			expect(typeof restored[1].restoreError).toBe("string")
 		})
+
+		test("a deletion completing while parked at the e2e hold gate rejects every row (capture precedes the gate)", async () => {
+			// The gate parks an import RPC pre-finalize; a deletion can begin AND
+			// fully release during that park. The epochs must be captured BEFORE
+			// the gate — a post-gate capture would read the settled post-bump
+			// epoch and land orphan rows.
+			let release!: () => void
+			const parked = new Promise<void>((res) => {
+				release = res
+			})
+			const gated = new ContactService(logger, api, { waitAt: () => parked })
+			const gatedServices = new ServiceCollection()
+			gatedServices.add(profile)
+			gatedServices.add(gated)
+			await gatedServices.start()
+
+			const run = gated.restore(rows)
+			await new Promise((r) => setTimeout(r, 0)) // capture done; parked at the gate
+			const d = profile.getDeletionState()
+			d.beginDeletion(profileA.id)
+			d.release(profileA.id)
+			release()
+			const restored = await run
+			expect(restored.every((r) => typeof r.restoreError === "string")).toBe(true)
+			const raw = await api.storage.local.get(null)
+			expect(Object.keys(raw).some((k) => k.startsWith("nulo:core:contacts@"))).toBe(false)
+		})
 	})
 })
