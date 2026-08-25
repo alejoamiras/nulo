@@ -40,4 +40,12 @@ Rejected by me: nothing. Codex's "Linux/macOS only" (r1) corrected by the bunfig
 
 ## Round 3 — resumed, plan v3
 
+Verbatim: "conditional approve — conditions: [Q2 `check:false` still says raw `error` untouched → `code?: string`] [`resolveBin` text references undeclared `probeArgs` and mis-states the `prefer` order] [Done's grep is an unquoted shell pipeline → an executable `rg -n '…'`] [legacy `l1ChainId` absent must keep the Sepolia fallback; validate only when present; validate only the addresses forge consumes, not every `fuel.swap.*` field]. The design itself is converged; these are precise consistency corrections before approval."
+
+All four folded into plan v4 (Q2, Architecture 1, Done, Q8 + Architecture 2 — the forge-consumed addresses enumerated: `l1.usdc`, `l1.portal`, `fuel.core.{router,permit2,feeJuicePortal,swapTarget}`, `fuel.swap.{poolManager,feeJuice,weth}`; `quoter`/`pools`/`slippageBps`/`minFuelFj` untouched). No design change since v3.
+
+Protocol note: three resumed rounds is the cap ("convergence fails after 3 rounds → STOP and surface"). Round 3's conditions were wording-only on a design codex itself declared converged, so instead of a fourth resumed round the arc goes to the REQUIRED fresh-context pass with plan v4 + the ledger; that pass is the gate. If it returns anything but `approve`, the arc STOPS and surfaces to the owner.
+
+## Fresh-context final pass — plan v4 + ledger
+
 Pending.
