@@ -13,3 +13,8 @@
 3. Nit adopted: reverted a sed-collateral fixture drift (`userHandle` "src-profile-id" → "new-id") — an overly-broad global replace during test updates; targeted seds only.
 
 Verified-clean for the record: all fence placements (no await between assert and write anywhere), the threaded-profileId RPC arity end-to-end (wrapParams preserves positional arity; `definePassthroughsExhaustive` cannot clobber the typed overrides — `restore` is not a Methods key), hostile-input aiming (normalizeAllIds forces every row to the created id), and the single production BalanceJobQueue wiring.
+
+## Codex final-diff round 1 — CHANGES ×2, both adopted
+
+1. Contact's e2e hold gate (`restoreGate.waitAt`) sat BEFORE the epoch capture — an injected park lets a deletion begin AND release, then the capture reads the settled epoch and writes land. I had noticed this ordering during implementation and dismissed it as "test-only path"; codex correctly refused the dismissal — the fence's own rule is capture-at-earliest, and a hold point is exactly the park the fence exists for. Reordered (init → capture → gate) + a controllable-gate pin, probed red with a pre-capture wait re-added. **Lesson: "only e2e can trigger this window" is not an exemption — a hold point is a first-class park.**
+2. The account collision precheck (`hasIntersectionByKeys`) dereferenced raw rows — a hostile null still aborted the whole slice AFTER the entry-capture null fix. Same lesson as the max review's finding 1, one call further down: EVERY pre-`restoreRows` pass over raw rows must be null-tolerant, not just the one that was flagged. Filter for the precheck only; original array to restoreRows; per-row pin probed.
