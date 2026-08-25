@@ -79,4 +79,12 @@ Runs 1–5: exit 0 each (all 11 workspaces concurrently, each on `bun --bun vite
 
 Every row above satisfies its pass criterion: frozen install exit 0; 12 Node summaries `failedRuns: 0`; every Bun summary's run records show `versions.bun = 1.4.0` and every Node summary's show none (enforced by the comparator); 12 compares exit 0; `test:all` ×5 exit 0; `audit:vue`, `build:faucet`, armed smoke e2e, lint/typecheck, ci-gating exit 0; the dispatched run bound to the matrix commit has `quality-status: success`; the one resolution difference is allowed and written up. No Bun-only failure occurred, so the failure procedure was never entered; no owner STOP (A5/A7) was triggered.
 
+## Matrix attempt 2 (`f3f09299`) — one Bun-only failure, classified (a): test assumption
+
+`apps/extension` aggregate, Bun run 13/30: `src/wallet/services/profile/service.integration.test.ts :: … importMnemonic canonicalizes (case/whitespace) and enforces exactly 24 words` — `expected [Function] to throw error matching /Invalid checksum|Invalid mnemonic/ but got 'A profile with this recovery phrase already exists'` (line 721). Node: 60/60 across both matrices; Bun: 59/60.
+
+Root cause is in the test, not the engine. Line 720 built the "corrupted" phrase as `[...words.slice(0, 23), words[0] === "abandon" ? "zoo" : "abandon"]` — the replacement word depends on the FIRST word, so whenever the randomly generated phrase already ends in that word, `corrupted === words`, `getEntropy` validates it, and `importPasswordProfile` raises the duplicate error (`service.ts:1467-1481` validates length → wordlist/checksum → derives → dedupes). Probability ≈ 1/2048 per run; a second latent path (a list word replacing the last word yields a VALID checksum for a different phrase — ≈ 1/256 per run — would have failed with "promise resolved") never fired in 120 runs. Both are properties of the test's randomness, reachable on either engine; Bun merely drew the losing ticket first.
+
+Fix (test only, `fix(test)`): replace the last word with a word that is NOT on the BIP-39 list, so `getEntropy` rejects deterministically ("Invalid mnemonic") on every run and every engine. No product code touched; no runtime-conditional skip. Per the matrix commit rule the frozen install, the full matrix, the `test:all` ×5 loop and the dispatch are re-run at the new commit.
+
 LESSONS_FILE=implementations-plan/vitest-on-bun/lessons/phase-1.md
