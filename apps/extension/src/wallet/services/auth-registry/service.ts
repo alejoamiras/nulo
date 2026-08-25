@@ -451,16 +451,51 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		await this.ensureInitialized()
 
 		return await this.lock.withLock(async () => {
+			// Duplicate identity is the compound (account, hash) — hashes are
+			// legitimately shared ACROSS accounts, so a bare-hash check would
+			// false-reject. Encoded injectively (JSON array): accounts/hashes are
+			// attacker-shaped strings, so any in-band delimiter is forgeable.
+			// The seed comes from RAW payloads — decoded reads hide malformed
+			// rows whose pairs must still block duplicates; a row too corrupt to
+			// yield both strings has no identity to collide with. NO cap check
+			// here: these are already-granted authorizations, and rejecting a
+			// unique row would destroy the only revocation index.
+			const pairKeyOf = (account: string, hash: string) => JSON.stringify([account, hash])
+			const seen = new Set<string>()
+			for (const [, raw] of await this.authwits.rawStringEntries()) {
+				try {
+					const v = JSON.parse(raw) as { account?: unknown; hash?: unknown }
+					if (typeof v.account === "string" && typeof v.hash === "string") {
+						seen.add(pairKeyOf(v.account, v.hash))
+					}
+				} catch {
+					// No extractable identity — nothing to dedupe against.
+				}
+			}
+			// Occupancy from the PHYSICAL key space: the cursor must never land on
+			// a key a decoded read can't see (a hidden row would be overwritten).
+			// Writes use canonical String(id), so noncanonical aliases can't
+			// falsely collide.
+			const occupied = new Set(await this.authwits.getKeys())
 			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
 			// `id` advances only after a successful write: restoreRows routes a
 			// throwing row to `restoreError` and never reaches the `id++`, so a
-			// malformed authwit doesn't consume a cursor slot (matches the prior
-			// hand-rolled loop exactly).
+			// malformed authwit doesn't consume a cursor slot. Ordering inside the
+			// writer is load-bearing: validate → dedupe-check → write → record —
+			// a malformed or duplicate row must neither block nor poison a valid
+			// sibling.
 			return await restoreRows(authwits, async (authwit) => {
+				while (occupied.has(`${id}`)) id++
 				// Parse the persisted shape so a malformed backup authwit is recorded
 				// as restoreError, not silently written + codec-hidden on read.
 				const row = AuthwitSchema.parse({ ...authwit, id })
+				const pairKey = pairKeyOf(row.account, row.hash)
+				if (seen.has(pairKey)) {
+					throw new Error("authwit already exists (account+hash)")
+				}
 				await this.authwits.set(`${id}`, row)
+				occupied.add(`${id}`)
+				seen.add(pairKey)
 				id++
 				return row
 			})

@@ -10,9 +10,28 @@
  * `EntityStorage` (any object with the one method works).
  */
 import { array_max, getRandomHex } from "@/wallet/utils"
+import { canonicalNumericStorageId } from "@/wallet/services/purge-rows"
 
 export async function nextNumericId(storage: { getKeys(): Promise<string[]> }): Promise<number> {
-	return array_max((await storage.getKeys()).map((x) => +x)) + 1
+	const keys = await storage.getKeys()
+	// Hostile keys must not skew the max: bare `+x` let an alias ("0x10", "01")
+	// shift it and a huge junk key pin the allocator onto one forever-colliding
+	// float (1e21 + 1 === 1e21). Canonical round-trip PLUS a safe-integer bound
+	// (canonical-but-unsafe forms — "1e+21", 2^53 — round-trip String() exactly)
+	// keeps only allocatable ids. The bound lives HERE, not in
+	// canonicalNumericStorageId, so purge-classification semantics are untouched.
+	const allocatable = keys.map((x) => canonicalNumericStorageId(x)).filter((n): n is number => n !== undefined && Number.isSafeInteger(n))
+	let candidate = array_max(allocatable) + 1
+	// The candidate itself must be safe AND physically free: a hostile
+	// MAX_SAFE_INTEGER key would otherwise yield unsafe 2^53, which pins and
+	// overwrites. Clamp and walk down into the first free key — gap-fill reuse
+	// in that pathological case is deliberate (the contract is uniqueness, not
+	// monotonicity). On sane stores the walk never runs: String(max+1) is
+	// canonical, so an equal key would have raised the max instead.
+	if (!Number.isSafeInteger(candidate)) candidate = Number.MAX_SAFE_INTEGER
+	const occupied = new Set(keys)
+	while (occupied.has(String(candidate))) candidate -= 1
+	return candidate
 }
 
 export async function nextRandomId(storage: { contains(id: string): Promise<boolean> }, length = 8): Promise<string> {
