@@ -765,12 +765,16 @@ async function handleWalletMessage(
 		messageId: message.messageId,
 		walletId: "nulo",
 	}
-	// The switch epoch the response was composed under — gates delivery at the tail.
+	// The switch epoch the response is composed under — gates delivery at the
+	// tail. Captured BEFORE the awaited profile read: a switch landing inside
+	// that await must register as a bump AFTER this baseline, or the stale
+	// `profile` would pass the entry guard and the tail would see no change.
+	const preEntryEpoch = switchEpoch.current()
 	let entryEpoch: number | undefined
 
 	try {
 		const profile = await requireActiveProfile(profileService, "Wallet is locked")
-		entryEpoch = switchEpoch.current()
+		entryEpoch = preEntryEpoch
 
 		// Identity guard: the channel serves ONLY the profile that established
 		// it (map-miss = fail closed). The dApp gets the error envelope, then

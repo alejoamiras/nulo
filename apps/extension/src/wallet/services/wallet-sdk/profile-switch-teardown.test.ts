@@ -130,22 +130,24 @@ describe("trackProfileSwitchEpoch", () => {
 		}
 	}
 
-	test("bumps only on truthy identity CHANGES — lock and unlock-to-same stay flat", () => {
+	test("bumps on truthy identity changes AND the unknowable first emission — lock and unlock-to-same stay flat", () => {
 		const emitter = makeEmitter()
 		const epoch = trackProfileSwitchEpoch(emitter)
-		emitter.emit({ id: "A" }) // first activation — baseline, no bump
-		expect(epoch.current()).toBe(0)
+		// First truthy emission bumps: silent restore emits nothing, so the
+		// baseline is unknown and must be treated as potentially-switched.
+		emitter.emit({ id: "A" })
+		expect(epoch.current()).toBe(1)
 		emitter.emit({ id: "A" }) // re-emission, same identity
-		expect(epoch.current()).toBe(0)
+		expect(epoch.current()).toBe(1)
 		emitter.emit(undefined) // lock
-		emitter.emit({ id: "A" }) // unlock to the SAME profile
-		expect(epoch.current()).toBe(0)
+		emitter.emit({ id: "A" }) // unlock to the SAME profile — baseline known
+		expect(epoch.current()).toBe(1)
 		emitter.emit({ id: "B" }) // real switch
-		expect(epoch.current()).toBe(1)
-		emitter.emit(undefined) // switch-then-lock: the bump is already recorded
-		expect(epoch.current()).toBe(1)
-		emitter.emit({ id: "A" }) // unlock into a DIFFERENT profile
 		expect(epoch.current()).toBe(2)
+		emitter.emit(undefined) // switch-then-lock: the bump is already recorded
+		expect(epoch.current()).toBe(2)
+		emitter.emit({ id: "A" }) // unlock into a DIFFERENT profile
+		expect(epoch.current()).toBe(3)
 	})
 })
 

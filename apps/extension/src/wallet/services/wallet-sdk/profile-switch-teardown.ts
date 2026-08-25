@@ -87,7 +87,13 @@ export function trackProfileSwitchEpoch(onActiveProfileChanged: {
 	let lastTruthyId: string | undefined
 	onActiveProfileChanged.add((profile) => {
 		if (!profile) return
-		if (lastTruthyId !== undefined && profile.id !== lastTruthyId) epoch++
+		// The FIRST truthy emission bumps too: the SW-restart silent restore
+		// emits nothing, so the baseline is unknowable here — treating the
+		// first emission as a potential switch fails safe (a restored-A →
+		// switch-B would otherwise slide under an un-bumped baseline). Cost:
+		// a request spanning restore → lock → unlock-to-same has its response
+		// suppressed once; unlock-to-same with a known baseline stays flat.
+		if (profile.id !== lastTruthyId) epoch++
 		lastTruthyId = profile.id
 	})
 	return { current: () => epoch }
