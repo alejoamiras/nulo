@@ -34,7 +34,13 @@ import { isSubframeSender, validateContentScriptMessage } from "./content-script
 import { toWalletResponseError } from "./error-envelope"
 import { toJsonSafe } from "./to-json-safe"
 import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
-import { enforceSessionProfileBinding, stampSessionProfileGuarded, wireProfileSwitchTeardown } from "./profile-switch-teardown"
+import {
+	enforceSessionProfileBinding,
+	type ProfileSwitchEpoch,
+	stampSessionProfileGuarded,
+	trackProfileSwitchEpoch,
+	wireProfileSwitchTeardown,
+} from "./profile-switch-teardown"
 
 import type { ServiceCollection } from "@/wallet/base"
 import { NetworkService } from "@/wallet/services/network/service"
@@ -346,6 +352,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 							profileService,
 							operationJournal,
 							sessionProfiles,
+							switchEpoch,
 							logger,
 							{
 								// Bind the baton release into the `onExecutionEnqueued`
@@ -429,7 +436,9 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 
 	// Profile-bound channel teardown: a switch disconnects every live session
 	// stamped to another profile (and unstamped debris) BEFORE the discovery
-	// drain below can serve the new profile.
+	// drain below can serve the new profile. The epoch tracker feeds the
+	// response-delivery gate in handleWalletMessage.
+	const switchEpoch = trackProfileSwitchEpoch(profileService.onActiveProfileChanged)
 	wireProfileSwitchTeardown({
 		onActiveProfileChanged: profileService.onActiveProfileChanged,
 		getActiveSessions: () => handler.getActiveSessions(),
@@ -748,6 +757,7 @@ async function handleWalletMessage(
 	profileService: ProfileService,
 	operationJournal: OperationJournalService,
 	sessionProfiles: Map<string, string>,
+	switchEpoch: ProfileSwitchEpoch,
 	logger: ILogger,
 	hooks?: DispatchHooks,
 ): Promise<void> {
@@ -755,12 +765,12 @@ async function handleWalletMessage(
 		messageId: message.messageId,
 		walletId: "nulo",
 	}
-	// The profile the response was composed under — gates delivery at the tail.
-	let composedUnderProfileId: string | undefined
+	// The switch epoch the response was composed under — gates delivery at the tail.
+	let entryEpoch: number | undefined
 
 	try {
 		const profile = await requireActiveProfile(profileService, "Wallet is locked")
-		composedUnderProfileId = profile.id
+		entryEpoch = switchEpoch.current()
 
 		// Identity guard: the channel serves ONLY the profile that established
 		// it (map-miss = fail closed). The dApp gets the error envelope, then
@@ -827,20 +837,14 @@ async function handleWalletMessage(
 	// The entry guard is one-shot: a switch landing mid-dispatch normally tears
 	// the session down (upstream sendResponse then no-ops), but a teardown
 	// hiccup can leave the channel live — and a response composed with the NEW
-	// profile's reads must never reach the old channel. Deliver only while the
-	// composing profile is still the active one. Lock (undefined) still
-	// delivers: an A-composed response over A's channel leaks nothing, and the
-	// pinned lock semantics keep channels alive with per-call errors.
-	if (composedUnderProfileId !== undefined) {
-		const nowActive = await profileService.getActiveProfile()
-		if (nowActive && nowActive.id !== composedUnderProfileId) {
-			logger.log(
-				"wallet-sdk",
-				LogLevel.Warn,
-				`Suppressing ${message.type} response for ${session.origin}: composed under ${composedUnderProfileId}, active is ${nowActive.id}`,
-			)
-			return
-		}
+	// profile's reads must never reach the old channel. The EPOCH comparison
+	// (not an active-identity check) also catches switch-then-lock, where the
+	// active profile reads `undefined` and an identity check would wave the
+	// response through. Pure lock/unlock-to-same bumps nothing, so those
+	// pinned flows still deliver.
+	if (entryEpoch !== undefined && switchEpoch.current() !== entryEpoch) {
+		logger.log("wallet-sdk", LogLevel.Warn, `Suppressing ${message.type} response for ${session.origin}: profile switched mid-dispatch`)
+		return
 	}
 
 	try {

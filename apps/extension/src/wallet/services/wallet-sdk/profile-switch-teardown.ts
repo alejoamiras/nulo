@@ -68,6 +68,32 @@ export async function enforceSessionProfileBinding(args: {
 }
 
 /**
+ * Monotonic count of ACTUAL profile-identity switches (truthy → different
+ * truthy). Lock emits `undefined` and bumps nothing; unlock back into the
+ * SAME profile bumps nothing — so an epoch comparison across a dispatch
+ * suppresses exactly the cross-identity interleavings (including switch-
+ * then-lock, where an active-profile identity check would read `undefined`
+ * and wave the response through) while the pinned lock/unlock flows stay
+ * untouched.
+ */
+export interface ProfileSwitchEpoch {
+	current(): number
+}
+
+export function trackProfileSwitchEpoch(onActiveProfileChanged: {
+	add(listener: (profile: { id: string } | undefined) => void): unknown
+}): ProfileSwitchEpoch {
+	let epoch = 0
+	let lastTruthyId: string | undefined
+	onActiveProfileChanged.add((profile) => {
+		if (!profile) return
+		if (lastTruthyId !== undefined && profile.id !== lastTruthyId) epoch++
+		lastTruthyId = profile.id
+	})
+	return { current: () => epoch }
+}
+
+/**
  * Stamp a session's owning profile with terminate-race compensation: the
  * switch-teardown can terminate a mid-validation session, and termination is
  * FINAL — so after setting, a dead session's stamp is pure leak and is

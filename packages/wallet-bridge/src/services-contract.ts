@@ -27,7 +27,14 @@ import type { AccessLevel, DappPermissions, IAccountRef, IDappSessionRef, INetwo
 import type { LocalTxOrigin } from "./transaction-origin"
 
 export interface INetworkReader {
-	getNetworks(chainId?: number): Promise<INetworkRef[]>
+	/** Profile-ANCHORED network read (the extension's lock-free
+	 *  `getNetworksRaw`). The dispatcher must never resolve networks via the
+	 *  ACTIVE profile: an in-flight dApp message racing a profile switch would
+	 *  build its operation on the NEW profile's network row, and accountless
+	 *  mutations (registerSender/registerContract) would then write into the
+	 *  new profile's world. Anchoring here + the execution-side row-ownership
+	 *  check turn that race into a fail-closed error. */
+	getNetworksRaw(profileId: string, chainId?: number): Promise<INetworkRef[]>
 }
 
 export interface IAccountReader {

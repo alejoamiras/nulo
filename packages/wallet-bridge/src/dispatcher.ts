@@ -52,7 +52,7 @@
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
 import { resolveAuthorizedSessionAccount } from "./account-resolution"
-import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
+import { formatCaipAccount, formatCaipChain, parseCaipAccount } from "./caip"
 import type {
 	AccountsCapability,
 	Capability,
@@ -1310,7 +1310,16 @@ export class WalletSdkDispatcher {
 	 * Resolve a session's chainId to a Network.
 	 */
 	private async resolveNetwork(ctx: SessionContext): Promise<INetworkRef> {
-		return resolveNetworkByChainId(this.networkService, ctx.chainId)
+		// Anchored to the session's stamped profile (never the active one): a
+		// profile switch landing mid-dispatch leaves the op carrying the
+		// COMPOSING profile's network row, and the extension's `getNetwork`
+		// ownership check then fails closed at execution instead of letting an
+		// accountless mutation write into the newly active profile's world.
+		const networks = await this.networkService.getNetworksRaw(ctx.profileId, ctx.chainId)
+		if (networks.length === 0) {
+			throw new Error(`No network configured for chainId ${ctx.chainId}`)
+		}
+		return networks[0]!
 	}
 
 	/**

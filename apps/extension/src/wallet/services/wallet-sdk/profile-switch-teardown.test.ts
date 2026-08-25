@@ -1,6 +1,11 @@
 import { describe, expect, test, vi } from "vitest"
 import type { ILogger } from "@/wallet/logger"
-import { enforceSessionProfileBinding, stampSessionProfileGuarded, wireProfileSwitchTeardown } from "./profile-switch-teardown"
+import {
+	enforceSessionProfileBinding,
+	stampSessionProfileGuarded,
+	trackProfileSwitchEpoch,
+	wireProfileSwitchTeardown,
+} from "./profile-switch-teardown"
 
 const noopLogger = { log: () => {} } as unknown as ILogger
 
@@ -111,6 +116,36 @@ describe("enforceSessionProfileBinding — the dispatch guard", () => {
 		})
 		expect(await enforceSessionProfileBinding(args)).toBe(false)
 		expect(terminateSession).toHaveBeenCalledWith("s1")
+	})
+})
+
+describe("trackProfileSwitchEpoch", () => {
+	function makeEmitter() {
+		const listeners: Array<(p: { id: string } | undefined) => void> = []
+		return {
+			add: (l: (p: { id: string } | undefined) => void) => listeners.push(l),
+			emit: (p: { id: string } | undefined) => {
+				for (const l of listeners) l(p)
+			},
+		}
+	}
+
+	test("bumps only on truthy identity CHANGES — lock and unlock-to-same stay flat", () => {
+		const emitter = makeEmitter()
+		const epoch = trackProfileSwitchEpoch(emitter)
+		emitter.emit({ id: "A" }) // first activation — baseline, no bump
+		expect(epoch.current()).toBe(0)
+		emitter.emit({ id: "A" }) // re-emission, same identity
+		expect(epoch.current()).toBe(0)
+		emitter.emit(undefined) // lock
+		emitter.emit({ id: "A" }) // unlock to the SAME profile
+		expect(epoch.current()).toBe(0)
+		emitter.emit({ id: "B" }) // real switch
+		expect(epoch.current()).toBe(1)
+		emitter.emit(undefined) // switch-then-lock: the bump is already recorded
+		expect(epoch.current()).toBe(1)
+		emitter.emit({ id: "A" }) // unlock into a DIFFERENT profile
+		expect(epoch.current()).toBe(2)
 	})
 })
 

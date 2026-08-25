@@ -46,7 +46,7 @@ beforeAll(() => {
 const noopLogger: ILogger = { log: () => {} }
 
 const stubNetwork: INetworkReader = {
-	getNetworks: async () => [],
+	getNetworksRaw: async () => [],
 }
 const stubAccount: IAccountReader = {
 	getAccounts: async () => [],
@@ -260,7 +260,7 @@ describe("dispatcher.requestCapabilities reject persistence", () => {
 describe("dispatcher.handleBatch", () => {
 	function networkWithChainId(chainId: number): INetworkReader {
 		const network: INetworkRef = { id: `net-${chainId}`, chainId }
-		return { getNetworks: async () => [network] }
+		return { getNetworksRaw: async () => [network] }
 	}
 
 	// Programmable executeOperations stub: each call shifts the next pre-loaded
@@ -406,7 +406,7 @@ function makeGetAccountsDispatcher(opts: {
 		applyCapabilityDecision: async (_id, decision) => applyDecisionTo(opts.session, decision),
 	}
 	const network: INetworkRef = { id: "net-0", chainId: 0 }
-	const networkReader: INetworkReader = { getNetworks: async () => [network] }
+	const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
 	const accountReader: IAccountReader = {
 		getAccounts: async () => opts.accounts ?? [],
 	}
@@ -440,7 +440,7 @@ describe("dispatcher.handleGetAccounts — plan-v3 contract", () => {
 			applyCapabilityDecision: async () => null as unknown as IDappSessionRef,
 		}
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
-		const networkReader: INetworkReader = { getNetworks: async () => [network] }
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
 			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
@@ -527,7 +527,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		requestCapabilitiesImpl: (params: unknown) => Promise<CapabilityResult>,
 	): WalletSdkDispatcher {
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
-		const networkReader: INetworkReader = { getNetworks: async () => [network] }
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
 			requestCapabilities: requestCapabilitiesImpl as never,
@@ -683,7 +683,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 				{ address: a3, name: "Name3", chainId: 0 }, // NOT a session account → filtered out
 			],
 		}
-		const networkReader: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] }
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
 		const session = makeSession({
 			accounts: [caip1, caip2],
 			accountAliases: { [caip1]: "alias-1" }, // a1 → alias hit; a2 → name fallback
@@ -723,7 +723,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		// runs BEFORE the canGet gate, so a future gate-hoist can't silently turn a
 		// throw into accounts:[]. networkReader returns no networks → resolve throws.
 		const accountReader: IAccountReader = { getAccounts: async () => [] }
-		const networkReader: INetworkReader = { getNetworks: async () => [] }
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [] }
 		const session = makeSession({
 			capabilityGrants: [
 				{ capability: { type: "accounts", canGet: false, canCreateAuthWit: false, accounts: [] } as Capability, grantedAt: 1 },
@@ -743,7 +743,7 @@ describe("dispatcher.requestCapabilities — Phase 1.5 field-aware accounts diff
 		const a = `0x${"44".repeat(32)}`
 		const caip = `aztec:0:${a}`
 		const accountReader: IAccountReader = { getAccounts: async () => [{ address: a, name: "", chainId: 0 }] }
-		const networkReader: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] }
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] }
 		const session = makeSession({
 			accounts: [caip],
 			capabilityGrants: [
@@ -842,7 +842,7 @@ describe("dispatcher sendTx hook forwarding", () => {
 			requestCapabilities: async () => ({}) as never,
 		}
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 		const account: IAccountReader = {
 			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
@@ -876,7 +876,7 @@ describe("dispatcher sendTx hook forwarding", () => {
 			},
 			requestCapabilities: async () => ({}) as never,
 		}
-		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
 		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
 		const dispatcher = new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger)
 
@@ -918,7 +918,7 @@ describe("dispatcher.handleSendTx — opts.from resolution (multi-account sessio
 			},
 			requestCapabilities: async () => ({}) as never,
 		}
-		const network: INetworkReader = { getNetworks: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net-0", chainId: 0 }] as INetworkRef[] }
 		const account: IAccountReader = { getAccounts: async () => accounts }
 		return {
 			dispatcher: new WalletSdkDispatcher(network, account, stubExecution, interaction, writer, noopLogger),
@@ -1022,7 +1022,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 			},
 		}
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 		const account: IAccountReader = {
 			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
@@ -1068,7 +1068,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 			executeOperations: async () => [] as OperationResult[],
 		}
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 		const account: IAccountReader = {
 			getAccounts: async () => [
@@ -1096,7 +1096,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 
 		const grants = [
@@ -1147,7 +1147,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 		const account: IAccountReader = {
 			getAccounts: async () => [
@@ -1182,7 +1182,7 @@ describe("dispatcher — registerToken reachability + routing", () => {
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 		const grantArgs = ["0xacc", { caller: "0xc", contract: "0xd", method: "m", args: [] }]
 
@@ -1275,7 +1275,7 @@ describe("F-006: network-only methods fail-closed on missing session (Phase 3)",
 			applyCapabilityDecision: async () => null as unknown as IDappSessionRef,
 		}
 		const network: INetworkRef = { id: "net-0", chainId: 0 }
-		const networkReader: INetworkReader = { getNetworks: async () => [network] }
+		const networkReader: INetworkReader = { getNetworksRaw: async () => [network] }
 		const interaction: IDappInteractionRunner = {
 			execute: async () => ({}) as never,
 			requestCapabilities: async () => ({ granted: [] }) as CapabilityResult,
@@ -1344,7 +1344,7 @@ describe("Phase 0.5: session lookup consolidation (TOCTOU defense)", () => {
 	}
 
 	const networkWithChainId0: INetworkReader = {
-		getNetworks: async () => [{ id: "net-0", chainId: 0 } as INetworkRef],
+		getNetworksRaw: async () => [{ id: "net-0", chainId: 0 } as INetworkRef],
 	}
 
 	function dispatcherWith(writer: IDappSessionWriter, accounts: IAccountRef[] = []): WalletSdkDispatcher {
@@ -1793,7 +1793,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 			},
 		}
 		const network: INetworkReader = {
-			getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
+			getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[],
 		}
 		const account: IAccountReader = {
 			getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }],
@@ -1844,7 +1844,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 			requestCapabilities: async () => ({}) as never,
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
-		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
 		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
@@ -1880,7 +1880,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 			requestCapabilities: async () => ({}) as never,
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
-		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
 		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
@@ -1930,7 +1930,7 @@ describe("dispatcher — grantPublicAuthwit reachability + routing", () => {
 			requestCapabilities: async () => ({}) as never,
 		}
 		const execution: IExecutionRunner = { executeOperations: async () => [] as OperationResult[] }
-		const network: INetworkReader = { getNetworks: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
+		const network: INetworkReader = { getNetworksRaw: async () => [{ id: "net1", chainId: 0 }] as INetworkRef[] }
 		const account: IAccountReader = { getAccounts: async () => [{ address: "0xacc", name: "main", chainId: 0 }] }
 		const dispatcher = new WalletSdkDispatcher(network, account, execution, interaction, writer, noopLogger)
 
@@ -2077,5 +2077,26 @@ describe("dispatcher session-lookup anchoring", () => {
 		// in-flight dispatch racing a profile switch must resolve its OWN
 		// profile's row, never the newly active one.
 		expect(seen).toEqual([["https://test.example", "0", "test-profile"]])
+	})
+
+	test("resolveNetwork anchors the network read to ctx.profileId (silently revertible without this pin)", async () => {
+		const { writer } = makeSessionWriter(makeSession())
+		const seen: Array<[string, number | undefined]> = []
+		const networkReader: INetworkReader = {
+			getNetworksRaw: async (profileId, chainId) => {
+				seen.push([profileId, chainId])
+				return [{ id: "net-0", chainId: 0 } as INetworkRef]
+			},
+		}
+		const interaction: IDappInteractionRunner = {
+			execute: async () => ({}) as never,
+			requestCapabilities: (async () => ({ granted: [] })) as never,
+		}
+		const dispatcher = new WalletSdkDispatcher(networkReader, stubAccount, stubExecution, interaction, writer, noopLogger)
+		await dispatcher.dispatch("getChainInfo", [], ctx).catch(() => {})
+		// Anchored, never the active profile: an accountless mutation racing a
+		// switch must carry the composing profile's network row so execution
+		// fails closed on the ownership check.
+		expect(seen).toEqual([["test-profile", 0]])
 	})
 })
