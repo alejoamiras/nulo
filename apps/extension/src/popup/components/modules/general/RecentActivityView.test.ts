@@ -368,7 +368,7 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 		expect(vm.executingTask).toBeTruthy()
 
 		H.getTasks.mockResolvedValue([]) // the new profile's world is empty
-		H.store.current.profile = { id: "p2", name: "Q" } // same address, new profile
+		H.store.current.profile = { id: "p2" } // same address, new profile
 		await nextTick()
 		expect(vm.executingTask).toBeNull() // sync clear fired despite identical address
 		await flushPromises()
@@ -402,7 +402,7 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 		await flushPromises()
 
 		H.getTokens.mockResolvedValue([{ id: 2, symbol: "FRESH" }])
-		H.store.current.profile = { id: "p2", name: "Q" } // switch → sync clear + fenced reload
+		H.store.current.profile = { id: "p2" } // switch → sync clear + fenced reload
 		await nextTick()
 		await flushPromises()
 		slow.resolve([{ id: 9, symbol: "STALE" }]) // the OLD run resumes last
@@ -435,9 +435,9 @@ describe("RecentActivityView — scope-triple containment (N-23)", () => {
 		await flushPromises()
 
 		H.getOperations.mockResolvedValue([]) // B's and the return-A's snapshots are empty
-		H.store.current.profile = { id: "p2", name: "Q" } // A→B
+		H.store.current.profile = { id: "p2" } // A→B
 		await nextTick()
-		H.store.current.profile = { id: "p1", name: "P" } // B→A (captured-equality would revalidate!)
+		H.store.current.profile = { id: "p1" } // B→A (captured-equality would revalidate!)
 		await nextTick()
 		await flushPromises()
 
