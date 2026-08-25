@@ -28,3 +28,21 @@ unconstrained fn proxy_set_bridge_second_call_reverts() {
     let other = env.create_light_account();
     env.call_public(admin, TokenMinterProxy::at(proxy).set_bridge(other));
 }
+
+/// An UNWIRED proxy still enforces owner-only wiring: a non-owner set_bridge fails with the
+/// owner assert (not merely the immutability guard), pinning that access control precedes
+/// single-shot semantics.
+#[test(should_fail_with = "not owner")]
+unconstrained fn proxy_unwired_non_owner_set_bridge_rejected() {
+    let mut env = aztec::test::helpers::test_environment::TestEnvironment::new();
+    let admin = env.create_light_account();
+    let attacker = env.create_light_account();
+
+    let proxy_init = TokenMinterProxy::interface().constructor();
+    let proxy = env
+        .deploy("@token_minter_proxy/TokenMinterProxy")
+        .with_public_initializer(admin, proxy_init);
+
+    let other_bridge = env.create_light_account();
+    env.call_public(attacker, TokenMinterProxy::at(proxy).set_bridge(other_bridge));
+}

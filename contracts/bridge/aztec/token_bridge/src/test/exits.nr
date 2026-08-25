@@ -89,3 +89,19 @@ unconstrained fn exit_to_l1_public_paused_rejected() {
         ),
     );
 }
+
+/// Zero L1 recipient is rejected before authwit evaluation or burning.
+#[test(should_fail_with = "Recipient cannot be zero")]
+unconstrained fn exit_to_l1_public_zero_recipient_rejected() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let user = env.create_light_account();
+    env.call_public(
+        user,
+        TokenBridge::at(bridge).exit_to_l1_public(
+            aztec::protocol::address::EthAddress::zero(),
+            1,
+            aztec::protocol::address::EthAddress::zero(),
+            NONCE,
+        ),
+    );
+}

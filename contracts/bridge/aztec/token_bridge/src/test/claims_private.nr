@@ -83,3 +83,11 @@ unconstrained fn claim_private_paused_rejected() {
     let leaf = send_mint_to_private_message(env, recipient, amount, salt, bridge);
     env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, amount, salt, leaf));
 }
+
+/// Private claims to zero are rejected before any note creation or message consumption.
+#[test(should_fail_with = "Recipient cannot be zero")]
+unconstrained fn claim_private_zero_recipient_rejected() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let relayer = env.create_light_account();
+    env.call_private(relayer, TokenBridge::at(bridge).claim_private(AztecAddress::zero(), 500_000, 7, 0));
+}
