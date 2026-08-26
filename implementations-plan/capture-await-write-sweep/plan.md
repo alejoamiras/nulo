@@ -1,7 +1,7 @@
 # capture-await-write-sweep — targeted concurrency sweep
 
-**Tier**: `/blueprint light` (owner-fixed; escalation rule: CONFIRMED count > 2 → add the mid-tier dual-audit legs on the fix diff).
-**Branch/worktree**: `worktree-capture-await-write-sweep`, based on dev `4f2833ab` (post audit-448 batch 9).
+**Tier**: `/blueprint light` (owner-fixed; escalation is risk-based — §Method 6: CONFIRMED > 2 OR any cross-context/shared-primitive/trust-boundary/high-harm fix → independent max review leg).
+**Branch/worktree**: `worktree-capture-await-write-sweep`, cut at dev `4f2833ab` (post audit-448 batch 9), origin/dev `1727a42f` (#470) merged in at `c3297ded`.
 **eli5_mode**: Artifact (URL recorded in § Seeds when published).
 
 ## Goal
@@ -18,13 +18,13 @@ This is a pattern hunt, not a re-audit. The 9 audit-448 batches + earlier fence 
 
 1. A complete triage table — every candidate listed with a verdict, **no silent drops**.
 2. Fixes for every CONFIRMED site using the **nearest established fence idiom** (never a new fence style), each with a colocated regression pin that discriminates the racy shape, revert-probed red.
-3. If everything triages SAFE: the table itself is the deliverable — a clean bill closing the theme.
+3. If nothing triages CONFIRMED: the table itself is the deliverable — a bill of health that is always QUALIFIED by the KNOWN-DEFERRED D13 residual rows (an unqualified clean bill is impossible by construction) and by any OWNER-ACK-PENDING SAFE-lww rows.
 
 ## Phase 0 answers (derived from the task brief — owner pre-answered)
 
 - **Success criterion**: triage table covers 100% of enumerated candidates; CONFIRMED sites fixed + pinned (revert-probe log per pin); `audit:vue` green; smoke/network e2e per repo rules when their surfaces are touched.
 - **Scope in**: `apps/extension/src/wallet/services/**`, `packages/wallet-core/src/**`, `packages/aztec-runtime/src/**`; UI composables ONLY where they write through services. Background/SW code paths are the focus.
-- **Scope out**: already-fenced sites (exclusion list in recon.md), UI-pure composables/components, faucet/playground apps, e2e/test code (except pins added by this plan), findings adjudicated REFUTED in the 2026-08-24 verdict (esp. N-20's defective proof c5-3 — never adopt).
+- **Scope out as fix TARGETS** (but pre-seeded into the table for capture-order/branch-coverage verification, never silently excluded): already-fenced sites (recon.md §4) and the KNOWN-DEFERRED D13 residuals. Fully out: UI-pure composables/components, faucet/playground apps, e2e/test code (except pins added by this plan), findings adjudicated REFUTED in the 2026-08-24 verdict (esp. N-20's defective proof c5-3 — never adopt; adjacent allocator races still triage).
 - **Quality bar**: production. This is a wallet; races here are security-adjacent.
 - **Validation layers**: typecheck/lint/unit on every phase; `audit:vue` as the pre-PR gate; `test:e2e` (smoke) if popup/UI surfaces change; `e2e:agent` (network, SOLO on this host) if dApp/network/PXE behavior changes.
 - **Escalation**: CONFIRMED > 2 → treat fixes as a mid-tier arc (independent max review of the diff in addition to the codex loop).
@@ -33,11 +33,11 @@ This is a pattern hunt, not a re-audit. The 9 audit-448 batches + earlier fence 
 
 ## Method (from the brief, operationalized; rev 2 folds the codex plan-gate reject)
 
-1. **Enumerate mechanically, TWO passes** (phase 1):
+1. **Enumerate mechanically, THREE passes** (phase 1):
    - **Pass 1 — intraprocedural**: fan out read-only agents over the 122-file census slices; every function where a value read from shared state crosses an `await` and then feeds a write, transition, or dispatch is a candidate. Sites with visible fences are listed and marked, never dropped.
    - **Pass 2 — async-boundary lens** (codex net-miss finding): a grep-guided sweep over the whole scope for the variants pass 1's function-local reading under-catches: state captured into REGISTERED closures/listeners that fire later (EventHandler `.add`, `addListener`, ports, alarms, timers); fire-and-forget launches (`void fn(...)`, un-awaited promises, `.then` chains) where the capture and the await live in different functions; aliased mutable objects (captured reference mutated elsewhere; final write doesn't syntactically mention the read); cross-realm/cross-context flows (SW↔offscreen RPC results carrying identity, popup-realm writers to shared storage); event-payload staleness (payload minted pre-switch consumed post-switch — `EventHandler.invoke` does NOT await subscribers, so async subscriber bodies interleave).
    - **Pass 3 — score-0/1 re-screen**: the census's score-0/1 exclusions are re-verified by a cheap shape-screen (grep for await + subsequent shared-state write per file); any hit is promoted to full enumeration. Known promotions already: `packages/aztec-runtime/src/pxe/client.ts` (`request()` :124-194 — generation capture, provision retry), `apps/extension/src/wallet/services/profile/client.ts` (`subscribeActiveProfile` :138-155 — documented snapshot→subscribe lost-event window). The screen also covers `packages/extension-messaging/src/**` (scope-adjacent transport layer holding cross-context request state — a DOCUMENTED scope addition per the plan audit, reported in the table under its own section).
-   Over-inclusion is fine; silent omission is the failure mode.
+   STATEFUL `extension-messaging` files (`core/base-client.ts`, `core/base-service.ts`, transports — anything holding correlators/pending maps/timers) get FULL-read enumeration like a pass-1 slice, not grep-screen-only; type/barrel files may stay screen-only. Over-inclusion is fine; silent omission is the failure mode.
 2. **Triage** (phase 2) with the three questions per candidate, each answered against the RIGHT invariant (codex triage-misjudgment finding):
    - (a) Can the state the snapshot came from change during the await? Consider ALL mutator classes: user-driven deletion/profile/network/account switch, claim/reap, restore/import, SW restart (in-memory state dies; durable state persists; offscreen restarts independently), lock/unlock + session expiry, OTHER REALMS (popup/onboarding write shared storage directly), event-handler reentrancy, watchdog force-release — AND authority expiry: even if the captured state row is unchanged, has the AUTHORIZATION it represents (session, approval, epoch) expired or been revoked?
    - (b) Does the write recheck or CAS at commit — over the RIGHT field? A CAS on stage is not a CAS on authorization provenance; check ABA, an await between the re-check and the commit, and whether every write branch (success, failure, catch, finally) is covered.
@@ -88,7 +88,7 @@ This is a pattern hunt, not a re-audit. The 9 audit-448 batches + earlier fence 
 - Template plans + lessons exist under `implementations-plan/{export-integrity,migration-lifecycle,dapp-profile-binding,lock-ownership,data-safety,shell-identity-fences,service-fences,journal-reaper,runtime-edges,fix-state-fences,fix-account-generation-fence,reimport-pxe-fence}/`.
 - N-20 adjudicated REFUTED with defective proof c5-3 (runbook § adjudication deltas); N-21 latent; N-03's orphan inert; N-10's harm ceiling = transiently stale same-address balance.
 - Recon idiom inventory + exclusion list: see `recon.md` (file:line for every idiom).
-- Census: 280 production files in scope, 122 at async-write score ≥2 (34,437 LOC) forming the enumeration universe, pre-packed into 6 LOC-balanced slices (recon.md §5). Score 0/1 exclusions carry per-file bases; carve-outs (`wallet/{config,logger,base}/`, `syncedRef.js`) are census-documented absences re-verified by a cheap parent skim at triage.
+- Census: 280 production files in scope; 122 at async-write score ≥2 (34,437 LOC) form the PASS-1 universe (6 LOC-balanced slices, recon.md §5) — the full enumeration universe additionally includes the pass-3 promotions (`pxe/client.ts`, `profile/client.ts`, any screen hits, stateful `extension-messaging` files) and the parent carve-out files. Score 0/1 exclusions carry per-file bases in census.md and are re-verified by the pass-3 screen.
 - Fence implementations themselves (lock.ts, rw-guard.ts, restore-fence.ts, …) are IN the enumeration universe — prior batches found real bugs inside fences (N-11).
 
 **Inferences** (attackable):
@@ -108,15 +108,15 @@ Pre-answered by the brief: tier + escalation floor, scope dirs, fix policy (esta
 
 ### Phase 1 — census-sliced mechanical enumeration
 Fan out 6 read-only enumeration agents over recon.md §5's slices; each reads EVERY assigned file fully and returns per-function candidates (`file:line · state read · await(s) crossed · write · visible guard · interleave hypothesis`) + an explicit per-file coverage statement (zero-candidate files still listed with a reason). Sites with visible fences are LISTED and marked, never dropped — the parent verifies fence sufficiency at triage. Parent consolidates into `candidates.md` (dedup, no verdicts yet).
-**Gate**: slice-union == the 122-file census set; every slice reports 100% of its files examined (⚠ files re-covered by the parent); candidates.md committed. Commands: none (read-only phase) — gate is the coverage cross-check recorded in candidates.md. Layers: n/a.
+**Gate**: pass 1 slice-union == the 122-file census set with every slice reporting 100% of its files examined (⚠ files re-covered by the parent); pass 2 (both agents) AND pass 3 (screen of every score-0/1 file with per-file reason + full enumeration of every promotion incl. the stateful extension-messaging files) complete; all three passes consolidated into `candidates.md` — the file is not final (and triage does not freeze) until all passes are in. Commands: none (read-only phase) — gate is the coverage cross-check recorded in candidates.md. Layers: n/a.
 
 ### Phase 2 — triage + adversarial pass
 Parent reads each candidate site in the code and issues verdicts per the three questions (v2 checklist in §Method). The table is PRE-SEEDED with every recon §4 prior-fenced site and both D13 residual rows — "if encountered" listing is not enough (codex exclusion finding); prior-fenced rows verify capture order + branch coverage rather than assuming. KNOWN-DEFERRED rows cite backup-restore-residuals (never re-flagged as new, never silently fixed, never relabeled SAFE — a clean bill is explicitly QUALIFIED by them). A new bug in a previously-fenced file is suppressed only if it IS the exact ratified residual; adjacent races (incl. allocator races near refuted N-20) triage normally. Parent carve-out skim results (`wallet/{config,logger,base}/`, `syncedRef.js`) enter the table as parent-slice rows. Then the candidate manifest + SAFE rows are FROZEN and independently attacked: a codex `xhigh` adversarial pass over the full table + code refs — attack SAFE verdicts, confirm/refute CONFIRMED interleavings, flag net-misses — before any fix edits begin (reviewing only a fix diff cannot find omissions).
-**Gate**: table row count == consolidated candidate count (no silent drops); every CONFIRMED row has a written interleave scenario; codex pass completed with its challenges resolved (adopted or rebutted in the table). Commands: none (analysis phase). Layers: n/a.
+**Gate**: triage-row ID set == candidates.md ID set (candidates.md carries the pre-seeded prior-fenced/D13/refuted-adjacent rows in its own section, so parity is ID-set equality with no out-of-band rows; dedup rule: a pass-2/3 candidate matching an existing ID folds into that row, noted); every CONFIRMED row has a written interleave scenario; codex pass completed with its challenges resolved (adopted or rebutted in the table). Commands: none (analysis phase). Layers: n/a.
 
 ### Phase 3 — fixes + discriminating pins (skipped if zero CONFIRMED)
 Per CONFIRMED site: nearest-idiom fix + colocated pin in the SAME commit; revert-probe each pin (strip fence → pin red → restore → green) and log the probe in `lessons/phase-3.md`.
-**Gate** (targeted — the full battery runs ONCE in phase 4): `bun run lint` + `bun run typecheck:all` exit 0; the touched packages' test suites green via targeted vitest/bun-test runs (each named in lessons). Layers: typecheck/lint · unit (targeted).
+**Gate** (per-fix-iteration feedback, NOT a terminal re-run — the terminal full battery is phase 4's alone): after each fix commit, `bun run lint` + `bun run typecheck:all` + the touched packages' targeted test runs (each named in lessons) exit 0. No standalone full-suite pass at phase end — phase 4 immediately provides it. Layers: typecheck/lint · unit (targeted).
 
 ### Phase 4 — full battery + delivery prep
 **Gate**: `bun run audit:vue` exit 0 (typecheck ∥ extension unit+component ∥ lint, then build) AND `bun run test:all` exit 0 (all workspace packages' suites — covers wallet-core/aztec-runtime units audit:vue doesn't run). If any popup/UI file changed: `bun run test:e2e` green. If any dApp/network/PXE behavior changed: `bun run e2e:agent` green, run SOLO (no concurrent suites/audits on this host; flake → re-run once before triaging). Layers: all applicable.
