@@ -18,7 +18,7 @@
 		"test": "bun --bun vitest run"
 	},
 	"dependencies": {
-		"@alejoamiras/aztec-accelerator": "5.0.1",
+		"@alejoamiras/aztec-accelerator": "5.2.0",
 		"@aztec/accounts": "5.2.0",
 		"@aztec/aztec.js": "5.2.0",
 		"@aztec/bb.js": "5.2.0",

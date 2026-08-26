@@ -1,15 +1,18 @@
 /**
- * Split-line residue gate: the workspace `@aztec/*` line is bumped while
- * @alejoamiras/aztec-accelerator, @alejoamiras/private-fee-juice, and
- * @aztec-foundation/aztec-standards hold 5.0.1. Every remaining `@aztec/*@5.0.1`
- * lock entry must be reachable from a held package through the lock's dependency
- * graph — computed over graph edges, not key prefixes, because bun.lock shortens a
- * nested key to the bare position when only one dependent exists (e.g. the
- * accelerator's `@aztec/bb-prover@5.0.1` keys as bare "@aztec/bb-prover"). Runtime
- * resolution must agree: consumers reach the accelerator's nested copies at 5.0.1
- * (its `dependencies`), reach private-fee-juice's `@aztec` PEERS at the workspace
- * line (exact-5.0.1 peers re-bind to the provided context), and reach the workspace
- * line directly.
+ * Split-line residue gate: the workspace `@aztec/*` line moves while
+ * @alejoamiras/private-fee-juice and @aztec-foundation/aztec-standards stay pinned
+ * to an older line. Every remaining `@aztec/*@5.0.1` lock entry must be reachable
+ * from one of those packages through the lock's dependency graph — computed over
+ * graph edges, not key prefixes, because bun.lock shortens a nested key to the bare
+ * position when only one dependent exists. Runtime resolution must agree: every
+ * consumer reaches the workspace line, directly and through each held package
+ * (their exact-pinned `@aztec` PEERS re-bind to the provided context, so 5.0.1-built
+ * wrapper code executes against workspace-line modules).
+ *
+ * The accelerator SDK is deliberately NOT held: a single `@aztec` generation in the
+ * prover path is load-bearing, because upstream's `getVKIndex` discriminates with
+ * `instanceof` and silently mis-resolves when two copies of
+ * @aztec/noir-protocol-circuits-types coexist in one bundle.
  *
  * Usage: bun scripts/aztec-hold-residue-check.ts   (exits 1 on any violation)
  */
@@ -20,11 +23,9 @@ import { join } from "node:path"
 const ROOT = join(import.meta.dir, "..")
 const WORKSPACE_LINE = "5.2.0"
 const HELD_LINE = "5.0.1"
-const HELD_ROOTS = [
-	"@alejoamiras/aztec-accelerator",
-	"@alejoamiras/private-fee-juice",
-	"@aztec-foundation/aztec-standards",
-]
+const HELD_ROOTS = ["@alejoamiras/private-fee-juice", "@aztec-foundation/aztec-standards"]
+/** Packages whose own `@aztec` deps must resolve to the workspace line, not a private copy. */
+const SINGLE_GENERATION_ROOTS = ["@alejoamiras/aztec-accelerator"]
 
 let failures = 0
 const fail = (msg: string) => {
@@ -103,14 +104,16 @@ const CONSUMERS = ["apps/extension", "packages/aztec-runtime", "packages/bridge-
 const checks: Expectation[] = []
 for (const c of CONSUMERS) {
 	checks.push({ consumer: c, spec: "@aztec/stdlib", want: WORKSPACE_LINE })
-	// Exact-5.0.1 PEERS re-bind to the provided (workspace) generation — the verified
-	// hazard mode: 5.0.1-compiled wrappers running on workspace-line modules.
+	// Exact-pinned PEERS re-bind to the provided (workspace) generation — the verified
+	// hazard mode: older-line wrapper code running on workspace-line modules.
 	checks.push({ consumer: c, via: "@alejoamiras/private-fee-juice", spec: "@aztec/stdlib", want: WORKSPACE_LINE })
 	checks.push({ consumer: c, via: "@alejoamiras/private-fee-juice", spec: "@aztec/aztec.js", want: WORKSPACE_LINE })
 }
+// The prover path must be single-generation end to end (see the header note on getVKIndex).
 for (const c of ["apps/extension", "packages/aztec-runtime"]) {
-	checks.push({ consumer: c, via: "@alejoamiras/aztec-accelerator", spec: "@aztec/stdlib", want: HELD_LINE })
-	checks.push({ consumer: c, via: "@alejoamiras/aztec-accelerator", spec: "@aztec/bb-prover", want: HELD_LINE })
+	for (const spec of ["@aztec/stdlib", "@aztec/bb-prover", "@aztec/noir-protocol-circuits-types"]) {
+		checks.push({ consumer: c, via: SINGLE_GENERATION_ROOTS[0], spec, want: WORKSPACE_LINE })
+	}
 }
 
 for (const { consumer, via, spec, want } of checks) {
