@@ -298,6 +298,12 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 		await this.ensureInitialized()
 		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
 		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
+		return NetworkService.assertCanonicalStoredL1(network)
+	}
+
+	/** Seeded-constant + canonical-range validation of a row's `l1ChainId` (sync — see
+	 *  `getL1ChainIdStored` for why the seeded row value must equal the in-code constant). */
+	private static assertCanonicalStoredL1(network: Network): number {
 		const seeded = SEED_L1_BY_KIND[network.kind ?? "custom"]
 		if (seeded !== undefined && network.l1ChainId !== seeded) {
 			throw new Error(`Seeded network L1 identity mismatch: stored ${network.l1ChainId}, expected ${seeded}`)
@@ -314,11 +320,15 @@ export class NetworkService extends Service<Methods, Events> implements ServiceS
 	 * poisoned custom-network row cannot mint a wrong-chain account. Seeded kinds are already
 	 * bound to in-code constants and stay offline-creatable; custom networks are online-configured
 	 * by nature, so an unreachable node fails creation with a clear error.
+	 *
+	 * ONE row read: the probe target and the returned l1ChainId must come from the same
+	 * snapshot — two independent reads could validate one row and return another's value.
 	 */
 	public async resolveVerifiedL1ChainId(profileId: string, chainId: number): Promise<number> {
-		const stored = await this.getL1ChainIdStored(profileId, chainId)
+		await this.ensureInitialized()
 		const network = (await this.storage.getValues()).find((n) => n.profileId === profileId && n.chainId === chainId)
 		if (!network) throw new Error(`No network for chain ${chainId} in this profile`)
+		const stored = NetworkService.assertCanonicalStoredL1(network)
 		const kind = network.kind ?? "custom"
 		if (SEED_L1_BY_KIND[kind] === undefined) {
 			const primary = network.endpoints.find((e) => e.id === network.primaryEndpointId) ?? network.endpoints[0]

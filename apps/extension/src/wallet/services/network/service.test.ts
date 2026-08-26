@@ -78,6 +78,55 @@ function harness(seeded: Record<string, NodeInfo | Error>): {
 	return { service, factory }
 }
 
+describe("NetworkService — resolveVerifiedL1ChainId single-snapshot", () => {
+	test("the probe target and the returned l1ChainId come from one row read", async () => {
+		// Two-faced storage: the row is swapped between reads. A split-read
+		// implementation validates one row's endpoint against the OTHER row's
+		// stored value and throws a spurious mismatch; the single-snapshot
+		// implementation probes and returns the same row it read.
+		const logger = new LoggerStore(new ConfigStore())
+		const factory = new FakeNodeFactory()
+		factory.setOverrides("https://rpc-a.example/", {
+			getNodeInfo: vi.fn().mockResolvedValue({ l1ChainId: 5, rollupVersion: 1 }) as unknown as AztecNode["getNodeInfo"],
+		})
+		factory.setOverrides("https://rpc-b.example/", {
+			getNodeInfo: vi.fn().mockResolvedValue({ l1ChainId: 7, rollupVersion: 1 }) as unknown as AztecNode["getNodeInfo"],
+		})
+		const browserApi = new FakeBrowserApi()
+		browserApi.reset()
+		const service = new NetworkService(logger, browserApi, factory)
+		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in (no full lifecycle needed)
+		;(service as any).initialized = true
+
+		const rowKey = "nulo:core:networks@n1"
+		const rowA = {
+			id: "n1",
+			profileId: "p1",
+			chainId: 123,
+			l1ChainId: 5,
+			name: "A",
+			primaryEndpointId: "e1",
+			endpoints: [{ id: "e1", rpcUrl: "https://rpc-a.example/" }],
+			kind: "custom",
+		}
+		const rowB = { ...rowA, l1ChainId: 7, endpoints: [{ id: "e1", rpcUrl: "https://rpc-b.example/" }] }
+		await browserApi.storage.local.set({ [rowKey]: JSON.stringify(rowA) })
+
+		const realGet = browserApi.storage.local.get.bind(browserApi.storage.local)
+		let swapped = false
+		browserApi.storage.local.get = (async (key: unknown) => {
+			const value = await realGet(key as never)
+			if (!swapped && JSON.stringify(value).includes("nulo:core:networks@")) {
+				swapped = true
+				await browserApi.storage.local.set({ [rowKey]: JSON.stringify(rowB) })
+			}
+			return value
+		}) as typeof browserApi.storage.local.get
+
+		await expect(service.resolveVerifiedL1ChainId("p1", 123)).resolves.toBe(5)
+	})
+})
+
 describe("NetworkService NodeFactory seam", () => {
 	test("getChainId returns the XOR of l1ChainId and rollupVersion for non-localhost", async () => {
 		const { service, factory } = harness({
