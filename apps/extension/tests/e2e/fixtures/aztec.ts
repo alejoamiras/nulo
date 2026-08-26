@@ -505,15 +505,29 @@ export async function setupPreFundedAccount(
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(accountSeed)
 
 	// Sanity check the derived address against NuloAccount's path so the fixture
-	// fails fast if the upstream Schnorr / NuloAccount implementations diverge.
+	// fails fast if the frozen-artifact account below and NuloAccount ever disagree.
 	const nuloAccountContract = await NuloAccount.new(accountSeed, logger)
 	const expectedAddress = nuloAccountContract.address
 	logger.info(`Expected derived address: ${expectedAddress.toString()}`)
 
-	// Step 2 — Create the script-side schnorr account in the wallet's PXE.
-	// EmbeddedWallet.createSchnorrAccount(secretKey, salt, signingKey) returns an AccountManager —
-	// called WITHOUT a cast so the compiler checks the argument order against upstream.
-	const accountManager = await wallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
+	// Step 2 — Create the script-side account in the wallet's PXE, bound to the FROZEN artifact.
+	// `wallet.createSchnorrAccount` would build against whatever `@aztec/accounts` currently
+	// ships, and upstream rebuilds that artifact on toolchain changes — at 5.2.0 its class id
+	// (and so its address) moved, while Nulo's stays pinned. Subclassing to serve the vendored
+	// artifact is what keeps the deployed account at the address the wallet actually derives;
+	// everything else (ctor name `constructor`, args [x, y], salt ZERO) already matches the
+	// frozen descriptor, so only the artifact hook is overridden.
+	const { SchnorrAccountContract } = await import("@aztec/accounts/schnorr")
+	const { FrozenSchnorrAccountArtifact } = await import("@nulo/aztec-runtime/account")
+	const { AccountManager } = await import("@aztec/aztec.js/wallet")
+	class FrozenSchnorrAccountContract extends SchnorrAccountContract {
+		override getContractArtifact() {
+			return Promise.resolve(FrozenSchnorrAccountArtifact)
+		}
+	}
+	const accountManager = await AccountManager.create(wallet, secretKey, new FrozenSchnorrAccountContract(signingKey), {
+		salt: Fr.ZERO,
+	})
 	if (accountManager.address.toString() !== expectedAddress.toString()) {
 		throw new Error(
 			`Address derivation parity broken: NuloAccount=${expectedAddress.toString()} vs createSchnorrAccount=${accountManager.address.toString()}`,

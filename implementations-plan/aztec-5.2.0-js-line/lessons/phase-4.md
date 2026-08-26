@@ -37,4 +37,61 @@ for faucet/playground/extension; retry launched. Durable lesson: ANY dependency-
 invalidates vite dep-optimizer caches in dev-served apps — clear `.vite` before the first
 post-bump e2e run.
 
-(Battery results appended below when the phase completes.)
+## THE ONE REAL SOURCE CHANGE THIS BUMP NEEDED (e2e fixture)
+
+`fee-methods.test.ts` failed prover-ON with
+`Address derivation parity broken: NuloAccount=0x03e8… vs createSchnorrAccount=0x24b3…`
+(`fixtures/aztec.ts:518`, `setupPreFundedAccount`). **This is the freeze working, surfacing in
+test infrastructure** — upstream recompiled SchnorrAccount at 5.2.0, so
+`EmbeddedWallet.createSchnorrAccount` derives a NEW address while `NuloAccount` (vendored
+artifact) stays pinned. The fixture funded the frozen address but deployed the upstream one.
+
+- **Production blast radius: ZERO.** `rg createSchnorrAccount apps/extension/src packages/*/src`
+  → no hits; production derives only through the frozen path. Failure was confined to the three
+  pre-funded-fee-juice cases (public FJ, private FJ, gas-balance card).
+- **Fix**: build the script-side `AccountManager` from the FROZEN artifact —
+  `AccountManager.create(wallet, secretKey, new FrozenSchnorrAccountContract(signingKey),
+  {salt: Fr.ZERO})`, where `FrozenSchnorrAccountContract extends SchnorrAccountContract` and
+  overrides only `getContractArtifact()`. Verified safe to override just that hook:
+  `getContractArtifact()` is the abstract artifact seam on `DefaultAccountContract`, and
+  upstream 5.2.0's `getInitializationFunctionAndArgs()` returns `constructorName: "constructor"`
+  with args `[x, y]` — byte-for-byte the frozen descriptor's pins (salt `Fr.ZERO` too). The
+  parity assertion is KEPT and now guards the fixture's frozen path against NuloAccount.
+- **Durable lesson (belongs in the aztec-update skill)**: any bump that recompiles upstream's
+  account artifacts breaks e2e fixtures that build accounts through upstream helpers, even
+  though production is immune. Fixtures must derive through the frozen artifact, not
+  `createSchnorrAccount`. Typecheck cannot see this — `tests/e2e` is outside the tsconfig graph.
+
+## Battery results
+
+Re-run after the SDK 5.2.0 bump (the re-diff verdicts above are unaffected — they compare OUR
+copied logic against upstream 5.2.0 sources, independent of the accelerator's own version).
+
+- **Builds**: `audit:vue` green (typecheck ∥ test ∥ lint → chrome build, `✓ built in 4.23s`);
+  faucet, playground, and firefox builds all produced their outputs.
+- **Drift detectors**: `verify:deployments` — dripper / nulo / olun all `[OK]`
+  (computed == committed); the opt-in `BRIDGE_MANIFEST=public/testnet-bridge.json` lane —
+  bridge.proxy / bridge.token / bridge.bridge all `[OK]`. Six live testnet addresses re-derive
+  bit-identically under the 5.2.0 loader against unchanged artifacts: the dossier's
+  loader-neutrality claim, confirmed on our own deployments.
+- **Smoke**: first run had ONE failure — `backup-migration.test.ts` "fixture-arming contract:
+  unarmed runs are allowed ONLY against a release artifact". NOT a bump regression: that test
+  is a guard asserting the suite can't silently skip; it fires whenever a repo build lacks
+  `VITE_NULO_E2E_MIGRATION_FIXTURE=1`. CI arms it via `_smoke-e2e.yml`
+  (`MIGRATION_FIXTURE_ARMED` → both the build-time and run-time vars). Re-run with a
+  fixture-armed build (build with `VITE_NULO_E2E_MIGRATION_FIXTURE=1`, run with
+  `NULO_E2E_MIGRATION_FIXTURE=1`). **Local-runbook lesson: `bun run test:e2e` after a plain
+  `bun run build` is NOT the CI-equivalent smoke — arm the fixture or the guard reds.**
+- **Smoke, armed run**: backup-migration guard passed; two SW files failed
+  (`sw-restart-network`, `sw-resilience`). Triaged, NOT neutralized:
+  - `sw-restart-network` passed on the first targeted re-run → flake.
+  - `sw-resilience` failed twice — but the stacks point at the **initial**
+    `waitForHash(page, "#/popup/general")` on lines 98/139, i.e. cold popup boot BEFORE any SW
+    kill, not the SW logic. Run in isolation the whole file passes, fast: 7.1s / 3.7s / 3.3s
+    against a 15s budget. Verdict: host contention during a 32-file parallel smoke run, the
+    same cold-boot-opener flake class dev commit #468 raised the budget for — not a bump
+    regression (this diff has ZERO runtime source changes, and the SDK 5.2.0 bump makes the
+    bundle single-generation, i.e. smaller than the dual-generation state, not larger).
+    Confirmation re-run on an idle host recorded below; CI's dedicated smoke runner is the
+    authority.
+

@@ -182,7 +182,7 @@ HOLD verdict doesn't waste the largest manual block; fable + codex alignment, D8
 && `bun scripts/aztec-hold-residue-check.ts`; pass criteria: all exit 0 / empty; boundary
 verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`.
 
-## Phase 3 ⏸ — Fail-fast checkpoint: RED → PAUSED on owner action (2026-08-26)
+## Phase 3 ✓ — Fail-fast checkpoint: RED → root-caused → SDK 5.2.0 cut → GREEN (2026-08-26)
 
 Canary red at the first proving tx: upstream getVKIndex instanceof fails across the bundle's
 dual stdlib generations (full triage: lessons/phase-3.md). Owner decision: cut the
@@ -540,10 +540,12 @@ quality loop converges. Merge is the owner's call.
 Runs once for PR-0 (scoped to its small diff, before PR-0 opens) and once for PR-1 (the net
 diff from the plan baseline `21244d4a` minus PR-0's merged content, before PR-1 opens):
 
-1. **`/code-review max --fix`** on the diff under review. Skim applied fixes, then commit them
-   SEPARATELY from implementation commits.
-2. **Codex audit** (`/codex xhigh`), package: the diff under review; a summary of the
-   code-review commits; this plan.md + decision ledger; recon.md; the adversarial/security ask
+1. **~~`/code-review max --fix`~~ — DROPPED (owner, 2026-08-26): too token-expensive for this
+   arc's payoff.** The diff is pins + patches + one gate script + docs, with zero runtime source
+   changes, already covered by `test:all`, `typecheck:all`, `lint`, the residue gate, the freeze
+   diff, and the prover-ON canary. The codex loop below remains the review layer.
+2. **Codex audit** (`/codex xhigh`), package: the diff under review; this plan.md + decision
+   ledger; recon.md; the adversarial/security ask
    ("What could go wrong? What would an attacker target? What are we trusting that we
    shouldn't? Where are the supply-chain / crypto / least-privilege weaknesses?"); PLUS both
    rules verbatim:
@@ -611,13 +613,13 @@ URL; keep both in sync on any material plan change).
 Recommended: `/goal` (completion is transcript-observable).
 
 ```
-/goal All EIGHT phase headers in implementations-plan/aztec-5.2.0-js-line/plan.md (Phase A, Phase 0, 1, 2, 3, 4, 5, 6) marked ✓, each backed by its validation gate (as written in plan.md) reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md; every freeze/KAT/detector test green with zero pin or vector edits (git diff 21244d4a...HEAD over packages/aztec-runtime/src/account/ and contracts/ is empty, quoted); the prover-ON frozen-account canary green locally with a "Received /prove request" line quoted (both on the old line in Phase A and post-bump in Phase 3); the full local network suite green with fee-flow /prove evidence; for EACH of the two PRs: /code-review max --fix complete with fixes committed separately AND the codex fix loop converged (resumed codex pass reporting no new material findings, quoted) BEFORE that PR was created; both PRs exist on GitHub with labels e2e:network and e2e:smoke (gh pr view output quoted); bun run test:all and bun run lint both exit 0 in the transcript.
+/goal All EIGHT phase headers in implementations-plan/aztec-5.2.0-js-line/plan.md (Phase A, Phase 0, 1, 2, 3, 4, 5, 6) marked ✓, each backed by its validation gate (as written in plan.md) reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md; every freeze/KAT/detector test green with zero pin or vector edits (git diff 21244d4a...HEAD over packages/aztec-runtime/src/account/ and contracts/ is empty, quoted); the prover-ON frozen-account canary green locally with a "Received /prove request" line quoted (both on the old line in Phase A and post-bump in Phase 3); the full local network suite green with fee-flow /prove evidence; for EACH of the two PRs: the codex fix loop converged (resumed codex pass reporting no new material findings, quoted) BEFORE that PR was created; both PRs exist on GitHub with labels e2e:network and e2e:smoke (gh pr view output quoted); bun run test:all and bun run lint both exit 0 in the transcript.
 ```
 
 Fallback `/loop 15m` (fixed interval):
 
 ```
-/loop 15m Drive implementations-plan/aztec-5.2.0-js-line forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. (3) No task in hand? Pick the next pending plan.md step (order: Phase A → its quality loop → PR-0 → phases 0-6 → PR-1 loop); after each meaningful edit run bun run lint + the touched package's test; commit + push. (4) Stuck or facing a decision I'd normally get? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/. Hard limits: never merge, never publish/deploy, never broadcast to testnet (incl. drip canaries) without explicit owner authorization, never expand scope beyond plan.md, never edit freeze-surface pins/vectors — a red freeze test or canary means STOP and surface, not fix; never neutralize a required check. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase gate green (commands + pass criteria as written, incl. the 21244d4a...HEAD freeze diff)? Mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md, advance. (7) All phases ✓? Run the Post-implementation section exactly, per PR (code-review max --fix → separate commits → codex xhigh loop with the plan's two verbatim rules → PR only after convergence, labels e2e:network e2e:smoke → gh pr checks --watch), then a wrap-up report: what shipped, contentious calls with ELI5 context, open items. Keep the ASCII checklist visible each firing.
+/loop 15m Drive implementations-plan/aztec-5.2.0-js-line forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. (3) No task in hand? Pick the next pending plan.md step (order: Phase A → its quality loop → PR-0 → phases 0-6 → PR-1 loop); after each meaningful edit run bun run lint + the touched package's test; commit + push. (4) Stuck or facing a decision I'd normally get? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/. Hard limits: never merge, never publish/deploy, never broadcast to testnet (incl. drip canaries) without explicit owner authorization, never expand scope beyond plan.md, never edit freeze-surface pins/vectors — a red freeze test or canary means STOP and surface, not fix; never neutralize a required check. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase gate green (commands + pass criteria as written, incl. the 21244d4a...HEAD freeze diff)? Mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md, advance. (7) All phases ✓? Run the Post-implementation section exactly, per PR (codex xhigh loop with the plan's two verbatim rules → PR only after convergence, labels e2e:network e2e:smoke → gh pr checks --watch), then a wrap-up report: what shipped, contentious calls with ELI5 context, open items. Keep the ASCII checklist visible each firing.
 ```
 
 Both seeds must run INSIDE this worktree (`agent-worktree resume aztec-5.2.0-js-line`). Use

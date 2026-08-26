@@ -1,4 +1,29 @@
-# Phase 3 — fail-fast canary: RED, triaged to root cause, PAUSED on owner action
+# Phase 3 ✓ — fail-fast canary: RED → root-caused → resolved at the source → GREEN
+
+## RESOLUTION (2026-08-26, after the owner cut SDK 5.2.0)
+
+`@alejoamiras/aztec-accelerator@5.2.0` (published 17:41Z, all five `@aztec` deps at 5.2.0)
+collapsed the bundle to a single generation. Consequences, all verified:
+- **The cast is gone.** `typecheck:all` passes with ZERO casts — the bump now touches no runtime
+  source at all. (D2 superseded by D9.)
+- Residue gate extended and PASSING: the whole prover path — `stdlib`, `bb-prover`, AND
+  `noir-protocol-circuits-types` (the VK-tree module, the actual bug locus) — resolves to 5.2.0
+  from both consumers. The only remaining 5.0.1 copies belong to private-fee-juice's declared
+  closure, whose peers rebind to 5.2.0 at runtime.
+- **Canary GREEN**: `Test Files 1 passed (1)`, `Tests 2 passed (2)`, `CANARY_RC=0`, with the
+  full native chain in the server log:
+  `Received /prove request` → `Requested Aztec version version=5.2.0` →
+  `Download complete version=5.2.0` → `Proving succeeded` ×3.
+  The frozen 5.0.1 account bytecode therefore deploys, proves natively **under bb-5.2.0**,
+  consumes an authwit, and survives an SW-restart re-derive on the bumped stack.
+- Min-age: the fresh publish tripped the gate; ONE dated exclude added (D10), removable
+  on/after 2026-09-02, justified on verified first-party SLSA provenance.
+
+Everything below is the original red-run triage, kept because it is the durable lesson.
+
+---
+
+# Phase 3 (original) — RED, triaged to root cause, PAUSED on owner action
 
 ## Runs
 
