@@ -80,17 +80,22 @@ export class ConfigStore implements IConfigStore {
 	 */
 	private async apply(incoming: unknown) {
 		const src = (incoming ?? {}) as Record<string, unknown>
-		for (const key of Object.keys(this.config) as ConfigKey[]) {
-			// Skip missing AND explicit-undefined props: the per-key schema has a
-			// `.default()`, so `safeParse(undefined)` would reset to default rather
-			// than keep the current value (the prior typeof check skipped these).
-			if (!(key in src) || src[key] === undefined) continue
-			const parsed = ConfigSchema.shape[key].safeParse(src[key])
-			if (parsed.success && this.config[key] !== parsed.data) {
-				;(this.config as Record<string, unknown>)[key] = parsed.data
-				this.onUpdate.invoke({ key, value: this.config[key] } as ConfigProp)
+		// Same lock as `set()`: an unlocked apply (reset/load) interleaving a
+		// concurrent set() during its persist await would clobber the fresher
+		// value in storage while memory kept it — a silent lost update.
+		await this.lock.withLock(async () => {
+			for (const key of Object.keys(this.config) as ConfigKey[]) {
+				// Skip missing AND explicit-undefined props: the per-key schema has a
+				// `.default()`, so `safeParse(undefined)` would reset to default rather
+				// than keep the current value (the prior typeof check skipped these).
+				if (!(key in src) || src[key] === undefined) continue
+				const parsed = ConfigSchema.shape[key].safeParse(src[key])
+				if (parsed.success && this.config[key] !== parsed.data) {
+					;(this.config as Record<string, unknown>)[key] = parsed.data
+					this.onUpdate.invoke({ key, value: this.config[key] } as ConfigProp)
+				}
 			}
-		}
-		await this.storage.set(this.config)
+			await this.storage.set(this.config)
+		})
 	}
 }
