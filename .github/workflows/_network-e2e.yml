@@ -155,10 +155,11 @@ jobs:
       - uses: ./.github/actions/setup-accelerator-server
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         with:
-          # v1.0.6 (Aztec 4.3.1-bundled bb). The 5.0 proving stack is fetched on demand
-          # on first /prove (bb is downloaded per the SDK-requested version), so this binary
-          # proves 5.0.0 txs without a 5.0-specific release (bb is fetched per the SDK version). Bump again when a newer line ships.
-          version: "1.0.6"
+          # v2.0.0 headless server. bb is DECOUPLED from the Aztec line: fetched on first
+          # /prove per the SDK-requested version (x-aztec-version header) and cached in
+          # ~/.aztec-accelerator/versions/, so accelerator releases track accelerator code
+          # changes only — never @aztec bumps. BB_BINARY_PATH below bypasses that download.
+          version: "2.0.0"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's
           # the trust anchor on every run). Computed locally via:
@@ -167,7 +168,7 @@ jobs:
           # tarball; we don't trust the sidecar as a security boundary
           # anyway (release-origin compromise would replace both).
           # See SECURITY.md "Binary dependencies" for the bump procedure.
-          expected_sha256: 995d13a4d877c06ccdb457de3c54ac13f85a8ceb6f3b3ddf13aecbb026b8c3d3
+          expected_sha256: 443d5f7b485d5ec430a4fe0ffc277cbd4cedbb285073ffae9ca3ee83dda10a22
 
       - name: Start accelerator-server
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
@@ -177,7 +178,8 @@ jobs:
           # for each prove + version-cache info we tail in the advisory step.
           RUST_LOG: "info"
           # ACCEL_ALLOW_ALL approves every browser origin. accelerator-server v1.0.6
-          # (SEC-01c) flipped the headless default to deny-by-default: with ALLOWED_ORIGINS
+          # (SEC-01c) flipped the headless default to deny-by-default, and v2.0.0 keeps the
+          # identical contract (README "Headless Server" table): with ALLOWED_ORIGINS
           # unset, localhost is auto-approved but every NON-localhost origin is DENIED. Our
           # offscreen prover calls /prove from chrome-extension://<id> (non-localhost) with
           # no popup available in headless CI → request denied → no proof → the canary tx
@@ -304,21 +306,22 @@ jobs:
           fi
           echo "Bundle clean: no probe strings."
 
-      # Advisory only — does NOT exit non-zero. Layer 2 in chain-runtime.ts
-      # is the authoritative hard-fail; this step surfaces server-side
-      # activity counts in the run summary for measurement / debugging.
-      # See plan §8 for layer design.
-      - name: Surface accelerator activity (advisory)
+      # ENFORCED (owner-approved hardening): an accelerator-ON run that produced ZERO
+      # server-side /prove requests fails here — every accelerator-ON caller builds the
+      # wallet accelerator-required, so zero proofs means the native lane was silently
+      # bypassed. Complements Layer 2's in-page hard-fail with server-side evidence.
+      # The rollback lever is untouched: disable_accelerator skips this step entirely.
+      - name: Assert accelerator activity (enforced)
         if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
         shell: bash
         run: |
           set -euo pipefail
           if [ ! -f /tmp/accelerator-server.log ]; then
-            echo "::warning::accelerator-server log missing — possible startup failure"
-            exit 0
+            echo "::error::accelerator-server log missing — startup failure"
+            exit 1
           fi
-          # Verified literal pattern from accelerator-server source
-          # (server.rs:392: `tracing::info!("Received /prove request");`).
+          # Verified literal from accelerator-server 2.0.0 source
+          # (core/src/server/prove.rs:228: `tracing::info!("Received /prove request");`).
           PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/accelerator-server.log || true)
           echo "::notice::accelerator-server log shows ${PROVE_COUNT} /prove requests this run"
           {
@@ -330,6 +333,11 @@ jobs:
             tail -5 /tmp/accelerator-server.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PROVE_COUNT" -eq 0 ]; then
+            echo "::error::accelerator-ON run finished with ZERO /prove requests — the native proving lane was bypassed."
+            tail -30 /tmp/accelerator-server.log || true
+            exit 1
+          fi
 
       - name: Shut down accelerator-server
         if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
