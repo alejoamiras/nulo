@@ -95,7 +95,7 @@ describe("ConfigStore — apply/set serialization", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0))
 		const setRun = store.set("theme", "light")
 		await new Promise((resolve) => setTimeout(resolve, 0))
-		parked?.()
+		;(parked as (() => void) | null)?.()
 		await Promise.all([resetRun, setRun])
 
 		expect(store.get("theme")).toBe("light")

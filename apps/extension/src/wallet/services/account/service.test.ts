@@ -476,7 +476,7 @@ describe("AccountService — same-row field editors serialize", () => {
 		await new Promise((resolve) => setTimeout(resolve, 0))
 		const visRun = service.changeAccountVisibility("p1", 1, "0xaa", false)
 		await new Promise((resolve) => setTimeout(resolve, 0))
-		parked?.()
+		;(parked as (() => void) | null)?.()
 		await Promise.all([nameRun, visRun])
 
 		const raw = await realGet(null)
