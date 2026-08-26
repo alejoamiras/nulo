@@ -68,7 +68,6 @@ export async function waitForLocalNode(url = LOCAL_NODE_URL, timeoutMs = 60_000)
 	throw new Error(`Local Aztec node at ${url} did not become healthy within ${timeoutMs}ms`)
 }
 
-/** Create an EmbeddedWallet connected to the local node. Returns wallet + cleanup function. */
 /**
  * Serves Nulo's FROZEN Schnorr artifact wherever upstream would serve its own.
  *
@@ -104,6 +103,7 @@ class FrozenArtifactWallet extends EmbeddedWallet {
 	}
 }
 
+/** Create an EmbeddedWallet connected to the local node. Returns wallet + cleanup function. */
 export async function createTestWallet(url = LOCAL_NODE_URL) {
 	const node = createAztecNodeClient(url)
 	await waitForNode(node)

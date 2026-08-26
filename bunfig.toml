@@ -48,15 +48,14 @@ linker = "isolated"
 # CLI equivalent: --minimum-release-age=604800
 minimumReleaseAge = 604800
 
-# TEMPORARY — remove on/after 2026-09-02 (follow-up PR), when 5.2.0 ages past
-# the gate on its own. @alejoamiras/aztec-accelerator@5.2.0 published
-# 2026-08-26T17:41Z: a first-party release cut by this repo's owner to unblock
-# the @aztec 5.2.0 line (the 5.0.1 SDK's nested stdlib made upstream's
-# getVKIndex `instanceof` fail across duplicate copies). Verified before
-# exempting: npm registry signature, npm publish attestation, and SLSA v1
-# provenance binding the tarball to
-# alejoamiras/aztec-accelerator@acb3d317d4d64ca2aeee2e7a8d0d7dd90365e39b built
-# by .github/workflows/publish-testnet.yml on a GitHub-hosted runner. Its own
-# @aztec/* deps are all 5.2.0, already past the gate.
+# TEMPORARY — remove on/after 2026-09-02T17:41Z, when 5.2.0 clears the gate on its own.
+# @alejoamiras/aztec-accelerator@5.2.0 is first-party (published by this repo's owner) and had
+# to land immediately: the 5.0.1 SDK pinned its own @aztec copies, and two generations of
+# @aztec/noir-protocol-circuits-types in one bundle make upstream's instanceof-based getVKIndex
+# mis-resolve. Verified before exempting: registry signature, npm publish attestation, and SLSA
+# v1 provenance binding the tarball to
+# alejoamiras/aztec-accelerator@acb3d317d4d64ca2aeee2e7a8d0d7dd90365e39b built by
+# .github/workflows/publish-testnet.yml. Provenance only proves origin — the release also
+# carries 2.x transport changes that were NOT reviewed here.
 minimumReleaseAgeExcludes = ["@alejoamiras/aztec-accelerator"]
 

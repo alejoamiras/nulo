@@ -186,7 +186,7 @@ verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`
 
 Canary red at the first proving tx: upstream getVKIndex instanceof fails across the bundle's
 dual stdlib generations (full triage: lessons/phase-3.md). Owner decision: cut the
-@alejoamiras/aztec-accelerator SDK at 5.2.0 (deps-only release; the 2.0.0 server binary is
+@alejoamiras/aztec-accelerator SDK at 5.2.0 (the 2.0.0 server binary is
 already proven in CI via PR-0). Resume = SDK pin bump -> drop the Phase-2 cast -> flip the
 accelerator rows in the residue script -> re-run gates from Phase 1. Ledger: D9.
 
@@ -500,10 +500,16 @@ PR-0**. Original ask texts kept below for context:
 - **D9 — canary red, resolved at the source (owner, 2026-08-26)**: the nested-dual hazard
   materialized in UPSTREAM code (`getVKIndex` `instanceof` across dual copies of
   `noir-protocol-circuits-types`) — unfixable by SDK logic or ours short of bundle dedupe. The
-  owner cut `@alejoamiras/aztec-accelerator@5.2.0` (deps-only) instead, giving a
+  owner cut `@alejoamiras/aztec-accelerator@5.2.0` instead, giving a
   single-generation world. RESULT: cast removed, typecheck green with zero casts, residue gate
   extended to assert single-generation resolution across the whole prover path. **The
   accelerator therefore moves with the line — the plan's original hold on it is void.**
+- **D11 — the SDK bump is NOT deps-only (codex PR-1 audit)**: `@alejoamiras/aztec-accelerator`
+  5.0.1 → 5.2.0 grew 32 files/126KB → 38 files/362KB. Beyond re-pinning its `@aztec` deps it
+  carries the 2.x transport work (HTTPS selection, site authorization, bounded responses). This
+  arc verified the release's PROVENANCE and its dependency pins; it did NOT semantically review
+  that transport diff — the package is first-party (owner-authored), so that review is the
+  owner's, and the min-age exemption rests on provenance + authorship, not on our review.
 - **D10 — min-age exclude (owner, 2026-08-26)**: SDK 5.2.0 published minutes before install and
   tripped the 7-day gate (gate working as designed). ONE dated exclude added to `bunfig.toml`
   (`@alejoamiras/aztec-accelerator`), removable on/after 2026-09-02, justified on first-party

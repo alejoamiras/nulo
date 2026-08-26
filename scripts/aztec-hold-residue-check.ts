@@ -5,9 +5,11 @@
  * from one of those packages through the lock's dependency graph — computed over
  * graph edges, not key prefixes, because bun.lock shortens a nested key to the bare
  * position when only one dependent exists. Runtime resolution must agree: every
- * consumer reaches the workspace line, directly and through each held package
- * (their exact-pinned `@aztec` PEERS re-bind to the provided context, so 5.0.1-built
- * wrapper code executes against workspace-line modules).
+ * consumer reaches the workspace line, directly and through each held package.
+ * A held package's exact-pinned `@aztec` PEER only re-binds to the workspace line when
+ * the consuming workspace DECLARES that package; otherwise it silently nests the old
+ * version (bridge-core hit exactly this with `@aztec/protocol-contracts`), which is why
+ * every peer is checked from every consumer rather than a sample.
  *
  * The accelerator SDK is deliberately NOT held: a single `@aztec` generation in the
  * prover path is load-bearing, because upstream's `getVKIndex` discriminates with
@@ -104,10 +106,11 @@ const CONSUMERS = ["apps/extension", "packages/aztec-runtime", "packages/bridge-
 const checks: Expectation[] = []
 for (const c of CONSUMERS) {
 	checks.push({ consumer: c, spec: "@aztec/stdlib", want: WORKSPACE_LINE })
-	// Exact-pinned PEERS re-bind to the provided (workspace) generation — the verified
-	// hazard mode: older-line wrapper code running on workspace-line modules.
-	checks.push({ consumer: c, via: "@alejoamiras/private-fee-juice", spec: "@aztec/stdlib", want: WORKSPACE_LINE })
-	checks.push({ consumer: c, via: "@alejoamiras/private-fee-juice", spec: "@aztec/aztec.js", want: WORKSPACE_LINE })
+	// Every declared peer, not a sample: a peer left on the old line puts a second generation of
+	// that module in the bundle, which is how nominal `instanceof` checks silently mis-resolve.
+	for (const spec of ["@aztec/stdlib", "@aztec/aztec.js", "@aztec/protocol-contracts"]) {
+		checks.push({ consumer: c, via: "@alejoamiras/private-fee-juice", spec, want: WORKSPACE_LINE })
+	}
 }
 // The prover path must be single-generation end to end (see the header note on getVKIndex).
 for (const c of ["apps/extension", "packages/aztec-runtime"]) {

@@ -36,10 +36,11 @@ existing keys and profiles.
   - Forks repurposing this extension under a different domain MUST
     change BOTH the constant and the manifest entry atomically. There
     is no migration path for WebAuthn credentials.
-- **`SchnorrAccountContractArtifact`** — the upstream Aztec Schnorr account
-  contract; the class id is pinned by the upstream `@aztec/accounts` version.
-  Bumping that dependency changes the class id and orphans existing accounts
-  unless handled via migration.
+- **The Schnorr account artifact** — vendored byte-exact at
+  `packages/aztec-runtime/src/account/artifacts/SchnorrAccount.json` and pinned by digest +
+  class id, precisely so that bumping `@aztec/accounts` (which rebuilds its own copy on any
+  toolchain change) cannot move a derived address. Editing those bytes rotates the address
+  regime and ships only as a new extension major.
 
 Any PR that touches these must include:
 1. Explicit mention of the invariant being changed.
