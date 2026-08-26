@@ -69,12 +69,47 @@ export async function waitForLocalNode(url = LOCAL_NODE_URL, timeoutMs = 60_000)
 }
 
 /** Create an EmbeddedWallet connected to the local node. Returns wallet + cleanup function. */
+/**
+ * Serves Nulo's FROZEN Schnorr artifact wherever upstream would serve its own.
+ *
+ * Upstream rebuilds `@aztec/accounts` artifacts on toolchain changes (5.2.0 moved the
+ * SchnorrAccount class id, and with it every address derived from it), while Nulo's address
+ * regime is pinned to a vendored copy. A script-side account built from the upstream artifact
+ * would land on a different address than the one the extension derives and this fixture funds.
+ * Only the artifact hook differs: upstream's constructor name (`constructor`), args ([x, y])
+ * and salt (ZERO) already match the frozen descriptor.
+ */
+class FrozenArtifactWallet extends EmbeddedWallet {
+	constructor(...[pxe, node, walletDB, accountContracts, log]: ConstructorParameters<typeof EmbeddedWallet>) {
+		const frozen: typeof accountContracts = {
+			...accountContracts,
+			getSchnorrAccountContract: async (signingKey) => {
+				const [{ SchnorrAccountContract }, { FrozenSchnorrAccountArtifact }] = await Promise.all([
+					import("@aztec/accounts/schnorr"),
+					import("@nulo/aztec-runtime/account"),
+				])
+				return new (class extends SchnorrAccountContract {
+					override getContractArtifact() {
+						return Promise.resolve(FrozenSchnorrAccountArtifact)
+					}
+				})(signingKey)
+			},
+			getSchnorrInitializerlessAccountContract: (k) => accountContracts.getSchnorrInitializerlessAccountContract(k),
+			getEcdsaRAccountContract: (k) => accountContracts.getEcdsaRAccountContract(k),
+			getEcdsaKAccountContract: (k) => accountContracts.getEcdsaKAccountContract(k),
+			getStubAccountContractArtifact: (t) => accountContracts.getStubAccountContractArtifact(t),
+			createStubAccount: (a, t) => accountContracts.createStubAccount(a, t),
+		}
+		super(pxe, node, walletDB, frozen, log)
+	}
+}
+
 export async function createTestWallet(url = LOCAL_NODE_URL) {
 	const node = createAztecNodeClient(url)
 	await waitForNode(node)
 
 	const dataDirectory = join(tmpdir(), `nulo-e2e-${randomBytes(8).toString("hex")}`)
-	const wallet = await EmbeddedWallet.create(node, {
+	const wallet = await FrozenArtifactWallet.create(node, {
 		pxe: { dataDirectory, proverEnabled: false },
 	})
 
@@ -510,24 +545,12 @@ export async function setupPreFundedAccount(
 	const expectedAddress = nuloAccountContract.address
 	logger.info(`Expected derived address: ${expectedAddress.toString()}`)
 
-	// Step 2 — Create the script-side account in the wallet's PXE, bound to the FROZEN artifact.
-	// `wallet.createSchnorrAccount` would build against whatever `@aztec/accounts` currently
-	// ships, and upstream rebuilds that artifact on toolchain changes — at 5.2.0 its class id
-	// (and so its address) moved, while Nulo's stays pinned. Subclassing to serve the vendored
-	// artifact is what keeps the deployed account at the address the wallet actually derives;
-	// everything else (ctor name `constructor`, args [x, y], salt ZERO) already matches the
-	// frozen descriptor, so only the artifact hook is overridden.
-	const { SchnorrAccountContract } = await import("@aztec/accounts/schnorr")
-	const { FrozenSchnorrAccountArtifact } = await import("@nulo/aztec-runtime/account")
-	const { AccountManager } = await import("@aztec/aztec.js/wallet")
-	class FrozenSchnorrAccountContract extends SchnorrAccountContract {
-		override getContractArtifact() {
-			return Promise.resolve(FrozenSchnorrAccountArtifact)
-		}
-	}
-	const accountManager = await AccountManager.create(wallet, secretKey, new FrozenSchnorrAccountContract(signingKey), {
-		salt: Fr.ZERO,
-	})
+	// Step 2 — Create the script-side schnorr account in the wallet's PXE.
+	// EmbeddedWallet.createSchnorrAccount(secretKey, salt, signingKey) returns an AccountManager —
+	// called WITHOUT a cast so the compiler checks the argument order against upstream. The
+	// wallet was built with the frozen-artifact provider (see createTestWallet), so this derives
+	// Nulo's pinned address rather than whatever `@aztec/accounts` currently ships.
+	const accountManager = await wallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
 	if (accountManager.address.toString() !== expectedAddress.toString()) {
 		throw new Error(
 			`Address derivation parity broken: NuloAccount=${expectedAddress.toString()} vs createSchnorrAccount=${accountManager.address.toString()}`,
