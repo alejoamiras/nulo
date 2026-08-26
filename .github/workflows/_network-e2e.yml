@@ -303,7 +303,7 @@ jobs:
       # bypassed. Complements Layer 2's in-page hard-fail with server-side evidence.
       # The rollback lever is untouched: disable_accelerator skips this step entirely.
       - name: Assert accelerator activity (enforced)
-        if: ${{ always() && !inputs.disable_accelerator && !inputs.proverless }}
+        if: ${{ always() && !cancelled() && !inputs.disable_accelerator && !inputs.proverless }}
         shell: bash
         run: |
           set -euo pipefail

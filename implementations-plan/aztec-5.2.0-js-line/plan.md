@@ -238,7 +238,8 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
    (machine solo — the suite mass-fails under concurrent load; single re-run for known-flake
    fingerprints only, logged). This is the native-proof gate for the fee flows
    (private-fee-juice boundary) and the passkey canary — capture per-fee-flow `/prove`
-   evidence from the server log (CI's fee shard proves via WASM only).
+   evidence from the server log (CI's fee shard is proverless-STUB post-split — it produces NO
+   real proofs, so this local run is the ONLY real-proof coverage of the fee flows).
 
 **Validation gate** — commands: steps 1–5; pass criteria: all exit 0; verify:deployments rows
 all `[OK]` in BOTH lanes; suite green with fee-flow `/prove` evidence; re-diff verdicts logged
@@ -402,8 +403,9 @@ before the full battery, CI wiring, and docs.
   "Built against Aztec 5.0.1"; SDK bakes `x-aztec-version` from its own package.json; single
   `checkAcceleratorStatus` call site already union-shaped.
 - CI: canary shard = transfers + tx-sendTx-default + frozen-account-canary (accelerator
-  required); fee-methods shard proves via WASM; `/prove` count advisory by design (Layer 2
-  required-mode throw is the hard gate).
+  required); fee-methods + heavy-concurrent shards are proverless STUB post-split (no real
+  proofs — corrected during PR-0 review; the audits' "WASM-proves" premise was stale);
+  `/prove` count now ENFORCED in accelerator-ON lanes (PR-0), advisory nowhere.
 - wallet-sdk 5.0.1→5.2.0: our imported subpaths byte-identical (only `base-wallet/` changed);
   `PXE_DATA_SCHEMA_VERSION = 13` at both; upstream aliases viem to `npm:@aztec/viem@2.38.2` at
   both; canonical addresses: only HandshakeRegistry moved.
