@@ -60,12 +60,13 @@ describe("TokenBalanceService.requestBalanceRefresh — missing-pair contract (c
 describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 	let service: TokenBalanceService
 	let seedRepo: BalanceRepository
+	let api: FakeBrowserApi
 
 	beforeEach(() => {
 		// One FakeBrowserApi shared by the service's internal repo and the test's
 		// seedRepo (same fixed storage key) so the test can seed + assert without
 		// reaching into privates.
-		const api = new FakeBrowserApi()
+		api = new FakeBrowserApi()
 		api.reset()
 		seedRepo = new BalanceRepository(api)
 		service = new TokenBalanceService(new LoggerStore(new ConfigStore()), api)
@@ -104,6 +105,32 @@ describe("TokenBalanceService.onTokenDeleted purge cascade", () => {
 		await invokeDelete(1)
 
 		expect((await seedRepo.getAll()).map((b) => b.id)).toEqual([3])
+	})
+
+	test("a profile switch mid-purge still deletes the rows but suppresses the UI emits", async () => {
+		await seedRepo.set(balance(1, 1))
+		await seedRepo.set(balance(2, 1))
+
+		// Bump the generation from inside the handler's first storage read — the
+		// switch lands between the entry capture and the per-row emits. Deletes
+		// must proceed (idempotent, stranding rows is worse); emits must not.
+		const svc = service as unknown as { profileGeneration: number; emit: (e: string, p: unknown) => void }
+		const realGet = api.storage.local.get.bind(api.storage.local)
+		let bumped = false
+		api.storage.local.get = (async (key: unknown) => {
+			const value = await realGet(key as never)
+			if (!bumped) {
+				bumped = true
+				svc.profileGeneration += 1
+			}
+			return value
+		}) as typeof api.storage.local.get
+		const emit = vi.spyOn(svc, "emit")
+
+		await invokeDelete(1)
+
+		expect(await seedRepo.getAll()).toEqual([])
+		expect(emit.mock.calls.filter(([e]) => e === "onTokenBalanceDeleted")).toHaveLength(0)
 	})
 })
 

@@ -212,11 +212,13 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		return await this.repo.allocateIdAvoiding(this.invalidatedBalanceIds)
 	}
 
-	private async createTokenBalance(token: Token, account: Account, gen?: number) {
+	// `gen` is REQUIRED: an omitted generation would silently disable both fences
+	// below, and the compiler is the caller-auditor that keeps new call sites honest.
+	private async createTokenBalance(token: Token, account: Account, gen: number) {
 		const id = await this.allocateUnfencedId()
 		// A profile switch during allocation makes this write belong to a departed
 		// context — skip it (the id isn't persisted, so it's reused by the next call).
-		if (gen !== undefined && gen !== this.profileGeneration) return
+		if (gen !== this.profileGeneration) return
 		const tb: TokenBalanceRaw = {
 			id,
 			token: token.id,
@@ -228,7 +230,7 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 		await this.repo.set(tb)
 		// A switch during the write must not emit a UI event or enqueue a sync under
 		// the new profile's context.
-		if (gen !== undefined && gen !== this.profileGeneration) return
+		if (gen !== this.profileGeneration) return
 		this.emit("onTokenBalanceAdded", this.getTokenBalanceInfo(tb))
 		this.queue.enqueue(tb)
 	}
@@ -315,11 +317,18 @@ export class TokenBalanceService extends Service<Methods, Events> implements Ser
 	}
 
 	private readonly onTokenDeleted = async (token: TokenInfo) => {
+		// Same generation fence as the sibling handlers, scoped to the EMIT only:
+		// the row deletes are idempotent and must complete regardless of a switch
+		// (stranding rows is worse), but a UI event under the switched-to profile's
+		// context would splice a foreign deletion into its lists.
+		const gen = this.profileGeneration
 		this.tokens.delete(token.id)
 		for (const tb of (await this.repo.getAll()).filter((x) => x.token === token.id)) {
 			this.invalidatedBalanceIds.add(tb.id)
 			await this.repo.delete(tb.id)
-			this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
+			if (gen === this.profileGeneration) {
+				this.emit("onTokenBalanceDeleted", this.getTokenBalanceInfo(tb, token))
+			}
 		}
 	}
 
