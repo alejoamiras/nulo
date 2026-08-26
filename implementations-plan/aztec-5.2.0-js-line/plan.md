@@ -15,7 +15,7 @@ pin; node already runs 5.2.0-nightly. No reset, no redeploys; the only broadcast
 owner-gated sponsored drip canary (Ask 2). If any drift detector fires mid-run, STOP and
 re-gate with the owner per the aztec-update skill — never a silent re-pin.
 
-**Plan baseline**: `origin/dev` @ `21244d4a` (the worktree base — all "zero-diff" gates measure
+**Plan baseline**: recon base `21244d4a`; **PR-1 gate baseline `1727a42f`** (post-PR-0-merge dev — the handoff re-pin; the worktree base — all "zero-diff" gates measure
 against this OID, not the working tree). Companion: [recon.md](recon.md). Audits:
 [audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md). `eli5_mode: artifact`
 (URL recorded in Seeds §).
@@ -88,7 +88,7 @@ a rebased branch.
 with output; `~/.aztec/versions/5.2.0/bin/` present; layers: none (read-only probes). Log:
 `lessons/phase-0.md`.
 
-## Phase 1 — Pins, patches, lockfile, provenance
+## Phase 1 ✓ — Pins, patches, lockfile, provenance
 
 1. Edit exact pins to `5.2.0` in: `apps/extension` (20 names), `apps/faucet` (16),
    `apps/playground` (**8**), `packages/aztec-runtime` (**13**), `packages/bridge-core` (**9**),
@@ -173,8 +173,8 @@ Log: `lessons/phase-1.md`.
 HOLD verdict doesn't waste the largest manual block; fable + codex alignment, D8.)
 
 **Validation gate** — commands: `bun run typecheck:all` && `bun run test:all` && `bun run lint`
-&& the freeze-invariant diff `git diff <BASELINE>...HEAD --stat -- packages/aztec-runtime/src/account/ contracts/`
-(must be EMPTY; `<BASELINE>` = the PR-1 baseline re-pinned after PR-0 merges — see Delivery)
+&& the freeze-invariant diff `git diff 1727a42f...HEAD --stat -- packages/aztec-runtime/src/account/ contracts/`
+(must be EMPTY; `1727a42f` = the PR-1 baseline re-pinned after PR-0 merges — see Delivery)
 && `git status --porcelain packages/aztec-runtime/src/account/ contracts/` (must be empty)
 && `bun scripts/aztec-hold-residue-check.ts`; pass criteria: all exit 0 / empty; boundary
 verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`.
@@ -505,7 +505,7 @@ PR-0**. Original ask texts kept below for context:
   Phases 0–6. Opened ONLY after the Post-implementation loops converge.
 
 **Handoff protocol** (final-pass High 5): PR-1's branch is cut FRESH from dev after PR-0
-merges; at that moment re-pin the plan baseline (`<BASELINE>` := the post-PR-0-merge dev OID —
+merges; at that moment re-pin the plan baseline (`1727a42f` := the post-PR-0-merge dev OID —
 recorded in lessons and used by every freeze-diff gate; the original recon baseline `21244d4a`
 stays the recon reference only). PR-1 must be up-to-date with dev at merge time (re-run CI on a
 rebase if dev moved). **Rollback order is PR-1 first, then PR-0** — reverting PR-0 alone would
@@ -541,7 +541,7 @@ diff from the plan baseline `21244d4a` minus PR-0's merged content, before PR-1 
 4. **Final full re-gate AFTER the loops** (fable C5 + final-pass High 2 — pre-loop runs do NOT
    count): `bun run audit:vue && bun run test:all && bun run lint:actions &&
    bun scripts/aztec-hold-residue-check.ts` plus the freeze diff
-   (`git diff <BASELINE>...HEAD -- packages/aztec-runtime/src/account/ contracts/` empty), plus
+   (`git diff 1727a42f...HEAD -- packages/aztec-runtime/src/account/ contracts/` empty), plus
    a RERUN of the required-mode canary (Phase 3's command) whenever the loop diff touched
    runtime code (docs/comments-only loop diffs may skip it — state which applied), plus any
    phase gate whose surface the loops touched.
