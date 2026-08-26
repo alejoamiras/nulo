@@ -31,16 +31,27 @@ This is a pattern hunt, not a re-audit. The 9 audit-448 batches + earlier fence 
 - **Delegation**: routine verdicts resolved in-session; genuinely disputable SAFE-vs-CONFIRMED calls go through the codex adversarial pass (phase 2 gate). NEEDS-DESIGN findings are documented, not silently fixed or dropped.
 - **/harden**: not scheduled — this sweep IS a targeted hardening pass; a future whole-repo `/harden` remains an owner call.
 
-## Method (from the brief, operationalized)
+## Method (from the brief, operationalized; rev 2 folds the codex plan-gate reject)
 
-1. **Enumerate mechanically** (phase 1): fan out read-only agents over a file census of the scope; every function where a value read from shared state crosses an `await` and then feeds a write, transition, or dispatch is a candidate. Over-inclusion is fine; silent omission is the failure mode. Grep seeds: `getGeneration`, `getOperation`, epoch/generation/fence identifiers, storage-facade writers, EntityStorage mutations after awaits, active-profile/network reads, cache snapshots.
-2. **Triage** (phase 2) with three questions per candidate:
-   - (a) Can the state the snapshot came from change during the await? (deletion, profile/network switch, claim, restore, SW restart, lock/unlock)
-   - (b) Does the write recheck or CAS at commit?
-   - (c) Is an existing fence idiom already guarding it?
-3. **Verdicts**: `SAFE-<reason>` (fenced / under-lock-both-sides / immutable-state / no-mutator-with-search-trail / by-design-last-write-wins with harm ceiling stated) · `CONFIRMED` (constructible interleave with durable or cross-identity harm) · `NEEDS-DESIGN` (racy, but the fix exceeds established idioms — documented finding, not fixed here; precedent: backup-restore-residuals proved some fences are multi-PR epics).
+1. **Enumerate mechanically, TWO passes** (phase 1):
+   - **Pass 1 — intraprocedural**: fan out read-only agents over the 122-file census slices; every function where a value read from shared state crosses an `await` and then feeds a write, transition, or dispatch is a candidate. Sites with visible fences are listed and marked, never dropped.
+   - **Pass 2 — async-boundary lens** (codex net-miss finding): a grep-guided sweep over the whole scope for the variants pass 1's function-local reading under-catches: state captured into REGISTERED closures/listeners that fire later (EventHandler `.add`, `addListener`, ports, alarms, timers); fire-and-forget launches (`void fn(...)`, un-awaited promises, `.then` chains) where the capture and the await live in different functions; aliased mutable objects (captured reference mutated elsewhere; final write doesn't syntactically mention the read); cross-realm/cross-context flows (SW↔offscreen RPC results carrying identity, popup-realm writers to shared storage); event-payload staleness (payload minted pre-switch consumed post-switch — `EventHandler.invoke` does NOT await subscribers, so async subscriber bodies interleave).
+   - **Pass 3 — score-0/1 re-screen**: the census's score-0/1 exclusions are re-verified by a cheap shape-screen (grep for await + subsequent shared-state write per file); any hit is promoted to full enumeration. Known promotions already: `packages/aztec-runtime/src/pxe/client.ts` (`request()` :124-194 — generation capture, provision retry), `apps/extension/src/wallet/services/profile/client.ts` (`subscribeActiveProfile` :138-155 — documented snapshot→subscribe lost-event window). The screen also covers `packages/extension-messaging/src/**` (scope-adjacent transport layer holding cross-context request state — a DOCUMENTED scope addition per the plan audit, reported in the table under its own section).
+   Over-inclusion is fine; silent omission is the failure mode.
+2. **Triage** (phase 2) with the three questions per candidate, each answered against the RIGHT invariant (codex triage-misjudgment finding):
+   - (a) Can the state the snapshot came from change during the await? Consider ALL mutator classes: user-driven deletion/profile/network/account switch, claim/reap, restore/import, SW restart (in-memory state dies; durable state persists; offscreen restarts independently), lock/unlock + session expiry, OTHER REALMS (popup/onboarding write shared storage directly), event-handler reentrancy, watchdog force-release — AND authority expiry: even if the captured state row is unchanged, has the AUTHORIZATION it represents (session, approval, epoch) expired or been revoked?
+   - (b) Does the write recheck or CAS at commit — over the RIGHT field? A CAS on stage is not a CAS on authorization provenance; check ABA, an await between the re-check and the commit, and whether every write branch (success, failure, catch, finally) is covered.
+   - (c) Is an existing fence idiom guarding it — with correct capture ORDER (before the first await), full branch coverage, restart persistence where needed, and fencing of production (the write) rather than only consumption?
+3. **Verdicts with proof obligations** (codex SAFE-taxonomy finding):
+   - `SAFE-fenced`: name the idiom + verify capture order and branch coverage.
+   - `SAFE-under-lock`: the read→write AND every mutator take the SAME lock acquisition; note the watchdog — a >5-min hold forfeits exclusivity (`maxHoldMs` default), so long-hold sections claiming this verdict must address force-release.
+   - `SAFE-immutable`: ALL relevant authority is immutable, not merely the captured object.
+   - `SAFE-no-mutator`: enumerate the mutator classes checked (raw storage writers incl. other realms, events, ports, offscreen, restart recovery) WITH the search trail. This is the highest-risk category — treat a thin trail as unresolved.
+   - `SAFE-lww` (by-design last-write-wins): state the harm ceiling, affected identities/assets, persistence duration — and mark `OWNER-ACK-PENDING` (the PR body lists these for explicit owner acceptance; a SAFE-lww verdict is provisional until then).
+   - `CONFIRMED` (constructible interleave with durable or cross-identity harm) · `NEEDS-DESIGN` (racy, fix exceeds established idioms — documented, not fixed; precedent: backup-restore-residuals) · `KNOWN-DEFERRED` (owner-ratified deferral cited; NEVER relabeled SAFE — precludes an unqualified clean bill).
 4. **Fix policy** (phase 3): nearest established idiom only — capture-at-entry epochs (`captureRestoreEpochs`/`assertRestoreEpoch`), generation fences (`createRunFence`, required `getGeneration`), CAS (`transitionIfStage`), ownership (`requireOwnedRow`, ticketed `Lock`), switch-epoch trackers. Capture must precede the FIRST await it guards (hold points and e2e gates are first-class parks). Every fix ships its discriminating pin IN THE SAME COMMIT, revert-probed red.
-5. **Adversarial framing** everywhere: construct the interleaving; never accept "single-threaded so it's fine". Also never accept "test-only/e2e-only window" as an exemption.
+5. **Adversarial framing** everywhere: construct the interleaving; never accept "single-threaded so it's fine" (single-threaded holds only PER REALM — SW, offscreen, popup are concurrent contexts sharing durable state). Never accept "test-only/e2e-only window" as an exemption.
+6. **Escalation** (risk-based, replacing the pure count rule): the independent max-effort review leg fires when CONFIRMED > 2 **or** any single fix touches a cross-context flow, a shared fence primitive, a trust boundary (restore/dApp dispatch), or has high-harm ceiling.
 
 ## Template-library principles (binding, from the batches' lessons)
 
@@ -72,7 +83,7 @@ This is a pattern hunt, not a re-audit. The 9 audit-448 batches + earlier fence 
 ## Assumptions
 
 **Facts** (verified):
-- Worktree base = origin/dev `4f2833ab` (all 9 audit-448 batches merged: #453–#463 line; index rows 129–143).
+- Worktree cut at origin/dev `4f2833ab`; origin/dev then advanced to `1727a42f` (#470 — CI workflow + aztec-5.2.0-js-line plan docs ONLY, zero scope source files) and was merged into this branch (`c3297ded`). All 9 audit-448 batches merged (index rows 129–143). Rebase policy: re-fetch + delta-assess before the PR opens; re-enumerate only if a delta touches scope files.
 - Gate commands exist at root `package.json`: `audit:vue`, `test`, `test:all`, `lint`, `typecheck:all`, `test:e2e`, `e2e:agent`.
 - Template plans + lessons exist under `implementations-plan/{export-integrity,migration-lifecycle,dapp-profile-binding,lock-ownership,data-safety,shell-identity-fences,service-fences,journal-reaper,runtime-edges,fix-state-fences,fix-account-generation-fence,reimport-pxe-fence}/`.
 - N-20 adjudicated REFUTED with defective proof c5-3 (runbook § adjudication deltas); N-21 latent; N-03's orphan inert; N-10's harm ceiling = transiently stale same-address balance.
@@ -81,11 +92,17 @@ This is a pattern hunt, not a re-audit. The 9 audit-448 batches + earlier fence 
 - Fence implementations themselves (lock.ts, rw-guard.ts, restore-fence.ts, …) are IN the enumeration universe — prior batches found real bugs inside fences (N-11).
 
 **Inferences** (attackable):
-- The census + function-level enumeration net catches the shape (risk: reads laundered through helper calls or object aliasing evade the "local snapshot" pattern-match; mitigation: enumeration instructions include field-reads-off-this, destructured reads, and helper-returned snapshots, and the codex pass is explicitly asked what the net misses).
-- The extension SW's concurrency model is single-threaded JS with interleaving at awaits — races are await-boundary races, not data races. (Matches every prior batch's model.)
-- Score-0/1 census files (pure types/codecs, no shared-state writes) can be excluded from function-level enumeration without silent drops — the census's own grep basis is the audit trail.
+- Pass 1 (intraprocedural) + pass 2 (async-boundary lens) + pass 3 (score re-screen) together catch the shape. The codex plan gate REJECTED the pass-1-only net as intraprocedural; passes 2–3 are the fold. Residual risk: deeply laundered aliasing — mitigated by the phase-2 codex table attack.
+- Interleaving at awaits PER REALM; SW, offscreen, popup/onboarding are concurrent realms sharing durable storage — cross-realm writers are a first-class mutator class in triage.
+- ~~Score-0/1 files cannot hide the shape~~ CORRECTED (codex found two counterexamples: `pxe/client.ts`, `profile/client.ts`): score-0/1 exclusions are re-verified by the pass-3 shape screen; the committed `census.md` carries the per-file trail.
 
-**Asks** — none open. Pre-answered by the brief: tier (light + escalation rule), scope, fix policy (established idioms only), clean-bill deliverable, adversarial codex framing. Standing instructions authorize codex consults and feature-branch pushes; PR is opened at delivery, merge stays with the owner.
+**Asks** — all resolved under the brief's standing authorization; recorded here as decided-with-rationale for owner veto at PR review:
+- *Boundary-package scope*: `packages/extension-messaging/src/**` (cross-context transport state) gets the pass-3 shape screen and its hits a dedicated table section — a DOCUMENTED addition beyond the brief's three dirs, adopted from the plan audit; everything else outside the brief stays out.
+- *Rebase policy*: fold origin/dev before the PR; re-enumerate scope-touching deltas.
+- *SAFE-lww acceptance*: each such verdict is provisional `OWNER-ACK-PENDING`; the PR body lists them for explicit acceptance.
+- *Negative-proof bar*: every SAFE-no-mutator verdict enumerates the mutator classes checked (raw storage/other realms, events, ports, offscreen, restart) with its search trail.
+- *Deferral expiry*: KNOWN-DEFERRED rows cite their ratifying plan; re-audit scheduling stays an owner call (out of sweep scope).
+Pre-answered by the brief: tier + escalation floor, scope dirs, fix policy (established idioms only), clean-bill deliverable, adversarial codex framing. Standing instructions authorize codex consults and feature-branch pushes; PR opened at delivery, merge stays with the owner.
 
 ## Phases & validation gates
 
@@ -94,15 +111,15 @@ Fan out 6 read-only enumeration agents over recon.md §5's slices; each reads EV
 **Gate**: slice-union == the 122-file census set; every slice reports 100% of its files examined (⚠ files re-covered by the parent); candidates.md committed. Commands: none (read-only phase) — gate is the coverage cross-check recorded in candidates.md. Layers: n/a.
 
 ### Phase 2 — triage + adversarial pass
-Parent reads each candidate site in the code and issues verdicts per the three questions; produce `triage.md` (the full table). Known-deferred D13 residuals triage as KNOWN-DEFERRED citing backup-restore-residuals (never re-flagged as new, never silently fixed). Parent also skims the census carve-outs (`wallet/{config,logger,base}/`, `syncedRef.js`) to confirm the documented absences. Then a codex `xhigh` adversarial pass over the table + diff-less code refs: attack SAFE verdicts, confirm/refute CONFIRMED interleavings, flag net-misses.
+Parent reads each candidate site in the code and issues verdicts per the three questions (v2 checklist in §Method). The table is PRE-SEEDED with every recon §4 prior-fenced site and both D13 residual rows — "if encountered" listing is not enough (codex exclusion finding); prior-fenced rows verify capture order + branch coverage rather than assuming. KNOWN-DEFERRED rows cite backup-restore-residuals (never re-flagged as new, never silently fixed, never relabeled SAFE — a clean bill is explicitly QUALIFIED by them). A new bug in a previously-fenced file is suppressed only if it IS the exact ratified residual; adjacent races (incl. allocator races near refuted N-20) triage normally. Parent carve-out skim results (`wallet/{config,logger,base}/`, `syncedRef.js`) enter the table as parent-slice rows. Then the candidate manifest + SAFE rows are FROZEN and independently attacked: a codex `xhigh` adversarial pass over the full table + code refs — attack SAFE verdicts, confirm/refute CONFIRMED interleavings, flag net-misses — before any fix edits begin (reviewing only a fix diff cannot find omissions).
 **Gate**: table row count == consolidated candidate count (no silent drops); every CONFIRMED row has a written interleave scenario; codex pass completed with its challenges resolved (adopted or rebutted in the table). Commands: none (analysis phase). Layers: n/a.
 
 ### Phase 3 — fixes + discriminating pins (skipped if zero CONFIRMED)
 Per CONFIRMED site: nearest-idiom fix + colocated pin in the SAME commit; revert-probe each pin (strip fence → pin red → restore → green) and log the probe in `lessons/phase-3.md`.
-**Gate**: `bun run lint` + `bun run typecheck:all` + `bun run test:all` exit 0; every pin's revert-probe logged red/green. Layers: typecheck/lint · unit.
+**Gate** (targeted — the full battery runs ONCE in phase 4): `bun run lint` + `bun run typecheck:all` exit 0; the touched packages' test suites green via targeted vitest/bun-test runs (each named in lessons). Layers: typecheck/lint · unit (targeted).
 
 ### Phase 4 — full battery + delivery prep
-**Gate**: `bun run audit:vue` exit 0 (typecheck ∥ unit+component ∥ lint, then build). If any popup/UI file changed: `bun run test:e2e` green. If any dApp/network/PXE behavior changed: `bun run e2e:agent` green, run SOLO (no concurrent suites/audits on this host; flake → re-run once before triaging). Layers: all applicable.
+**Gate**: `bun run audit:vue` exit 0 (typecheck ∥ extension unit+component ∥ lint, then build) AND `bun run test:all` exit 0 (all workspace packages' suites — covers wallet-core/aztec-runtime units audit:vue doesn't run). If any popup/UI file changed: `bun run test:e2e` green. If any dApp/network/PXE behavior changed: `bun run e2e:agent` green, run SOLO (no concurrent suites/audits on this host; flake → re-run once before triaging). Layers: all applicable.
 
 ## Post-implementation (self-contained — the implementing session executes THIS section)
 
@@ -111,7 +128,7 @@ Per CONFIRMED site: nearest-idiom fix + colocated pin in the SAME commit; revert
    - No-over-engineering: "Report bugs and small, targeted improvements only. Do not propose speculative abstractions, extra configuration surface, new layers, or rewrites — the smallest change that fixes each real problem. If code works and is clear, leave it alone."
    - Comment-quality: "Audit the comments for value per character. Flag any comment that narrates what the code visibly does, restates its line, references implementation plans / phases / reviews, or spends a paragraph where a sentence works — and flag places where a non-obvious invariant or constraint deserves a comment it doesn't have. Comments are permanent context every future reader, human or LLM, pays to re-read: they must be few, dense, and exact."
 3. **Iterative fix loop**: verify codex's factual claims against the repo first; apply accepted fixes; commit; log consult + verdict in `lessons/`; RESUME the same codex session with the fix diff; repeat until a round yields no new material findings (>3 material rounds → stop and surface).
-4. **Escalation leg** (only if CONFIRMED > 2): an independent max-effort Claude review of the diff (own revert-probes), findings folded before the codex loop closes.
+4. **Escalation leg** (risk-based — §Method 6): fires when CONFIRMED > 2 OR any fix touches a cross-context flow, shared fence primitive, trust boundary, or high-harm ceiling: an independent max-effort Claude review of the diff (own revert-probes), findings folded before the codex loop closes.
 5. **Delivery**: FIRST PR now — `gh pr create` to dev, conventional title ≤93 chars (budget for ` (#NN)`), body = triage summary + fix list. `gh pr checks --watch`; flake → re-run, breakage → fix; NEVER weaken/neutralize a gate; plain merge only when the owner says so (no `--admin`, no autonomous merge).
 6. Update `implementations-plan/index.md` (add this plan's row); `agent-worktree status` at each gate; suggest `agent-worktree done capture-await-write-sweep` after merge.
 
