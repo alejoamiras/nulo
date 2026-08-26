@@ -179,7 +179,13 @@ HOLD verdict doesn't waste the largest manual block; fable + codex alignment, D8
 && `bun scripts/aztec-hold-residue-check.ts`; pass criteria: all exit 0 / empty; boundary
 verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`.
 
-## Phase 3 — Fail-fast checkpoint: first build + prover-ON canary
+## Phase 3 ⏸ — Fail-fast checkpoint: RED → PAUSED on owner action (2026-08-26)
+
+Canary red at the first proving tx: upstream getVKIndex instanceof fails across the bundle's
+dual stdlib generations (full triage: lessons/phase-3.md). Owner decision: cut the
+@alejoamiras/aztec-accelerator SDK at 5.2.0 (deps-only release; the 2.0.0 server binary is
+already proven in CI via PR-0). Resume = SDK pin bump -> drop the Phase-2 cast -> flip the
+accelerator rows in the residue script -> re-run gates from Phase 1. Ledger: D9.
 
 Runs BEFORE the full battery (codex H2): the two go/no-go unknowns (prover boundary at runtime;
 bb pairing) get answered at the earliest buildable moment.
@@ -489,6 +495,10 @@ PR-0**. Original ask texts kept below for context:
 - **D8 — Canary-first ordering** (codex H2 + fable): the prover-ON canary is Phase 3,
   immediately after first buildable state; the ~16-file copied-logic re-diff moved AFTER it
   (Phase 4 step 1) so a HOLD wastes no manual work; full battery, CI wiring, docs follow.
+- **D9 — canary red, resolved at the source (owner, 2026-08-26)**: the nested-dual hazard
+  materialized in UPSTREAM code (VK-index instanceof across dual copies) — unfixable by SDK
+  logic or our code short of bundle dedupe; owner chose to cut the SDK 5.2.0 release instead
+  (single-generation world). The Phase-2 cast becomes removable on resume.
 - **Rejected audit items** (with reasons, see audit-codex.md): removing the
   `NULO_E2E_DISABLE_ACCELERATOR` kill-switch (documented owner rollback lever; policy change →
   Ask 5 offers the narrower hardening); adding a CI-native PrivateFPC canary job in this bump
