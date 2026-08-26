@@ -48,8 +48,9 @@ misbehaves, it reds on a line already known-good, and reverting it is one tiny P
    compute `expected_sha256` of the **extracted binary** (`tar -xzO accelerator-server |
    shasum -a 256`).
 3. Edit `.github/workflows/_network-e2e.yml`: `version: "2.0.0"` + the new `expected_sha256`
-   (+ any start-flag/env adaptations step 1 mandates; explicit loopback bind flag). If Ask 5 is
-   approved, the fail-on-zero-`/prove` enforcement lands HERE too. `bun run lint:actions`.
+   (+ any start-flag/env adaptations step 1 mandates; explicit loopback bind flag). **Ask 5 is
+   APPROVED: the fail-on-zero-`/prove` enforcement lands HERE** (canary lane only; the
+   kill-switch keeps working for manual/non-required lanes). `bun run lint:actions`.
 4. Local pre-flight on the OLD line: start the 2.0.0 binary on `127.0.0.1:59833`, build with
    `VITE_NULO_ACCELERATOR_REQUIRED=1`, run
    `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts`, assert ≥1
@@ -431,7 +432,10 @@ before the full battery, CI wiring, and docs.
 - The live node (a rotating `5.2.0-nightly.*` build) accepts stable-5.2.0 clients — inferred
   from rollupVersion equality (the actual invariant), not observed against the stable release.
 
-**Asks** (owner decisions, surfaced at the approval gate):
+**Asks** — ALL RESOLVED at the approval gate (owner, 2026-08-26): plan **APPROVED**; Ask 1
+leave the testnet map as-is; Ask 2 skip the drip canary; Ask 3 drop-on-mismatch confirmed;
+Ask 4 hold-on-red confirmed; **Ask 5 APPROVED — the fail-on-zero-`/prove` hardening ships in
+PR-0**. Original ask texts kept below for context:
 1. Testnet FPC `compatibleNodeVersions`: append `"5.2.0"` (mirrors the 2026-07-27 mainnet
    ruling) or leave? Default: leave — deploy-time-only script, and it exact-matches full
    version strings so it is red against the rotating nightly string today regardless.
@@ -567,8 +571,9 @@ boundary. Owner can schedule separately.
   stale-criterion cleanup). Consolidation judged "architecturally coherent"; D7 "defensible
   once its handoff and rollback rules are corrected" (now corrected). Round 2 recorded in
   [audit-codex.md](audit-codex.md).
+- **OWNER: APPROVED** (2026-08-26) with all five Asks resolved (see Assumptions § Asks).
 
-## Seeds (DRAFT — finalized after approval)
+## Seeds (FINAL — approved scope, 2026-08-26)
 
 ELI5 companion: published Artifact at
 `https://claude.ai/code/artifact/8ffef5f5-6bd3-4851-8f4e-1e86e2676d23` (source:

@@ -198,18 +198,17 @@
   </ul>
 
   <div class="approval">
-    <h2 style="margin-top:0">Approval needed from you</h2>
-    <ul>
-      <li>Confirm scope: JS line to 5.2.0; contracts/standards/accelerator/addresses held. Two PRs.</li>
-      <li>Confirm the validation depth: full local network suite + native-proving canary + CI suites.</li>
-      <li>Answer (or accept the defaults for) open questions 1–5 above.</li>
-      <li>Then: <strong>approve</strong>, <strong>conditionally approve</strong> (with conditions), or <strong>reject</strong> (with blockers).</li>
-    </ul>
+    <h2 style="margin-top:0">Status: APPROVED ✓</h2>
+    <p>Approved by the owner on 2026-08-26 with every open question resolved:
+    <strong>1</strong> leave the version list as-is · <strong>2</strong> skip the live drip test ·
+    <strong>3</strong> drop a mismatched prover seed · <strong>4</strong> a real red canary halts
+    the upgrade · <strong>5</strong> the CI hardening is approved and ships in the first PR.
+    The seeds below are final.</p>
   </div>
 
-  <h2>Implementation seeds</h2>
-  <p class="muted">Draft until you approve — finalized against the approved scope. Run inside the
-  plan's worktree (<code>agent-worktree resume aztec-5.2.0-js-line</code>).</p>
+  <h2>Implementation seeds — FINAL</h2>
+  <p class="muted">Finalized against the approved scope. Run inside the plan's worktree
+  (<code>agent-worktree resume aztec-5.2.0-js-line</code>).</p>
   <p class="warn">Use exactly ONE per session — they don't compose; setting one replaces the other.</p>
 
   <div class="seedcard rec">
