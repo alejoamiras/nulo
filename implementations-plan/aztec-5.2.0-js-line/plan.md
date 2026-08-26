@@ -149,7 +149,7 @@ above, `bun install --frozen-lockfile`; pass criteria: all exit 0, zero un-allow
 entries, peer warnings dispositioned, provenance transcribed; layers: install + one unit file.
 Log: `lessons/phase-1.md`.
 
-## Phase 2 — API churn, typecheck, unit suites (the freeze invariant)
+## Phase 2 ✓ — API churn, typecheck, unit suites (the freeze invariant)
 
 1. `bun run typecheck:all` — fix churn mechanically and behavior-preserving; wrap upstream
    renames inside our service layer (PxeService precedent) so our RPC surfaces don't ripple.

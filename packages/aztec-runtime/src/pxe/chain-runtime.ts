@@ -3,7 +3,7 @@ import { createPXE, type PXE } from "@aztec/pxe/client/bundle"
 import { createLogger } from "@aztec/foundation/log"
 import type { AztecSQLiteOPFSStore } from "@aztec/kv-store/sqlite-opfs"
 import { WASMSimulator } from "@aztec/simulator/client"
-import type { AztecNode } from "@aztec/stdlib/interfaces/client"
+import type { AztecNode, PrivateKernelProver } from "@aztec/stdlib/interfaces/client"
 import { AcceleratorProver, type AcceleratorPhase } from "@alejoamiras/aztec-accelerator"
 import { AztecNodeFactoryAdapter } from "../adapters/aztec-node-factory-adapter"
 import type { NodeFactory } from "../ports/node-factory-port"
@@ -245,7 +245,18 @@ export class ProductionPxeFactory implements PxeFactory {
 			}
 		}
 
-		const pxe = await createPXE(node, config, { proverOrOptions: prover, simulator, store })
+		// The accelerator SDK compiles against its own exact-pinned @aztec/stdlib, so its
+		// PrivateKernelProver carries that copy's nominally-branded classes; the two
+		// generations' private_kernel_prover.d.ts and private_kernel_prover_output are
+		// byte-identical, PXE accepts the prover by duck-typing (isPrivateKernelProver),
+		// and the boundary serializes to msgpack — the cast bridges TS's
+		// cross-declaration private-brand rule, nothing more. Re-verify the byte-diff on
+		// any bump that moves either side.
+		const pxe = await createPXE(node, config, {
+			proverOrOptions: prover as unknown as PrivateKernelProver,
+			simulator,
+			store,
+		})
 		return new ChainRuntime(network.chainId, node, pxe, network.rpcUrl, store)
 	}
 }
