@@ -35,3 +35,7 @@ APPROVE, diff ready for PR: "Both provenance paths are now non-vacuously pinned 
 ## Battery round 1 — audit:vue red: the KNOWN bb.js-under-jsdom family
 
 `nulo-account.test.ts` passed standalone (aztec-runtime node env) but crashed the extension AGGREGATE lane (`BBApiException: std::bad_cast` in poseidon2 — `NuloAccount.new` derives keys). This is the DOCUMENTED limitation with an established convention: every aztec-runtime suite touching live poseidon2 is excluded from `apps/extension/vitest.config.ts`'s aggregate include and runs in the package's own node-env suite via `test:all` (which IS the CI unit gate — `_unit-tests.yml` runs `bun run test:all`, so the pins still gate PRs). Joined the family with the standard comment. **Lesson: when adding a package test that constructs real Aztec account machinery, check the aggregate's exclude list FIRST — the `std::bad_cast` family is pre-triaged; standalone-green ≠ aggregate-green.**
+
+## Battery rounds 2-3 — GREEN end-to-end
+
+Round 2: audit ✓ (with the aggregate exclusion), armed build ✓, smoke RED once — the exact `stopServiceWorker: target still alive 15s` CDP fingerprint (documented runner flake; diff touches no SW-kill path). Round 3 (resume): smoke ✓ on re-run, solo network e2e ✓ (71 files / 100 tests). Monitor gotcha fixed en route: a Monitor's `pgrep -f` liveness check self-matches its own command line — pattern must be bracket-escaped (`[b]9-battery.sh`) or process death never fires.
