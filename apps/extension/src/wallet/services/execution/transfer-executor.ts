@@ -21,6 +21,7 @@ import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { TxExecutionRequest } from "@aztec/stdlib/tx"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { IAccountContract } from "@nulo/aztec-runtime/account"
 import { formatFeeJuice } from "@/utils/fee-estimation"
@@ -146,6 +147,7 @@ export class TransferExecutor {
 			let network: Network
 			let nonce: { toString(): string }
 			let feePaymentMethod: AccountFeePaymentMethodOptions
+			let initializesAccount: boolean | undefined
 			// Activity-feed inputs — captured separately from the FPC-mutated
 			// `buildAndEstimate` txCalls so the persisted record stays just
 			// the user-intent transfer (no `pay_fee` / `fee_entrypoint_*`
@@ -165,6 +167,8 @@ export class TransferExecutor {
 			if (reused) {
 				this.deps.logDebug(`executeTransfer: reusing precomputed estimate ${precomputedEstimateId}`)
 				txRequest = reused.txRequest
+				// The entry retains the exact build — its provenance rides along.
+				initializesAccount = reused.initializesAccount
 				nonce = reused.nonce
 				feePaymentMethod = reused.feePaymentMethod
 				activityToken = reused.token
@@ -182,6 +186,7 @@ export class TransferExecutor {
 				activityArgs = args
 
 				const built = await this.deps.buildAndEstimate(op, op.feeSettings, transferTask)
+				initializesAccount = built.initializesAccount
 				txRequest = built.txRequest
 				node = built.node
 				pxe = built.pxe
@@ -201,6 +206,7 @@ export class TransferExecutor {
 				pxe,
 				node,
 				txRequest,
+				initializesAccount,
 				scopes: [account.address],
 				parentTask: transferTask,
 				checkCancelled,
@@ -246,7 +252,13 @@ export class TransferExecutor {
 			// Journal already in `cancelled` (cancelJob did it); convert the
 			// internal sentinel to the structured RPC-boundary error here.
 			maybeRethrowAsRpcCancel(error, transferTask)
-			await markJournal({ stage: "failed" }, normalizeError(error, "transfer"))
+			// A classified initialization race keeps its own kind on the transfer
+			// path too — the flag was threaded here precisely so a first-tx popup
+			// transfer classifies the same as a dApp send.
+			await markJournal(
+				{ stage: "failed" },
+				normalizeError(error, error instanceof DuplicateInitializationError ? "duplicate_initialization" : "transfer"),
+			)
 			transferTask.fail(error)
 			throw error
 		} finally {
@@ -267,7 +279,13 @@ export class TransferExecutor {
 		const { op, token, fn, args } = await this.deps.planner.buildTransferOperation(req)
 		checkCancelled()
 
-		const { txRequest, network, nonce, feePaymentMethod } = await this.deps.buildAndEstimate(op, op.feeSettings, undefined, signal)
+		const {
+			txRequest,
+			network,
+			nonce,
+			feePaymentMethod,
+			initializesAccount: builtInitializes,
+		} = await this.deps.buildAndEstimate(op, op.feeSettings, undefined, signal)
 		checkCancelled()
 
 		const maxFeeRaw = BigInt(getEstimatedFee(txRequest))
@@ -310,6 +328,7 @@ export class TransferExecutor {
 						primaryEndpointUrl: primary.rpcUrl,
 						pendingHashes,
 						txRequest,
+						initializesAccount: builtInitializes,
 						nonce,
 						feePaymentMethod,
 						token: { contract: token.contract, name: token.name, symbol: token.symbol, decimals: token.decimals },

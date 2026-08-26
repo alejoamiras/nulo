@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest"
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, JobCancelledError, TooManyPendingError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { classifyOperationCatch, maybeRethrowAsRpcCancel } from "./rpc-cancel"
 
@@ -50,8 +50,25 @@ describe("classifyOperationCatch", () => {
 		const task = { cancel: vi.fn(), fail: vi.fn() }
 		const err = new Error("network unreachable")
 		const result = classifyOperationCatch(err, task, errorMessage)
-		expect(result).toEqual({ status: "failed", error: "network unreachable" })
+		expect(result).toEqual({ status: "failed", error: "network unreachable", code: undefined })
 		expect(task.fail).toHaveBeenCalledWith(err)
 		expect(task.cancel).not.toHaveBeenCalled()
+	})
+
+	test("(N-15) DuplicateInitializationError rides the code channel", () => {
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new DuplicateInitializationError(), task, errorMessage)
+		expect(result.status).toBe("failed")
+		expect((result as { code?: string }).code).toBe("DUPLICATE_INITIALIZATION")
+	})
+
+	test("(N-15) OTHER WalletError subclasses do NOT ride the code channel (unsound reconstruction guard)", () => {
+		// TooManyPendingError deliberately reconstructs as base WalletError and
+		// detail-dependent classes lose details through the message-only
+		// channel — a blanket pass-through would silently corrupt them.
+		const task = { cancel: vi.fn(), fail: vi.fn() }
+		const result = classifyOperationCatch(new TooManyPendingError(), task, errorMessage)
+		expect(result.status).toBe("failed")
+		expect((result as { code?: string }).code).toBeUndefined()
 	})
 })

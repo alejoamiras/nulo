@@ -89,6 +89,11 @@ export interface BuiltStandardTx {
 	 *  finalize-time clamp reads THIS, never a live refetch (zero extra RPCs,
 	 *  and no chance of clamping against a flipped endpoint). */
 	txsLimits: Gas
+	/** True iff this build wrapped the account constructor (first-tx
+	 *  multicall). Send-path provenance for the existing-nullifier
+	 *  classification — the flag lives here because `TxExecutionRequest`
+	 *  itself cannot carry it. */
+	initializesAccount: boolean
 }
 
 /** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
@@ -357,6 +362,7 @@ export class TxRequestBuilder {
 			}
 
 			const payload = new ExecutionPayload(calls, authwits, capsules, extraHashedArgs)
+			const buildMeta: { initializesAccount?: boolean } = {}
 			const txRequest = await account.buildTxExecutionRequest(
 				node,
 				pxe,
@@ -368,11 +374,13 @@ export class TxRequestBuilder {
 				},
 				chainInfoFrom(nodeInfo),
 				gasSettings,
+				buildMeta,
 			)
 
 			task.complete()
 			return {
 				txRequest,
+				initializesAccount: buildMeta.initializesAccount === true,
 				node,
 				pxe,
 				account,
@@ -503,7 +511,10 @@ export class TxRequestBuilder {
 
 			task.complete()
 			// NO_FROM emits no add_public_authwit, so there is nothing to record.
+			// A NO_FROM build never wraps an account ctor (it targets a contract
+			// entrypoint directly), so it can never lose an initialization race.
 			return {
+				initializesAccount: false,
 				txRequest,
 				node,
 				pxe,

@@ -1,0 +1,45 @@
+# Phase 1 — implementation + review arc
+
+## Max review — REQUEST-CHANGES ×5, all adopted (commit 527b08ce)
+
+1. **MAJOR (empirically proven): the dApp-facing envelope branch was DEAD CODE.** I registered `DuplicateInitializationError` in `toWalletResponseError` — but the production chain flattens executor failures to `{ status: "failed", error: string }` (`classifyOperationCatch`) and the dispatcher re-materializes a bare `new Error(string)`, so the `instanceof` branch could never fire; and the error wasn't in `walletErrorFromPayload`'s switch, so class identity also died at genuine RPC hops. Fix (the reviewer's cancelled-status-precedent shape): `FailedOperationResult` gains `code?`, `classifyOperationCatch` stamps it for `WalletError`s, `unwrapOperationResult` re-materializes via `walletErrorFromPayload`, the payload union + switch gain the case, and a composition pin drives the three REAL functions end-to-end (probed red with the code ride-along stripped). **Lesson: registering an error type at the boundary is worthless without tracing the actual value path to that boundary — mine crossed two data-flattening hops; the reviewer found it by composing the real functions, which is exactly what the pin now does.**
+2. AggregateError folded only NAMES into its message while the boot log prints message/stack only — and with retry vetoed for the SW lifetime, that log line is the entire post-mortem. Root-cause messages now folded in.
+3. The regex's `duplicate (siloed )?nullifier` alternation: source-verified, the only SEND-time text it can match is "Duplicate nullifier in tx" — an intra-tx malformed-tx error, NO race — while the simulation texts it was written for never reach the send catch. Narrowed to `/existing nullifier/i`. **Lesson: when codex hands you candidate match strings ("optionally cover the simulation strings"), verify each string is REACHABLE at your chosen seam before matching it — an unreachable alternation's only effect is false positives.**
+4. The transfer path threaded the flag but kept the `transfer` journal kind — same failure, two kinds. The instanceof→kind pick now applied at both catch sites.
+5. My "relationship pin" was a tautology (`2T+60s > 2T`); deleted with a comment — the consumer pin (observing the value WindowManager receives) is the real discriminator, and the claimed "both pins red" probe result was half false (the reviewer re-probed).
+
+Verified clean by the review: provenance threading complete (all four contexts, both reuse branches undefined, no stale-true path), the N-28 settle-before-throw semantics + all callers, no other 5-min assumptions, comment/TSDoc conventions.
+
+## Codex final-diff round 1 — CHANGES ×3, all adopted
+
+1. **My "reused estimates → undefined provenance" rule was wrong**: the reuse caches retain the EXACT built request, so the flag rides the entry (REQUIRED field, stash + restore, consume pin). I'd reasoned "the stash persists only request fields" — but the stash is MINE to extend; treating its shape as fixed made the normal estimate→confirm path bypass the entire fix. **Lesson: before declaring provenance "unavailable" on a path, check whether the path's own data structure is in this diff's power to extend.**
+2. **My wire generalization was unsound**: stamping `code` for EVERY WalletError collided with deliberate reconstruction policy (TooManyPending → base WalletError per an existing pin) and dropped `details` for detail-dependent classes. Narrowed to exactly DuplicateInitializationError. **Lesson: a "correct generalization" of an error channel needs the full subclass matrix — when the ask is one type, ship one type.**
+3. The provenance assignments themselves were unpinned (coordinator tests inject `true` manually; stripping nulo-account's assignments stayed green) — new real-account pins in aztec-runtime (node env runs the actual derivation; node/entrypoint stubbed at the instance seam), probed red. Plus the journal-state UI mapping I'd missed ("Account already initialized — retry after sync") with its pin.
+
+Also this round: the battery's smoke red was the KNOWN cold-boot flake — at 15 s now (the deflake default engaged) but racing my own codex xhigh process on the host. Re-run policy: keep MY OWN concurrent work off the host during smoke too, not just network.
+
+## Codex plan-gate lessons already in phase-0; this phase's addendum
+
+- The biome 2.5.9 line rejects unformatted code as ERRORS while the legacy warnings stay warnings — a `bun run lint` exit 1 with untouched-file warnings means MY files have a format error hiding among them; `grep "Formatter would have printed" -B6` finds it fast.
+- Commit subjects near 100 chars: check `git log` after committing (the hook rejects silently, leaving files staged) — bitten twice this pipeline.
+
+## Codex final-diff round 2 — CHANGES ×2, both adopted
+
+1. **The reuse-hit restore assignments were unpinned at the executor level.** fr1's entry-shape pins (`transfer-estimate-reuse.test.ts` consume pin) proved the CACHE retains the flag, but nothing proved the EXECUTORS hand it onward: stripping `initializesAccount = reused.initializesAccount` in either executor stayed green. Extended the existing reuse-path tests to seed entries with `initializesAccount: true` and assert the `proveAndSend` ctx receives it (plus the stash-site `toMatchObject`s now include the flag). Both strips probed red. **Lesson: a data-retention pin at the cache layer does not cover the hand-off at the consumer layer — pin where the value is USED, not only where it is stored.**
+2. **The narrowed wire channel had no negative pin.** Restoring the unsound blanket `WalletError` pass-through (fr1 finding 2) would have stayed green — nothing asserted other WalletError subclasses DON'T ride `code`. Added the TooManyPendingError classification pin (`code === undefined`) with the reconstruction-policy rationale, plus a positive DuplicateInitializationError pin, and narrowed the `FailedOperationResult.code` TSDoc from "typed error" to the one ratified type. **Lesson: when a review narrows a mechanism, pin the EXCLUSION too — otherwise the rejected generalization can silently return.**
+
+## Codex final-diff round 3 — SIGN-OFF
+
+APPROVE, diff ready for PR: "Both provenance paths are now non-vacuously pinned through the actual proveAndSend context. The positive/negative classifier tests correctly red any blanket WalletError pass-through, and the narrowed TSDoc matches runtime policy. No overshoot." Arc closed: plan gate ×5 → max review ×5 → fd CHANGES ×3 → fr2 CHANGES ×2 → fr3 APPROVE.
+
+## Battery round 1 — audit:vue red: the KNOWN bb.js-under-jsdom family
+
+`nulo-account.test.ts` passed standalone (aztec-runtime node env) but crashed the extension AGGREGATE lane (`BBApiException: std::bad_cast` in poseidon2 — `NuloAccount.new` derives keys). This is the DOCUMENTED limitation with an established convention: every aztec-runtime suite touching live poseidon2 is excluded from `apps/extension/vitest.config.ts`'s aggregate include and runs in the package's own node-env suite via `test:all` (which IS the CI unit gate — `_unit-tests.yml` runs `bun run test:all`, so the pins still gate PRs). Joined the family with the standard comment. **Lesson: when adding a package test that constructs real Aztec account machinery, check the aggregate's exclude list FIRST — the `std::bad_cast` family is pre-triaged; standalone-green ≠ aggregate-green.**
+
+## Battery rounds 2-3 — GREEN end-to-end
+
+Round 2: audit ✓ (with the aggregate exclusion), armed build ✓, smoke RED once — the exact `stopServiceWorker: target still alive 15s` CDP fingerprint (documented runner flake; diff touches no SW-kill path). Round 3 (resume): smoke ✓ on re-run, solo network e2e ✓ (71 files / 100 tests). Monitor gotcha fixed en route: a Monitor's `pgrep -f` liveness check self-matches its own command line — pattern must be bracket-escaped (`[b]9-battery.sh`) or process death never fires.
+
+## Codex post-sign-off ratification
+
+The one non-docs commit after the fr3 APPROVE (`4c2b4146`, the aggregate jsdom exclusion) was sent back for explicit ratification before merge. Verdict: **RATIFIED** — "the exclusion follows established jsdom/WASM policy while `test:all` preserves node-environment CI coverage."

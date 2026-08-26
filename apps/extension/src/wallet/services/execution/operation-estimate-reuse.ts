@@ -69,6 +69,10 @@ export type OperationEstimateReuseEntry = {
 	readonly fpcIdentity?: FpcIdentitySnapshot
 	/** Built downstream state — reused on confirm. Live handles excluded. */
 	readonly txRequest: TxExecutionRequest
+	/** Provenance travels WITH the cached request: the entry retains the
+	 *  exact build, so the confirm leg classifies an existing-nullifier
+	 *  rejection with the same fidelity as a fresh build. */
+	readonly initializesAccount: boolean
 	readonly nonce: { toString(): string }
 	readonly feePaymentMethod: AccountFeePaymentMethodOptions
 	readonly txCalls: BuiltStandardTx["txCalls"]

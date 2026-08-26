@@ -8,6 +8,14 @@ export type OkOperationResult<T> = {
 export type FailedOperationResult = {
 	status: "failed"
 	error: string
+	/** `DuplicateInitializationError.CODE` when the executor threw that ONE
+	 *  typed error (the sole failure whose dApp discrimination is a ratified
+	 *  contract, and whose reconstruction is lossless message-only). The
+	 *  result crosses process boundaries as data, so the class identity is
+	 *  carried here and re-materialized at unwrap — a blanket WalletError
+	 *  pass-through is deliberately NOT done (detail-dependent classes and
+	 *  base-reconstruction policies would corrupt). */
+	code?: string
 }
 
 /**

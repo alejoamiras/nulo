@@ -23,6 +23,7 @@ import {
 	RpcDisconnectedError,
 	RpcTimeoutError,
 	TooManyPendingError,
+	DuplicateInitializationError,
 } from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
 
@@ -88,6 +89,17 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			code: -32005,
 			message: error.message,
 			data: { walletErrorCode: TooManyPendingError.CODE },
+		}
+	}
+	if (error instanceof DuplicateInitializationError) {
+		// The account's first transaction lost the initialization race (another
+		// device or a lagging node). Transient from the dApp's perspective —
+		// retry succeeds once the network syncs. -32603 + discriminator so a
+		// dApp can retry without treating it as a permanent send failure.
+		return {
+			code: -32603,
+			message: error.message,
+			data: { walletErrorCode: DuplicateInitializationError.CODE },
 		}
 	}
 	return error instanceof Error ? error.message : String(error)

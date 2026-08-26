@@ -30,6 +30,7 @@ const FPC_SNAPSHOT = { id: "fpc-1", type: 2, address: "0xfpc", chainId: 7, isPro
 function makeEntry(overrides: Partial<OperationEstimateReuseEntry> = {}): OperationEstimateReuseEntry {
 	return {
 		fingerprint: fingerprintOperation(makeInput())!,
+		initializesAccount: false,
 		accountAddress: "0xacc",
 		networkId: "net-1",
 		feeSettings: makeInput().feeSettings,

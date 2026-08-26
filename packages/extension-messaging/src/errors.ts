@@ -173,6 +173,25 @@ export class TooManyPendingError extends WalletError {
 	}
 }
 
+/**
+ * A first (account-initializing) transaction lost the initialization race:
+ * the node rejected it with an existing-nullifier error while the wallet
+ * KNOWS it wrapped the account constructor (another device, or a re-send
+ * against a node that lagged behind the earlier init). Classification is
+ * provenance-gated — a bare existing-nullifier rejection on a
+ * NON-initializing tx is an ordinary double-spend and must stay generic.
+ */
+export class DuplicateInitializationError extends WalletError {
+	public static readonly CODE = "DUPLICATE_INITIALIZATION"
+
+	public constructor(
+		message = "Another first transaction initialized this account — wait for network sync, then retry.",
+		details?: unknown,
+	) {
+		super(DuplicateInitializationError.CODE, message, details, "DuplicateInitializationError")
+	}
+}
+
 /** Request payload failed validation at the RPC boundary. */
 export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
@@ -286,6 +305,7 @@ type KnownWalletErrorPayload =
 	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
 	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
+	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -323,6 +343,8 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new ProfileIdConflictError(known.message, known.details)
 		case DuplicateWalletError.CODE:
 			return new DuplicateWalletError(known.message, known.details)
+		case DuplicateInitializationError.CODE:
+			return new DuplicateInitializationError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

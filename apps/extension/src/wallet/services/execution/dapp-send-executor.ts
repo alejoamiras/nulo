@@ -363,6 +363,7 @@ export class DappSendExecutor {
 				pendingHashes: this.deps.getPendingForAccount(operation.accountAddress).map((tx) => tx.hash),
 				fpcIdentity,
 				txRequest: built.txRequest,
+				initializesAccount: built.initializesAccount,
 				nonce: built.nonce,
 				feePaymentMethod: built.feePaymentMethod,
 				txCalls: built.txCalls,
@@ -421,13 +422,24 @@ export class DappSendExecutor {
 				await markJournal({ stage: "simulating" })
 				checkCancelled()
 
-				const { txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-					await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
+				const {
+					txRequest,
+					node,
+					pxe,
+					account,
+					network,
+					nonce,
+					txCalls,
+					feePaymentMethod,
+					pendingPublicAuthwits,
+					initializesAccount,
+				} = await this.deps.buildAndEstimateValidated(op, op.feeSettings, parentTask)
 
 				const { txHash } = await this.deps.coordinator.proveAndSend({
 					pxe,
 					node,
 					txRequest,
+					initializesAccount,
 					scopes: [account.address],
 					parentTask,
 					checkCancelled,
@@ -546,6 +558,7 @@ export class DappSendExecutor {
 				let txCalls: FeeEstimate["txCalls"]
 				let feePaymentMethod: FeeEstimate["feePaymentMethod"]
 				let pendingPublicAuthwits: FeeEstimate["pendingPublicAuthwits"]
+				let initializesAccount: boolean | undefined
 
 				if (reused) {
 					this.deps.logDebug(`[executeAztecSendTx] reusing precomputed estimate ${estimateId}`)
@@ -558,6 +571,8 @@ export class DappSendExecutor {
 					if (!profile) throw new Error("Wallet locked")
 					account = await this.deps.getAccountContract(profile.id, network.chainId, op.accountAddress)
 					txRequest = reused.txRequest
+					// The entry retains the exact build — its provenance rides along.
+					initializesAccount = reused.initializesAccount
 					nonce = reused.nonce
 					txCalls = reused.txCalls
 					feePaymentMethod = reused.feePaymentMethod
@@ -567,8 +582,18 @@ export class DappSendExecutor {
 					// fee calls conflict with the discovery simulation's dummy fee
 					// method. Probe-free validated pipeline, as always.
 					checkCancelled()
-					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } =
-						await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask))
+					;({
+						txRequest,
+						node,
+						pxe,
+						account,
+						network,
+						nonce,
+						txCalls,
+						feePaymentMethod,
+						pendingPublicAuthwits,
+						initializesAccount,
+					} = await this.deps.buildAndEstimateValidated({ ...op, actions, fee }, op.feeSettings, parentTask))
 				} else {
 					const { built, discoveredActions } = await this.deps.estimateWithDiscovery.estimate(
 						op,
@@ -583,7 +608,18 @@ export class DappSendExecutor {
 						)
 					}
 					checkCancelled()
-					;({ txRequest, node, pxe, account, network, nonce, txCalls, feePaymentMethod, pendingPublicAuthwits } = built)
+					;({
+						txRequest,
+						node,
+						pxe,
+						account,
+						network,
+						nonce,
+						txCalls,
+						feePaymentMethod,
+						pendingPublicAuthwits,
+						initializesAccount,
+					} = built)
 				}
 
 				const sendAdditionalScopes = Array.isArray(op.opts.additionalScopes) ? op.opts.additionalScopes : []
@@ -591,6 +627,7 @@ export class DappSendExecutor {
 					pxe,
 					node,
 					txRequest,
+					initializesAccount,
 					scopes: [account.address, ...sendAdditionalScopes],
 					parentTask,
 					checkCancelled,

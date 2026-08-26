@@ -41,6 +41,7 @@ const PRIMARY_ENDPOINT = { id: "ep-1", rpcUrl: "http://localhost:8080" }
 function makeEntry(overrides: Partial<TransferEstimateReuseEntry> = {}): TransferEstimateReuseEntry {
 	return {
 		networkId: INPUTS.networkId,
+		initializesAccount: false,
 		accountAddress: INPUTS.accountAddress,
 		tokenId: INPUTS.tokenId,
 		transferType: INPUTS.transferType,
@@ -225,5 +226,14 @@ describe("stash: opportunistic TTL sweep", () => {
 		expect(await reuse.tryConsume("est-stale", INPUTS)).toBeUndefined()
 		expect(await reuse.tryConsume("est-1", INPUTS)).toBeDefined()
 		expect(await reuse.tryConsume("est-2", INPUTS)).toBeDefined()
+	})
+
+	test("(N-15) a consumed entry carries the build's initializesAccount provenance verbatim", async () => {
+		// The entry retains the EXACT build, so the confirm leg's classification
+		// must see the same provenance a fresh build would — a cache hit that
+		// dropped the flag would silently downgrade a real init race to generic.
+		const { reuse } = makeReuse({ entry: { initializesAccount: true } })
+		const consumed = await reuse.tryConsume("est-1", INPUTS)
+		expect(consumed?.initializesAccount).toBe(true)
 	})
 })

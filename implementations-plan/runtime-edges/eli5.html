@@ -1,0 +1,23 @@
+<title>Runtime Edges</title>
+<style>
+:root { --bg: #f6f7f9; --ink: #17191d; --accent: #4a5a7d; --dim: #666c78; --card: #eaedf2; }
+body { background: var(--bg); color: var(--ink); font-family: Georgia, serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.6; }
+h1 { font-size: 1.6rem; } h2 { font-size: 1.15rem; color: var(--accent); margin-top: 1.6rem; }
+.card { background: var(--card); border-left: 3px solid var(--accent); padding: .7rem 1rem; margin: .8rem 0; }
+code { font-family: ui-monospace, monospace; font-size: .92em; }
+small { color: var(--dim); }
+</style>
+<h1>Runtime edges (batch 9 — the final batch)</h1>
+<p>Three small, sharp edges in the wallet's runtime, each fixed minimally per the adjudication:</p>
+
+<h2>1 · An honest error for a rare first-transaction race (N-15)</h2>
+<div class="card">Your very first transaction from an account also "initializes" it on-chain. If two devices race, or a lagging node hasn't seen the initialization yet, the losing transaction fails with a completely generic error. Now: when the wallet KNOWS it attempted an initializing transaction and the network answers "that nullifier already exists", it says what actually happened — "another first transaction initialized this account; wait for network sync, then retry" — with its own typed error and journal category. Deliberately NOT added: a pre-flight double-check against the node (that exact pattern caused an offline-boot hang once before and is documented as rejected).</div>
+
+<h2>2 · A passkey window that outlives the ceremony (N-21)</h2>
+<div class="card">Some authenticators need two rounds of "touch your key" (up to 3 minutes each), but the popup window enforced a hard 5-minute ceiling — it could slam shut under the user's finger at minute five of a legitimate 6-minute ceremony. The ceiling is now derived from the ceremony math (2 legs + 1 minute of slack = 7 minutes). This path has no production caller yet — the fix is future-proofing, per the audit's own re-weighting.</div>
+
+<h2>3 · A cleaner failure when the wallet's services boot (N-28)</h2>
+<div class="card">Services start in dependency waves. If one failed, the wave aborted instantly: still-starting siblings ran on unobserved, and the error named only the first failure. Now the wave always finishes settling before failing, and the error names EVERY failed service. Deliberately unchanged: already-started services stay live (a full rollback mechanism would be a redesign; the existing boot-cutoff guard covers the worst symptom).</div>
+
+<h2>Paper trail</h2>
+<p><small>Plan: <a href="plan.md">plan.md</a> · recon: <a href="recon.md">recon.md</a> · lessons: <a href="./lessons/phase-0-planning.md">phase-0-planning.md</a>. Codex gate: APPROVE-WITH-CHANGES ×5, all adopted — including two factual corrections (mined receipts carry no error data; my unhandled-rejection premise was wrong) sourced from the installed Aztec 5.0.1 code.</small></p>

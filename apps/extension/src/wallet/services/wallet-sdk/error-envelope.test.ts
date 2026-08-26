@@ -7,6 +7,9 @@ import {
 	RpcTimeoutError,
 	TooManyPendingError,
 } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
+import { unwrapOperationResult } from "@nulo/wallet-bridge"
+import { classifyOperationCatch } from "@/wallet/services/execution/rpc-cancel"
 import { toWalletResponseError } from "./error-envelope"
 
 describe("toWalletResponseError", () => {
@@ -102,5 +105,47 @@ describe("toWalletResponseError", () => {
 	test("non-Error throw → String() fallback", () => {
 		expect(toWalletResponseError("nope")).toBe("nope")
 		expect(toWalletResponseError(42)).toBe("42")
+	})
+})
+
+describe("duplicate-initialization envelope reachability (N-15)", () => {
+	test("the typed error survives the REAL production chain: classify → unwrap → envelope", async () => {
+		// The executor's catch flattens results to data; without the `code`
+		// ride-along + unwrap re-materialization, the envelope's typed branch
+		// is dead code (the max review proved the pre-fix chain delivers a
+		// bare string). This composes the three real functions end-to-end.
+		const task = { cancel: () => {}, fail: () => {} }
+		const result = classifyOperationCatch(new DuplicateInitializationError(), task, (e) => (e instanceof Error ? e.message : String(e)))
+		expect(result.status).toBe("failed")
+		const thrown = (() => {
+			try {
+				unwrapOperationResult(result as never)
+				return undefined
+			} catch (e) {
+				return e
+			}
+		})()
+		expect(thrown).toBeInstanceOf(DuplicateInitializationError)
+		const envelope = toWalletResponseError(thrown)
+		expect(envelope).toMatchObject({
+			code: -32603,
+			data: { walletErrorCode: "DUPLICATE_INITIALIZATION" },
+		})
+		expect((envelope as { message: string }).message).toMatch(/wait for network sync, then retry/)
+	})
+
+	test("an untyped failure still flattens to the string fall-through (no code, no envelope object)", () => {
+		const task = { cancel: () => {}, fail: () => {} }
+		const result = classifyOperationCatch(new Error("plain boom"), task, (e) => (e instanceof Error ? e.message : String(e)))
+		const thrown = (() => {
+			try {
+				unwrapOperationResult(result as never)
+				return undefined
+			} catch (e) {
+				return e
+			}
+		})()
+		expect(thrown).not.toBeInstanceOf(DuplicateInitializationError)
+		expect(toWalletResponseError(thrown)).toBe("plain boom")
 	})
 })

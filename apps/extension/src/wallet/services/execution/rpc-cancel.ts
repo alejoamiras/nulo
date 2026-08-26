@@ -34,7 +34,7 @@
  * wrong-toast UX bug.
  */
 
-import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { DuplicateInitializationError, JobCancelledError } from "@nulo/extension-messaging/errors"
 import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 
 /** Minimal task surface needed for the cancel conversion. Avoids importing
@@ -62,7 +62,9 @@ export function maybeRethrowAsRpcCancel(error: unknown, task: Pick<CancellableTa
  * Returns the OperationResult variant for the caller to push into its
  * results array. The caller still owns logging.
  */
-export type CancelOrFailResult = { status: "cancelled"; jobId?: string; reason: "user" } | { status: "failed"; error: string }
+export type CancelOrFailResult =
+	| { status: "cancelled"; jobId?: string; reason: "user" }
+	| { status: "failed"; error: string; code?: string }
 
 export function classifyOperationCatch(error: unknown, task: CancellableTask, errorMessage: (e: unknown) => string): CancelOrFailResult {
 	if (error instanceof JobCancelledSentinel) {
@@ -70,5 +72,15 @@ export function classifyOperationCatch(error: unknown, task: CancellableTask, er
 		return { status: "cancelled", jobId: error.jobId, reason: "user" }
 	}
 	task.fail(error)
-	return { status: "failed", error: errorMessage(error) }
+	// ONLY DuplicateInitializationError rides the code channel: it is the one
+	// executor failure whose dApp discrimination is a ratified contract, and
+	// its reconstruction is lossless (message-only). A blanket WalletError
+	// pass-through would be unsound — e.g. TooManyPendingError deliberately
+	// reconstructs as base WalletError, and detail-dependent classes lose
+	// their details through this message-only channel.
+	return {
+		status: "failed",
+		error: errorMessage(error),
+		code: error instanceof DuplicateInitializationError ? error.code : undefined,
+	}
 }

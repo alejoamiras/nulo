@@ -85,6 +85,7 @@ function makeHarness(
 	const pxe = { simulateTx: vi.fn(async () => ({ privateExecutionResult: {} })) }
 	const built = {
 		txRequest: makeTxRequest(),
+		initializesAccount: true,
 		node,
 		pxe,
 		account,
@@ -747,6 +748,9 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 			accountAddress: "0xacct",
 			primaryEndpointId: "ep1",
 			pendingHashes: [],
+			// (N-15) the stash persists the BUILD's provenance (harness build =
+			// true) — a hardcoded false would strip estimate→confirm classification.
+			initializesAccount: true,
 			// Post-send bookkeeping rides the entry — the reuse-hit tail needs both.
 			txCalls: built.txCalls,
 			pendingPublicAuthwits: built.pendingPublicAuthwits,
@@ -794,12 +798,13 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		const pendingPublicAuthwits = [{ account: "0xacct", hash: "0xph", content: { kind: "message_hash", messageHash: "0xm" } }]
 		const entry = {
 			txRequest: makeTxRequest(),
+			initializesAccount: true,
 			nonce: { toString: () => "77" },
 			feePaymentMethod: AccountFeePaymentMethodOptions.EXTERNAL,
 			txCalls: [{ contract: "0xc", method: "reused_method", args: [] }],
 			pendingPublicAuthwits,
 		}
-		const { executor, deps, authwit } = makeHarness({
+		const { executor, deps, authwit, proveAndSend } = makeHarness({
 			operationEstimateReuse: { tryConsume: vi.fn(async () => entry), stash: vi.fn(), evict: vi.fn() } as never,
 		})
 
@@ -816,6 +821,10 @@ describe("DappSendExecutor estimate→confirm reuse (aztec_sendTx)", () => {
 		const txArgs = (deps.addTransaction as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
 		expect(txArgs[4]).toBe("77")
 		expect(txArgs[5]).toBe(AccountFeePaymentMethodOptions.EXTERNAL)
+		// (N-15) the cached build's provenance reaches the send context — a
+		// dropped executor assignment would classify a real init race generic.
+		const reuseCtx = (proveAndSend.mock.calls[0] as unknown[])[0] as { initializesAccount?: boolean }
+		expect(reuseCtx.initializesAccount).toBe(true)
 	})
 
 	test("consume miss (forged/stale/drifted id) falls back to the FULL pipeline (fj ⇒ folded)", async () => {

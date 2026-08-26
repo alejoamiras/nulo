@@ -170,6 +170,7 @@ async function makeHarness() {
 	}
 	const entry: TransferEstimateReuseEntry = {
 		networkId: req.networkId,
+		initializesAccount: false,
 		accountAddress: req.accountAddress,
 		tokenId: req.tokenId,
 		transferType: req.transferType,

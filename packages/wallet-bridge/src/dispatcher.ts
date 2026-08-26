@@ -91,7 +91,7 @@ import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-chec
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
-import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type {
@@ -149,6 +149,11 @@ export function unwrapOperationResult(result: OperationResult): unknown {
 		case "cancelled":
 			throw new JobCancelledError(undefined, { jobId: result.jobId })
 		case "failed":
+			// A typed executor failure crosses the boundary as { error, code };
+			// re-materialize the WalletError so the wallet-sdk error envelope's
+			// instanceof discrimination works — throwing a bare Error here is
+			// exactly what made the envelope's typed branches dead code.
+			if (result.code) throw walletErrorFromPayload({ code: result.code, message: result.error })
 			throw new Error(result.error)
 		case "skipped":
 			throw new Error("Operation was skipped")

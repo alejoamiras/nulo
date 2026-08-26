@@ -132,6 +132,11 @@ describe("journalTerminalDisplay — Failed state (catch-all + per-kind subtitle
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Transaction failed")
 	})
 
+	test("(N-15) error.kind === 'duplicate_initialization' → the honest init-race subtitle", () => {
+		const op = recordWith({ error: { kind: "duplicate_initialization", message: "...", normalizedRaw: null } })
+		expect(journalTerminalDisplay(op)?.subtitle).toBe("Account already initialized — retry after sync")
+	})
+
 	test("error.kind === 'transfer' (executeTransfer catch-all) → generic 'Transaction failed'", () => {
 		const op = recordWith({ kind: "transfer", error: { kind: "transfer", message: "...", normalizedRaw: null } })
 		expect(journalTerminalDisplay(op)?.subtitle).toBe("Transaction failed")
