@@ -102,20 +102,37 @@ const versionAt = (p: string): string => {
 }
 
 type Expectation = { consumer: string; via?: string; spec: string; want: string }
-const CONSUMERS = ["apps/extension", "packages/aztec-runtime", "packages/bridge-core"]
 const checks: Expectation[] = []
-for (const c of CONSUMERS) {
-	checks.push({ consumer: c, spec: "@aztec/stdlib", want: WORKSPACE_LINE })
-	// Every declared peer, not a sample: a peer left on the old line puts a second generation of
-	// that module in the bundle, which is how nominal `instanceof` checks silently mis-resolve.
-	for (const spec of ["@aztec/stdlib", "@aztec/aztec.js", "@aztec/protocol-contracts"]) {
-		checks.push({ consumer: c, via: "@alejoamiras/private-fee-juice", spec, want: WORKSPACE_LINE })
-	}
+
+/** `@aztec/*` names a package declares under the given manifest field, from the lock. */
+const aztecDepsOf = (pkg: string, field: "dependencies" | "peerDependencies"): string[] => {
+	const entry = Object.values(lock.packages).find((e) => nameOf(e[0]) === pkg)
+	return Object.keys(entry?.[2]?.[field] ?? {}).filter((n) => n.startsWith("@aztec/"))
 }
-// The prover path must be single-generation end to end (see the header note on getVKIndex).
-for (const c of ["apps/extension", "packages/aztec-runtime"]) {
-	for (const spec of ["@aztec/stdlib", "@aztec/bb-prover", "@aztec/noir-protocol-circuits-types"]) {
-		checks.push({ consumer: c, via: SINGLE_GENERATION_ROOTS[0], spec, want: WORKSPACE_LINE })
+
+// Consumers and specs are DERIVED, never hard-coded: a new workspace that pulls a held package,
+// or a new peer added upstream, must be covered automatically or the gate is fail-open.
+for (const [ws, meta] of Object.entries(lock.workspaces)) {
+	if (!ws) continue
+	const declared = { ...meta.dependencies, ...meta.devDependencies }
+	// Probe what this workspace actually declares: under the isolated linker an undeclared
+	// package resolves out of the worktree entirely, which is a phantom dep, not a version fact.
+	for (const spec of Object.keys(declared).filter((n) => n.startsWith("@aztec/") && n !== "@aztec/viem")) {
+		checks.push({ consumer: ws, spec, want: WORKSPACE_LINE })
+	}
+	for (const held of HELD_ROOTS) {
+		if (!declared[held]) continue
+		// A held package's exact-pinned peers only rebind when this workspace declares them.
+		for (const spec of aztecDepsOf(held, "peerDependencies")) {
+			checks.push({ consumer: ws, via: held, spec, want: WORKSPACE_LINE })
+		}
+	}
+	for (const single of SINGLE_GENERATION_ROOTS) {
+		if (!declared[single]) continue
+		// The prover path must be single-generation end to end (see the header note on getVKIndex).
+		for (const spec of aztecDepsOf(single, "dependencies")) {
+			checks.push({ consumer: ws, via: single, spec, want: WORKSPACE_LINE })
+		}
 	}
 }
 

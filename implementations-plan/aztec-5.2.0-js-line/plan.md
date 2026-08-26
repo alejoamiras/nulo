@@ -482,12 +482,17 @@ PR-0**. Original ask texts kept below for context:
   The seed is a footgun, not an optimization. Unseeded download tax: 8.1MB, <1s. The
   runtime-downloaded bb is unpinned (accepted residual, noted in Security). Bump-PR Phase 5.1
   is a no-op; Phase 3/4 local servers run UNSEEDED for CI fidelity.
-- **D4 — Patches**: dual-key; 5.2.0 patches GENERATED against installed packages (bun patch
-  flow), never blind-copied; drop the 5.2.0 key iff upstream fixed exports; never drop the
-  5.0.1 key while the accelerator nests those versions.
-- **D5 — Residue policy**: reachability allowlist (three held packages) replaces zero-residue;
-  executable check in Phase 1.
-- **D6 — Excludes**: none added; per-name owner disposition if the gate fires.
+- **D4 — Patches**: patches GENERATED against installed packages (bun patch flow), never
+  blind-copied; upstream did NOT fix the exports maps at 5.2.0, so both are still required.
+  FINAL STATE: the `@5.0.1` keys remain only because the held packages' closures still carry
+  those versions — the accelerator no longer nests anything (D9).
+- **D5 — Residue policy**: reachability allowlist replaces zero-residue, encoded in
+  `scripts/aztec-hold-residue-check.ts`. FINAL STATE: TWO held roots
+  (`@alejoamiras/private-fee-juice`, `@aztec-foundation/aztec-standards`) — the accelerator
+  moved with the line (D9). The gate derives its consumers and specs from the lockfile rather
+  than hard-coding them, so a new workspace or a new upstream peer is covered automatically.
+- **D6 — Excludes**: per-name owner disposition when the gate fires. FINAL STATE: exactly ONE
+  exclude is active (`@alejoamiras/aztec-accelerator`, D10) with a dated removal follow-up.
 - **D7 — Two-PR delivery** (adopted from codex H2; DISPUTED by fable, which endorsed
   single-PR as "one logical one-revert unit"): kept two-PR — the binary bump is provable on the
   known-good line, independently revertable, and its 2.0.0 behavior changes are exactly the
@@ -528,7 +533,7 @@ PR-0**. Original ask texts kept below for context:
 
 - **PR-0**: `chore(ci): bump accelerator-server to 2.0.0 (sha-pinned, headless flags)` —
   Phase A only. Opened after its own quality loop; merged (owner) on green required checks.
-- **PR-1**: `chore(deps): bump @aztec js line to 5.2.0 (noir, standards, accelerator held)` —
+- **PR-1**: `chore(deps): bump @aztec js line to 5.2.0 (noir + standards + fee-juice held)` —
   Phases 0–6. Opened ONLY after the Post-implementation loops converge.
 
 **Handoff protocol** (final-pass High 5): PR-1's branch is cut FRESH from dev after PR-0
