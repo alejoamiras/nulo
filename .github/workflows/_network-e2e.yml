@@ -158,7 +158,7 @@ jobs:
           # v2.0.0 headless server. bb is DECOUPLED from the Aztec line: fetched on first
           # /prove per the SDK-requested version (x-aztec-version header) and cached in
           # ~/.aztec-accelerator/versions/, so accelerator releases track accelerator code
-          # changes only — never @aztec bumps. BB_BINARY_PATH below bypasses that download.
+          # changes only — never @aztec bumps.
           version: "2.0.0"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's
@@ -192,21 +192,12 @@ jobs:
           ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
-          # BB_BINARY_PATH is defined INSIDE the script, not in `env:`, because
-          # YAML env values are NOT shell-expanded by GitHub Actions — a literal
-          # `$HOME` would have been passed verbatim. Set + export here so the
-          # nohup subshell inherits it. Skip the server's first-prove
-          # bb-download tax by handing it the pre-installed binary from
-          # setup-aztec. The per-arch native ELF is the right target, not the
-          # Node-wrapped .bin/bb shim.
-          export BB_BINARY_PATH="$HOME/.aztec/current/node_modules/@aztec/bb.js/build/amd64-linux/bb"
-          if [ ! -x "$BB_BINARY_PATH" ]; then
-            echo "::error::BB_BINARY_PATH=$BB_BINARY_PATH not executable. setup-aztec layout may have shifted."
-            ls -la "$HOME/.aztec/" || true
-            ls -la "$HOME/.aztec/current/" 2>/dev/null || true
-            find "$HOME/.aztec" -name bb -type f 2>/dev/null | head -10 || true
-            exit 1
-          fi
+          # No BB_BINARY_PATH pre-seed: 2.0.0 registers a seeded binary under the
+          # literal version "unknown" (upstream #352) and matches SDK-requested
+          # versions EXACTLY, so a seed can never serve a versioned /prove — the
+          # server downloads the requested bb regardless (observed: seeded 5.0.1
+          # binary present, "Version not cached ... will download version=5.0.1",
+          # 8.1MB, <1s). The first-prove download tax is real but negligible.
           nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
           echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
 

@@ -31,7 +31,7 @@ local network suite green prover-ON including the fee flows; snappy step resolve
 docs updated; both PRs squash-merged into dev with `e2e:network` + `e2e:smoke` labels and all
 three required checks green.
 
-## Phase A — PR-0: accelerator-server 2.0.0 (against the CURRENT 5.0.1 line)
+## Phase A ✓ — PR-0: accelerator-server 2.0.0 (against the CURRENT 5.0.1 line)
 
 Isolates the binary variable from the version bump (adopted from codex audit H2): if 2.0.0
 misbehaves, it reds on a line already known-good, and reverting it is one tiny PR.
@@ -63,7 +63,7 @@ scoped to its small diff) → open PR-0 (labels `e2e:network` + `e2e:smoke`) →
 green (its CI canary proves 2.0.0 under CI conditions) → owner merges → PR-1 work continues on
 a rebased branch.
 
-## Phase 0 — Pre-flight probes for the bump (no repo edits)
+## Phase 0 ✓ — Pre-flight probes for the bump (no repo edits)
 
 1. **Snappy probe**: fresh 5.2.0 toolchain install into a scratch `HOME`
    (`curl -fsSL https://install.aztec.network/5.2.0/install | VERSION=5.2.0 bash`), then
@@ -246,10 +246,9 @@ per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lesson
 
 ## Phase 5 — Remaining CI wiring
 
-1. `BB_BINARY_PATH` pre-seed in `_network-e2e.yml` per Phase 3 evidence (D3): if the 2.0.0
-   server keys bb by the SDK-requested 5.0.1 and the 5.2.0-toolchain seed is ignored or
-   mismatched, DROP the pre-seed (first-prove download tax accepted) — never leave a
-   silently-wrong seed. If kept, note the served-bb evidence in the workflow comment.
+1. `BB_BINARY_PATH`: RESOLVED in Phase A / PR-0 (D3 — dropped with logged evidence). Nothing
+   to do here; verify only that Phase 3's canary log shows the expected
+   `Requested Aztec version version=5.0.1` + download/prove lines post-bump.
 2. `.github/actions/setup-aztec/action.yml`: remove the snappy pin step iff Phase 0 proved the
    5.2.0 install load-clean; otherwise keep + refresh comment.
 3. `bun run lint:actions`. (Ask 5's fail-on-zero-`/prove` hardening, if approved, ships in
@@ -465,8 +464,10 @@ PR-0**. Original ask texts kept below for context:
   C3), each permitted ONLY after a structural diff of the relevant declarations shows identity
   (codex H1); any SDK-typing error OUTSIDE that file ⇒ stop. Rejected: SDK `5.0.1-revision.1`
   (no benefit), holding the whole line.
-- **D3 — CI bb seed**: decided by Phase 3 canary log evidence; default drop-on-mismatch; the
-  runtime-downloaded bb is unpinned (accepted residual, noted in Security).
+- **D3 — CI bb seed**: **DECIDED (Phase A, earlier than planned)** — DROPPED, in PR-0. Evidence:
+  a seeded 5.0.1 bb registers as version "unknown" (upstream #352) and version matching is
+  exact, so the server downloaded bb-5.0.1 anyway (8.1MB, <1s). The runtime-downloaded bb is
+  unpinned (accepted residual, noted in Security). Bump-PR Phase 5.1 is a no-op.
 - **D4 — Patches**: dual-key; 5.2.0 patches GENERATED against installed packages (bun patch
   flow), never blind-copied; drop the 5.2.0 key iff upstream fixed exports; never drop the
   5.0.1 key while the accelerator nests those versions.
