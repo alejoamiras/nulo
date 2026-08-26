@@ -39,3 +39,7 @@ APPROVE, diff ready for PR: "Both provenance paths are now non-vacuously pinned 
 ## Battery rounds 2-3 — GREEN end-to-end
 
 Round 2: audit ✓ (with the aggregate exclusion), armed build ✓, smoke RED once — the exact `stopServiceWorker: target still alive 15s` CDP fingerprint (documented runner flake; diff touches no SW-kill path). Round 3 (resume): smoke ✓ on re-run, solo network e2e ✓ (71 files / 100 tests). Monitor gotcha fixed en route: a Monitor's `pgrep -f` liveness check self-matches its own command line — pattern must be bracket-escaped (`[b]9-battery.sh`) or process death never fires.
+
+## Codex post-sign-off ratification
+
+The one non-docs commit after the fr3 APPROVE (`4c2b4146`, the aggregate jsdom exclusion) was sent back for explicit ratification before merge. Verdict: **RATIFIED** — "the exclusion follows established jsdom/WASM policy while `test:all` preserves node-environment CI coverage."
