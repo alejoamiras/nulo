@@ -52,3 +52,32 @@ Owner decision needed — this is product behavior, not a test bug:
    drive the Continue button — only if the cause is genuinely upstream and unavoidable.
 3. Hold the bump.
 Do NOT simply raise the account-state deadline or relax the tests to green the gate.
+
+### Diagnosis so far (local repro, 2 runs)
+
+Reproduced locally with `NULO_E2E_PROVERLESS=1 bun run e2e:agent
+tests/e2e/network/backup-restore-integrity.test.ts` — same failure as CI, so it is deterministic
+and not host contention.
+
+The Continue gate is driven by `restoreErrorLog`, and `collectRestoreErrors`
+(`utils/full-backup-helpers.ts:159`) builds entries for **`account-state`** from per-item
+`restoreError`s — i.e. `AccountStateService.restore`'s `pxeService.registerSender` /
+`registerContract` calls are throwing for at least one item. That matches the trajectory's
+`restoring:account-state` hint.
+
+**Strong candidate — the 5.1.0 canonical HandshakeRegistry re-pin** (dossier §13; upstream
+"registry moves to a new address; handshakes established with the previous registry instance are
+not visible to the new one"). The SW log trail from the failing import registers the SAME
+contract under TWO class ids in one restore:
+- `HandshakeRegistry ... 0x2e04c07c83ee8107e921c3ae4ade010ee183860a89b7534ea3367efb561d2c3b`
+- `HandshakeRegistry ... 0x020ec1998d06036ddab4ba170e9b0d9b96e52beb58aa5ea83d72b22f589cbe6c`
+
+Not yet nailed: the actual `restoreError` string. It never reaches the DOM (the UI only gates on
+it), and the SW log ring (80 entries) is flooded by PXE contract-class registrations before the
+post-finalize account-state leg runs. Getting it needs one of: a bigger/filtered ring at that
+moment, a temporary log line in the account-state catch, or a probe that reads the restore RPC
+result directly — a source change, so it waits for the owner.
+
+Test-infra improvement kept: `importFullBackup`'s timeout diagnostic now appends the SW log
+trail (filtered to restore/import/account-state/register/error). "IMPORT DEGRADED" with no
+reason is a weak diagnostic; this is how the two class ids surfaced at all.
