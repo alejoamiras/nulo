@@ -129,6 +129,15 @@ Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, n
 
 ## Gotchas (hard-won)
 
+- **Sweep version literals across the WHOLE workspace, not just the app.** Test fixtures pin the
+  expected `@aztec` version in places a per-app grep misses — `apps/extension/scripts/
+  layout-identity.test.ts` AND `packages/resolve-asset/src/index.test.ts` both hardcode it, and
+  the second one only surfaced in CI. Run `rg -l '<old-version>' --glob '!node_modules'
+  --glob '!bun.lock'` from the repo root and classify every hit.
+- **`test:all` passes only when its EXIT CODE is 0.** Counting `Exited with code 0` lines is not
+  a pass signal — failing packages hide behind passing ones. Check `rc=$?` and grep for
+  `Exited with code [1-9]`/`FAIL ` explicitly.
+
 - **One `@aztec` generation in the bundle, always.** Upstream's `getVKIndex`
   (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`, so two
   copies of that module make it treat the VK object as its own hash and abort with
