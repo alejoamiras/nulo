@@ -14,10 +14,13 @@ the CONSUMER's — post-bump 5.2.0 — modules at runtime); `@aztec-foundation/a
 modes, two of which execute 5.0.1-compiled wrapper code against 5.2.0 modules.
 **ADOPTED**: plan's Architecture section rewritten as a three-mode boundary inventory; Phase 2
 verifies each mode; Phase 4 requires prover-ON fee-flow evidence (see C1b nuance).
-*Nuance corrected*: CI's `fee-methods` shard is real-WASM-proved (its own comment: "4 real
-fee-juice TX flows requiring full WASM proving"), not proof-free — the gap is NATIVE proving,
-which the local full-suite prover-ON run (already in scope) closes; a CI-native fee canary is
-surfaced as an optional follow-up, not silently added.
+*Nuance — corrected TWICE*: this triage first claimed the `fee-methods` shard is
+"real-WASM-proved", citing a stale in-workflow comment. PR-0's code-review pass established the
+truth from `pr-network-e2e.yml` inputs: fee-methods and heavy-concurrent run
+**`proverless: true` (STUB — no real proofs at all)** post-split. Codex's original "this
+fund-sensitive boundary never receives a real proof [in CI]" was therefore RIGHT. The
+mitigation stands and gains weight: the Phase 4 local required-mode full-suite run is the ONLY
+real-proof fee-flow coverage; the optional CI-native fee lane remains a surfaced follow-up.
 
 **C2 — canary bypassable via `NULO_E2E_DISABLE_ACCELERATOR`; `/prove` count advisory; D3's
 server-downloaded bb unpinned.** All verified (`_network-e2e.yml` "Advisory only" comment;
@@ -78,8 +81,9 @@ removed; seeds enumerate every phase header explicitly.
   rollback for the accelerator lane; changing required-gate semantics is an owner policy call —
   surfaced (Ask 5), not adopted unilaterally.
 - Adding a new CI-native PrivateFPC canary job in this bump: the local full-suite prover-ON run
-  covers the fee flows natively and CI already WASM-proves them; a CI-native fee lane is noted
-  as an optional follow-up.
+  covers the fee flows natively (and is their ONLY real-proof coverage — CI's fee lanes are
+  proverless stubs, see the corrected nuance above); a CI-native fee lane is noted as an
+  optional follow-up.
 
 # Codex audit — round 2 (final fresh-context pass, new session, xhigh, gpt-5.6-sol)
 
