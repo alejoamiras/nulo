@@ -57,17 +57,25 @@ lever. `bun run lint:actions` clean.
   server log: `prove_requests=3`, 3× `Proving succeeded`. Gate satisfied with `/prove`
   evidence on the 5.0.1 line against the release 2.0.0 binary.
 
-## D3 — DECIDED EARLY (evidence stronger than expected)
+## D3 — DECIDED EARLY; mechanism CORRECTED by upstream source trace
 
-With the 5.0.1 bb SEEDED via `BB_BINARY_PATH`, the server still logged
-`Requested Aztec version version=5.0.1` → `Version not cached (or unverified), will download
-version=5.0.1` → `Download complete ... bytes=8108654` (<1s) → `Proving succeeded`. The seed
-registers under the literal version `"unknown"` (upstream alejoamiras/aztec-accelerator#352)
-and version matching is EXACT, so a seed can never serve a versioned request. **The pre-seed is
-dead weight at 2.0.0 → dropped, in PR-0** (the coherent home for 2.0.0-semantics adaptations;
-owner pre-confirmed drop-on-mismatch). The bump PR's Phase 5.1 becomes a no-op. First-prove
-download tax measured: 8.1MB / <1s. Peer session (accelerator repo) notified with the evidence
-for issue #352 prioritization.
+Observed with a genuine bb-5.0.1 seeded via `BB_BINARY_PATH`: `Requested Aztec version
+version=5.0.1` → `Version not cached (or unverified), will download version=5.0.1` →
+`Download complete ... bytes=8108654` (<1s) → 3× `Proving succeeded`; the seed registers in the
+cache as the literal `"unknown"` (upstream alejoamiras/aztec-accelerator#352).
+
+My first reading — "the seed can never serve a versioned request; the download served the
+proofs" — was **INVERTED**, per the accelerator session's trace of the v2.0.0 tag: `find_bb`
+step 0 returns `BB_BINARY_PATH` UNCONDITIONALLY, so the SEEDED binary served all three proofs
+and the logged download was dead weight. The two were indistinguishable here only because the
+seed WAS bb-5.0.1. Consequence: a version-mismatched seed (e.g. post-bump CI seeding the 5.2.0
+toolchain's bb while the SDK requests 5.0.1) would SILENTLY prove with the wrong bb while the
+log claims the right one was downloaded — the exact "silently-wrong seed" failure D3 exists to
+prevent. **Drop stands, with a stronger rationale: the seed is a footgun, not an optimization.**
+Dropped in PR-0; bump-PR Phase 5.1 is a no-op; Phase 3/4 local servers must run UNSEEDED for CI
+fidelity (the Phase A local run's proofs used the seeded 5.0.1 binary — same bytes as the
+download, so the canary's validity is unaffected). Evidence folded into upstream #352 by the
+accelerator session (upgraded from modeling wart to interaction bug).
 
 ## Machine notes
 

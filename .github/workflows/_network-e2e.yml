@@ -192,12 +192,13 @@ jobs:
           ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
-          # No BB_BINARY_PATH pre-seed: 2.0.0 registers a seeded binary under the
-          # literal version "unknown" (upstream #352) and matches SDK-requested
-          # versions EXACTLY, so a seed can never serve a versioned /prove — the
-          # server downloads the requested bb regardless (observed: seeded 5.0.1
-          # binary present, "Version not cached ... will download version=5.0.1",
-          # 8.1MB, <1s). The first-prove download tax is real but negligible.
+          # No BB_BINARY_PATH pre-seed — it is a FOOTGUN at 2.0.0, not an optimization:
+          # find_bb returns the seed UNCONDITIONALLY for every request (upstream #352),
+          # so a seeded binary answers ALL /prove calls regardless of the SDK's
+          # x-aztec-version, while the server still logs a (dead) download of the
+          # requested version. A version-mismatched seed would prove with the wrong bb
+          # under a log claiming the right one. Unseeded, the server downloads and runs
+          # the actually-requested bb (observed: 8.1MB, <1s — negligible tax).
           nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
           echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
 

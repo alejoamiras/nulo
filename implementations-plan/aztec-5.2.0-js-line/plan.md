@@ -184,10 +184,11 @@ verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`
 Runs BEFORE the full battery (codex H2): the two go/no-go unknowns (prover boundary at runtime;
 bb pairing) get answered at the earliest buildable moment.
 
-1. Start accelerator-server **2.0.0** (the PR-0 binary) with an EXPLICIT loopback bind
-   (`127.0.0.1:59833` passed as a flag, not assumed as default — final-pass Medium) and the
-   Phase A origin flags; assert the listening socket (`ss -tlnp | grep 59833` or `/health`)
-   before any test.
+1. Start accelerator-server **2.0.0** (the PR-0 binary) — **UNSEEDED (no `BB_BINARY_PATH`,
+   matching CI post-D3; a seed would answer every /prove with itself regardless of the
+   requested version)** — with `ACCEL_ALLOW_ALL=1` + `RUST_LOG=info` (the 2.0.0 listener is
+   hardcoded loopback with a Host-allowlist; there is no bind flag — assert via `/health`
+   before any test).
 2. `VITE_NULO_ACCELERATOR_REQUIRED=1` canary via
    `bun run e2e:agent tests/e2e/network/frozen-account-canary.test.ts` (agent.sh builds the
    wallet; verify its build-stamp assertions). **Assert ≥1 `Received /prove request`** in the
@@ -466,10 +467,13 @@ PR-0**. Original ask texts kept below for context:
   C3), each permitted ONLY after a structural diff of the relevant declarations shows identity
   (codex H1); any SDK-typing error OUTSIDE that file ⇒ stop. Rejected: SDK `5.0.1-revision.1`
   (no benefit), holding the whole line.
-- **D3 — CI bb seed**: **DECIDED (Phase A, earlier than planned)** — DROPPED, in PR-0. Evidence:
-  a seeded 5.0.1 bb registers as version "unknown" (upstream #352) and version matching is
-  exact, so the server downloaded bb-5.0.1 anyway (8.1MB, <1s). The runtime-downloaded bb is
-  unpinned (accepted residual, noted in Security). Bump-PR Phase 5.1 is a no-op.
+- **D3 — CI bb seed**: **DECIDED (Phase A) — DROPPED, in PR-0; mechanism corrected by upstream
+  source trace**: `find_bb` returns a seed UNCONDITIONALLY (upstream #352), so a seeded binary
+  answers every /prove regardless of the SDK-requested version while the server logs a dead
+  download of the right one — a version-mismatched seed would silently prove with the wrong bb.
+  The seed is a footgun, not an optimization. Unseeded download tax: 8.1MB, <1s. The
+  runtime-downloaded bb is unpinned (accepted residual, noted in Security). Bump-PR Phase 5.1
+  is a no-op; Phase 3/4 local servers run UNSEEDED for CI fidelity.
 - **D4 — Patches**: dual-key; 5.2.0 patches GENERATED against installed packages (bun patch
   flow), never blind-copied; drop the 5.2.0 key iff upstream fixed exports; never drop the
   5.0.1 key while the accelerator nests those versions.
