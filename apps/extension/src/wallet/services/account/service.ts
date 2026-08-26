@@ -272,16 +272,20 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 	}
 
 	public async changeAccountName(profileId: string, chainId: number, address: string, name: string): Promise<Account | undefined> {
-		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		if (account?.profileId !== profileId || account.chainId !== chainId) {
-			return undefined
-		}
-		if (account.name !== name) {
-			account.name = name
-			await this.storage.set(accountRowIdOf(account), account)
-			this.emit("onAccountUpdated", account)
-		}
-		return account
+		// Whole-row read-modify-write: serialize per row key with the sibling
+		// field editor, or whichever write lands second reverts the other field.
+		return this.tupleLocks.withLock(accountRowId(profileId, chainId, address), async () => {
+			const account = await this.storage.get(accountRowId(profileId, chainId, address))
+			if (account?.profileId !== profileId || account.chainId !== chainId) {
+				return undefined
+			}
+			if (account.name !== name) {
+				account.name = name
+				await this.storage.set(accountRowIdOf(account), account)
+				this.emit("onAccountUpdated", account)
+			}
+			return account
+		})
 	}
 
 	public async changeAccountVisibility(
@@ -290,16 +294,18 @@ export class AccountService extends Service<Methods, Events> implements ServiceS
 		address: string,
 		visible: boolean,
 	): Promise<Account | undefined> {
-		const account = await this.storage.get(accountRowId(profileId, chainId, address))
-		if (account?.profileId !== profileId || account.chainId !== chainId) {
-			return undefined
-		}
-		if (account.visible !== visible) {
-			account.visible = visible
-			await this.storage.set(accountRowIdOf(account), account)
-			this.emit("onAccountUpdated", account)
-		}
-		return account
+		return this.tupleLocks.withLock(accountRowId(profileId, chainId, address), async () => {
+			const account = await this.storage.get(accountRowId(profileId, chainId, address))
+			if (account?.profileId !== profileId || account.chainId !== chainId) {
+				return undefined
+			}
+			if (account.visible !== visible) {
+				account.visible = visible
+				await this.storage.set(accountRowIdOf(account), account)
+				this.emit("onAccountUpdated", account)
+			}
+			return account
+		})
 	}
 
 	public async getAccountContract(profileId: string, chainId: number, address: string): Promise<IAccountContract> {

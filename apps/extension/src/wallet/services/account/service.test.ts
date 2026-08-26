@@ -429,3 +429,59 @@ describe("AccountService.sweepOrphanImportedKeys (N-06 / F-B23)", () => {
 		expect(raw[IMPORTED_KEY("0xobj")]).toBeDefined()
 	})
 })
+
+describe("AccountService — same-row field editors serialize", () => {
+	test("a name change parked at its read cannot revert a concurrent visibility change", async () => {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletion = new ProfileDeletionState()
+		const services = new ServiceCollection()
+		services.add(
+			svc(PROFILE_SERVICE_NAME, {
+				onProfileDeleted: new EventHandler(),
+				getDeletionState: () => deletion,
+			}),
+		)
+		services.add(
+			svc(NETWORK_SERVICE_NAME, {
+				registerChainPurgeSubscriber: () => {},
+			}),
+		)
+		const service = new AccountService(new LoggerStore(new ConfigStore()), api)
+		services.add(service)
+		await services.start()
+
+		const rowId = accountRowId("p1", 1, "0xaa")
+		await api.storage.local.set({ [`nulo:core:accounts@${rowId}`]: JSON.stringify(mkAccount("0xaa")) })
+
+		// Park the FIRST row read AFTER it returns — the parked name change then
+		// holds its already-read (soon stale) row snapshot while the visibility
+		// change tries to run to completion. Parking before the read would let
+		// the resumed read see fresh state and prove nothing.
+		const realGet = api.storage.local.get.bind(api.storage.local)
+		let parked: (() => void) | null = null
+		let armed = true
+		api.storage.local.get = (async (key: unknown) => {
+			const value = await realGet(key as never)
+			if (armed && typeof key === "string" && key.includes(rowId)) {
+				armed = false
+				await new Promise<void>((resolve) => {
+					parked = resolve
+				})
+			}
+			return value
+		}) as typeof api.storage.local.get
+
+		const nameRun = service.changeAccountName("p1", 1, "0xaa", "B")
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		const visRun = service.changeAccountVisibility("p1", 1, "0xaa", false)
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		parked?.()
+		await Promise.all([nameRun, visRun])
+
+		const raw = await realGet(null)
+		const row = JSON.parse((raw as Record<string, string>)[`nulo:core:accounts@${rowId}`])
+		expect(row.name).toBe("B")
+		expect(row.visible).toBe(false)
+	})
+})
