@@ -77,6 +77,16 @@ fidelity (the Phase A local run's proofs used the seeded 5.0.1 binary — same b
 download, so the canary's validity is unaffected). Evidence folded into upstream #352 by the
 accelerator session (upgraded from modeling wart to interaction bug).
 
+## Unseeded rerun (codex L1) — the post-diff CI configuration, validated
+
+Server restarted UNSEEDED with an ISOLATED empty cache (scratch `HOME`): `/health` showed
+`bb_available:true` on the cold cache (CI's Layer-1 wait is safe pre-download; the `"unknown"`
+sentinel appears even seedless). Canary rerun: **2/2 green, `CANARY_RC=0`,
+`proving_succeeded=3`**, with the genuine download path in the log
+(`Requested Aztec version version=5.0.1` → `Version not cached … will download` →
+`Download complete … bytes=8108654` → `Proving succeeded`). No seed present, so the proofs are
+unambiguously served by the downloaded bb-5.0.1 — the exact merged-workflow behavior.
+
 ## Machine notes
 
 - `~/.aztec/current` already pointed at 5.2.0 BEFORE any action of ours (5.2.0 toolchain was
