@@ -101,10 +101,10 @@ const versionAt = (p: string): string => {
 	return m ? m[2] : `unparsed:${p}`
 }
 
-type Expectation = { consumer: string; via?: string; spec: string; want: string }
+/** `chain` is the package hops to resolve THROUGH, each from the previous one's directory. */
+type Expectation = { consumer: string; chain: string[]; spec: string; want: string }
 const checks: Expectation[] = []
 
-/** `@aztec/*` names a package declares under the given manifest field, from the lock. */
 const aztecDepsOf = (pkg: string, field: "dependencies" | "peerDependencies"): string[] => {
 	const entry = Object.values(lock.packages).find((e) => nameOf(e[0]) === pkg)
 	return Object.keys(entry?.[2]?.[field] ?? {}).filter((n) => n.startsWith("@aztec/"))
@@ -118,35 +118,46 @@ for (const [ws, meta] of Object.entries(lock.workspaces)) {
 	// Probe what this workspace actually declares: under the isolated linker an undeclared
 	// package resolves out of the worktree entirely, which is a phantom dep, not a version fact.
 	for (const spec of Object.keys(declared).filter((n) => n.startsWith("@aztec/") && n !== "@aztec/viem")) {
-		checks.push({ consumer: ws, spec, want: WORKSPACE_LINE })
+		checks.push({ consumer: ws, chain: [], spec, want: WORKSPACE_LINE })
 	}
 	for (const held of HELD_ROOTS) {
 		if (!declared[held]) continue
 		// A held package's exact-pinned peers only rebind when this workspace declares them.
 		for (const spec of aztecDepsOf(held, "peerDependencies")) {
-			checks.push({ consumer: ws, via: held, spec, want: WORKSPACE_LINE })
+			checks.push({ consumer: ws, chain: [held], spec, want: WORKSPACE_LINE })
 		}
 	}
 	for (const single of SINGLE_GENERATION_ROOTS) {
 		if (!declared[single]) continue
-		// The prover path must be single-generation end to end (see the header note on getVKIndex).
-		for (const spec of aztecDepsOf(single, "dependencies")) {
-			checks.push({ consumer: ws, via: single, spec, want: WORKSPACE_LINE })
+		// Walk the WHOLE `@aztec` closure, not just direct deps: the module that actually broke
+		// (noir-protocol-circuits-types, home of getVKIndex) hangs off bb-prover, one edge in.
+		const visited = new Set<string>([single])
+		const paths: string[][] = [[single]]
+		while (paths.length > 0) {
+			const chain = paths.shift() as string[]
+			for (const spec of aztecDepsOf(chain[chain.length - 1], "dependencies")) {
+				checks.push({ consumer: ws, chain, spec, want: WORKSPACE_LINE })
+				if (!visited.has(spec)) {
+					visited.add(spec)
+					paths.push([...chain, spec])
+				}
+			}
 		}
 	}
 }
 
-for (const { consumer, via, spec, want } of checks) {
+for (const { consumer, chain, spec, want } of checks) {
 	const base = join(ROOT, consumer)
 	try {
-		const fromDir = via ? join(resolveFrom(base, via), "..") : base
+		let fromDir = base
+		for (const hop of chain) fromDir = join(resolveFrom(fromDir, hop), "..")
 		const target = resolveFrom(fromDir, spec)
 		const got = versionAt(target)
-		const label = via ? `${consumer} → ${via} → ${spec}` : `${consumer} → ${spec}`
+		const label = [consumer, ...chain, spec].join(" → ")
 		if (got.startsWith(want)) console.log(`ok   ${label} = ${got}`)
 		else fail(`${label} = ${got}, want ${want} (${target})`)
 	} catch (e) {
-		fail(`${consumer}${via ? ` → ${via}` : ""} → ${spec}: ${(e as Error).message.split("\n")[0]}`)
+		fail(`${[consumer, ...chain, spec].join(" → ")}: ${(e as Error).message.split("\n")[0]}`)
 	}
 }
 
