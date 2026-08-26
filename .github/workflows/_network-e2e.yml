@@ -155,10 +155,8 @@ jobs:
       - uses: ./.github/actions/setup-accelerator-server
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         with:
-          # v2.0.0 headless server. bb is fetched per the SDK-requested version
-          # (x-aztec-version) and cached in ~/.aztec-accelerator/versions/; a
-          # BB_BINARY_PATH seed would override that selection for EVERY request,
-          # so the start step below runs unseeded.
+          # v2.0.0 headless server; bb is fetched per the SDK-requested version
+          # (x-aztec-version) and cached in ~/.aztec-accelerator/versions/.
           version: "2.0.0"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's
@@ -177,26 +175,18 @@ jobs:
           # tracing-subscriber filter; info level carries the per-prove lines the
           # assertion step greps.
           RUST_LOG: "info"
-          # ACCEL_ALLOW_ALL approves every browser origin. accelerator-server v1.0.6
-          # (SEC-01c) flipped the headless default to deny-by-default, and v2.0.0 keeps the
-          # identical contract (README "Headless Server" table): with ALLOWED_ORIGINS
-          # unset, localhost is auto-approved but every NON-localhost origin is DENIED. Our
-          # offscreen prover calls /prove from chrome-extension://<id> (non-localhost) with
-          # no popup available in headless CI → request denied → no proof → the canary tx
-          # errors / times out (NOT a silent WASM fallback — the required-mode build throws).
-          # We can't pre-list the origin in ALLOWED_ORIGINS because the unpacked-extension id
-          # isn't known until Chrome loads it, so allow-all is the headless contract (it is
-          # mutually exclusive with ALLOWED_ORIGINS, which stays unset). Safe per SECURITY.md:
-          # loopback-only (127.0.0.1:59833), single-tenant runner, fork PRs receive no secrets,
-          # and the only /prove traffic originates from the wallet we just built.
+          # The server denies non-localhost origins by default (SEC-01c, unchanged at
+          # 2.0.0), and the wallet proves from chrome-extension://<id> — an origin
+          # unknowable before Chrome loads the unpacked build, so an ALLOWED_ORIGINS
+          # allowlist is impossible; allow-all is safe on a loopback-only server on a
+          # single-tenant runner where fork PRs receive no secrets (SECURITY.md).
           ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
           # Never seed BB_BINARY_PATH: find_bb returns a seed unconditionally
           # (alejoamiras/aztec-accelerator#352), so a version-mismatched seed would
           # prove every request with the wrong bb while the log shows a download of
-          # the right one. Unseeded, the requested bb is fetched on first prove
-          # (~8MB, sub-second).
+          # the right one.
           nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
           echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
 
@@ -298,10 +288,9 @@ jobs:
 
       # Zero SUCCESSFUL native proofs in a canary-lane run means the native lane was
       # bypassed — server-side evidence complementing Layer 2's in-page hard-fail.
-      # Canary lanes only: soak/dispatch lanes may run non-proving file sets with the
-      # accelerator up, and "Received /prove request" logs before authorization or
-      # proving, so the gate counts "Proving succeeded". disable_accelerator skips
-      # this step entirely.
+      # The gate counts "Proving succeeded" ("Received /prove request" logs before
+      # authorization or proving) and enforces only canary lanes: soak/dispatch lanes
+      # may legitimately run non-proving file sets with the accelerator up.
       - name: Assert accelerator activity (enforced in canary lanes)
         if: ${{ always() && !cancelled() && !inputs.disable_accelerator && !inputs.proverless }}
         shell: bash
