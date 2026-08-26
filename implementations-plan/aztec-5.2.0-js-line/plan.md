@@ -3,9 +3,11 @@
 Bump the `@aztec/*` JS line **5.0.1 → 5.2.0** (20 package names across 8 workspace
 package.jsons), while deliberately **holding**: the Noir surface (Nargo tags, compile.sh
 toolchain, committed `target/*.json`), `@aztec-foundation/aztec-standards@5.0.1`,
-`@alejoamiras/private-fee-juice@5.0.1`, `@alejoamiras/aztec-accelerator@5.0.1` (nothing
-5.2.0-targeted exists for any of them), `@aztec/viem@2.38.2` (upstream's own exact alias at both
-versions), and the frozen account surface (permanent). In scope by owner choice: CI
+`@alejoamiras/private-fee-juice@5.0.1` (no 5.2.0 release exists), `@aztec/viem@2.38.2`
+(upstream's own exact alias at both versions), and the frozen account surface (permanent).
+**`@alejoamiras/aztec-accelerator` is NOT held** — it started as a hold (nothing 5.2.0-targeted
+existed), but the Phase 3 canary proved a dual-generation prover path is unshippable, so the
+owner cut SDK 5.2.0 mid-arc and it moves with the line (D9). In scope by owner choice: CI
 accelerator-server binary 1.0.6 → 2.0.0 (shipped FIRST as its own PR — see Delivery), the
 setup-aztec snappy-pin probe (+removal if proven fixed), and full local network-suite
 validation before the bump PR.
@@ -29,7 +31,8 @@ byte-untouched vs baseline; every freeze test, KAT, keystone, and drift detector
 **prover-ON frozen-account canary green locally (with `/prove` evidence) and in CI**; full
 local network suite green prover-ON including the fee flows; snappy step resolved per probe;
 docs updated; both PRs squash-merged into dev with `e2e:network` + `e2e:smoke` labels and all
-three required checks green.
+three required checks green. Post-merge follow-up (D10): a small PR removing the
+`@alejoamiras/aztec-accelerator` min-age exclude on/after 2026-09-02.
 
 ## Phase A ✓ — PR-0: accelerator-server 2.0.0 (against the CURRENT 5.0.1 line)
 
@@ -294,7 +297,7 @@ account surface. **Three distinct held-package binding modes** (verified in `bun
 
 | Package | Declaration | Post-bump runtime binding | Hazard mode | Pin/gate |
 |---|---|---|---|---|
-| `@alejoamiras/aztec-accelerator` | exact-5.0.1 `dependencies` | HYBRID in the bundle: nested 5.0.1 stdlib/foundation/bb-prover + Vite-deduped **5.2.0** acvm/abi leaves (final-pass note) | object identity across the prover slot | duck-typed upstream; D2 structural diff; Phase 3 canary |
+| `@alejoamiras/aztec-accelerator` | ~~exact-5.0.1 `dependencies`~~ → **5.2.0, moves with the line** | single generation end to end | ~~dual-copy identity~~ — eliminated at the source (D9) | `aztec-hold-residue-check.ts` asserts stdlib + bb-prover + noir-protocol-circuits-types all resolve to the workspace line; Phase 3 canary |
 | `@alejoamiras/private-fee-juice` | exact-5.0.1 `peerDependencies` | binds to workspace **5.2.0** modules (or nests — per the Phase 1.4 pre-decided outcome) | 5.0.1-compiled wrappers on 5.2.0 APIs | peer-warning disposition; `private-fuel.test.ts`; Phase 4 fee flows prover-ON |
 | `@aztec-foundation/aztec-standards` | none | binds to workspace **5.2.0** modules | same | `descriptors-real-artifact.test.ts`; token e2e |
 
@@ -468,11 +471,10 @@ PR-0**. Original ask texts kept below for context:
   transitives correctly (#25305 closed); full regen only on unresolvable conflicts. Supersedes
   the prior-bump ritual; UPDATE.md line 11 updated in Phase 6. Verification via exact
   `lockfile-exception-diff.ts <base> <new>` + reachability check + `--frozen-lockfile` (codex M2).
-- **D2 — Prover boundary**: keep SDK 5.0.1; casts confined to the `chain-runtime.ts` SDK seam
-  (both typing sites — the constructor's simulator arg and the `proverOrOptions` slot; fable
-  C3), each permitted ONLY after a structural diff of the relevant declarations shows identity
-  (codex H1); any SDK-typing error OUTSIDE that file ⇒ stop. Rejected: SDK `5.0.1-revision.1`
-  (no benefit), holding the whole line.
+- **D2 — Prover boundary**: SUPERSEDED BY D9. The cast this authorized (one site, applied after
+  the mandated structural diff) was REMOVED once SDK 5.2.0 landed — the seam is single-generation
+  and typechecks with zero casts. The discipline it encoded still stands for any future split:
+  no cast without a byte-diff, none outside `chain-runtime.ts`.
 - **D3 — CI bb seed**: **DECIDED (Phase A) — DROPPED, in PR-0; mechanism corrected by upstream
   source trace**: `find_bb` returns a seed UNCONDITIONALLY (upstream #352), so a seeded binary
   answers every /prove regardless of the SDK-requested version while the server logs a dead
@@ -496,9 +498,18 @@ PR-0**. Original ask texts kept below for context:
   immediately after first buildable state; the ~16-file copied-logic re-diff moved AFTER it
   (Phase 4 step 1) so a HOLD wastes no manual work; full battery, CI wiring, docs follow.
 - **D9 — canary red, resolved at the source (owner, 2026-08-26)**: the nested-dual hazard
-  materialized in UPSTREAM code (VK-index instanceof across dual copies) — unfixable by SDK
-  logic or our code short of bundle dedupe; owner chose to cut the SDK 5.2.0 release instead
-  (single-generation world). The Phase-2 cast becomes removable on resume.
+  materialized in UPSTREAM code (`getVKIndex` `instanceof` across dual copies of
+  `noir-protocol-circuits-types`) — unfixable by SDK logic or ours short of bundle dedupe. The
+  owner cut `@alejoamiras/aztec-accelerator@5.2.0` (deps-only) instead, giving a
+  single-generation world. RESULT: cast removed, typecheck green with zero casts, residue gate
+  extended to assert single-generation resolution across the whole prover path. **The
+  accelerator therefore moves with the line — the plan's original hold on it is void.**
+- **D10 — min-age exclude (owner, 2026-08-26)**: SDK 5.2.0 published minutes before install and
+  tripped the 7-day gate (gate working as designed). ONE dated exclude added to `bunfig.toml`
+  (`@alejoamiras/aztec-accelerator`), removable on/after 2026-09-02, justified on first-party
+  provenance: registry signature + npm publish attestation + SLSA v1 binding the tarball to
+  `alejoamiras/aztec-accelerator@acb3d317` built by `publish-testnet.yml` on a GitHub-hosted
+  runner (verified before exempting). Follow-up removal PR is a Phase 6 deliverable.
 - **Rejected audit items** (with reasons, see audit-codex.md): removing the
   `NULO_E2E_DISABLE_ACCELERATOR` kill-switch (documented owner rollback lever; policy change →
   Ask 5 offers the narrower hardening); adding a CI-native PrivateFPC canary job in this bump
