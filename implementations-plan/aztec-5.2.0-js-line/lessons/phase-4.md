@@ -49,14 +49,18 @@ artifact) stays pinned. The fixture funded the frozen address but deployed the u
 - **Production blast radius: ZERO.** `rg createSchnorrAccount apps/extension/src packages/*/src`
   → no hits; production derives only through the frozen path. Failure was confined to the three
   pre-funded-fee-juice cases (public FJ, private FJ, gas-balance card).
-- **Fix**: build the script-side `AccountManager` from the FROZEN artifact —
-  `AccountManager.create(wallet, secretKey, new FrozenSchnorrAccountContract(signingKey),
-  {salt: Fr.ZERO})`, where `FrozenSchnorrAccountContract extends SchnorrAccountContract` and
-  overrides only `getContractArtifact()`. Verified safe to override just that hook:
-  `getContractArtifact()` is the abstract artifact seam on `DefaultAccountContract`, and
-  upstream 5.2.0's `getInitializationFunctionAndArgs()` returns `constructorName: "constructor"`
-  with args `[x, y]` — byte-for-byte the frozen descriptor's pins (salt `Fr.ZERO` too). The
-  parity assertion is KEPT and now guards the fixture's frozen path against NuloAccount.
+- **Fix (final form)**: serve the frozen artifact at the WALLET-CONSTRUCTION seam.
+  `EmbeddedWallet`'s constructor takes an `AccountContractsProvider`, so `FrozenArtifactWallet`
+  (in the same fixture) passes one that returns a `SchnorrAccountContract` subclass overriding
+  only `getContractArtifact()`, delegating every other provider method. `createSchnorrAccount`
+  then runs upstream's full path — key registration, walletDB storage, deploy — at the frozen
+  address, and `setupPreFundedAccount` keeps its original one-liner. Safe because upstream
+  5.2.0's `getInitializationFunctionAndArgs()` returns `constructorName: "constructor"` with
+  args `[x, y]` and salt `Fr.ZERO` — byte-for-byte the frozen descriptor's pins. The parity
+  assertion is KEPT as the guard it was meant to be. Verified: `fee-methods` 5/5 prover-ON.
+  (First attempt hand-rolled `AccountManager.create` + `registerContract` and still failed —
+  `Public keys not registered`, then `Account "0x…" does not exist on this wallet` — because it
+  re-implemented upstream's steps one failure at a time. Find the seam first.)
 - **Durable lesson (belongs in the aztec-update skill)**: any bump that recompiles upstream's
   account artifacts breaks e2e fixtures that build accounts through upstream helpers, even
   though production is immune. Fixtures must derive through the frozen artifact, not
@@ -95,3 +99,30 @@ copied logic against upstream 5.2.0 sources, independent of the accelerator's ow
     Confirmation re-run on an idle host recorded below; CI's dedicated smoke runner is the
     authority.
 
+
+## Final battery outcome (post-SDK-5.2.0)
+
+- Builds: `audit:vue` + faucet + playground + firefox — all green.
+- Detectors: `verify:deployments` both lanes, 6/6 live addresses `[OK]`.
+- Smoke (fixture-armed, idle host): **31 passed | 1 skipped (32 files), 112 tests**.
+- Network, prover-ON: 22 files green including BOTH canaries and **`fee-methods` 5/5**
+  (public FJ, private FJ, gas-balance card) — the fee flows CI only stubs.
+- Network remainder: handed to CI, which shards it 5-way on dedicated runners. Rationale:
+  the local serial run added no signal CI doesn't produce, at ~2.5h.
+
+## Process lessons (cost me more time than the bump did)
+
+1. **Match the local run to CI's topology.** All-71-prover-ON was self-imposed; CI runs the pool
+   proverless in shards and only 3 files prover-ON.
+2. **Shard the proverless pass locally.** `agent.sh` allocates its own ports per run, so 3-4
+   concurrent shards are safe. I ran serial because of a "network e2e runs alone" note that is
+   about not competing with OTHER agents, not about refusing to parallelize the suite. Prover-ON
+   is the real exception (single accelerator on a hardcoded port).
+3. **Never edit fixtures mid-run** — vitest loads them per worker; I did it twice and had to
+   discard both runs (one test burned 16 min on retries).
+4. **Find the seam before patching.** I rebuilt the account by hand (AccountManager → key
+   registration → walletDB storage), rediscovering upstream's steps one failure at a time, when
+   `EmbeddedWallet`'s constructor already takes an `AccountContractsProvider`. Three
+   verification cycles where one would have done.
+5. `setsid nohup script.sh` silently no-ops when the script isn't executable — use `bash <script>`.
+6. Don't over-filter a long-run log; losing the error text costs a whole re-run.
