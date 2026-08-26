@@ -217,7 +217,7 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
 (canary file; the sandbox is local — no live-network broadcasts anywhere in this plan). Log:
 `lessons/phase-3.md`.
 
-## Phase 4 — Full battery: re-diff, detectors, builds, smoke, full prover-ON suite
+## Phase 4 ✓ — Full battery: re-diff, detectors, builds, smoke, full prover-ON suite
 
 1. Re-diff the copied-logic list against installed 5.2.0 sources (verdicts per file in
    lessons): `fee-options.ts` + `embedded-fpc-cap.ts` (MIN_FEE_PADDING both),
@@ -255,7 +255,7 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
 all `[OK]` in BOTH lanes; suite green with fee-flow `/prove` evidence; re-diff verdicts logged
 per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lessons/phase-4.md`.
 
-## Phase 5 — Remaining CI wiring
+## Phase 5 ✓ — Remaining CI wiring
 
 1. `BB_BINARY_PATH`: RESOLVED in Phase A / PR-0 (D3 — dropped with logged evidence). Nothing
    to do here; verify only that Phase 3's canary log shows the expected
@@ -270,7 +270,7 @@ per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lesson
 reviewed line-by-line in lessons; layers: workflow lint (the PR's own CI canary is the real
 proof). Log: `lessons/phase-5.md`.
 
-## Phase 6 — Docs + delivery prep
+## Phase 6 ✓ — Docs + delivery prep
 
 1. `UPDATE.md`: banner → 5.2.0; append 5.2.0-arc couplings (dual-key patches, the three-mode
    held-package boundary inventory, prover-boundary cast if made, `x-aztec-version` static-pin
