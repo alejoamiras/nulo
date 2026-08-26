@@ -155,10 +155,10 @@ jobs:
       - uses: ./.github/actions/setup-accelerator-server
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         with:
-          # v2.0.0 headless server. bb is DECOUPLED from the Aztec line: fetched on first
-          # /prove per the SDK-requested version (x-aztec-version header) and cached in
-          # ~/.aztec-accelerator/versions/, so accelerator releases track accelerator code
-          # changes only — never @aztec bumps.
+          # v2.0.0 headless server. bb is fetched per the SDK-requested version
+          # (x-aztec-version) and cached in ~/.aztec-accelerator/versions/; a
+          # BB_BINARY_PATH seed would override that selection for EVERY request,
+          # so the start step below runs unseeded.
           version: "2.0.0"
           # SHA-256 of the EXTRACTED binary (not the tarball — different
           # hashes; the binary is what `actions/cache` restores, so it's
@@ -174,8 +174,8 @@ jobs:
         if: '${{ !inputs.disable_accelerator && !inputs.proverless }}'
         shell: bash
         env:
-          # tracing-subscriber default = info; emits "Received /prove request"
-          # for each prove + version-cache info we tail in the advisory step.
+          # tracing-subscriber filter; info level carries the per-prove lines the
+          # assertion step greps.
           RUST_LOG: "info"
           # ACCEL_ALLOW_ALL approves every browser origin. accelerator-server v1.0.6
           # (SEC-01c) flipped the headless default to deny-by-default, and v2.0.0 keeps the
@@ -192,13 +192,11 @@ jobs:
           ACCEL_ALLOW_ALL: "1"
         run: |
           set -euo pipefail
-          # No BB_BINARY_PATH pre-seed — it is a FOOTGUN at 2.0.0, not an optimization:
-          # find_bb returns the seed UNCONDITIONALLY for every request (upstream #352),
-          # so a seeded binary answers ALL /prove calls regardless of the SDK's
-          # x-aztec-version, while the server still logs a (dead) download of the
-          # requested version. A version-mismatched seed would prove with the wrong bb
-          # under a log claiming the right one. Unseeded, the server downloads and runs
-          # the actually-requested bb (observed: 8.1MB, <1s — negligible tax).
+          # Never seed BB_BINARY_PATH: find_bb returns a seed unconditionally
+          # (alejoamiras/aztec-accelerator#352), so a version-mismatched seed would
+          # prove every request with the wrong bb while the log shows a download of
+          # the right one. Unseeded, the requested bb is fetched on first prove
+          # (~8MB, sub-second).
           nohup accelerator-server > /tmp/accelerator-server.log 2>&1 &
           echo "ACCELERATOR_PID=$!" >> "$GITHUB_ENV"
 
@@ -298,35 +296,39 @@ jobs:
           fi
           echo "Bundle clean: no probe strings."
 
-      # ENFORCED (owner-approved hardening): an accelerator-ON run that produced ZERO
-      # server-side /prove requests fails here — every accelerator-ON caller builds the
-      # wallet accelerator-required, so zero proofs means the native lane was silently
-      # bypassed. Complements Layer 2's in-page hard-fail with server-side evidence.
-      # The rollback lever is untouched: disable_accelerator skips this step entirely.
-      - name: Assert accelerator activity (enforced)
+      # Zero SUCCESSFUL native proofs in a canary-lane run means the native lane was
+      # bypassed — server-side evidence complementing Layer 2's in-page hard-fail.
+      # Canary lanes only: soak/dispatch lanes may run non-proving file sets with the
+      # accelerator up, and "Received /prove request" logs before authorization or
+      # proving, so the gate counts "Proving succeeded". disable_accelerator skips
+      # this step entirely.
+      - name: Assert accelerator activity (enforced in canary lanes)
         if: ${{ always() && !cancelled() && !inputs.disable_accelerator && !inputs.proverless }}
         shell: bash
+        env:
+          SHARD_LABEL: ${{ inputs.shard_label }}
         run: |
           set -euo pipefail
           if [ ! -f /tmp/accelerator-server.log ]; then
             echo "::error::accelerator-server log missing — startup failure"
             exit 1
           fi
-          # Verified literal from accelerator-server 2.0.0 source
-          # (core/src/server/prove.rs:228: `tracing::info!("Received /prove request");`).
+          # Literals from accelerator-server 2.0.0 core/src/server/prove.rs:228,:353.
           PROVE_COUNT=$(grep -c 'Received /prove request' /tmp/accelerator-server.log || true)
-          echo "::notice::accelerator-server log shows ${PROVE_COUNT} /prove requests this run"
+          PROVE_SUCCESS=$(grep -c 'Proving succeeded' /tmp/accelerator-server.log || true)
+          echo "::notice::accelerator-server log: ${PROVE_COUNT} /prove requests, ${PROVE_SUCCESS} successful proofs"
           {
             echo "### accelerator-server activity"
             echo "- /prove request lines: ${PROVE_COUNT}"
+            echo "- successful proofs: ${PROVE_SUCCESS}"
             echo "- log size: $(wc -c < /tmp/accelerator-server.log) bytes"
             echo "- last 5 lines:"
             echo '```'
             tail -5 /tmp/accelerator-server.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$PROVE_COUNT" -eq 0 ]; then
-            echo "::error::accelerator-ON run finished with ZERO /prove requests — the native proving lane was bypassed."
+          if [ "$PROVE_SUCCESS" -eq 0 ] && [ "$SHARD_LABEL" = "canary" ]; then
+            echo "::error::canary lane finished with ZERO successful native proofs — the native proving lane was bypassed."
             tail -30 /tmp/accelerator-server.log || true
             exit 1
           fi
