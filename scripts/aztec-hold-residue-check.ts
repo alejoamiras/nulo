@@ -146,6 +146,10 @@ for (const [ws, meta] of Object.entries(lock.workspaces)) {
 	}
 }
 
+// Same version is NOT the same module: the isolated linker materializes one physical copy per
+// peer context, and `instanceof` across two copies fails exactly like the dual-generation case.
+const canonical = new Map<string, { path: string; label: string }>()
+
 for (const { consumer, chain, spec, want } of checks) {
 	const base = join(ROOT, consumer)
 	try {
@@ -154,6 +158,12 @@ for (const { consumer, chain, spec, want } of checks) {
 		const target = resolveFrom(fromDir, spec)
 		const got = versionAt(target)
 		const label = [consumer, ...chain, spec].join(" → ")
+		const seen = canonical.get(spec)
+		if (seen && seen.path !== target) {
+			fail(`${label} resolves ${target}, but ${seen.label} resolves ${seen.path} — two physical copies of ${spec}`)
+		} else if (!seen) {
+			canonical.set(spec, { path: target, label })
+		}
 		if (got.startsWith(want)) console.log(`ok   ${label} = ${got}`)
 		else fail(`${label} = ${got}, want ${want} (${target})`)
 	} catch (e) {
