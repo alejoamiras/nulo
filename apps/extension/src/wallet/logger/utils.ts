@@ -117,17 +117,41 @@ const REDACTED_KEYS: ReadonlySet<string> = new Set([
  */
 const URL_KEYS: ReadonlySet<string> = new Set(["rpcUrl", "submittedEndpointUrl", "endpointUrl"])
 
-const URL_LIKE = /\bhttps?:\/\/[^\s'"]+/gi
+/**
+ * URL-ish runs in free text. Covers `ws://`/`wss://` (the Aztec node transport) alongside http(s),
+ * and protocol-relative `//host/...`, because an endpoint carrying an API key is just as
+ * credential-bearing over a socket as over HTTP.
+ */
+const URL_LIKE = /(?:\b(?:https?|wss?):\/\/|(?<![:\w])\/\/)[^\s'"<>)\]}]+/gi
+
+/**
+ * Long unbroken high-entropy runs — base64url or hex — interpolated into free text.
+ *
+ * Error messages are the main way a secret reaches a log without anyone deciding to log it
+ * ("failed to unseal <blob>"). Scrubbing URLs alone leaves those, so anything long enough to be a
+ * key and dense enough not to be prose is replaced. 32 chars is comfortably above ordinary
+ * identifiers (an Aztec address is longer, and losing it here costs little) and below any English
+ * word.
+ */
+const SECRET_BLOB = /\b[A-Za-z0-9+/=_-]{32,}\b/g
 
 /** Reduce any URL in free text to its origin; userinfo, path and query go with it. */
 function scrubUrls(text: string): string {
 	return text.replace(URL_LIKE, (candidate) => {
+		// Protocol-relative has no scheme for `new URL` to parse; give it one, then keep only the host.
+		const absolute = candidate.startsWith("//") ? `https:${candidate}` : candidate
 		try {
-			return new URL(candidate).origin
+			const { protocol, host } = new URL(absolute)
+			return candidate.startsWith("//") ? `//${host}` : `${protocol}//${host}`
 		} catch {
 			return "[url]"
 		}
 	})
+}
+
+/** Scrub free text of both credential-bearing URLs and raw key-shaped blobs. */
+function scrubFreeText(text: string): string {
+	return scrubUrls(text).replace(SECRET_BLOB, "[redacted]")
 }
 
 function toOrigin(value: unknown): unknown {
@@ -147,9 +171,12 @@ function toOrigin(value: unknown): unknown {
  * Restoring it naively would swap one bug for a worse one: messages routinely interpolate the
  * values that caused the failure, and stacks carry file paths, so the fix caps and scrubs the
  * message and drops the stack.
+ *
+ * Scrubbing covers URLs AND key-shaped blobs: an error message is the commonest way a secret
+ * reaches a log without anyone choosing to log it.
  */
 function projectError(error: Error): Record<string, unknown> {
-	const scrubbed = scrubUrls(error.message ?? "")
+	const scrubbed = scrubFreeText(error.message ?? "")
 	return {
 		name: error.name,
 		message: scrubbed.length > MAX_ERROR_MESSAGE_CHARS ? `${scrubbed.slice(0, MAX_ERROR_MESSAGE_CHARS - 1)}…` : scrubbed,
@@ -176,7 +203,9 @@ export const trim = (value: unknown, depth: number = 0): unknown => {
 		if (value instanceof ArrayBuffer) return `[ArrayBuffer(${value.byteLength})]`
 		if (value instanceof Map) return `[Map(${value.size})]`
 		if (value instanceof Set) return `[Set(${value.size})]`
-		if (value instanceof Date) return value.toISOString()
+		// `toISOString()` THROWS on an invalid date — turning a log call into an application
+		// exception, which is the one thing a logger must never do.
+		if (value instanceof Date) return Number.isNaN(value.getTime()) ? "[Invalid Date]" : value.toISOString()
 
 		const obj = value as Record<string, unknown>
 		if ("nonDispatchPublicFunctions" in value) {

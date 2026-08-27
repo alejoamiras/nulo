@@ -78,6 +78,12 @@ describe("trim — non-plain objects", () => {
 	test("renders a Date instead of collapsing it to {}", () => {
 		expect(trim(new Date("2026-08-27T10:00:00.000Z"))).toBe("2026-08-27T10:00:00.000Z")
 	})
+
+	test("an invalid Date does not turn a log call into an exception", () => {
+		// `toISOString()` throws "Invalid time value" — the one thing a logger must never do.
+		expect(() => trim(new Date("not-a-date"))).not.toThrow()
+		expect(trim(new Date("not-a-date"))).toBe("[Invalid Date]")
+	})
 })
 
 describe("trim — errors", () => {
@@ -97,6 +103,34 @@ describe("trim — errors", () => {
 		expect(JSON.stringify(out)).not.toContain(SECRET)
 		expect(JSON.stringify(out)).not.toContain("SUPER-SECRET-KEY")
 		expect((out as Record<string, unknown>).message).toContain("https://rpc.example.com")
+	})
+
+	test("scrubs a websocket endpoint, not just http", () => {
+		// The Aztec node transport is ws/wss, and those URLs carry API keys just the same.
+		const out = trim(new Error(`socket closed: wss://node.example.com/v1/${SECRET}`))
+
+		expect(JSON.stringify(out)).not.toContain(SECRET)
+		expect((out as Record<string, unknown>).message).toContain("wss://node.example.com")
+	})
+
+	test("scrubs a protocol-relative endpoint", () => {
+		const out = trim(new Error(`fetch failed: //rpc.example.com/v2/${SECRET}`))
+
+		expect(JSON.stringify(out)).not.toContain(SECRET)
+	})
+
+	test("redacts a raw key-shaped blob interpolated into the message", () => {
+		// The commonest way a secret reaches a log without anyone choosing to log it.
+		const blob = "dGhpcy1pcy1hLXZlcnktbG9uZy1zZWFsZWQta2V5LWJsb2ItdmFsdWU="
+		const out = trim(new Error(`failed to unseal ${blob}`))
+
+		expect(JSON.stringify(out)).not.toContain(blob)
+		expect((out as Record<string, unknown>).message).toContain("[redacted]")
+	})
+
+	test("leaves ordinary prose alone", () => {
+		const out = trim(new Error("Network not found")) as Record<string, unknown>
+		expect(out.message).toBe("Network not found")
 	})
 
 	test("caps a long message", () => {
