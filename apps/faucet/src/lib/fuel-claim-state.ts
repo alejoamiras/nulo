@@ -241,11 +241,7 @@ export type StandaloneFuelRecovery =
 	| "offer" // public record, completed, fuel bridged and not yet settled.
 	| "none" // nothing to recover: no fuel, a direct-Fuel record, unfinished, or already settled.
 	| "private-settled" // private + well-formed: its FJ paid for the completing tx. Say nothing.
-	// Private with metadata gaps — never an offer, but the two causes need different advice: the
-	// event-derived fields come back from the L1 receipt on a retry, while the client-random salt
-	// exists nowhere but a backup file.
-	| "private-unknown-recoverable"
-	| "private-unknown-needs-backup"
+	| "private-unknown" // private + metadata gaps: never an offer, and the card has no action to advertise.
 
 export interface StandaloneFuelRecoveryInputs {
 	isPrivate: boolean
@@ -269,6 +265,5 @@ export function decideStandaloneFuelRecovery(i: StandaloneFuelRecoveryInputs): S
 	if (i.completedAt === undefined) return "none" // an unfinished claim retries via the normal action.
 	if (f?.consumed === true || f?.standaloneClaimed === true) return "none"
 	if (!i.isPrivate) return f?.received ? "offer" : "none"
-	if (decideFuelLadder({ isPrivate: true, schema: i.schema, fuel: f }) === "private") return "private-settled"
-	return f?.bridgeSecretSalt ? "private-unknown-recoverable" : "private-unknown-needs-backup"
+	return decideFuelLadder({ isPrivate: true, schema: i.schema, fuel: f }) === "private" ? "private-settled" : "private-unknown"
 }

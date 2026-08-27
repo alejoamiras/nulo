@@ -150,16 +150,10 @@ const fuelRecovery = computed(() =>
 )
 const fuelRecoverable = computed(() => fuelRecovery.value === "offer")
 /** Private bridge whose private-claim metadata is incomplete: its gas state is genuinely unknown and
- *  the public recovery must not be offered — so say so rather than showing nothing. The advice differs
- *  by cause: event-derived fields return from the L1 receipt on a retry, the salt only from a backup. */
-const privateFuelUnknown = computed(
-	() => fuelRecovery.value === "private-unknown-recoverable" || fuelRecovery.value === "private-unknown-needs-backup",
-)
-const privateFuelUnknownNote = computed(() =>
-	fuelRecovery.value === "private-unknown-recoverable"
-		? "This private bridge's gas details couldn't be read from Ethereum yet, so its gas state can't be confirmed - retry in a minute. Public gas recovery doesn't apply to private bridges."
-		: "This private bridge is missing the secret that claims its gas, so its gas state can't be confirmed. Only its backup file has that secret. Public gas recovery doesn't apply to private bridges.",
-)
+ *  the public recovery must not be offered — so say so rather than showing nothing. Deliberately
+ *  advertises no action: this renders only on COMPLETED records, which re-run no claim, so any
+ *  "retry" advice here would be false. */
+const privateFuelUnknown = computed(() => fuelRecovery.value === "private-unknown")
 const fuelRecovering = ref(false)
 const fuelRecoverError = ref<string | null>(null)
 
@@ -380,7 +374,8 @@ function onDiscard() {
 		</div>
 
 		<p v-if="privateFuelUnknown" class="private-fuel-unknown" :data-testid="TESTIDS.journalPrivateFuelUnknown">
-			{{ privateFuelUnknownNote }}
+			This private bridge's gas data is incomplete, so its gas state can't be confirmed. Your tokens
+			arrived. Public gas recovery doesn't apply to private bridges.
 		</p>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />

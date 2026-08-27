@@ -357,6 +357,16 @@ export function ensureDepositJournalDeps(): void {
 				})
 				return "recovered"
 			}
+			// A schema-2 record's deposit went through the router, so its receipt MUST carry
+			// BridgeWithFuel. Falling back to the plain-portal event here would report "recovered"
+			// while leaving the fuel fields absent forever — re-probed on every private retry, and
+			// silently continued past on public ones. Only fail closed when we actually came looking
+			// for fuel data: a schema-2 record that already has it is just recovering its token leaf.
+			if (rec.schema === 2 && (!rec.fuel?.received || !rec.fuel?.leafIndex)) {
+				throw new Error(
+					"This bridge's Ethereum receipt doesn't match its record - its gas details can't be recovered from the chain. Restore it from its backup file.",
+				)
+			}
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
 			const event = sent[0] as { args?: { index?: bigint } } | undefined
 			if (event?.args?.index === undefined) {
@@ -425,13 +435,14 @@ export function ensureDepositJournalDeps(): void {
 			// publicly-visible tx and deanonymizes the bridge. Incomplete metadata (legacy, partially
 			// restored, tampered) is exactly the fall-through that used to happen silently.
 			if (decideFuelLadder({ isPrivate: rec.isPrivate, schema: rec.schema, fuel }) === "private-incomplete") {
-				// The engine rehydrates event-derived fuel fields from the L1 receipt before this runs, so
-				// reaching here with a salt means that recovery hasn't landed yet (retryable); without one
-				// the secret exists nowhere but a backup file.
+				// Only advertise a retry where one can actually do something: the engine's receipt
+				// rehydration needs a depositTxHash, and only the event-derived fields come back that
+				// way. The client-random salt exists nowhere but a backup file.
+				const retryable = !!fuel?.bridgeSecretSalt && !!rec.depositTxHash
 				return stop(
-					fuel?.bridgeSecretSalt
+					retryable
 						? "This private bridge's gas details couldn't be read from Ethereum yet - retry in a minute. The public gas recovery is deliberately unavailable for private bridges."
-						: "This private bridge is missing the secret needed to claim its gas privately (an older or partially restored record). Only its backup file has that secret - the public gas recovery is deliberately unavailable for private bridges.",
+						: "This private bridge is missing the data needed to claim its gas privately (an older or partially restored record). Only its backup file can restore that - the public gas recovery is deliberately unavailable for private bridges.",
 				)
 			}
 			if (rec.isPrivate && fuel?.received && fuel.leafIndex && fuel.bridgeSecretSalt) {

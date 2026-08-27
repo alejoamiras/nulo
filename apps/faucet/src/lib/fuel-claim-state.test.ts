@@ -251,19 +251,17 @@ describe("decideStandaloneFuelRecovery — one source for the card and the actio
 		expect(decideStandaloneFuelRecovery(input)).toBe("private-settled")
 	})
 
-	it("a PRIVATE record missing its salt needs a backup — the salt is client-random, not on chain", () => {
-		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel })).toBe("private-unknown-needs-backup")
-	})
-
-	it("a PRIVATE record missing only event-derived fields is chain-recoverable — advise a retry, not a backup", () => {
-		const input = { ...base, isPrivate: true, fuel: { received: "1000", bridgeSecretSalt: "0xsalt" } }
-		expect(decideStandaloneFuelRecovery(input)).toBe("private-unknown-recoverable")
+	it.each([
+		["missing its salt", { received: "1000", leafIndex: "7" }],
+		["missing event-derived fields", { received: "1000", bridgeSecretSalt: "0xsalt" }],
+	])("a PRIVATE record %s is unknown — surfaced, never offered", (_label, f) => {
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel: f })).toBe("private-unknown")
 	})
 
 	// The durable marker, not the block's presence: a schema-2 record whose fuel block was lost to
 	// tampering still HAS a live FJ message, so it must not be read as a no-fuel deposit.
 	it("a private schema-2 record with NO fuel block is unknown, never 'none'", () => {
-		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel: undefined })).toBe("private-unknown-needs-backup")
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel: undefined })).toBe("private-unknown")
 		expect(decideFuelLadder({ isPrivate: true, schema: 2, fuel: undefined })).toBe("private-incomplete")
 	})
 
