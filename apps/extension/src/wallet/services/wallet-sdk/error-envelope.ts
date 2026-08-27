@@ -26,7 +26,6 @@ import {
 	DuplicateInitializationError,
 } from "@nulo/extension-messaging/errors"
 import type { WalletResponse } from "@aztec/wallet-sdk/types"
-import { scrubUrls } from "@/utils/scrub-urls"
 
 export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 	if (error instanceof JobCancelledError) {
@@ -103,17 +102,21 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
 			data: { walletErrorCode: DuplicateInitializationError.CODE },
 		}
 	}
-	// This string crosses the trust boundary INTO an arbitrary dApp — the one path here that leaves
-	// the machine. Internal messages routinely interpolate the values that caused the failure, and
-	// RPC providers embed API keys in endpoint URLs. The wire contract (a plain string for
-	// unrecognised throws) is preserved; only credentials and unbounded length are not.
-	return scrubForDapp(error instanceof Error ? error.message : String(error))
+	// This value crosses the trust boundary INTO an arbitrary dApp — the one path here that leaves
+	// the machine — and by definition we did not recognise the error, so nothing about its text is
+	// known to be safe. Scrubbing and capping were tried and are not enough: a cap BOUNDS exposure
+	// without sanitizing it, and `new Error("private note: <secret>")` passes through verbatim.
+	//
+	// Every error a dApp is meant to act on is classified above and carries a `walletErrorCode`;
+	// an unclassified one has no defined meaning to the caller, so a constant loses nothing it
+	// could legitimately use. The wire contract (a plain string for unrecognised throws) is
+	// preserved — only the content is not.
+	return UNCLASSIFIED_ERROR_MESSAGE
 }
 
-/** Max characters of an unrecognised internal error handed to a dApp. */
-const MAX_DAPP_ERROR_CHARS = 200
-
-function scrubForDapp(message: string): string {
-	const scrubbed = scrubUrls(message)
-	return scrubbed.length > MAX_DAPP_ERROR_CHARS ? `${scrubbed.slice(0, MAX_DAPP_ERROR_CHARS - 1)}…` : scrubbed
-}
+/**
+ * The single string handed to a dApp for any error we did not classify.
+ *
+ * Deliberately constant: it is the only shape that cannot carry internal state outward.
+ */
+export const UNCLASSIFIED_ERROR_MESSAGE = "The wallet could not process the request."

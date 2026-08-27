@@ -63,6 +63,18 @@ export class EntityStorage<T> {
 	}
 
 	/**
+	 * A storage key, safe to log.
+	 *
+	 * Row ids are not opaque — an account row is keyed by its address — so the full key is
+	 * identifying. The root is not sensitive and is the useful half; the id keeps a short prefix,
+	 * which locates the row among the handful under a root without writing the whole value down.
+	 */
+	private describeKey(fullKey: string): string {
+		const id = fullKey.slice(this.root.length + 1)
+		return `${this.root}@${id.length > 10 ? `${id.slice(0, 10)}…` : id}`
+	}
+
+	/**
 	 * Decode a raw storage value. Both failure modes KEEP the row (return
 	 * undefined = "present but unreadable"); the read path NEVER deletes by id.
 	 *
@@ -86,11 +98,16 @@ export class EntityStorage<T> {
 		} catch (err) {
 			// The row is whatever was stored under this root — profile ciphertext, contact PII,
 			// transaction detail, or attacker-supplied backup content — and this message is a
-			// pre-formatted string, which the logger's redaction cannot reach inside. Size and type
-			// diagnose the real failure modes here (a truncated write, a non-string value); the
-			// bytes themselves never did.
+			// pre-formatted string, which the logger's redaction cannot reach inside.
+			//
+			// The parse ERROR is withheld too, not just the payload: V8 quotes an excerpt of the
+			// offending input inside its own message (`Unexpected token 'S', "SECRET..." is not
+			// valid JSON`), so interpolating `err.message` re-introduces exactly what dropping the
+			// explicit preview removed. Size and type diagnose the real failure modes here — a
+			// truncated write, a non-string value — and the error's NAME distinguishes a syntax
+			// error from anything else.
 			const shape = typeof raw === "string" ? `string(${raw.length} chars)` : `[${typeof raw}]`
-			const msg = err instanceof Error ? err.message : String(err)
+			const failure = err instanceof Error ? err.name : typeof err
 			// B-23: KEEP the malformed row — the read path never deletes by id. The
 			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write: a
 			// get() reads a stale malformed snapshot, a concurrent set() overwrites
@@ -101,7 +118,9 @@ export class EntityStorage<T> {
 			// unreadable row (return undefined) and leave deletion to an explicitly
 			// serialized repair path — see the purge-hardening follow-up — exactly as
 			// the validation-failure branch below already does.
-			console.error(`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload ${shape}`)
+			console.error(
+				`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} is malformed — KEEPING (not deleting) — ${failure} — payload ${shape}`,
+			)
 			return undefined
 		}
 		if (!this.parse) {
@@ -111,8 +130,12 @@ export class EntityStorage<T> {
 		try {
 			validated = this.parse(parsed)
 		} catch (verr) {
-			const vmsg = verr instanceof Error ? verr.message : String(verr)
-			console.error(`EntityStorage[${this.root}]: row "${fullKey}" failed validation — KEEPING (not deleting) — ${vmsg}`)
+			// Same reasoning as the syntax branch: a codec's exception text is arbitrary and
+			// routinely quotes the value it rejected.
+			const failure = verr instanceof Error ? verr.name : typeof verr
+			console.error(
+				`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} failed validation — KEEPING (not deleting) — ${failure}`,
+			)
 			return undefined
 		}
 		return this.requireIdMatch(fullKey, validated)
@@ -137,7 +160,11 @@ export class EntityStorage<T> {
 				? typeof embedded === "number" && Number.isSafeInteger(embedded) && embedded >= 1 && String(embedded) === suffix
 				: typeof embedded === "string" && embedded === suffix
 		if (!ok) {
-			console.error(`EntityStorage[${this.root}]: row "${fullKey}" embeds id "${String(embedded)}" — KEEPING (not deleting)`)
+			// Both halves are identifying — the key suffix and the embedded id are addresses for
+			// several roots — and the security-relevant fact is only that they DISAGREE.
+			console.error(
+				`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} embeds a mismatched id (${typeof embedded}) — KEEPING (not deleting)`,
+			)
 			return undefined
 		}
 		return entity

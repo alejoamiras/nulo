@@ -10,7 +10,7 @@ import {
 import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 import { unwrapOperationResult } from "@nulo/wallet-bridge"
 import { classifyOperationCatch } from "@/wallet/services/execution/rpc-cancel"
-import { toWalletResponseError } from "./error-envelope"
+import { toWalletResponseError, UNCLASSIFIED_ERROR_MESSAGE } from "./error-envelope"
 
 describe("toWalletResponseError", () => {
 	test("JobCancelledError → {code:4001, walletErrorCode, jobId} (regression for existing behavior)", () => {
@@ -97,14 +97,17 @@ describe("toWalletResponseError", () => {
 		expect(wire).not.toContain("p1")
 	})
 
-	test("plain Error → string fallback (preserves wire contract for unrecognised throws)", () => {
+	test("plain Error → constant string (preserves the string wire contract, not the content)", () => {
+		// The SHAPE contract — a plain string for unrecognised throws — is what dApps depend on;
+		// the CONTENT was internal text crossing into an untrusted caller.
 		const env = toWalletResponseError(new Error("boom"))
-		expect(env).toBe("boom")
+		expect(typeof env).toBe("string")
+		expect(env).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 	})
 
-	test("non-Error throw → String() fallback", () => {
-		expect(toWalletResponseError("nope")).toBe("nope")
-		expect(toWalletResponseError(42)).toBe("42")
+	test("non-Error throw → the same constant", () => {
+		expect(toWalletResponseError("nope")).toBe(UNCLASSIFIED_ERROR_MESSAGE)
+		expect(toWalletResponseError(42)).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 	})
 })
 
@@ -146,34 +149,42 @@ describe("duplicate-initialization envelope reachability (N-15)", () => {
 			}
 		})()
 		expect(thrown).not.toBeInstanceOf(DuplicateInitializationError)
-		expect(toWalletResponseError(thrown)).toBe("plain boom")
+		expect(toWalletResponseError(thrown)).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 	})
 
-	// This string is handed to an arbitrary dApp — the only path here that leaves the machine.
-	describe("fall-through scrubbing", () => {
-		test("strips an API key embedded in an endpoint URL", () => {
+	/**
+	 * This value is handed to an ARBITRARY dApp — the only path here that leaves the machine.
+	 *
+	 * Scrubbing and capping were tried first and rejected: a cap bounds exposure without
+	 * sanitizing it, so `new Error("private note: <secret>")` still crossed verbatim. Anything a
+	 * dApp is meant to act on is classified above with a `walletErrorCode`, so an unclassified
+	 * error's text has no defined meaning to the caller.
+	 */
+	describe("fall-through carries no internal state", () => {
+		test("an endpoint URL with an API key never reaches the dApp", () => {
 			const out = toWalletResponseError(new Error("fetch failed: https://eth.example.com/v2/SECRET-KEY-123?apiKey=abc"))
 
+			expect(out).toBe(UNCLASSIFIED_ERROR_MESSAGE)
 			expect(out).not.toContain("SECRET-KEY-123")
-			expect(out).not.toContain("apiKey=abc")
-			expect(out).toContain("https://eth.example.com")
+			expect(out).not.toContain("eth.example.com")
 		})
 
-		test("strips userinfo credentials", () => {
-			const out = toWalletResponseError(new Error("connect failed to https://user:hunter2@node.example.com/rpc"))
+		test("a secret in the message body never reaches the dApp — a cap would not have stopped this", () => {
+			const out = toWalletResponseError(new Error("private note: correct-horse-battery-staple"))
 
-			expect(out).not.toContain("hunter2")
+			expect(out).toBe(UNCLASSIFIED_ERROR_MESSAGE)
+			expect(out).not.toContain("correct-horse")
 		})
 
-		test("caps an unbounded internal message", () => {
-			const out = toWalletResponseError(new Error("x".repeat(10_000)))
-
-			expect((out as string).length).toBeLessThanOrEqual(200)
+		test("stays a plain string, which is the actual wire contract", () => {
+			expect(typeof toWalletResponseError(new Error("x".repeat(10_000)))).toBe("string")
+			expect(typeof toWalletResponseError("not an error")).toBe("string")
 		})
 
-		test("leaves an ordinary message untouched", () => {
-			expect(toWalletResponseError(new Error("plain boom"))).toBe("plain boom")
-			expect(toWalletResponseError("not an error")).toBe("not an error")
+		test("classified errors are unaffected — they keep their code and message", () => {
+			const env = toWalletResponseError(new RpcTimeoutError("Offscreen request timed out: prove"))
+
+			expect(env).toMatchObject({ code: -32603, data: { walletErrorCode: RpcTimeoutError.CODE } })
 		})
 	})
 })

@@ -431,7 +431,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 				logger.log(
 					"wallet-sdk-bg",
 					LogLevel.Info,
-					`Terminating live session ${match.sessionId} for revoked dApp ${origin}@${chainId}`,
+					`Terminating live session ${match.sessionId} on chain ${chainId} — dApp access revoked`,
 				)
 				handler.terminateSession(match.sessionId)
 			}
@@ -811,7 +811,7 @@ async function handleWalletMessage(
 		// Pass the error as an OBJECT, never pre-stringified: a finished string is opaque to the
 		// logger's redaction, so interpolating it here would smuggle whatever the error carries
 		// (endpoint URLs, argument values) straight into the log store.
-		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for ${session.origin}`, response.error)
+		logger.log("wallet-sdk", LogLevel.Error, `Method ${message.type} failed for session ${session.sessionId}`, response.error)
 
 		if (hooks?.queuedJournalId) {
 			await failQueuedIfUnclaimed(operationJournal, hooks.queuedJournalId, getErrorMessage(error), logger)
@@ -827,7 +827,11 @@ async function handleWalletMessage(
 	// response through. Pure lock/unlock-to-same bumps nothing, so those
 	// pinned flows still deliver.
 	if (entryEpoch !== undefined && switchEpoch.current() !== entryEpoch) {
-		logger.log("wallet-sdk", LogLevel.Warn, `Suppressing ${message.type} response for ${session.origin}: profile switched mid-dispatch`)
+		logger.log(
+			"wallet-sdk",
+			LogLevel.Warn,
+			`Suppressing ${message.type} response for session ${session.sessionId}: profile switched mid-dispatch`,
+		)
 		return
 	}
 
