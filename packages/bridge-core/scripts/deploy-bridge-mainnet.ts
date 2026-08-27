@@ -259,6 +259,17 @@ async function main() {
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const preBridge = String(await (portalPre.read as any).l2Bridge())
 		if (!/^0x0+$/.test(preBridge)) throw new Error(`portal already initialized (l2Bridge ${preBridge}) — reuse forbidden; STOP`)
+		// Wrong-key preflight: read the pinned initializer back and compare BEFORE broadcasting.
+		// Without it a resume under a different key discovers the mismatch only as a NotInitializer
+		// revert, after gas is spent and mid-way through a one-shot sequence.
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const pinnedInitializer = String(await (portalPre.read as any).initializer())
+		if (pinnedInitializer.toLowerCase() !== account.address.toLowerCase()) {
+			throw new Error(
+				`portal initializer is ${pinnedInitializer} but this run broadcasts from ${account.address} — ` +
+					"resume with the key that deployed the portal; initialize is pinned to it and there is no rescue path.",
+			)
+		}
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, CIRCLE_USDC, bridgeInstance.address.toString()])
