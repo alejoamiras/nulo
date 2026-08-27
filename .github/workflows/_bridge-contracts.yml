@@ -98,7 +98,24 @@ jobs:
       # setup-aztec shells out to bun, so it has to be on PATH before that step runs.
       - uses: ./.github/actions/setup-bun
 
+      # Read the toolchain out of the crate rather than hardcoding it: these Nargo.toml files pin
+      # aztec-packages to their own tag, and compiling that tag's aztec-nr with a newer nargo dies
+      # inside upstream's macros. Deriving it here means the job cannot drift from the pin.
+      - name: Resolve the pinned Aztec toolchain
+        id: aztec-pin
+        run: |
+          TAG=$(sed -n 's/.*aztec-packages\/".*tag = "v\([^"]*\)".*/\1/p' \
+            contracts/bridge/aztec/keystone/Nargo.toml | head -1)
+          if [ -z "$TAG" ]; then
+            echo "::error::could not read the aztec-packages tag from keystone/Nargo.toml"
+            exit 1
+          fi
+          echo "pinned Aztec toolchain: $TAG"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
       - uses: ./.github/actions/setup-aztec
+        with:
+          version: ${{ steps.aztec-pin.outputs.version }}
 
       # Pure-library crates only: they need no TXE oracle, so they run unattended here.
       # The TokenBridge TXE suite is excluded on purpose — see the header.

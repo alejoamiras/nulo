@@ -6,6 +6,14 @@ inputs:
     description: Skip Foundry + Aztec CLI install (use when the test points at a remote node).
     required: false
     default: "false"
+  version:
+    description: >
+      Override the detected Aztec version. Leave empty to derive it from apps/extension's
+      @aztec/aztec.js, which is what every caller wants. The bridge contracts are the exception:
+      their Nargo.toml pins aztec-packages to its own tag, and compiling that tag's aztec-nr with
+      a newer nargo fails inside upstream's own macros.
+    required: false
+    default: ""
 
 runs:
   using: composite
@@ -14,9 +22,16 @@ runs:
       if: inputs.skip_cli != 'true'
       id: detect
       shell: bash
+      env:
+        OVERRIDE: ${{ inputs.version }}
       run: |
-        VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('apps/extension/package.json','utf8')).dependencies['@aztec/aztec.js'])")
-        echo "Aztec version: $VERSION"
+        if [ -n "$OVERRIDE" ]; then
+          VERSION="$OVERRIDE"
+          echo "Aztec version: $VERSION (caller override)"
+        else
+          VERSION=$(bun -e "console.log(JSON.parse(require('fs').readFileSync('apps/extension/package.json','utf8')).dependencies['@aztec/aztec.js'])")
+          echo "Aztec version: $VERSION (from apps/extension)"
+        fi
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
     - name: Install Node.js 24
