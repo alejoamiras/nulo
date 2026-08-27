@@ -79,9 +79,6 @@ export abstract class ServiceClient<
 			this.handleResponse(message.content)
 		} else {
 			const { event, payload } = message.content
-			// The payload is every balance, profile, tx and transfer object in the wallet; the
-			// event name is the whole diagnostic value.
-			this.logDebug("Event received", event)
 			this.handleEvent(event, payload)
 		}
 	}

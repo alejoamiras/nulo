@@ -6,7 +6,7 @@ import { decodeResult } from "./decode"
 import { wrapParams } from "../utils"
 import { CLIENT_DISCONNECTED_MESSAGE, remoteErrorFromResponseContent, RpcDisconnectedError, RpcTimeoutError } from "../errors"
 import type { RequestTerminalStatus } from "./terminal-status"
-import { summarizeContent } from "./envelope-summary"
+import { describeUnregisteredName, summarizeContent } from "./envelope-summary"
 
 /**
  * Shared request-correlator core for both transport clients (popup↔SW Port and
@@ -230,9 +230,14 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 	protected handleEvent(event: keyof TEvents, payload: TEvents[keyof TEvents]): void {
 		const handler = (this as unknown as Record<PropertyKey, unknown>)[event]
 		if (this.reservedEventNames.has(String(event)) || !(handler instanceof EventHandler)) {
-			this.logWarn("Unknown or reserved event received", event)
+			// Unvalidated and sender-controlled: a forged message can put a secret in the event slot,
+			// and this line is at Warn, above the level filter. Describe it, never echo it.
+			this.logWarn("Unknown or reserved event received", describeUnregisteredName(event))
 			return
 		}
+		// Logged HERE, not at the transport seam: past the check above the name is proven to be one
+		// of this client's declared events, so echoing it in full is safe and useful.
+		this.logDebug("Event received", String(event))
 		handler.invoke(payload)
 	}
 

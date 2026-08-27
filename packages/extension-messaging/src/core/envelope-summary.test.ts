@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { summarizeContent, summarizeMessage } from "./envelope-summary"
+import { describeUnregisteredName, summarizeContent, summarizeMessage } from "./envelope-summary"
 import { wrapParams } from "../utils"
 
 /**
@@ -86,6 +86,20 @@ describe("summarizeContent", () => {
 
 		expect(() => summarizeContent(hostile, vouch)).not.toThrow()
 		expect(summarizeContent(hostile, vouch)).toEqual({ summaryFailed: true })
+	})
+})
+
+describe("describeUnregisteredName", () => {
+	// Used where the caller has ALREADY concluded the name is unknown — the forged-event path,
+	// which logs at Warn and so lands in the store for every user.
+	test("never echoes the value", () => {
+		expect(describeUnregisteredName(SECRET)).toBe(`[unregistered:${SECRET.length}]`)
+		expect(describeUnregisteredName(SECRET)).not.toContain("horse")
+	})
+
+	test("reports the type for a non-string", () => {
+		expect(describeUnregisteredName(42)).toBe("[number]")
+		expect(describeUnregisteredName(undefined)).toBe("[undefined]")
 	})
 })
 

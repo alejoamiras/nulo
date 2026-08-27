@@ -94,6 +94,16 @@ function guard(build: () => Record<string, unknown>): Record<string, unknown> {
 	}
 }
 
+/**
+ * Describe a name that has NOT been proven registered.
+ *
+ * For sites that have already decided the name is unknown — there is nothing left to vouch for it,
+ * and on those paths the value is sender-controlled, so echoing it is the leak.
+ */
+export function describeUnregisteredName(value: unknown): string {
+	return describeString(value)
+}
+
 /** Describe a request/response `content` block: ids and vouched names, never `params`/`result`. */
 export function summarizeContent(content: unknown, vouch?: NameVouch): Record<string, unknown> {
 	return guard(() => summarizeContentUnsafe(content, vouch))
