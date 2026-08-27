@@ -150,13 +150,21 @@ describe("AccountSwitcher", () => {
 	it("copy button copies the FULL address without toggling selection", async () => {
 		const c = connectSession()
 		const writeText = vi.fn(async () => {})
+		// Restored in finally: a leaked stub clipboard would outlive this case and silently
+		// answer for every later test in the file.
+		const original = Object.getOwnPropertyDescriptor(navigator, "clipboard")
 		Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
-		const w = mountSwitcher()
-		await w.find(sel(TESTIDS.accountChip)).trigger("click")
-		await w.findAll(sel(TESTIDS.accountMenuCopy))[1].trigger("click")
-		expect(writeText).toHaveBeenCalledWith(ADDR_B)
-		expect(c.selectedAccount.value).toBe(ADDR_A) // copy is a sibling control, not selection
-		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(true) // menu stays open
+		try {
+			const w = mountSwitcher()
+			await w.find(sel(TESTIDS.accountChip)).trigger("click")
+			await w.findAll(sel(TESTIDS.accountMenuCopy))[1].trigger("click")
+			expect(writeText).toHaveBeenCalledWith(ADDR_B)
+			expect(c.selectedAccount.value).toBe(ADDR_A) // copy is a sibling control, not selection
+			expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(true) // menu stays open
+		} finally {
+			if (original) Object.defineProperty(navigator, "clipboard", original)
+			else Reflect.deleteProperty(navigator, "clipboard")
+		}
 	})
 
 	it("discloses grant truncation in the menu", async () => {

@@ -56,8 +56,8 @@ async function registerAllContracts(w: Wallet): Promise<void> {
 	await w.registerContract(tokenInst, TokenContractArtifact)
 	await w.registerContract(bridgeInst, tokenBridgeArtifact)
 	// The PrivateFPC must be pre-registered so the no-fuel-claim gate's private Fee-Juice balance read
-	// works under 5.0.1 — the wallet only auto-registers it when a tx uses it as fee payer, which is too
-	// late for the pre-claim read. See @/contracts/private-fpc.
+	// resolves: the wallet only auto-registers it when a tx uses it as fee payer, which is too late for
+	// the pre-claim read. See @/contracts/private-fpc.
 	const { instance: privateFpcInst, artifact: privateFpcArtifact } = await getPrivateFpc()
 	await w.registerContract(privateFpcInst, privateFpcArtifact)
 }

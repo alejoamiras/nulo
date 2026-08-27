@@ -205,7 +205,19 @@ classification, permit deadline, `resolvePackageAsset`) rather than on top of ou
 **Gates on the merged tree**: faucet typecheck 0 · `bun run lint` 0 · `test:faucet` 615/615 (60 files —
 dev's new faucet suites and ours green together) · `test:e2e` 15/15 · `bun run audit:faucet` 0.
 
-**Merge-integration codex round**: verdict recorded in the audit log below.
+**Merge-integration codex round — VERDICT: approve.** It independently confirmed the two hazards I
+suspected are benign: `confirmLandedTxHash` is hash-scoped and display-only, so retaining it across a
+switch is consistent with deliberately cross-account-visible cards (and busy-gating blocks switching
+during active polling); and `fuelRecipientFor` preserves the former inline mapping exactly, leaving
+`rec.recipient` the correct ownership/`from` basis for private fuel (the PrivateFPC is the fuel
+destination and fee payer, not an account). It also diffed the 5.0.1 vs 5.2.0 capability definitions
+byte-for-byte (identical) and found the bun-runtime-sensitive test constructs deterministic.
+
+| # | Residual (severity) | Disposition |
+|---|---|---|
+| D-46 | `claimFuelStandalone` doesn't explicitly reject PRIVATE records (LOW) | **Surfaced to the owner, not unilaterally changed.** Pre-existing and outside this feature's domain: the `standaloneClaimed` contract already documents "PUBLIC fuel only", and private fuel lands at the PrivateFPC, so a private standalone claim cannot redirect funds — it can only fail confusingly. Enforcing it is a bridge-recovery behavior change (and touches a fund-stranding-sensitive affordance), so it belongs to a bridge-owned change, not a merge refresh. |
+| D-47 | `AccountSwitcher.test.ts` leaked its stub clipboard into later cases (LOW) | **Adopted**: descriptor saved and restored in `finally`. |
+| D-48 | Stale "under 5.0.1" comment after the 5.2.0 bump (LOW) | **Adopted**: comment now states the constraint without pinning a version. |
 
 ## Security & Adversarial Considerations
 

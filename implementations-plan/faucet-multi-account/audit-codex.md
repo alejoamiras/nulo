@@ -167,3 +167,21 @@ Confirmed. All conditions are addressed:
 Only the accepted narrow-width header cosmetic remains.
 
 VERDICT: approve
+## Merge-integration round (dev @118 commits, resumed session, xhigh) — VERDICT: approve
+
+No merge blocker found; the multi-account invariants survived.
+
+- Account guard correctly prevents cross-account receipt polling. `confirmLandedTxHash` is hash-scoped and display-only; retaining it across switches is consistent with intentionally cross-account-visible journal cards. Busy gating prevents switching during active polling.
+- `fuelRecipientFor` exactly preserves the former inline mapping. For private fuel, `rec.recipient` remains the correct ownership/`from` account; the PrivateFPC is the fuel destination/fee payer, not the active account.
+- `"proposed"` introduces no settlement or switching gap. A resume under another account stops before receipt processing without corrupting persisted state.
+- The 5.0.1 and 5.2.0 capability definitions are byte-identical; wallet-manager discovery code is unchanged. The only relevant wallet schema change found was unrelated receipt-wait timing.
+- No new wallet sends/prompts were added by dev, and all existing account-sensitive spans remain covered.
+- Bun-sensitive tests are deterministic; storage spies restore in `finally`, timers reset, and the push iterator creates no live event-loop handle.
+
+Noted residuals:
+
+- [LOW] `claimFuelStandalone` does not explicitly reject private records. Legitimate completed private claims have already consumed the FJ message, so this can only produce a misleading sponsored recovery attempt, not redirect funds. A defensive `rec.isPrivate` rejection would tighten the invariant.
+- [LOW] `AccountSwitcher.test.ts` leaves its configurable clipboard replacement installed for later tests in that file.
+- [LOW] `useWalletConnection.ts` retains a stale “under 5.0.1” comment after the 5.2.0 bump.
+
+VERDICT: approve
