@@ -174,6 +174,15 @@ describe("trim — errors", () => {
 		expect((out.message as string).length).toBeLessThanOrEqual(200)
 	})
 
+	test("projects a DOMException — WebAuthn failures arrive as one", () => {
+		// Not an Error, and its fields are non-enumerable, so the generic walk produced `{}` —
+		// discarding exactly the diagnosis the passkey and backup-export paths log it for.
+		const out = trim(new DOMException("credential denied", "SecurityError")) as Record<string, unknown>
+
+		expect(out.name).toBe("SecurityError")
+		expect(out.message).toBe("credential denied")
+	})
+
 	test("handles a subclassed error", () => {
 		class RpcError extends Error {
 			public constructor() {

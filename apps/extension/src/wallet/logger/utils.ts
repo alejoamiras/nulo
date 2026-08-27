@@ -170,6 +170,15 @@ function toOrigin(value: unknown): unknown {
 }
 
 /**
+ * Error-like brands whose `name`/`message` are non-enumerable, so the generic walk yields `{}`.
+ *
+ * `DOMException` is not an `Error` and reports its own tag — WebAuthn failures arrive as one and
+ * are logged verbatim during passkey ceremonies and backup export, so omitting it silently
+ * discarded exactly the diagnosis those paths exist to produce.
+ */
+const ERROR_TAGS: ReadonlySet<string> = new Set(["[object Error]", "[object DOMException]"])
+
+/**
  * Loggable projection of an error.
  *
  * `Object.entries(new Error("x"))` is `[]` — name/message/stack are non-enumerable — so the
@@ -207,7 +216,7 @@ export const trim = (value: unknown, depth: number = 0): unknown => {
 		// Non-plain objects first — the generic walk below mishandles every one of them. Typed
 		// arrays are the dangerous case: `Object.entries` yields one entry PER BYTE, so a raw
 		// 32-byte key would be EXPANDED into a 32-field object rather than hidden.
-		if (Object.prototype.toString.call(value) === "[object Error]") return projectError(value as Error)
+		if (ERROR_TAGS.has(Object.prototype.toString.call(value))) return projectError(value as Error)
 		if (ArrayBuffer.isView(value)) return `[${value.constructor.name}(${value.byteLength})]`
 		if (value instanceof ArrayBuffer) return `[ArrayBuffer(${value.byteLength})]`
 		if (value instanceof Map) return `[Map(${value.size})]`
