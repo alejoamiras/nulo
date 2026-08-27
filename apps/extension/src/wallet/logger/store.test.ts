@@ -6,14 +6,27 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 
 // ── Mock IConfig ──────────────────────────────────────────────────────
 
-function mockConfig(debugMode = false): IConfig {
+function mockConfig(debugMode = false, developerMode = false): IConfig {
 	return {
 		onUpdate: new EventHandler<ConfigProp>(),
 		get: ((key: string) => {
 			if (key === "debugMode") return debugMode
+			if (key === "developerMode") return developerMode
 			return undefined
 		}) as IConfig["get"],
 	}
+}
+
+/** chrome.storage.session double that records what the flush actually wrote. */
+function mockSessionStorage(initial?: unknown) {
+	const session = {
+		get: vi.fn().mockResolvedValue(initial === undefined ? {} : { "nulo:logs": initial }),
+		set: vi.fn(),
+		remove: vi.fn().mockResolvedValue(undefined),
+	}
+	// biome-ignore lint/suspicious/noExplicitAny: test setup — mocking chrome.storage.session
+	;(globalThis as any).chrome = { storage: { session } }
+	return session
 }
 
 // print() calls console._debug/_log/_warn/_error (originals saved by console-sniffer).
@@ -201,22 +214,13 @@ describe("LoggerStore", () => {
 		})
 
 		test("rehydrates from session storage", async () => {
-			// Mock chrome.storage.session
 			const savedLogs = [
 				{ id: 5, timestamp: 1000, source: "test", level: LogLevel.Info, context: "sw" as const, data: ["saved"] },
 				{ id: 10, timestamp: 2000, source: "test", level: LogLevel.Debug, context: "offscreen" as const, data: ["saved2"] },
 			]
-			// biome-ignore lint/suspicious/noExplicitAny: test setup — mocking chrome.storage.session
-			;(globalThis as any).chrome = {
-				storage: {
-					session: {
-						get: vi.fn().mockResolvedValue({ "nulo:logs": savedLogs }),
-						set: vi.fn(),
-					},
-				},
-			}
+			mockSessionStorage(savedLogs)
 
-			const store = new LoggerStore(mockConfig(true))
+			const store = new LoggerStore(mockConfig(true, true))
 			await store.rehydrate()
 
 			const logs = store.get(10)
@@ -228,6 +232,81 @@ describe("LoggerStore", () => {
 			store.log("new", LogLevel.Debug, "after rehydrate")
 			const all = store.get(10)
 			expect(all[2].id).toBeGreaterThan(10)
+		})
+	})
+
+	// Retention is opt-in with developer mode. Without it, captured lines must never outlive this
+	// worker — that is what keeps the wide capture surface off a normal user's machine.
+	describe("retention gate", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
+
+		test("does NOT persist when developer mode is off", () => {
+			const session = mockSessionStorage()
+			const store = new LoggerStore(mockConfig(false, false))
+
+			store.log("a", LogLevel.Error, "sensitive")
+			vi.advanceTimersByTime(5000)
+
+			expect(session.set).not.toHaveBeenCalled()
+		})
+
+		test("persists when developer mode is on", () => {
+			const session = mockSessionStorage()
+			const store = new LoggerStore(mockConfig(false, true))
+
+			store.log("a", LogLevel.Error, "diagnostic")
+			vi.advanceTimersByTime(5000)
+
+			expect(session.set).toHaveBeenCalledTimes(1)
+			const written = session.set.mock.calls[0][0]["nulo:logs"] as Array<{ data: unknown[] }>
+			expect(written[0].data).toEqual(["diagnostic"])
+		})
+
+		test("turning developer mode off purges what was already written", async () => {
+			const session = mockSessionStorage()
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+
+			store.log("a", LogLevel.Error, "captured while on")
+			vi.advanceTimersByTime(5000)
+			expect(session.set).toHaveBeenCalledTimes(1)
+
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.runAllTimersAsync()
+
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+
+			// And it must stop writing from here on.
+			store.log("a", LogLevel.Error, "after opt-out")
+			vi.advanceTimersByTime(5000)
+			expect(session.set).toHaveBeenCalledTimes(1)
+		})
+
+		test("a pending flush cannot recreate the file after opt-out", async () => {
+			const session = mockSessionStorage()
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+
+			store.log("a", LogLevel.Error, "queued")
+			// Opt out mid-debounce, before the 2s flush fires.
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.runAllTimersAsync()
+
+			expect(session.set).not.toHaveBeenCalled()
+		})
+
+		test("rehydrate drops a stale persisted copy when retention is off", async () => {
+			// The flag can be turned off while this worker is dead, so the disable-time purge never
+			// ran — boot must not import those entries back into memory.
+			const stale = [{ id: 1, timestamp: 1, source: "s", level: LogLevel.Info, context: "sw" as const, data: ["stale"] }]
+			const session = mockSessionStorage(stale)
+
+			const store = new LoggerStore(mockConfig(false, false))
+			await store.rehydrate()
+
+			expect(store.get(10)).toHaveLength(0)
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
 		})
 	})
 })

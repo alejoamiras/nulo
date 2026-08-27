@@ -9,10 +9,12 @@ export class LoggerStore implements ILoggerStore {
 	private logs: CircularBufferIterable<Log>
 	private nextId = 1
 	private flushTimer?: ReturnType<typeof setTimeout>
+	private persistEnabled: boolean
 
 	public constructor(config: IConfig) {
 		this.logLevel = config.get("debugMode") ? LogLevel.Debug : LogLevel.Info
 		this.logs = new CircularBufferIterable(this.logLevel === LogLevel.Debug ? 10_000 : 1000)
+		this.persistEnabled = config.get("developerMode") === true
 		config.onUpdate.add(this.onConfigUpdate)
 	}
 
@@ -63,6 +65,13 @@ export class LoggerStore implements ILoggerStore {
 
 	/** Rehydrate logs from chrome.storage.session (call on startup before wiring services). */
 	public async rehydrate(): Promise<void> {
+		// Anything still in session storage was captured under a PREVIOUS opt-in — the flag can be
+		// turned off while this worker is dead, so the disable-time purge never ran. Drop it rather
+		// than importing it back into memory.
+		if (!this.persistEnabled) {
+			await this.purgePersisted()
+			return
+		}
 		try {
 			const result = await chrome.storage.session.get("nulo:logs")
 			const saved = result["nulo:logs"] as Log[] | undefined
@@ -77,8 +86,16 @@ export class LoggerStore implements ILoggerStore {
 		}
 	}
 
-	/** Debounced flush of recent logs to chrome.storage.session for crash recovery. */
+	/**
+	 * Debounced flush of recent logs to chrome.storage.session for crash recovery.
+	 *
+	 * Retention is opt-in with developer mode. Without it a normal user's logs live only in this
+	 * worker's memory and die with it, so no captured line survives to be read back or exported —
+	 * which is the bulk of the exposure, since the capture surface is far wider than the redactor
+	 * can cover. Developers accept retention in exchange for diagnosis across worker restarts.
+	 */
 	private scheduleFlush(): void {
+		if (!this.persistEnabled) return
 		if (this.flushTimer) return
 		this.flushTimer = setTimeout(() => {
 			this.flushTimer = undefined
@@ -91,10 +108,30 @@ export class LoggerStore implements ILoggerStore {
 		}, 2000)
 	}
 
+	/** Drop the persisted copy and cancel any in-flight flush that would recreate it. */
+	private async purgePersisted(): Promise<void> {
+		if (this.flushTimer) {
+			clearTimeout(this.flushTimer)
+			this.flushTimer = undefined
+		}
+		try {
+			await chrome.storage.session.remove("nulo:logs")
+		} catch {
+			// Session storage may not be available
+		}
+	}
+
 	private readonly onConfigUpdate = (prop: ConfigProp) => {
 		if (prop.key === "debugMode") {
 			this.logLevel = prop.value ? LogLevel.Debug : LogLevel.Info
 			this.logs.resize(this.logLevel === LogLevel.Debug ? 10_000 : 1_000)
+		}
+		if (prop.key === "developerMode") {
+			this.persistEnabled = prop.value === true
+			// Turning retention off must PURGE, not merely stop writing: entries captured while it
+			// was on otherwise survive in session storage and are re-imported by rehydrate() on the
+			// next worker restart, so the setting would appear to do nothing.
+			if (!this.persistEnabled) void this.purgePersisted()
 		}
 	}
 }
