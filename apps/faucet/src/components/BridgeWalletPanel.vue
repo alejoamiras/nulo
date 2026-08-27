@@ -159,4 +159,17 @@ async function onClick() {
 	background: color-mix(in srgb, var(--red) 10%, transparent) !important;
 	color: var(--red) !important;
 }
+
+.split {
+	display: inline-flex;
+}
+
+.split > :first-child {
+	border-right: 1px solid color-mix(in srgb, var(--txt-inverse) 25%, transparent);
+}
+
+.split .caret {
+	min-width: 44px;
+	padding: 0 12px;
+}
 </style>
