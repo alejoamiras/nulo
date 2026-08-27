@@ -69,6 +69,13 @@ jobs:
         if: inputs.run-halmos
         working-directory: contracts/bridge/evm
         run: |
+          # The proofs arrive partway up the stack, so a branch below that point legitimately has
+          # no suite to run. Assert the count only where the file exists, rather than failing
+          # every earlier arc.
+          if [ ! -f test/FormalRouter.t.sol ]; then
+            echo "::notice::FormalRouter.t.sol not present on this ref — skipping the symbolic proofs"
+            exit 0
+          fi
           pipx install "halmos==$(cat halmos.version)"
           # --ast --force: halmos reads the solc AST from the artifacts, and the plain `forge
           # build` above writes them without it. Against those artifacts halmos does not fail —
