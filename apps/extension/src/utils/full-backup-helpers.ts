@@ -7,6 +7,14 @@ import { EncryptionKey } from "@nulo/wallet-crypto"
 import { fromBase64 } from "@/wallet/utils"
 import { scrubUrls } from "@/utils/scrub-urls"
 import { CONFIG_SERVICE_NAME, type ConfigKey, RESTORABLE_CONFIG_KEYS } from "@/wallet/services/config/spec"
+import { ACCOUNT_SERVICE_NAME, IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
+import { AUTH_REGISTRY_SERVICE_NAME } from "@/wallet/services/auth-registry/spec"
+import { CONTACT_SERVICE_NAME } from "@/wallet/services/contact/spec"
+import { FPC_SERVICE_NAME } from "@/wallet/services/fpc/spec"
+import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
+import { TOKEN_BALANCE_SERVICE_NAME } from "@/wallet/services/token-balance/spec"
+import { TOKEN_SERVICE_NAME } from "@/wallet/services/token/spec"
+import { TRANSACTION_SERVICE_NAME } from "@/wallet/services/transaction/spec"
 
 /**
  * One shared ceiling for backup files, enforced on BOTH sides: the import
@@ -169,15 +177,40 @@ interface GenericRestoreItem {
  * row, so a crafted token row can ship `chainId: "SECRET"` or `key: "SECRET"` — short strings that
  * pass a length check while being neither a chain id nor a config key.
  */
-const RESTORE_ERROR_FIELDS = [
-	{ name: "id", kind: "identifier" },
-	{ name: "networkId", kind: "identifier" },
-	{ name: "profileId", kind: "identifier" },
-	// Chain ids are numeric everywhere in this codebase; a string one is not a chain id.
-	{ name: "chainId", kind: "number" },
-	// Only for config rows, and only when it is genuinely one of the restorable keys.
-	{ name: "key", kind: "configKey" },
-] as const
+type RestoreErrorField = { name: string; kind: "identifier" | "number" | "configKey" }
+
+const ID: RestoreErrorField = { name: "id", kind: "identifier" }
+const PROFILE_ID: RestoreErrorField = { name: "profileId", kind: "identifier" }
+const NETWORK_ID: RestoreErrorField = { name: "networkId", kind: "identifier" }
+/** Chain ids are numeric everywhere in this codebase; a string one is not a chain id. */
+const CHAIN_ID: RestoreErrorField = { name: "chainId", kind: "number" }
+/** Only meaningful for config rows, and only when it is genuinely a restorable key. */
+const CONFIG_KEY: RestoreErrorField = { name: "key", kind: "configKey" }
+
+/**
+ * Which fields each service may emit — declared PER SERVICE, not globally.
+ *
+ * A shared field list is still a name allowlist: `restoreRows` returns the raw failed row, and
+ * backup migration preserves unknown properties, so a crafted `token` row can carry a
+ * `networkId` — a field a token does not have — and a global list emits it. Naming the fields a
+ * given row type actually has is what closes that.
+ *
+ * Fail-closed: a service absent from this map emits nothing but its ordinal and error.
+ */
+const RESTORE_ERROR_FIELDS_BY_SERVICE: Readonly<Record<string, ReadonlyArray<RestoreErrorField>>> = {
+	[NETWORK_SERVICE_NAME]: [ID, PROFILE_ID, CHAIN_ID],
+	// Accounts and imported keys are keyed by address and carry no `id`.
+	[ACCOUNT_SERVICE_NAME]: [PROFILE_ID, CHAIN_ID],
+	[IMPORTED_KEYS_SERVICE_NAME]: [PROFILE_ID, CHAIN_ID],
+	[TOKEN_SERVICE_NAME]: [ID, PROFILE_ID, CHAIN_ID],
+	[TOKEN_BALANCE_SERVICE_NAME]: [ID],
+	// A Tx is keyed by hash, which is a private-activity link — the ordinal locates it instead.
+	[TRANSACTION_SERVICE_NAME]: [PROFILE_ID, NETWORK_ID, CHAIN_ID],
+	[AUTH_REGISTRY_SERVICE_NAME]: [ID],
+	[FPC_SERVICE_NAME]: [ID, PROFILE_ID, CHAIN_ID],
+	[CONTACT_SERVICE_NAME]: [ID, PROFILE_ID],
+	[CONFIG_SERVICE_NAME]: [CONFIG_KEY],
+}
 
 /**
  * Upper bound on recorded failures. Nothing else bounds this: the viewer renders the whole log
@@ -227,7 +260,7 @@ function describeRestoreError(value: unknown): unknown {
  */
 function projectRestoreErrorRow(row: Record<string, unknown>, index: number, serviceName: string): Record<string, unknown> {
 	const out: Record<string, unknown> = { row: index }
-	for (const field of RESTORE_ERROR_FIELDS) {
+	for (const field of RESTORE_ERROR_FIELDS_BY_SERVICE[serviceName] ?? []) {
 		const value = row[field.name]
 		if (value === undefined) continue
 		if (field.kind === "number") {

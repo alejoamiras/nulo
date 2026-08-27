@@ -1,5 +1,6 @@
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { describe, expect, it, vi } from "vitest"
+import { IMPORTED_KEYS_SERVICE_NAME } from "@/wallet/services/account/spec"
 import {
 	AssemblyAbortedError,
 	assembleFullBackup,
@@ -224,12 +225,14 @@ describe("collectRestoreErrors", () => {
 	// log, AND a console.warn that the hijacked console feeds into the log store.
 	describe("payload stripping", () => {
 		it("drops an imported key's sealed signing key", () => {
-			const result = collectRestoreErrors("imported-keys", [
+			// An ImportedAccountKey is keyed by address and carries no `id`, so a row claiming one is
+			// carrying something else under that name — the ordinal locates it instead.
+			const result = collectRestoreErrors(IMPORTED_KEYS_SERVICE_NAME, [
 				{ id: "k1", profileId: "p1", chainId: 1, address: "0xacc", encryptedSigningKey: "SEALED-BLOB", restoreError: "boom" },
 			])
 
 			expect(JSON.stringify(result)).not.toContain("SEALED-BLOB")
-			expect(result).toEqual([{ row: 0, id: "k1", profileId: "p1", chainId: 1, restoreError: "boom" }])
+			expect(result).toEqual([{ row: 0, profileId: "p1", chainId: 1, restoreError: "boom" }])
 		})
 
 		it("drops an endpoint URL, which routinely carries a provider API key", () => {
@@ -340,6 +343,33 @@ describe("collectRestoreErrors", () => {
 			>
 
 			expect(result[0]).not.toHaveProperty("key")
+		})
+
+		it("does NOT keep `networkId` on a token — a Token has no such field", () => {
+			// The field policy is per-service for exactly this reason: a global list would emit any
+			// allowlisted name a crafted row chose to carry, and backup migration preserves unknown
+			// properties on its way to `restoreRows`, which hands the raw row back on failure.
+			const result = collectRestoreErrors("token", [{ id: 7, networkId: "ATTACKER_SECRET_UNDER_64", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(JSON.stringify(result)).not.toContain("ATTACKER_SECRET_UNDER_64")
+			expect(result).toEqual([{ row: 0, id: 7, restoreError: "boom" }])
+		})
+
+		it("does NOT keep `id` on a transaction — a Tx is keyed by hash", () => {
+			const result = collectRestoreErrors("transaction", [
+				{ id: "ATTACKER_SECRET_UNDER_64", networkId: "n1", chainId: 31337, restoreError: "boom" },
+			]) as Array<Record<string, unknown>>
+
+			expect(JSON.stringify(result)).not.toContain("ATTACKER_SECRET_UNDER_64")
+			expect(result).toEqual([{ row: 0, networkId: "n1", chainId: 31337, restoreError: "boom" }])
+		})
+
+		it("emits nothing but the ordinal for a service absent from the policy", () => {
+			const result = collectRestoreErrors("not-a-real-service", [{ id: "x1", profileId: "p1", restoreError: "boom" }])
+
+			expect(result).toEqual([{ row: 0, restoreError: "boom" }])
 		})
 
 		it("drops a chainId that is a string — a short string passes a length check but is not a chain id", () => {
