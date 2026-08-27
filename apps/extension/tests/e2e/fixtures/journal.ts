@@ -216,7 +216,11 @@ export async function readDappExecuteRecordsFull(page: Page): Promise<unknown[] 
 
 /**
  * The service-worker's own log trail — `LoggerStore` debounce-flushes it to
- * `chrome.storage.session["nulo:logs"]` every 2s (`wallet/logger/store.ts:80`).
+ * `chrome.storage.session["nulo:logs"]` every 2s (`wallet/logger/store.ts`).
+ *
+ * That flush is gated on `developerMode`, which e2e profiles do NOT enable, so this returns an
+ * empty trail unless the test turned it on. It is a best-effort diagnostic aid for a stalled run,
+ * never an assertion source — an empty result means "not retained", not "nothing happened".
  * Reading it from the test side surfaces HOW FAR execution got — did `acquireSlot`
  * run, did `executionMutex.acquire` resolve, was the journal claim attempted — for
  * the F3 stall whose state otherwise lives only in SW memory. NO production change.
