@@ -74,9 +74,14 @@ const SENSITIVE_NAMES = [...REDACTED_KEYS, ...URL_KEYS, ...EXTRA_NAMES]
  * Receiver-agnostic on purpose: the dominant idiom in the packages is `this.logger.log(...)`, and
  * services also reach it as `deps.logger.log` / `this.deps.logError`. Anchoring on the METHOD name
  * catches every receiver; `Math.log` is the one collision worth excluding.
+ *
+ * The third alternative covers a logging PORT called bare — `log?.("warn", …)`, the shape the PXE
+ * layer's `PublicEventLogger`/`ClassIdVerifyLogger` use at their emission points. That is not
+ * helper indirection: the callee is typed and named as a logger, and what it is handed is what
+ * gets logged.
  */
 const LOG_CALL =
-	/(?<!\bMath)\s*\??\.\s*(?:log|logDebug|logInfo|logWarn|logError)\s*\(|\bconsole\s*\??\.\s*(?:log|warn|error|info|debug|trace)\s*\(/
+	/(?<!\bMath)\s*\??\.\s*(?:log|logDebug|logInfo|logWarn|logError)\s*\(|\bconsole\s*\??\.\s*(?:log|warn|error|info|debug|trace)\s*\(|(?<![.\w$])log(?:Debug|Info|Warn|Error)?\s*\??\.?\s*\(/
 
 /** Files allowed to name these identifiers near a log call. */
 const ALLOWLIST: RegExp[] = [
@@ -560,6 +565,22 @@ describe("log-payload ban (static)", () => {
 		])
 		expect(offenders).toHaveLength(1)
 		expect(offenders[0]).toContain("x.ts:5")
+	})
+
+	test("catches a logging PORT called bare — `log?.(…)`", () => {
+		// The PXE layer passes typed logger callbacks (`PublicEventLogger`) and calls them like
+		// this at the emission point; seven such calls exist today.
+		const offenders = findLoggedSecrets([
+			{ path: "packages/aztec-runtime/src/pxe/public-events.ts", content: 'log?.("warn", "failed", password)' },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("catches the same port called without the optional chain", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/aztec-runtime/src/pxe/x.ts", content: 'log("warn", "failed", { value: password })' },
+		])
+		expect(offenders).toHaveLength(1)
 	})
 
 	test("a long call is not truncated — the window has no line cap", () => {
