@@ -17,6 +17,22 @@ function mockConfig(debugMode = false, developerMode = false): IConfig {
 	}
 }
 
+/**
+ * A config whose values can change AFTER construction — the production shape, where the store is
+ * built on schema defaults and `config.load()` supplies the real values later.
+ */
+function mutableConfig(initial: { debugMode?: boolean; developerMode?: boolean } = {}) {
+	const state = { debugMode: false, developerMode: false, ...initial }
+	return {
+		onUpdate: new EventHandler<ConfigProp>(),
+		get: ((key: string) => state[key as keyof typeof state]) as IConfig["get"],
+		/** Stand-in for what `config.load()` → `apply()` does to the in-memory config. */
+		set(key: "debugMode" | "developerMode", value: boolean) {
+			state[key] = value
+		},
+	}
+}
+
 /** chrome.storage.session double that records what the flush actually wrote. */
 function mockSessionStorage(initial?: unknown) {
 	const session = {
@@ -295,18 +311,76 @@ describe("LoggerStore", () => {
 
 			expect(session.set).not.toHaveBeenCalled()
 		})
+	})
 
-		test("rehydrate drops a stale persisted copy when retention is off", async () => {
-			// The flag can be turned off while this worker is dead, so the disable-time purge never
-			// ran — boot must not import those entries back into memory.
-			const stale = [{ id: 1, timestamp: 1, source: "s", level: LogLevel.Info, context: "sw" as const, data: ["stale"] }]
-			const session = mockSessionStorage(stale)
+	/**
+	 * Production boot order: the store is constructed at module scope on SCHEMA DEFAULTS, then
+	 * `rehydrate()` runs, and only later does `config.load()` supply the user's real setting
+	 * (inside `runtime.start()`, after migrations — an ordering that must not change). Tests that
+	 * inject an already-loaded config cannot see this, which is how the first version of this arc
+	 * shipped a bug that wiped every developer's logs on each worker restart.
+	 */
+	describe("retention across the real boot order", () => {
+		beforeEach(() => vi.useFakeTimers())
+		afterEach(() => vi.useRealTimers())
 
-			const store = new LoggerStore(mockConfig(false, false))
+		const saved = [{ id: 1, timestamp: 1, source: "s", level: LogLevel.Info, context: "sw" as const, data: ["from-last-lifecycle"] }]
+
+		test("rehydrate restores even though the constructor saw the default", async () => {
+			// REGRESSION: gating rehydrate on the constructor's value purged here, before the
+			// loaded config could say "developer mode is on".
+			mockSessionStorage(saved)
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+
 			await store.rehydrate()
+
+			expect(store.get(10)).toHaveLength(1)
+		})
+
+		test("a developer's rehydrated logs SURVIVE the config load", async () => {
+			const session = mockSessionStorage(saved)
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+			await store.rehydrate()
+
+			config.set("developerMode", true) // what config.load() does
+			await store.applyRetentionPolicy()
+
+			expect(store.get(10)).toHaveLength(1)
+			expect(session.remove).not.toHaveBeenCalled()
+
+			// …and persistence resumes.
+			store.log("a", LogLevel.Error, "new")
+			vi.advanceTimersByTime(5000)
+			expect(session.set).toHaveBeenCalled()
+		})
+
+		test("a non-developer's rehydrated logs are dropped once the config loads", async () => {
+			// Covers the case no config-update event can: `apply()` only emits on a CHANGE, so a
+			// stored `developerMode: false` matching the default is silent.
+			const session = mockSessionStorage(saved)
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+			await store.rehydrate()
+			expect(store.get(10)).toHaveLength(1)
+
+			await store.applyRetentionPolicy()
 
 			expect(store.get(10)).toHaveLength(0)
 			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+		})
+
+		test("retention stays off after the load, so nothing is written", async () => {
+			const session = mockSessionStorage()
+			const config = mutableConfig()
+			const store = new LoggerStore(config)
+			await store.applyRetentionPolicy()
+
+			store.log("a", LogLevel.Error, "sensitive")
+			vi.advanceTimersByTime(5000)
+
+			expect(session.set).not.toHaveBeenCalled()
 		})
 	})
 })
