@@ -34,7 +34,7 @@ export interface ILogger {
 export interface ILoggerStore extends ILogger {
 	onLog: EventHandler<Log>
 	get(count: number, fromId?: number): Log[]
-	clear(): void
+	clear(): void | Promise<void>
 }
 
 /** Console → LogLevel mapping table. Used by the logger adapter in
