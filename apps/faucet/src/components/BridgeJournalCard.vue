@@ -20,6 +20,7 @@ import { switchActiveAccount } from "@/composables/useWalletConnection"
 /** Utils */
 import { assetDecimals, assetSymbol } from "@/lib/asset-label"
 import { decideStandaloneFuelRecovery } from "@/lib/fuel-claim-state"
+import { isTerminalAttention } from "@/lib/bridge-steps"
 import { useNow } from "@/lib/clock"
 import { IS_MAINNET } from "@/lib/network"
 import { formatBigInt } from "@/lib/format"
@@ -194,16 +195,16 @@ const attention = computed(() => rt.value.attention)
 // Every attention except a deployment mismatch is retryable: the runs re-validate all guards
 // idempotently, so pressing CLAIM/FINISH after fixing the cause (switching accounts, etc.) is
 // exactly the recovery path - hiding the button stranded those states until a reload.
-// Terminal states: retrying repeats the same immutable failure, so offer no CLAIM/RETRY. The
-// journal-level Restore control stays available for both.
-const actionable = computed(() => attention.value !== "stale-deployment" && attention.value !== "receipt-mismatch")
+const actionable = computed(() => !isTerminalAttention(attention.value))
 
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */
 const stageLabel = computed(() => {
-	if (rt.value.busy || stage.value === "done") return null
+	// A terminal record has no CLAIM/FINISH button, so guidance telling the user to press one would
+	// point at something that isn't there.
+	if (rt.value.busy || stage.value === "done" || isTerminalAttention(attention.value)) return null
 	const r = props.record
 	if (r.direction === "deposit") {
 		switch (stage.value) {

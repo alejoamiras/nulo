@@ -447,6 +447,8 @@ describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
 		runtime.value = { [rec.id]: { attention: "receipt-mismatch", note: "…can't be recovered from the chain." } }
 		const w = mountCard(rec)
 		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+		// ...and the guidance line must not tell the user to press the button that isn't there.
+		expect(w.find(sel(TESTIDS.journalStage)).exists()).toBe(false)
 		// A retryable error on the same record DOES keep the action — the suppression is terminal-only.
 		runtime.value = { [rec.id]: { attention: "error", note: "transient" } }
 		expect(mountCard(rec).find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
