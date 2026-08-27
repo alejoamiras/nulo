@@ -70,7 +70,16 @@ jobs:
         working-directory: contracts/bridge/evm
         run: |
           pipx install "halmos==$(cat halmos.version)"
-          halmos --contract FormalRouterTest
+          # --ast --force: halmos reads the solc AST from the artifacts, and the plain `forge
+          # build` above writes them without it. Against those artifacts halmos does not fail —
+          # it reports "No tests with --match-contract", which passes for a missing suite unless
+          # the count is checked. Rebuild with the AST, then require exactly four proofs.
+          forge build --ast --force
+          halmos --contract FormalRouterTest | tee halmos.log
+          grep -q "4 passed; 0 failed" halmos.log || {
+            echo "::error::expected 4 passing symbolic proofs; see the log above"
+            exit 1
+          }
 
   noir:
     name: nargo test (keystone)
