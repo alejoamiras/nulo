@@ -19,6 +19,7 @@ import {
 	type Methods,
 } from "./spec"
 import {
+	ACCOUNT_STATE_CAPS,
 	ACCOUNT_STATE_SKIP_DEADLINE,
 	ACCOUNT_STATE_SKIP_UNREACHABLE,
 	isConnectivityErrorMessage,
@@ -216,6 +217,23 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			})
 		}
 
+		// The slice is mostly contract ARTIFACTS, and the restore side rejects it wholesale past
+		// `maxSliceCodeUnits` — an export that silently crosses the cap only fails much later, on
+		// someone else's import. Report the size while the user can still act on it.
+		const sliceCodeUnits = JSON.stringify(result).length
+		if (sliceCodeUnits > ACCOUNT_STATE_CAPS.maxSliceCodeUnits * 0.8) {
+			const biggest = result
+				.flatMap((r) => r.contracts.map((c) => ({ address: c.address, units: JSON.stringify(c.artifact ?? {}).length })))
+				.sort((a, b) => b.units - a.units)
+				.slice(0, 5)
+				.map((c) => `${c.address.slice(0, 12)}…=${c.units}`)
+				.join(", ")
+			this.logWarn(
+				`backup: account-state slice is ${sliceCodeUnits} code units of ${ACCOUNT_STATE_CAPS.maxSliceCodeUnits} ` +
+					`(${result.reduce((n2, r) => n2 + r.contracts.length, 0)} contract(s)); largest artifacts: ${biggest}`,
+			)
+		}
+
 		return result
 	}
 
@@ -273,6 +291,10 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			const classify = (err: unknown): string => {
 				const message = truncateErrorMessage(toRestoreError(err))
 				if (isConnectivityErrorMessage(message)) unreachable = true
+				// The per-item errors only travel back in the RPC result, which gates the import's
+				// Continue screen without ever being rendered — log them or a degraded restore is
+				// undiagnosable in the field.
+				this.logWarn(`restore: registration failed on ${item.networkId} — ${message}`)
 				return message
 			}
 
@@ -330,6 +352,14 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				}
 			}
 
+			if (skippedByDeadline > 0) {
+				// Same reasoning as the classify() log: an expired budget gates the import's
+				// Continue screen with nothing written anywhere a field report could show.
+				this.logWarn(
+					`restore: budget expired on ${item.networkId} — ${skippedByDeadline} registration(s) not attempted ` +
+						`(${senders.length} sender(s), ${contracts.length} contract(s) done)`,
+				)
+			}
 			result.push({
 				networkId: item.networkId,
 				senders,

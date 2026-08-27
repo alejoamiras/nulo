@@ -4,11 +4,11 @@ The checklist for bumping the Aztec / Noir dependency line. **`@aztec/*` is exac
 
 > **Convention:** any code that types against an `@aztec` shape (a PXE method signature, a wire type, an artifact field) MUST add an entry to **§ Types coupled to `@aztec` shape** below, with `file:line`, so the next bump has a checklist. Round-2 phase R4 (P18b PXE descriptor) is the first to append here.
 
-Current line: **`@aztec/* = 5.0.1`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below).
+Current line: **`@aztec/* = 5.2.0`** (Noir wasm packages `noir-acvm_js` / `noir-noirc_abi` carry Bun patches — see below). The Noir contract source (Nargo tags, `contracts/bridge/aztec/scripts/compile.sh`, committed `target/*.json`), `@aztec-foundation/aztec-standards` and `@alejoamiras/private-fee-juice` are HELD at 5.0.1 — a deliberate split line, see `implementations-plan/aztec-5.2.0-js-line/`.
 
 ## Before you bump
 1. Read the upstream `@aztec/aztec.js` + `@aztec/pxe` changelog for the target version — note any renamed/removed exports, PXE method signature changes, or artifact-format changes.
-2. Bump the exact pins in EVERY workspace `package.json` (root + `packages/*` + `apps/*`) — they must all match. `@aztec/*` does not go through `bun update --latest` cleanly (Bun #25305); prefer editing the pins + a clean re-resolve (delete `bun.lock`, `bun install`) if transitives drift.
+2. Bump the exact pins in EVERY workspace `package.json` (root + `packages/*` + `apps/*`) — they must all match. `@aztec/*` does not go through `bun update --latest` cleanly (Bun #25305); prefer editing the pins + `bun install` (targeted re-resolution). Bun #25305 is CLOSED on Bun 1.4 — deleting `bun.lock` is no longer the ritual and is now a last resort, since a full regen also re-gates every already-locked version against the min-age policy.
 3. Also bump the `packageManager` Bun version drift check if the upgrade requires it.
 
 ## Coupling points to re-verify (the re-check list)
@@ -44,8 +44,37 @@ Current line: **`@aztec/* = 5.0.1`** (Noir wasm packages `noir-acvm_js` / `noir-
 
 - Token-fn descriptor matching vs the standards artifact — `apps/extension/src/wallet/services/token/functions/descriptors.ts` (`matchesStructPath`: crate-prefix-tolerant struct-path compare) — noir namespaces ABI struct paths by the artifact's import chain (`authorization_contract::aztec::…::AztecAddress` in `@aztec-foundation/aztec-standards@5.0.1`), and 5.x `loadContractArtifact` splits public fns into `artifact.nonDispatchPublicFunctions`. On ANY standards bump run `descriptors-real-artifact.test.ts` — it pins all nine kinds against the REAL installed artifact and is the first thing that must go red on an ABI reshape. Probe through the package's own `Token.js` export, never the raw target JSON (the loaded shape differs).
 - Token `constructor_with_minter` arity — 5.0.1 added a 5th `auth_contract` param. Coupled sites: `apps/extension/tests/e2e/fixtures/aztec.ts` (deployTestToken), `apps/faucet/scripts/deploy.ts` (+ record `constructorArgs.authContract`), `apps/faucet/src/contracts/deployments.ts` (`rebuildTokenInstanceFrom` REQUIRES `authContract`; pre-5.0.1 records fail targeted). An upstream arity change breaks derivation everywhere at once — the faucet `verify-deployments` gate is the detector.
-- FPC node-compat map — `packages/bridge-core/src/private-fpc-canonical.json` `compatibleNodeVersions` (digest-keyed, HUMAN-curated) + `network` identity pins; consumed by `scripts/check-fpc-version.ts` (`--mode predeploy|require-deployed`). A new artifact digest REQUIRES a fresh compat entry (fails closed); the live v5 testnet encodes `node_getContract` absence by OMITTING the result key (`rpcOptional`).
+- FPC node-compat map — `packages/bridge-core/src/private-fpc-canonical.json` `compatibleNodeVersions` (digest-keyed, HUMAN-curated) + `network` identity pins; consumed by `scripts/check-fpc-version.ts` (`--mode predeploy|require-deployed`). A new artifact digest REQUIRES a fresh compat entry (fails closed); the live v5 testnet returns `"result": null` for an absent `node_getContract` (the `!("result" in body)` branch in `rpcOptional` is dead; correctness rests on `body.result ?? undefined`).
 - `pxeGeneration` incarnation fence — `apps/extension/src/wallet/services/profile/spec.ts` (`Profile.pxeGeneration`, minted at EVERY row creation) ↔ `packages/aztec-runtime/src/pxe/{service,client,chain-runtime}.ts` (lifecycle map, `StoreKeyProvision`, `NetworkInfo.pxeGeneration`). Wire-coupled across SW↔offscreen (same build, no skew), but any new Profile-row construction site MUST mint a generation — grep `: Profile = {` on change.
+
+## 5.2.0-arc couplings (added by the 5.0.1 → 5.2.0 split-line bump)
+
+- **A dual `@aztec` generation in one bundle is UNSHIPPABLE.** Upstream's `getVKIndex`
+  (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`; two
+  copies of that module make it silently treat the VK object as its own hash and abort with
+  `VK index for [object Object] not found in VK tree` — before any proof is attempted. This is
+  why `@alejoamiras/aztec-accelerator` must move WITH the line (it exact-pins its own
+  `@aztec` deps) rather than being held. `scripts/aztec-hold-residue-check.ts` is the standing
+  gate: it walks bun.lock's dependency graph and `realpath`-resolves from every consumer to
+  prove the prover path (stdlib + bb-prover + noir-protocol-circuits-types) is single-generation.
+- **E2E fixtures must build accounts from the FROZEN artifact.** Upstream recompiles
+  `@aztec/accounts` on toolchain changes (5.2.0 moved SchnorrAccount's class id), so
+  `EmbeddedWallet.createSchnorrAccount` derives a different address than the wallet does.
+  `apps/extension/tests/e2e/fixtures/aztec.ts` supplies a `FrozenArtifactWallet` whose
+  `AccountContractsProvider` serves the vendored artifact for schnorr. Production is immune
+  (no `createSchnorrAccount` call sites outside tests) — typecheck cannot see this, since
+  `tests/e2e` is outside the tsconfig graph.
+- **`BB_BINARY_PATH` is a footgun, not an optimization.** The accelerator's `find_bb` returns a
+  seed unconditionally (alejoamiras/aztec-accelerator#352), so a version-mismatched seed proves
+  every request with the wrong bb while the log shows a download of the right one. CI runs the
+  server unseeded.
+- **Clear `<app>/node_modules/.vite` after any dependency-line swap** before the first e2e run —
+  stale optimizer caches make dev-served apps fail to load with `.vite/deps/*.js does not exist`.
+- `PXE_DATA_SCHEMA_VERSION` stayed 13 across 5.0.1→5.2.0 (no store wipe); `@aztec/viem` is an
+  exact upstream alias at both versions; only `HandshakeRegistry` moved among canonical
+  addresses; the `@aztec/noir-contracts.js` Token/NFT/FPC/SponsoredFPC class ids DID shift, so
+  the SponsoredFPC address is generation-dependent (both generations are deployed and funded on
+  testnet — verify with a read-only balance probe before assuming).
 
 ## After you bump — validation gate
 - `bun run typecheck:all` (exit 0 — verify by exit code + grep, not `| tail`).

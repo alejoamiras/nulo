@@ -501,7 +501,12 @@ export function useFullBackupImport(opts: UseFullBackupImportOptions): UseFullBa
 		// APPEND, not assign: some services already have entries recorded before
 		// their restore runs (e.g. token-balance's un-relinkable rows are recorded
 		// pre-restore) — a plain assignment would clobber those diagnostics.
-		if (errors) restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
+		if (errors) {
+			// Names the service that gates the Continue screen. Without it a degraded import is
+			// only visible as "some slice failed", with the reasons stranded in the RPC result.
+			console.warn(`[full-backup-import] ${serviceName} reported ${errors.length} restore error(s)`, errors)
+			restoreErrorLog.value[serviceName] = [...(restoreErrorLog.value[serviceName] ?? []), ...errors]
+		}
 	}
 
 	async function restoreBackup() {

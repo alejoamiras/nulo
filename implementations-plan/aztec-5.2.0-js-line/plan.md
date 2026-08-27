@@ -3,9 +3,11 @@
 Bump the `@aztec/*` JS line **5.0.1 → 5.2.0** (20 package names across 8 workspace
 package.jsons), while deliberately **holding**: the Noir surface (Nargo tags, compile.sh
 toolchain, committed `target/*.json`), `@aztec-foundation/aztec-standards@5.0.1`,
-`@alejoamiras/private-fee-juice@5.0.1`, `@alejoamiras/aztec-accelerator@5.0.1` (nothing
-5.2.0-targeted exists for any of them), `@aztec/viem@2.38.2` (upstream's own exact alias at both
-versions), and the frozen account surface (permanent). In scope by owner choice: CI
+`@alejoamiras/private-fee-juice@5.0.1` (no 5.2.0 release exists), `@aztec/viem@2.38.2`
+(upstream's own exact alias at both versions), and the frozen account surface (permanent).
+**`@alejoamiras/aztec-accelerator` is NOT held** — it started as a hold (nothing 5.2.0-targeted
+existed), but the Phase 3 canary proved a dual-generation prover path is unshippable, so the
+owner cut SDK 5.2.0 mid-arc and it moves with the line (D9). In scope by owner choice: CI
 accelerator-server binary 1.0.6 → 2.0.0 (shipped FIRST as its own PR — see Delivery), the
 setup-aztec snappy-pin probe (+removal if proven fixed), and full local network-suite
 validation before the bump PR.
@@ -15,7 +17,7 @@ pin; node already runs 5.2.0-nightly. No reset, no redeploys; the only broadcast
 owner-gated sponsored drip canary (Ask 2). If any drift detector fires mid-run, STOP and
 re-gate with the owner per the aztec-update skill — never a silent re-pin.
 
-**Plan baseline**: `origin/dev` @ `21244d4a` (the worktree base — all "zero-diff" gates measure
+**Plan baseline**: recon base `21244d4a`; **PR-1 gate baseline `1727a42f`** (post-PR-0-merge dev — the handoff re-pin; the worktree base — all "zero-diff" gates measure
 against this OID, not the working tree). Companion: [recon.md](recon.md). Audits:
 [audit-codex.md](audit-codex.md), [audit-fable.md](audit-fable.md). `eli5_mode: artifact`
 (URL recorded in Seeds §).
@@ -29,7 +31,8 @@ byte-untouched vs baseline; every freeze test, KAT, keystone, and drift detector
 **prover-ON frozen-account canary green locally (with `/prove` evidence) and in CI**; full
 local network suite green prover-ON including the fee flows; snappy step resolved per probe;
 docs updated; both PRs squash-merged into dev with `e2e:network` + `e2e:smoke` labels and all
-three required checks green.
+three required checks green. Post-merge follow-up (D10): a small PR removing the
+`@alejoamiras/aztec-accelerator` min-age exclude on/after 2026-09-02.
 
 ## Phase A ✓ — PR-0: accelerator-server 2.0.0 (against the CURRENT 5.0.1 line)
 
@@ -88,7 +91,7 @@ a rebased branch.
 with output; `~/.aztec/versions/5.2.0/bin/` present; layers: none (read-only probes). Log:
 `lessons/phase-0.md`.
 
-## Phase 1 — Pins, patches, lockfile, provenance
+## Phase 1 ✓ — Pins, patches, lockfile, provenance
 
 1. Edit exact pins to `5.2.0` in: `apps/extension` (20 names), `apps/faucet` (16),
    `apps/playground` (**8**), `packages/aztec-runtime` (**13**), `packages/bridge-core` (**9**),
@@ -149,7 +152,7 @@ above, `bun install --frozen-lockfile`; pass criteria: all exit 0, zero un-allow
 entries, peer warnings dispositioned, provenance transcribed; layers: install + one unit file.
 Log: `lessons/phase-1.md`.
 
-## Phase 2 — API churn, typecheck, unit suites (the freeze invariant)
+## Phase 2 ✓ — API churn, typecheck, unit suites (the freeze invariant)
 
 1. `bun run typecheck:all` — fix churn mechanically and behavior-preserving; wrap upstream
    renames inside our service layer (PxeService precedent) so our RPC surfaces don't ripple.
@@ -173,13 +176,19 @@ Log: `lessons/phase-1.md`.
 HOLD verdict doesn't waste the largest manual block; fable + codex alignment, D8.)
 
 **Validation gate** — commands: `bun run typecheck:all` && `bun run test:all` && `bun run lint`
-&& the freeze-invariant diff `git diff <BASELINE>...HEAD --stat -- packages/aztec-runtime/src/account/ contracts/`
-(must be EMPTY; `<BASELINE>` = the PR-1 baseline re-pinned after PR-0 merges — see Delivery)
+&& the freeze-invariant diff `git diff 1727a42f...HEAD --stat -- packages/aztec-runtime/src/account/ contracts/`
+(must be EMPTY; `1727a42f` = the PR-1 baseline re-pinned after PR-0 merges — see Delivery)
 && `git status --porcelain packages/aztec-runtime/src/account/ contracts/` (must be empty)
 && `bun scripts/aztec-hold-residue-check.ts`; pass criteria: all exit 0 / empty; boundary
 verdicts logged; layers: typecheck + lint + full unit. Log: `lessons/phase-2.md`.
 
-## Phase 3 — Fail-fast checkpoint: first build + prover-ON canary
+## Phase 3 ✓ — Fail-fast checkpoint: RED → root-caused → SDK 5.2.0 cut → GREEN (2026-08-26)
+
+Canary red at the first proving tx: upstream getVKIndex instanceof fails across the bundle's
+dual stdlib generations (full triage: lessons/phase-3.md). Owner decision: cut the
+@alejoamiras/aztec-accelerator SDK at 5.2.0 (the 2.0.0 server binary is
+already proven in CI via PR-0). Resume = SDK pin bump -> drop the Phase-2 cast -> flip the
+accelerator rows in the residue script -> re-run gates from Phase 1. Ledger: D9.
 
 Runs BEFORE the full battery (codex H2): the two go/no-go unknowns (prover boundary at runtime;
 bb pairing) get answered at the earliest buildable moment.
@@ -208,7 +217,7 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
 (canary file; the sandbox is local — no live-network broadcasts anywhere in this plan). Log:
 `lessons/phase-3.md`.
 
-## Phase 4 — Full battery: re-diff, detectors, builds, smoke, full prover-ON suite
+## Phase 4 ✓ — Full battery: re-diff, detectors, builds, smoke, targeted prover-ON + CI suite
 
 1. Re-diff the copied-logic list against installed 5.2.0 sources (verdicts per file in
    lessons): `fee-options.ts` + `embedded-fpc-cap.ts` (MIN_FEE_PADDING both),
@@ -233,20 +242,24 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
    `BRIDGE_MANIFEST=public/testnet-bridge.json bun run --cwd apps/faucet verify:deployments`
    (opt-in manifest lane, `apps/faucet/scripts/verify-deployments.ts:146`).
 4. `bun run test:e2e` (smoke; sandbox-free).
-5. **Full local network suite prover-ON, fallback-proof** (final-pass Critical 1): accelerator-
-   server 2.0.0 up, then `VITE_NULO_ACCELERATOR_REQUIRED=1 bun run e2e:agent` — the required-
-   mode build makes silent WASM fallback IMPOSSIBLE for the whole suite, not just the canary
-   (machine solo — the suite mass-fails under concurrent load; single re-run for known-flake
-   fingerprints only, logged). This is the native-proof gate for the fee flows
-   (private-fee-juice boundary) and the passkey canary — capture per-fee-flow `/prove`
-   evidence from the server log (CI's fee shard is proverless-STUB post-split — it produces NO
-   real proofs, so this local run is the ONLY real-proof coverage of the fee flows).
+5. **Prover-ON, fallback-proof — SCOPE REVISED (owner, 2026-08-26)**: the original step ran the
+   FULL local network suite prover-ON. The owner cut that ("our CI runs the tests faster than
+   you"), making CI the authority for the suite. What remains local is only what CI's own config
+   proves it CANNOT cover: `pr-network-e2e.yml` sets `proverless: true` on both fee lanes (the
+   `fee-methods` heavy job and the general shard pool carrying `tx-sendTx-feePayer`), and its one
+   real-proving lane (`shard_label: "canary"`) runs three unrelated files — so the fee flows have
+   ZERO real-proof coverage in CI by design. Local residue, with accelerator-server 2.0.0 up and
+   a `VITE_NULO_ACCELERATOR_REQUIRED=1` build (silent WASM fallback impossible): the
+   frozen-account canary, plus `fee-methods.test.ts` + `tx-sendTx-feePayer.test.ts` as the entire
+   real-proof gate for the private-fee-juice boundary. Capture `/prove` evidence from the server
+   log; zero successful proofs voids the run. Everything else: CI.
 
 **Validation gate** — commands: steps 1–5; pass criteria: all exit 0; verify:deployments rows
-all `[OK]` in BOTH lanes; suite green with fee-flow `/prove` evidence; re-diff verdicts logged
-per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lessons/phase-4.md`.
+all `[OK]` in BOTH lanes; the local prover-ON residue green WITH `/prove` + `Proving succeeded`
+evidence quoted; the CI network suite green on the PR; re-diff verdicts logged per file; layers:
+build + smoke + targeted prover-ON local e2e + CI network suite. Log: `lessons/phase-4.md`.
 
-## Phase 5 — Remaining CI wiring
+## Phase 5 ✓ — Remaining CI wiring
 
 1. `BB_BINARY_PATH`: RESOLVED in Phase A / PR-0 (D3 — dropped with logged evidence). Nothing
    to do here; verify only that Phase 3's canary log shows the expected
@@ -261,7 +274,7 @@ per file; layers: build + smoke + full prover-ON local-sandbox e2e. Log: `lesson
 reviewed line-by-line in lessons; layers: workflow lint (the PR's own CI canary is the real
 proof). Log: `lessons/phase-5.md`.
 
-## Phase 6 — Docs + delivery prep
+## Phase 6 ✓ — Docs + delivery prep
 
 1. `UPDATE.md`: banner → 5.2.0; append 5.2.0-arc couplings (dual-key patches, the three-mode
    held-package boundary inventory, prover-boundary cast if made, `x-aztec-version` static-pin
@@ -288,7 +301,7 @@ account surface. **Three distinct held-package binding modes** (verified in `bun
 
 | Package | Declaration | Post-bump runtime binding | Hazard mode | Pin/gate |
 |---|---|---|---|---|
-| `@alejoamiras/aztec-accelerator` | exact-5.0.1 `dependencies` | HYBRID in the bundle: nested 5.0.1 stdlib/foundation/bb-prover + Vite-deduped **5.2.0** acvm/abi leaves (final-pass note) | object identity across the prover slot | duck-typed upstream; D2 structural diff; Phase 3 canary |
+| `@alejoamiras/aztec-accelerator` | ~~exact-5.0.1 `dependencies`~~ → **5.2.0, moves with the line** | single generation end to end | ~~dual-copy identity~~ — eliminated at the source (D9) | `aztec-hold-residue-check.ts` asserts stdlib + bb-prover + noir-protocol-circuits-types all resolve to the workspace line; Phase 3 canary |
 | `@alejoamiras/private-fee-juice` | exact-5.0.1 `peerDependencies` | binds to workspace **5.2.0** modules (or nests — per the Phase 1.4 pre-decided outcome) | 5.0.1-compiled wrappers on 5.2.0 APIs | peer-warning disposition; `private-fuel.test.ts`; Phase 4 fee flows prover-ON |
 | `@aztec-foundation/aztec-standards` | none | binds to workspace **5.2.0** modules | same | `descriptors-real-artifact.test.ts`; token e2e |
 
@@ -462,11 +475,10 @@ PR-0**. Original ask texts kept below for context:
   transitives correctly (#25305 closed); full regen only on unresolvable conflicts. Supersedes
   the prior-bump ritual; UPDATE.md line 11 updated in Phase 6. Verification via exact
   `lockfile-exception-diff.ts <base> <new>` + reachability check + `--frozen-lockfile` (codex M2).
-- **D2 — Prover boundary**: keep SDK 5.0.1; casts confined to the `chain-runtime.ts` SDK seam
-  (both typing sites — the constructor's simulator arg and the `proverOrOptions` slot; fable
-  C3), each permitted ONLY after a structural diff of the relevant declarations shows identity
-  (codex H1); any SDK-typing error OUTSIDE that file ⇒ stop. Rejected: SDK `5.0.1-revision.1`
-  (no benefit), holding the whole line.
+- **D2 — Prover boundary**: SUPERSEDED BY D9. The cast this authorized (one site, applied after
+  the mandated structural diff) was REMOVED once SDK 5.2.0 landed — the seam is single-generation
+  and typechecks with zero casts. The discipline it encoded still stands for any future split:
+  no cast without a byte-diff, none outside `chain-runtime.ts`.
 - **D3 — CI bb seed**: **DECIDED (Phase A) — DROPPED, in PR-0; mechanism corrected by upstream
   source trace**: `find_bb` returns a seed UNCONDITIONALLY (upstream #352), so a seeded binary
   answers every /prove regardless of the SDK-requested version while the server logs a dead
@@ -474,12 +486,17 @@ PR-0**. Original ask texts kept below for context:
   The seed is a footgun, not an optimization. Unseeded download tax: 8.1MB, <1s. The
   runtime-downloaded bb is unpinned (accepted residual, noted in Security). Bump-PR Phase 5.1
   is a no-op; Phase 3/4 local servers run UNSEEDED for CI fidelity.
-- **D4 — Patches**: dual-key; 5.2.0 patches GENERATED against installed packages (bun patch
-  flow), never blind-copied; drop the 5.2.0 key iff upstream fixed exports; never drop the
-  5.0.1 key while the accelerator nests those versions.
-- **D5 — Residue policy**: reachability allowlist (three held packages) replaces zero-residue;
-  executable check in Phase 1.
-- **D6 — Excludes**: none added; per-name owner disposition if the gate fires.
+- **D4 — Patches**: patches GENERATED against installed packages (bun patch flow), never
+  blind-copied; upstream did NOT fix the exports maps at 5.2.0, so both are still required.
+  FINAL STATE: the `@5.0.1` keys remain only because the held packages' closures still carry
+  those versions — the accelerator no longer nests anything (D9).
+- **D5 — Residue policy**: reachability allowlist replaces zero-residue, encoded in
+  `scripts/aztec-hold-residue-check.ts`. FINAL STATE: TWO held roots
+  (`@alejoamiras/private-fee-juice`, `@aztec-foundation/aztec-standards`) — the accelerator
+  moved with the line (D9). The gate derives its consumers and specs from the lockfile rather
+  than hard-coding them, so a new workspace or a new upstream peer is covered automatically.
+- **D6 — Excludes**: per-name owner disposition when the gate fires. FINAL STATE: exactly ONE
+  exclude is active (`@alejoamiras/aztec-accelerator`, D10) with a dated removal follow-up.
 - **D7 — Two-PR delivery** (adopted from codex H2; DISPUTED by fable, which endorsed
   single-PR as "one logical one-revert unit"): kept two-PR — the binary bump is provable on the
   known-good line, independently revertable, and its 2.0.0 behavior changes are exactly the
@@ -489,6 +506,46 @@ PR-0**. Original ask texts kept below for context:
 - **D8 — Canary-first ordering** (codex H2 + fable): the prover-ON canary is Phase 3,
   immediately after first buildable state; the ~16-file copied-logic re-diff moved AFTER it
   (Phase 4 step 1) so a HOLD wastes no manual work; full battery, CI wiring, docs follow.
+- **D9 — canary red, resolved at the source (owner, 2026-08-26)**: the nested-dual hazard
+  materialized in UPSTREAM code (`getVKIndex` `instanceof` across dual copies of
+  `noir-protocol-circuits-types`) — unfixable by SDK logic or ours short of bundle dedupe. The
+  owner cut `@alejoamiras/aztec-accelerator@5.2.0` instead, giving a
+  single-generation world. RESULT: cast removed, typecheck green with zero casts, residue gate
+  extended to assert single-generation resolution across the whole prover path. **The
+  accelerator therefore moves with the line — the plan's original hold on it is void.**
+- **D11 — the SDK bump is NOT deps-only (codex PR-1 audit)**: `@alejoamiras/aztec-accelerator`
+  5.0.1 → 5.2.0 grew 32 files/126KB → 38 files/362KB. Beyond re-pinning its `@aztec` deps it
+  carries the 2.x transport work (HTTPS selection, site authorization, bounded responses). This
+  arc verified the release's PROVENANCE and its dependency pins; it did NOT semantically review
+  that transport diff — the package is first-party (owner-authored), so that review is the
+  owner's, and the min-age exemption rests on provenance + authorship, not on our review.
+- **D10 — min-age exclude (owner, 2026-08-26)**: SDK 5.2.0 published minutes before install and
+  tripped the 7-day gate (gate working as designed). ONE dated exclude added to `bunfig.toml`
+  (`@alejoamiras/aztec-accelerator`), removable on/after 2026-09-02, justified on first-party
+  provenance: registry signature + npm publish attestation + SLSA v1 binding the tarball to
+  `alejoamiras/aztec-accelerator@acb3d317` built by `publish-testnet.yml` on a GitHub-hosted
+  runner (verified before exempting). Follow-up removal PR is a Phase 6 deliverable.
+- **D12b — recalibrated 64 → 40 MiB (codex audit, 2026-08-27)**: the first raise picked 64 MiB,
+  which a fresh codex pass showed was two-ways wrong — see `audit-codex-slice-cap.md`. 64 MiB
+  EQUALS `MAX_BACKUP_FILE_BYTES`, so the whole-file cap always tripped first and the slice cap
+  stopped being a bound (worse for encrypted backups, whose base64 envelope caps plaintext at
+  ~48MiB); and the export-time warning derives as 80% of the cap, so doubling it moved the
+  threshold to 53.7M — above the 33.8M we actually ship — silently disabling the early signal
+  added during the very diagnosis that motivated the raise. 40MiB keeps the cap binding under
+  both ceilings and puts today's payload at 80.6%, so the warning fires now. The pre-audit
+  hypothesis that the raise would shift failures from clean rejection to late deadline-partials
+  was WRONG and is recorded as such: the oversize path already ran after `finalizeRestore`, so
+  the old behavior was equally partial.
+- **D12 — account-state slice cap 32 → 64 MiB (owner, 2026-08-27)**: the bump pushed a
+  3-network backup 0.29% past the 32 MiB cap, degrading full-backup import (two CI shards red).
+  Measured cause: the slice stores a full contract artifact PER NETWORK, so canonical contracts
+  are duplicated per network (HandshakeRegistry ×3, AuthRegistry ×3, PrivateFPC ×2 — ~35% of the
+  slice); 5.1.0's canonical HandshakeRegistry re-pin added ~4.5 MB and tipped it. The owner chose
+  the cap raise over filtering canonical contracts out of the export: that filtering needs to
+  know which contracts the wallet can always re-register locally (handshake/auth registry
+  tracking), which is real research, and there are **no user backups in the wild** — pre-production,
+  so no compatibility argument constrains the number. The cap remains a hard ceiling on
+  attacker-controlled input; only its value moved. Slice-shrinking stays open as future work.
 - **Rejected audit items** (with reasons, see audit-codex.md): removing the
   `NULO_E2E_DISABLE_ACCELERATOR` kill-switch (documented owner rollback lever; policy change →
   Ask 5 offers the narrower hardening); adding a CI-native PrivateFPC canary job in this bump
@@ -501,11 +558,11 @@ PR-0**. Original ask texts kept below for context:
 
 - **PR-0**: `chore(ci): bump accelerator-server to 2.0.0 (sha-pinned, headless flags)` —
   Phase A only. Opened after its own quality loop; merged (owner) on green required checks.
-- **PR-1**: `chore(deps): bump @aztec js line to 5.2.0 (noir, standards, accelerator held)` —
+- **PR-1**: `chore(deps): bump @aztec js line to 5.2.0 (noir + standards + fee-juice held)` —
   Phases 0–6. Opened ONLY after the Post-implementation loops converge.
 
 **Handoff protocol** (final-pass High 5): PR-1's branch is cut FRESH from dev after PR-0
-merges; at that moment re-pin the plan baseline (`<BASELINE>` := the post-PR-0-merge dev OID —
+merges; at that moment re-pin the plan baseline (`1727a42f` := the post-PR-0-merge dev OID —
 recorded in lessons and used by every freeze-diff gate; the original recon baseline `21244d4a`
 stays the recon reference only). PR-1 must be up-to-date with dev at merge time (re-run CI on a
 rebase if dev moved). **Rollback order is PR-1 first, then PR-0** — reverting PR-0 alone would
@@ -519,10 +576,12 @@ quality loop converges. Merge is the owner's call.
 Runs once for PR-0 (scoped to its small diff, before PR-0 opens) and once for PR-1 (the net
 diff from the plan baseline `21244d4a` minus PR-0's merged content, before PR-1 opens):
 
-1. **`/code-review max --fix`** on the diff under review. Skim applied fixes, then commit them
-   SEPARATELY from implementation commits.
-2. **Codex audit** (`/codex xhigh`), package: the diff under review; a summary of the
-   code-review commits; this plan.md + decision ledger; recon.md; the adversarial/security ask
+1. **~~`/code-review max --fix`~~ — DROPPED (owner, 2026-08-26): too token-expensive for this
+   arc's payoff.** The diff is pins + patches + one gate script + docs, with zero runtime source
+   changes, already covered by `test:all`, `typecheck:all`, `lint`, the residue gate, the freeze
+   diff, and the prover-ON canary. The codex loop below remains the review layer.
+2. **Codex audit** (`/codex xhigh`), package: the diff under review; this plan.md + decision
+   ledger; recon.md; the adversarial/security ask
    ("What could go wrong? What would an attacker target? What are we trusting that we
    shouldn't? Where are the supply-chain / crypto / least-privilege weaknesses?"); PLUS both
    rules verbatim:
@@ -541,7 +600,7 @@ diff from the plan baseline `21244d4a` minus PR-0's merged content, before PR-1 
 4. **Final full re-gate AFTER the loops** (fable C5 + final-pass High 2 — pre-loop runs do NOT
    count): `bun run audit:vue && bun run test:all && bun run lint:actions &&
    bun scripts/aztec-hold-residue-check.ts` plus the freeze diff
-   (`git diff <BASELINE>...HEAD -- packages/aztec-runtime/src/account/ contracts/` empty), plus
+   (`git diff 1727a42f...HEAD -- packages/aztec-runtime/src/account/ contracts/` empty), plus
    a RERUN of the required-mode canary (Phase 3's command) whenever the loop diff touched
    runtime code (docs/comments-only loop diffs may skip it — state which applied), plus any
    phase gate whose surface the loops touched.
@@ -590,13 +649,13 @@ URL; keep both in sync on any material plan change).
 Recommended: `/goal` (completion is transcript-observable).
 
 ```
-/goal All EIGHT phase headers in implementations-plan/aztec-5.2.0-js-line/plan.md (Phase A, Phase 0, 1, 2, 3, 4, 5, 6) marked ✓, each backed by its validation gate (as written in plan.md) reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md; every freeze/KAT/detector test green with zero pin or vector edits (git diff 21244d4a...HEAD over packages/aztec-runtime/src/account/ and contracts/ is empty, quoted); the prover-ON frozen-account canary green locally with a "Received /prove request" line quoted (both on the old line in Phase A and post-bump in Phase 3); the full local network suite green with fee-flow /prove evidence; for EACH of the two PRs: /code-review max --fix complete with fixes committed separately AND the codex fix loop converged (resumed codex pass reporting no new material findings, quoted) BEFORE that PR was created; both PRs exist on GitHub with labels e2e:network and e2e:smoke (gh pr view output quoted); bun run test:all and bun run lint both exit 0 in the transcript.
+/goal All EIGHT phase headers in implementations-plan/aztec-5.2.0-js-line/plan.md (Phase A, Phase 0, 1, 2, 3, 4, 5, 6) marked ✓, each backed by its validation gate (as written in plan.md) reported passing in the transcript; for each phase the agent printed LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md; every freeze/KAT/detector test green with zero pin or vector edits (git diff 21244d4a...HEAD over packages/aztec-runtime/src/account/ and contracts/ is empty, quoted); the prover-ON frozen-account canary green locally with a "Received /prove request" line quoted (both on the old line in Phase A and post-bump in Phase 3); the full local network suite green with fee-flow /prove evidence; for EACH of the two PRs: the codex fix loop converged (resumed codex pass reporting no new material findings, quoted) BEFORE that PR was created; both PRs exist on GitHub with labels e2e:network and e2e:smoke (gh pr view output quoted); bun run test:all and bun run lint both exit 0 in the transcript.
 ```
 
 Fallback `/loop 15m` (fixed interval):
 
 ```
-/loop 15m Drive implementations-plan/aztec-5.2.0-js-line forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. (3) No task in hand? Pick the next pending plan.md step (order: Phase A → its quality loop → PR-0 → phases 0-6 → PR-1 loop); after each meaningful edit run bun run lint + the touched package's test; commit + push. (4) Stuck or facing a decision I'd normally get? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/. Hard limits: never merge, never publish/deploy, never broadcast to testnet (incl. drip canaries) without explicit owner authorization, never expand scope beyond plan.md, never edit freeze-surface pins/vectors — a red freeze test or canary means STOP and surface, not fix; never neutralize a required check. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase gate green (commands + pass criteria as written, incl. the 21244d4a...HEAD freeze diff)? Mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md, advance. (7) All phases ✓? Run the Post-implementation section exactly, per PR (code-review max --fix → separate commits → codex xhigh loop with the plan's two verbatim rules → PR only after convergence, labels e2e:network e2e:smoke → gh pr checks --watch), then a wrap-up report: what shipped, contentious calls with ELI5 context, open items. Keep the ASCII checklist visible each firing.
+/loop 15m Drive implementations-plan/aztec-5.2.0-js-line forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative state), git status, git log --oneline -5; if a PR exists, gh pr view --json statusCheckRollup (no --watch). (2) Waiting on CI is fine — confirm it progresses; use the wait to prep the next phase. (3) No task in hand? Pick the next pending plan.md step (order: Phase A → its quality loop → PR-0 → phases 0-6 → PR-1 loop); after each meaningful edit run bun run lint + the touched package's test; commit + push. (4) Stuck or facing a decision I'd normally get? Call /codex xhigh, reach a defensible decision, act, log the consult in lessons/. Hard limits: never merge, never publish/deploy, never broadcast to testnet (incl. drip canaries) without explicit owner authorization, never expand scope beyond plan.md, never edit freeze-surface pins/vectors — a red freeze test or canary means STOP and surface, not fix; never neutralize a required check. (5) Same step failed 5 times? Stop retrying; reassess with codex. (6) Phase gate green (commands + pass criteria as written, incl. the 21244d4a...HEAD freeze diff)? Mark ✓ in plan.md, write lessons, print LESSONS_FILE=implementations-plan/aztec-5.2.0-js-line/lessons/phase-<id>.md, advance. (7) All phases ✓? Run the Post-implementation section exactly, per PR (codex xhigh loop with the plan's two verbatim rules → PR only after convergence, labels e2e:network e2e:smoke → gh pr checks --watch), then a wrap-up report: what shipped, contentious calls with ELI5 context, open items. Keep the ASCII checklist visible each firing.
 ```
 
 Both seeds must run INSIDE this worktree (`agent-worktree resume aztec-5.2.0-js-line`). Use

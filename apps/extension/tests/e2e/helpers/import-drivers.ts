@@ -15,6 +15,7 @@ import { basename, join } from "node:path"
 import { type Page, TimeoutError } from "puppeteer"
 import { expect } from "vitest"
 import { clickByTestId, type ExtensionContext, openOnboarding, openPopup, waitForHash, withTimeoutMessage } from "../fixtures/extension"
+import { readSwLogTrail } from "../fixtures/journal"
 import {
 	appendImportRecord,
 	buildImportRecord,
@@ -260,9 +261,15 @@ export async function importFullBackup(
 		// The import flow is restore + (possibly) the app's OWN bounded 30s recovery wait before it
 		// routes (import.vue completeImportWithRecovery) - a 30s clock expired structurally whenever
 		// the recovery leg ran. Sized to the recovery envelope + slow-runner restore + margin.
-		await withTimeoutMessage(waitForHash(page, shell.successHash, 300_000), async () =>
-			formatTrajectoryDiagnostic(await readFinal(), shell.successHash),
-		)
+		await withTimeoutMessage(waitForHash(page, shell.successHash, 300_000), async () => {
+			const diagnostic = formatTrajectoryDiagnostic(await readFinal(), shell.successHash)
+			// A degraded import gates on `restoreErrorLog`, which the UI never renders — without
+			// the per-service reasons the diagnostic says "DEGRADED" and nothing actionable.
+			const trail = await readSwLogTrail(page, { limit: 60, match: "restore|import|account-state|register|error" }).catch(
+				(e) => `<log trail unavailable: ${e instanceof Error ? e.message : String(e)}>`,
+			)
+			return `${diagnostic}\nRestore log trail: ${JSON.stringify(trail).slice(0, 4000)}`
+		})
 	} catch (err) {
 		outcome = err instanceof TimeoutError || (err instanceof Error && err.cause instanceof TimeoutError) ? "timeout" : "error"
 		throw err
