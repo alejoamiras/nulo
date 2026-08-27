@@ -48,7 +48,7 @@ export async function approveOrRollbackDiscoverySession(args: {
 			)
 		}
 		rejectDiscovery(discovery.requestId)
-		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (expired during session creation): ${discovery.origin}`)
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (expired during session creation): request ${discovery.requestId}`)
 		return false
 	}
 
@@ -61,7 +61,7 @@ export async function approveOrRollbackDiscoverySession(args: {
 	pendingVerification.set(discovery.requestId, { at: Date.now(), profileId: approverProfileId, tabId: discovery.tabId })
 	if (!approveDiscovery(discovery.requestId)) {
 		pendingVerification.delete(discovery.requestId)
-		logger.log("wallet-sdk", LogLevel.Warn, `Discovery approve did not land (already gone): ${discovery.origin}`)
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery approve did not land (already gone): request ${discovery.requestId}`)
 		return false
 	}
 	return true

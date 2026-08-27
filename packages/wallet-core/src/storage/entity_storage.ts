@@ -66,12 +66,13 @@ export class EntityStorage<T> {
 	 * A storage key, safe to log.
 	 *
 	 * Row ids are not opaque — an account row is keyed by its address — so the full key is
-	 * identifying. The root is not sensitive and is the useful half; the id keeps a short prefix,
-	 * which locates the row among the handful under a root without writing the whole value down.
+	 * identifying, and even a prefix is: it pins an address to ~40 bits, which confirms a guess.
+	 * The root names WHICH store failed, which is the actionable half; the id contributes only its
+	 * length, enough to tell a plausible id from a truncated or empty one.
 	 */
 	private describeKey(fullKey: string): string {
-		const id = fullKey.slice(this.root.length + 1)
-		return `${this.root}@${id.length > 10 ? `${id.slice(0, 10)}…` : id}`
+		const idLength = Math.max(0, fullKey.length - this.root.length - 1)
+		return `${this.root}@<id:${idLength} chars>`
 	}
 
 	/**
@@ -104,10 +105,12 @@ export class EntityStorage<T> {
 			// offending input inside its own message (`Unexpected token 'S', "SECRET..." is not
 			// valid JSON`), so interpolating `err.message` re-introduces exactly what dropping the
 			// explicit preview removed. Size and type diagnose the real failure modes here — a
-			// truncated write, a non-string value — and the error's NAME distinguishes a syntax
-			// error from anything else.
+			// truncated write, a non-string value — and a FIXED category separates a malformed-JSON
+			// failure from anything else.
 			const shape = typeof raw === "string" ? `string(${raw.length} chars)` : `[${typeof raw}]`
-			const failure = err instanceof Error ? err.name : typeof err
+			// A hard-coded category, not `err.name`: a custom error class name is itself arbitrary
+			// text and would reopen the same channel this branch exists to close.
+			const failure = err instanceof SyntaxError ? "SyntaxError" : "non-syntax throw"
 			// B-23: KEEP the malformed row — the read path never deletes by id. The
 			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write: a
 			// get() reads a stale malformed snapshot, a concurrent set() overwrites
@@ -129,13 +132,10 @@ export class EntityStorage<T> {
 		let validated: T
 		try {
 			validated = this.parse(parsed)
-		} catch (verr) {
-			// Same reasoning as the syntax branch: a codec's exception text is arbitrary and
-			// routinely quotes the value it rejected.
-			const failure = verr instanceof Error ? verr.name : typeof verr
-			console.error(
-				`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} failed validation — KEEPING (not deleting) — ${failure}`,
-			)
+		} catch {
+			// The codec's exception is deliberately not read: a zod issue list quotes the values it
+			// rejected, which is the same channel the syntax branch above closes.
+			console.error(`EntityStorage[${this.root}]: row ${this.describeKey(fullKey)} failed validation — KEEPING (not deleting)`)
 			return undefined
 		}
 		return this.requireIdMatch(fullKey, validated)

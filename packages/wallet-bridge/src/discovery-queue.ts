@@ -113,7 +113,7 @@ export class DiscoveryQueue {
 			// can await a popup) may itself push a later one past the window.
 			if (isDiscoveryExpired(discovery)) {
 				this.handler.rejectDiscovery(discovery.requestId)
-				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): ${discovery.origin}`)
+				this.logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (stale): request ${entry.requestId}`)
 				continue
 			}
 

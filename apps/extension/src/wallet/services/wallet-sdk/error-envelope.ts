@@ -120,3 +120,20 @@ export function toWalletResponseError(error: unknown): WalletResponse["error"] {
  * Deliberately constant: it is the only shape that cannot carry internal state outward.
  */
 export const UNCLASSIFIED_ERROR_MESSAGE = "The wallet could not process the request."
+
+/**
+ * The session was invalidated mid-flight (profile switch, revocation) and the dApp must reconnect.
+ *
+ * Classified rather than thrown as a plain `Error`: this is wallet-authored, ACTIONABLE guidance,
+ * and routing it through the unclassified fall-through would replace it with the constant above —
+ * privacy preserved, but the dApp left unable to tell "reconnect" from any other failure.
+ *
+ * EIP-1193 4900 ("Disconnected") is correct here precisely because it makes dApp libraries tear
+ * down session state: the session really is gone. That is the opposite of `RpcDisconnectedError`
+ * above, which is transient and deliberately avoids 4900.
+ */
+export const SESSION_INVALID_ERROR: WalletResponse["error"] = {
+	code: 4900,
+	message: "Session no longer valid — reconnect",
+	data: { walletErrorCode: "SESSION_INVALID" },
+}

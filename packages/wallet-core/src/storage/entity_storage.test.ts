@@ -103,13 +103,48 @@ describe("EntityStorage", () => {
 			const removeSpy = vi.spyOn(api.storage.local, "remove")
 			expect(await storage.get("bad")).toBeUndefined()
 			expect(errorSpy).toHaveBeenCalledTimes(1)
-			expect(errorSpy.mock.calls[0]?.[0]).toContain("users@bad")
+			// The ROOT identifies which store failed; the row id does not appear — an account row is
+			// keyed by its address, so even a prefix pins an address to ~40 bits.
+			expect(errorSpy.mock.calls[0]?.[0]).toContain("EntityStorage[users]")
+			expect(errorSpy.mock.calls[0]?.[0]).not.toContain("users@bad")
 			await Promise.resolve()
 			// The read path must NEVER delete-by-id — it would race a concurrent valid
 			// write. The malformed row is retained for a serialized repair path.
 			expect(removeSpy).not.toHaveBeenCalled()
 			expect(await storage.contains("bad")).toBe(true)
 			removeSpy.mockRestore()
+		})
+
+		test("the malformed payload NEVER reaches the log, not even via the parse error", async () => {
+			// Dropping the explicit preview was not enough on its own: V8 quotes an excerpt of the
+			// offending input inside `err.message` (`Unexpected token 'S', "SECRET…" is not valid
+			// JSON`), so interpolating the error re-introduced exactly what the preview had leaked.
+			await api.storage.local.set({ "users@bad": '{"note":"SUPER-SECRET-NOTE-CONTENT"' })
+
+			expect(await storage.get("bad")).toBeUndefined()
+
+			const logged = String(errorSpy.mock.calls[0]?.[0])
+			expect(logged).not.toContain("SUPER-SECRET-NOTE-CONTENT")
+			expect(logged).not.toContain("note")
+			// Still diagnosable: which store, how big the value was, and what kind of failure.
+			expect(logged).toContain("EntityStorage[users]")
+			expect(logged).toContain("chars")
+		})
+
+		test("a codec rejection does not echo the value the schema refused", async () => {
+			// zod issue lists quote the rejected values; the codec's exception is never read.
+			const strict = new EntityStorage<{ name: string }>("users", api.storage.local, (raw) => {
+				const v = raw as { name?: unknown }
+				if (typeof v.name !== "string") throw new Error(`Expected string, received ${JSON.stringify(raw)}`)
+				return v as { name: string }
+			})
+			await api.storage.local.set({ "users@bad": '{"name":"SUPER-SECRET-NAME"}' })
+			await api.storage.local.set({ "users@bad2": '{"name":42,"secret":"SUPER-SECRET-NAME"}' })
+
+			expect(await strict.get("bad2")).toBeUndefined()
+
+			const logged = errorSpy.mock.calls.map((c) => String(c[0])).join("\n")
+			expect(logged).not.toContain("SUPER-SECRET-NAME")
 		})
 
 		test("getAll skips malformed rows and returns the valid ones", async () => {

@@ -31,7 +31,7 @@ import { BackgroundConnectionHandler, type PendingDiscovery, type ActiveSession 
 import { NOOP_LOGGER, type WalletMessage, type WalletResponse } from "@aztec/wallet-sdk/types"
 import { attachContentListener } from "./content-message-relay"
 import { isSubframeSender, validateContentScriptMessage } from "./content-script-validator"
-import { toWalletResponseError } from "./error-envelope"
+import { SESSION_INVALID_ERROR, toWalletResponseError } from "./error-envelope"
 import { toJsonSafe } from "./to-json-safe"
 import { deletePendingVerificationForTab, type PendingVerificationEntry } from "./pending-verification"
 import {
@@ -479,7 +479,7 @@ export function initWalletSdkHandler(services: ServiceCollection, logger: ILogge
 					discoveryQueue,
 					logger,
 				)
-				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: ${discovery.origin}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Queued discovery processed: request ${discovery.requestId}`)
 				return true
 			})
 		} else {
@@ -542,7 +542,7 @@ async function handleDiscovery(
 	const rejectIfExpired = (): boolean => {
 		if (isDiscoveryExpired(discovery)) {
 			handler.rejectDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past Nulo's 55s freshness cutoff): ${discovery.origin}`)
+			logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected (past Nulo's 55s freshness cutoff): request ${discovery.requestId}`)
 			return true
 		}
 		return false
@@ -576,7 +576,11 @@ async function handleDiscovery(
 		if (existingSession) {
 			if (rejectIfExpired()) return
 			handler.approveDiscovery(discovery.requestId)
-			logger.log("wallet-sdk", LogLevel.Info, `Discovery auto-approved (existing session): ${discovery.origin} chain=${chainId}`)
+			logger.log(
+				"wallet-sdk",
+				LogLevel.Info,
+				`Discovery auto-approved (existing session): request ${discovery.requestId} chain=${chainId}`,
+			)
 			return
 		}
 
@@ -658,7 +662,7 @@ async function handleDiscovery(
 			const result = await dappInteractionService.discover(params, discovery.requestId)
 			if (!result.approved) {
 				handler.rejectDiscovery(discovery.requestId)
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: ${discovery.origin}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Discovery denied: request ${discovery.requestId}`)
 				return
 			}
 
@@ -698,20 +702,16 @@ async function handleDiscovery(
 				logger,
 			})
 			if (approved) {
-				logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: ${discovery.origin} chain=${chainId}`)
+				logger.log("wallet-sdk", LogLevel.Info, `Discovery approved: request ${discovery.requestId} chain=${chainId}`)
 			}
 		} finally {
 			resolvePopup!()
 			pendingDiscoveryPromises.delete(dedupeKey)
 		}
-	} catch (error) {
+	} catch {
 		// User rejected or popup was closed
 		handler.rejectDiscovery(discovery.requestId)
-		logger.log(
-			"wallet-sdk",
-			LogLevel.Warn,
-			`Discovery rejected for ${discovery.origin}: ${error instanceof Error ? error.message : String(error)}`,
-		)
+		logger.log("wallet-sdk", LogLevel.Warn, `Discovery rejected for request ${discovery.requestId}`)
 	}
 }
 
@@ -769,7 +769,7 @@ async function handleWalletMessage(
 			activeProfileId: profile.id,
 			sessionProfiles,
 			respond: () => {
-				response.error = toWalletResponseError(new Error("Session no longer valid — reconnect"))
+				response.error = SESSION_INVALID_ERROR
 				return handler.sendResponse(session.sessionId, response)
 			},
 			terminateSession: (sessionId) => handler.terminateSession(sessionId),

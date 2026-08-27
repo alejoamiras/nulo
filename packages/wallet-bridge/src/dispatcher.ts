@@ -548,7 +548,11 @@ export class WalletSdkDispatcher {
 		const grants = dappSession.capabilityGrants ?? []
 		const hasAccountsGrant = grants.some((g) => g.capability.type === "accounts")
 		if (hasAccountsGrant) {
-			this.logger.log("wallet-sdk", LogLevel.Warn, `Desync: accounts grant exists but session.accounts is empty for ${ctx.origin}`)
+			this.logger.log(
+				"wallet-sdk",
+				LogLevel.Warn,
+				`Desync: accounts grant exists but session.accounts is empty for session ${ctx.sessionId}`,
+			)
 			return []
 		}
 

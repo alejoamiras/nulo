@@ -62,7 +62,7 @@ export async function enforceSessionProfileBinding(args: {
 	args.logger.log(
 		"wallet-sdk",
 		LogLevel.Warn,
-		`Rejected message for ${args.origin}: session bound to ${stamped ?? "no"} profile, active is ${args.activeProfileId}`,
+		`Rejected message for session ${args.sessionId}: bound to ${stamped ?? "no"} profile, active is ${args.activeProfileId}`,
 	)
 	return false
 }
@@ -127,7 +127,7 @@ export function wireProfileSwitchTeardown(deps: ProfileSwitchTeardownDeps): void
 			deps.logger.log(
 				"wallet-sdk-bg",
 				LogLevel.Info,
-				`Profile switch: terminating session ${session.sessionId} (${session.origin}) bound to ${stamped ?? "no"} profile`,
+				`Profile switch: terminating session ${session.sessionId} bound to ${stamped ?? "no"} profile`,
 			)
 			try {
 				deps.terminateSession(session.sessionId)
