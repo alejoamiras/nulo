@@ -98,6 +98,41 @@ The extension has a data-preserving storage-migration framework — engine in `@
 - **Never migratable — don't try**: crypto/KDF/vector rotations (the migrator runs pre-unlock and has no password to re-encrypt with — re-encrypt-on-next-unlock or a documented reset; see [`packages/wallet-crypto/README.md`](./packages/wallet-crypto/README.md)); `chrome.storage.session` (ephemeral); PXE IndexedDB (Aztec-owned, protocol-reset concern; `account-state` backup slices are the non-storage carve-out — their wire shape is versioned by `aztec-version`, not the storage schema).
 - **Related standing rule**: UI code (popup / onboarding / stores / composables) accesses `chrome.storage.local` ONLY through the migration-aware facade (`@/utils/storage`) — never raw. Enforced by `storage-facade-ban.test.ts`; the barrier it provides is what stops a page opened mid-migration from corrupting the transform.
 
+## Logging policy (what may reach a log line)
+
+`console.*` is **not** the browser console. It is globally hijacked (`utils/console-sniffer.ts`) in
+all four contexts and funnels into `LoggerStore`, which buffers, persists to
+`chrome.storage.session`, feeds the log viewer, and is CSV-exportable. So an ordinary
+`console.warn` has the same reach as `this.logWarn`, and "it's just a debug line" is never a reason
+to log something sensitive.
+
+- **Pass OBJECTS, never pre-formatted strings.** The only redaction is `trim()`
+  (`wallet/logger/utils.ts`), an object walker: it blanks secret-named keys, collapses known
+  shapes (`Note`, `ActiveSession`, `Profile`, contract artifacts), summarises typed
+  arrays/`Map`/`Set`, and projects errors. **A finished string is opaque to it** — `` `k=${x}` ``
+  can never be redacted. This is enforced by `utils/log-payload-ban.test.ts`, which fails CI
+  listing every offending `file:line`. Its known false-negative is textual (aliasing and
+  indirection defeat it), stated in its own header.
+- **Log the identifier, not the payload — chosen per site.** There is no single right identifier:
+  a `txHash` links private activity, an unsalted origin hash is dictionary-reversible, a bare row
+  id is useless without the database. Prefer note type + content arity, function name + return
+  arity, operation + count + outcome, a row id for entity failures.
+- **Never log**: decrypted note contents, simulation/utility return values, contact name or
+  address, page or navigation URLs, balances, whole RPC envelopes (`params`/`result` carry
+  passwords and export returns), or whole backup rows.
+- **Endpoint URLs** are reduced to their origin (`scrubUrls`, `@/utils/scrub-urls`) — providers
+  embed API keys in the path — on both the log path and the dApp-facing error envelope.
+- **`console.log`/`console.info` are banned** in `apps/extension/src/**` (biome `noConsole`,
+  `allow: debug|warn|error`). A diagnostic belongs at `debug`, which is dropped entirely unless
+  Developer Mode is on. Exempt: the sniffer, the logger internals, `popup/app.vue`'s anti-scam
+  DevTools banner, e2e, tests.
+- **Retention is opt-in.** Persistence to `chrome.storage.session` only happens with Developer
+  Mode on; turning it off purges the stored copy, and so does "Clear logs".
+
+When adding a sensitive field to a type, add its name to BOTH denylists — `REDACTED_KEYS` in
+`wallet/logger/utils.ts` and `SENSITIVE_IDENTIFIERS` in `utils/log-payload-ban.test.ts` — in
+camelCase *and* the kebab-case spelling used by exported backup JSON.
+
 ## Extension component model (L0–L6)
 
 Six layers, low → high. A layer can import only from layers below it. Enforced via `biome.json` `noRestrictedImports` overrides.

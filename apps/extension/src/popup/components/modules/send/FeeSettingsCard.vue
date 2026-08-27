@@ -551,12 +551,12 @@ watch(useOwnMethod, async (val) => {
 })
 
 onBeforeMount(async () => {
-	console.log(`[fee:${methodId}] mounting`)
+	console.debug(`[fee:${methodId}] mounting`)
 	fpcService.connect()
 	await runInit()
 })
 onBeforeUnmount(() => {
-	console.log(`[fee:${methodId}] unmounting`)
+	console.debug(`[fee:${methodId}] unmounting`)
 	// Release before tearing down the clients: the store's retry loop for
 	// this key must die with the card's subscription (today's unmount
 	// retry-chain death).
