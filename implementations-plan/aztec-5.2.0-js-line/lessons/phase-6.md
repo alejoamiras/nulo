@@ -81,3 +81,41 @@ result directly — a source change, so it waits for the owner.
 Test-infra improvement kept: `importFullBackup`'s timeout diagnostic now appends the SW log
 trail (filtered to restore/import/account-state/register/error). "IMPORT DEGRADED" with no
 reason is a weak diagnostic; this is how the two class ids surfaced at all.
+
+### ROOT CAUSE FOUND
+
+```
+"restoreError":"account-state slice too large (33652642 code units)"
+```
+
+`ACCOUNT_STATE_CAPS.maxSliceCodeUnits` is 32 MiB (33,554,432). The exported slice is
+**33,652,642 — over by 98,210 code units, 0.29%.** `normalizeAccountStateSlice` returns
+`{ items: [], violations: [...] }` on that check, so the restore short-circuits: no sender or
+contract registration is attempted (which is why neither the `classify()` nor the
+`skippedByDeadline` instrumentation fired), and the single violation becomes the one restore
+error that gates the import behind Continue.
+
+Why the bump pushed it over: the account-state slice embeds full contract ARTIFACTS. 5.2.0
+recompiled every app artifact (Noir beta.22 → beta.25) and the PXE preloads more standard
+contracts — the SW trail shows TWO `HandshakeRegistry` class generations registered in one
+restore (`0x2e04c07c…` and `0x020ec199…`, the 5.1.0 canonical re-pin). An already-near-the-line
+payload crossed a hard cap.
+
+It is a CAP, not a protocol limit — chosen as "a cheap, still-hard bound" against hostile
+backups. The margin was simply too thin to survive an upstream artifact-size change.
+
+Owner decision (unchanged shape, now with a precise cause):
+1. **Raise the cap** (e.g. 32 → 64 MiB). One-line, restores clean imports, keeps a hard bound.
+   The DoS reasoning is unaffected at 64 MiB — it is still a fixed ceiling on attacker input.
+2. **Shrink what the slice carries** (e.g. omit artifacts the wallet can re-fetch by class id,
+   or skip canonical/standard contracts the PXE preloads anyway). Better long-term, bigger
+   change, and it alters what a restore can recover offline.
+3. Hold the bump.
+
+Diagnosis cost 5 local runs; each new instrumentation line narrowed it. Kept as permanent
+observability (all three were genuinely missing):
+- `AccountStateService`: warn on per-item registration failure and on budget expiry.
+- `useFullBackupImport.recordRestoreErrors`: warn naming the service that gates the screen.
+- `importFullBackup`: append the SW log trail to the timeout diagnostic.
+Without these the failure reads only as "IMPORT DEGRADED", with the reason stranded in an RPC
+result that nothing renders or logs.

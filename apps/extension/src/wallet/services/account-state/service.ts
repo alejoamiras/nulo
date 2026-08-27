@@ -273,6 +273,10 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			const classify = (err: unknown): string => {
 				const message = truncateErrorMessage(toRestoreError(err))
 				if (isConnectivityErrorMessage(message)) unreachable = true
+				// The per-item errors only travel back in the RPC result, which gates the import's
+				// Continue screen without ever being rendered — log them or a degraded restore is
+				// undiagnosable in the field.
+				this.logWarn(`restore: registration failed on ${item.networkId} — ${message}`)
 				return message
 			}
 
@@ -330,6 +334,14 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				}
 			}
 
+			if (skippedByDeadline > 0) {
+				// Same reasoning as the classify() log: an expired budget gates the import's
+				// Continue screen with nothing written anywhere a field report could show.
+				this.logWarn(
+					`restore: budget expired on ${item.networkId} — ${skippedByDeadline} registration(s) not attempted ` +
+						`(${senders.length} sender(s), ${contracts.length} contract(s) done)`,
+				)
+			}
 			result.push({
 				networkId: item.networkId,
 				senders,
