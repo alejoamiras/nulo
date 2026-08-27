@@ -588,7 +588,14 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 		// was sent — without this recovery every retry would bail here forever while a confirmed
 		// L1 deposit sits stranded with no L2 claim (user money). Without a txHash the flow is
 		// genuinely still pre-send: bail and let it (or a later click) re-enter.
-		if (!rec.leafIndex) {
+		// A fueled record whose EVENT-DERIVED fuel fields are missing is chain-recoverable by the same
+		// receipt, but the gate above only ever fired on a missing TOKEN leaf — so those records never
+		// got rehydrated. They must, because the private ladder now fails closed without them rather
+		// than silently falling through to the public one. Guarded on the dep + tx hash so the bail
+		// below stays reachable only from the original missing-leaf path.
+		const fuelFieldsRecoverable =
+			rec.schema === 2 && !!rec.depositTxHash && !!deps.recoverDepositLeg && (!rec.fuel?.received || !rec.fuel?.leafIndex)
+		if (!rec.leafIndex || fuelFieldsRecoverable) {
 			if (!rec.depositTxHash || !deps.recoverDepositLeg) {
 				log("no leafIndex yet - the deposit leg is still running", id)
 				return

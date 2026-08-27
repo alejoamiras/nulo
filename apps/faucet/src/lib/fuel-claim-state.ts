@@ -212,12 +212,17 @@ export type FuelLadder =
 
 export interface FuelLadderInputs {
 	isPrivate: boolean
-	/** Present ⟺ the deposit bought fuel. */
+	/** The DURABLE "this deposit bought fuel" marker: `fuel` is present ⟺ schema 2. A schema-2 record
+	 *  with no fuel block is a corrupted one that still has a live FJ message — classifying it by the
+	 *  block's absence alone would send it down the public ladder. */
+	schema: 1 | 2
 	fuel?: { received?: string; leafIndex?: string; bridgeSecretSalt?: string }
 }
 
 export function decideFuelLadder(i: FuelLadderInputs): FuelLadder {
-	if (!i.isPrivate || !i.fuel) return "public"
+	if (!i.isPrivate) return "public"
+	// Only a genuine no-fuel private deposit (schema 1, no block) has no FJ to protect.
+	if (!i.fuel) return i.schema === 2 ? "private-incomplete" : "public"
 	const f = i.fuel
 	return f.received && f.leafIndex && f.bridgeSecretSalt ? "private" : "private-incomplete"
 }
@@ -236,12 +241,17 @@ export type StandaloneFuelRecovery =
 	| "offer" // public record, completed, fuel bridged and not yet settled.
 	| "none" // nothing to recover: no fuel, a direct-Fuel record, unfinished, or already settled.
 	| "private-settled" // private + well-formed: its FJ paid for the completing tx. Say nothing.
-	| "private-unknown" // private + incomplete metadata: offer nothing, but surface the unknown state.
+	// Private with metadata gaps — never an offer, but the two causes need different advice: the
+	// event-derived fields come back from the L1 receipt on a retry, while the client-random salt
+	// exists nowhere but a backup file.
+	| "private-unknown-recoverable"
+	| "private-unknown-needs-backup"
 
 export interface StandaloneFuelRecoveryInputs {
 	isPrivate: boolean
 	/** A direct-Fuel record's completion IS its gas claim — never offer a re-claim for one. */
 	isFeeJuiceAsset: boolean
+	schema: 1 | 2
 	completedAt?: number
 	fuel?: {
 		received?: string
@@ -254,9 +264,11 @@ export interface StandaloneFuelRecoveryInputs {
 
 export function decideStandaloneFuelRecovery(i: StandaloneFuelRecoveryInputs): StandaloneFuelRecovery {
 	const f = i.fuel
-	if (i.isFeeJuiceAsset || !f?.received) return "none"
+	if (i.isFeeJuiceAsset) return "none"
+	if (!f?.received && !(i.isPrivate && i.schema === 2)) return "none"
 	if (i.completedAt === undefined) return "none" // an unfinished claim retries via the normal action.
-	if (f.consumed === true || f.standaloneClaimed === true) return "none"
-	if (!i.isPrivate) return "offer"
-	return decideFuelLadder({ isPrivate: true, fuel: f }) === "private" ? "private-settled" : "private-unknown"
+	if (f?.consumed === true || f?.standaloneClaimed === true) return "none"
+	if (!i.isPrivate) return f?.received ? "offer" : "none"
+	if (decideFuelLadder({ isPrivate: true, schema: i.schema, fuel: f }) === "private") return "private-settled"
+	return f?.bridgeSecretSalt ? "private-unknown-recoverable" : "private-unknown-needs-backup"
 }

@@ -143,14 +143,23 @@ const fuelRecovery = computed(() =>
 	decideStandaloneFuelRecovery({
 		isPrivate: props.record.isPrivate,
 		isFeeJuiceAsset: isFuel.value,
+		schema: props.record.schema,
 		completedAt: props.record.completedAt,
 		fuel: fuel.value,
 	}),
 )
 const fuelRecoverable = computed(() => fuelRecovery.value === "offer")
 /** Private bridge whose private-claim metadata is incomplete: its gas state is genuinely unknown and
- *  the public recovery must not be offered — so say so rather than showing nothing. */
-const privateFuelUnknown = computed(() => fuelRecovery.value === "private-unknown")
+ *  the public recovery must not be offered — so say so rather than showing nothing. The advice differs
+ *  by cause: event-derived fields return from the L1 receipt on a retry, the salt only from a backup. */
+const privateFuelUnknown = computed(
+	() => fuelRecovery.value === "private-unknown-recoverable" || fuelRecovery.value === "private-unknown-needs-backup",
+)
+const privateFuelUnknownNote = computed(() =>
+	fuelRecovery.value === "private-unknown-recoverable"
+		? "This private bridge's gas details couldn't be read from Ethereum yet, so its gas state can't be confirmed - retry in a minute. Public gas recovery doesn't apply to private bridges."
+		: "This private bridge is missing the secret that claims its gas, so its gas state can't be confirmed. Only its backup file has that secret. Public gas recovery doesn't apply to private bridges.",
+)
 const fuelRecovering = ref(false)
 const fuelRecoverError = ref<string | null>(null)
 
@@ -371,8 +380,7 @@ function onDiscard() {
 		</div>
 
 		<p v-if="privateFuelUnknown" class="private-fuel-unknown" :data-testid="TESTIDS.journalPrivateFuelUnknown">
-			This private bridge's gas data is incomplete, so its gas state can't be confirmed. The public gas
-			recovery doesn't apply to private bridges - restore this bridge from its backup file if you kept one.
+			{{ privateFuelUnknownNote }}
 		</p>
 
 		<BridgePhaseRail v-if="stage !== 'done'" :record="record" compact />

@@ -203,15 +203,15 @@ describe("decideFuelLadder — the L11 privacy fence", () => {
 	const complete = { received: "1000", leafIndex: "7", bridgeSecretSalt: "0xsalt" }
 
 	it("a well-formed private fueled record routes to the private ladder", () => {
-		expect(decideFuelLadder({ isPrivate: true, fuel: complete })).toBe("private")
+		expect(decideFuelLadder({ isPrivate: true, schema: 2, fuel: complete })).toBe("private")
 	})
 
 	it("public records use the public ladder", () => {
-		expect(decideFuelLadder({ isPrivate: false, fuel: complete })).toBe("public")
+		expect(decideFuelLadder({ isPrivate: false, schema: 2, fuel: complete })).toBe("public")
 	})
 
 	it("a private record with NO fuel is unaffected — it never bridged FJ", () => {
-		expect(decideFuelLadder({ isPrivate: true, fuel: undefined })).toBe("public")
+		expect(decideFuelLadder({ isPrivate: true, schema: 1, fuel: undefined })).toBe("public")
 	})
 
 	// The regression the audit demanded: a private fueled record must NEVER reach the public /
@@ -223,12 +223,12 @@ describe("decideFuelLadder — the L11 privacy fence", () => {
 		["missing received", { leafIndex: "7", bridgeSecretSalt: "0xsalt" }],
 		["empty fuel block", {}],
 	])("private + %s fails closed, never public", (_label, fuel) => {
-		expect(decideFuelLadder({ isPrivate: true, fuel })).toBe("private-incomplete")
+		expect(decideFuelLadder({ isPrivate: true, schema: 2, fuel })).toBe("private-incomplete")
 	})
 })
 
 describe("decideStandaloneFuelRecovery — one source for the card and the action", () => {
-	const base = { isPrivate: false, isFeeJuiceAsset: false, completedAt: 1 }
+	const base = { isPrivate: false, isFeeJuiceAsset: false, schema: 2 as const, completedAt: 1 }
 	const fuel = { received: "1000", leafIndex: "7" }
 
 	it("offers recovery for a completed PUBLIC record with unsettled fuel", () => {
@@ -251,13 +251,32 @@ describe("decideStandaloneFuelRecovery — one source for the card and the actio
 		expect(decideStandaloneFuelRecovery(input)).toBe("private-settled")
 	})
 
-	it("a PRIVATE record with incomplete metadata is unknown — still no public recovery, but surfaced", () => {
-		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel })).toBe("private-unknown")
+	it("a PRIVATE record missing its salt needs a backup — the salt is client-random, not on chain", () => {
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel })).toBe("private-unknown-needs-backup")
+	})
+
+	it("a PRIVATE record missing only event-derived fields is chain-recoverable — advise a retry, not a backup", () => {
+		const input = { ...base, isPrivate: true, fuel: { received: "1000", bridgeSecretSalt: "0xsalt" } }
+		expect(decideStandaloneFuelRecovery(input)).toBe("private-unknown-recoverable")
+	})
+
+	// The durable marker, not the block's presence: a schema-2 record whose fuel block was lost to
+	// tampering still HAS a live FJ message, so it must not be read as a no-fuel deposit.
+	it("a private schema-2 record with NO fuel block is unknown, never 'none'", () => {
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel: undefined })).toBe("private-unknown-needs-backup")
+		expect(decideFuelLadder({ isPrivate: true, schema: 2, fuel: undefined })).toBe("private-incomplete")
+	})
+
+	it("a genuine no-fuel private deposit (schema 1) is untouched", () => {
+		expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, schema: 1, fuel: undefined })).toBe("none")
+		expect(decideFuelLadder({ isPrivate: true, schema: 1, fuel: undefined })).toBe("public")
 	})
 
 	it("no private record can ever reach 'offer'", () => {
-		for (const f of [fuel, { ...fuel, bridgeSecretSalt: "0xsalt" }, { received: "1000" }, {}]) {
-			expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, fuel: f })).not.toBe("offer")
+		for (const f of [fuel, { ...fuel, bridgeSecretSalt: "0xsalt" }, { received: "1000" }, {}, undefined]) {
+			for (const schema of [1, 2] as const) {
+				expect(decideStandaloneFuelRecovery({ ...base, isPrivate: true, schema, fuel: f })).not.toBe("offer")
+			}
 		}
 	})
 })

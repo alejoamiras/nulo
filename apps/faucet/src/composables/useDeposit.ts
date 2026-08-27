@@ -236,6 +236,7 @@ export async function claimFuelStandalone(id: string): Promise<void> {
 		decideStandaloneFuelRecovery({
 			isPrivate: rec.isPrivate,
 			isFeeJuiceAsset: assetKindOf(rec) === "fee-juice",
+			schema: rec.schema,
 			completedAt: rec.completedAt,
 			fuel,
 		}) !== "offer"
@@ -423,9 +424,14 @@ export function ensureDepositJournalDeps(): void {
 			// must never fall through to the public/sponsored ladder below — that claims the FJ in a
 			// publicly-visible tx and deanonymizes the bridge. Incomplete metadata (legacy, partially
 			// restored, tampered) is exactly the fall-through that used to happen silently.
-			if (decideFuelLadder({ isPrivate: rec.isPrivate, fuel }) === "private-incomplete") {
+			if (decideFuelLadder({ isPrivate: rec.isPrivate, schema: rec.schema, fuel }) === "private-incomplete") {
+				// The engine rehydrates event-derived fuel fields from the L1 receipt before this runs, so
+				// reaching here with a salt means that recovery hasn't landed yet (retryable); without one
+				// the secret exists nowhere but a backup file.
 				return stop(
-					"This private bridge is missing the data needed to claim its gas privately (an older or partially restored record). Restore it from its backup file to recover that data - the public gas recovery is deliberately unavailable for private bridges.",
+					fuel?.bridgeSecretSalt
+						? "This private bridge's gas details couldn't be read from Ethereum yet - retry in a minute. The public gas recovery is deliberately unavailable for private bridges."
+						: "This private bridge is missing the secret needed to claim its gas privately (an older or partially restored record). Only its backup file has that secret - the public gas recovery is deliberately unavailable for private bridges.",
 				)
 			}
 			if (rec.isPrivate && fuel?.received && fuel.leafIndex && fuel.bridgeSecretSalt) {
