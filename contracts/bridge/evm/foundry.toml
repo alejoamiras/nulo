@@ -24,3 +24,17 @@ remappings = [
   "@test/=test/",
   "forge-std/=lib/forge-std/src/",
 ]
+
+# Pinned, not inherited: leaving these at Foundry's defaults means a toolchain upgrade can
+# silently change how much of the input space the fuzz and invariant suites actually cover,
+# with no diff to review.
+[profile.default.fuzz]
+runs = 256
+
+[profile.default.invariant]
+runs = 256
+depth = 500
+# Kept permissive deliberately: handler actions bound their own inputs and wrap the
+# expected-revert cases in try/catch, but `sweep` on an empty balance and other benign
+# no-ops still revert, and failing the campaign on those would only add noise.
+fail_on_revert = false

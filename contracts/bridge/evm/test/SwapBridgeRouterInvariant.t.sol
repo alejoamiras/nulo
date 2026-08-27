@@ -44,6 +44,13 @@ contract SwapBridgeRouterInvariantTest is Test {
     function invariant_feePortalReceivedExactlyReportedOutput() public view {
         assertEq(handler.feePortalBalance(), handler.ghostFjOut(), "fee portal balance != cumulative reported output");
     }
+
+    /// I4 — a swap target reporting more fuel than it transfers is never accepted. Distinct
+    /// from I3: I3 checks the arithmetic of what did land, this checks that the hostile shape
+    /// was refused at all, which the balance-delta and fuel-consumed guards jointly enforce.
+    function invariant_lyingSwapTargetNeverAccepted() public view {
+        assertFalse(handler.hostileAccepted(), "router accepted a swap target that under-delivered");
+    }
 }
 
 contract RouterHandler is StdUtils {
@@ -67,6 +74,7 @@ contract RouterHandler is StdUtils {
     uint256 public ghostTokenDeposited;
     uint256 public ghostFuelSwapped;
     uint256 public ghostFjOut;
+    bool public hostileAccepted;
     uint256 private nonce;
     address[] public swapTargets;
 
@@ -89,6 +97,11 @@ contract RouterHandler is StdUtils {
         usdc.mint(address(this), 1_000_000_000 * 1e6);
         usdc.mint(user, 1_000_000_000 * 1e6);
         fj.mint(address(swap), 1_000_000_000 ether); // == cap, ok
+        // The handler needs its own FJ float to donate from. Without it every FJ donation
+        // reverted on insufficient balance and was swallowed by the invariant runner's
+        // default fail_on_revert=false, so that branch never ran and I1's FJ leg only ever
+        // compared zero to zero.
+        fj.mint(address(this), 1_000_000_000 ether);
         usdc.approve(address(permit2), type(uint256).max);
         vm.prank(user);
         usdc.approve(address(permit2), type(uint256).max);
@@ -101,6 +114,10 @@ contract RouterHandler is StdUtils {
         uint256 total = bound(seed % 1000, 2, 1000) * 1e6;
         uint256 fuel = bound((seed >> 10) % 997, 1, total - 1);
         bool isPrivate = (seed >> 4) % 2 == 0;
+        // Vary the honest output so I3 compares a moving sum rather than a constant multiple:
+        // a fee-portal credit bug that scales with the reported amount stays visible.
+        uint256 out = bound((seed >> 20) % 4096, 1 ether, 5 ether);
+        swap.setOutput(out, 0);
         (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _route();
         vm.prank(user);
         router.bridgeWithFuel(
@@ -123,7 +140,45 @@ contract RouterHandler is StdUtils {
         ghostPulled += total;
         ghostTokenDeposited += total - fuel;
         ghostFuelSwapped += fuel;
-        ghostFjOut += 1 ether;
+        ghostFjOut += out;
+    }
+
+    /// A swap target that reports more fuel than it hands over must be caught by the router's
+    /// balance-delta check, not absorbed. The attempt has to revert whole: nothing pulled,
+    /// nothing credited to the fee portal, so no ghost advances. Interleaving this with the
+    /// honest actions is what makes I3 falsifiable — without it every target in the campaign
+    /// reports exactly what it transfers and the invariant cannot fail by construction.
+    function bridgeWithLyingTarget(uint256 seed) external {
+        uint256 total = bound(seed % 1000, 2, 1000) * 1e6;
+        uint256 fuel = bound((seed >> 10) % 997, 1, total - 1);
+        uint256 reported = bound((seed >> 20) % 4096, 2 ether, 5 ether);
+        uint256 delivered = bound((seed >> 32) % 997, 1, reported - 1 ether);
+        (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _route();
+
+        swap.setOutput(reported, delivered);
+        vm.prank(user);
+        try router.bridgeWithFuel(
+            SwapBridgeRouter.BridgeParams({
+                tokenPortal: address(tokenPortal),
+                bridgeToken: address(usdc),
+                totalAmount: total,
+                fuelAmount: fuel,
+                aztecRecipient: RECIPIENT,
+                fuelRecipient: FUEL_RECIPIENT,
+                tokenSecretHash: SECRET,
+                fuelSecretHash: SECRET,
+                minFuelOutput: 1 ether,
+                path: path,
+                zeroForOnes: dirs,
+                isPrivate: false
+            }),
+            _permit()
+        ) {
+            // Recorded, not reverted: a revert here would be swallowed by the campaign's
+            // fail_on_revert=false and the detection would never surface. I4 reads this flag.
+            hostileAccepted = true;
+        } catch {}
+        swap.setOutput(1 ether, 0);
     }
 
     function bridge(uint256 seed) external {
@@ -147,11 +202,16 @@ contract RouterHandler is StdUtils {
 
     /// Attacker dust/value donation — must NEVER distort user accounting (delta checks).
     function donate(uint256 seed) external {
-        uint256 amt = bound(seed % 991, 1, 500) * 1e6;
+        uint256 units = bound(seed % 991, 1, 500);
         if ((seed >> 5) % 2 == 0) {
+            uint256 amt = units * 1e6;
             usdc.transfer(address(router), amt);
             ghostDonatedUsdc += amt;
         } else {
+            // FJ is 18-decimal: scaling it by 1e6 like USDC capped donations at ~5e-10 FJ,
+            // dust against the ether-scale amounts the fuel leg actually moves, so the FJ
+            // side of I1 was never exercised at a magnitude that could mask a residue bug.
+            uint256 amt = units * 1 ether;
             fj.transfer(address(router), amt);
             ghostDonatedFj += amt;
         }
