@@ -185,3 +185,71 @@ Noted residuals:
 - [LOW] `useWalletConnection.ts` retains a stale “under 5.0.1” comment after the 5.2.0 bump.
 
 VERDICT: approve
+## Private-fuel fence rounds (owner-reported CLAIM YOUR GAS bug) — dev-refreshed branch
+
+### Round (response-8)
+
+The fix is correct for well-formed current records, but one integration hole remains.
+
+- [HIGH] Claim 3 is not universally true in the accepted record space. The PrivateFPC branch requires `received`, `leafIndex`, and `bridgeSecretSalt`. A private record missing any of these falls through:
+
+  - With complete fuel except salt, `decideFuelClaim` can select `userOverride → sponsored` or `sponsored-plus-standalone-fj`. The token claim can complete without consuming the FPC-bound message.
+  - With incomplete fuel fields, it reaches the no-fuel wallet-fee path and can likewise complete independently.
+  - `bridgeSecretSalt` remains optional in persisted/backup records. Current creation writes it, but legacy, partially recovered, or tampered records are accepted.
+
+  Structurally route every `rec.isPrivate && fuel` record into the private branch. Missing private metadata should fail closed with explicit recovery/support guidance before the public ladder. Add a regression proving such a record never invokes public/sponsored fuel logic.
+
+- [MED] A completed private record with missing metadata will now look successfully finished with no indication that its fuel state is unknown. Suppress the public action, but render a non-actionable warning for this malformed/legacy case. For a well-formed completed record, silence is correct.
+
+- [MED] The new test’s “no switch button” assertion is ineffective: its private recipient is the active account, so no switch would appear even without the fix. Exercise an `OTHER` recipient.
+
+- [MED] The exported defensive rejection remains untested. Given the production incident, extract a small pure eligibility predicate shared by the card and action, or otherwise pin the action boundary directly.
+
+- [LOW] The thrown copy is accurate for current records but not malformed/legacy ones. Prefer: “Private gas is claimed as part of the private bridge; standalone recovery is unavailable.”
+
+- [LOW] `reconcileFuelConsumed` remains consistent. It can still latch private consumption; neither the phase rail nor receipt depends on `consumed`/`standaloneClaimed`.
+
+VERDICT: conditional approve (conditions: structurally prevent every private fueled record from reaching the public/no-fuel ladder, surface malformed private-fuel metadata without offering recovery, and pin that boundary in tests)
+### Round (response-9)
+
+- **HIGH** — The fence is not complete. `!fuel → "public"` ignores the durable schema marker: a private token record with `schema === 2` but a deleted/malformed `fuel` block is known to have bought FJ yet reaches the no-fuel path. Local journal parsing is intentionally shallow, so storage tampering can create this shape. Pass `schema`/`hadFuel`; only `schema === 1 && !fuel` should be public.
+
+- **MED** — `private-incomplete` can wedge chain-recoverable records. If the token `leafIndex` exists but `fuel.received`/`fuel.leafIndex` is missing, `runDepositClaim` skips `recoverDepositLeg`; the new `stop()` then blocks before the L1 receipt can reconstruct those fields. Attempt receipt recovery for missing event-derived fuel data before stopping. A missing salt properly requires backup.
+
+- **LOW** — The warning correctly states that the state is unknown and public recovery is unavailable, but backup is not universally corrective—especially when the missing field is receipt-derived. Mention retry/chain recovery or support as applicable.
+
+Direct private-Fuel records remain separately fail-closed, and the shared standalone-recovery predicate correctly prevents private records from reaching `"offer"`.
+
+VERDICT: conditional approve (conditions: make the no-fuel classification schema-aware and rehydrate chain-recoverable fuel metadata before fail-stop)
+### Round (response-10)
+
+- **LOW** — Normal public behavior is unchanged: schema-1 and complete schema-2 records bypass the new disjunct. Recovery runs once per invocation, not an internal loop.
+
+- **MED** — A schema-2 receipt lacking `BridgeWithFuel` falls through to parsing plain `MessageSent`, reports `"recovered"`, but leaves fuel fields absent. Private retries therefore re-probe forever; public records can incorrectly continue through the no-fuel path. For schema 2, absence of `BridgeWithFuel` should fail closed as a record/receipt mismatch rather than use the plain-deposit fallback.
+
+- **MED** — `"private-unknown-recoverable"` overstates recoverability. It does not require `depositTxHash`, and it is displayed only for completed records—which `runDepositClaim` immediately ignores and whose cards expose no retry action. The engine’s salt-based `stop()` copy has the same no-hash problem. Either provide a completed-record metadata-recovery path, or classify/copy these states as non-retryable support/backup cases.
+
+The schema-aware privacy fence itself is correct, and no private input reaches `"offer"`.
+
+VERDICT: conditional approve (conditions: fail closed when a schema-2 receipt lacks BridgeWithFuel, and only advertise retry where an actionable receipt-recovery path exists)
+### Round (response-11)
+
+- **Looks correct** — The throw affects only schema-2 records missing fuel fields whose receipt lacks `BridgeWithFuel`; valid fueled paths and token-leaf-only recovery remain unchanged.
+
+- **Looks correct** — `completedAt` is written only after a successful, checkpointed Aztec claim receipt (plus identity/consumption verification where required). Direct-Fuel records are excluded, so “Your tokens arrived” is accurate absent accepted storage tampering.
+
+- **MED** — One false action remains: the terminal receipt/record mismatch is stored as `attention: "error"`, so `BridgeJournalCard` still renders a **RETRY** button. Clicking it deterministically repeats the same immutable-receipt failure until an external restore occurs. Give this failure a terminal attention/outcome that suppresses CLAIM/RETRY while leaving the journal-level Restore control available.
+
+VERDICT: conditional approve (conditions: suppress the futile RETRY action for terminal schema-2 receipt/record mismatch)
+### Final — VERDICT: approve
+
+- **Looks correct** — Terminal classification is reached only after a successful Ethereum receipt lacks the required `BridgeWithFuel` data. RPC failure returns `"pending"`; other parsing/errors remain retryable `"error"` states.
+
+- **MED** — Two action promises remain:
+
+  - `BridgeJournalCard.stageLabel` can still say “Press CLAIM…” while `"receipt-mismatch"` suppresses the button.
+  - `BridgeStepper.canRetry` checks only the failed phase key, so a foreground `"receipt-mismatch"` in `sync`/`claim` can still render the full rail’s **RETRY** button.
+
+Gate both surfaces on the same terminal-attention predicate. Restore, Backup, Clear, and Discard are otherwise legitimate actions.
+
+VERDICT: conditional approve (conditions: suppress terminal-state CLAIM guidance in BridgeJournalCard and RETRY in BridgeStepper)
