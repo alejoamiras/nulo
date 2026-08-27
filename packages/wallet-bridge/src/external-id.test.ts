@@ -46,11 +46,25 @@ describe("describeExternalId", () => {
 		expect(b).not.toBe(a)
 	})
 
-	test("is bounded — a hostile page cannot grow the table without limit", () => {
-		for (let i = 0; i < 600; i++) describeExternalId(`id-${i}`)
+	test("is bounded, and the bound actually evicts", () => {
+		const first = describeExternalId("victim-session")
+		// Overflow the 512-entry table.
+		for (let i = 0; i < 600; i++) describeExternalId(`filler-${i}`)
 
-		// Past the cap the table resets; correlation restarts rather than memory growing.
-		expect(describeExternalId("id-0")).toMatch(/^ext-\d+$/)
+		// Proof the table really cleared: the same id no longer resolves to its old token.
+		expect(describeExternalId("victim-session")).not.toBe(first)
+	})
+
+	test("NEVER reuses a token after an overflow", () => {
+		// Rewinding the counter would let a hostile page mint enough ids to force an eviction and
+		// then have its next session reuse `ext-1` — making it read as an unrelated earlier session
+		// in log lines still sitting in the store's buffer.
+		const seen = new Set<string>()
+		for (let i = 0; i < 1500; i++) {
+			const token = describeExternalId(`id-${i}`)
+			expect(seen.has(token)).toBe(false)
+			seen.add(token)
+		}
 	})
 
 	test("reports the type for a non-string", () => {

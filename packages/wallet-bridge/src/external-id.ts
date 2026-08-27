@@ -34,8 +34,10 @@ export function describeExternalId(value: unknown): string {
 	if (existing !== undefined) return existing
 
 	if (tokens.size >= MAX_TRACKED_IDS) {
+		// Clear the table but NEVER rewind the counter. Old log lines survive in the store's buffer,
+		// so reusing `ext-1` would make two unrelated sessions read as the same one — and a hostile
+		// page can force exactly that by minting enough ids to trigger the overflow.
 		tokens.clear()
-		nextToken = 1
 	}
 	const token = `ext-${nextToken++}`
 	tokens.set(value, token)
