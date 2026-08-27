@@ -234,17 +234,24 @@ function stripNoise(line: string, state: LexState): { code: string; state: LexSt
 	return { code: out, state: { inBlockComment: inBlock, quote, interp } }
 }
 
+/** Keywords after which a `/` can only begin a regex literal, never divide. */
+const REGEX_PRECEDING_KEYWORDS = /\b(?:return|typeof|instanceof|in|of|case|do|else|yield|await|new|delete|void)$/
+
 /**
  * Whether a `/` at the end of `preceding` opens a regex literal rather than dividing.
  *
- * The distinction is genuinely ambiguous in JS without a full parser; this reads the last
- * significant character, which is how every lightweight tokenizer does it. Getting it wrong in the
- * division direction leaves the old behaviour (the `/` is kept, harmless); getting it wrong in the
- * regex direction blanks a short span — again harmless, since only delimiters are being counted.
+ * Neither misjudgement is harmless, because this same stripped text drives BOTH the paren count
+ * and the hazard scan: reading a regex as division lets its `)` close the window early, and
+ * reading a division as a regex blanks the span up to the next `/`, which can erase the payload.
+ * So both halves are modelled — the operator/punctuation set, the keywords that can only precede a
+ * regex, and the postfix `++`/`--` that can only precede a division.
  */
 function startsRegex(preceding: string): boolean {
-	const last = preceding.replace(/\s+$/, "").slice(-1)
-	return last === "" || "(,=:[!&|?{};+-*%~^<>".includes(last)
+	const trimmed = preceding.replace(/\s+$/, "")
+	if (trimmed === "") return true
+	if (trimmed.endsWith("++") || trimmed.endsWith("--")) return false
+	if (REGEX_PRECEDING_KEYWORDS.test(trimmed)) return true
+	return "(,=:[!&|?{};+-*%~^<>".includes(trimmed.slice(-1))
 }
 
 /** Index just past the closing `/` of the regex literal starting at `start`. */
@@ -280,10 +287,13 @@ const MAX_CALL_WINDOW_LINES = 12
  * balance never resolves inside the cap the window runs to the cap, which over-scans: a loud false
  * positive rather than the silent false negative this test exists to prevent.
  */
-function callWindow(code: string[], start: number): number {
+function callWindow(code: string[], start: number, from: number): number {
 	let depth = 0
 	for (let i = start; i < code.length && i - start < MAX_CALL_WINDOW_LINES; i++) {
-		for (const ch of code[i]) {
+		// Only the log call's OWN parens count. Anything to its left on the opener line belongs to
+		// whatever produced the receiver — `getLogger({…}).log(` closes a paren before the call
+		// even starts, which used to cancel the opener and collapse the window to one line.
+		for (const ch of i === start ? code[i].slice(from) : code[i]) {
 			if (ch === "(") depth++
 			else if (ch === ")") depth--
 		}
@@ -407,9 +417,16 @@ function findLoggedSecrets(files: Array<{ path: string; content: string }>): str
 		}
 		const reported = new Set<string>()
 		for (let i = 0; i < code.length; i++) {
-			if (!LOG_CALL.test(code[i])) continue
-			const end = callWindow(code, i)
-			const window = code.slice(i, end + 1).join("\n")
+			const opener = LOG_CALL.exec(code[i])
+			if (!opener) continue
+			// Index of the call's own `(` — the last character of the matched opener.
+			const from = opener.index + opener[0].length - 1
+			const end = callWindow(code, i, from)
+			// Blank the opener line's prefix rather than slicing it off, so every offset in the
+			// joined window still maps to the same column of the same real line.
+			const lines = code.slice(i, end + 1)
+			lines[0] = " ".repeat(from) + lines[0].slice(from)
+			const window = lines.join("\n")
 			for (const { name, index } of hazards(window)) {
 				const line = i + window.slice(0, index).split("\n").length
 				const offense = `${path}:${line} → ${name} flattened into a log string`
@@ -523,6 +540,37 @@ describe("log-payload ban (static)", () => {
 				path: "packages/wallet-core/src/x.ts",
 				content: ["this.logWarn(", "\t/\\)/.test(value) ? 'a' : 'b',", "\t`key=${masterKey}`,", ")"].join("\n"),
 			},
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a paren before the call does not cancel its opener", () => {
+		// `getLogger({…}).log(` closes a paren to the LEFT of the call; counting the whole opener
+		// line drove the depth negative and collapsed the window to a single line.
+		const offenders = findLoggedSecrets([
+			{
+				path: "packages/wallet-core/src/x.ts",
+				content: ["getLogger({", '\tsubsystem: "wallet",', "}).log(", "\t`failed`,", "\tpassword,", ")"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+		expect(offenders[0]).toContain("x.ts:5")
+	})
+
+	test("a regex after `return` is a regex, not a division", () => {
+		const offenders = findLoggedSecrets([
+			{
+				path: "packages/wallet-core/src/x.ts",
+				content: ["console.warn(function matcher() {", "\treturn /\\)/", "}, password)"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a division after `++` is a division, not a regex", () => {
+		// Read as a regex, the span to the next `/` is blanked — and the payload with it.
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: "console.warn(i++ / total, password, /retry/)" },
 		])
 		expect(offenders).toHaveLength(1)
 	})
