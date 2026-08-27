@@ -106,16 +106,20 @@ all four contexts and funnels into `LoggerStore`, which buffers, persists to
 `console.warn` has the same reach as `this.logWarn`, and "it's just a debug line" is never a reason
 to log something sensitive.
 
-- **Pass OBJECTS, never pre-formatted strings.** The only redaction is `trim()`
+- **Pass the value as an object property NAMED for what it is.** The only redaction is `trim()`
   (`wallet/logger/utils.ts`), an object walker: it blanks secret-named keys, collapses known
   shapes (`Note`, `ActiveSession`, `Profile`, contract artifacts), summarises typed
-  arrays/`Map`/`Set`, and projects errors. **A finished string is opaque to it** — `` `k=${x}` ``
+  arrays/`Map`/`Set`, and projects errors. It redacts **by key name**, so `{ password }` is safe
+  and `{ value: password }` is not — the walker reads a benign key and passes the string through.
+  **A finished string is opaque to it** — `` `k=${x}` ``
   can never be redacted — and neither can `"k=" + x` or a bare `x` string argument. This is
   enforced by `apps/extension/src/utils/log-payload-ban.test.ts`, which scans the extension app
   AND every package it compiles in (`extension-messaging`, `wallet-bridge`, `wallet-core`,
   `wallet-crypto`, `aztec-runtime` — the transport layer logs the most dangerous payloads there
   is), and fails CI listing every offending `file:line`. Its known false-negative is textual
-  (aliasing and indirection defeat it), stated in its own header.
+  (aliasing and indirection defeat it), stated in its own header. Its denied names are imported
+  FROM `REDACTED_KEYS`/`URL_KEYS`, so the two lists cannot drift; an arity read
+  (`authWitnesses.length`) is deliberately allowed, being the idiom this policy asks for.
 - **Log the identifier, not the payload — chosen per site.** There is no single right identifier:
   a `txHash` links private activity, an unsalted origin hash is dictionary-reversible, a bare row
   id is useless without the database. Prefer note type + content arity, function name + return
@@ -134,10 +138,10 @@ to log something sensitive.
 - **Retention is opt-in.** Persistence to `chrome.storage.session` only happens with Developer
   Mode on; turning it off purges the stored copy, and so does "Clear logs".
 
-When adding a sensitive field to a type, add its name to BOTH denylists — `REDACTED_KEYS` in
-`wallet/logger/utils.ts` and `SENSITIVE_IDENTIFIERS` in `utils/log-payload-ban.test.ts` — in
-camelCase *and* the kebab-case spelling used by exported backup JSON (the scanner reads
-`${row["master-key"]}` too). Names ending in `secretKey` are covered by suffix in both.
+When adding a sensitive field to a type, add its name to `REDACTED_KEYS` in
+`wallet/logger/utils.ts` — in camelCase *and* the kebab-case spelling used by exported backup JSON
+(the scanner reads `${row["master-key"]}` too). The static guard imports that set, so it extends in
+the same commit. Names ending in `secretKey` are covered by suffix in both.
 
 ## Extension component model (L0–L6)
 

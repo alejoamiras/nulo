@@ -79,7 +79,7 @@ const MAX_ERROR_MESSAGE_CHARS = 200
  * would blind ordinary diagnostics for no gain. Same reasoning for `token`, which in this wallet
  * almost always means a token contract.
  */
-const REDACTED_KEYS: ReadonlySet<string> = new Set([
+export const REDACTED_KEYS: ReadonlySet<string> = new Set([
 	// Aztec proof material.
 	"acir",
 	"authWitnesses",
@@ -122,14 +122,14 @@ const REDACTED_KEYS: ReadonlySet<string> = new Set([
  * `masterNullifierSecretKey` / `masterIncomingViewingSecretKey` / … set, without enumerating
  * every upstream spelling. No benign field in this codebase ends in `SecretKey`.
  */
-const SECRET_KEY_SUFFIX = /secretkey$/i
+export const SECRET_KEY_SUFFIX = /secretkey$/i
 
 /**
  * Keys holding an endpoint URL. Commercial RPC providers routinely embed the API key in the path
  * or query, so these are reduced to their origin rather than blanked — which endpoint failed is
  * the whole diagnostic value, and the origin carries it.
  */
-const URL_KEYS: ReadonlySet<string> = new Set(["rpcUrl", "submittedEndpointUrl", "endpointUrl"])
+export const URL_KEYS: ReadonlySet<string> = new Set(["rpcUrl", "submittedEndpointUrl", "endpointUrl"])
 
 function toOrigin(value: unknown): unknown {
 	if (typeof value !== "string") return `[${typeof value}]`

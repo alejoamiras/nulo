@@ -3,6 +3,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative } from "node:path"
 import { describe, expect, test } from "vitest"
+import { REDACTED_KEYS, SECRET_KEY_SUFFIX, URL_KEYS } from "@/wallet/logger/utils"
 
 /**
  * Static ban: a log call must not flatten a sensitive value into its message.
@@ -43,45 +44,23 @@ const SCAN_ROOTS = [
 const SCANNED_EXT = /\.(ts|js|vue)$/
 
 /**
- * Identifiers that must never be flattened into a log message. Kept in sync with the runtime
- * denylist in `wallet/logger/utils.ts` — that one blanks them inside objects, this one stops them
- * being flattened into a string before the logger can see them.
+ * Names extra to the runtime denylist: values `trim()` reduces by SHAPE rather than by key, so
+ * they carry no denied key name of their own, but flattening them into a string still leaks.
  *
  * Deliberately excludes `secret` and `token`: both are ambiguous in this codebase (ciphertext on
  * `Profile`, a token contract nearly everywhere) and would fire constantly on safe lines.
  */
-const SENSITIVE_IDENTIFIERS = [
-	"masterKey",
-	// Kebab spellings are not bare identifiers, but they ARE how exported backup JSON names these
-	// fields — and `${row["master-key"]}` is a template interpolation like any other.
-	"master-key",
-	"masterSecret",
-	"importedKeysDek",
-	"imported-keys-dek",
-	"dekSealed",
-	"imported-keys-dek-sealed",
-	"encryptedSigningKey",
-	"signingKey",
-	"privateKey",
-	"claimSecret",
-	"wrappedSecret",
-	"envelopeMac",
-	"mnemonic",
-	"seedPhrase",
-	"entropy",
-	"password",
-	"passhash",
-	"passphrase",
-	"prf",
-	"rawContent",
-	"privateBalance",
-	"publicBalance",
-	"rpcUrl",
-	"endpointUrl",
-]
+const EXTRA_NAMES = ["masterSecret", "rawContent", "privateBalance", "publicBalance"]
 
-/** Mirrors the runtime redactor's `SECRET_KEY_SUFFIX`, which covers the whole `*SecretKey` family. */
-const SENSITIVE_SUFFIX = /\b[\w$-]*secretkey\b/i
+/**
+ * Every denied name, taken FROM the runtime denylists rather than restated beside them.
+ *
+ * The two lists were previously kept in sync by a comment saying they were, and they were not:
+ * `dek`, `bearer`, `submittedEndpointUrl`, `claim-secret` and the whole proof-material set were
+ * denied at runtime and unguarded here. Importing the sets makes the parity structural — adding a
+ * key to `REDACTED_KEYS` now extends this scanner in the same commit, with nothing to remember.
+ */
+const SENSITIVE_NAMES = [...REDACTED_KEYS, ...URL_KEYS, ...EXTRA_NAMES]
 
 /**
  * Log-call openers.
@@ -143,17 +122,29 @@ function scannableLines(path: string, content: string): string[] {
 }
 
 /**
+ * Lexer state that outlives a line: a template literal and a block comment both span them, and a
+ * scanner that reset at every newline would read a continued template's `)` as real code — which
+ * is precisely the early-window-close this stripping exists to prevent.
+ */
+type Interpolation = { depth: number; outerQuote: string }
+type LexState = { inBlockComment: boolean; quote: string | null; interp: Interpolation[] }
+
+const FRESH_LEX: LexState = { inBlockComment: false, quote: null, interp: [] }
+
+/**
  * The line with string contents and comments blanked, so parens inside them cannot be counted.
  *
  * `${…}` bodies survive: inside a template literal they are CODE, and they are the single most
  * important thing this scanner reads. Everything else between quotes becomes spaces — same length,
- * so column positions still line up.
+ * so column positions still line up. `braceDepth` is a stack, not a counter: a `${…}` body can
+ * contain its own object literals and nested templates, and treating the first `}` as the end of
+ * the interpolation would silently blank the rest of the expression.
  */
-function stripNoise(line: string, startInBlockComment: boolean): { code: string; inBlockComment: boolean } {
+function stripNoise(line: string, state: LexState): { code: string; state: LexState } {
 	let out = ""
-	let inBlock = startInBlockComment
-	let quote: string | null = null
-	let templateDepth = 0
+	let inBlock = state.inBlockComment
+	let quote = state.quote
+	const interp = state.interp.map((f) => ({ ...f }))
 	for (let i = 0; i < line.length; i++) {
 		const ch = line[i]
 		const next = line[i + 1]
@@ -166,28 +157,52 @@ function stripNoise(line: string, startInBlockComment: boolean): { code: string;
 			continue
 		}
 		if (quote) {
-			// Inside a template literal, `${` opens a code region that must be kept verbatim.
+			// Inside a template literal, `${` opens a code region that must be kept verbatim — and
+			// the enclosing quote goes on the stack, because the body is no longer inside it.
 			if (quote === "`" && ch === "$" && next === "{") {
-				templateDepth++
+				interp.push({ depth: 0, outerQuote: quote })
+				quote = null
 				out += "${"
 				i++
 				continue
 			}
-			if (templateDepth > 0) {
-				if (ch === "}") templateDepth--
-				out += ch
-				continue
-			}
 			if (ch === "\\") {
-				out += "  "
+				// A nested string inside an interpolation is kept, so bracket keys stay readable;
+				// a plain string's contents are blanked.
+				out += interp.length > 0 ? line.slice(i, i + 2) : "  "
 				i++
 				continue
 			}
-			if (ch === quote) quote = null
-			out += ch === quote ? ch : " "
+			if (ch === quote) {
+				quote = null
+				out += ch
+				continue
+			}
+			out += interp.length > 0 ? ch : " "
 			continue
 		}
-		if (ch === "/" && next === "/") return { code: out, inBlockComment: false }
+		if (interp.length > 0) {
+			const frame = interp[interp.length - 1]
+			if (ch === '"' || ch === "'" || ch === "`") {
+				quote = ch
+				out += ch
+				continue
+			}
+			if (ch === "{") frame.depth++
+			else if (ch === "}") {
+				if (frame.depth === 0) {
+					// Closes the interpolation: back inside the template literal it came from.
+					interp.pop()
+					quote = frame.outerQuote
+				} else frame.depth--
+			}
+			out += ch
+			continue
+		}
+		if (ch === "/" && next === "/") {
+			out += " ".repeat(line.length - i)
+			break
+		}
 		if (ch === "/" && next === "*") {
 			inBlock = true
 			out += "  "
@@ -201,7 +216,7 @@ function stripNoise(line: string, startInBlockComment: boolean): { code: string;
 		}
 		out += ch
 	}
-	return { code: out, inBlockComment: inBlock }
+	return { code: out, state: { inBlockComment: inBlock, quote, interp } }
 }
 
 /**
@@ -233,25 +248,6 @@ function callWindow(code: string[], start: number): number {
 	return Math.min(start + MAX_CALL_WINDOW_LINES - 1, code.length - 1)
 }
 
-/** Bodies of every `${…}` in the line — the code regions of a template literal. */
-function interpolations(code: string): string[] {
-	const out: string[] = []
-	const re = /\$\{/g
-	let m = re.exec(code)
-	while (m) {
-		let depth = 1
-		let i = m.index + 2
-		for (; i < code.length && depth > 0; i++) {
-			if (code[i] === "{") depth++
-			else if (code[i] === "}") depth--
-		}
-		out.push(code.slice(m.index + 2, depth === 0 ? i - 1 : code.length))
-		re.lastIndex = i
-		m = re.exec(code)
-	}
-	return out
-}
-
 /**
  * Blank string literals inside an interpolation body, EXCEPT a bracket-access key.
  *
@@ -266,32 +262,68 @@ function blankComparisonLiterals(body: string): string {
 	})
 }
 
-function namesSensitive(text: string): string | null {
-	const code = blankComparisonLiterals(text)
-	for (const id of SENSITIVE_IDENTIFIERS) {
-		if (new RegExp(`\\b${id}\\b`).test(code)) return id
+/** Every occurrence of a denied name in `code`, as `{ name, index }`. */
+function occurrences(code: string): Array<{ name: string; index: number }> {
+	const out: Array<{ name: string; index: number }> = []
+	for (const id of SENSITIVE_NAMES) {
+		const re = new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g")
+		let m = re.exec(code)
+		while (m) {
+			out.push({ name: id, index: m.index })
+			m = re.exec(code)
+		}
 	}
-	const suffix = SENSITIVE_SUFFIX.exec(code)
-	return suffix ? suffix[0] : null
+	const suffix = new RegExp(`\\b[\\w$-]*${SECRET_KEY_SUFFIX.source.replace(/\$$/, "")}\\b`, "gi")
+	let m = suffix.exec(code)
+	while (m) {
+		out.push({ name: m[0], index: m.index })
+		m = suffix.exec(code)
+	}
+	return out
 }
 
 /**
- * The three ways a value reaches a log as an unredactable string, checked against `code` (already
- * noise-stripped, so a quoted `"password"` is gone and cannot false-positive).
+ * The ONE redactable position: the name is an object key, so `trim()` blanks it by name.
  *
- * The object forms — `{ password }`, `{ password: p }` — are deliberately NOT hazards: that is the
- * shape `trim()` can redact, and the shape this rule exists to push people toward.
+ * `{ password }` and `{ password: p }` are safe. Everything else that reaches a log call is not —
+ * `{ value: password }` and `[password]` put the primitive where `trim()` walks past it, and a
+ * member access (`network.rpcUrl`), a concatenation, a bare argument and an interpolation all
+ * flatten it outright. So rather than enumerating hazard shapes — which is how the first two
+ * versions of this scanner ended up porous — the check inverts: any occurrence that is not a key
+ * is a hazard.
+ */
+function isObjectKey(code: string, index: number, name: string): boolean {
+	const before = code.slice(0, index).replace(/\s+$/, "")
+	const after = code.slice(index + name.length).replace(/^\s+/, "")
+	// `${password}` wears the same braces as `{ password }` and means the opposite thing.
+	const opensObject = (before.endsWith("{") && !before.endsWith("${")) || before.endsWith(",")
+	const closesProperty = after.startsWith(":") || after.startsWith("}") || after.startsWith(",")
+	return opensObject && closesProperty
+}
+
+/**
+ * An ARITY read of a denied value — `authWitnesses.length`, `notes.size`.
+ *
+ * This is the idiom the logging policy actively recommends in place of the payload, so flagging it
+ * would push people back toward logging the thing itself. The measurement is not the value.
+ */
+const ARITY_READ = /^\.(?:length|size|byteLength)\b/
+
+function isArityRead(code: string, index: number, name: string): boolean {
+	return ARITY_READ.test(code.slice(index + name.length))
+}
+
+/**
+ * The denied name this log call flattens, or null.
+ *
+ * `code` is already noise-stripped, so a quoted `"password"` outside an interpolation is gone;
+ * inside one, `blankComparisonLiterals` removes comparison literals while keeping bracket-access
+ * keys, so `${profile.type === "password"}` is quiet and `${row["master-key"]}` is not.
  */
 function hazards(code: string): string | null {
-	for (const body of interpolations(code)) {
-		const hit = namesSensitive(body)
-		if (hit) return hit
-	}
-	for (const id of [...SENSITIVE_IDENTIFIERS, "[\\w$-]*[sS]ecretKey"]) {
-		// Concatenated into a message.
-		if (new RegExp(`(?:\\+\\s*\\b${id}\\b|\\b${id}\\b\\s*\\+)`).test(code)) return id
-		// Handed over as a bare positional argument — a string primitive passes `trim()` intact.
-		if (new RegExp(`[(,]\\s*\\b${id}\\b\\s*[,)]`).test(code)) return id
+	const cleaned = blankComparisonLiterals(code)
+	for (const { name, index } of occurrences(cleaned)) {
+		if (!isObjectKey(cleaned, index, name) && !isArityRead(cleaned, index, name)) return name
 	}
 	return null
 }
@@ -303,10 +335,10 @@ function findLoggedSecrets(files: Array<{ path: string; content: string }>): str
 		if (ALLOWLIST.some((re) => re.test(path))) continue
 		const raw = scannableLines(path, content)
 		const code: string[] = []
-		let inBlock = false
+		let state = FRESH_LEX
 		for (const line of raw) {
-			const stripped = stripNoise(line, inBlock)
-			inBlock = stripped.inBlockComment
+			const stripped = stripNoise(line, state)
+			state = stripped.state
 			code.push(stripped.code)
 		}
 		const reported = new Set<string>()
@@ -387,6 +419,80 @@ describe("log-payload ban (static)", () => {
 			{ path: "apps/extension/src/wallet/services/foo/service.ts", content: "this.logWarn(`k=${deployerSecretKey}`)" },
 		])
 		expect(offenders).toHaveLength(1)
+	})
+
+	test("catches a member expression handed over as a positional argument", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-bridge/src/x.ts", content: 'logger.log("sdk", LogLevel.Warn, network.rpcUrl)' },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("catches a positional argument on its own continuation line", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: ["this.logWarn(", '\t"failed",', "\tpassword,", ")"].join("\n") },
+		])
+		expect(offenders).toHaveLength(1)
+		expect(offenders[0]).toContain("x.ts:3")
+	})
+
+	test("catches concatenation of a member expression", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: 'console.error("key=" + profile.masterKey)' },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("an object whose VALUE is the secret is NOT safe — trim() redacts by key", () => {
+		// The safe shape is `{ password }`; `{ value: password }` puts the primitive where the
+		// walker reads a benign key name and passes the string straight through.
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: "this.logWarn('failed', { value: password })" },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("an array element is not safe either", () => {
+		const offenders = findLoggedSecrets([{ path: "packages/wallet-core/src/x.ts", content: "this.logWarn('failed', [password])" }])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("an ARITY read is allowed — it is the idiom the policy asks for", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: "this.logDebug(`authwits added: ${txRequest.authWitnesses.length}`)" },
+		])
+		expect(offenders).toEqual([])
+	})
+
+	test("indexing the same value is not an arity read", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: "this.logDebug(`first: ${txRequest.authWitnesses[0]}`)" },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a nested object literal inside an interpolation does not end it early", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: "this.logWarn(`${format({ ok: true }) + masterKey}`)" },
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("a template literal spanning lines keeps its string state across them", () => {
+		// Quote state that reset per line would read the `)` below as real code and close the
+		// window before reaching the payload.
+		const offenders = findLoggedSecrets([
+			{ path: "packages/wallet-core/src/x.ts", content: ["this.logWarn(`multi ) line", "\tcontinues ${masterKey}`)"].join("\n") },
+		])
+		expect(offenders).toHaveLength(1)
+		expect(offenders[0]).toContain("x.ts:2")
+	})
+
+	test("the denylist is sourced from the runtime redactor, not restated beside it", () => {
+		for (const key of REDACTED_KEYS) expect(SENSITIVE_NAMES).toContain(key)
+		for (const key of URL_KEYS) expect(SENSITIVE_NAMES).toContain(key)
+		// The names the runtime reduces by shape rather than by key still have to be here.
+		expect(SENSITIVE_NAMES).toContain("privateBalance")
 	})
 
 	test("catches an interpolation on a CONTINUATION line of a multi-line call", () => {
