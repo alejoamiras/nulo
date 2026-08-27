@@ -211,8 +211,9 @@ describe("LoggerStore", () => {
 			const store = new LoggerStore(mockConfig(true, true))
 			store.log("a", LogLevel.Error, "msg")
 
-			store.clear()
-			await new Promise((r) => setTimeout(r, 0))
+			// Awaiting the returned promise is the point: `clearLogs()` must not resolve before the
+			// persisted copy is gone. Sleeping instead would pass even if clear() returned nothing.
+			await store.clear()
 
 			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
 		})
@@ -337,27 +338,38 @@ describe("LoggerStore", () => {
 			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
 		})
 
-		test("MULTIPLE queued writes cannot outlive a purge", async () => {
-			// A single in-flight slot was not enough: the timer clears when a flush STARTS, so a
-			// later log could fire a second flush while the first was still pending, and a purge
-			// awaiting only the newest promise got overtaken by the older write. The serialized
-			// queue also means writes never overlap — each starts only after the last one finishes.
+		test("a write queued behind a hung one still cannot land after a purge", async () => {
+			// Written to FAIL against the previous single-slot implementation: there, flush B's
+			// callback called set() immediately while A was still pending, so the mid-test
+			// "still only one set" assertion breaks and a purge awaiting only B could be overtaken
+			// by A. Each step below pins one link of the ordering.
 			const session = mockSessionStorage()
-			session.set.mockImplementation(() => new Promise<void>((r) => setTimeout(r, 10)))
+			const resolvers: Array<() => void> = []
+			session.set.mockImplementation(() => new Promise<void>((r) => resolvers.push(r)))
 
 			const config = mockConfig(false, true)
 			const store = new LoggerStore(config)
 
 			store.log("a", LogLevel.Error, "first")
-			await vi.advanceTimersByTimeAsync(2500) // flush A fires and completes
+			await vi.advanceTimersByTimeAsync(2500) // flush A fires; its set() hangs
+			expect(session.set).toHaveBeenCalledTimes(1)
+
 			store.log("a", LogLevel.Error, "second")
-			await vi.advanceTimersByTimeAsync(2500) // flush B fires and completes
-			expect(session.set).toHaveBeenCalledTimes(2)
+			await vi.advanceTimersByTimeAsync(2500) // B's timer fires — it must QUEUE, not start
+			expect(session.set).toHaveBeenCalledTimes(1)
 
 			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.advanceTimersByTimeAsync(0)
+			expect(session.remove).not.toHaveBeenCalled()
+
+			resolvers[0]() // A completes → B may now start
+			await vi.advanceTimersByTimeAsync(0)
+			expect(session.set).toHaveBeenCalledTimes(2)
+			expect(session.remove).not.toHaveBeenCalled() // …and remove is still behind B
+
+			resolvers[1]() // B completes → the removal finally runs
 			await vi.runAllTimersAsync()
 
-			// The removal must be the LAST storage operation — nothing may land on top of it.
 			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
 			const removeOrder = session.remove.mock.invocationCallOrder[0]
 			const lastSetOrder = Math.max(...session.set.mock.invocationCallOrder)
