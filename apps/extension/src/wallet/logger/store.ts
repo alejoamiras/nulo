@@ -9,8 +9,15 @@ export class LoggerStore implements ILoggerStore {
 	private logs: CircularBufferIterable<Log>
 	private nextId = 1
 	private flushTimer?: ReturnType<typeof setTimeout>
-	/** The write a fired flush is currently performing; a purge must be ordered after it. */
-	private flushInFlight?: Promise<void>
+	/**
+	 * FIFO chain of every session-storage operation this store performs.
+	 *
+	 * A single "in-flight write" slot is not enough: the timer is cleared the moment a flush
+	 * STARTS, so a later log can schedule and fire a second flush while the first is still
+	 * pending, and a purge awaiting only the latest promise can still be overtaken by the earlier
+	 * write. Chaining every `set` and `remove` through one queue makes the ordering total.
+	 */
+	private storageOps: Promise<void> = Promise.resolve()
 	private persistEnabled: boolean
 
 	private readonly config: IConfig
@@ -36,9 +43,11 @@ export class LoggerStore implements ILoggerStore {
 	 * intact, so the next worker restart rehydrated everything the user had just cleared — the
 	 * "Clear logs" button appeared to work and didn't.
 	 */
-	public clear(): void {
+	public clear(): Promise<void> {
 		this.logs.clear()
-		void this.purgePersisted()
+		// Returned, not fired-and-forgotten: `clearLogs()` must not acknowledge success while the
+		// persisted copy is still on disk — a worker restart in that window resurrects it.
+		return this.purgePersisted()
 	}
 
 	public log(source: string, level: LogLevel, ...data: unknown[]): void {
@@ -114,18 +123,26 @@ export class LoggerStore implements ILoggerStore {
 		if (this.flushTimer) return
 		this.flushTimer = setTimeout(() => {
 			this.flushTimer = undefined
-			// Tracked, not fire-and-forget: cancelling the TIMER cannot stop a write that has
-			// already begun, and an unawaited `set()` landing after a purge would recreate the very
-			// key the purge just removed.
-			this.flushInFlight = (async () => {
-				try {
-					const items = this.logs.items().slice(-2000)
-					await chrome.storage.session.set({ "nulo:logs": items })
-				} catch {
-					// Session storage may not be available
-				}
-			})()
+			// Queued, not fire-and-forget: cancelling the TIMER cannot stop a write that has already
+			// begun, and an unqueued `set()` landing after a purge would recreate the very key the
+			// purge just removed.
+			void this.enqueueStorageOp(async () => {
+				const items = this.logs.items().slice(-2000)
+				await chrome.storage.session.set({ "nulo:logs": items })
+			})
 		}, 2000)
+	}
+
+	/**
+	 * Append a session-storage operation to the serialized chain and return its completion.
+	 *
+	 * Each link swallows its own failure — session storage is unavailable in tests and can throw at
+	 * runtime — so one bad operation never wedges the queue for the rest of the worker's life.
+	 */
+	private enqueueStorageOp(op: () => Promise<void>): Promise<void> {
+		const next = this.storageOps.then(op, op).catch(() => {})
+		this.storageOps = next
+		return next
 	}
 
 	/**
@@ -146,21 +163,17 @@ export class LoggerStore implements ILoggerStore {
 	}
 
 	/**
-	 * Drop the persisted copy. Cancels a pending flush and — crucially — waits for one that has
-	 * already started, so the removal is ordered AFTER any write that could otherwise land on top
-	 * of it and resurrect the key.
+	 * Drop the persisted copy. Cancels a pending flush and queues the removal behind every write
+	 * already in flight, so no `set()` can land on top of it and resurrect the key.
 	 */
-	private async purgePersisted(): Promise<void> {
+	private purgePersisted(): Promise<void> {
 		if (this.flushTimer) {
 			clearTimeout(this.flushTimer)
 			this.flushTimer = undefined
 		}
-		await this.flushInFlight
-		try {
+		return this.enqueueStorageOp(async () => {
 			await chrome.storage.session.remove("nulo:logs")
-		} catch {
-			// Session storage may not be available
-		}
+		})
 	}
 
 	private readonly onConfigUpdate = (prop: ConfigProp) => {

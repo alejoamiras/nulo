@@ -270,22 +270,22 @@ describe("LoggerStore", () => {
 		beforeEach(() => vi.useFakeTimers())
 		afterEach(() => vi.useRealTimers())
 
-		test("does NOT persist when developer mode is off", () => {
+		test("does NOT persist when developer mode is off", async () => {
 			const session = mockSessionStorage()
 			const store = new LoggerStore(mockConfig(false, false))
 
 			store.log("a", LogLevel.Error, "sensitive")
-			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersByTimeAsync(5000)
 
 			expect(session.set).not.toHaveBeenCalled()
 		})
 
-		test("persists when developer mode is on", () => {
+		test("persists when developer mode is on", async () => {
 			const session = mockSessionStorage()
 			const store = new LoggerStore(mockConfig(false, true))
 
 			store.log("a", LogLevel.Error, "diagnostic")
-			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersByTimeAsync(5000)
 
 			expect(session.set).toHaveBeenCalledTimes(1)
 			const written = session.set.mock.calls[0][0]["nulo:logs"] as Array<{ data: unknown[] }>
@@ -298,7 +298,7 @@ describe("LoggerStore", () => {
 			const store = new LoggerStore(config)
 
 			store.log("a", LogLevel.Error, "captured while on")
-			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersByTimeAsync(5000)
 			expect(session.set).toHaveBeenCalledTimes(1)
 
 			config.onUpdate.invoke({ key: "developerMode", value: false })
@@ -308,7 +308,7 @@ describe("LoggerStore", () => {
 
 			// And it must stop writing from here on.
 			store.log("a", LogLevel.Error, "after opt-out")
-			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersByTimeAsync(5000)
 			expect(session.set).toHaveBeenCalledTimes(1)
 		})
 
@@ -323,7 +323,7 @@ describe("LoggerStore", () => {
 			const store = new LoggerStore(config)
 			store.log("a", LogLevel.Error, "queued")
 
-			vi.advanceTimersByTime(2500) // the flush FIRES and its set() is now pending
+			await vi.advanceTimersByTimeAsync(2500) // the flush FIRES and its set() is now pending
 			expect(session.set).toHaveBeenCalledTimes(1)
 			expect(session.remove).not.toHaveBeenCalled()
 
@@ -335,6 +335,33 @@ describe("LoggerStore", () => {
 			resolveSet()
 			await vi.runAllTimersAsync()
 			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+		})
+
+		test("MULTIPLE queued writes cannot outlive a purge", async () => {
+			// A single in-flight slot was not enough: the timer clears when a flush STARTS, so a
+			// later log could fire a second flush while the first was still pending, and a purge
+			// awaiting only the newest promise got overtaken by the older write. The serialized
+			// queue also means writes never overlap — each starts only after the last one finishes.
+			const session = mockSessionStorage()
+			session.set.mockImplementation(() => new Promise<void>((r) => setTimeout(r, 10)))
+
+			const config = mockConfig(false, true)
+			const store = new LoggerStore(config)
+
+			store.log("a", LogLevel.Error, "first")
+			await vi.advanceTimersByTimeAsync(2500) // flush A fires and completes
+			store.log("a", LogLevel.Error, "second")
+			await vi.advanceTimersByTimeAsync(2500) // flush B fires and completes
+			expect(session.set).toHaveBeenCalledTimes(2)
+
+			config.onUpdate.invoke({ key: "developerMode", value: false })
+			await vi.runAllTimersAsync()
+
+			// The removal must be the LAST storage operation — nothing may land on top of it.
+			expect(session.remove).toHaveBeenCalledWith("nulo:logs")
+			const removeOrder = session.remove.mock.invocationCallOrder[0]
+			const lastSetOrder = Math.max(...session.set.mock.invocationCallOrder)
+			expect(removeOrder).toBeGreaterThan(lastSetOrder)
 		})
 
 		test("a pending flush cannot recreate the file after opt-out", async () => {
@@ -390,7 +417,7 @@ describe("LoggerStore", () => {
 
 			// …and persistence resumes.
 			store.log("a", LogLevel.Error, "new")
-			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersByTimeAsync(5000)
 			expect(session.set).toHaveBeenCalled()
 		})
 
@@ -416,7 +443,7 @@ describe("LoggerStore", () => {
 			await store.applyRetentionPolicy()
 
 			store.log("a", LogLevel.Error, "sensitive")
-			vi.advanceTimersByTime(5000)
+			await vi.advanceTimersByTimeAsync(5000)
 
 			expect(session.set).not.toHaveBeenCalled()
 		})
