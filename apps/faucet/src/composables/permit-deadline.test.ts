@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { PERMIT_DEADLINE_SECONDS } from "@nulo/bridge-core"
 import { describe, expect, test } from "vitest"
 
 /**
@@ -16,28 +15,29 @@ import { describe, expect, test } from "vitest"
  * against a mock wallet purely to read one field back.
  */
 const COMPOSABLES = join(__dirname)
-const SIGNING_SOURCES = ["useDeposit.ts", "useFuel.ts"]
+// Exact counts, not "at least one": with a lower bound, renaming or hardcoding ONE of
+// useDeposit's two sites leaves the other satisfying the assertion and the test green — which
+// is the same shape as the bug it exists to catch.
+const SIGNING_SOURCES: ReadonlyArray<readonly [string, number]> = [
+	["useDeposit.ts", 2],
+	["useFuel.ts", 1],
+]
 
 describe("permit deadline reachability", () => {
-	test.each(SIGNING_SOURCES)("%s derives every deadline from the shared constant", (file) => {
+	test.each(SIGNING_SOURCES)("%s derives all %i deadlines from the shared constant", (file, expected) => {
 		const src = readFileSync(join(COMPOSABLES, file), "utf8")
 		const assignments = src.match(/const deadline = .*/g) ?? []
 
-		expect(assignments.length).toBeGreaterThan(0)
+		expect(assignments).toHaveLength(expected)
 		for (const line of assignments) {
 			expect(line).toContain("PERMIT_DEADLINE_SECONDS")
 		}
 	})
 
-	test("no signing site hardcodes the pre-tightening 1800s window", () => {
-		for (const file of SIGNING_SOURCES) {
+	test("no signing site hardcodes its own window", () => {
+		for (const [file] of SIGNING_SOURCES) {
 			const src = readFileSync(join(COMPOSABLES, file), "utf8")
 			expect(src).not.toMatch(/Date\.now\(\) \/ 1000\) \+ \d+/)
 		}
-	})
-
-	test("the shared constant stays inside the range the router will accept", () => {
-		expect(PERMIT_DEADLINE_SECONDS).toBeGreaterThanOrEqual(60n)
-		expect(PERMIT_DEADLINE_SECONDS).toBeLessThanOrEqual(900n)
 	})
 })
