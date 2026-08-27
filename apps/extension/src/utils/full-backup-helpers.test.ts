@@ -183,8 +183,8 @@ describe("collectRestoreErrors", () => {
 	it("filters generic services to only failed entries", () => {
 		const result = collectRestoreErrors("network", [{ id: "a", restoreError: "boom" }, { id: "b" }, { id: "c", restoreError: "kaput" }])
 		expect(result).toEqual([
-			{ id: "a", restoreError: "boom" },
-			{ id: "c", restoreError: "kaput" },
+			{ row: 0, id: "a", restoreError: "boom" },
+			{ row: 1, id: "c", restoreError: "kaput" },
 		])
 	})
 
@@ -211,9 +211,11 @@ describe("collectRestoreErrors", () => {
 				senders: [{ address: "ok" }],
 			},
 		])
+		// Children are identified by POSITION: the addresses are registered contracts and
+		// tagging senders, both of which are privacy signals in their own right.
 		expect(result).toEqual([
-			{ networkId: "net1", contracts: [{ address: "x", restoreError: "fail" }], senders: [] },
-			{ networkId: "net2", contracts: [], senders: [{ address: "t", restoreError: "boom" }] },
+			{ networkId: "net1", contracts: [{ child: 0, restoreError: "fail" }], senders: [] },
+			{ networkId: "net2", contracts: [], senders: [{ child: 0, restoreError: "boom" }] },
 		])
 	})
 
@@ -226,7 +228,7 @@ describe("collectRestoreErrors", () => {
 			])
 
 			expect(JSON.stringify(result)).not.toContain("SEALED-BLOB")
-			expect(result).toEqual([{ id: "k1", profileId: "p1", chainId: 1, restoreError: "boom" }])
+			expect(result).toEqual([{ row: 0, id: "k1", profileId: "p1", chainId: 1, restoreError: "boom" }])
 		})
 
 		it("drops an endpoint URL, which routinely carries a provider API key", () => {
@@ -235,7 +237,7 @@ describe("collectRestoreErrors", () => {
 			])
 
 			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
-			expect(result).toEqual([{ id: "n1", restoreError: "boom" }])
+			expect(result).toEqual([{ row: 0, id: "n1", restoreError: "boom" }])
 		})
 
 		it("drops contact PII", () => {
@@ -263,7 +265,41 @@ describe("collectRestoreErrors", () => {
 			])
 
 			expect(JSON.stringify(result)).not.toContain("BLOB")
-			expect(result).toEqual([{ networkId: "net1", contracts: [{ address: "0xc", restoreError: "fail" }], senders: [] }])
+			expect(result).toEqual([{ networkId: "net1", contracts: [{ child: 0, restoreError: "fail" }], senders: [] }])
+		})
+
+		it("constrains allowlisted fields by TYPE, not just by name", () => {
+			// Allowlisting names alone is not enough: a crafted backup can ship an allowlisted key
+			// whose VALUE is an object carrying whatever it likes, and a name-only filter copies it
+			// through intact.
+			const result = collectRestoreErrors("token", [
+				{ id: "t1", chainId: { rpcUrl: "https://mainnet.example.com/v2/SECRET-KEY" }, restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(JSON.stringify(result)).not.toContain("rpcUrl")
+			expect(result).toEqual([{ row: 0, id: "t1", chainId: "[object]", restoreError: "boom" }])
+		})
+
+		it("bounds an allowlisted id that is really a payload wearing an id's name", () => {
+			const result = collectRestoreErrors("token", [{ id: "X".repeat(5000), restoreError: "boom" }]) as Array<Record<string, unknown>>
+
+			expect(result[0].id).toBe("[string:5000]")
+		})
+
+		it("scrubs and bounds restoreError — a fetch failure interpolates the whole endpoint", () => {
+			const result = collectRestoreErrors("network", [
+				{ id: "n1", restoreError: "fetch failed: https://rpc.example.com/v2/SECRET-KEY?apiKey=abc" },
+			]) as Array<Record<string, unknown>>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(result[0].restoreError).toContain("https://rpc.example.com")
+		})
+
+		it("caps a very long restoreError", () => {
+			const result = collectRestoreErrors("network", [{ id: "n1", restoreError: "x".repeat(9000) }]) as Array<Record<string, unknown>>
+
+			expect((result[0].restoreError as string).length).toBeLessThanOrEqual(200)
 		})
 
 		it("caps a hostile backup's error count instead of recording all of it", () => {

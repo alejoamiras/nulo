@@ -68,6 +68,10 @@ export type RestoreStage =
 /** B-24: how many times to retry the compensating profile delete on rollback. */
 const ROLLBACK_MAX_ATTEMPTS = 3
 
+/** Bound on dropped-balance records. This path never reaches the collector, so it carries no cap
+ *  of its own — and a hostile backup can ship tens of thousands of un-relinkable rows. */
+const MAX_DROPPED_BALANCES_RECORDED = 200
+
 // Ceiling for the crash-rollback liveness gate. Structural, never the success
 // mechanism: the SW heartbeat re-writes liveness every 10s and a booting
 // worker writes immediately after full wiring, so a healthy respawn resolves
@@ -290,28 +294,35 @@ export function relinkRestoredTokenBalances(
 		if (!newTokens[i].restoreError) oldIdToNew.set(old.id, newTokens[i].id)
 	}
 	const droppedBalances: unknown[] = []
-	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap((tb: Record<string, unknown>) => {
-		const newId = oldIdToNew.get(tb.token)
-		// token/account chain-equality (final pass): the balance's account
-		// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
-		// chain-distinct, so this rejects a balance pairing an imported
-		// account with a token on a chain that account wasn't imported on.
-		const tokenChain = oldIdToChain.get(tb.token)
-		const chainOk =
-			tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
-		if (newId === undefined || !chainOk) {
-			// This path bypasses `collectRestoreErrors` entirely (these rows are dropped BEFORE any
-			// service sees them), so it has to do its own allowlisting — `tb` is raw, unvalidated
-			// backup content and carries `publicBalance`/`privateBalance`.
-			droppedBalances.push({
-				id: tb.id,
-				token: tb.token,
-				restoreError: "Token balance could not be re-linked to a restored token",
-			})
-			return []
-		}
-		return [{ ...tb, token: newId }]
-	})
+	data["token-balance"] = (data["token-balance"] as Array<Record<string, unknown>>).flatMap(
+		(tb: Record<string, unknown>, index: number) => {
+			const newId = oldIdToNew.get(tb.token)
+			// token/account chain-equality (final pass): the balance's account
+			// must be an account imported ON THE TOKEN'S CHAIN. Addresses are
+			// chain-distinct, so this rejects a balance pairing an imported
+			// account with a token on a chain that account wasn't imported on.
+			const tokenChain = oldIdToChain.get(tb.token)
+			const chainOk =
+				tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
+			if (newId === undefined || !chainOk) {
+				// This path bypasses `collectRestoreErrors` entirely — these rows are dropped BEFORE any
+				// service sees them — so it must do its own allowlisting AND its own bounding.
+				//
+				// `tb` is raw, unvalidated backup content: it carries `publicBalance`/`privateBalance`,
+				// and migration validates only `tb.id`, so `token` can be an arbitrary nested object
+				// holding a URL or a secret. Only the POSITION is recorded, which is all that
+				// distinguishes one dropped row from another anyway.
+				if (droppedBalances.length < MAX_DROPPED_BALANCES_RECORDED) {
+					droppedBalances.push({
+						row: index,
+						restoreError: "Token balance could not be re-linked to a restored token",
+					})
+				}
+				return []
+			}
+			return [{ ...tb, token: newId }]
+		},
+	)
 	return droppedBalances
 }
 

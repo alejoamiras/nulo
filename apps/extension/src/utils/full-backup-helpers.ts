@@ -5,6 +5,7 @@
 
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { fromBase64 } from "@/wallet/utils"
+import { scrubUrls } from "@/utils/scrub-urls"
 
 /**
  * One shared ceiling for backup files, enforced on BOTH sides: the import
@@ -168,23 +169,65 @@ const RESTORE_ERROR_ID_KEYS = ["id", "networkId", "chainId", "profileId"] as con
  */
 const MAX_RECORDED_RESTORE_ERRORS = 200
 
-/** Keep the identifying fields and the error; drop the row's payload. */
-function projectRestoreErrorRow(row: Record<string, unknown>): Record<string, unknown> {
-	const out: Record<string, unknown> = {}
+/** Longest allowlisted identifier kept verbatim. Real ids are far shorter; anything longer is a
+ *  payload wearing an id's name. */
+const MAX_ID_CHARS = 64
+
+/** Longest `restoreError` kept. Matches the account-state normalizer's own cap. */
+const MAX_RESTORE_ERROR_CHARS = 200
+
+/**
+ * An allowlisted field, constrained by TYPE as well as name.
+ *
+ * Allowlisting names alone is not enough against a crafted backup: nothing stops it from shipping
+ * `chainId: { rpcUrl: "https://…/SECRET" }`, and a name-only filter copies that object through
+ * intact. Only bounded scalars survive; anything else is reduced to its type.
+ */
+function boundedScalar(value: unknown): unknown {
+	if (typeof value === "number") return Number.isFinite(value) ? value : "[number]"
+	if (typeof value === "boolean") return value
+	if (typeof value !== "string") return `[${typeof value}]`
+	return value.length <= MAX_ID_CHARS ? value : `[string:${value.length}]`
+}
+
+/**
+ * The failure text, scrubbed and bounded.
+ *
+ * `restoreError` is a runtime message, not backup content — but a fetch failure interpolates the
+ * whole credential-bearing endpoint URL into it, so it is neither trusted nor unbounded.
+ */
+function describeRestoreError(value: unknown): unknown {
+	if (typeof value !== "string") return `[${typeof value}]`
+	const scrubbed = scrubUrls(value)
+	return scrubbed.length > MAX_RESTORE_ERROR_CHARS ? `${scrubbed.slice(0, MAX_RESTORE_ERROR_CHARS - 1)}…` : scrubbed
+}
+
+/**
+ * Keep the identifying fields and the error; drop the row's payload.
+ *
+ * The ordinal is what makes this diagnosable at all: accounts and imported keys carry no `id`,
+ * transactions are keyed by `hash` and config by `key`, none of which are kept — so without a
+ * position two failures in the same slice would be indistinguishable.
+ */
+function projectRestoreErrorRow(row: Record<string, unknown>, index: number): Record<string, unknown> {
+	const out: Record<string, unknown> = { row: index }
 	for (const key of RESTORE_ERROR_ID_KEYS) {
-		if (row[key] !== undefined) out[key] = row[key]
+		if (row[key] !== undefined) out[key] = boundedScalar(row[key])
 	}
-	out.restoreError = row.restoreError
+	out.restoreError = describeRestoreError(row.restoreError)
 	return out
 }
 
 /**
- * account-state children keep `address` — unlike the generic branch these are contract and
- * tagging-sender addresses, and which one failed to register is the entire diagnosis. They carry
- * no secret: the `instance`/`artifact` blobs beside them are the bulk, and are dropped.
+ * account-state children are identified by POSITION, not address.
+ *
+ * The addresses here are registered contracts and tagging senders — the service's own code calls
+ * the set of contracts a wallet has registered a privacy signal, and senders are address-book
+ * data behind a capability gate. The ordinal says which child failed without naming it; the
+ * `instance`/`artifact` blobs beside it are dropped as the bulk.
  */
-function projectAccountStateChild(child: Record<string, unknown>): Record<string, unknown> {
-	return { address: child.address, restoreError: child.restoreError }
+function projectAccountStateChild(child: Record<string, unknown>, index: number): Record<string, unknown> {
+	return { child: index, restoreError: describeRestoreError(child.restoreError) }
 }
 
 /** Trim to the cap, replacing the tail with one constant marker rather than silently dropping. */
@@ -222,10 +265,10 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 			// where a throw would strand the import on a false "Import failed".
 			const failedContracts = (Array.isArray(item.contracts) ? item.contracts : [])
 				.filter((c) => c?.restoreError)
-				.map(projectAccountStateChild)
+				.map((child, i) => projectAccountStateChild(child, i))
 			const failedSenders = (Array.isArray(item.senders) ? item.senders : [])
 				.filter((s) => s?.restoreError)
-				.map(projectAccountStateChild)
+				.map((child, i) => projectAccountStateChild(child, i))
 			// ITEM-LEVEL errors (whole-network skips, deadline notes, normalizer
 			// violations) count too — a top-level restoreError with clean child
 			// arrays used to vanish here, letting a skipped registration
@@ -245,7 +288,7 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 	}
 	const filtered = (data as GenericRestoreItem[])
 		.filter((item) => item?.restoreError)
-		.map((item) => projectRestoreErrorRow(item as Record<string, unknown>))
+		.map((item, i) => projectRestoreErrorRow(item as Record<string, unknown>, i))
 	return filtered.length ? capRecords(filtered) : null
 }
 
