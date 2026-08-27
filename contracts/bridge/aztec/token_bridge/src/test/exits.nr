@@ -105,3 +105,68 @@ unconstrained fn exit_to_l1_public_zero_recipient_rejected() {
         ),
     );
 }
+
+/// The private exit carries the same two guards as the public one, reached through the
+/// enqueued public assert rather than inline. Only the public path was covered, so a
+/// regression that dropped either guard from the private entrypoint would have gone unseen.
+/// Funded and authorized before pausing: the private exit's pause gate runs in the ENQUEUED
+/// public assert, so the private phase (note nullification, authwit) must succeed first.
+/// Without the balance the test would fail on the missing note and prove nothing about pause.
+#[test(should_fail_with = "Bridge is paused")]
+unconstrained fn exit_to_l1_private_paused_rejected() {
+    let (mut env, admin, _proxy, token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    utils::fund_private(env, user, 500_000, 4242, bridge);
+
+    add_private_authwit_from_call(env, user, _proxy, Token::at(token).burn_private(user, 1, NONCE));
+    env.call_public(admin, TokenBridge::at(bridge).set_paused(true));
+    env.call_private(
+        user,
+        TokenBridge::at(bridge).exit_to_l1_private(
+            aztec::protocol::address::EthAddress::from_field(0xBEEF),
+            1,
+            aztec::protocol::address::EthAddress::zero(),
+            NONCE,
+        ),
+    );
+}
+
+#[test(should_fail_with = "Recipient cannot be zero")]
+unconstrained fn exit_to_l1_private_zero_recipient_rejected() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let user = env.create_contract_account();
+    env.call_private(
+        user,
+        TokenBridge::at(bridge).exit_to_l1_private(
+            aztec::protocol::address::EthAddress::zero(),
+            1,
+            aztec::protocol::address::EthAddress::zero(),
+            NONCE,
+        ),
+    );
+}
+
+/// Exiting more than the caller holds must fail on the burn rather than emitting an L2→L1
+/// withdraw message for value that was never destroyed — the shape that would let a user
+/// exit twice against one balance.
+#[test(should_fail_with = "attempt to subtract with overflow")]
+unconstrained fn exit_to_l1_public_insufficient_balance_rejected() {
+    let (mut env, _admin, _proxy, token, bridge) = utils::setup();
+    let user = env.create_light_account();
+    let minted: u128 = 100_000;
+    let recipient = aztec::protocol::address::EthAddress::from_field(0xBEEF);
+
+    let leaf = utils::send_mint_to_public_message(env, user, minted, 42, bridge);
+    env.call_public(user, TokenBridge::at(bridge).claim_public(user, minted, 42, leaf));
+
+    add_public_authwit_from_call(
+        env,
+        user,
+        _proxy,
+        Token::at(token).burn_public(user, minted + 1, NONCE),
+    );
+    env.call_public(
+        user,
+        TokenBridge::at(bridge).exit_to_l1_public(recipient, minted + 1, aztec::protocol::address::EthAddress::zero(), NONCE),
+    );
+}

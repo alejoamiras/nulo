@@ -11,7 +11,8 @@ use aztec::{
 };
 use token::Token;
 use token_minter_proxy::TokenMinterProxy;
-use token_portal_content_hash_lib::get_mint_to_public_content_hash;
+use claim_secret_lib::derive_claim_secret;
+use token_portal_content_hash_lib::{get_mint_to_private_content_hash, get_mint_to_public_content_hash};
 
 /// The L1 portal identity the bridge binds at construction; arbitrary but must match the
 /// `sender` of every injected L1→L2 message.
@@ -51,6 +52,25 @@ pub unconstrained fn setup() -> (TestEnvironment, AztecAddress, AztecAddress, Az
     env.call_public(admin, TokenMinterProxy::at(proxy).set_bridge(bridge));
 
     (env, admin, proxy, token, bridge)
+}
+
+/// Funds `recipient` with private notes through the legitimate claim path. Guard tests that
+/// target the PRIVATE proxy/bridge entrypoints need a real private balance first: those calls
+/// nullify notes during private execution, so an unfunded caller fails on the missing note or
+/// authwit long before reaching the guard under test, and the test would pass for the wrong
+/// reason. `recipient` must come from `create_contract_account()` — light accounts lack the
+/// key set needed to spend private notes.
+pub unconstrained fn fund_private(
+    env: TestEnvironment,
+    recipient: AztecAddress,
+    amount: u128,
+    salt: Field,
+    bridge: AztecAddress,
+) {
+    let content = get_mint_to_private_content_hash(amount);
+    let secret_hash = aztec::hash::compute_secret_hash([derive_claim_secret(salt, recipient)]);
+    let leaf = env.send_l1_to_l2_message_from_secret_hash(content, secret_hash, PORTAL, bridge);
+    env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, amount, salt, leaf));
 }
 
 /// Injects an L1→L2 `mint_to_public` message exactly as NuloTokenPortal would commit it, and

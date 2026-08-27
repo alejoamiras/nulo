@@ -78,5 +78,12 @@ fi
 # ── 3. Run the suite ────────────────────────────────────────────────────────────────
 export NARGO_FOREIGN_CALL_TIMEOUT=1200000
 cd "$tb"
+# One TXE server, bounded concurrency. The server's lmdb store opens with maxReaders 2, and
+# nargo defaults to one test thread per core: past roughly two dozen tests the reader limit is
+# exceeded and the native binding aborts the whole process with an uncaught Napi::Error. Every
+# test still in flight then fails with "Failed calling external resolver", which reads like a
+# suite-wide breakage rather than a capacity limit — and any bare `should_fail` test passes
+# vacuously on that connect error. Override with TXE_TEST_THREADS if the server gains headroom.
+TEST_THREADS="${TXE_TEST_THREADS:-4}"
 # Not exec: that would replace this shell and skip the EXIT trap, orphaning the TXE server.
-"$NARGO" test --force --oracle-resolver "http://127.0.0.1:$TXE_PORT" "$@"
+"$NARGO" test --force --test-threads "$TEST_THREADS" --oracle-resolver "http://127.0.0.1:$TXE_PORT" "$@"

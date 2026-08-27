@@ -91,3 +91,18 @@ unconstrained fn claim_private_zero_recipient_rejected() {
     let relayer = env.create_light_account();
     env.call_private(relayer, TokenBridge::at(bridge).claim_private(AztecAddress::zero(), 500_000, 7, 0));
 }
+
+/// One message, one mint. The public path pinned this; the private path shares the same
+/// message-nullifier mechanism but had no replay test, so a nullifier regression would have
+/// been caught on only half the surface — and the private half is the one a relayer drives.
+#[test(should_fail_with = "No non-nullified L1 to L2 message found")]
+unconstrained fn claim_private_double_claim_rejected() {
+    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
+    let recipient = env.create_contract_account();
+    let amount: u128 = 500_000;
+    let salt = 24680;
+
+    let leaf = send_mint_to_private_message(env, recipient, amount, salt, bridge);
+    env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, amount, salt, leaf));
+    env.call_private(recipient, TokenBridge::at(bridge).claim_private(recipient, amount, salt, leaf));
+}
