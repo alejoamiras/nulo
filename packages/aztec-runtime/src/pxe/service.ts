@@ -1,3 +1,4 @@
+import { memoizeAsyncBy } from "./async-memo"
 import type { PackedPrivateEvent, PXE } from "@aztec/pxe/client/bundle"
 import { Fr } from "@aztec/foundation/curves/bn254"
 import { type ContractArtifact, ContractArtifactSchema, EventSelector, FunctionCall } from "@aztec/stdlib/abi"
@@ -6,7 +7,7 @@ import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import {
 	type ContractInstanceWithAddress,
 	ContractInstanceWithAddressSchema,
-	getContractInstanceFromInstantiationParams,
+	getContractClassFromArtifact,
 	type CompleteAddress,
 	type PartialAddress,
 } from "@aztec/stdlib/contract"
@@ -34,10 +35,11 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/offscreen"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { ReadWriteGuard } from "@nulo/wallet-core/utils"
 import type { NetworkInfo } from "./chain-runtime"
-import { ChainRuntimeRegistry, ProductionPxeFactory, type PxeFactory } from "./chain-runtime"
+import { ChainRuntimeRegistry, ProductionPxeFactory, PXE_STORE_KEY_MISSING, type PxeFactory } from "./chain-runtime"
 import { PXE_DATA_DIR_ROOT, chainDataDir, chainDataDirPrefix, chainRegistryKey, chainRegistryKeyPrefix } from "./chain-coordinates"
 import { listChainStoreDirs, removeChainStoreDir, removeProfileStoreDirs } from "./opfs-store"
 import { ArtifactRegistry } from "./artifact-registry"
+import { PxeLifecycleCoordinator } from "./lifecycle-coordinator"
 import { loadProductionKnownArtifacts } from "./known-artifacts"
 import { loadProductionNoteSchemas, type NoteSchema } from "./note-schemas"
 import { type Methods, PXE_SERVICE_NAME } from "./spec"
@@ -128,13 +130,9 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * scoped clear).
 	 */
 	private readonly chainGuards = new Map<string, ReadWriteGuard>()
-	/** Per-chain purge epochs (#281 review): bumped by `clearChainState` so an
-	 *  in-flight read op cannot RESURRECT a just-purged chain — its write-rebind
-	 *  step would otherwise re-create the runtime + a fresh OPFS store dir for a
-	 *  chain whose network row is gone (nothing ever removes that dir again). A
-	 *  read that entered BEFORE the purge refuses to rebind; a new op after the
-	 *  purge sees the new epoch at entry and may legitimately re-create. */
-	private readonly chainPurgeEpochs = new Map<string, number>()
+	/** Per-chain purge-epoch fence (Q-01): owns the epoch counter + the
+	 *  capture/assert the op paths share. See {@link PxeLifecycleCoordinator}. */
+	private readonly lifecycle = new PxeLifecycleCoordinator()
 	private readonly profileBarriers = new Map<string, ReadWriteGuard>()
 	private readonly guardLogger: ILogger
 	private readonly registry: ChainRuntimeRegistry
@@ -170,6 +168,14 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 
 	private chainKey(profileId: string, chainId: number): string {
 		return chainRegistryKey({ profileId, chainId })
+	}
+
+	/** Monotonically advance a chain's purge epoch. Any operation that captured
+	 * the prior value fails its post-await equality check in withPxeWrite/Read,
+	 * so it can't recreate the runtime/store for a chain that is being (or was)
+	 * purged. Called at both ends of clearChainState's destructive section. */
+	private bumpChainPurgeEpoch(profileId: string, chainId: number): void {
+		this.lifecycle.bump(this.chainKey(profileId, chainId))
 	}
 
 	private getChainGuard(profileId: string, chainId: number): ReadWriteGuard {
@@ -413,16 +419,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	}
 
 	public async proveTx(network: NetworkInfo, txRequest: TxExecutionRequest, scopes: AztecAddress[]): Promise<TxProvingResult> {
-		return this.withPxeWrite("proveTx", network, async (pxe, node) => {
-			// DEBUG: log PXE sync state before proving
-			try {
-				const header = await pxe.getSyncedBlockHeader()
-				const nodeTip = await node.getBlockNumber()
-				this.logDebug(`[SYNC-DEBUG] proveTx: PXE anchor block=${header.getBlockNumber()}, node tip=${nodeTip}`)
-			} catch (e) {
-				this.logDebug(`[SYNC-DEBUG] proveTx: failed to read sync state: ${e}`)
-			}
-
+		return this.withPxeWrite("proveTx", network, async (pxe) => {
 			// 5.0 tags private-log messages with the sender; PXE throws "Sender for tags is not set"
 			// during private execution (before proving) when it is absent — so any private-note-emitting
 			// tx (e.g. public→private shield) fails in witness-gen. The SDK's BaseWallet derives this from
@@ -448,16 +445,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		opts: SimulateTxOpts,
 		stubAccountAddresses?: string[],
 	): Promise<TxSimulationResult> {
-		return this.withPxeWrite("simulateTx", network, async (pxe, node) => {
-			// DEBUG: log PXE sync state before simulation
-			try {
-				const header = await pxe.getSyncedBlockHeader()
-				const nodeTip = await node.getBlockNumber()
-				this.logDebug(`[SYNC-DEBUG] simulateTx: PXE anchor block=${header.getBlockNumber()}, node tip=${nodeTip}`)
-			} catch (e) {
-				this.logDebug(`[SYNC-DEBUG] simulateTx: failed to read sync state: ${e}`)
-			}
-
+		return this.withPxeWrite("simulateTx", network, async (pxe) => {
 			let overrides = await SimulationOverrides.schema.optional().parseAsync(opts.overrides)
 
 			// Source the stub artifact from `@aztec/accounts/stub/schnorr`
@@ -469,16 +457,31 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// `loadContractArtifact(SimulatedSchnorrAccountJson)`). ECDSA
 			// support comes for free when Nulo grows it (sibling import:
 			// `@aztec/accounts/ecdsa/stub`).
+			//
+			// Override mechanics mirror upstream `EmbeddedWallet.buildAccountOverrides`:
+			// the stub CLASS is registered with the PXE (function artifacts are
+			// resolved from the class store by `currentContractClassId`, so an
+			// unregistered class makes every lookup come back empty), and each
+			// entry keeps the account's REAL instance with only the class id
+			// swapped — an instance derived from the stub artifact with a random
+			// salt would carry an address preimage inconsistent with the map key.
+			// The historical shape here (`new SimulationOverrides({...contracts})`,
+			// spreading entries at the TOP level) parked the map outside the
+			// `contracts` key, so the override never reached the simulator and
+			// discovery ran UNSTUBBED — proven live on testnet against an
+			// authwit-requiring op (single-sim-estimates B1, Finding 0).
 			if (stubAccountAddresses?.length) {
-				const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
-				const contracts: Record<string, { instance: ContractInstanceWithAddress; artifact: ContractArtifact }> = {}
+				const stubClassId = await this.ensureStubClassRegistered(pxe)
+				const contracts: Record<string, { instance: ContractInstanceWithAddress }> = {}
 				for (const addr of stubAccountAddresses) {
-					const instance = await getContractInstanceFromInstantiationParams(StubSchnorrAccountContractArtifact, {
-						salt: Fr.random(),
-					})
-					contracts[addr] = { instance, artifact: StubSchnorrAccountContractArtifact }
+					const address = await AztecAddress.schema.parseAsync(addr)
+					const instance = await pxe.getContractInstance(address)
+					if (!instance) {
+						throw new Error(`stubAccountAddresses: no contract instance registered for ${addr}`)
+					}
+					contracts[addr] = { instance: { ...instance, currentContractClassId: stubClassId } }
 				}
-				overrides = new SimulationOverrides({ ...(overrides?.contracts ?? {}), ...contracts })
+				overrides = new SimulationOverrides({ contracts: { ...(overrides?.contracts ?? {}), ...contracts } })
 			}
 
 			// When we pass `overrides`, upstream PXE enforces
@@ -501,6 +504,23 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				senderForTags: simScopes[0],
 			})
 		})
+	}
+
+	/** Per-PXE memo of the stub-class registration: class hashing + the
+	 *  registerContractClass round-trip are WASM-heavy and sit on the fee
+	 *  estimation hot path — pay them once per PXE incarnation, not per sim.
+	 *  Keyed by the PXE instance through an injected WeakMap so a
+	 *  chain-runtime teardown/recreate naturally re-registers against the
+	 *  fresh store — and the dead PXE is never pinned by its promise. */
+	private readonly stubClassRegistrations = memoizeAsyncBy<PXE, Fr>(async (pxe) => {
+		const { StubSchnorrAccountContractArtifact } = await import("@aztec/accounts/schnorr/stub")
+		await pxe.registerContractClass(StubSchnorrAccountContractArtifact)
+		const { id } = await getContractClassFromArtifact(StubSchnorrAccountContractArtifact)
+		return id
+	}, new WeakMap<PXE, Promise<Fr>>())
+
+	private ensureStubClassRegistered(pxe: PXE): Promise<Fr> {
+		return this.stubClassRegistrations.get(pxe)
 	}
 
 	public async executeUtility(network: NetworkInfo, call: FunctionCall, opts: ExecuteUtilityOpts): Promise<UtilityExecutionResult> {
@@ -619,13 +639,18 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				// with the profile (other chains share it); crypto-erase for the profile as a
 				// whole happens in clearProfileState. The IndexedDB delete is the LEGACY
 				// (rc.2-era) cleanup layer.
-				this.chainPurgeEpochs.set(
-					this.chainKey(profileId, chainId),
-					(this.chainPurgeEpochs.get(this.chainKey(profileId, chainId)) ?? 0) + 1,
-				)
+				// B-18: bump the purge epoch at BOTH ends of the destructive section.
+				// The opening bump fences ops that captured before the purge began;
+				// the closing bump (right before the guard releases) fences an op that
+				// entered DURING the 641-643 destruction window — it would have read
+				// the already-incremented value and otherwise passed the equality
+				// check in withPxeWrite/withPxeRead, resurrecting a chain whose row is
+				// gone. Only a genuinely-post-purge op captures the stable final value.
+				this.bumpChainPurgeEpoch(profileId, chainId)
 				await this.registry.dispose(profileId, chainId)
 				await removeChainStoreDir({ profileId, chainId })
 				await this.deleteDb(chainDataDir({ profileId, chainId }))
+				this.bumpChainPurgeEpoch(profileId, chainId)
 			})
 		})
 	}
@@ -773,12 +798,24 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 	 * missing-key retry can provision-then-retry. The error deliberately does
 	 * NOT contain the PXE_STORE_KEY_MISSING marker: re-provisioning cannot
 	 * rescue a stale-generation op, so the client must not retry it.
+	 *
+	 * ONE non-live case passes: `deleted` under a DIFFERENT generation than the
+	 * capture. That op belongs to a same-id re-imported SUCCESSOR booting before
+	 * its first provision — not to the erased incarnation. It must fall through
+	 * to the missing-key path (the predecessor's key was crypto-erased, so the
+	 * runtime bind throws PXE_STORE_KEY_MISSING) and the client's provision —
+	 * which `provisionChainStoreKey` explicitly admits over deleted(other gen) —
+	 * flips the lifecycle live. Hard-rejecting here deadlocked the successor
+	 * forever: the only provision trigger is that retry marker, which this
+	 * error path deliberately suppresses (delete profile → re-import same seed
+	 * → every op rejected until the offscreen document restarted).
 	 */
 	private assertGenerationCurrent(network: NetworkInfo): void {
 		const captured = network.pxeGeneration
 		if (!captured) return
 		const current = this.profileLifecycles.get(network.profileId)
 		if (!current) return
+		if (current.kind === "deleted" && current.gen !== captured) return
 		if (current.kind !== "live" || current.gen !== captured) {
 			throw new Error(
 				`pxe op rejected: profile ${network.profileId} is ${current.kind} (generation ${current.gen === captured ? "matches" : "superseded"}) — the capture is stale`,
@@ -798,7 +835,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 			// raced concurrent readers + the SAH-pool lock (#281 D3). The read is
 			// fully released before the write is requested — no read→write upgrade.
 			const missed = Symbol("runtime-miss")
-			const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
+			const chainKey = this.chainKey(network.profileId, network.chainId)
+			const purgeEpochAtEntry = this.lifecycle.current(chainKey)
 			for (let attempt = 0; attempt < PxeService.MAX_RUNTIME_BIND_ATTEMPTS; attempt++) {
 				const result = await barrier.read(async () => {
 					return chainGuard.read(async () => {
@@ -814,17 +852,32 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				}
 				await barrier.read(async () => {
 					await chainGuard.write(async () => {
-						if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
-							throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
-						}
+						this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 						await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					})
 				})
 			}
 			throw new Error(`${label}: chain runtime kept rebinding/vanishing after ${PxeService.MAX_RUNTIME_BIND_ATTEMPTS} attempts`)
 		} catch (err) {
-			this.logError(`[READ] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
+			this.logOpFailure("READ", label, start, err)
 			throw err
+		}
+	}
+
+	/**
+	 * A `PXE_STORE_KEY_MISSING` rejection is a designed protocol step, not an
+	 * incident: keys live in offscreen memory only, so the FIRST profile-scoped
+	 * op after an offscreen boot misses and the SW client derives +
+	 * re-provisions + retries once. Logging it at error painted three red lines
+	 * on every cold start for a condition that self-heals in ~1s; a retry that
+	 * ALSO fails still surfaces at the caller. Everything else stays error.
+	 */
+	private logOpFailure(kind: "READ" | "WRITE", label: string, start: number, err: unknown): void {
+		const message = err instanceof Error ? err.message : String(err)
+		if (message.includes(PXE_STORE_KEY_MISSING)) {
+			this.logDebug(`[${kind}] ${label} pre-provision miss after ${Date.now() - start}ms (client re-provisions + retries)`)
+		} else {
+			this.logError(`[${kind}] ${label} failed after ${Date.now() - start}ms`, message)
 		}
 	}
 
@@ -832,7 +885,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 		const start = Date.now()
 		const barrier = this.getProfileBarrier(network.profileId)
 		const chainGuard = this.getChainGuard(network.profileId, network.chainId)
-		const purgeEpochAtEntry = this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0
+		const chainKey = this.chainKey(network.profileId, network.chainId)
+		const purgeEpochAtEntry = this.lifecycle.current(chainKey)
 		try {
 			this.logDebug(`[DEBUG] [WRITE] ${label} waiting for lock`)
 			return await barrier.read(async () => {
@@ -841,10 +895,8 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 					// A write op that captured NetworkInfo before a mid-flight clearChainState must
 					// NOT resurrect the purged chain by re-creating its runtime + a fresh OPFS store
 					// (concurrency audit MED #4 — the read path fenced this but the write path called
-					// ensure directly). Same epoch check as withPxeRead.
-					if ((this.chainPurgeEpochs.get(this.chainKey(network.profileId, network.chainId)) ?? 0) !== purgeEpochAtEntry) {
-						throw new Error(`${label}: chain was purged mid-operation — refusing to re-create its runtime/store`)
-					}
+					// ensure directly). Same epoch check as withPxeRead — now the shared fence.
+					this.lifecycle.assertUnchanged(chainKey, purgeEpochAtEntry, label)
 					// Already under the chain WRITE guard — `ensure` may rebind here.
 					const runtime = await this.registry.ensure(network, this.storeKeys.get(network.profileId))
 					this.logDebug(`[DEBUG] [WRITE] ${label} lock acquired, executing`)
@@ -854,7 +906,7 @@ export class PxeService extends Service<Methods> implements ServiceSpec<Methods>
 				})
 			})
 		} catch (err) {
-			this.logError(`[WRITE] ${label} failed after ${Date.now() - start}ms`, err instanceof Error ? err.message : String(err))
+			this.logOpFailure("WRITE", label, start, err)
 			throw err
 		}
 	}

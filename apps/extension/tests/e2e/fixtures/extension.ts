@@ -1,6 +1,13 @@
 import puppeteer, { TimeoutError, type Browser, type Page, type ConsoleMessage } from "puppeteer"
 import { test as base, inject } from "vitest"
-import { switchToLocalNetwork, importToken, getAccountAddress, refreshBalances, createAccount } from "./helpers"
+import {
+	captureBalanceBaseline,
+	createAccount,
+	getAccountAddress,
+	importToken,
+	switchToLocalNetwork,
+	waitForFreshBalanceRow,
+} from "./helpers"
 import { snapshotResultSeq, waitForPgResult } from "./playground"
 import { waitForPopup, approveCapabilities } from "./popups"
 import { TEST_PASSWORD } from "./constants"
@@ -70,16 +77,34 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 	)
 	const extensionId = new URL(workerTarget.url()).hostname
 
+	// The scratch page is ours, not `pages()[0]`: puppeteer can hand back a page
+	// whose frame is half-initialized and detaches during the first navigation
+	// (`openPopup` documents the same sequence and applies the same remedy), and
+	// the only fix is to discard the page and re-create it — which we may not do
+	// to Chrome's own startup page. That page is therefore left untouched, which
+	// also guarantees the browser always keeps one open.
+	let blankPage: Page | undefined
+	for (let attempt = 1; ; attempt++) {
+		let candidate: Page | undefined
+		try {
+			candidate = await browser.newPage()
+			patchPagePolling(candidate)
+			await candidate.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
+				waitUntil: "domcontentloaded",
+			})
+			blankPage = candidate
+			break
+		} catch (err) {
+			// `newPage()` itself can throw the detach, so it lives inside the try;
+			// `candidate` is undefined in that case and there is nothing to close.
+			await candidate?.close().catch(() => {})
+			if (attempt >= 2 || !isFrameDetachError(err)) throw err
+		}
+	}
 	// Wait for SW to fully initialize (liveness signal in chrome.storage.session).
 	// runtime.ts writes the first liveness immediately after initWalletSdkHandler;
 	// 30s timeout matches the helper in sw-resilience.test.ts and gives headroom
 	// for slow CI runners on cold-boot Barretenberg wasm + service-graph init.
-	const pages = await browser.pages()
-	const blankPage = pages[0]
-	patchPagePolling(blankPage)
-	await blankPage.goto(`chrome-extension://${extensionId}/src/popup/index.html`, {
-		waitUntil: "domcontentloaded",
-	})
 	if (waitForLiveness) {
 		await blankPage.waitForFunction(
 			async () => {
@@ -105,7 +130,7 @@ export async function launchExtension(opts: { userDataDir?: string; waitForLiven
 		await chrome.storage.local.set({ "nulo:onboarding:completed": true })
 	})
 
-	await blankPage.goto("about:blank")
+	await blankPage.close()
 
 	return { browser, extensionId, consoleErrors: [], pageErrors: [] }
 }
@@ -139,6 +164,21 @@ export async function openOnboarding(ctx: ExtensionContext): Promise<Page> {
 		// account switch). Prod already treats it as benign (offscreen
 		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
+		// STRUCTURAL BLIND SPOT — root-caused + probe-verified (flake-ledger:
+		// consoleErrors entry, closed permanent-by-design): the console-sniffer
+		// (`utils/console-sniffer.ts`, first module script in the popup/
+		// onboarding/offscreen entry pages — the setup page carries no sniffer)
+		// reroutes app `console.*` over LoggerService RPC to the SW realm;
+		// the native page console never fires on the success path, so CDP's
+		// consoleAPICalled never emits and this listener structurally cannot see
+		// app console output. Browser-emitted entries (e.g. "Unchecked
+		// runtime.lastError") bypass the patch and DO arrive. App-log evidence
+		// channel: `fixtures/journal.ts` readSwLogTrail (SW session-storage
+		// ring, 2s flush debounce). `pageerror` below IS reliable for uncaught
+		// throws + unhandled rejections (probe-verified) — an error the app
+		// catches and merely logs is invisible to BOTH fixture arrays
+		// (`consoleErrors` AND `pageErrors`; it does reach the SW log ring);
+		// prefer DOM/storage/stage evidence for app-level failures.
 		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
@@ -313,7 +353,7 @@ async function setupConnectedPlayground(
  *  loadInteractionPayload's PXE/accountService warmup can each exceed 30s on a
  *  cold CI runner; 30s for the dApp result). `pick` owns the per-fixture
  *  selection + its failure messages (single account vs first-two). */
-async function grantCapBundle(
+export async function grantCapBundle(
 	ctx: ExtensionContext,
 	playgroundPage: Page,
 	bundle: "accounts" | "transaction",
@@ -649,29 +689,22 @@ export const test = base.extend<{
 
 			await importToken(page, aztecConfig.tokenAddress)
 
-			// Poll: refresh balances until the minted amount is visible in the extension.
 			// The extension's PXE syncs blocks independently and may take 30-60s on
-			// a fresh node. Each refresh triggers a simulateTx which advances the
-			// sync. Tightened from 30×5s=150s to 40×1.5s=60s — the extra retries
-			// keep the same observability while halving total budget on the slow
-			// path; on the happy path balance appears in 2-4 retries either way.
-			const maxRetries = 40
-			for (let i = 0; i < maxRetries; i++) {
-				await refreshBalances(page)
-				const bodyText = await page.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) {
-					console.log(`[tokenReady] Balance visible after ${i + 1} refresh(es) (~${((i + 1) * 1.5).toFixed(1)}s)`)
-					break
-				}
-				if (i % 10 === 9) {
-					console.log(`[tokenReady] Still waiting for balance... (${i + 1}/${maxRetries} retries)`)
-				}
-				if (i === maxRetries - 1) {
-					console.warn("[tokenReady] Balance not visible after all retries (~60s) — tests may fail")
-				}
-				await page
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
-					.catch(() => {})
+			// a fresh node; each refresh advances the sync. Fail-HARD: a fixture
+			// that quietly degrades just moves the failure downstream into
+			// whichever consumer reads the balance first, with worse evidence —
+			// the freshness-gated row wait throws with a storage census instead.
+			// Budget: 60s. Token-scoped, so fiat/superstring text cannot satisfy it.
+			{
+				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
+				await waitForFreshBalanceRow(page, {
+					account: accountAddress,
+					tokenContract: aztecConfig.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baseline,
+					timeoutMs: 60_000,
+				})
+				console.log(`[tokenReady] balance row fresh + exact`)
 			}
 
 			await page.close()
@@ -727,7 +760,11 @@ export const test = base.extend<{
 				await waitForL1ToL2Message(
 					node,
 					claim.messageHash.toString(),
-					() => mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, 1n, minterAddress, feeOptions),
+					() =>
+						// Self-mint to the TEST wallet's account: each forced block must
+						// not add to the extension account, whose balance is asserted
+						// EXACTLY by the fail-hard row wait below.
+						mintPublicTokens(wallet, aztecConfig.tokenAddress, minterAddress, 1n, minterAddress, feeOptions),
 					90_000,
 				)
 
@@ -741,24 +778,18 @@ export const test = base.extend<{
 
 			await importToken(page, aztecConfig.tokenAddress)
 
-			// Poll for token balance. Tightened from 30 × 5s = 150s to
-			// 60 × 1.5s = 90s — matches the tokenReadyExtension cadence
-			// in PR #70 (extension.ts:329-344). Faster happy-path detection
-			// with a slightly shorter total budget.
-			const maxRetries = 60
-			for (let i = 0; i < maxRetries; i++) {
-				await refreshBalances(page)
-				const bodyText = await page.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) {
-					console.log(`[feeJuiceReady] Balance visible after ${i + 1} refresh(es)`)
-					break
-				}
-				if (i === maxRetries - 1) {
-					console.warn("[feeJuiceReady] Balance not visible after all retries")
-				}
-				await page
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
-					.catch(() => {})
+			// Fail-HARD freshness-gated row wait — see tokenReadyExtension's note.
+			// Budget: 90s.
+			{
+				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
+				await waitForFreshBalanceRow(page, {
+					account: accountAddress,
+					tokenContract: aztecConfig.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baseline,
+					timeoutMs: 90_000,
+				})
+				console.log(`[feeJuiceReady] balance row fresh + exact`)
 			}
 
 			await page.close()
@@ -777,7 +808,7 @@ export const test = base.extend<{
 			// Phase 1: setup pre-funded account on-chain (script-side).
 			const { createTestWallet, setupPreFundedAccount, createSponsoredFeeOptions, mintPublicTokens } = await import("./aztec")
 			const { wallet, accounts, node, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
-			let prefunded: { masterBase64: string; accountAddress: { toString(): string } }
+			let prefunded: { words: string[]; masterBase64: string; accountAddress: { toString(): string } }
 			try {
 				const feePayer = accounts[0]
 				if (!feePayer) throw new Error("expected at least one sandbox-deployed test account")
@@ -822,12 +853,12 @@ export const test = base.extend<{
 			})
 			await waitForHash(page, "#/popup/import", 5_000)
 
-			await page.waitForSelector('[data-testid="import-option-private-key"]', { visible: true, timeout: 30_000 })
-			await clickByTestId(page, "import-option-private-key")
+			await page.waitForSelector('[data-testid="import-option-seed"]', { visible: true, timeout: 30_000 })
+			await clickByTestId(page, "import-option-seed")
 
-			await page.waitForSelector('[data-testid="import-private-key-input"] input', { visible: true, timeout: 30_000 })
+			await page.waitForSelector('[data-testid="import-seed-input"] input', { visible: true, timeout: 30_000 })
 			await page.evaluate(
-				({ secretKey, pwd }: { secretKey: string; pwd: string }) => {
+				({ seed, pwd }: { seed: string; pwd: string }) => {
 					const setVal = (sel: string, v: string) => {
 						const input = document.querySelector<HTMLInputElement>(sel)
 						if (!input) throw new Error(`input not found: ${sel}`)
@@ -837,21 +868,21 @@ export const test = base.extend<{
 					}
 					// F2: profile name is required at submit time.
 					setVal('[data-testid="import-name-input"] input', "Imported Profile")
-					setVal('[data-testid="import-private-key-input"] input', secretKey)
+					setVal('[data-testid="import-seed-input"] input', seed)
 					setVal('[data-testid="import-password-input"] input', pwd)
 					setVal('[data-testid="import-password-confirm-input"] input', pwd)
 				},
-				{ secretKey: prefunded.masterBase64, pwd: TEST_PASSWORD },
+				{ seed: prefunded.words.join(" "), pwd: TEST_PASSWORD },
 			)
 
 			await page.waitForFunction(
 				() => {
-					const btn = document.querySelector<HTMLButtonElement>('[data-testid="import-private-key-submit-btn"]')
+					const btn = document.querySelector<HTMLButtonElement>('[data-testid="import-seed-submit-btn"]')
 					return btn && !btn.disabled
 				},
 				{ timeout: 5_000, polling: 100 },
 			)
-			await clickByTestId(page, "import-private-key-submit-btn")
+			await clickByTestId(page, "import-seed-submit-btn")
 			await waitForHash(page, "#/popup/general", 30_000)
 
 			// Switch to Local Network — popup auto-creates a Local-chain account
@@ -888,24 +919,17 @@ export const test = base.extend<{
 			// matching feeJuiceReadyExtension's :356-371 pattern. The send flow
 			// needs a token registered before send-from-type is selectable.
 			await importToken(page, aztecConfig.tokenAddress)
-			// Tightened from 30 × 5s = 150s to 60 × 1.5s = 90s — matches the
-			// tokenReadyExtension cadence in PR #70 (extension.ts:329-344). Same
-			// total budget shape (or shorter), but happy-path detection is ~3×
-			// faster.
-			const maxRetries = 60
-			for (let i = 0; i < maxRetries; i++) {
-				await refreshBalances(page)
-				const bodyText = await page.evaluate(() => document.body.innerText)
-				if (bodyText.includes("1,000")) {
-					console.log(`[feeJuiceImported] token balance visible after ${i + 1} refresh(es)`)
-					break
-				}
-				if (i === maxRetries - 1) {
-					console.warn("[feeJuiceImported] token balance not visible after all retries")
-				}
-				await page
-					.waitForFunction(() => document.body.innerText.includes("1,000"), { timeout: 1_500, polling: 200 })
-					.catch(() => {})
+			// Fail-HARD freshness-gated row wait — see tokenReadyExtension's note.
+			{
+				const baseline = await captureBalanceBaseline(page, accountAddress, aztecConfig.tokenAddress)
+				await waitForFreshBalanceRow(page, {
+					account: accountAddress,
+					tokenContract: aztecConfig.tokenAddress,
+					expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+					baselineUpdatedAt: baseline,
+					timeoutMs: 90_000,
+				})
+				console.log(`[feeJuiceImported] token balance row fresh + exact`)
 			}
 
 			await page.close()
@@ -997,6 +1021,29 @@ export function patchPagePolling(page: Page): void {
 	}
 }
 
+/** Await a puppeteer wait and, on TIMEOUT ONLY, replace it with a diagnostic
+ *  that names what never happened. Every other failure — frame detach, CDP
+ *  disconnect, page crash — keeps its own identity and message, because
+ *  relabelling those as "the state never settled" is exactly how a real fault
+ *  gets buried under a plausible-looking flake. The original is preserved as
+ *  `cause`. Pass a function when the diagnostic has to read live page state. */
+export async function withTimeoutMessage<T>(wait: Promise<T>, message: string | (() => string | Promise<string>)): Promise<T> {
+	try {
+		return await wait
+	} catch (err) {
+		if (!(err instanceof TimeoutError)) throw err
+		let text: string
+		try {
+			text = typeof message === "function" ? await message() : message
+		} catch (diagErr) {
+			// A diagnostic that reads a dead page must never replace the timeout
+			// it was meant to explain.
+			text = `<diagnostic failed: ${diagErr instanceof Error ? diagErr.message : String(diagErr)}>`
+		}
+		throw new Error(text, { cause: err })
+	}
+}
+
 /**
  * Detect puppeteer detach errors that can occur during the brief CDP race
  * between `browser.newPage()` and the first `page.goto(...)`. These signal
@@ -1006,7 +1053,12 @@ export function patchPagePolling(page: Page): void {
  */
 function isFrameDetachError(err: unknown): boolean {
 	const msg = err instanceof Error ? err.message : String(err)
-	return /Navigating frame was detached|frame got detached|Session closed|Target closed|Connection closed/i.test(msg)
+	// "Attempted to use detached Frame/Page" is puppeteer's OTHER detach wording
+	// (thrown by the handle decorators rather than the navigation path). Without
+	// it the retry above cannot see the very failure it exists to absorb.
+	return /Navigating frame was detached|frame got detached|Attempted to use detached (Frame|Page)|Session closed|Target closed|Connection closed/i.test(
+		msg,
+	)
 }
 
 /** Open the extension popup in a new page with error collection. */
@@ -1034,6 +1086,18 @@ export async function openPopup(ctx: ExtensionContext): Promise<Page> {
 
 async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 	const page = await ctx.browser.newPage()
+	try {
+		return await setUpPopupPage(ctx, page)
+	} catch (err) {
+		// The retry in `openPopup` re-creates the page, so this one must not be
+		// left behind: a live target keeps its listeners and its extension
+		// connections, which the next attempt then races.
+		await page.close().catch(() => {})
+		throw err
+	}
+}
+
+async function setUpPopupPage(ctx: ExtensionContext, page: Page): Promise<Page> {
 	patchPagePolling(page)
 	await page.setViewport({ width: 360, height: 600 })
 	// Bring the new page to the front so the tab is "focused" — defense in
@@ -1051,6 +1115,21 @@ async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
 		// account switch). Prod already treats it as benign (offscreen
 		// `isBenignSwDisconnect`); filter it here too so the `consoleErrors`
 		// assertions only catch UNEXPECTED errors, not this known noise.
+		// STRUCTURAL BLIND SPOT — root-caused + probe-verified (flake-ledger:
+		// consoleErrors entry, closed permanent-by-design): the console-sniffer
+		// (`utils/console-sniffer.ts`, first module script in the popup/
+		// onboarding/offscreen entry pages — the setup page carries no sniffer)
+		// reroutes app `console.*` over LoggerService RPC to the SW realm;
+		// the native page console never fires on the success path, so CDP's
+		// consoleAPICalled never emits and this listener structurally cannot see
+		// app console output. Browser-emitted entries (e.g. "Unchecked
+		// runtime.lastError") bypass the patch and DO arrive. App-log evidence
+		// channel: `fixtures/journal.ts` readSwLogTrail (SW session-storage
+		// ring, 2s flush debounce). `pageerror` below IS reliable for uncaught
+		// throws + unhandled rejections (probe-verified) — an error the app
+		// catches and merely logs is invisible to BOTH fixture arrays
+		// (`consoleErrors` AND `pageErrors`; it does reach the SW log ring);
+		// prefer DOM/storage/stage evidence for app-level failures.
 		if (msg.type() === "error" && !msg.text().includes("Client disconnected")) {
 			ctx.consoleErrors.push(msg.text())
 		}
@@ -1133,8 +1212,16 @@ async function openPopupOnce(ctx: ExtensionContext): Promise<Page> {
  *  flows where the SW pushes a navigation while another popup window has
  *  focus, the rAF-driven poll can stall — the hash transition lands but
  *  this `waitForFunction` never observes it. Time-based polling avoids
- *  the throttling regardless of focus state. */
-export async function waitForHash(page: Page, expectedHash: string, timeout = 5_000): Promise<void> {
+ *  the throttling regardless of focus state.
+ *
+ *  The 15s default budgets for the bare-default call sites, which are all
+ *  cold-boot openers (`openPopup` → first route): SW start + Vue mount +
+ *  session hydration exceeds 5s under parallel-agent host load, which made
+ *  the alphabetically-last files (the `sw-*` family, paying a fresh cold
+ *  boot per single-test file at peak accumulated load) the suite's dominant
+ *  flake. A genuinely broken route fails at any timeout; call sites that
+ *  need a tighter bound pass one explicitly. */
+export async function waitForHash(page: Page, expectedHash: string, timeout = 15_000): Promise<void> {
 	await page.waitForFunction((hash: string) => window.location.hash === hash, { timeout, polling: 200 }, expectedHash)
 }
 

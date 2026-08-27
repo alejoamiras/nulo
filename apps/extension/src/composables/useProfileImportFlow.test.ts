@@ -1,13 +1,12 @@
 import { effectScope } from "vue"
 import { beforeEach, describe, expect, test, vi } from "vitest"
-import { UserRejectedError } from "@nulo/extension-messaging/errors"
+import { createPinia, setActivePinia } from "pinia"
+import { DuplicateWalletError, UserRejectedError } from "@nulo/extension-messaging/errors"
 
 vi.mock("@/utils/core", () => {
 	const profileMock = {
 		getProfiles: vi.fn(async () => [] as Array<{ name: string }>),
 		importMnemonic: vi.fn(async () => ({ id: "p1", name: "Imported", type: "password" })),
-		importPlain: vi.fn(async () => ({ id: "p1", name: "Imported", type: "password" })),
-		importEncrypted: vi.fn(async () => ({ id: "p1", name: "Imported", type: "password" })),
 		importPasskey: vi.fn(async () => ({ id: "p1", name: "Imported", type: "passkey" })),
 	}
 	return { managers: { profile: profileMock } }
@@ -42,6 +41,8 @@ const tick = () => new Promise((r) => setTimeout(r, 0))
 beforeEach(() => {
 	vi.clearAllMocks()
 	profileApi.getProfiles.mockResolvedValue([])
+	// The flow reads cacheStore/popupStore for the duplicate-phrase confirm dialog.
+	setActivePinia(createPinia())
 })
 
 describe("useProfileImportFlow", () => {
@@ -52,32 +53,9 @@ describe("useProfileImportFlow", () => {
 		flow.repeatedPassword.value = "password123"
 		flow.seedPhrase.value = SEED_24
 		await flow.handleImportSeed()
-		expect(profileApi.importMnemonic).toHaveBeenCalledWith("MyProfile", SEED_24.split(" "), "password123")
+		expect(profileApi.importMnemonic).toHaveBeenCalledWith("MyProfile", SEED_24.split(" "), "password123", false)
 		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 		expect(flow.isImporting.value).toBe(false)
-	})
-
-	test("private-key happy path imports and completes once", async () => {
-		const { flow, opts } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "private_key"
-		flow.password.value = "password123"
-		flow.repeatedPassword.value = "password123"
-		flow.privateKey.value = "0xabc"
-		await flow.handleImportPrivateKey()
-		expect(profileApi.importPlain).toHaveBeenCalledWith("MyProfile", "0xabc", "password123")
-		expect(opts.completeImport).toHaveBeenCalledTimes(1)
-	})
-
-	test("public-key happy path imports and completes once", async () => {
-		const { flow, opts } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "public_key"
-		flow.password.value = "password123"
-		flow.publicKey.value = "0xpub"
-		await flow.handleImportPublicKey()
-		expect(profileApi.importEncrypted).toHaveBeenCalledWith("MyProfile", "0xpub", "password123")
-		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 	})
 
 	test("passkey happy path runs the ceremony then imports + completes once", async () => {
@@ -89,7 +67,7 @@ describe("useProfileImportFlow", () => {
 		expect(flow.ceremonyRequest.value).toEqual({ mode: "get" })
 		flow.onCeremonyResolve(fakeCred)
 		await p
-		expect(profileApi.importPasskey).toHaveBeenCalledWith("MyProfile", fakeCred)
+		expect(profileApi.importPasskey).toHaveBeenCalledWith("MyProfile", fakeCred, false)
 		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 	})
 
@@ -128,30 +106,6 @@ describe("useProfileImportFlow", () => {
 		expect(profileApi.importMnemonic).not.toHaveBeenCalled()
 		expect(opts.completeImport).not.toHaveBeenCalled()
 		expect(flow.nameError.value).toBeTruthy()
-	})
-
-	test("private-key 'Invalid secret length' routes to the secret field", async () => {
-		profileApi.importPlain.mockRejectedValueOnce(new Error("Invalid secret length"))
-		const { flow, opts } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "private_key"
-		flow.password.value = "password123"
-		flow.repeatedPassword.value = "password123"
-		flow.privateKey.value = "0xabc"
-		await flow.handleImportPrivateKey()
-		expect(flow.error.value).toEqual({ type: "secret", title: "Invalid key length", tooltip: "" })
-		expect(opts.completeImport).not.toHaveBeenCalled()
-	})
-
-	test("public-key 'Invalid password' routes to the password field", async () => {
-		profileApi.importEncrypted.mockRejectedValueOnce(new Error("Invalid password"))
-		const { flow } = makeFlow()
-		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "public_key"
-		flow.password.value = "password123"
-		flow.publicKey.value = "0xpub"
-		await flow.handleImportPublicKey()
-		expect(flow.error.value).toEqual({ type: "password", title: "Wrong password", tooltip: "" })
 	})
 
 	test("(A1) generic import error uses the unified shape, not [object Object]", async () => {
@@ -195,13 +149,104 @@ describe("useProfileImportFlow", () => {
 		// regression that an end-state-only assertion would miss.
 		const { flow, opts } = makeFlow()
 		flow.profileName.value = "MyProfile"
-		flow.selectedImportOption.value = "private_key"
+		flow.selectedImportOption.value = "seed"
 		flow.password.value = "password123"
 		flow.repeatedPassword.value = "password123"
-		flow.privateKey.value = "0xabc"
-		await flow.handleImportPrivateKey()
+		flow.seedPhrase.value = SEED_24
+		await flow.handleImportSeed()
 		expect(opts.completeImport).toHaveBeenCalledTimes(1)
 		expect(opts.completeImport).toHaveBeenCalledWith({ id: "p1", name: "Imported", type: "password" })
+	})
+
+	// Duplicate-recovery-phrase warn-and-confirm (owner policy: warned choice, never a hard block).
+	describe("duplicate-phrase confirm", () => {
+		/** Drive the ConfirmPopup the way the real popup does: invoke the stashed callback. */
+		async function confirmDialog() {
+			const { useCacheStore } = await import("@/stores/cache.store")
+			const confirm = useCacheStore().confirm as { callback?: () => void; title?: string; description?: string }
+			expect(confirm.title).toBeTruthy()
+			confirm.callback?.()
+			return confirm
+		}
+		/** Dismiss it: the popup store close IS the cancel signal (ConfirmPopup has no cancel hook). */
+		async function dismissDialog() {
+			const { usePopupStore } = await import("@/stores/popup.store")
+			usePopupStore().close("confirm")
+		}
+
+		test("seed: a duplicate throws → dialog → confirm retries with allowDuplicate", async () => {
+			profileApi.importMnemonic
+				.mockRejectedValueOnce(new DuplicateWalletError(undefined, { existingProfileName: "Main" }))
+				.mockResolvedValueOnce({ id: "p2", name: "Dup", type: "password" })
+			const { flow, opts } = makeFlow()
+			flow.profileName.value = "MyProfile"
+			flow.password.value = "password123"
+			flow.repeatedPassword.value = "password123"
+			flow.seedPhrase.value = SEED_24
+
+			const p = flow.handleImportSeed()
+			await tick()
+			const confirm = await confirmDialog()
+			// The dialog NAMES the colliding profile (never key material).
+			expect(String(confirm.description)).toContain("Main")
+			await p
+
+			expect(profileApi.importMnemonic).toHaveBeenCalledTimes(2)
+			expect(profileApi.importMnemonic).toHaveBeenLastCalledWith("MyProfile", SEED_24.split(" "), "password123", true)
+			expect(opts.completeImport).toHaveBeenCalledTimes(1)
+		})
+
+		test("seed: declining the dialog abandons the import (no retry, no completeImport)", async () => {
+			profileApi.importMnemonic.mockRejectedValueOnce(new DuplicateWalletError(undefined, { existingProfileName: "Main" }))
+			const { flow, opts } = makeFlow()
+			flow.profileName.value = "MyProfile"
+			flow.password.value = "password123"
+			flow.repeatedPassword.value = "password123"
+			flow.seedPhrase.value = SEED_24
+
+			const p = flow.handleImportSeed()
+			await tick()
+			await dismissDialog()
+			await p
+
+			expect(profileApi.importMnemonic).toHaveBeenCalledTimes(1)
+			expect(opts.completeImport).not.toHaveBeenCalled()
+			expect(flow.isImporting.value).toBe(false)
+		})
+
+		test("passkey: the confirm-retry reuses the SAME credential (no second ceremony)", async () => {
+			profileApi.importPasskey
+				.mockRejectedValueOnce(new DuplicateWalletError(undefined, { existingProfileName: "Main" }))
+				.mockResolvedValueOnce({ id: "p2", name: "Dup", type: "passkey" })
+			const { flow, opts } = makeFlow()
+			flow.profileName.value = "MyProfile"
+			const fakeCred = { credentialId: "c1" } as never
+
+			const p = flow.handleImportPasskey()
+			await tick()
+			flow.onCeremonyResolve(fakeCred)
+			await tick()
+			await confirmDialog()
+			await p
+
+			expect(profileApi.importPasskey).toHaveBeenCalledTimes(2)
+			// Same credential object both times — the ceremony ran exactly once.
+			expect(profileApi.importPasskey).toHaveBeenNthCalledWith(1, "MyProfile", fakeCred, false)
+			expect(profileApi.importPasskey).toHaveBeenNthCalledWith(2, "MyProfile", fakeCred, true)
+			expect(opts.completeImport).toHaveBeenCalledTimes(1)
+		})
+
+		test("a NON-duplicate error still routes to the generic error surface (no dialog)", async () => {
+			profileApi.importMnemonic.mockRejectedValueOnce(new Error("boom"))
+			const { flow } = makeFlow()
+			flow.profileName.value = "MyProfile"
+			flow.password.value = "password123"
+			flow.repeatedPassword.value = "password123"
+			flow.seedPhrase.value = SEED_24
+			await flow.handleImportSeed()
+			expect(flow.error.value.tooltip).toBe("boom")
+			expect(profileApi.importMnemonic).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	test("dispose() is callable and the composable registers no onUnmounted", () => {

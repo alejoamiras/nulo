@@ -17,6 +17,9 @@ import { useToast } from "@/composables/toast"
 import { useEntityCrud } from "@/composables/useEntityCrud"
 const { openToast } = useToast()
 
+/** Utils */
+import { copyToClipboard } from "@/utils/clipboard"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
@@ -46,8 +49,10 @@ const {
 const handleCopyAddress = (address) => {
 	copiedAddress.value = address
 
-	window.navigator.clipboard.writeText(address)
-	openToast({ label: "Sender's address is copied", icon: "copy" })
+	void copyToClipboard(address, openToast, {
+		success: { label: "Sender's address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 
 	setTimeout(() => {
 		copiedAddress.value = ""
@@ -179,7 +184,7 @@ onBeforeUnmount(() => {
 		border-color: var(--nulo-outline);
 		span {
 			color: var(--txt-primary);
-			cursor: copy;
+			cursor: pointer;
 		}
 	}
 }

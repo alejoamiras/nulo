@@ -1,5 +1,5 @@
 import { expect } from "vitest"
-import type { Page } from "puppeteer"
+import type { Page, Target } from "puppeteer"
 import { TEST_PASSWORD } from "./fixtures/constants"
 import { test, openPopup, waitForHash, clickByTestId, replaceInputValue, type ExtensionContext } from "./fixtures/extension"
 import { lockWallet } from "./fixtures/helpers"
@@ -10,28 +10,67 @@ import { lockWallet } from "./fixtures/helpers"
 
 async function stopServiceWorker(ext: ExtensionContext): Promise<void> {
 	const swTarget = await ext.browser.waitForTarget((t) => t.type() === "service_worker" && t.url().includes(ext.extensionId), {
-		timeout: 5_000,
+		timeout: 15_000,
 	})
-	const swSession = await swTarget.createCDPSession()
-	try {
-		await swSession.send("Runtime.terminateExecution")
-	} catch {
-		// Session dies along with the SW; swallow disconnect noise.
-	}
+
+	// Arm the destruction listener BEFORE closing: puppeteer reports the very
+	// Target object that went away, so identity is object equality rather than a
+	// private `_targetId` read, and a fast replacement cannot be mistaken for the
+	// original surviving.
+	const destroyed = new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			ext.browser.off("targetdestroyed", onDestroyed)
+			reject(new Error("stopServiceWorker: the service-worker target was still alive 15s after close()"))
+		}, 15_000)
+		function onDestroyed(target: Target) {
+			if (target !== swTarget) return
+			clearTimeout(timer)
+			ext.browser.off("targetdestroyed", onDestroyed)
+			resolve()
+		}
+		ext.browser.on("targetdestroyed", onDestroyed)
+	})
+
+	const worker = await swTarget.worker()
+	if (!worker) throw new Error("stopServiceWorker: service-worker target exposed no worker to close")
+	await worker.close()
+	await destroyed
 }
 
-async function waitForLiveness(page: Page): Promise<void> {
+/** Readiness after the restart: session storage retains the pre-kill heartbeat,
+ *  so a truthy check passes instantly against a stale value and the next UI wait
+ *  races the booting worker. Requiring a STRICTLY NEWER timestamp is what makes
+ *  this causal.
+ *
+ *  It is only meaningful because `stopServiceWorker` above waits for the old
+ *  target to be GONE. Against a kill that leaves the worker running, a fresh
+ *  timestamp arrives from its ordinary heartbeat within HEARTBEAT_INTERVAL_MS
+ *  and proves nothing (deflake-round-3 `lessons/phase-3.md`). */
+async function waitForLiveness(page: Page, afterTs: number): Promise<void> {
 	await page.waitForFunction(
-		async () => {
+		async (priorTs: number) => {
 			try {
 				const result = await chrome.storage.session.get("nulo:liveness")
-				return !!result["nulo:liveness"]
+				return Number(result["nulo:liveness"] ?? 0) > priorTs
 			} catch {
 				return false
 			}
 		},
 		{ timeout: 30_000, polling: 500 },
+		afterTs,
 	)
+}
+
+/** Read the current liveness heartbeat (0 when absent/unreadable). */
+async function readLiveness(page: Page): Promise<number> {
+	return await page.evaluate(async () => {
+		try {
+			const r = await chrome.storage.session.get("nulo:liveness")
+			return Number(r["nulo:liveness"] ?? 0)
+		} catch {
+			return 0
+		}
+	})
 }
 
 // The active chain (`Network.id`) and the chain's primary endpoint
@@ -58,12 +97,13 @@ test("SW restart preserves active network + primary endpoint", async ({ register
 	expect(Object.keys(before.networkRows).length).toBeGreaterThan(0)
 
 	await lockWallet(page)
+	const preKillLiveness = await readLiveness(page)
 	await page.close()
 
 	await stopServiceWorker(registeredExtension)
 
 	const page2 = await openPopup(registeredExtension)
-	await waitForLiveness(page2)
+	await waitForLiveness(page2, preKillLiveness)
 	await waitForHash(page2, "#/popup/auth", 15_000)
 
 	// Unlock

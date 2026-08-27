@@ -28,7 +28,7 @@ import { z } from "zod"
 export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
 
 /**
- * Per-`(networkId, contract)` public-scan progress, surfaced to the token card as the "Catching up…"
+ * Per-`(networkId, contract)` public-scan progress, surfaced to the token card as the catching-up dot
  * affordance. `backfilling` = the scan cursor is materially behind the checkpointed tip (cold-start
  * hydration from far back, or a fresh add / SW restart); `caught-up` = at/near the tip (the steady
  * every-30s poll). Derived from data the scan already reads — the tip + the persisted cursor — so it
@@ -37,12 +37,33 @@ export type IncomingTrustState = "unknown" | "pending" | "trusted" | "blocked"
  */
 export type IncomingSyncState = "backfilling" | "caught-up"
 
-/** Transition payload for {@link Events.onIncomingSyncStateChanged} — per contract (the scan serves all
+/**
+ * How many blocks behind the checkpointed tip a scan may be before the token card shows the
+ * catching-up dot. Sized to ≈15 minutes of chain history (owner policy): both seeded dRPC networks
+ * measured ≈90 s/block on 2026-08-13 (Alpha V5: 2 blocks/181 s; Testnet: 2 blocks/182 s — raw samples
+ * in implementations-plan/home-refresh/lessons/phase-1.md). The 2-block sample quantizes cadence to
+ * the 60–180 s/block range, so the threshold uses the FASTEST plausible cadence (900 s ÷ 60 s = 15)
+ * — the conservative direction: the dot under-triggers rather than flags routine polls. Tune here if
+ * the network's cadence changes. ADVISORY ONLY: the lag is node-reported and must never gate any
+ * action beyond the indicator.
+ */
+export const BACKFILL_INDICATOR_THRESHOLD_BLOCKS = 15
+
+/** Per-`(networkId, contract)` sync snapshot: the FSM state plus how far behind the checkpointed tip
+ *  the confirmed coverage is. `blocksBehind` is a display signal (see the threshold above), refreshed
+ *  every scan pass — not only on transitions. */
+export type IncomingSyncSnapshot = {
+	state: IncomingSyncState
+	blocksBehind: number
+}
+
+/** Payload for {@link Events.onIncomingSyncStateChanged} — per contract (the scan serves all
  *  of a network's accounts; the token card keys on `contract` + the active `networkId`). */
 export type IncomingSyncStateChanged = {
 	networkId: string
 	contract: string
 	state: IncomingSyncState
+	blocksBehind: number
 }
 
 import { type PublicEventCursor, PublicEventCursorSchema } from "@nulo/aztec-runtime/pxe/public-events"
@@ -195,6 +216,13 @@ export type PublicScanCursor = {
 	lastSyncedBlockHash: string | null
 	/** D6 rewind FLOOR — the finalized tip AT the last successful scan (NOT the current finalized). */
 	lastScanFinalized: number | null
+	/**
+	 * Highest block CONFIRMED contiguously covered — the catching-up indicator's lag datum. Unlike
+	 * `lastScanFinalized` it is NOT capped at the finalized tip (a restart seeding from the finalized
+	 * floor would fake a `checkpointed − finalized` backlog on the first failed pass). Written on every
+	 * coverage-confirming pass; absent on pre-existing cursors (falls back to `lastScanFinalized`).
+	 */
+	lastCoveredBlock?: number
 	/** Retrofit seam for a future per-token backfill window. `0` in v1. */
 	startBlock: number
 	/**
@@ -245,6 +273,7 @@ export const PublicScanCursorSchema: z.ZodType<PublicScanCursor> = z.object({
 	cursor: PublicEventCursorSchema.nullable(),
 	lastSyncedBlockHash: z.string().nullable(),
 	lastScanFinalized: z.number().nullable(),
+	lastCoveredBlock: z.number().optional(),
 	startBlock: z.number(),
 	pendingPage: pendingPageSchema.optional(),
 	reconciling: reconcilingSchema.optional(),
@@ -306,8 +335,10 @@ export type Events = {
 	 *  contract per pending cycle. */
 	onIncomingTransferPending: IncomingTransferPending
 	onIncomingTrustChanged: IncomingTrustRecord
-	/** Fires on a `(networkId, contract)` sync-state TRANSITION only (backfilling ↔ caught-up), so a
-	 *  steady poll doesn't spam it. Drives the token card's "Catching up…" indicator. */
+	/** Fires on a `(networkId, contract)` sync-state TRANSITION (backfilling ↔ caught-up) OR when
+	 *  `blocksBehind` crosses {@link BACKFILL_INDICATOR_THRESHOLD_BLOCKS} in either direction while
+	 *  backfilling — so a steady poll doesn't spam it, but a long episode can start/stop showing the
+	 *  dot mid-flight. Drives the token card's catching-up indicator. */
 	onIncomingSyncStateChanged: IncomingSyncStateChanged
 }
 
@@ -336,10 +367,12 @@ export type Methods = {
 	/** Trust state for a (profile, network, contract) triple. Returns
 	 *  `unknown` for contracts that have never received an incoming note. */
 	getTrustState(profileId: string, networkId: string, contract: string): IncomingTrustState
-	/** Current public-scan sync state for a `(networkId, contract)` — the initial snapshot the token card
-	 *  reads on mount (thereafter it tracks {@link Events.onIncomingSyncStateChanged}). Returns
-	 *  `caught-up` for an unknown / never-scanned key (fail toward "no indicator"). */
-	getSyncState(networkId: string, contract: string): IncomingSyncState
+	/** Current public-scan sync snapshot for a `(networkId, contract)` — the initial read the token card
+	 *  does on mount (thereafter it tracks {@link Events.onIncomingSyncStateChanged}). Refreshed every
+	 *  scan pass, so reseeds (mount / port reconnect) always see current lag. Returns
+	 *  `{ state: "caught-up", blocksBehind: 0 }` for an unknown / never-scanned key (fail toward
+	 *  "no indicator"). */
+	getSyncState(networkId: string, contract: string): IncomingSyncSnapshot
 	/** User accepted the first-receive prompt: `pending → trusted`. Flips
 	 *  all hidden records for this contract to visible; emits
 	 *  `onIncomingTransferAdded` for each. Returns `false` when the contract

@@ -52,14 +52,13 @@
 // package-name import (`@nulo/wallet-bridge`) would resolve at runtime but
 // wires an unnecessary self-reference through the barrel.
 import { resolveAuthorizedSessionAccount } from "./account-resolution"
-import { formatCaipAccount, formatCaipChain, parseCaipAccount, resolveNetworkByChainId } from "./caip"
+import { formatCaipAccount, formatCaipChain, parseCaipAccount } from "./caip"
 import type {
 	AccountsCapability,
 	Capability,
 	ContractsCapability,
 	DataCapability,
 	GrantedCapabilityRecord,
-	RejectedCapabilityRecord,
 	Scope,
 	SimulationCapability,
 	TransactionCapability,
@@ -92,7 +91,7 @@ import { isCreateAuthWitCoveredByTxOrSimulationScope } from "./method-scope-chec
 import type { IAccountRef, IDappSessionRef, INetworkRef } from "./session-types"
 import { OriginType, type LocalTxOrigin } from "./transaction-origin"
 import type { SessionContext } from "./types"
-import { CapabilityNotGrantedError, JobCancelledError } from "@nulo/extension-messaging/errors"
+import { CapabilityNotGrantedError, JobCancelledError, walletErrorFromPayload } from "@nulo/extension-messaging/errors"
 import type { ILogger } from "@nulo/wallet-core/logger"
 import { LogLevel } from "@nulo/wallet-core/logger"
 import type {
@@ -150,6 +149,11 @@ export function unwrapOperationResult(result: OperationResult): unknown {
 		case "cancelled":
 			throw new JobCancelledError(undefined, { jobId: result.jobId })
 		case "failed":
+			// A typed executor failure crosses the boundary as { error, code };
+			// re-materialize the WalletError so the wallet-sdk error envelope's
+			// instanceof discrimination works — throwing a bare Error here is
+			// exactly what made the envelope's typed branches dead code.
+			if (result.code) throw walletErrorFromPayload({ code: result.code, message: result.error })
 			throw new Error(result.error)
 		case "skipped":
 			throw new Error("Operation was skipped")
@@ -393,7 +397,10 @@ export class WalletSdkDispatcher {
 		// Closes the TOCTOU window where 6 separate `tryGetDappSessionByOriginAndChain`
 		// calls previously gave different handlers different views of the same
 		// session (e.g. if the session was deleted mid-dispatch).
-		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId))
+		// Anchored to ctx.profileId (the session's establishment-stamped
+		// profile, guard-verified upstream): a profile switch landing mid-await
+		// must not let this lookup resolve the NEW profile's row.
+		const dappSession = await this.dappSessionService.tryGetDappSessionByOriginAndChain(ctx.origin, String(ctx.chainId), ctx.profileId)
 
 		// Resolve the method's descriptor up front. A method that reaches dispatch()
 		// without a registry row is unsupported (retired, or never-supported) —
@@ -767,22 +774,12 @@ export class WalletSdkDispatcher {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
 
-		// Resolve the dApp-supplied account against the session's authorized
-		// list. Falls back to the first session-authorized account if args[0]
-		// isn't a valid address (lenient parsing — old SDK shapes pass the
-		// address as a raw string vs. AztecAddress instance).
+		// Resolve the dApp-supplied account through the SAME session-authorization
+		// helper sendTx/createAuthWit use — one implementation of "which account
+		// may this dApp act as", with its distinct no-accounts / empty-session /
+		// not-authorized failure messages.
 		const requestedAccount = String(args[0])
-		const network = await this.resolveNetwork(ctx)
-		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
-		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
-		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
-		if (!account) {
-			// Either the dApp passed an unknown account, or the requested
-			// account isn't in this session's authorized set. Refuse rather
-			// than silently substituting — the user granted permission for a
-			// specific subset of accounts via requestCapabilities.
-			throw new Error(`registerToken: account ${requestedAccount} is not authorized for this dApp session`)
-		}
+		const [, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedAccount)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 
 		const tokenAddress = String(args[1])
@@ -818,14 +815,9 @@ export class WalletSdkDispatcher {
 			throw new Error(`No dApp session found for origin ${ctx.origin}`)
 		}
 
+		// Same shared session-authorization resolve as registerToken/sendTx.
 		const requestedAccount = String(args[0])
-		const network = await this.resolveNetwork(ctx)
-		const allAccounts = await this.accountService.getAccounts(ctx.profileId, network.chainId)
-		const sessionAddresses = this.getSessionAccountAddresses(dappSession, ctx.chainId)
-		const account = allAccounts.find((acc) => sessionAddresses.has(acc.address) && acc.address === requestedAccount)
-		if (!account) {
-			throw new Error(`grantPublicAuthwit: account ${requestedAccount} is not authorized for this dApp session`)
-		}
+		const [, account] = await this.resolveNetworkAndAccount(ctx, dappSession, requestedAccount)
 		const caipAccount = formatCaipAccount(ctx.chainId, account.address)
 
 		const content = args[1] as { caller: string; contract: string; method: string; args: unknown[] }
@@ -962,16 +954,20 @@ export class WalletSdkDispatcher {
 			})
 		} catch (err) {
 			// On popup reject/close, persist rejection for all delta items so the
-			// next request renders the "previously denied" badge. The grant-path
-			// write below is unreachable when this throws.
-			const rejectedAt = Date.now()
-			const newRejections: RejectedCapabilityRecord[] = delta.map((cap) => ({
-				capabilityType: cap.type as string,
-				rejectedAt,
-			}))
-			const deltaTypes = new Set(delta.map((cap) => cap.type as string))
-			const mergedRejections = [...existingRejections.filter((r) => !deltaTypes.has(r.capabilityType)), ...newRejections]
-			await this.dappSessionService.setCapabilityRejections(dappSession.id, mergedRejections)
+			// next request renders the "previously denied" badge. One atomic decision
+			// (B-14), and if the row was revoked meanwhile just surface the popup error.
+			try {
+				await this.dappSessionService.applyCapabilityDecision(dappSession.id, {
+					addAccounts: [],
+					aliasPatch: {},
+					grantRecords: [],
+					replaceTypes: [],
+					approvedTypes: [],
+					rejectedTypes: delta.map((cap) => cap.type as string),
+				})
+			} catch {
+				// Session already revoked — nothing to persist.
+			}
 			throw err
 		}
 
@@ -984,25 +980,6 @@ export class WalletSdkDispatcher {
 				if (accountsCap) {
 					grantedResults.push(accountsCap)
 				}
-			}
-		}
-
-		// If accounts were selected in the popup, merge with existing (don't replace)
-		if (result.selectedAccounts && result.selectedAccounts.length > 0) {
-			const existingAccounts = new Set(dappSession.accounts ?? [])
-			for (const acc of result.selectedAccounts) {
-				existingAccounts.add(acc)
-			}
-			const mergedAccounts = [...existingAccounts]
-
-			await this.dappSessionService.updateDappSession(
-				dappSession.id,
-				dappSession.permissions,
-				mergedAccounts,
-				dappSession.confirmationLevel,
-			)
-			if (result.accountAliases) {
-				await this.dappSessionService.setAccountAliases(dappSession.id, result.accountAliases)
 			}
 		}
 
@@ -1036,28 +1013,30 @@ export class WalletSdkDispatcher {
 			const replacement = replacementFor(type) ?? (delta.find((c) => c.type === type) as unknown as Capability)
 			newGrants.push({ capability: replacement, grantedAt: now })
 		}
-		// Merge: keep existing grants minus rejected AND minus replaced types, then the new records.
-		const mergedGrants = [
-			...existingGrants.filter((g) => !rejectedTypes.has(g.capability.type) && !deltaApprovedTypes.has(g.capability.type)),
-			...newGrants,
-		]
 
-		await this.dappSessionService.setCapabilityGrants(dappSession.id, mergedGrants)
+		// Delta items NOT approved become rejections.
+		const rejectedDeltaTypes = delta.filter((cap) => !approvedTypes.has(cap.type as string)).map((cap) => cap.type as string)
+		const hasAccountSelection = (result.selectedAccounts?.length ?? 0) > 0
 
-		// Track rejections: delta items that were NOT approved
-		const newRejections: RejectedCapabilityRecord[] = delta
-			.filter((cap) => !approvedTypes.has(cap.type as string))
-			.map((cap) => ({ capabilityType: cap.type as string, rejectedAt: now }))
-		// Merge: keep old rejections for types not in this delta + new rejections
-		const deltaTypes = new Set(delta.map((cap) => cap.type as string))
-		const mergedRejections = [...existingRejections.filter((r) => !deltaTypes.has(r.capabilityType)), ...newRejections]
-		await this.dappSessionService.setCapabilityRejections(dappSession.id, mergedRejections)
-
-		// Reload session to pick up updated accounts/aliases
-		const updatedSession = await this.dappSessionService.getDappSession(dappSession.id)
+		// ONE atomic decision (B-14): accounts + aliases + grants + rejections merged
+		// against the LATEST row under a single lock — no interleaving between the
+		// formerly-separate writes, and a concurrent revoke fails cleanly (no
+		// half-written row) instead of collapsing to a bare "Invalid id". Different-type
+		// concurrent approvals both survive (the merge reads the latest row).
+		const updatedSession = await this.dappSessionService.applyCapabilityDecision(dappSession.id, {
+			addAccounts: hasAccountSelection ? (result.selectedAccounts ?? []) : [],
+			aliasPatch: hasAccountSelection ? (result.accountAliases ?? {}) : {},
+			grantRecords: newGrants,
+			replaceTypes: [...deltaApprovedTypes],
+			// ONLY the delta types that were approved clear their rejection — NOT the
+			// full grantedResults set (the popup echoes untouched existing caps, and
+			// clearing their rejections would erase a concurrent unrelated rejection).
+			approvedTypes: [...deltaApprovedTypes],
+			rejectedTypes: rejectedDeltaTypes,
+		})
 
 		const granted = await this.enrichGrantedCapabilities(
-			mergedGrants.map((g) => g.capability),
+			(updatedSession.capabilityGrants ?? []).map((g) => g.capability),
 			requestedCapabilities,
 			ctx,
 			updatedSession,
@@ -1336,7 +1315,16 @@ export class WalletSdkDispatcher {
 	 * Resolve a session's chainId to a Network.
 	 */
 	private async resolveNetwork(ctx: SessionContext): Promise<INetworkRef> {
-		return resolveNetworkByChainId(this.networkService, ctx.chainId)
+		// Anchored to the session's stamped profile (never the active one): a
+		// profile switch landing mid-dispatch leaves the op carrying the
+		// COMPOSING profile's network row, and the extension's `getNetwork`
+		// ownership check then fails closed at execution instead of letting an
+		// accountless mutation write into the newly active profile's world.
+		const networks = await this.networkService.getNetworksRaw(ctx.profileId, ctx.chainId)
+		if (networks.length === 0) {
+			throw new Error(`No network configured for chainId ${ctx.chainId}`)
+		}
+		return networks[0]!
 	}
 
 	/**

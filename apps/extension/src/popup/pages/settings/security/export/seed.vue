@@ -63,26 +63,11 @@ const handleUnlock = async () => {
 	}
 }
 
-// F-14: best-effort clipboard scrub a while after copy. Extension popups may
-// deny clipboard writes without a transient user gesture, so this is a bonus
-// layer — the on-page warning is the reliable mitigation. We deliberately do
-// NOT add a clipboardRead permission (it would only widen the wallet's
-// clipboard-read surface); the scrub is therefore unconditional, not
-// equals-checked.
-const CLIPBOARD_CLEAR_MS = 60_000
-let clipboardClearTimer
-const isCopied = ref(false)
+// F-14 scrub + honest copy toast live in useSecretClipboardCopy (shared with
+// the key page — the block was previously duplicated word for word here).
+const { isCopied, copySecret } = useSecretClipboardCopy({ toastLabel: "Recovery phrase copied", openToast })
 const handleCopy = () => {
-	isCopied.value = true
-	window.navigator.clipboard.writeText(phrase.value)
-	openToast({ label: "Seed phrase is copied", icon: "copy" })
-	clearTimeout(clipboardClearTimer)
-	clipboardClearTimer = setTimeout(() => {
-		void window.navigator.clipboard.writeText("").catch(() => {})
-	}, CLIPBOARD_CLEAR_MS)
-	setTimeout(() => {
-		isCopied.value = false
-	}, 2500)
+	copySecret(phrase.value)
 }
 
 const onKeydown = (e) => {
@@ -97,13 +82,8 @@ watch(
 )
 
 onBeforeUnmount(() => {
-	// Intentionally do NOT clear `clipboardClearTimer`. Closing this page
-	// (Close button / auto-close) is a route-nav that keeps the popup's JS
-	// context alive, so cancelling here would make the scrub near-inert in the
-	// common copy-then-close flow. The timer only runs an idempotent
-	// `writeText("")` (no secret reference, `.catch`-guarded) — safe to outlive
-	// the component, at the documented small cost of clobbering an unrelated
-	// clipboard copy made within the 60s window (accepted; no clipboardRead).
+	// The scrub timer deliberately survives unmount — see useSecretClipboardCopy's
+	// F-14 rationale. This page owns only its secret-nulling + listener cleanup.
 	phrase.value = null
 	document.removeEventListener("keydown", onKeydown)
 })
@@ -111,9 +91,9 @@ onBeforeUnmount(() => {
 
 <template>
 	<SecretExportLayout
-		heroMain="Seed"
+		heroMain="Recovery"
 		heroSub="Phrase"
-		collapsingLabel="Seed Phrase"
+		collapsingLabel="Recovery Phrase"
 		backTo="/popup/settings/security/export"
 	>
 		<!-- Agreement gate -->
@@ -122,11 +102,11 @@ onBeforeUnmount(() => {
 				<span class="export_section_label">Before you continue</span>
 				<Flex direction="column" gap="8">
 					<Text size="13" height="150" color="body">
-						Seed phrase is direct and full access to your entire profile, once you lose it you will not
+						Your recovery phrase is direct and full access to your entire profile, once you lose it you will not
 						be able to regain access to your profile.
 					</Text>
 					<Text size="13" height="150" color="body">
-						Ensure that seed phrase is securely stored.
+						Ensure that your recovery phrase is securely stored.
 					</Text>
 					<Text size="13" height="150" color="body">
 						By continuing you agree to all risks and responsibilities.
@@ -154,10 +134,10 @@ onBeforeUnmount(() => {
 		<!-- Revealed phrase -->
 		<template v-else>
 			<div class="export_section">
-				<span class="export_section_label">Your seed phrase</span>
+				<span class="export_section_label">Your recovery phrase</span>
 				<SecretRevealCard
 					:value="phrase"
-					label="Seed Phrase"
+					label="Recovery Phrase"
 					testId="reveal-content"
 					:isCopied="isCopied"
 					@copy="handleCopy"
@@ -170,21 +150,21 @@ onBeforeUnmount(() => {
 					<Flex gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
-							Some applications on your PC can have access to your clipboard and read a seed phrase
+							Some applications on your PC can have access to your clipboard and read a recovery phrase
 						</Text>
 					</Flex>
 
 					<Flex gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
-							Storing a text file with sensitive information like a seed phrase can be dangerous
+							Storing a text file with sensitive information like a recovery phrase can be dangerous
 						</Text>
 					</Flex>
 
 					<Flex gap="8">
 						<Icon name="warning" size="12" color="tertiary" style="height: 18px; flex-shrink: 0" />
 						<Text size="12" weight="500" height="150" color="tertiary">
-							Storing a seed phrase in your notebook or in any other physical form can be considered one of
+							Storing a recovery phrase in your notebook or in any other physical form can be considered one of
 							the safest methods, but a paper can be easily lost or destroyed (by water or fire)
 						</Text>
 					</Flex>
@@ -205,7 +185,7 @@ onBeforeUnmount(() => {
 				variant="cta"
 				data-testid="unlock-submit-btn"
 			>
-				Retrieve Seed Phrase
+				Retrieve Recovery Phrase
 			</Button>
 
 			<SecretCountdownClose

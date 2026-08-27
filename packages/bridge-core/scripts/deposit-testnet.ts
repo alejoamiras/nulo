@@ -23,18 +23,17 @@ import { computeSecretHash } from "@aztec/aztec.js/crypto"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { TokenPortalAbi, TokenPortalBytecode } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { createPublicClient, createWalletClient, defineChain, getContract, http } from "viem"
+import { getContract } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { consumeWithdrawal } from "../src/flows"
+import { createL1Clients, createL2Wallet, createNode, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 const TOKEN_NAME = "Nulo USDC"
 const TOKEN_SYMBOL = "USDC"
@@ -49,12 +48,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const OUT = join(here, "..", "..", "..", "contracts", "bridge", "evm", "out")
 const AZTEC = join(here, "..", "..", "..", "contracts", "bridge", "aztec")
 
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
-})
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
 function evmArtifact(name: string): { abi: unknown[]; bytecode: `0x${string}` } {
 	const j = JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8"))
@@ -77,14 +71,12 @@ async function nodeRegistry(): Promise<`0x${string}`> {
 }
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// ─── L1 (Sepolia, viem) ──────────────────────────────────────────
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
 	console.log("L1 deployer", account.address)
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
 	const registry = await nodeRegistry()
 	console.log("testnet registry", registry)
 
@@ -101,8 +93,8 @@ async function main() {
 	const portal = await deployEvm("TokenPortal", TokenPortalAbi, TokenPortalBytecode as `0x${string}`, [])
 
 	// ─── L2 (testnet aztec.js — REAL proofs) ─────────────────────────
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const secret = Fr.random()
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)

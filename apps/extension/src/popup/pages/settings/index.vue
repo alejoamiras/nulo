@@ -107,7 +107,7 @@ onBeforeUnmount(() => {
 				<SettingItem
 					to="/popup/settings/security"
 					title="Security & Backup"
-					description="Auto-lock, seed phrase, secret key"
+					description="Auto-lock, recovery phrase"
 					materialIcon="lock"
 					chevron
 					data-testid="setting-nav-security"

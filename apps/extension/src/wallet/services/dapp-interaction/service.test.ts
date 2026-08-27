@@ -19,6 +19,7 @@ import type { ILogger } from "@/wallet/logger"
 import { type LocalTxOrigin, OriginType } from "@/wallet/services/transaction/service"
 import type { WindowManager } from "@/wallet/services/window-manager/window-manager"
 import { describe, expect, test, vi } from "vitest"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { DappInteractionService } from "./service"
 import type { DappInteraction, ExecutionHooks } from "./spec"
 
@@ -138,5 +139,62 @@ describe("DappInteractionService forwards execution hooks (does not fire the bat
 		const id = "interaction-3"
 		internals.storage.set(id, { id, payload: emptyPayload, handleId: "handle-3", cancellationToken: id })
 		await expect(svc.approveInteraction(id, [], origin)).resolves.toBeUndefined()
+	})
+})
+
+describe("DappInteractionService cancellation linearization (first service claim wins)", () => {
+	const seed = (internals: Internals, id: string) => {
+		internals.storage.set(id, {
+			id,
+			payload: emptyPayload,
+			handleId: `handle-${id}`,
+			cancellationToken: id,
+		})
+	}
+
+	test("cancel processed first → later approve throws JobCancelledError, execution never starts, record retained", async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations })
+		seed(internals, "i-1")
+
+		svc.cancelInteraction("i-1")
+		await expect(svc.approveInteraction("i-1", [], origin)).rejects.toBeInstanceOf(JobCancelledError)
+		await flush()
+		expect(executeOperations).not.toHaveBeenCalled()
+		// The record survives until window dismissal — overlay + cleanup rely on it.
+		expect(internals.storage.has("i-1")).toBe(true)
+		await expect(svc.isInteractionCancelled("i-1")).resolves.toBe(true)
+	})
+
+	test("approve claimed first → later cancel finds nothing, approval proceeds exactly once", async () => {
+		const executeOperations = vi.fn(async () => [])
+		const { svc, internals } = makeService({ executeOperations })
+		seed(internals, "i-2")
+		const cancelled: string[] = []
+		svc.onInteractionCancelled.add((id) => cancelled.push(id))
+
+		await svc.approveInteraction("i-2", [], origin)
+		svc.cancelInteraction("i-2")
+		await flush()
+		expect(executeOperations).toHaveBeenCalledTimes(1)
+		expect(cancelled).toEqual([])
+	})
+
+	test("resolveInteraction refuses a cancelled record too (capability/discovery parity)", async () => {
+		const { svc, internals } = makeService({})
+		seed(internals, "i-4")
+		svc.cancelInteraction("i-4")
+		await expect(svc.resolveInteraction("i-4", { approved: true })).rejects.toBeInstanceOf(JobCancelledError)
+		expect(internals.storage.has("i-4")).toBe(true)
+	})
+
+	test("the cancelled flag is DURABLE before the broadcast — a late subscriber replays it", async () => {
+		const { svc, internals } = makeService({})
+		seed(internals, "i-3")
+		// No subscriber attached when the cancel fires (the lost-event case).
+		svc.cancelInteraction("i-3")
+		await expect(svc.isInteractionCancelled("i-3")).resolves.toBe(true)
+		// An unknown id reads false, never throws (replay must be safe pre-load).
+		await expect(svc.isInteractionCancelled("missing")).resolves.toBe(false)
 	})
 })

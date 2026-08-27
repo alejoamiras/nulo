@@ -16,9 +16,6 @@ import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 import { waitForProfileActive } from "@/composables/waitForProfileActive"
 
-/** Services */
-import { setSentinel } from "@/utils/core"
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { redirectToOnboardingTabIfNeeded } from "@/wallet/utils/onboarding-tab"
@@ -73,7 +70,6 @@ onBeforeMount(() => redirectToOnboardingTabIfNeeded(appStore))
 const { hydrateKnownProfile } = useProfileBootstrap()
 const completeImport = async (profile) => {
 	await setLastActiveProfileId(profile.id)
-	await setSentinel()
 	const outcome = await completeImportWithRecovery({
 		waitForActive: (ms) => waitForProfileActive(appStore, profile.id, ms),
 		recover: async () => (await hydrateKnownProfile())?.id === profile.id && appStore.isLogined,
@@ -99,19 +95,16 @@ const {
 	onCeremonyReject,
 	selectedImportOption,
 	seedPhrase,
-	privateKey,
-	publicKey,
 	password,
 	repeatedPassword,
 	maxPasswordLength,
 	error,
 	isCopied,
 	isAllowedToImportBySeedPhrase,
-	isAllowedToImportByPrivateKey,
-	isAllowedToImportByPublicKey,
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
+	restoreStage,
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
@@ -120,8 +113,6 @@ const {
 	restoreBackup,
 	showRestoreErrorLog,
 	handleImportSeed,
-	handleImportPrivateKey,
-	handleImportPublicKey,
 	handleImportPasskey,
 	handlePasswordInput,
 	handleSecretInput,
@@ -190,7 +181,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Flex direction="column" :class="$style.page">
+	<Flex direction="column" :class="$style.page" :data-restore-stage="restoreStage">
 		<Flex ref="wrapperRef" direction="column" :class="$style.wrapper">
 			<SubPageHeader :backTo="backTo">
 				<template #title>
@@ -255,10 +246,8 @@ onBeforeUnmount(() => {
 				/>
 
 				<ImportSecretForm
-					v-if="selectedImportOption === 'seed' || selectedImportOption === 'private_key' || selectedImportOption === 'public_key'"
+					v-if="selectedImportOption === 'seed'"
 					v-model:seedPhrase="seedPhrase"
-					v-model:privateKey="privateKey"
-					v-model:publicKey="publicKey"
 					v-model:password="password"
 					v-model:repeatedPassword="repeatedPassword"
 					:method="selectedImportOption"
@@ -308,6 +297,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="completeImport(importedProfile)"
+						data-testid="import-full-backup-continue-btn"
 						variant="cta"
 					>
 						Continue
@@ -315,6 +305,7 @@ onBeforeUnmount(() => {
 					<Button
 						v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 						@click="showRestoreErrorLog"
+						data-testid="import-full-backup-view-errors-btn"
 						variant="cta_outline"
 					>
 						View Errors
@@ -329,25 +320,7 @@ onBeforeUnmount(() => {
 					:disabled="!isAllowedToImportBySeedPhrase"
 					variant="cta"
 				>
-					Use Seed Phrase
-				</Button>
-				<Button
-					v-if="selectedImportOption === 'private_key'"
-					@click="handleImportPrivateKey"
-					data-testid="import-private-key-submit-btn"
-					:disabled="!isAllowedToImportByPrivateKey"
-					variant="cta"
-				>
-					Use Plain Key
-				</Button>
-				<Button
-					v-if="selectedImportOption === 'public_key'"
-					@click="handleImportPublicKey"
-					data-testid="import-public-key-submit-btn"
-					:disabled="!isAllowedToImportByPublicKey"
-					variant="cta"
-				>
-					Use Encrypted Key
+					Use Recovery Phrase
 				</Button>
 
 				<Button @click="handleBack" :disabled="restoreStatus === 'progress'" variant="cta_outline">Back</Button>

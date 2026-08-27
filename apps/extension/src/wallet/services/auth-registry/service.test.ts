@@ -19,6 +19,7 @@ import type { AuthwitContent } from "@/wallet/services/execution/spec"
 import { EXECUTION_SERVICE_NAME } from "@/wallet/services/execution/spec"
 import { NETWORK_SERVICE_NAME } from "@/wallet/services/network/spec"
 import { PROFILE_SERVICE_NAME } from "@/wallet/services/profile/spec"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { TASK_SERVICE_NAME } from "@/wallet/services/task/spec"
 import { TRANSACTION_SERVICE_NAME, TxExecutionResult, TxStatus } from "@/wallet/services/transaction/spec"
 import { svc } from "../composition-harness"
@@ -99,7 +100,7 @@ describe("AuthRegistryService.reconcileFromTx — dropped is non-destructive", (
 		api.reset()
 		txUpdated = new EventHandler()
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, {}))
+		services.add(svc(PROFILE_SERVICE_NAME, { getDeletionState: () => new ProfileDeletionState() }))
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
 		services.add(svc(EXECUTION_SERVICE_NAME, {}))
@@ -137,13 +138,14 @@ describe("AuthRegistryService.reconcileFromTx — dropped is non-destructive", (
 
 describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 	let service: AuthRegistryService
+	let api: FakeBrowserApi
 	beforeEach(async () => {
 		// restore() gates on ensureInitialized(); run the real lifecycle over stub
 		// peers (init only subscribes to onAccountDeleted + onTransactionUpdated).
-		const api = new FakeBrowserApi()
+		api = new FakeBrowserApi()
 		api.reset()
 		const services = new ServiceCollection()
-		services.add(svc(PROFILE_SERVICE_NAME, {}))
+		services.add(svc(PROFILE_SERVICE_NAME, { getDeletionState: () => new ProfileDeletionState() }))
 		services.add(svc(NETWORK_SERVICE_NAME, {}))
 		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
 		services.add(svc(EXECUTION_SERVICE_NAME, {}))
@@ -162,7 +164,7 @@ describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 		// parse-reject it up front so it never reaches storage.
 		const bad = { id: 0, account: A, hash: "0xh", content: null } as unknown as Authwit
 
-		const [restored] = await service.restore([bad])
+		const [restored] = await service.restore([bad], "p1")
 
 		expect(restored.restoreError).toBeTruthy()
 		expect(await service.getAuthwits(A)).toHaveLength(0)
@@ -171,10 +173,170 @@ describe("AuthRegistryService.restore — hostile-row validation (P1)", () => {
 	test("a malformed row (non-string hash) does not abort the batch — the valid sibling lands", async () => {
 		const bad = { id: 0, account: A, hash: 123, content } as unknown as Authwit
 
-		const restored = await service.restore([bad, authwit(A, "0xgood")])
+		const restored = await service.restore([bad, authwit(A, "0xgood")], "p1")
 
 		expect(restored[0].restoreError).toBeTruthy()
 		expect(restored[1].restoreError).toBeUndefined()
 		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xgood"])
+	})
+
+	/** Codex r3: the journal is keyed BY the embedded numeric id — an aliased copy of row 5
+	 *  under key 9 must read as absent, so revoke(9) refuses instead of touching row 5. */
+	test("an id-aliased row (5 copied under key 9) reads as absent — revoke(9) refuses", async () => {
+		// revokeAuthwits gates on ensureInitialized(); run the real lifecycle over stub peers.
+		const api = new FakeBrowserApi()
+		api.reset()
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { getDeletionState: () => new ProfileDeletionState() }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		const service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
+		services.add(service)
+		await services.start()
+		// Five rows so the journal holds an honest row at key @5 (ids mint sequentially).
+		await service.recordPendingAuthwits(
+			A,
+			[
+				{ hash: "0xh1", content },
+				{ hash: "0xh2", content },
+				{ hash: "0xh3", content },
+				{ hash: "0xh4", content },
+				{ hash: "0xh5", content },
+			],
+			"0xtx",
+		)
+		const all = await api.storage.local.get()
+		const rowFiveKey = Object.keys(all).find((k) => k === "nulo:core:auth-registry@5")
+		expect(rowFiveKey).toBeTruthy()
+		// Copy row 5 VERBATIM (embedded id stays 5) under key 9.
+		await api.storage.local.set({ "nulo:core:auth-registry@9": all[rowFiveKey!] })
+
+		await expect(service.revokeAuthwits("network-1", A, [9], undefined as never)).rejects.toThrow(/doesn't exist/)
+		// The original row is untouched and still lists.
+		expect((await service.getAuthwits(A)).map((r) => r.hash)).toEqual(["0xh1", "0xh2", "0xh3", "0xh4", "0xh5"])
+	}, 15_000)
+
+	// N-24 pins — restore dedupes on the compound (account, hash), matching the
+	// live-write path's invariant. Duplicates from a cloned/re-imported backup
+	// otherwise each mint a fresh id and silently burn per-account cap headroom.
+
+	test("(N-24) an intra-batch duplicate (account, hash) is restoreError-tagged; the first lands", async () => {
+		const restored = await service.restore([authwit(A, "0xdup"), authwit(A, "0xdup")], "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeTruthy()
+		expect(await service.getAuthwits(A)).toHaveLength(1)
+	})
+
+	test("(N-24) a pair already in storage (live-recorded) blocks its restore", async () => {
+		await service.recordPendingAuthwits(A, [{ hash: "0xlive", content }], "0xtx")
+		const [restored] = await service.restore([authwit(A, "0xlive")], "p1")
+		expect(restored.restoreError).toBeTruthy()
+		expect(await service.getAuthwits(A)).toHaveLength(1)
+	})
+
+	test("(N-24) the same hash under TWO accounts restores clean — the key is compound, not bare-hash", async () => {
+		const restored = await service.restore([authwit("0xalice", "0xshared"), authwit("0xbob", "0xshared")], "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeUndefined()
+		expect(await service.getAuthwits("0xalice")).toHaveLength(1)
+		expect(await service.getAuthwits("0xbob")).toHaveLength(1)
+	})
+
+	test("(N-24) delimiter-forged pairs are distinct — ('a::b','c') and ('a','b::c') both land", async () => {
+		// An in-band string delimiter would collapse these two identities; the
+		// JSON-array encoding keeps them injective.
+		const restored = await service.restore([authwit("a::b", "c"), authwit("a", "b::c")], "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toBeUndefined()
+	})
+
+	test("(N-24) a hostile decodable row at MAX_SAFE_INTEGER fails the ROW — no hang, no hidden write", async () => {
+		// Past MAX_SAFE_INTEGER the float cursor stops advancing (id++ is a
+		// no-op): an unguarded skip loop spins forever under the service lock,
+		// and an unguarded write lands key-identity-hidden on read. Both
+		// boundary keys are seeded so the loop's own guard (not just the
+		// post-loop check) is what exits.
+		const max = Number.MAX_SAFE_INTEGER
+		await api.storage.local.set({
+			[`nulo:core:auth-registry@${max}`]: JSON.stringify({ id: max, account: A, hash: "0xmax", content: {} }),
+			[`nulo:core:auth-registry@${max + 1}`]: JSON.stringify({ junk: true }),
+		})
+		const restored = await service.restore([authwit(A, "0xnew1"), authwit(A, "0xnew2")], "p1")
+		expect(restored[0].restoreError).toBeTruthy()
+		expect(restored[1].restoreError).toBeTruthy()
+		// Nothing landed at (or past) the unsafe boundary beyond the seeds.
+		const raw = await api.storage.local.get(null)
+		const authKeys = Object.keys(raw).filter((k) => k.startsWith("nulo:core:auth-registry@"))
+		expect(authKeys).toHaveLength(2)
+	}, 10_000)
+
+	test("(N-24) a codec-hidden raw row's pair still blocks its duplicate, and its key is never overwritten", async () => {
+		// Seed a raw row that carries a valid (account, hash) but a codec-breaking
+		// content — decoded reads hide it, yet its identity must still dedupe and
+		// its numeric key must stay occupied.
+		await api.storage.local.set({
+			"nulo:core:auth-registry@1": JSON.stringify({ id: 1, account: A, hash: "0xhidden", content: null }),
+		})
+		const restored = await service.restore([authwit(A, "0xhidden"), authwit(A, "0xnew")], "p1")
+		expect(restored[0].restoreError).toBeTruthy() // hidden pair blocks its duplicate
+		expect(restored[1].restoreError).toBeUndefined()
+		// The hidden row's raw bytes are intact (key @1 not clobbered by the cursor).
+		const raw = (await api.storage.local.get("nulo:core:auth-registry@1"))["nulo:core:auth-registry@1"]
+		expect(JSON.parse(raw as string)).toMatchObject({ id: 1, hash: "0xhidden", content: null })
+	})
+})
+
+describe("AuthRegistryService.restore — deletion fence (N-14, threaded profileId)", () => {
+	async function makeHarness() {
+		const api = new FakeBrowserApi()
+		api.reset()
+		const deletionState = new ProfileDeletionState()
+		const services = new ServiceCollection()
+		services.add(svc(PROFILE_SERVICE_NAME, { getDeletionState: () => deletionState }))
+		services.add(svc(NETWORK_SERVICE_NAME, {}))
+		services.add(svc(ACCOUNT_SERVICE_NAME, { onAccountDeleted: new EventHandler() }))
+		services.add(svc(EXECUTION_SERVICE_NAME, {}))
+		services.add(svc(TRANSACTION_SERVICE_NAME, { onTransactionUpdated: new EventHandler() }))
+		services.add(svc(TASK_SERVICE_NAME, {}))
+		const service = new AuthRegistryService(new LoggerStore(new ConfigStore()) as never, api)
+		services.add(service)
+		await services.start()
+		return { api, deletionState, service }
+	}
+	const rows = [
+		{ id: 0, account: "0xacc", hash: "0xh1", content },
+		{ id: 0, account: "0xacc", hash: "0xh2", content },
+	]
+
+	test("a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+		const h = await makeHarness()
+		const origSet = h.api.storage.local.set.bind(h.api.storage.local)
+		let fired = false
+		h.api.storage.local.set = async (items: Record<string, unknown>) => {
+			await origSet(items)
+			if (!fired) {
+				fired = true
+				h.deletionState.beginDeletion("p1")
+			}
+		}
+		const restored = await h.service.restore(rows, "p1")
+		expect(restored[0].restoreError).toBeUndefined()
+		expect(restored[1].restoreError).toMatch(/deleted/)
+		expect(await h.service.getAuthwits("0xacc")).toHaveLength(1)
+	})
+
+	test("fails closed when the created-profile id is missing", async () => {
+		const h = await makeHarness()
+		await expect(h.service.restore(rows, undefined as never)).rejects.toThrow(/profile id/)
+		expect(await h.service.getAuthwits("0xacc")).toHaveLength(0)
+	})
+
+	test("positive control: no deletion → both rows land", async () => {
+		const h = await makeHarness()
+		const restored = await h.service.restore(rows, "p1")
+		expect(restored.every((r) => r.restoreError === undefined)).toBe(true)
 	})
 })

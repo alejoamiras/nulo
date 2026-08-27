@@ -1,9 +1,13 @@
 import { computed, ref, watch } from "vue"
-import { UserRejectedError } from "@nulo/extension-messaging/errors"
+import { DuplicateWalletError, UserRejectedError } from "@nulo/extension-messaging/errors"
+import { useCacheStore } from "@/stores/cache.store"
+import { usePopupStore } from "@/stores/popup.store"
 import { useFullBackupImport } from "@/composables/useFullBackupImport"
 import { usePasskeyCeremony } from "@/composables/usePasskeyCeremony"
 import { useProfileNameField } from "@/composables/useProfileNameField"
-import { pickFile } from "@/utils"
+import { FileTooLargeError, pickFile } from "@/utils"
+import { copyToClipboard } from "@/utils/clipboard"
+import { MAX_BACKUP_FILE_BYTES } from "@/utils/full-backup-helpers"
 import { managers } from "@/utils/core"
 
 /**
@@ -54,10 +58,70 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 
 	const { request: ceremonyRequest, runCeremony, onResolve: onCeremonyResolve, onReject: onCeremonyReject } = usePasskeyCeremony()
 
+	const cacheStore = useCacheStore()
+	const popupStore = usePopupStore()
+	/** `cacheStore.confirm` is an untyped shared `reactive({})` (every other consumer is an
+	 *  unchecked SFC). Narrow it here to the fields ConfirmPopup actually reads. */
+	const confirmSlot = cacheStore.confirm as {
+		title?: string
+		description?: string
+		confirm_text?: string
+		callback?: () => void
+	}
+	/** Set once the user confirms the duplicate-recovery-phrase warning; the retry passes it to
+	 *  the service. Reset per attempt so a confirm never leaks into a later, unrelated import. */
+	const allowDuplicate = ref(false)
+
+	/**
+	 * Warn-and-confirm for a duplicate recovery phrase (owner policy: a warned choice, never a
+	 * hard block). `run` is re-invoked with `allowDuplicate` set if the user confirms; any other
+	 * error propagates untouched. Shared by the seed + passkey + full-backup import paths, so the
+	 * copy and the retry semantics can't drift between them.
+	 */
+	async function withDuplicateConfirm<T>(run: () => Promise<T>): Promise<T | undefined> {
+		try {
+			return await run()
+		} catch (err) {
+			if (!(err instanceof DuplicateWalletError)) throw err
+			const existing = (err.details as { existingProfileName?: string } | undefined)?.existingProfileName
+			const confirmed = await new Promise<boolean>((resolve) => {
+				let settled = false
+				const settle = (value: boolean) => {
+					if (settled) return
+					settled = true
+					stop()
+					resolve(value)
+				}
+				confirmSlot.title = "You already have this wallet"
+				confirmSlot.description = existing
+					? `“${existing}” already uses this recovery phrase. Both profiles will hold the same accounts and funds. Add it anyway?`
+					: "Another profile already uses this recovery phrase. Both profiles will hold the same accounts and funds. Add it anyway?"
+				confirmSlot.confirm_text = "Add anyway"
+				// ConfirmPopup invokes `callback` on confirm and just closes on cancel/dismiss —
+				// there is no cancel hook — so the close transition IS the cancel signal. Watch it
+				// (the watcher starts before `open`, and `settle` is idempotent, so a confirm that
+				// also closes can't resolve twice).
+				confirmSlot.callback = () => settle(true)
+				const stop = watch(
+					() => popupStore.isOpened("confirm"),
+					(isOpen, wasOpen) => {
+						if (wasOpen && !isOpen) settle(false)
+					},
+				)
+				popupStore.open("confirm")
+			})
+			if (!confirmed) return undefined
+			allowDuplicate.value = true
+			try {
+				return await run()
+			} finally {
+				allowDuplicate.value = false
+			}
+		}
+	}
+
 	const selectedImportOption = ref<string | null>(null)
 	const seedPhrase = ref<string | undefined>(undefined)
-	const privateKey = ref<string | undefined>(undefined)
-	const publicKey = ref<string | undefined>(undefined)
 	const password = ref("")
 	const repeatedPassword = ref("")
 	const maxPasswordLength = 128
@@ -85,8 +149,10 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	const isCopied = ref(false)
 	function handleCopyError() {
 		isCopied.value = true
-		window.navigator.clipboard.writeText(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`)
-		opts.openToast({ label: "Error is copied", icon: "copy" })
+		void copyToClipboard(`${error.value.title}${error.value.tooltip ? `: ${error.value.tooltip}` : ""}`, opts.openToast, {
+			success: { label: "Error is copied" },
+			failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+		})
 		setTimeout(() => {
 			isCopied.value = false
 		}, 1_500)
@@ -103,21 +169,12 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	// an empty name shakes the input instead of silently disabling the buttons.
 	const isAllowedToContinue = computed(() => {
 		if (!password.value || password.value.length < 8) return false
-		if (selectedImportOption.value !== "public_key" && (!repeatedPassword.value || password.value !== repeatedPassword.value))
-			return false
+		if (!repeatedPassword.value || password.value !== repeatedPassword.value) return false
 		return true
 	})
 	const isAllowedToImportBySeedPhrase = computed(() => {
 		if (!isAllowedToContinue.value) return false
 		return seedPhrase.value?.split(" ").length === 24 && password.value.length >= 8
-	})
-	const isAllowedToImportByPrivateKey = computed(() => {
-		if (!isAllowedToContinue.value) return false
-		return !!privateKey.value
-	})
-	const isAllowedToImportByPublicKey = computed(() => {
-		if (!isAllowedToContinue.value) return false
-		return !!publicKey.value
 	})
 
 	async function fetchExistingNames(): Promise<string[]> {
@@ -135,59 +192,19 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 				isImporting.value = false
 				return
 			}
-			const profile = await managers.profile.importMnemonic(trimmedName.value, (seedPhrase.value ?? "").split(" "), password.value)
+			const profile = await withDuplicateConfirm(() =>
+				managers.profile.importMnemonic(
+					trimmedName.value,
+					(seedPhrase.value ?? "").split(" "),
+					password.value,
+					allowDuplicate.value,
+				),
+			)
+			// `undefined` = the user declined the duplicate warning; stay on the form.
+			if (!profile) return
 			await opts.completeImport(profile)
 		} catch (err) {
 			fillUnknownImportError(err)
-		} finally {
-			isImporting.value = false
-		}
-	}
-
-	const handleImportPrivateKey = async () => {
-		if (!isAllowedToImportByPrivateKey.value || isImporting.value) return
-		isImporting.value = true
-		try {
-			const existingNames = await fetchExistingNames()
-			if (!validateName({ existingNames })) {
-				isImporting.value = false
-				return
-			}
-			const profile = await managers.profile.importPlain(trimmedName.value, privateKey.value as string, password.value)
-			await opts.completeImport(profile)
-		} catch (err) {
-			// `profile/service.ts` throws `new Error("Invalid secret length")` —
-			// arrives as an Error instance across the RPC boundary, so match on
-			// `.message`, not string-equality on the value itself.
-			if (err instanceof Error && err.message === "Invalid secret length") {
-				fillError("secret", "Invalid key length")
-			} else {
-				fillUnknownImportError(err)
-			}
-		} finally {
-			isImporting.value = false
-		}
-	}
-
-	const handleImportPublicKey = async () => {
-		if (!isAllowedToImportByPublicKey.value || isImporting.value) return
-		isImporting.value = true
-		try {
-			const existingNames = await fetchExistingNames()
-			if (!validateName({ existingNames })) {
-				isImporting.value = false
-				return
-			}
-			const profile = await managers.profile.importEncrypted(trimmedName.value, publicKey.value as string, password.value)
-			await opts.completeImport(profile)
-		} catch (err) {
-			if (err instanceof Error && err.message === "Invalid password") {
-				fillError("password", "Wrong password")
-			} else if (err instanceof Error && err.message === "Invalid secret length") {
-				fillError("secret", "Invalid encrypted key")
-			} else {
-				fillUnknownImportError(err)
-			}
 		} finally {
 			isImporting.value = false
 		}
@@ -205,7 +222,11 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 			// Discovery `get` — no allowedCredentials; the user picks from their
 			// available passkeys.
 			const credData = await runCeremony({ mode: "get" })
-			const profile = await managers.profile.importPasskey(trimmedName.value, credData)
+			// The SAME credentialData is reused on the confirm-retry — no second WebAuthn ceremony.
+			const profile = await withDuplicateConfirm(() =>
+				managers.profile.importPasskey(trimmedName.value, credData, allowDuplicate.value),
+			)
+			if (!profile) return
 			await opts.completeImport(profile)
 		} catch (err) {
 			// User cancel: silent return (no warning notification on Escape /
@@ -222,6 +243,7 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		selectedBackup,
 		decryptionPassword,
 		restoreStatus,
+		restoreStage,
 		importedProfile,
 		isAllowedToImportBackup,
 		isRestoreHasErrors,
@@ -236,11 +258,31 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		repeatedPassword,
 		fillError,
 		clearError,
-		pickFile,
+		// Capped pick: the byte gate must run inside pickFile (compressed files
+		// inflate in there, before any caller-side .size check could). The cap
+		// error maps to the flow's error banner and the flow exits through its
+		// existing no-file path.
+		pickFile: async () => {
+			try {
+				return await pickFile(undefined, false, true, MAX_BACKUP_FILE_BYTES)
+			} catch (err) {
+				if (err instanceof FileTooLargeError) {
+					fillError(
+						"full_backup",
+						"Backup File Too Large",
+						"The backup file is too large to import. Please select a correct backup file.",
+					)
+					return undefined
+				}
+				throw err
+			}
+		},
 		completeImport: opts.completeImport,
 		runCeremony,
 		profileName,
 		showErrorLog: opts.showErrorLog,
+		allowDuplicate,
+		confirmDuplicate: withDuplicateConfirm,
 	})
 
 	// Guarded prefill: fill the Profile-name input from a parsed backup, but
@@ -254,8 +296,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 	// to retype it after hitting Back.
 	function clearFormState() {
 		selectedImportOption.value = null
-		privateKey.value = undefined
-		publicKey.value = undefined
 		seedPhrase.value = undefined
 		password.value = ""
 		repeatedPassword.value = ""
@@ -283,8 +323,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		// import state
 		selectedImportOption,
 		seedPhrase,
-		privateKey,
-		publicKey,
 		password,
 		repeatedPassword,
 		maxPasswordLength,
@@ -293,12 +331,11 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		isCopied,
 		// per-method gates
 		isAllowedToImportBySeedPhrase,
-		isAllowedToImportByPrivateKey,
-		isAllowedToImportByPublicKey,
 		// full backup
 		selectedBackup,
 		decryptionPassword,
 		restoreStatus,
+		restoreStage,
 		importedProfile,
 		isAllowedToImportBackup,
 		isRestoreHasErrors,
@@ -308,8 +345,6 @@ export function useProfileImportFlow(opts: UseProfileImportFlowOptions) {
 		showRestoreErrorLog,
 		// handlers
 		handleImportSeed,
-		handleImportPrivateKey,
-		handleImportPublicKey,
 		handleImportPasskey,
 		handlePasswordInput,
 		handleSecretInput,

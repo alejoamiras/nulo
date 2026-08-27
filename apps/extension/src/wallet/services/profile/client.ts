@@ -12,6 +12,7 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 	public readonly onProfileUpdated = new EventHandler<ProfileInfo>()
 	public readonly onProfileDeleted = new EventHandler<ProfileInfo>()
 	public readonly onActiveProfileChanged = new EventHandler<ProfileInfo | undefined>()
+	public readonly onImportedKeysDegraded = new EventHandler<ProfileInfo>()
 
 	public constructor(name?: string) {
 		super(PROFILE_SERVICE_NAME, new LoggerServiceClient(), name)
@@ -73,28 +74,24 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		return this.request("deleteProfile", id)
 	}
 
-	public importEncrypted(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		return this.request("importEncrypted", name, secret, password)
+	public importMnemonic(name: string, mnemonic: string[], password: string, allowDuplicate?: boolean): Promise<ProfileInfo> {
+		return this.request("importMnemonic", name, mnemonic, password, allowDuplicate)
 	}
 
-	public importPlain(name: string, secret: string, password: string): Promise<ProfileInfo> {
-		return this.request("importPlain", name, secret, password)
-	}
-
-	public importMnemonic(name: string, mnemonic: string[], password: string): Promise<ProfileInfo> {
-		return this.request("importMnemonic", name, mnemonic, password)
-	}
-
-	public importPasskey(name: string, credentialData?: PasskeyCredentialData): Promise<ProfileInfo> {
-		return this.request("importPasskey", name, credentialData)
-	}
-
-	public exportEncrypted(id: string): Promise<string> {
-		return this.request("exportEncrypted", id)
+	public importPasskey(name: string, credentialData?: PasskeyCredentialData, allowDuplicate?: boolean): Promise<ProfileInfo> {
+		return this.request("importPasskey", name, credentialData, allowDuplicate)
 	}
 
 	public exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): Promise<string> {
 		return this.request("exportPlain", id, password, credentialData)
+	}
+
+	public exportBackupMaterial(id: string, password: string): Promise<{ masterKey: string; entropy: string; importedKeysDek: string }> {
+		return this.request("exportBackupMaterial", id, password)
+	}
+
+	public getProfileDekSealed(id: string): Promise<string> {
+		return this.request("getProfileDekSealed", id)
 	}
 
 	public exportMnemonic(id: string, password: string): Promise<string[]> {
@@ -106,8 +103,9 @@ export class ProfileServiceClient extends ServiceClient<Methods, Events> impleme
 		secret: RestoreSecret,
 		password?: string,
 		credentialData?: PasskeyCredentialData,
+		allowDuplicate?: boolean,
 	): Promise<Restored<ProfileInfo>> {
-		return this.request("restore", profile, secret, password, credentialData)
+		return this.request("restore", profile, secret, password, credentialData, allowDuplicate)
 	}
 
 	public finalizeRestore(id: string, password?: string): Promise<ProfileInfo> {

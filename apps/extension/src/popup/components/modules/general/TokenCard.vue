@@ -1,7 +1,4 @@
 <script setup>
-/** Vendor */
-import { DateTime } from "luxon"
-
 /** Services */
 import { PriceServiceClient } from "@/wallet/services/price/client"
 
@@ -15,7 +12,6 @@ import { balanceFormatted } from "@/utils/amount.js"
 import { useAppStore } from "@/stores/app.store"
 const appStore = useAppStore()
 
-const emit = defineEmits(["onRefreshBalance"])
 const props = defineProps({
 	tokenBalance: {
 		type: Object,
@@ -25,8 +21,8 @@ const props = defineProps({
 		type: Object,
 		required: false,
 	},
-	/** §3: this token's incoming public-transfer history is cold-start backfilling — drives the
-	 *  "Catching up…" affordance. Grafted by TokensView from IncomingTransferService's sync state. */
+	/** §3: this token's incoming public-transfer history is genuinely behind — drives the
+	 *  catching-up dot. Threshold-gated by TokensView from IncomingTransferService's sync state. */
 	backfilling: {
 		type: Boolean,
 		default: false,
@@ -51,12 +47,10 @@ onBeforeUnmount(() => {
 })
 const privateFormatted = computed(() => balanceFormatted(privateRaw.value, decimals.value, 6).value)
 const publicFormatted = computed(() => balanceFormatted(publicRaw.value, decimals.value, 6).value)
-const hasPrivate = computed(() => privateRaw.value !== 0n)
-const hasPublic = computed(() => publicRaw.value !== 0n)
 // Treat updatedAt===0 as "balance has never synced" — the projector hasn't run yet
 // so the "0" placeholder in the row would be misleading. Render a spinner instead.
 const isInitialSync = computed(() => !!props.tokenBalance && props.tokenBalance.updatedAt === 0)
-// §3: the balance is known but incoming history is still hydrating → a subtle caption beside the balance.
+// §3: the balance is known but incoming history is still hydrating → the ambient dot beside the symbol.
 const catchingUp = computed(() => props.backfilling && !isInitialSync.value)
 // §3: balance ALSO unknown (fresh add) → escalate the loading block from a plain spinner to a shimmer.
 const catchingUpUnresolved = computed(() => props.backfilling && isInitialSync.value)
@@ -64,44 +58,52 @@ const description = computed(() => {
 	if (props.tokenBalance?.isMinting) return "Minting more tokens..."
 	if (catchingUpUnresolved.value) return "Catching up…"
 	if (isInitialSync.value) return "Loading balance…"
-	if (props.tokenBalance?.isUpdating) return "Refreshing balance..."
 	if (props.newToken) return "Minting in progress..."
 
 	return token.value?.name || "unknown"
 })
 
-const isHovered = ref(false)
-
-const handleRefreshBalance = async () => {
-	if (!props.tokenBalance) return
-
-	emit("onRefreshBalance")
-}
+// Routine refreshes are deliberately SILENT per row — batch refreshes would animate every row at
+// once; TokensView's section-header dot is the ONE activity signal. Only exceptions speak here:
+// the failed dim below + the first-load skeleton.
+// The row's last projection FAILED (persisted `syncFailure`, cleared by the
+// next success): dim the last-known amount + say so. Gated on !isUpdating so a
+// retry in flight shows its honest in-flight state instead (the loading block
+// during an initial sync; silence after). Deliberately NOT gated on
+// isInitialSync: a never-synced row whose FIRST projection failed must show
+// the failure, not an infinite "Loading balance…" spinner.
+const syncFailed = computed(() => !!props.tokenBalance?.syncFailure && !props.tokenBalance?.isUpdating)
 </script>
 
 <template>
-	<RouterLink
-		v-if="tokenBalance"
-		:to="`/popup/tokens/${token?.id}`"
-		data-testid="tokens-card"
-		:class="$style.row"
-		@pointerenter="isHovered = true"
-		@pointerleave="isHovered = false"
-	>
+	<RouterLink v-if="tokenBalance" :to="`/popup/tokens/${token?.id}`" data-testid="tokens-card" :class="$style.row">
 		<Flex direction="column" gap="2">
-			<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
-				{{ token.symbol }}
-			</span>
-			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
-			<span v-else :class="$style.type_label">PRIVATE / PUBLIC</span>
-			<Flex v-if="catchingUp" align="center" gap="4" :class="$style.catching_up" data-testid="token-catching-up">
-				<span :class="$style.pulse_dot" />
-				<span :class="$style.catching_up_text">Catching up…</span>
+			<Flex align="center" gap="6">
+				<!-- §3 catching-up: an ambient dot, not a caption — it renders only when the scan is
+				     genuinely behind (TokensView's threshold gate) and explains itself via tooltip.
+				     Focusable so the tooltip is keyboard-reachable. -->
+				<Tooltip v-if="catchingUp" side="top" position="start">
+					<span
+						:class="$style.pulse_dot_wrap"
+						data-testid="token-catching-up"
+						tabindex="0"
+						role="img"
+						aria-label="Catching up on incoming transfers"
+					>
+						<span :class="$style.pulse_dot" />
+					</span>
+					<template #content>Catching up on incoming transfers</template>
+				</Tooltip>
+				<span :class="$style.symbol" data-testid="token-symbol" :data-symbol="token.symbol">
+					{{ token.symbol }}
+				</span>
 			</Flex>
+			<span v-if="fiatLabel" data-testid="token-fiat" :class="$style.fiat">{{ fiatLabel }}</span>
+			<span v-else :class="$style.fiat">{{ token?.name || "unknown" }}</span>
 		</Flex>
 
 		<Flex
-			v-if="isInitialSync"
+			v-if="isInitialSync && !syncFailed"
 			align="center"
 			gap="6"
 			data-testid="token-balance-loading"
@@ -112,10 +114,17 @@ const handleRefreshBalance = async () => {
 			<span :class="$style.loading_text">{{ description }}</span>
 		</Flex>
 		<Flex v-else direction="column" align="end" gap="2">
-			<span :class="$style.amount">{{ totalBalance || 0 }}</span>
+			<span :class="[$style.amount, syncFailed && $style.amount_stale]">{{ totalBalance || 0 }}</span>
 			<span :class="$style.detail">
-				<span :class="$style.split_dot" /> {{ privateFormatted }}&ensp;<span :class="[$style.split_dot, $style.split_dot_pub]" />
-				{{ publicFormatted }}
+				<span :class="$style.icon_private"><Icon name="lock" size="9" /></span>
+				{{ privateFormatted }}
+				<span :class="$style.pub_group">
+					<span :class="$style.icon_public"><Icon name="globe" size="9" /></span>
+					{{ publicFormatted }}
+				</span>
+			</span>
+			<span v-if="syncFailed" :class="$style.failed_text" data-testid="token-balance-failed">
+				Couldn't refresh
 			</span>
 		</Flex>
 	</RouterLink>
@@ -135,7 +144,7 @@ const handleRefreshBalance = async () => {
 	align-items: center;
 	justify-content: space-between;
 
-	padding: 16px 0;
+	padding: 8px 0;
 	cursor: pointer;
 	text-decoration: none;
 
@@ -182,23 +191,30 @@ const handleRefreshBalance = async () => {
 .detail {
 	font-family: var(--font-mono);
 	font-size: 10px;
-	color: var(--nulo-outline);
+	color: var(--nulo-secondary);
 
 	display: inline-flex;
 	align-items: center;
 	gap: 3px;
 }
 
-/* Same private/public dot vocabulary as BalanceView's header breakdown. */
-.split_dot {
-	display: inline-block;
-	width: 5px;
-	height: 5px;
-	background: var(--nulo-accent);
+/* Same private/public vocabulary as BalanceView's breakdown: bone lock = private,
+   grey globe = public. Icons inherit via currentColor. */
+.icon_private {
+	display: inline-flex;
+	color: var(--nulo-accent);
 }
 
-.split_dot_pub {
-	background: var(--nulo-outline);
+.icon_public {
+	display: inline-flex;
+	color: var(--nulo-secondary);
+}
+
+.pub_group {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	margin-left: 6px;
 }
 
 .loading_block {
@@ -211,11 +227,6 @@ const handleRefreshBalance = async () => {
 	color: var(--nulo-outline);
 }
 
-/* §3 "Catching up…" — a status line under the symbol/fiat while incoming history hydrates. */
-.catching_up {
-	margin-top: 2px;
-}
-
 .pulse_dot {
 	width: 5px;
 	height: 5px;
@@ -223,6 +234,25 @@ const handleRefreshBalance = async () => {
 	background: var(--nulo-accent);
 
 	animation: token_pulse 2s linear infinite;
+}
+
+/* §3 catching-up dot: sits LEFT of the symbol, glows softly (it must be findable without a
+   caption), explains itself via the wrapping Tooltip — hover or keyboard focus. */
+.pulse_dot_wrap {
+	display: inline-flex;
+	align-items: center;
+	cursor: help;
+	outline: none;
+}
+
+.pulse_dot_wrap .pulse_dot {
+	/* Glow follows the accent so it works in BOTH themes (bone halo in dark, warm in light). */
+	box-shadow: 0 0 4px 1px color-mix(in srgb, var(--nulo-accent) 35%, transparent);
+}
+
+.pulse_dot_wrap:focus-visible {
+	outline: 1px solid var(--nulo-accent);
+	outline-offset: 2px;
 }
 
 @keyframes token_pulse {
@@ -237,10 +267,16 @@ const handleRefreshBalance = async () => {
 	}
 }
 
-.catching_up_text {
+/* Last projection failed: keep the last-known amount visible, dimmed (the
+   GasBalanceCard stale vocabulary), with the reason underneath. */
+.amount_stale {
+	opacity: 0.55;
+}
+
+.failed_text {
 	font-family: var(--font-mono);
 	font-size: 10px;
-	color: var(--nulo-secondary);
+	color: var(--red);
 }
 
 /* Escalated loading affordance (balance ALSO unresolved): a shimmer where the amount would be. */

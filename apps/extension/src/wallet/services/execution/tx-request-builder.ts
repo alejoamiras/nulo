@@ -72,6 +72,11 @@ export interface BuiltStandardTx {
 	pxe: IPXE
 	account: IAccountContract
 	network: Network
+	/** The EXACT chain-identity pair the build asserted and signed under —
+	 *  consumers snapshotting chain identity must use THIS, never refetch
+	 *  (a refetch after an endpoint flip would bind the snapshot to a chain
+	 *  the request was not built for). */
+	chainIdentity: { l1ChainId: number; rollupVersion: number }
 	nonce: Fr
 	txCalls: TxCall[]
 	/** Public authwits this build will write on-chain (`set_authorized`). Recording
@@ -79,6 +84,16 @@ export interface BuiltStandardTx {
 	 *  during fee estimate, or a rejected approval — records nothing. NO_FROM builds
 	 *  carry an empty array (they emit no `add_public_authwit`). */
 	pendingPublicAuthwits: { account: string; hash: string; content: AuthwitContent }[]
+	/** Node-advertised per-tx gas admission limit, snapshotted from the SAME
+	 *  `getNodeInfo()` the build asserted chain identity against — the
+	 *  finalize-time clamp reads THIS, never a live refetch (zero extra RPCs,
+	 *  and no chance of clamping against a flipped endpoint). */
+	txsLimits: Gas
+	/** True iff this build wrapped the account constructor (first-tx
+	 *  multicall). Send-path provenance for the existing-nullifier
+	 *  classification — the flag lives here because `TxExecutionRequest`
+	 *  itself cannot carry it. */
+	initializesAccount: boolean
 }
 
 /** NO_FROM (DefaultEntrypoint) variant — no account nonce exists on that path. */
@@ -347,6 +362,7 @@ export class TxRequestBuilder {
 			}
 
 			const payload = new ExecutionPayload(calls, authwits, capsules, extraHashedArgs)
+			const buildMeta: { initializesAccount?: boolean } = {}
 			const txRequest = await account.buildTxExecutionRequest(
 				node,
 				pxe,
@@ -358,10 +374,23 @@ export class TxRequestBuilder {
 				},
 				chainInfoFrom(nodeInfo),
 				gasSettings,
+				buildMeta,
 			)
 
 			task.complete()
-			return { txRequest, node, pxe, account, network, nonce, txCalls, pendingPublicAuthwits }
+			return {
+				txRequest,
+				initializesAccount: buildMeta.initializesAccount === true,
+				node,
+				pxe,
+				account,
+				network,
+				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+				nonce,
+				txCalls,
+				pendingPublicAuthwits,
+				txsLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
+			}
 		} catch (error) {
 			task.fail(error)
 			throw error
@@ -482,7 +511,22 @@ export class TxRequestBuilder {
 
 			task.complete()
 			// NO_FROM emits no add_public_authwit, so there is nothing to record.
-			return { txRequest, node, pxe, account, network, txCalls, pendingPublicAuthwits: [] }
+			// A NO_FROM build never wraps an account ctor (it targets a contract
+			// entrypoint directly), so it can never lose an initialization race.
+			return {
+				initializesAccount: false,
+				txRequest,
+				node,
+				pxe,
+				account,
+				network,
+				chainIdentity: { l1ChainId: nodeInfo.l1ChainId, rollupVersion: nodeInfo.rollupVersion },
+				txCalls,
+				pendingPublicAuthwits: [],
+				// NO_FROM gasSettings are ALREADY capped by construction — the
+				// `GasSettings.fallback` above uses these limits directly.
+				txsLimits: new Gas(nodeInfo.txsLimits.gas.daGas, nodeInfo.txsLimits.gas.l2Gas),
+			}
 		} catch (error) {
 			task.fail(error)
 			throw error

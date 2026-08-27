@@ -41,13 +41,29 @@ Do not start Phase 1 before the answers; on a reset, do not run any `--broadcast
 - The two noir patches: rename `patches/@aztec%2Fnoir-{acvm_js,noirc_abi}@<v>.patch` + the `patchedDependencies` keys in the root package.json.
 - `bunfig.toml` `minimumReleaseAgeExcludes`: fresh publishes are min-age-blocked, and the gate bites TRANSITIVES too — enumerate every `@aztec/*` name from `bun.lock` (~30), plus the three `@alejoamiras/*`. Date the comment; a follow-up PR removes the excludes after they age past 7 days.
 
-**The lockfile ritual** (Bun #25305 — per-package update won't re-resolve transitives):
-```bash
-rm bun.lock && bun install
-```
-- ⚠️ `bunfig.toml` pins `linker = "hoisted"` — do NOT remove it. A fresh lockfile otherwise defaults to the isolated linker and breaks the foundry `@aztec/` remap, `resolvePackageFile` walkers, and the deploy-script `node_modules/...` paths.
-- Allowlist-diff the lock: only the intended scopes move (in-range `^` refreshes of everything else are the accepted cost — investigate anything suspicious, trace odd new transitives to their parent).
-- Assert zero old-version entries remain: `rg -c '<old-version>' bun.lock` → 0.
+**The lockfile ritual** — `bun install` after editing the pins. Bun #25305 is CLOSED on Bun 1.4:
+targeted re-resolution now holds transitives to the min-age gate, so `rm bun.lock` is NO LONGER
+the default (a full regen re-gates every already-locked version and invites unrelated churn).
+Keep it as the last resort for unresolvable conflicts only.
+- ⚠️ `bunfig.toml` pins `linker = "isolated"` (since the 2026-08 isolated-linker arc) — do NOT
+  change it. The old hoisting assumptions were made layout-agnostic via `@nulo/resolve-asset` +
+  generated remappings; `apps/extension/scripts/layout-identity.test.ts` is the executable
+  guarantee (and carries `expectVersion` literals that MUST move with the line).
+- Diff the lock with `bun scripts/lockfile-exception-diff.ts <base-lock> bun.lock` and
+  disposition every `exceptions/added/removed` entry (no blanket acceptance).
+- **Residue is an ALLOWLIST check, not a zero check.** When any package is deliberately held,
+  old-line entries legitimately remain. `bun scripts/aztec-hold-residue-check.ts` encodes it:
+  graph-reachability from the held roots (bun.lock v2 shortens a single-dependent nested key to
+  the bare position, so key-prefix matching gives false failures) plus `realpath` resolution
+  from every consumer workspace. Anything else on the old line is a missed pin.
+- Fresh publishes are min-age-blocked. Prefer waiting; when a first-party release must land
+  immediately, add ONE dated `minimumReleaseAgeExcludes` entry with the removal date and the
+  provenance you verified (registry signature + npm/SLSA attestation binding the tarball to a
+  repo+commit), and file the removal PR.
+- Provenance actually runs like this: build a scratch npm project from the exception-diff's
+  resolved `name@version` set, `npm install --ignore-scripts`, THEN `npm audit signatures`.
+  `--package-lock-only` makes audit a no-op ("found no dependencies to audit") — which is why
+  earlier bumps never transcribed a passing run.
 
 **API churn**: `bun run typecheck:all` is the fast-fail — **but typecheck is NOT sufficient on a fork-class bump.** Surfaces typecheck can't see (5.0-fork precedent): copied/adapted upstream logic (fee options, gas math) that must be re-diffed against the new upstream; the three `nulo-schema-patch.ts` copies (extension/faucet/playground — they throw at RUNTIME if the wallet-sdk schema shape moved; `test:all` exercises them, typecheck doesn't); and native-proving required-mode (`VITE_NULO_ACCELERATOR_REQUIRED`) surviving the proving-stack change. Port mechanically and behavior-preserving; wrap renamed upstream APIs inside our service layer so OUR RPC surfaces don't ripple (precedent: PXE senders → tagging-secret sources, wrapped in `PxeService`). Non-mechanical churn (a removed API we depend on) → stop, `/codex` triage, re-plan.
 
@@ -113,11 +129,69 @@ Then Branch A's delivery gates. Live-deploy discipline: fix forward carefully, n
 
 ## Gotchas (hard-won)
 
+- **Sweep version literals across the WHOLE workspace, not just the app.** Test fixtures pin the
+  expected `@aztec` version in places a per-app grep misses — `apps/extension/scripts/
+  layout-identity.test.ts` AND `packages/resolve-asset/src/index.test.ts` both hardcode it, and
+  the second one only surfaced in CI. Run `rg -l '<old-version>' --glob '!node_modules'
+  --glob '!bun.lock'` from the repo root and classify every hit.
+- **`test:all` passes only when its EXIT CODE is 0.** Counting `Exited with code 0` lines is not
+  a pass signal — failing packages hide behind passing ones. Check `rc=$?` and grep for
+  `Exited with code [1-9]`/`FAIL ` explicitly.
+
+- **One `@aztec` generation in the bundle, always.** Upstream's `getVKIndex`
+  (`noir-protocol-circuits-types/artifacts/vks/tree.ts`) discriminates with `instanceof`, so two
+  copies of that module make it treat the VK object as its own hash and abort with
+  `VK index for [object Object] not found in VK tree` — thrown in-wallet BEFORE any `/prove`
+  request, so the accelerator log is silent and it looks like a proving failure that never
+  reached the prover. Any package that exact-pins its own `@aztec` deps (the accelerator SDK)
+  must move WITH the line; holding it is not an option. Packages that declare exact-version
+  PEERS (private-fee-juice) or nothing at all (standards) re-bind to the workspace line and are
+  safe to hold. Gate: `scripts/aztec-hold-residue-check.ts`.
+- **Upstream recompiles `@aztec/accounts` artifacts on toolchain changes** (5.2.0 moved
+  SchnorrAccount's class id, −3,892 bytes). Production is immune — addresses come from the
+  vendored frozen artifact — but any E2E fixture that builds accounts through
+  `EmbeddedWallet.createSchnorrAccount` will fund one address and deploy another. Fix at the
+  wallet-construction seam: `EmbeddedWallet`'s constructor takes an `AccountContractsProvider`,
+  so subclass it and serve the frozen artifact for schnorr (see `FrozenArtifactWallet` in
+  `apps/extension/tests/e2e/fixtures/aztec.ts`). Symptom order if you patch it piecemeal:
+  address-parity mismatch → `Public keys not registered for account` → `Account "0x…" does not
+  exist on this wallet` — those are three different upstream steps you'd be re-implementing;
+  don't, use the provider.
+- **`tests/e2e` is outside the tsconfig graph** — fixture breakage never shows in
+  `typecheck:all`. The network suite is the only detector.
+- **Clear `<app>/node_modules/.vite` after a dependency-line swap**, before the first e2e run.
+  Stale dep-optimizer caches make dev-served apps fail with `.vite/deps/*.js does not exist`,
+  which surfaces as a page that never loads and a test that times out far from the cause.
+- **Don't edit fixtures while a suite is running.** Vitest workers load them per-worker, so a
+  mid-run edit yields a mix of old and new code and results you must throw away.
+- **Match the local run to CI's topology.** CI runs the network pool proverless in shards and
+  only a 3-file canary lane prover-ON. Running all ~70 files prover-ON locally is ~2.5h for no
+  extra signal; run prover-ON for the canaries + fee/tx-send paths and proverless for the rest.
+  Two files carry `@requires-proverless` and the runner hard-fails if they're in a prover-ON set.
+  And SHARD the proverless pass locally — `agent.sh` allocates its own ports per run, so 3-4
+  concurrent shards are safe (CI runs 5) and cut it from ~25min to under 10. Prover-ON is the
+  exception: every shard would queue on the single accelerator at the hardcoded port 59833.
+- **`BB_BINARY_PATH` is a footgun**: `find_bb` returns the seed unconditionally
+  (alejoamiras/aztec-accelerator#352), so a version-mismatched seed proves everything with the
+  wrong bb while the log shows a download of the right one. Run the server unseeded.
+
 - `aztec compile`'s "thread 'main' has overflowed its stack" can MASK real type errors — run `aztec-nargo compile` raw (with `ulimit -s 65520`) to see them.
 - rc.2+ `DeployMethod.send()` returns `Promise<DeployResultMined>` (no `.deployed()` chain), and codegen'd `Contract.deploy` needs the **EmbeddedWallet itself** as the `Wallet` (the account object lacks `getContractClassMetadata`) with the account as `from`.
 - A CONFLICTING PR runs **zero CI silently** (GitHub can't build the merge ref) — check `mergeable` before wondering where the checks went.
 - `FeeJuice.claim_and_end_setup` is ONLY valid as the fee payload (setup phase — where `FeeJuicePaymentMethodWithClaim` places it). An app-phase claim under a sponsored fee must use plain `claim`, or it asserts on EVERY attempt — which looks exactly like a slow L1→L2 message sync if the retry loop swallows errors. Print the caught error on the retry cadence, and when a claim "never syncs", independently check the message witness (`node_getL1ToL2MessageMembershipWitness` with the key from the portal's deposit event) before blaming the network.
 - Blanket `biome check --write` on test trees converts `vi.fn(function () {…})` mocks to arrows and breaks `new`-constructed service-client mocks (~95 failures) — format only the files you touched.
+
+- **CI's aztec toolchain install has NO min-age gate — un-pinned transitives walk in on publish
+  day.** The repo's `bunfig.toml` 7-day gate covers OUR deps only; `.github/actions/setup-aztec`
+  runs the upstream installer, whose npm resolve is live. 2026-08-12: `snappy@7.4.0` (broken Node
+  entry chain — unconditionally reaches the never-installed-on-linux `@napi-rs/snappy-wasm32-wasi`
+  fallback) killed every fresh CI sandbox boot the day it published, while local runs stayed green
+  on pre-publish `~/.aztec` trees. The action now carries a load-check-gated pin step (replaces
+  snappy with 7.3.3 by direct tarball extraction, no-op when the installed one loads, fail-loud
+  re-check) — **remove that step when bumping to an @aztec line whose install resolves a fixed
+  snappy** (check: fresh-install in a scratch HOME, then `node -e "require('snappy')"` against the
+  version dir). Same class can recur through any un-pinned transitive: diagnose via publish-time
+  correlation + bare local `npm install` repro before rerunning CI.
 
 - **Standards/token package swaps: noir struct paths are NOT stable across dep graphs.** The same
   `AztecAddress` param can arrive as `aztec::protocol_types::…::AztecAddress` from one compile and

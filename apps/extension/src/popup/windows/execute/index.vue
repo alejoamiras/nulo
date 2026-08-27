@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /** Vendor */
 import { onMounted, onUnmounted } from "vue"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 
 /** Components */
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
 import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vue"
+import DappApprovalFooter from "@/components/composite/DappApprovalFooter.vue"
 import OperationCard from "./OperationCard.vue"
 import SignerIdentityStrip from "./SignerIdentityStrip.vue"
 
@@ -124,13 +126,20 @@ const {
 	results: feeEstimates,
 	estimating: estimatingOps,
 	estimate: scheduleFeeEstimate,
+	handoffAll: handoffFeeEstimates,
+	rearm: rearmFeeEstimates,
+	cancelAll: cancelAllFeeEstimates,
 } = useFeeEstimationMap<number, { op: UIOperation; feeSettings: FeeSettings }, unknown>({
 	// Cast op → Operation (strict): the estimate is only scheduled AFTER the
 	// user picks a fee, so feeSettings is set on the op by the time we get here.
 	// The wallet-bridge Operation type carries a slightly different AztecAddress/
 	// Fr surface than the popup-resolved DraftUIOperation; the cast bridges that
 	// pre-existing mismatch.
-	estimate: ({ op, feeSettings }) => executionService.estimateOperationFee(op as unknown as Operation, feeSettings),
+	estimate: ({ op, feeSettings }, estimateToken, flowKey) =>
+		executionService.estimateOperationFee(op as unknown as Operation, feeSettings, estimateToken, flowKey),
+	cancelRemote: (estimateToken) => {
+		executionService.cancelEstimate(estimateToken).catch(() => {})
+	},
 	debounceMs: 500,
 	onError: (key, err) => {
 		console.error(`[Execute] Fee estimation failed for op ${key}:`, getErrorMessage(err), getErrorData(err))
@@ -169,6 +178,12 @@ const {
 })
 
 const init = async () => {
+	// B-30: disconnect the locally-constructed account/network clients on EVERY
+	// exit path. They were disconnected only on the success path (after the ops
+	// loop), so any throw in the loop — e.g. "Account no longer exists" — leaked
+	// both live SW ports for the failed popup's lifetime.
+	let accountService: AccountServiceClient | undefined
+	let networkService: NetworkServiceClient | undefined
 	try {
 		profile.value = await profileService.getActiveProfile()
 		await loadInteractionPayload()
@@ -180,18 +195,18 @@ const init = async () => {
 			throw new Error("Sign in with another profile")
 		}
 
-		const accountService = new AccountServiceClient()
-		const networkService = new NetworkServiceClient()
+		accountService = new AccountServiceClient()
+		networkService = new NetworkServiceClient()
 
 		const getNetwork = async (caipChain: CaipChain): Promise<Network> => {
 			const { chainId } = parseCaipChain(caipChain)
-			return resolveNetworkByChainId(networkService, chainId)
+			return resolveNetworkByChainId(networkService!, chainId)
 		}
 
 		const getNetworkAndAccount = async (caipAccount: CaipAccount): Promise<[Network, Account]> => {
 			const { chainId, address } = parseCaipAccount(caipAccount)
-			const network = await resolveNetworkByChainId(networkService, chainId)
-			const account = await accountService.getAccount(profile.value!.id, network.chainId, address)
+			const network = await resolveNetworkByChainId(networkService!, chainId)
+			const account = await accountService!.getAccount(profile.value!.id, network.chainId, address)
 			if (!account) throw new Error("Account no longer exists")
 			return [network, account]
 		}
@@ -284,8 +299,6 @@ const init = async () => {
 		// is dismissed mid-init (cancel from another window) we want the
 		// approve gate to stay closed.
 		initComplete.value = _operations.length > 0
-		accountService.disconnect()
-		networkService.disconnect()
 
 		// Pre-fetch token metadata for any `register_token` ops so the
 		// OperationCard renders name/symbol/decimals before Allow. The Allow
@@ -314,6 +327,11 @@ const init = async () => {
 	} catch (error) {
 		console.error(getErrorData(error))
 		setError("Something went wrong")
+	} finally {
+		// Both are idle after the ops loop; disconnect on success, throw, or
+		// early-return alike (undefined when init returned before constructing them).
+		accountService?.disconnect()
+		networkService?.disconnect()
 	}
 }
 
@@ -371,13 +389,40 @@ const approve = async () => {
 			}
 			return draft
 		})
-		await interactionService.approveInteraction(requestId.value!, executable, {
-			type: OriginType.DAPP,
-			name: dapp.value?.name ?? "Unknown app",
-		})
+		// Ownership handoff: approval transfers the estimates to the execution
+		// path — the window's unmount cleanup must NOT remote-cancel them, or
+		// the eviction would race the fire-and-forget executeOperations out of
+		// its reuse hits and needlessly abort still-running estimates.
+		handoffFeeEstimates()
+		// Estimate→confirm reuse ids, index-aligned with `executable`. Rides
+		// this popup-privileged RPC as an envelope — never the shared
+		// Operation wire shape, so a dApp payload can't forge one.
+		const estimateIds = operations.value.map(
+			(_op, index) => (feeEstimates.value[index] as { estimateId?: string } | null | undefined)?.estimateId,
+		)
+		await interactionService.approveInteraction(
+			requestId.value!,
+			executable,
+			{
+				type: OriginType.DAPP,
+				name: dapp.value?.name ?? "Unknown app",
+			},
+			estimateIds,
+		)
 		closeWindow(true)
 	} catch (error) {
-		setError("Processing error.", getErrorMessage(error))
+		// The execution path never took ownership — re-arm so a later
+		// reject/unmount can still cancel + evict the handed-off estimates.
+		rearmFeeEstimates()
+		if (error instanceof JobCancelledError) {
+			// A raced approve refused service-side (the dApp cancelled first):
+			// the refusal IS the cancelled state — render the overlay, never an
+			// error banner. Covers the case where the cancel broadcast itself
+			// was lost to this popup.
+			isInteractionCancelled.value = true
+		} else {
+			setError("Processing error.", getErrorMessage(error))
+		}
 	} finally {
 		isLoading.value = false
 	}
@@ -385,6 +430,10 @@ const approve = async () => {
 
 const reject = async () => {
 	if (isInteractionCancelled.value || !requestId.value) return
+	// Reject-time eviction: abort in-flight estimates and drop any stashed
+	// signed requests NOW — window teardown alone isn't guaranteed to run
+	// dispose before the window dies.
+	cancelAllFeeEstimates()
 	rejectViaInteractionService("User rejected")
 	closeWindow(true)
 }
@@ -460,43 +509,25 @@ onUnmounted(disposeWindow)
 			</Flex>
 		</Flex>
 
-		<Flex direction="column" gap="10" :class="$style.footer">
-			<Tooltip v-if="processingError" side="top" position="start" :disabled="!processingError.tooltip">
-				<Flex align="center" wide gap="6">
-					<Icon name="info" size="14" :color="processingError.type === 'warning' ? 'orange' : 'red'" />
-					<Text data-testid="error-text" role="alert" size="12" weight="600" color="secondary">{{ processingError.title }}</Text>
-				</Flex>
-
-				<template #content>
-					<Text size="12" color="secondary">{{ processingError.tooltip }}</Text>
-				</template>
-			</Tooltip>
-
-			<Flex align="center" justify="between" gap="12">
-				<Button
-					data-testid="execute-reject-btn"
-					@click="reject"
-					wide
-					variant="primary_outline"
-					size="medium"
-					:disabled="isLoading || !requestId"
-				>
-					Reject
-				</Button>
-
-				<Button
-					data-testid="execute-confirm-btn"
-					@click="approve"
-					wide
-					variant="primary"
-					size="medium"
-					:loading="isLoading"
-					:disabled="processingError?.type === 'error' || tokenMetadataLoading || !initComplete || operations.length === 0 || needsFeeSelection"
-				>
-					<Text size="13" color="inverse">{{ isLoading ? "EXECUTING" : "Confirm" }}</Text>
-				</Button>
-			</Flex>
-		</Flex>
+		<DappApprovalFooter
+			:processing-error="processingError"
+			reject-testid="execute-reject-btn"
+			reject-label="Reject"
+			:reject-disabled="isLoading || !requestId"
+			confirm-testid="execute-confirm-btn"
+			:confirm-label="isLoading ? 'EXECUTING' : 'Confirm'"
+			:confirm-loading="isLoading"
+			:confirm-disabled="
+				processingError?.type === 'error' ||
+				tokenMetadataLoading ||
+				!initComplete ||
+				operations.length === 0 ||
+				needsFeeSelection ||
+				isInteractionCancelled
+			"
+			@reject="reject"
+			@approve="approve"
+		/>
 
 		<DappCancelledOverlay
 			v-if="isWrongProfile"
@@ -543,11 +574,4 @@ onUnmounted(disposeWindow)
 	}
 }
 
-.footer {
-	flex-shrink: 0;
-
-	padding: 16px;
-	border-top: 1px solid var(--nulo-border);
-	background: var(--nulo-surface);
-}
 </style>

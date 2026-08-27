@@ -18,13 +18,14 @@
  * UNDERLYING() + handler's FEE_ASSET() on L1.
  */
 import { createHash } from "node:crypto"
-import { execFileSync, execSync } from "node:child_process"
 import { lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { homedir } from "node:os"
 import { dirname, join, resolve as resolvePath } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseCandidateManifest } from "../src/candidate-schema"
 import { assertFaucetCandidateShape, assertZeroSeed } from "../src/promotion"
 import { PRIVATE_FPC_ADDRESS, PRIVATE_FPC_SALT } from "../src/private-fuel"
+import { git, resolveBin, run } from "./run"
 
 /** The ONLY L1 signer authorized for this arc — pinned in the PLAN (and here), never derived
  *  from the env being checked. A different env-derived signer is a hard stop. */
@@ -65,7 +66,21 @@ export const CAPS = {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repoRoot = join(here, "..", "..", "..")
-const CAST = join(process.env.HOME ?? "~", ".aztec", "versions", "5.0.0", "internal-bin", "cast")
+let castPath: string | undefined
+
+/** `CAST_BIN` → the current Aztec toolchain → the 5.0.0 pin → PATH; resolved on first use so
+ *  importing this module for its signer constants never requires `cast` to exist. */
+function castBin(): string {
+	castPath ??= resolveBin("cast", {
+		envVar: "CAST_BIN",
+		candidates: [
+			join(homedir(), ".aztec", "current", "internal-bin", "cast"),
+			join(homedir(), ".aztec", "versions", "5.0.0", "internal-bin", "cast"),
+		],
+		prefer: "candidates",
+	})
+	return castPath
+}
 
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
 
@@ -84,15 +99,24 @@ async function rpc<T>(url: string, method: string, params: unknown[]): Promise<T
 const sha256 = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex")
 
 /** Run `cast` with an ARGV array — NEVER a shell string. A node-returned address containing shell
- *  metacharacters must not be able to execute commands (the deployer key is in this process's env);
- *  execFileSync bypasses the shell entirely so no interpolated value is ever parsed as a command. */
+ *  metacharacters must not be able to execute commands (the deployer key is in this process's env
+ *  AND in this argv); `run` never touches a shell and adds nothing from argv to a failure — what
+ *  `cast` itself prints to stderr is kept verbatim. */
 function cast(args: string[]): string {
-	return execFileSync(CAST, args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim()
+	return run(castBin(), args, { stdio: ["ignore", "pipe", "pipe"] }).stdout.trim()
 }
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const PRIVATE_KEY_HEX = /^(?:0x)?[0-9a-fA-F]{64}$/
+const COMMIT_SHA = /^[0-9a-f]{40}$/
+
+/** The key reaches `cast` as an argument; a value that is not a 32-byte hex key must never get there. */
+function requirePrivateKey(value: string): string {
+	if (!PRIVATE_KEY_HEX.test(value)) throw new Error("PRIVATE_KEY is not a 32-byte hex key — STOP")
+	return value
+}
 /** Fail-closed validation for any value that flows into a `cast` invocation from an UNTRUSTED source
- *  (a node RPC response, primarily). Even with execFileSync closing the shell vector, a malformed
+ *  (a node RPC response, primarily). Even with `run` closing the shell vector, a malformed
  *  address must hard-stop rather than silently produce a wrong on-chain read. */
 function requireAddress(value: string | undefined, label: string): string {
 	if (!value || !EVM_ADDRESS.test(value)) {
@@ -160,9 +184,7 @@ async function build(intentPath: string): Promise<void> {
 	// Read the pin from the COMMITTED blob (git show HEAD:…), never the working tree:
 	// the lessons dir is allowlisted-dirty during live arcs, so a tree read could be
 	// silently re-pointed without tripping tree discipline (review finding #7).
-	const previousArc = JSON.parse(
-		execSync("git show HEAD:implementations-plan/aztec-5.0.0-stable/lessons/intent.json", { cwd: repoRoot, encoding: "utf8" }),
-	) as {
+	const previousArc = JSON.parse(git(["show", "HEAD:implementations-plan/aztec-5.0.0-stable/lessons/intent.json"], repoRoot)) as {
 		identity: { l1ChainId: number; rollupVersion: number }
 		l1: Record<string, string>
 	}
@@ -208,7 +230,7 @@ async function build(intentPath: string): Promise<void> {
 		secondEndpoint = { posture: "SINGLE-L2-NODE (documented residual: no second public endpoint; L1-anchored; caps bound exposure)" }
 	}
 
-	const signer = cast(["wallet", "address", "--private-key", pk])
+	const signer = cast(["wallet", "address", "--private-key", requirePrivateKey(pk)])
 	if (signer.toLowerCase() !== PLAN_PINNED_L1_SIGNER.toLowerCase()) {
 		throw new Error(`env-derived signer ${signer} != plan-pinned ${PLAN_PINNED_L1_SIGNER} — HARD STOP`)
 	}
@@ -218,9 +240,9 @@ async function build(intentPath: string): Promise<void> {
 	const startingBalanceEth = Number(cast(["balance", signer, "--rpc-url", sepolia, "--ether"]))
 	if (!Number.isFinite(startingBalanceEth)) throw new Error(`could not read starting signer balance — STOP`)
 
-	const commit = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim()
-	const dirty = execSync("git status --porcelain", { cwd: repoRoot, encoding: "utf8" })
-		.split("\n")
+	const commit = git(["rev-parse", "HEAD"], repoRoot)
+	const dirty = run("git", ["status", "--porcelain"], { cwd: repoRoot })
+		.stdout.split("\n")
 		.filter(Boolean)
 		.filter((l) => !OPERATIONAL_ALLOWLIST.some((a) => l.slice(3).startsWith(a)))
 
@@ -287,10 +309,10 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	// PAST the one-time digest-recording verify and into the gating regime) it MUST be committed — an
 	// uncommitted edit to weaken caps/signer/digest would otherwise slip through the tree check.
 	if (intent.candidateSha256) {
-		const intentStatus = execSync(`git status --porcelain -- ${JSON.stringify(intentPath)}`, {
+		// `--literal-pathspecs` + `--`: the path is neither an option nor pathspec magic.
+		const intentStatus = run("git", ["--literal-pathspecs", "status", "--porcelain", "--", intentPath], {
 			cwd: repoRoot,
-			encoding: "utf8",
-		}).trim()
+		}).stdout.trim()
 		if (intentStatus.length > 0) {
 			throw new Error(`intent.json is uncommitted — the gate's own anchor must be committed before promotion:\n${intentStatus}`)
 		}
@@ -299,8 +321,8 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	// Tree discipline at EVERY verify, not just at build: only allowlisted operational files may be
 	// dirty during the live arc. A non-allowlisted source change must be committed (fix-forward,
 	// logged in lessons) before the next broadcast group — never carried silently into a promotion.
-	const dirtyNow = execSync("git status --porcelain", { cwd: repoRoot, encoding: "utf8" })
-		.split("\n")
+	const dirtyNow = run("git", ["status", "--porcelain"], { cwd: repoRoot })
+		.stdout.split("\n")
 		.filter(Boolean)
 		.filter((l) => !OPERATIONAL_ALLOWLIST.some((a) => l.slice(3).startsWith(a)))
 	if (dirtyNow.length > 0) {
@@ -313,7 +335,9 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	// every changed path to be allowlisted — so the intent commit itself (allowlisted lessons)
 	// is fine, but a deploy-relevant change since build is a STOP.
 	if (intent.source?.commit) {
-		const changedSinceBuild = execSync(`git diff --name-only ${intent.source.commit} HEAD`, { cwd: repoRoot, encoding: "utf8" })
+		// The intent is a type-cast JSON file: the commit is validated before it becomes a git argument.
+		if (!COMMIT_SHA.test(intent.source.commit)) throw new Error(`intent.source.commit is not a 40-hex commit — STOP`)
+		const changedSinceBuild = git(["diff", "--name-only", "--end-of-options", intent.source.commit, "HEAD", "--"], repoRoot)
 			.split("\n")
 			.filter(Boolean)
 			.filter((path) => !OPERATIONAL_ALLOWLIST.some((a) => path.startsWith(a)))
@@ -336,7 +360,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 	// Signer re-check.
 	const pk = process.env.PRIVATE_KEY
 	if (pk) {
-		const signer = cast(["wallet", "address", "--private-key", pk])
+		const signer = cast(["wallet", "address", "--private-key", requirePrivateKey(pk)])
 		if (signer.toLowerCase() !== intent.signer.toLowerCase()) throw new Error(`signer ${signer} != intent ${intent.signer} — STOP`)
 	}
 
@@ -413,7 +437,7 @@ async function verify(intentPath: string, candidatePath?: string): Promise<void>
 
 	// Balance-within-caps reconciliation — ENFORCED, not merely printed. A build recorded the
 	// pre-spend baseline; if the cumulative spend since then exceeds the cap, hard-stop.
-	const balance = Number(cast(["balance", intent.signer, "--rpc-url", sepolia, "--ether"]))
+	const balance = Number(cast(["balance", requireAddress(intent.signer, "intent signer"), "--rpc-url", sepolia, "--ether"]))
 	if (typeof intent.startingBalanceEth === "number" && Number.isFinite(intent.startingBalanceEth)) {
 		const spent = intent.startingBalanceEth - balance
 		const cap = Number(intent.caps.maxTotalEthSpend)
@@ -480,7 +504,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// 0c. The FPC require-deployed gate as CODE, not operator discipline (review finding #6):
 	// promotion enables the faucet's Fuel tab, which hard-uses PRIVATE_FPC_ADDRESS — an
 	// undeployed or upgraded-out FPC at that address must abort the promotion.
-	execFileSync("bun", [join(here, "check-fpc-version.ts"), "--mode", "require-deployed"], { stdio: "inherit" })
+	run("bun", [join(here, "check-fpc-version.ts"), "--mode", "require-deployed"], { stdio: "inherit" })
 
 	// 1. Symlink rejection on every involved path (a symlinked live target would
 	// redirect the rename; a symlinked candidate breaks the read-once contract).
@@ -522,7 +546,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 
 		// 2b. Prove the faucet CANDIDATE's derivation BEFORE any live write (review finding #3):
 		// previously a junk candidate failed only AFTER the live file was overwritten.
-		execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
+		run("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts"), "--config", faucetCandidatePath], {
 			stdio: "inherit",
 		})
 	}
@@ -562,7 +586,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// 5. Re-verify the LIVE files: strict-parse the bridge manifest as written, and
 	// re-prove the faucet derivation through the real gate.
 	parseCandidateManifest(JSON.parse(readFileSync(bridgeLivePath, "utf8")))
-	execFileSync("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], {
+	run("bun", [join(repoRoot, "apps/faucet/scripts/verify-deployments.ts")], {
 		stdio: "inherit",
 		env: { ...process.env, BRIDGE_MANIFEST: bridgeLivePath },
 	})
@@ -576,7 +600,7 @@ async function promote(intentPath: string, opts: { bridgeOnly?: boolean; dropSwa
 	// 6. Promotion receipt — committed by the operator alongside the promoted files.
 	const receiptPath = join(repoRoot, "implementations-plan/aztec-5.0.1-line/lessons/promotion-receipt.json")
 	mkdirSync(dirname(receiptPath), { recursive: true })
-	const commit = execSync("git rev-parse HEAD", { cwd: repoRoot, encoding: "utf8" }).trim()
+	const commit = git(["rev-parse", "HEAD"], repoRoot)
 	writeFileSync(
 		receiptPath,
 		`${JSON.stringify(
@@ -616,7 +640,7 @@ if (isMain) {
 	const bridgeOnly = rest.includes("--bridge-only")
 	const dropSwap = rest.includes("--drop-swap")
 	const restoreSwap = rest.includes("--restore-swap")
-	const run =
+	const dispatch =
 		cmd === "build"
 			? build(intentPath)
 			: cmd === "verify"
@@ -624,7 +648,7 @@ if (isMain) {
 				: cmd === "promote"
 					? promote(intentPath, { bridgeOnly, dropSwap, restoreSwap })
 					: Promise.reject(new Error(`unknown command ${cmd}`))
-	run.catch((err) => {
+	dispatch.catch((err) => {
 		console.error(`✗ ${err instanceof Error ? err.message : err}`)
 		process.exit(1)
 	})

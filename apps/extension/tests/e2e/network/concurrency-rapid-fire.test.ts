@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -36,7 +36,7 @@ test.skipIf(!hasConfig)(
 		for (let i = 0; i < 5; i++) {
 			const r = await waitForPgResult(page, "getChainInfo", seqBefore + i, 30_000)
 			settled.push(r.seq)
-			expect(r.status).toBe("ok")
+			await assertPgOk(page, r, "concurrency-rapid-fire:r")
 		}
 
 		// FIFO check: seqs should be strictly ascending

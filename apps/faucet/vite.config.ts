@@ -6,6 +6,7 @@ import { fileURLToPath, URL } from "node:url"
 import vue from "@vitejs/plugin-vue"
 import { defineConfig, type Plugin, type UserConfig } from "vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 import { nuloComponentsPlugin } from "./scripts/components-plugin"
 import { type FaucetTarget, TESTNET_TARGET } from "./src/lib/network-targets"
 import { deriveAllowedPreviewHosts } from "./src/lib/preview-hosts"
@@ -167,7 +168,20 @@ export function makeFaucetConfig(target: FaucetTarget): UserConfig {
 			"import.meta.env.VITE_ALLOWED_PREVIEW_HOSTS": JSON.stringify(allowedPreviewHosts.join(",")),
 		},
 		resolve: {
-			alias: [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }],
+			alias: [
+				{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+				// nodePolyfills' `globals.Buffer` injects an import of this shim into EVERY
+				// transformed module, which rolldown then resolves from that module's own
+				// location. Workspace packages (wallet-crypto, wallet-core) don't declare the
+				// plugin, so under the isolated linker the bare specifier is unreachable from
+				// them — pin it to this app's copy. Same shape as apps/extension/vite.config.ts.
+				{
+					find: "vite-plugin-node-polyfills/shims/buffer",
+					replacement: resolvePackageAsset("vite-plugin-node-polyfills", "shims/buffer/dist/index.js", {
+						from: import.meta.url,
+					}),
+				},
+			],
 			// Multiple nested versions of these WASM-binding packages can exist
 			// in node_modules. Without dedup, initAbi() and abiEncode() end up
 			// in different module scopes and the WASM instance never resolves.

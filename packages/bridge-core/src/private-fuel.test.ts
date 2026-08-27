@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 
 import { poseidon2HashBytes } from "@aztec/foundation/crypto/sync"
 import { Fr } from "@aztec/foundation/curves/bn254"
@@ -28,17 +29,10 @@ import {
  * never a silent drift that strands or misroutes Fee Juice.
  */
 
-/** Resolve a file inside a package WITHOUT its exports map (which blocks ./target/*) — same
- *  node_modules walk the extension's `resolvePackageFile` uses. */
+/** Resolve a file inside a package WITHOUT its exports map (which blocks ./target/*) —
+ *  layout-agnostic via @nulo/resolve-asset, anchored at this declaring workspace. */
 function resolvePackageFile(pkg: string, file: string): string {
-	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
-	let dir = fileURLToPath(new URL(".", import.meta.url))
-	while (dir !== dirname(dir)) {
-		const candidate = join(dir, "node_modules", ...parts, file)
-		if (existsSync(candidate)) return candidate
-		dir = dirname(dir)
-	}
-	throw new Error(`Cannot find ${pkg}/${file} in any node_modules`)
+	return resolvePackageAsset(pkg, file, { from: import.meta.url })
 }
 
 describe("private-fuel keystone", () => {
@@ -71,15 +65,13 @@ describe("private-fuel keystone", () => {
 		},
 	]
 
-	it.each(vectors)("deriveBridgeSecret + secretHash match the pinned vector (salt=$salt)", async ({
-		salt,
-		claimer,
-		secret,
-		secretHash,
-	}) => {
-		expect(deriveBridgeSecret(salt, claimer).toString()).toBe(secret)
-		expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
-	})
+	it.each(vectors)(
+		"deriveBridgeSecret + secretHash match the pinned vector (salt=$salt)",
+		async ({ salt, claimer, secret, secretHash }) => {
+			expect(deriveBridgeSecret(salt, claimer).toString()).toBe(secret)
+			expect((await privateFuelSecretHash(salt, claimer)).toString()).toBe(secretHash)
+		},
+	)
 
 	it("ADDRESS TRIPWIRE — re-deriving from the installed artifact at the CANONICAL salt matches PRIVATE_FPC_ADDRESS", async () => {
 		const rawBytes = readFileSync(resolvePackageFile("@alejoamiras/private-fee-juice", "target/private_contract-PrivateFPC.json"))

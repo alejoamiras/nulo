@@ -33,9 +33,10 @@
  * Read-only, no keys. The live dust canary (pre-promotion) stays the authoritative on-net proof.
  */
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { resolvePackageAsset } from "@nulo/resolve-asset"
 
 import { loadContractArtifact } from "@aztec/stdlib/abi"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
@@ -57,14 +58,7 @@ function parseMode(argv: string[]): GateMode {
 }
 
 function resolvePackageFile(pkg: string, file: string): string {
-	const parts = pkg.startsWith("@") ? pkg.split("/").slice(0, 2) : [pkg.split("/")[0]]
-	let dir = fileURLToPath(new URL(".", import.meta.url))
-	while (dir !== dirname(dir)) {
-		const candidate = join(dir, "node_modules", ...parts, file)
-		if (existsSync(candidate)) return candidate
-		dir = dirname(dir)
-	}
-	throw new Error(`Cannot find ${pkg}/${file} in any node_modules`)
+	return resolvePackageAsset(pkg, file, { from: import.meta.url })
 }
 
 async function rpc<T>(method: string, params: unknown[]): Promise<T> {

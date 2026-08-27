@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { afterEach, beforeEach, describe, expect } from "vitest"
-import { clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
+import { withTimeoutMessage, clickByTestId, openOnboarding, replaceInputValue, test, waitForHash } from "./fixtures/extension"
 
 const ONBOARDING_HEALTH_URL = "http://127.0.0.1:59833/health"
 const TEST_PASSWORD = "OnboardingTest_!23"
@@ -53,14 +53,27 @@ describe("onboarding tab", () => {
 		// Wait for the status card to settle (any terminal state). If 'active'
 		// (real accelerator is installed on the dev box), click Continue.
 		// Otherwise click Skip — which now routes directly to /done.
-		const status = await page.evaluate(async () => {
-			while (true) {
-				const el = document.querySelector('[data-testid="onboarding-accelerator-status"]')
-				const s = el?.getAttribute("data-status")
-				if (s === "active" || s === "no-bb" || s === "not-detected") return s
-				await new Promise((r) => setTimeout(r, 200))
-			}
-		})
+		const status = await withTimeoutMessage(
+			page
+				.waitForFunction(
+					() => {
+						const s = document.querySelector('[data-testid="onboarding-accelerator-status"]')?.getAttribute("data-status")
+						return s === "active" || s === "no-bb" || s === "not-detected" ? s : null
+					},
+					{ timeout: 20_000, polling: 200 },
+				)
+				.then((handle) => handle.jsonValue()),
+			async () => {
+				const seen = await page
+					.evaluate(
+						() =>
+							document.querySelector('[data-testid="onboarding-accelerator-status"]')?.getAttribute("data-status") ??
+							"<absent>",
+					)
+					.catch(() => "<unreadable>")
+				return `onboarding accelerator status never reached a terminal value within 20s (last: ${seen})`
+			},
+		)
 		if (status === "active") {
 			await clickByTestId(page, "onboarding-accelerator-continue")
 		} else {

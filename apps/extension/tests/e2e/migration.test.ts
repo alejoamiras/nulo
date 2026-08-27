@@ -134,6 +134,35 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		return page
 	}
 
+	/** Click the barrier's Retry button, then relaunch the browser over the
+	 *  same profile. In production the button's `chrome.runtime.reload()` IS
+	 *  the restart; under `--load-extension` Chrome disables the unpacked
+	 *  extension on reload (ERR_BLOCKED_BY_CLIENT until a browser restart), so
+	 *  the harness substitutes a real cold boot. The chain is still fully
+	 *  proven: a boot WITHOUT the button's one-shot token short-circuits at
+	 *  the gate and never advances the version — so convergence after this
+	 *  helper is convergence THROUGH the written-and-consumed gesture token. */
+	async function retryAndReopen(page: Page): Promise<Page> {
+		if (!ctx) throw new Error("no extension context")
+		await page.click("[data-testid='migration-retry-btn']")
+		// Let the token write land before killing the browser (the click
+		// handler persists it before calling runtime.reload()).
+		await page
+			.waitForFunction(
+				() =>
+					new Promise((r) =>
+						chrome.storage.local.get("nulo:schema:retry-requested", (v) => r("nulo:schema:retry-requested" in v)),
+					),
+				{
+					timeout: 5_000,
+					polling: 100,
+				},
+			)
+			.catch(() => {})
+		await ctx.browser.close()
+		return relaunch()
+	}
+
 	afterEach(async () => {
 		await ctx?.browser.close()
 		ctx = undefined
@@ -162,13 +191,23 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		await page.waitForSelector("[data-testid='migration-blocked']", { visible: true, timeout: 10_000 })
 
 		// Fix the cause (the boom key is OUTSIDE the migration footprint, so the
-		// resume-restore can't resurrect it) and cold-boot again: restore → re-run.
+		// resume-restore can't resurrect it) and cold-boot again. The boot GATE
+		// short-circuits an ambient wake on a persisted non-terminal block —
+		// the engine must NOT run (that no-burn is the N-02 invariant at the
+		// UI level): version stays unadvanced and the barrier renders with the
+		// Retry button.
 		await storageRemove(page, [BOOM_KEY])
 		if (ctx) await ctx.browser.close()
 		const page2 = await relaunch()
-		await waitForVersion(page2, MAX_VERSION)
-		await expectTransformed(page2)
-		expect(await page2.$("[data-testid='migration-blocked']")).toBeNull()
+		await page2.waitForSelector("[data-testid='migration-retry-btn']", { visible: true, timeout: 10_000 })
+		expect((await storageGet(page2, [VERSION_KEY]))[VERSION_KEY]).toBe(1)
+
+		// The gesture is the retry path: tap → extension reloads → the fresh
+		// boot consumes the token, runs the engine, and converges.
+		const page3 = await retryAndReopen(page2)
+		await waitForVersion(page3, MAX_VERSION)
+		await expectTransformed(page3)
+		expect(await page3.$("[data-testid='migration-blocked']")).toBeNull()
 	})
 
 	test("a popup opened mid-migration shows the Updating barrier and no old-shape write-back occurs", async () => {
@@ -187,7 +226,7 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		await expectTransformed(page) // transformed exactly once, no resurrection
 	})
 
-	test("a crash mid-migration converges on the next boot (restore + re-run)", async () => {
+	test("a crash mid-migration converges: restore + stand-down, then a gesture retry completes", async () => {
 		await launchAndSeed({ [HOLD_KEY]: 1 })
 		const page = await relaunch()
 		await waitForKeyPresent(page, RUNNING_KEY) // journal armed: running + backup
@@ -195,12 +234,22 @@ describe.skipIf(!HAS_FIXTURE)("storage migration through the real boot path", ()
 		// THE CRASH: kill the whole browser while the migration is mid-flight.
 		if (ctx) await ctx.browser.close()
 
-		// Next cold boot: journal interrupted → restore → re-run. The fixture
-		// parks on the still-present hold; release it and watch it converge.
+		// Next cold boot: the interrupted journal restores, the interruption is
+		// COUNTED, and the boot stands down (one authorization = one up()) —
+		// the recoverable barrier renders instead of a silent same-boot re-run.
 		const page2 = await relaunch()
-		await waitForKeyPresent(page2, RUNNING_KEY)
+		await waitForKeyPresent(page2, BLOCKED_KEY)
+		await page2.waitForSelector("[data-testid='migration-retry-btn']", { visible: true, timeout: 10_000 })
+		// Pre-shape restored, version unadvanced, nothing half-committed.
+		const mid = await storageGet(page2, [VERSION_KEY, `${ROOT}@a`])
+		expect(mid[VERSION_KEY]).toBe(1)
+		expect(JSON.parse(mid[`${ROOT}@a`] as string)).toEqual({ legacyName: "alpha", keep: 1 })
+
+		// Release the hold so the authorized run can finish, then the gesture:
+		// retry → reload → the fresh boot converges, transformed exactly once.
 		await storageRemove(page2, [HOLD_KEY])
-		await waitForVersion(page2, MAX_VERSION)
-		await expectTransformed(page2)
+		const page3 = await retryAndReopen(page2)
+		await waitForVersion(page3, MAX_VERSION)
+		await expectTransformed(page3)
 	})
 })

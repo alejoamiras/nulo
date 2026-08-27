@@ -5,12 +5,15 @@
  * - Storage key `nulo:core:token-balances`.
  * - Injected `browserApi.storage.local` (the chrome.storage.local adapter in prod).
  * - `TokenBalanceRaw` shape unchanged.
- * - IDs are numeric; `allocateId()` mirrors today's
- *   `array_max((await balances.getKeys()).map((x) => +x)) + 1`.
+ * - IDs are numeric; `allocateId()` delegates to `nextNumericId`, which
+ *   allocates max(allocatable ids) + 1 with hostile keys excluded (canonical
+ *   round-trip + safe-integer bound; the candidate itself safe and free) —
+ *   identical to the old `array_max(map(+)) + 1` on every legitimate store.
  */
 
-import { array_max } from "@/wallet/utils"
 import { EntityStorage } from "@/wallet/storage"
+import { nextNumericId } from "@/wallet/services/id-allocators"
+import { purgeMalformedRows } from "@/wallet/services/purge-rows"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { TOKEN_BALANCE_STORAGE_ROOT, TokenBalanceRawSchema, type TokenBalanceRaw } from "./spec"
 
@@ -39,9 +42,25 @@ export class BalanceRepository {
 		await this.storage.delete(`${id}`)
 	}
 
-	/** Allocate a fresh numeric id: `max(existing ids) + 1`. */
+	/** Allocate a fresh numeric id via the hardened allocator: max(allocatable
+	 *  ids) + 1 on every legitimate store, with hostile keys excluded and a
+	 *  safe, physically-free candidate guaranteed (downward gap-fill at the
+	 *  hostile boundary). */
 	public async allocateId(): Promise<number> {
-		return array_max((await this.storage.getKeys()).map((x) => +x)) + 1
+		return nextNumericId(this.storage)
+	}
+
+	/** Allocate a fresh id treating `avoid` (fence-invalidated ids) as
+	 *  occupied. Blindly incrementing past a fenced id assumed a forward-
+	 *  contiguous free space, which the allocator's hostile-boundary gap-fill
+	 *  does not guarantee — a step past the fence could land on (and
+	 *  overwrite) a physically occupied key. Feeding the fence in as pseudo-
+	 *  keys lets the one allocator resolve occupancy, safety, and the fence
+	 *  together. */
+	public async allocateIdAvoiding(avoid: ReadonlySet<number>): Promise<number> {
+		return nextNumericId({
+			getKeys: async () => [...(await this.storage.getKeys()), ...[...avoid].map((n) => String(n))],
+		})
 	}
 
 	/** Check whether a persisted balance exists for (token, account).
@@ -50,5 +69,14 @@ export class BalanceRepository {
 	public async existsByTokenAndAccount(tokenId: number, account: string): Promise<boolean> {
 		const all = await this.storage.getValues()
 		return all.some((x) => x.token === tokenId && x.account === account)
+	}
+
+	/** F-B23 raw second pass over the balance rows — the codec-hidden complement
+	 *  of `delete`, kept here so storage stays repository-private. */
+	public async purgeMalformed(
+		matchesRaw: (raw: Record<string, unknown>) => boolean,
+		onPurged?: (storageId: string) => void,
+	): Promise<number> {
+		return purgeMalformedRows(this.storage, matchesRaw, onPurged)
 	}
 }

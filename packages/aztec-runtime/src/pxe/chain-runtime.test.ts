@@ -71,6 +71,7 @@ const createPXEMock = vi.mocked(createPXE)
 
 const fakeNodeFactory: NodeFactory = {
 	createNode: () => ({ getL1ContractAddresses: async () => ({ rollupAddress: undefined }) }) as never,
+	probeChainId: async () => 0,
 }
 
 const fakeNetwork = { profileId: "p", chainId: 31337, rpcUrl: "http://node.local" }

@@ -3,8 +3,7 @@ import { sleep } from "@nulo/wallet-core/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
-import { BaseServiceClient, type RequestErrorMeta, type ResponseContentLike } from "../core/base-client"
-import { RpcDisconnectedError, RpcTimeoutError, remoteErrorFromResponseContent } from "../errors"
+import { BaseServiceClient, type RequestErrorMeta } from "../core/base-client"
 import { MessageType, type EventMessage, type ResponseMessage } from "../messages"
 
 /** Default upper bound on any RPC request. Individual calls can override.
@@ -131,27 +130,12 @@ export abstract class ServiceClient<
 		port.postMessage({ type: MessageType.Request, content })
 	}
 
-	protected makeRemoteError(content: ResponseContentLike): unknown {
-		return remoteErrorFromResponseContent(content)
+	protected timeoutMessage(meta: RequestErrorMeta): string {
+		return `RPC '${meta.methodName}' timed out after ${meta.timeoutMs}ms`
 	}
 
-	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
-		return new RpcTimeoutError(`RPC '${meta.methodName}' timed out after ${meta.timeoutMs}ms`, {
-			requestId: meta.requestId,
-			methodName: meta.methodName,
-		})
-	}
-
-	protected makeSendFailureError(meta: RequestErrorMeta): unknown {
-		return new RpcDisconnectedError(`RPC '${meta.methodName}' aborted: port disconnected`, {
-			requestId: meta.requestId,
-			methodName: meta.methodName,
-			cause: meta.cause === undefined ? undefined : String(meta.cause),
-		})
-	}
-
-	protected makeDisconnectError(): unknown {
-		return new Error("Client disconnected")
+	protected sendFailureMessage(meta: RequestErrorMeta): string {
+		return `RPC '${meta.methodName}' aborted: port disconnected`
 	}
 
 	// ── Convenience RPCs ────────────────────────────────────────────────

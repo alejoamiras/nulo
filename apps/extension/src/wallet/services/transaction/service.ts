@@ -1,5 +1,6 @@
 import { TxHash, TxStatus as AztecTxStatus, TxExecutionResult as AztecTxExecutionResult } from "@aztec/stdlib/tx"
-import { toRestoreError } from "@/utils/restore-error"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import type { ILogger } from "@/wallet/logger"
@@ -9,7 +10,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import type { ExecutionFence, ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { StepContent, type WrappedTask } from "@/wallet/services/task/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock, sleep } from "@/wallet/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
@@ -27,6 +28,7 @@ import {
 	type Methods,
 	type Events,
 	TxSchema,
+	TxConfirmationTimeoutError,
 } from "./spec"
 import type { AccountFeePaymentMethodOptions } from "@aztec/entrypoints/account"
 
@@ -169,8 +171,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	): Promise<Tx> {
 		// Under the tx lock (codex blocker): serialize the dup-check + write against
 		// restore's create-only check + the coordinator's purge (finding D).
-		await this.lock.enter()
-		try {
+		return await this.lock.withLock(async () => {
 			// D13: an execution captured {profileId, epoch} when it was authorized.
 			// If a deletion of that profile has since begun (epoch advanced) OR the
 			// owning account row is already purged/re-owned, reject — a completing
@@ -216,17 +217,58 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 			this.emit("onTransactionAdded", tx)
 			this.pending.set(tx.hash, tx)
 			return tx
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
-	public async waitForTx(txHash: string, parentTask?: WrappedTask) {
-		const waitForTxTask = parentTask?.startSubtask(new StepContent("Waiting for transaction"))
-		while (this.pending.has(txHash)) {
-			await sleep(100)
+	/**
+	 * Poll until `txHash` leaves the pending queue (submitted — NOT proven; see
+	 * the callers' `waitForTxProven` for public-effect visibility), bounded by
+	 * `timeoutMs`. A locked wallet stalls the sync worker indefinitely, so an
+	 * unbounded wait spun for the whole lock period holding its task open —
+	 * which also blocked the task tree's GC (roots need `finishedAt`).
+	 *
+	 * Exit contract (each settles the subtask at most once; task-service
+	 * throws are swallowed — the registry can be cleared mid-wait by a
+	 * profile switch, and the wait's outcome must not be replaced by a
+	 * bookkeeping error): drained → complete; timeout → fail + typed
+	 * {@link TxConfirmationTimeoutError} (the tx may still mine — the copy
+	 * says "not confirmed", never "failed").
+	 */
+	public async waitForTx(txHash: string, parentTask?: WrappedTask, timeoutMs = 120_000) {
+		let waitForTxTask: WrappedTask | undefined
+		try {
+			waitForTxTask = parentTask?.startSubtask(new StepContent("Waiting for transaction"))
+		} catch {
+			// A stale/cleared parent must not abort the wait — the wait is the
+			// job; the subtask is progress decoration.
 		}
-		waitForTxTask?.complete()
+		let settled = false
+		const settle = (outcome: "complete" | "fail", message?: string): void => {
+			if (settled) return
+			settled = true
+			try {
+				if (!waitForTxTask?.exists) return
+				if (outcome === "complete") waitForTxTask.complete()
+				else waitForTxTask.fail(new Error(message ?? "wait failed"))
+			} catch {
+				// Task bookkeeping must never replace the wait's outcome.
+			}
+		}
+		const deadline = Date.now() + timeoutMs
+		try {
+			while (this.pending.has(txHash)) {
+				if (Date.now() >= deadline) {
+					const message = `Transaction not confirmed within ${Math.round(timeoutMs / 1000)}s — it may still complete`
+					settle("fail", message)
+					throw new TxConfirmationTimeoutError(message)
+				}
+				await sleep(100)
+			}
+			settle("complete")
+		} catch (err) {
+			settle("fail", getErrorMessage(err))
+			throw err
+		}
 	}
 
 	private readonly onAccountDeleted = async (account: Account) => {
@@ -259,8 +301,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 	public async purgeForAccounts(addresses: readonly string[], profileId?: string): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
-		await this.lock.enter()
-		try {
+		await this.lock.withLock(async () => {
 			// Two profiles built from one mnemonic own the same address, so an
 			// address-only match deletes the OTHER profile's history too. When the
 			// caller knows whose rows these are, a scoped row must match that
@@ -303,9 +344,23 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 				},
 				(tx) => this.emit("onTransactionDeleted", tx),
 			)
-		} finally {
-			this.lock.leave()
-		}
+			// F-B23: raw second pass, same lock hold, mirroring the typed rules —
+			// a malformed row scoped to another profile is left; an UNSCOPED
+			// malformed row is deleted only under sole ownership (it cannot be
+			// marked ambiguous like a typed row — rewriting bytes the codec cannot
+			// read would launder garbage into a "valid" write — so the non-sole
+			// case leaves it, fail-closed and codec-hidden as before).
+			await purgeMalformedRows(
+				this.txs,
+				(raw) => {
+					if (typeof raw.account !== "string" || !set.has(raw.account)) return false
+					if (profileId === undefined) return true
+					if (raw.profileId !== undefined) return raw.profileId === profileId
+					return soleOwner
+				},
+				(id) => this.logDebug(`purged malformed tx row ${id}`),
+			)
+		})
 	}
 
 	private async runWorker() {
@@ -413,8 +468,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		// not hash membership: after a purge, `addTransaction` may legitimately
 		// re-create the same hash as a NEW row (ABA) — a stale poll's `has(hash)`
 		// would pass and overwrite it, while `get(hash) !== tx` cannot.
-		await this.lock.enter()
-		try {
+		await this.lock.withLock(async () => {
 			if (this.pending.get(tx.hash) !== tx && this.droppedWatch.get(tx.hash) !== tx) return
 			tx.updatedAt = Date.now()
 			tx.status = status
@@ -443,9 +497,7 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 				this.droppedNextCheckAt.delete(tx.hash)
 			}
 			this.logDebug(`Tx ${tx.hash.slice(0, 8)} ${receipt.status}`)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	private getTxStatus(status: AztecTxStatus): TxStatus {
@@ -511,50 +563,46 @@ export class TransactionService extends Service<Methods, Events> implements Serv
 		return txs
 	}
 
-	public async restore(txs: Tx[]): Promise<Restored<Tx>[]> {
+	public async restore(txs: Tx[], profileId: string): Promise<Restored<Tx>[]> {
 		await this.ensureInitialized()
-
-		const result: Restored<Tx>[] = []
-
-		await this.lock.enter()
-		try {
-			for (const tx of txs) {
-				try {
-					// D16: never restore a Pending tx. `submittedEndpointUrl` is
-					// backup-controlled and `updateTx` dials it (or, when absent, the
-					// ACTIVE profile's node) — the sync worker would leak an
-					// attacker-chosen hash to the wrong RPC. Pending is transient sync
-					// state that re-derives on the next real submission. Drop-and-record;
-					// NEVER write it (a written Pending row is re-armed by the init scan)
-					// and NEVER add it to `this.pending`.
-					if (tx.status === TxStatus.Pending) {
-						result.push({ ...tx, restoreError: "restored pending transaction rejected" })
-						continue
-					}
-					// B: create-only. `EntityStorage.set` is an upsert on the
-					// profile-shared txs root keyed by `hash`; a crafted hash equal to a
-					// victim's tx would overwrite (erase) it. A restore must never
-					// overwrite an existing tx.
-					if (await this.txs.contains(tx.hash)) {
-						result.push({ ...tx, restoreError: "transaction already exists (hash collision)" })
-						continue
-					}
-					// H: validate + canonicalize the persisted shape (mirror the read
-					// codec) so a malformed row is recorded, not written + codec-hidden.
-					const row = TxSchema.parse(tx)
-					await this.txs.set(row.hash, row)
-					result.push(row)
-				} catch (err) {
-					result.push({
-						...tx,
-						restoreError: toRestoreError(err),
-					})
-				}
-			}
-
-			return result
-		} finally {
-			this.lock.leave()
+		// Deletion fence keyed on the composable's authoritative created-profile
+		// id — tx rows' own profileId is optional AND backup-controlled, so it
+		// cannot anchor the fence. Fail closed: dispatch has no schema validation.
+		if (typeof profileId !== "string" || profileId.length === 0) {
+			throw new Error("restore requires the created profile id")
 		}
+		const deletion = this.deletionState
+		const epochs = captureRestoreEpochs(deletion, [profileId])
+
+		return await this.lock.withLock(async () => {
+			// The two guard rejections THROW (not push-and-continue) so restoreRows
+			// records them as `restoreError` with the identical message; the throw
+			// also guarantees the row is never written / never added to `this.pending`.
+			return await restoreRows(txs, async (tx) => {
+				// D16: never restore a Pending tx. `submittedEndpointUrl` is
+				// backup-controlled and `updateTx` dials it (or, when absent, the
+				// ACTIVE profile's node) — the sync worker would leak an
+				// attacker-chosen hash to the wrong RPC. Pending is transient sync
+				// state that re-derives on the next real submission. Drop-and-record;
+				// NEVER write it (a written Pending row is re-armed by the init scan)
+				// and NEVER add it to `this.pending`.
+				if (tx.status === TxStatus.Pending) {
+					throw new Error("restored pending transaction rejected")
+				}
+				// B: create-only. `EntityStorage.set` is an upsert on the
+				// profile-shared txs root keyed by `hash`; a crafted hash equal to a
+				// victim's tx would overwrite (erase) it. A restore must never
+				// overwrite an existing tx.
+				if (await this.txs.contains(tx.hash)) {
+					throw new Error("transaction already exists (hash collision)")
+				}
+				// H: validate + canonicalize the persisted shape (mirror the read
+				// codec) so a malformed row is recorded, not written + codec-hidden.
+				const row = TxSchema.parse(tx)
+				assertRestoreEpoch(deletion, epochs, profileId)
+				await this.txs.set(row.hash, row)
+				return row
+			})
+		})
 	}
 }

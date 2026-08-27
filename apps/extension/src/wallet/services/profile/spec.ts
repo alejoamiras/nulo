@@ -1,5 +1,11 @@
 import type { Fr } from "@aztec/foundation/curves/bn254"
-import type { Base64CredentialId, Base64MasterSecret, PasskeyCredentialData, SessionWrappedSecret } from "@nulo/wallet-crypto"
+import type {
+	Base64CredentialId,
+	Base64MasterSecret,
+	ImportedKeysDek,
+	PasskeyCredentialData,
+	SessionWrappedSecret,
+} from "@nulo/wallet-crypto"
 import type { Restored } from "@/wallet/base"
 
 export const PROFILE_SERVICE_NAME = "profile"
@@ -13,7 +19,29 @@ export type ProfileType = "password" | "passkey"
  * id in the SAME parameter — a swap that type-checked and only failed at restore.
  * `ProfileService.restore` asserts `secret.type === profile.type` before branching.
  */
-export type RestoreSecret = { type: "password"; masterKey: Base64MasterSecret } | { type: "passkey"; credentialId: Base64CredentialId }
+export type RestoreSecret =
+	| {
+			type: "password"
+			masterKey: Base64MasterSecret
+			/** Base64 of the 32-byte BIP-39 entropy behind the recovery phrase. REQUIRED for
+			 *  epoch-4 password backups; `restore` verifies `PBKDF2(words(entropy)) == masterKey`
+			 *  before sealing either (the backup checksum is integrity-not-auth). */
+			entropy: string
+			/** Base64 of the SOURCE profile's 32-byte imported-keys DEK, plaintext — the same trust
+			 *  envelope as the plaintext `masterKey` beside it. REQUIRED (epoch-4 shape). Used ONLY
+			 *  inside the TTL-bound rewrap context: `restore` mints a FRESH destination DEK for the
+			 *  new row (a restored clone must never share the source's DEK — clone divergence) and
+			 *  `restoreImportedKeys` rewraps the backup's key rows source→destination. */
+			importedKeysDek: string
+	  }
+	| {
+			type: "passkey"
+			credentialId: Base64CredentialId
+			/** The source profile's SEALED dek blob, verbatim (passkey backups carry no plaintext
+			 *  secrets) — the restore ceremony re-derives the same PRF wrap key to unseal it into
+			 *  the rewrap context. REQUIRED (epoch-4 shape). */
+			dekSealed: string
+	  }
 
 export type ProfileInfo = {
 	/** Randomly generated id. */
@@ -31,11 +59,35 @@ export type Profile = ProfileInfo & {
 	 *  resurrected in the offscreen document (#281 D4). Never reused, never
 	 *  derived from the id. */
 	pxeGeneration: string
+	/** The per-profile imported-keys DEK, sealed under the profile CREDENTIAL (password:
+	 *  EncryptionKey under the passhash; passkey: AES-GCM under the PRF-derived wrap key), AAD
+	 *  `nulo:profile-imported-dek:v1`. The DEK — never the master — roots imported signing-key
+	 *  rows: a shared recovery phrase means a shared master, so master-rooted keys are readable by
+	 *  the sibling profile by construction. */
+	dekSealed: string
+	/** One-way plaintext duplicate-phrase detector: hex(sha256("nulo:wallet-fingerprint:v1" ||
+	 *  master)). Plaintext ON PURPOSE — other profiles' masters are sealed, so import/restore can
+	 *  only compare a candidate master against stored fingerprints. Negligible-marginal (not zero)
+	 *  same-device linkability, owner-accepted; see `wallet-fingerprint.ts`. */
+	walletFingerprint: string
 } & (
 		| {
 				type: "password"
 				guard: string
 				secret: string
+				/** Sealed 32-byte BIP-39 entropy (AAD-bound, PasswordSecretBox v2) — the recovery
+				 *  phrase re-displays from THIS; the master derives one-way from the words. */
+				entropy: string
+				/** HMAC over (this row's OWN storage id, the four sealed slots, the plaintext
+				 *  wallet fingerprint), keyed by HKDF(master‖dek) — v3. NOT master-only: the
+				 *  same-phrase attacker HOLDS the master, so a master-keyed tag is forgeable by
+				 *  them; forging v3 additionally requires the victim's DEK. The id binding kills
+				 *  whole-envelope swaps between same-password profiles; the fingerprint binding
+				 *  makes blinding the duplicate guard a detectable tamper. Verified at password
+				 *  unlock AND bearer restore; a mismatch opens DERIVED-ONLY (imported accounts
+				 *  quarantine, no bearer) — never a profile block (A4: imported material must
+				 *  not block derived funds). */
+				envelopeMac: string
 		  }
 		| {
 				type: "passkey"
@@ -88,6 +140,11 @@ export type ActiveSession = {
 	session: Session
 	/** Master secret */
 	secret: Fr
+	/** The unsealed imported-keys DEK. `undefined` = a DEGRADED (derived-only) session: the DEK
+	 *  slot failed to unseal or the envelope MAC failed at unlock — imported accounts quarantine
+	 *  per-account, and NO silent-restore bearer is persisted (the next SW wake forces a password
+	 *  unlock, re-surfacing the state). Zeroized on close/replace/expiry. */
+	dek?: ImportedKeysDek
 }
 
 export type Methods = {
@@ -203,43 +260,28 @@ export type Methods = {
 	deleteProfile(id: string): ProfileInfo
 
 	/**
-	 * Imports profile from encrypted secret and signs in.
-	 * @param name Display name.
-	 * @param secret Encrypted secret (base64).
-	 * @param password Password to decrypt (and then encrypt) the secret.
-	 */
-	importEncrypted(name: string, secret: string, password: string): ProfileInfo
-
-	/**
-	 * Imports profile from plain secret and signs in.
-	 * @param name Display name.
-	 * @param secret Plain secret (base64).
-	 * @param password Password to encrypt the secret.
-	 */
-	importPlain(name: string, secret: string, password: string): ProfileInfo
-
-	/**
 	 * Imports a passkey-backed profile using an existing credential and signs in.
 	 *
 	 * @param name Display name.
 	 * @param credentialData OPTIONAL — PATH A. See `createPasskeyProfile` for
 	 *   the dual-path contract.
 	 */
-	importPasskey(name: string, credentialData?: PasskeyCredentialData): ProfileInfo
+	importPasskey(name: string, credentialData?: PasskeyCredentialData, allowDuplicate?: boolean): ProfileInfo
 
 	/**
-	 * Imports profile from 24-words mnemonic phrase, representing plain secret, and signs in.
+	 * Imports a profile from its 24-word recovery phrase and signs in. Validates on the
+	 * canonical form (NFKD/lowercase/collapse) BEFORE any persistence: exactly 24 words, all
+	 * on the wordlist, checksum valid. The master derives via the standard BIP-39 PBKDF2 step
+	 * (NULO-ACCOUNT-KDF v2); the entropy is stored sealed so the phrase re-displays.
+	 * Throws `DuplicateWalletError` (naming the colliding profile) when another live profile
+	 * carries the same wallet fingerprint, unless `allowDuplicate` — the UI confirms and retries
+	 * (warn-and-confirm, never a hard block; owner policy).
 	 * @param name Display name.
-	 * @param words 24-words mnemonic phrase.
-	 * @param password Password to encrypt the secret.
+	 * @param mnemonic 24-word recovery phrase.
+	 * @param password Password to encrypt the secrets.
+	 * @param allowDuplicate Confirmed duplicate override from the warn dialog.
 	 */
-	importMnemonic(name: string, mnemonic: string[], password: string): ProfileInfo
-
-	/**
-	 * Returns encrypted profile secret (base64).
-	 * @param id Profile id.
-	 */
-	exportEncrypted(id: string): string
+	importMnemonic(name: string, mnemonic: string[], password: string, allowDuplicate?: boolean): ProfileInfo
 
 	/**
 	 * Returns plain profile secret (base64). For passkey profiles, the
@@ -258,9 +300,29 @@ export type Methods = {
 	exportPlain(id: string, password?: string, credentialData?: PasskeyCredentialData): string
 
 	/**
-	 * Returns 24-words mnemonic phrase, representing plain profile secret.
+	 * Atomic discriminated export for the Full-Backup builder: master key, recovery-phrase
+	 * entropy, AND the imported-keys DEK from ONE authenticated pass, so the backup fields can
+	 * never come from different row states (no cross-call races). Password profiles only. Fails
+	 * loudly on an unrecoverable DEK slot (the epoch-4 backup shape requires it; a password
+	 * change self-heals the slot first).
 	 * @param id Profile id.
-	 * @param password Password to decrypt the secret.
+	 * @param password Password to decrypt the secrets.
+	 */
+	exportBackupMaterial(id: string, password: string): { masterKey: string; entropy: string; importedKeysDek: string }
+
+	/**
+	 * The profile's SEALED imported-keys DEK blob, verbatim (ciphertext — safe to hand out).
+	 * Passkey full backups carry THIS as their `imported-keys-dek-sealed` field; the restore
+	 * ceremony re-derives the same PRF wrap key to open it.
+	 * @param id Profile id.
+	 */
+	getProfileDekSealed(id: string): string
+
+	/**
+	 * Returns the 24-word recovery phrase, re-encoded from the profile's stored entropy after
+	 * the words↔master pairing check (fails closed on a tampered row).
+	 * @param id Profile id.
+	 * @param password Password to decrypt the secrets.
 	 */
 	exportMnemonic(id: string, password: string): string[]
 
@@ -289,7 +351,13 @@ export type Methods = {
 	 *   `{...profile, restoreError}` if missing for a passkey profile (no
 	 *   SW-driven window fallback).
 	 */
-	restore(profile: ProfileInfo, secret: RestoreSecret, password?: string, credentialData?: PasskeyCredentialData): Restored<ProfileInfo>
+	restore(
+		profile: ProfileInfo,
+		secret: RestoreSecret,
+		password?: string,
+		credentialData?: PasskeyCredentialData,
+		allowDuplicate?: boolean,
+	): Restored<ProfileInfo>
 
 	/**
 	 * Opens the session for a profile previously created by `restore()`.
@@ -316,4 +384,8 @@ export type Events = {
 	onProfileDeleted: ProfileInfo
 	/** Emitted when an active profile is changed. */
 	onActiveProfileChanged: ProfileInfo | undefined
+	/** Emitted when an unlock opened a DEGRADED (derived-only) session — the imported-keys DEK
+	 *  slot failed to unseal or the envelope MAC failed. The popup surfaces a visible warning
+	 *  (never just a log); imported accounts quarantine per-account. */
+	onImportedKeysDegraded: ProfileInfo
 }

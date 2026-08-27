@@ -32,22 +32,24 @@
     "test:release": "bun test scripts/release/",
     "test:ci-gating": "bun test scripts/ci-cd/",
     "check:imports": "biome check apps/ packages/",
-    "audit:vue": "bun run typecheck:all && bun run test && bun run lint && bun run build",
+    "audit:vue": "bun run --parallel typecheck:all test lint && bun run build",
     "audit:faucet": "bun run typecheck:all && bun run test:faucet && bun run lint && bun run --cwd apps/faucet verify:deployments && bun run build:faucet",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.1",
+    "@biomejs/biome": "2.5.9",
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2"
   },
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.0",
   "version": "0.27.0",
   "overrides": {
     "vite": "^8.0.0"
   },
   "patchedDependencies": {
     "@aztec/noir-noirc_abi@5.0.1": "patches/@aztec%2Fnoir-noirc_abi@5.0.1.patch",
-    "@aztec/noir-acvm_js@5.0.1": "patches/@aztec%2Fnoir-acvm_js@5.0.1.patch"
+    "@aztec/noir-acvm_js@5.0.1": "patches/@aztec%2Fnoir-acvm_js@5.0.1.patch",
+    "@aztec/noir-acvm_js@5.2.0": "patches/@aztec%2Fnoir-acvm_js@5.2.0.patch",
+    "@aztec/noir-noirc_abi@5.2.0": "patches/@aztec%2Fnoir-noirc_abi@5.2.0.patch"
   }
 }

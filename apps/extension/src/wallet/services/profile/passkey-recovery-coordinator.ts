@@ -38,6 +38,10 @@ import type { Profile } from "./spec"
 export type PasskeyRecovery = {
 	credentialId: Base64CredentialId
 	secret: MasterSecretBytes
+	/** The AES-GCM wrap key for the imported-keys DEK slot, derived while the credential is
+	 *  transiently alive (same HKDF extract as the master, distinct expand — see
+	 *  `PasskeyCredential.deriveDekWrapKey`). Non-extractable; nothing to zeroize. */
+	dekWrapKey: CryptoKey
 	/** Optional because WebAuthn `get` may omit userHandle. */
 	userHandle?: HexUserHandle
 }
@@ -55,9 +59,11 @@ export class PasskeyRecoveryCoordinator {
 	public async createForNewProfile(profileId: string, name: string): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.createKey(profileId, name)
 		const secret = await credential.deriveMasterSecret()
+		const dekWrapKey = await credential.deriveDekWrapKey()
 		return {
 			credentialId: credential.id,
 			secret,
+			dekWrapKey,
 			userHandle: credential.userHandle,
 		}
 	}
@@ -69,9 +75,11 @@ export class PasskeyRecoveryCoordinator {
 	public async recoverByCredentialId(credentialId: string): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.getKey(credentialId)
 		const secret = await credential.deriveMasterSecret()
+		const dekWrapKey = await credential.deriveDekWrapKey()
 		return {
 			credentialId: credential.id,
 			secret,
+			dekWrapKey,
 			userHandle: credential.userHandle,
 		}
 	}
@@ -82,9 +90,11 @@ export class PasskeyRecoveryCoordinator {
 	public async recoverUnknown(): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.getKey()
 		const secret = await credential.deriveMasterSecret()
+		const dekWrapKey = await credential.deriveDekWrapKey()
 		return {
 			credentialId: credential.id,
 			secret,
+			dekWrapKey,
 			userHandle: credential.userHandle,
 		}
 	}
@@ -102,9 +112,11 @@ export class PasskeyRecoveryCoordinator {
 	public async recoverFromCredentialData(data: PasskeyCredentialData): Promise<PasskeyRecovery> {
 		const credential = await this.passkeys.materializeCredential(data)
 		const secret = await credential.deriveMasterSecret()
+		const dekWrapKey = await credential.deriveDekWrapKey()
 		return {
 			credentialId: credential.id,
 			secret,
+			dekWrapKey,
 			userHandle: credential.userHandle,
 		}
 	}

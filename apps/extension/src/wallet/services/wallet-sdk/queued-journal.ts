@@ -27,7 +27,7 @@ import type { DappSessionService } from "@/wallet/services/dapp-session/service"
 import type { NetworkService } from "@/wallet/services/network/service"
 import type { AccountService } from "@/wallet/services/account/service"
 import { resolveAuthorizedSessionAccount } from "@nulo/wallet-bridge"
-import { parseCaipAccount, resolveNetworkByChainId } from "@/wallet/utils/caip"
+import { parseCaipAccount } from "@/wallet/utils/caip"
 import type { CaipAccount } from "@/wallet/services/dapp-interaction/spec"
 import { pickPrimaryMethod } from "@/utils/primary-method"
 
@@ -62,6 +62,12 @@ export interface TryCreateQueuedJournalDeps {
 	/** Supplies wallet-ordered accounts, so the record is filed under the same
 	 *  account the dispatcher will send from. */
 	account: AccountService
+	/** The session's establishment-stamped profile. Every profile-scoped read
+	 *  below anchors on it (session row, network) and the active profile must
+	 *  still MATCH it — this path runs before the dispatch guard and would
+	 *  otherwise let an A-era message racing a profile switch persist a
+	 *  B-profile record. */
+	stampedProfileId: string
 	logger: ILogger
 }
 
@@ -104,10 +110,14 @@ export async function tryCreateQueuedJournal(
 	session: ActiveSession,
 	deps: TryCreateQueuedJournalDeps,
 ): Promise<string | undefined> {
-	const { journal, profile, dappSession, networkSvc, account: accountSvc, logger } = deps
+	const { journal, profile, dappSession, networkSvc, account: accountSvc, stampedProfileId, logger } = deps
 	try {
 		const activeProfile = await profile.getActiveProfile()
 		if (!activeProfile) return undefined
+		// Stamp-vs-active check: a switch racing this message must not produce a
+		// record under the NEW profile (the dispatch guard will reject the
+		// message itself; the record must not exist either).
+		if (activeProfile.id !== stampedProfileId) return undefined
 		// Captured WITH the profile, asserted by the journal at persist time: if
 		// this profile is deleted (even deleted-and-reimported under the same id)
 		// while we resolve session/account/network below, the create is refused
@@ -115,7 +125,8 @@ export async function tryCreateQueuedJournal(
 		const profileEpoch = profile.getDeletionState().capture(activeProfile.id)
 
 		const chainId = chainInfoToChainId(session)
-		const dapp = await dappSession.tryGetDappSessionByOriginAndChain(session.origin, String(chainId))
+		// Anchored to the STAMPED profile — not a live re-read.
+		const dapp = await dappSession.tryGetDappSessionByOriginAndChain(session.origin, String(chainId), stampedProfileId)
 		if (!dapp?.accounts?.length) return undefined
 
 		// sendTx requires the `transaction` capability (the capability type
@@ -149,12 +160,18 @@ export async function tryCreateQueuedJournal(
 		// `networkId` for activity-feed scoping must be the INTERNAL network row id
 		// (RecentActivityView.journalRecordInScope filters on `network.id`), NOT
 		// `String(chainId)`. Without this resolution the queued card never renders.
-		const network = await resolveNetworkByChainId(networkSvc, chainId)
+		// Anchored network read (getNetworksRaw takes the profile explicitly —
+		// resolveNetworkByChainId would live-read the active profile).
+		const networks = await networkSvc.getNetworksRaw(stampedProfileId, chainId)
+		const network = networks[0]
 		if (!network) return undefined
 
 		// Critical section: cap check + record create must be atomic.
-		await queuedCreationLock.enter()
-		try {
+		return await queuedCreationLock.withLock(async () => {
+			// Pre-persist stamp revalidation (belt over the anchored reads above):
+			// the awaits since the first check are exactly where a switch lands.
+			const nowActive = await profile.getActiveProfile()
+			if (nowActive?.id !== stampedProfileId) return undefined
 			const sessionQueuedCount = await journal.countOperations({
 				sessionId: session.sessionId,
 				stage: "queued",
@@ -200,9 +217,7 @@ export async function tryCreateQueuedJournal(
 				initialStage: { stage: "queued" },
 			})
 			return record.id
-		} finally {
-			queuedCreationLock.leave()
-		}
+		})
 	} catch (error) {
 		logger.log("wallet-sdk-bg", LogLevel.Warn, `tryCreateQueuedJournal failed: ${getErrorMessage(error)}`)
 		return undefined
@@ -221,4 +236,31 @@ export function extractPrimaryMethodFromSendTx(message: WalletMessage): string |
 	if (!Array.isArray(args)) return undefined
 	const exec = args[0] as { calls?: Array<{ name?: string }> } | undefined
 	return pickPrimaryMethod(exec?.calls)
+}
+
+/**
+ * Transition a still-`queued` journal record to `failed`. The record is the
+ * source of truth (not a mutable flag): "handler claimed then failed" already
+ * carries its terminal state; "failed before claim" is ours to close so the
+ * UI doesn't show a permanently-stuck "Queued..." card. The stage check MUST
+ * ride `transitionIfStage`'s lock-held re-read — a separate read-then-
+ * transition legally turned a mid-flight `queued → pending` claim into
+ * `pending → failed`, failing an op the user had just approved.
+ */
+export async function failQueuedIfUnclaimed(
+	operationJournal: OperationJournalService,
+	journalId: string,
+	message: string,
+	logger: ILogger,
+): Promise<void> {
+	try {
+		await operationJournal.transitionIfStage(
+			journalId,
+			["queued"],
+			{ stage: "failed" },
+			{ kind: "popup_bound", message, normalizedRaw: null },
+		)
+	} catch (transitionError) {
+		logger.log("wallet-sdk", LogLevel.Warn, `Failed to mark queued record ${journalId} as failed: ${getErrorMessage(transitionError)}`)
+	}
 }

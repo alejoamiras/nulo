@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nulo Bug Audit — 2026-08-22 — Production Readiness</title>
+<style>
+  :root {
+    --bg: #fdfdfc; --fg: #1a1a18; --muted: #6b6b66; --border: #e4e2dd;
+    --card: #ffffff; --accent: #b3541e;
+    --crit: #b3261e; --major: #b07508; --minor: #5f6b7a; --ok: #2e6b34;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a; --fg: #e8e7e4; --muted: #9a9a94; --border: #33352f;
+      --card: #1f2124; --accent: #e08a4e;
+      --crit: #ef6f65; --major: #d9a13c; --minor: #8aa0b5; --ok: #7dc084;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0 auto; max-width: 820px; padding: 48px 24px; background: var(--bg); color: var(--fg);
+         font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         line-height: 1.6; font-size: 16px; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin-bottom: .3em; }
+  h2 { font-size: 1.25rem; margin-top: 2.2em; border-bottom: 1px solid var(--border); padding-bottom: .3em; }
+  h3 { font-size: 1.02rem; margin-top: 1.8em; }
+  a { color: var(--accent); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85em;
+         background: var(--card); border: 1px solid var(--border); padding: .05em .35em; border-radius: 4px; }
+  .strip { display: flex; gap: 10px; flex-wrap: wrap; margin: 20px 0 8px; }
+  .chip { border-radius: 999px; padding: 3px 14px; font-size: .85rem; font-weight: 600;
+          border: 1.5px solid var(--border); }
+  .chip.crit { color: var(--crit); border-color: var(--crit); }
+  .chip.major { color: var(--major); border-color: var(--major); }
+  .chip.minor { color: var(--minor); border-color: var(--minor); }
+  .chip.plain { color: var(--muted); }
+  .meta { color: var(--muted); font-size: .9rem; }
+  .callout { border: 1.5px solid var(--ok); border-radius: 12px; padding: 16px 20px; margin: 28px 0; }
+  .callout h2 { border: none; margin-top: 0; color: var(--ok); }
+  article.finding { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+                    padding: 20px 24px; margin: 22px 0; }
+  .sev { display: inline-block; font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+         border-radius: 4px; padding: 2px 8px; vertical-align: middle; }
+  .sev.CRITICAL { background: var(--crit); color: var(--bg); }
+  .sev.MAJOR { background: var(--major); color: var(--bg); }
+  .sev.MINOR { background: var(--minor); color: var(--bg); }
+  details { margin-top: 14px; border-top: 1px dashed var(--border); padding-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; margin: 14px 0; }
+  th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--border);
+           color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>Bug audit — production readiness</h1>
+<p class="meta">Nulo extension · 2026-08-22 · solo deep pass · clean-room (prior audits not consulted) ·
+<a href="report.md">full technical report</a> · <a href="proofs/RED-evidence.txt">RED test evidence</a></p>
+
+<div class="strip">
+  <span class="chip crit">1 Critical</span>
+  <span class="chip major">10 Major</span>
+  <span class="chip minor">11 Minor</span>
+  <span class="chip minor">6 Low</span>
+  <span class="chip plain">6 executing RED proofs</span>
+</div>
+
+<div class="callout">
+<h2>Cheapest fixes first</h2>
+<ol>
+  <li><strong>Silent rename failures</strong> (N-22) — swap an empty catch for the standard error toast. Minutes.</li>
+  <li><strong>Boot probe reads wrong storage area</strong> (N-27) — one-line fix.</li>
+  <li><strong>"Delete profile" modal acts on click-time identity</strong> (N-09) — capture the id when the dialog is built. Under an hour; removes the worst irreversible-outcome UI surface.</li>
+  <li><strong>No size cap on backup file import</strong> (N-13) — reject oversized files before reading. An hour.</li>
+  <li><strong>Lock watchdog double-release</strong> (N-11) — ~10-line ownership token fixes 14 locks at once and defangs N-17.</li>
+</ol>
+</div>
+
+<h2>The headline findings, in plain language</h2>
+
+<article class="finding">
+<h3><span class="sev CRITICAL">CRITICAL</span> N-01 — Exporting a backup can hang forever or produce a file that refuses to import</h3>
+<p><strong>What it is.</strong> The full-backup export page lets you start the same export twice, and if anything goes wrong mid-way it has no cleanup path. Two exports run side by side on the same connections; a single failure leaves a spinner that never ends, buttons permanently disabled, and copies of your secret keys stuck in memory with nothing able to reach them.</p>
+<p><strong>What a user would trigger.</strong> Click "Create Backup", get impatient, press Enter again while the password check runs — or the browser quietly restarts the wallet's background during the loop. Worst case, the downloaded backup carries a checksum computed from half-finished data: the file you just exported fails its own tamper check when you try to restore it later.</p>
+<p><strong>The fix.</strong> Refuse to start while an export is already running (one guard line), always clean up every connection in a finally block, and compute the checksum and the saved body from the same snapshot. The import page next door already does all of this correctly — copy its pattern.</p>
+<details><summary>Technical trace</summary>
+<p><code>full.vue:102</code> no latch · :164 status set after awaits · :169/:193-198 shared module binding + unguarded loop · :200 hash/assign gap · :245-258 Enter default re-fires during progress · :118-128 concurrent-ceremony error misrouted to navigate-away. Counter-examples and fix in <a href="report.md">report.md §N-01</a>.</p>
+</details>
+</article>
+
+<article class="finding">
+<h3><span class="sev MAJOR">MAJOR</span> N-02 — Ordinary tab reloads can burn the recovery budget and tell users to reinstall</h3>
+<p><strong>What it is.</strong> When an update ships a data migration and it fails once (say, low disk space), the wallet shows "restart to retry." But every background wake — any dApp tab reloading, the popup opening, a price tick — counts as a retry. Three accidental ones later, the screen flips to "reinstall the extension."</p>
+<p><strong>What a user would trigger.</strong> Update lands, migration hits a transient error, user keeps browsing. Their tabs reload in the background a few times. Hours later the wallet demands a destructive reinstall for something a single manual retry the next day would have fixed. Dormant today only because no real migrations exist yet — it arms itself exactly at launch.</p>
+<p><strong>The fix.</strong> Before re-running the engine on boot, check whether a blocked state is already recorded; if so, show the recovery screen without spending another attempt.</p>
+<details><summary>Technical trace</summary>
+<p>Module-top-level <code>runtime.start()</code> (<code>wallet/index.ts:103-111</code>) runs <code>Migrator.run()</code> on every wake; each failure bumps the durable counter (<code>migrator.ts:246</code>) and ≥3 flips terminal (:254); nothing short-circuits on the persisted blocked status (<code>runtime.ts:143-175</code>). RED proof: <code>proofs/c3-1-migration-ambient-burn.proof.test.ts</code>.</p>
+</details>
+</article>
+
+<article class="finding">
+<h3><span class="sev MAJOR">MAJOR</span> N-04 — A dApp connection quietly switches identities when you change profiles</h3>
+<p><strong>What it is.</strong> If two profiles have both connected the same dApp before, the dApp's live channel survives a profile switch and starts speaking for whichever profile unlocks next — no prompt, no reconnect, no indication.</p>
+<p><strong>What a user would trigger.</strong> Connect your Work profile to a dApp. Lock. Unlock Personal in the same browser. The dApp now silently reads Personal's private balances through the old Work-era channel.</p>
+<p><strong>The fix.</strong> Terminate matching channels when the active profile changes (the session-deleted handler already does exactly this shape), or stamp the opening profile onto the channel and refuse mismatches.</p>
+<details><summary>Technical trace</summary>
+<p>ctx built from current active profile (<code>wallet-sdk/background.ts:681-688</code>); profile-change listener drains discovery only (:392-423); session lookup keyed to active profile (<code>dapp-session/service.ts:114-129</code>). Silent readers bypass popups entirely.</p>
+</details>
+</article>
+
+<article class="finding">
+<h3><span class="sev MAJOR">MAJOR</span> N-03 / N-09 — Two ways destructive actions act on the wrong identity</h3>
+<p><strong>N-03 — account creation racing deletion.</strong> Creating an account checks permission first and writes seconds later, unfenced. Delete the profile inside that window and the new account row lands after the purge snapshot — it survives every cleanup, forever, tied to an erased profile. Fix: re-validate the deletion epoch immediately before writing (the transaction service already models this).</p>
+<p><strong>N-09 — stale "Delete Profile" modal.</strong> After certain updates, a blocking modal asks users to delete their profile for compatibility. It stays until clicked — including across a lock, and across a profile switch done from another wallet window. The click then deletes whichever profile is currently active, not the one the warning was about. Irreversible, wrong-target key deletion. Fix: remember which profile the modal was about when building it.</p>
+<details><summary>Technical trace</summary>
+<p>N-03: <code>account/service.ts:205</code> gate → :216-218 slow derivation → :229 unfenced write; correct pattern at <code>transaction/service.ts:180-184</code>. N-09: <code>composables/notification.js:27-32</code>; lock branch (<code>app.vue:136-145</code>) never clears notifications; side panel hosts the same shell (<code>manifest.config.ts:28-30</code>).</p>
+</details>
+</article>
+
+<article class="finding">
+<h3><span class="sev MAJOR">MAJOR</span> N-05 / N-10 / N-08 — Rapid switching leaves stale work running</h3>
+<p><strong>N-05.</strong> Flip networks twice quickly while the background is restarting, and an abandoned fetch can land last: the account list shows chain A under chain B, and the active account becomes a chain-A address. Balances, send validation, token lists all query the wrong identity until you switch again or reopen.</p>
+<p><strong>N-10.</strong> Switching A→B→A mid balance-refresh disarms the guards (the token map repopulates), so balances computed against profile B's private state get committed onto profile A's row and displayed.</p>
+<p><strong>N-08.</strong> The unlock screen's "wait for login" loop doesn't check WHO logged in. A unlock finishing out of order (or from another window) can repaint the UI as profile A while the actual unlocked session is B. And if the bootstrap RPC fails outright, the spinner sticks forever.</p>
+<p><strong>The fix family.</strong> Every async step that was started for a specific scope should re-check "am I still the current scope/identity?" after each await — the bootstrap code already has this fence; these three surfaces predate it.</p>
+<details><summary>Technical trace</summary>
+<p>N-05: <code>app.vue:100-131</code> + readiness-before-registration immunity (<code>base-client.ts:121</code> vs :143). N-10: <code>balance-job-queue.ts:186-293</code>, projector resolves live context (<code>balance-projector.ts:157</code>). N-08: <code>auth.vue:82-84, :107-118</code>; listener rejection unhandled (<code>app.vue:133-146</code>).</p>
+</details>
+</article>
+
+<article class="finding">
+<h3><span class="sev MAJOR">MAJOR</span> N-06 / N-07 — Background janitors can destroy things that are merely hidden or waiting</h3>
+<p><strong>N-06.</strong> A corrupted-but-parseable account row is deliberately kept on disk but hidden from normal reads. The orphan-key sweep compares hidden accounts' keys against raw storage and deletes keys whose account "isn't there" — permanently destroying the signing key of an imported account it couldn't see. Imported funds become unreachable from this install.</p>
+<p><strong>N-07.</strong> Queued dApp requests waiting in line behind a long approval popup are assumed dead after 10 minutes and marked failed — even though everything is alive. Queue three sends, take your time approving, and the third can report "cancelled" right as you approve it.</p>
+<p><strong>The fix family.</strong> Cleanup must enumerate storage the same way its twin writes do (raw vs decoded), and timeouts must distinguish "pipeline dead" from "waiting in line."</p>
+<details><summary>Technical trace</summary>
+<p>N-06: <code>account/service.ts:114-127</code> vs raw enumeration <code>imported-keys-repository.ts:49-56</code>; hiding at <code>entity_storage.ts:84-91</code>. N-07: <code>reaper.ts:72-82</code>; heartbeat starts at lane wait only (<code>execution-lane.ts:243</code>). RED proof for N-07: <code>proofs/c2-1-reaper-vs-fifo-waiter.proof.test.ts</code>.</p>
+</details>
+</article>
+
+<article class="finding">
+<h3><span class="sev MAJOR">MAJOR</span> N-11 — The safety-net lock timer can let two critical sections run at once</h3>
+<p><strong>What it is.</strong> Locks force-release after five minutes as a deadlock safety net. But when the stuck operation eventually finishes, its cleanup unlocks whatever is holding the lock NOW — letting a third task in while the second still holds it.</p>
+<p><strong>What a user would trigger.</strong> Any wedged chain call (slow node, hung offscreen) longer than five minutes followed by continued use. Two "exclusive" sections overlap; downstream this exact theft resurrects records of deleted tokens (N-17).</p>
+<p><strong>The fix.</strong> Hand every acquisition an owner token and make release a no-op for anyone else. Ten lines; fourteen locks benefit. Known-and-deferred until now — this audit supplies the first concrete harm scenario plus a failing test.</p>
+<details><summary>Technical trace</summary>
+<p><code>wallet-core/utils/lock.ts:63-68</code> watchdog calls unconditional leave(); :92-106 leave clears the CURRENT timer + flag. RED proof: <code>proofs/p1-1-lock-double-release.proof.test.ts</code>. Harm instance: N-17 (<code>incoming-transfer/service.ts:1045-1124</code>).</p>
+</details>
+</article>
+
+<h2>Everything else (Minor / Low)</h2>
+<table>
+<tr><th>ID</th><th>One-liner</th><th>User effect</th></tr>
+<tr><td>N-12</td><td>Lazy-expiry path cancels a freshly scheduled auto-lock alarm</td><td>Auto-lock occasionally fires late (fails safe)</td></tr>
+<tr><td>N-13</td><td>No size cap on imported backup files</td><td>Picking a huge file freezes/reloads the popup</td></tr>
+<tr><td>N-14</td><td>Import rollback races still-running restores after timeouts</td><td>Invisible junk rows for deleted profile ids</td></tr>
+<tr><td>N-15</td><td>First transaction trusts one possibly-stale node answer about initialization</td><td>Rare failed first send with fee burned</td></tr>
+<tr><td>N-16</td><td>Authwit revoke waits forever if the tx stays pending while locked</td><td>Action spins until next unlock</td></tr>
+<tr><td>N-17</td><td>Token scan holds the service lock across slow calls; watchdog theft resurrects purged records</td><td>Ghost receipts/outbox rows for deleted tokens</td></tr>
+<tr><td>N-18</td><td>Kill-during-migration skips attempt counting → endless crash-boot loop (latent)</td><td>No recovery surface; pairs with N-02's fix</td></tr>
+<tr><td>N-19</td><td>Shared object references serialize as "[Circular]" in dApp responses</td><td>dApp parse errors on some results</td></tr>
+<tr><td>N-20</td><td>Junk numeric keys can pin the id allocator onto one collapsing value</td><td>Requires poisoned key first; rows clobber</td></tr>
+<tr><td>N-21</td><td>Fallback-window passkey timeout shorter than the legitimate two-step ceremony</td><td>False timeout on PRF-late authenticators</td></tr>
+<tr><td>N-22</td><td>Profile rename failure swallowed silently</td><td>"Nothing happened" with no error shown</td></tr>
+<tr><td>N-23</td><td>Activity feed reset keyed on address only</td><td>Old profile's progress card shows after switch</td></tr>
+<tr><td>N-24–N-28</td><td>Dedupe gap on authwit restore · controller-map leak · verification-marker leak forces re-verify · telemetry probe reads wrong area · boot failure abandons sibling services</td><td>Limited / cosmetic / latent</td></tr>
+</table>
+
+<h2>What stayed clean</h2>
+<p>The freshly rewritten crypto core — KDF v2 derivation, DEK isolation, envelope MAC v2, passkey master reduce, BIP-39 handling — survived two independent scan lenses with zero data-level findings. The migration engine's crash-resume matrix, the backup trust gates, capability merge-under-lock, and the discovery freshness chain also held up under dedicated attack passes. That quiet is earned by the vector discipline; keep it sacred.</p>
+
+<footer>
+Full certificates, failing paths, and fix recommendations: <a href="report.md">report.md</a>.
+Raw per-cluster scans: <a href="raw/">raw/</a>. Executing proofs (currently RED, become green regression pins): <a href="proofs/">proofs/</a>.
+Run: 2026-08-22-production-ready.
+</footer>
+
+</body>
+</html>

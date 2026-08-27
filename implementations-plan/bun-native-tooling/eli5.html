@@ -1,0 +1,128 @@
+<title>Argv-Only Deploy Scripts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f7f8f6;
+    --card: #ffffff;
+    --ink: #1c2420;
+    --muted: #5b6660;
+    --line: #d9ded9;
+    --accent: #0f6e63;
+    --accent-soft: #dcefe9;
+    --warn: #9a5b00;
+    --warn-soft: #fbf1df;
+    --code-bg: #eef1ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #121917; --card: #182220; --ink: #e6ebe7; --muted: #9aa8a1; --line: #2a3532;
+      --accent: #4fd1b7; --accent-soft: #173a33; --warn: #e2a54b; --warn-soft: #2d2415; --code-bg: #1e2926;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #121917; --card: #182220; --ink: #e6ebe7; --muted: #9aa8a1; --line: #2a3532;
+    --accent: #4fd1b7; --accent-soft: #173a33; --warn: #e2a54b; --warn-soft: #2d2415; --code-bg: #1e2926;
+  }
+  body { background: var(--paper); color: var(--ink); font-family: "IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; margin: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  h1 { font-size: 2rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 0.25rem; text-wrap: balance; }
+  h2 { font-size: 1.2rem; font-weight: 600; margin: 2.5rem 0 0.75rem; text-wrap: balance; }
+  h3 { font-size: 1rem; font-weight: 600; margin: 0 0 0.35rem; }
+  p, li { max-width: 65ch; }
+  .eyebrow { color: var(--muted); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; margin: 0 0 1.5rem; }
+  .muted { color: var(--muted); font-size: 0.92rem; }
+  code, pre { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; }
+  code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+  pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  pre code { background: none; padding: 0; }
+  .phases { display: grid; gap: 1rem; }
+  .phase { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px; padding: 1rem 1.25rem; }
+  .phase p { margin: 0.35rem 0; }
+  .proves { color: var(--muted); font-size: 0.9rem; margin-top: 0.5rem; }
+  .callout { background: var(--accent-soft); border-radius: 6px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+  .callout h2 { margin-top: 0; }
+  .warning { color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 0.75rem 1rem; font-weight: 500; }
+  .seed { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  .tag { display: inline-block; background: var(--accent); color: var(--paper); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; padding: 0.15em 0.6em; border-radius: 999px; margin-left: 0.5rem; vertical-align: middle; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+  th, td { text-align: left; padding: 0.45rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; }
+  .table-wrap { overflow-x: auto; }
+  a { color: var(--accent); }
+  a:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<main>
+  <p class="eyebrow">Blueprint · light · Arc D of the Bun 1.4 adoption</p>
+  <h1>Argv-Only Deploy Scripts</h1>
+  <p>The bridge's deploy, verify and canary scripts (the ones an operator runs against Sepolia and mainnet) start other programs — <code>forge</code>, <code>cast</code>, <code>git</code>, <code>bun</code> — in eighteen hand-written places across six files. Three of those places build a shell command line by pasting text into a string; one hardcodes where <code>cast</code> lives; two copies of the same "find forge" helper drifted apart; and a failure can print the deployer's private key, because Node's error carries every argument that was passed. This plan replaces all eighteen with one small, tested primitive that only ever passes a list of arguments (never a shell string), never repeats those arguments in a failure, and finds the tools by one rule. The scripts keep doing exactly what they do today.</p>
+
+  <h2>What the dossier expected, and why the plan says no</h2>
+  <p>The Bun 1.4 dossier pencilled this arc in as "move these scripts to Bun's own process APIs (<code>Bun.$</code>, <code>Bun.spawn</code>)". Looking at the code changed that: the dangerous places are the shell strings, and the fix for those is a list of arguments — which Node's own API already does, and which these scripts already use for <code>forge</code> and <code>cast</code>. Bun's shell adds a different caveat (a value can still be read as a <em>flag</em> by the program it reaches), Bun's spawn has no "throw when it fails", and Bun's type definitions are not installed in this repo. Two independent codex reviews ruled the same way: harden on Node's API, no new dependency, no lockfile change, no waiting on Arc C.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><strong>light.</strong> Rubric: novelty low, blast radius low-to-medium (these scripts move real value when an operator runs them, but they never run in CI and the change is one revertable pull request), irreversibility low, migration cost low, external coupling medium (the Foundry and Aztec toolchains), security medium (a shell-string injection surface and a key in the arguments). Single package, one medium-high dimension → <code>light</code>, with the owner's standing rule that codex must converge before anything is built.</p>
+
+  <h2>What we already know (measured, not assumed)</h2>
+  <ul>
+    <li>Eighteen call sites, six files, zero tests, zero CI workflows: the scripts are the <code>aztec-update</code> operator runbook.</li>
+    <li>Three shell strings paste unvalidated input into <code>git</code> commands; <code>cast</code> is pinned to an Aztec 5.0.0 folder even when a newer toolchain is installed; the private key is passed to <code>cast</code> as an argument and would appear in Node's error if that call failed.</li>
+    <li>Both live manifests carry the modern portal marker; the scripts' legacy branch is unreachable for them — but it stays (an operator can still point <code>--config</code> at an old manifest; removing it would be a feature removal, which is yours to decide).</li>
+    <li>On the planning machine <code>forge</code> is installed, so <code>verify-l1 --dry-run</code> runs without any key: it printed four "builds" lines before the change, and must print the same four after.</li>
+    <li>Bun's <code>--no-orphans</code> flag (kill everything a process started when it dies) is documented as a descendant walk, not a process-group kill — but nothing here starts long-lived children, so it stays off; the safe experiment that would clear it is written down for a later arc.</li>
+  </ul>
+
+  <h2>Phases</h2>
+  <div class="phases">
+    <div class="phase">
+      <h3>Phase 0 — The primitive and its tests</h3>
+      <p>One new file, <code>run.ts</code>: <code>run(program, [args])</code> runs a program with a list of arguments, returns its output, and throws a clear error on failure — exit code, signal, or "not found" — with the last 4,000 characters of the program's error output and never the arguments. <code>resolveBin</code> finds a tool by one rule (an environment override, then either the PATH or a list of known folders, in a stated order). <code>git(...)</code> is the eight-times-used shortcut. The tests start real child processes on both engines: success, failure, a missing program, a killed process, too much output, and two "secret in the arguments" checks that inspect every way an error can be printed.</p>
+      <p class="proves">Proves itself by: typecheck, the package's tests on Node (the current runner) and the new test on Bun explicitly, lint — all green; the dry-run baseline recorded.</p>
+    </div>
+    <div class="phase">
+      <h3>Phase 1 — Six files, six commits</h3>
+      <p>Each file is moved to the primitive in its own commit so any one can be reverted alone. Behaviour is preserved on purpose: the deploy scripts still only warn when source verification fails, the verifier still treats "already verified" as success, output that streams to the operator still streams. Three deliberate improvements: <code>git</code> commands take validated values with the separators that stop a value from being read as an option; <code>cast</code> is found by the same rule as <code>forge</code> (override → the current Aztec toolchain → the old 5.0.0 folder → PATH); failures never carry the arguments. Values that reach <code>forge</code> and <code>cast</code> are checked for shape first (addresses, contract names, chain id, the key).</p>
+      <p class="proves">Proves itself by: typecheck + tests + lint after every file; a search proving no direct process call is left outside <code>run.ts</code>; an 18-row audit (old call → new call, exit path, soft-fail kept?, validation added?); the dry-run printing the same four lines as before.</p>
+    </div>
+    <div class="phase">
+      <h3>Phase 2 — Documentation</h3>
+      <p>The bridge-core README states the rule ("spawn only through <code>run.ts</code>"), <code>.env.example</code> gains <code>CAST_BIN</code>, and the Bun dossier is corrected (its Bun-native premise, two wrong claims about Bun's APIs, and the <code>--no-orphans</code> semantics).</p>
+      <p class="proves">Proves itself by: lint + the whole-repo tests green; the last diff being documentation only.</p>
+    </div>
+  </div>
+
+  <h2>Human context</h2>
+  <p><strong>Shell string vs argument list.</strong> A shell string is one line of text the shell has to re-parse — a value containing <code>;</code> or <code>$(...)</code> becomes a command. An argument list hands each value to the program untouched. That closes command injection. It does not stop a value from being read as one of the program's own flags — which is why <code>git</code> gets explicit separators and why addresses and names are shape-checked before they reach <code>forge</code> or <code>cast</code>.</p>
+  <p><strong>Why the tests start real processes.</strong> The primitive IS the risky part. A fake would test the fake. The tests run the engine that runs them as the child, so the same cases run under Node today and under Bun once Arc C lands.</p>
+  <p><strong>What cannot be proven here.</strong> The live conductors need keys and a network; their proof is the next real <code>aztec-update</code> run. What can be proven is proven: the primitive, the static audit, and the key-free dry-run.</p>
+
+  <h2>Open questions for you</h2>
+  <ul>
+    <li><strong>The Bun-native decline</strong> (Q1): accept, or direct a Bun-native primitive stacked on Arc C.</li>
+    <li><strong>The key as an argument</strong>: <code>cast</code> receives the private key on its command line today (visible in <code>ps</code>). Unchanged here; a keystore is the alternative.</li>
+    <li><strong>The soft-fail</strong>: the deploy scripts warn and continue when Etherscan verification fails. Kept; make it a hard stop in a follow-up?</li>
+    <li><strong>The legacy branch</strong>: unreachable for every manifest on disk, kept and validated. Delete it later?</li>
+  </ul>
+
+  <div class="callout">
+    <h2>Approval (resolved by the standing decision protocol while you were away)</h2>
+    <ul>
+      <li>Codex round 1 conditional → round 2 conditional (rejected deleting the legacy path) → round 3 "design converged" → fresh-context rounds 1–2 conditional → <strong>fresh-context round 3: approve</strong>. Every finding, its verification and its disposition: <a href="./lessons/gate-convergence.md">lessons/gate-convergence.md</a>.</li>
+      <li>No dependency, lockfile, CI-workflow or <code>@aztec/*</code> change. Merge is yours.</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds</h2>
+    <div class="seed">
+      <h3>/goal<span class="tag">final</span></h3>
+      <pre><code>/goal All phases (0–2) marked ✓ in implementations-plan/bun-native-tooling/plan.md, each ✓ backed by its validation gate as written there passing in the transcript (typecheck + bridge-core tests on Node + run.test.ts under `bun --bun vitest run` + lint for Phase 0; the per-file gate, the rg proving no direct child_process call outside run.ts, the 18-row static audit and the identical verify-l1 --dry-run output for Phase 1; lint + test:all + a docs-only diff for Phase 2); for each phase `LESSONS_FILE=implementations-plan/bun-native-tooling/lessons/phase-N.md` printed; `/code-review max --fix` complete with findings applied and committed separately; the codex fix loop converged (a resumed codex pass reporting no new material findings, quoted); ONE PR to dev exists, created only after convergence, with quality-status, smoke-e2e-status and network-e2e-status all SUCCESS at its HEAD; `bun run test:all` and `bun run lint` exit 0 in the transcript. Reserved for the owner: merging, deleting the legacy TokenPortal path, the key-in-argv question, the soft-fail policy, anything touching @aztec/* or required checks.</code></pre>
+    </div>
+    <div class="seed">
+      <h3>/loop<span class="tag">final</span></h3>
+      <pre><code>/loop 15m Drive implementations-plan/bun-native-tooling forward. Never idle waiting for my input. Each firing: (1) read plan.md + lessons/ (authoritative), `git status`, `git log --oneline -5`; if a PR exists, `gh pr view --json statusCheckRollup`. (2) Waiting on CI is fine — confirm it is progressing; use the wait to prepare the next step. (3) No task in hand? take the next pending step from plan.md; after each edit run `bun run lint` + `bun run --cwd packages/bridge-core typecheck` + `bun run --cwd packages/bridge-core test`; commit → push. (4) A decision you'd bring to me? call `/codex xhigh` with full context, iterate to a defensible decision, act, log the consult in lessons/phase-N.md; never merge, never delete the legacy path, never touch @aztec/* or required checks. (5) Same step failed 5×? stop, reassess with codex. (6) Phase green = its validation gate in plan.md passes as written: paste the result, mark ✓, write the lessons entry, print `LESSONS_FILE=…`, advance. (7) All phases ✓? run the Post-implementation section (code-review → codex loop → delivery), write the wrap-up (every codex-debated decision with ELI5 context), surface and stop.</code></pre>
+    </div>
+  </section>
+</main>

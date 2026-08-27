@@ -1,6 +1,6 @@
-import { expect, inject } from "vitest"
+import { inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -64,6 +64,6 @@ test.skipIf(!hasConfig)(
 		// return-shape conformance (a non-undefined result rejects client-side even
 		// though registration succeeded wallet-side). The old ["ok","error"] tolerance
 		// masked exactly that bug.
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "contracts-register:result")
 	},
 )

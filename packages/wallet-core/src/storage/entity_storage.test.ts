@@ -84,7 +84,8 @@ describe("EntityStorage", () => {
 	/**
 	 * Resilience: a single malformed row used to throw from `JSON.parse` inside
 	 * `get`/`getAll`/`getValues`, poisoning every reader of the namespace. The
-	 * primitive now logs the bad payload, deletes the row, and skips it.
+	 * primitive now logs the bad payload, RETAINS the row (B-23 — the read path
+	 * never deletes), and skips it.
 	 */
 	describe("malformed row resilience", () => {
 		let errorSpy: ReturnType<typeof vi.spyOn>
@@ -97,14 +98,18 @@ describe("EntityStorage", () => {
 			errorSpy.mockRestore()
 		})
 
-		test("get of malformed row returns undefined, schedules row delete, logs an error", async () => {
+		test("(B-23) get of a malformed row returns undefined and RETAINS it (no read-path delete)", async () => {
 			await api.storage.local.set({ "users@bad": "{not valid json" })
+			const removeSpy = vi.spyOn(api.storage.local, "remove")
 			expect(await storage.get("bad")).toBeUndefined()
 			expect(errorSpy).toHaveBeenCalledTimes(1)
 			expect(errorSpy.mock.calls[0]?.[0]).toContain("users@bad")
-			// Delete is fire-and-forget; allow the microtask to flush.
 			await Promise.resolve()
-			expect(await storage.contains("bad")).toBe(false)
+			// The read path must NEVER delete-by-id — it would race a concurrent valid
+			// write. The malformed row is retained for a serialized repair path.
+			expect(removeSpy).not.toHaveBeenCalled()
+			expect(await storage.contains("bad")).toBe(true)
+			removeSpy.mockRestore()
 		})
 
 		test("getAll skips malformed rows and returns the valid ones", async () => {
@@ -129,24 +134,37 @@ describe("EntityStorage", () => {
 			expect(errorSpy).toHaveBeenCalledTimes(1)
 		})
 
-		test("multiple malformed rows are all deleted; valid rows untouched", async () => {
+		test("(B-23) multiple malformed rows are RETAINED (not deleted); valid rows untouched", async () => {
 			await storage.set("alice", { name: "Alice", age: 30 })
 			await api.storage.local.set({ "users@bad1": "{", "users@bad2": "]" })
+			const removeSpy = vi.spyOn(api.storage.local, "remove")
 
 			const values = await storage.getValues()
 			expect(values).toEqual([{ name: "Alice", age: 30 }])
 			expect(errorSpy).toHaveBeenCalledTimes(2)
 			await Promise.resolve()
-			expect(await storage.contains("bad1")).toBe(false)
-			expect(await storage.contains("bad2")).toBe(false)
+			expect(removeSpy).not.toHaveBeenCalled()
+			expect(await storage.contains("bad1")).toBe(true)
+			expect(await storage.contains("bad2")).toBe(true)
+			removeSpy.mockRestore()
+		})
+
+		test("(B-23) a valid write to a key survives a prior malformed read of it", async () => {
+			// The old read-path delete could destroy a concurrent valid replacement;
+			// with a non-destructive read, a valid write after a malformed read stays.
+			await api.storage.local.set({ "users@a": "{malformed" })
+			expect(await storage.get("a")).toBeUndefined() // hidden, NOT deleted
+			await storage.set("a", { name: "Anna", age: 1 })
+			expect(await storage.get("a")).toEqual({ name: "Anna", age: 1 })
 		})
 	})
 
 	/**
-	 * Injected boundary codec: the deliberate split between JSON-SYNTAX failure
-	 * (drop the row, legacy) and CODEC-VALIDATION failure (KEEP the row — never
-	 * silently delete present-but-unreadable data). Guards the mega-deep trap
-	 * where a stricter codec turns a valid-but-drifted row into permanent loss.
+	 * Injected boundary codec. Both JSON-SYNTAX failure and CODEC-VALIDATION
+	 * failure KEEP the row (return undefined, never delete-by-id on the read path
+	 * — B-23: a fire-and-forget read-path delete raced a concurrent valid write).
+	 * Guards the mega-deep trap where a stricter codec turns a valid-but-drifted
+	 * row into permanent loss.
 	 */
 	describe("injected codec (validation split)", () => {
 		let errorSpy: ReturnType<typeof vi.spyOn>
@@ -201,13 +219,14 @@ describe("EntityStorage", () => {
 			removeSpy.mockRestore()
 		})
 
-		test("JSON-SYNTAX failure still DROPS the row even with an injected parse (syntax != validation)", async () => {
+		test("(B-23) JSON-SYNTAX failure KEEPS the row too (no read-path delete), like validation failure", async () => {
 			const removeSpy = vi.spyOn(api.storage.local, "remove")
 			const s = new EntityStorage<User>("users", api.storage.local, userParse)
 			await api.storage.local.set({ "users@corrupt": "{not json" })
 			expect(await s.get("corrupt")).toBeUndefined()
 			await Promise.resolve()
-			expect(removeSpy).toHaveBeenCalledWith("users@corrupt")
+			expect(removeSpy).not.toHaveBeenCalled()
+			expect(await s.contains("corrupt")).toBe(true)
 			removeSpy.mockRestore()
 		})
 
@@ -220,6 +239,88 @@ describe("EntityStorage", () => {
 			]
 			for (const [id, u] of corpus) await s.set(id, u)
 			for (const [id, u] of corpus) expect(await s.get(id)).toEqual(u)
+		})
+	})
+
+	/** The id/key consistency guard (opt-in) — the embedded-id transplant bypass closure. */
+	describe("requireKeyIdentityMatch (opt-in)", () => {
+		interface Identified {
+			id?: string | number
+			name: string
+		}
+		test('strict mode ("string"): mismatched, missing, or non-string ids read as undefined', async () => {
+			const guarded = new EntityStorage<Identified>("profiles", api.storage.local, undefined, {
+				requireKeyIdentityMatch: true,
+			})
+			await api.storage.local.set({
+				"profiles@A": JSON.stringify({ id: "B", name: "Bob" }),
+				"profiles@C": JSON.stringify({ id: "C", name: "Carol" }),
+				"profiles@D": JSON.stringify({ name: "NoId" }),
+				"profiles@E": JSON.stringify({ id: 5, name: "NumericIdUnderStringRoot" }),
+				"profiles@6": JSON.stringify({ id: 6, name: "NumericIdMatchingButNonString" }),
+			})
+			expect(await guarded.get("A")).toBeUndefined()
+			expect(await guarded.get("D")).toBeUndefined()
+			expect(await guarded.get("E")).toBeUndefined()
+			expect(await guarded.get("6")).toBeUndefined()
+			expect(await guarded.get("C")).toEqual({ id: "C", name: "Carol" })
+			const all = Object.fromEntries(await guarded.getAll())
+			expect(Object.keys(all)).toEqual(["C"])
+			// The row is hidden, never deleted — repair paths can still see it.
+			expect(await api.storage.local.get("profiles@A")).toHaveProperty("profiles@A")
+		})
+
+		test("numeric mode: positive safe integer whose canonical decimal form equals the suffix", async () => {
+			const guarded = new EntityStorage<Identified>("journal", api.storage.local, undefined, {
+				requireKeyIdentityMatch: true,
+				keyIdentityMode: "numeric",
+			})
+			await api.storage.local.set({
+				"journal@1": JSON.stringify({ id: 1, name: "one" }),
+				"journal@9": JSON.stringify({ id: 5, name: "aliased" }),
+				"journal@3": JSON.stringify({ name: "no-id" }),
+				"journal@4": JSON.stringify({ id: -4, name: "negative" }),
+				"journal@5.5": JSON.stringify({ id: 5.5, name: "fractional" }),
+				// String(1e21) === "1e+21", so a naive String()-comparison guard would ACCEPT
+				// this alias — only the safe-integer check rejects it. Pins that check.
+				"journal@1e+21": JSON.stringify({ id: 1e21, name: "unsafe-exponential" }),
+				"journal@0": JSON.stringify({ id: 0, name: "zero-never-minted" }),
+				"journal@2x": JSON.stringify({ id: "2", name: "string-id-under-numeric-mode" }),
+			})
+			expect(await guarded.get("1")).toEqual({ id: 1, name: "one" })
+			expect(await guarded.get("9")).toBeUndefined()
+			expect(await guarded.get("3")).toBeUndefined()
+			expect(await guarded.get("4")).toBeUndefined()
+			expect(await guarded.get("5.5")).toBeUndefined()
+			expect(await guarded.get("1e+21")).toBeUndefined()
+			expect(await guarded.get("0")).toBeUndefined()
+			expect(await guarded.get("2x")).toBeUndefined()
+		})
+
+		test("without the flag, mismatched embedded ids keep reading (other roots rely on this)", async () => {
+			const unguarded = new EntityStorage<Identified>("contexts", api.storage.local)
+			await api.storage.local.set({ "contexts@full": JSON.stringify({ id: "s1", name: "x" }) })
+			expect(await unguarded.get("full")).toEqual({ id: "s1", name: "x" })
+		})
+	})
+
+	/** The compare-and-delete surface for the F-B23 purge second pass. */
+	describe("raw string accessors", () => {
+		test("rawStringEntries returns the EXACT stored strings, including syntax-broken and validation-failed rows", async () => {
+			await storage.set("alice", { name: "Alice", age: 30 })
+			await api.storage.local.set({ "users@broken": "{not json", "users@drifted": JSON.stringify({ name: "NoAge" }) })
+			const entries = Object.fromEntries(await storage.rawStringEntries())
+			expect(entries).toEqual({
+				alice: JSON.stringify({ name: "Alice", age: 30 }),
+				broken: "{not json",
+				drifted: JSON.stringify({ name: "NoAge" }),
+			})
+		})
+
+		test("rawValue returns the stored string for one id; undefined when absent", async () => {
+			await api.storage.local.set({ "users@broken": "{not json" })
+			expect(await storage.rawValue("broken")).toBe("{not json")
+			expect(await storage.rawValue("nobody")).toBeUndefined()
 		})
 	})
 })

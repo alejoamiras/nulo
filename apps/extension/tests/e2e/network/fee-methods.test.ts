@@ -199,4 +199,20 @@ test.skipIf(!hasConfig)("gas balance card shows non-zero FeeJuice", { timeout: 1
 
 	console.log("✓ Gas balance card shows non-zero FeeJuice")
 	await page.close()
+
+	// Warm-cache reopen: the SW-side reader serves last-known balances via
+	// peek, so a reopened popup paints the value near-instantly instead of
+	// re-skeletoning through a fresh PXE read. 10s absorbs loaded-CI popup
+	// boot variance while staying far under the 60s cold-path budget above.
+	const reopened = await openPopup(feeJuiceImportedExtension)
+	await waitForHash(reopened, "#/popup/general")
+	await reopened.waitForSelector('[data-testid="gas-balance-public"]', { visible: true, timeout: 10_000 })
+	const reopenedText = await reopened.evaluate(
+		() => document.querySelector('[data-testid="gas-balance-public"]')?.textContent?.trim() || "",
+	)
+	expect(reopenedText).toContain("FJ")
+	expect(reopenedText).not.toBe("0 FJ")
+
+	console.log("✓ Reopened popup paints gas balance from the warm cache")
+	await reopened.close()
 })

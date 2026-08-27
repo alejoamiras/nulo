@@ -21,7 +21,13 @@
 import type { StorageRef } from "@nulo/wallet-core/migration"
 import { SCHEMA_RESERVED_PREFIX } from "@nulo/wallet-core/migration"
 import type { Account } from "@/wallet/services/account/spec"
-import { ACCOUNT_SERVICE_NAME, ACCOUNT_STORAGE_ROOT, accountRowId } from "@/wallet/services/account/spec"
+import {
+	ACCOUNT_SERVICE_NAME,
+	ACCOUNT_STORAGE_ROOT,
+	IMPORTED_KEYS_SERVICE_NAME,
+	IMPORTED_KEYS_STORAGE_ROOT,
+	accountRowId,
+} from "@/wallet/services/account/spec"
 import { ACCOUNT_STATE_SERVICE_NAME } from "@/wallet/services/account-state/spec"
 import type { Authwit } from "@/wallet/services/auth-registry/spec"
 import {
@@ -60,13 +66,14 @@ export const COMPAT_EPOCH_FIELD = "compat-epoch"
 export const BACKUP_SCHEMA_VERSION_FIELD = "backup-schema-version"
 
 /** The account-contract generation this build produces and accepts.
- *  Epoch 3 = the Aztec 5.0.0 signing-key-root account model (NULO-ACCOUNT-KDF v1): the
- *  seed→address derivation changed, so every epoch-2 backup's stored account addresses are
- *  stale — restoring them would create accounts that fail `getAccountContract`'s
- *  address-consistency assert at first load. The epoch gate is the designed NON-migratable
- *  hard reject for exactly this class of change (crypto/derivation rotations are never
- *  storage-migratable). Epoch 2 was the rc-era secret-root generation. */
-export const CURRENT_COMPAT_EPOCH = 3
+ *  Epoch 4 = NULO-ACCOUNT-KDF v2 (the recovery-phrase-centric key model): real BIP-39 PBKDF2
+ *  mnemonic→master, l1ChainId-keyed account seeds under dedicated Nulo domain separators, and
+ *  the store-both (entropy + master) profile row — every derived address changed AND password
+ *  blobs now REQUIRE an `entropy` field, so every epoch-3 blob is stale on both axes. The
+ *  epoch gate is the designed NON-migratable hard reject for exactly this class of change
+ *  (crypto/derivation rotations are never storage-migratable). Epoch 3 was the KDF-v1
+ *  signing-key-root generation; epoch 2 the rc-era secret-root generation. */
+export const CURRENT_COMPAT_EPOCH = 4
 
 const SUPPORTED_COMPAT_EPOCHS: ReadonlySet<number> = new Set([CURRENT_COMPAT_EPOCH])
 
@@ -190,6 +197,9 @@ function configStoredToSlice(stored: unknown): { ok: true; slice: unknown[] } | 
 export const BACKUP_SLICE_REGISTRY: Readonly<Record<string, SliceDescriptor>> = {
 	[PROFILE_SERVICE_NAME]: { kind: "block-listed", root: PROFILE_STORAGE_ROOT },
 	[ACCOUNT_SERVICE_NAME]: { kind: "root", root: ACCOUNT_STORAGE_ROOT, idOf: accountAnchor },
+	// Imported accounts' encrypted signing keys — own root, own owner. Optional: a backup with no
+	// imported accounts carries no slice, and that must not be a required-slice rejection.
+	[IMPORTED_KEYS_SERVICE_NAME]: { kind: "root", root: IMPORTED_KEYS_STORAGE_ROOT, idOf: accountAnchor, optional: true },
 	[NETWORK_SERVICE_NAME]: { kind: "root", root: NETWORK_STORAGE_ROOT, idOf: stringAnchor("id") },
 	[TOKEN_SERVICE_NAME]: { kind: "root", root: TOKEN_STORAGE_ROOT, idOf: numberAnchor("id") },
 	[TOKEN_BALANCE_SERVICE_NAME]: { kind: "root", root: TOKEN_BALANCE_STORAGE_ROOT, idOf: numberAnchor("id") },

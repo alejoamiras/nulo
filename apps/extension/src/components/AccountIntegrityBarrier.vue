@@ -74,8 +74,8 @@ onBeforeUnmount(() => {
 				<span :class="$style.title">ACCOUNT VERIFICATION FAILED</span>
 				<span :class="$style.sub" data-testid="account-integrity-blocked-copy">
 					This version of the wallet derives a different address than this profile's accounts were
-					created with, so the profile has been locked. Your seed phrase still derives your accounts
-					on a compatible version of Nulo. Never enter your seed phrase anywhere in response to this
+					created with, so the profile has been locked. Your recovery phrase still derives your accounts
+					on a compatible version of Nulo. Never enter your recovery phrase anywhere in response to this
 					message — no legitimate screen will ask for it.
 				</span>
 				<span :class="$style.detail">

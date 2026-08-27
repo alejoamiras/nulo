@@ -2069,7 +2069,7 @@ export const getMnemonic = async (entropy: Uint8Array<ArrayBuffer>): Promise<str
 		throw new Error("Invalid entropy length")
 	}
 
-	const hash = await self.crypto.subtle.digest("SHA-256", entropy)
+	const hash = await globalThis.crypto.subtle.digest("SHA-256", entropy)
 	const hashBits = bytesToBits(new Uint8Array(hash))
 
 	var entropyBits = bytesToBits(entropy)
@@ -2100,6 +2100,18 @@ export const getMnemonic = async (entropy: Uint8Array<ArrayBuffer>): Promise<str
 	return words
 }
 
+/**
+ * The ONE mnemonic canonicalization contract, shared by import validation and the BIP-39 KDF
+ * (`@nulo/wallet-crypto` `deriveBip39Seed`) so the same user input can never validate under one
+ * normalization and derive under another: NFKD, lowercase, trimmed, whitespace-collapsed.
+ * Accepts a raw sentence or a word array; returns the canonical word array.
+ */
+export const canonicalizeMnemonic = (input: string | string[]): string[] => {
+	const sentence = Array.isArray(input) ? input.join(" ") : input
+	const normalized = sentence.normalize("NFKD").toLowerCase().trim()
+	return normalized.length === 0 ? [] : normalized.split(/\s+/)
+}
+
 export const getEntropy = async (mnemonic: string[]): Promise<Uint8Array<ArrayBuffer>> => {
 	if (!mnemonic?.length || mnemonic.length % 3 > 0) {
 		throw new Error("Invalid mnemonic length")
@@ -2107,54 +2119,64 @@ export const getEntropy = async (mnemonic: string[]): Promise<Uint8Array<ArrayBu
 
 	var concatBitsCnt = mnemonic.length * 11
 	var concatBits = new Uint8Array(concatBitsCnt)
+	let entropy: Uint8Array<ArrayBuffer> | undefined
+	let handedOff = false
+	try {
+		let wordIndex = 0
+		for (const word of mnemonic) {
+			const index = bip39Words.indexOf(word)
 
-	var wordIndex = 0
-	for (const word of mnemonic) {
-		const index = bip39Words.indexOf(word)
+			if (index < 0) {
+				throw new Error(`Invalid mnemonic word '${word}'`)
+			}
 
-		if (index < 0) {
-			throw new Error(`Invalid mnemonic word '${word}'`)
+			concatBits[wordIndex * 11 + 0] = (index >> 10) & 1
+			concatBits[wordIndex * 11 + 1] = (index >> 9) & 1
+			concatBits[wordIndex * 11 + 2] = (index >> 8) & 1
+			concatBits[wordIndex * 11 + 3] = (index >> 7) & 1
+			concatBits[wordIndex * 11 + 4] = (index >> 6) & 1
+			concatBits[wordIndex * 11 + 5] = (index >> 5) & 1
+			concatBits[wordIndex * 11 + 6] = (index >> 4) & 1
+			concatBits[wordIndex * 11 + 7] = (index >> 3) & 1
+			concatBits[wordIndex * 11 + 8] = (index >> 2) & 1
+			concatBits[wordIndex * 11 + 9] = (index >> 1) & 1
+			concatBits[wordIndex * 11 + 10] = (index >> 0) & 1
+
+			++wordIndex
 		}
 
-		concatBits[wordIndex * 11 + 0] = (index >> 10) & 1
-		concatBits[wordIndex * 11 + 1] = (index >> 9) & 1
-		concatBits[wordIndex * 11 + 2] = (index >> 8) & 1
-		concatBits[wordIndex * 11 + 3] = (index >> 7) & 1
-		concatBits[wordIndex * 11 + 4] = (index >> 6) & 1
-		concatBits[wordIndex * 11 + 5] = (index >> 5) & 1
-		concatBits[wordIndex * 11 + 6] = (index >> 4) & 1
-		concatBits[wordIndex * 11 + 7] = (index >> 3) & 1
-		concatBits[wordIndex * 11 + 8] = (index >> 2) & 1
-		concatBits[wordIndex * 11 + 9] = (index >> 1) & 1
-		concatBits[wordIndex * 11 + 10] = (index >> 0) & 1
+		const checksumBitsCnt = concatBitsCnt / 33
+		const entropyBitsCnt = concatBitsCnt - checksumBitsCnt
 
-		++wordIndex
-	}
-
-	const checksumBitsCnt = concatBitsCnt / 33
-	const entropyBitsCnt = concatBitsCnt - checksumBitsCnt
-
-	const entropy = new Uint8Array(entropyBitsCnt / 8)
-	for (let i = 0; i < entropy.length; ++i) {
-		entropy[i] =
-			(concatBits[i * 8 + 0] << 7) |
-			(concatBits[i * 8 + 1] << 6) |
-			(concatBits[i * 8 + 2] << 5) |
-			(concatBits[i * 8 + 3] << 4) |
-			(concatBits[i * 8 + 4] << 3) |
-			(concatBits[i * 8 + 5] << 2) |
-			(concatBits[i * 8 + 6] << 1) |
-			(concatBits[i * 8 + 7] << 0)
-	}
-
-	const hash = await self.crypto.subtle.digest("SHA-256", entropy)
-	const hashBits = bytesToBits(new Uint8Array(hash))
-
-	for (let i = 0; i < checksumBitsCnt; ++i) {
-		if (concatBits[entropyBitsCnt + i] !== hashBits[i]) {
-			throw new Error("Invalid checksum")
+		entropy = new Uint8Array(entropyBitsCnt / 8)
+		for (let i = 0; i < entropy.length; ++i) {
+			entropy[i] =
+				(concatBits[i * 8 + 0] << 7) |
+				(concatBits[i * 8 + 1] << 6) |
+				(concatBits[i * 8 + 2] << 5) |
+				(concatBits[i * 8 + 3] << 4) |
+				(concatBits[i * 8 + 4] << 3) |
+				(concatBits[i * 8 + 5] << 2) |
+				(concatBits[i * 8 + 6] << 1) |
+				(concatBits[i * 8 + 7] << 0)
 		}
-	}
 
-	return entropy
+		const hash = await globalThis.crypto.subtle.digest("SHA-256", entropy)
+		const hashBits = bytesToBits(new Uint8Array(hash))
+
+		for (let i = 0; i < checksumBitsCnt; ++i) {
+			if (concatBits[entropyBitsCnt + i] !== hashBits[i]) {
+				throw new Error("Invalid checksum")
+			}
+		}
+
+		handedOff = true
+		return entropy
+	} finally {
+		// Wipe the bit-expanded entropy always, and the reconstructed entropy
+		// bytes on any non-return path (invalid word / bad checksum). The
+		// returned buffer is the caller's to own + zero.
+		concatBits.fill(0)
+		if (entropy && !handedOff) entropy.fill(0)
+	}
 }

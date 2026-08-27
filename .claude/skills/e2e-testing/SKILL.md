@@ -64,6 +64,20 @@ This prevents guessing at selectors and ensures tests assert on real observable 
   `anvil --port "$ANVIL_PORT"` even though global-setup already started ours on that port; the inner
   bind fails, the wrapper continues, the node boots fine (~30s). Do not diagnose port collisions from
   this line alone — check whether the node reached ready + deployments after it.
+- **Sandbox-boot signature `deploy_aztec_l1_contracts … required arguments were not provided:
+  --batch` → node never healthy → exit 86 = a `~/.aztec/current` DRIFT poisoning forge resolution
+  (ROOT-CAUSED + FIXED 2026-08-06).** `@aztec/ethereum`'s `resolveFoundryBinary` checks
+  `$FORGE_BIN` → **`~/.aztec/current/internal-bin/forge`** → `~/.aztec/current/bin/aztec-forge` →
+  `~/.foundry/bin` → PATH — the `current` checks outrank PATH, so global-setup's internal-bin PATH
+  prepend never protected the L1 deploy. Any `aztec-up install` on the machine re-points `current`; an install carrying a newer
+  forge fork (whose `forge script` requires `--batch`) then breaks the deploy for EVERY version's
+  boot, deterministically, while CI stays green (fresh runners have `current` == the pin). Fix in
+  `global-setup.ts`: resolve the whole toolchain from the repo's `@aztec/aztec.js` pin
+  (`~/.aztec/versions/<pin>`, CI's own rule) and export `FORGE_BIN`/`ANVIL_BIN` into the node spawn
+  env (the resolver's highest-priority source). Diagnosis discipline: global-setup truncates
+  `[aztec-node]` lines to 200 chars — the missing-argument NAMES get cut off; reproduce the boot
+  manually to see full stderr before theorizing. The cosmetic os-error-98 line precedes this as
+  usual — don't conflate.
 - **Full-backup import has a bounded two-stage clock**: restore (slow on hosted runners) THEN possibly
   the app's own 30s recovery wait before it routes (`import.vue` completeImportWithRecovery). Any
   navigation wait below restore+30s+margin fails STRUCTURALLY whenever the recovery leg runs — it looks
@@ -174,6 +188,51 @@ Related product gap (tracked separately): restore writes networks with Local LAS
 seeds defaults only when ZERO network rows exist — a kill mid-network-writes leaves the profile
 without "Local" permanently.
 
+## Deflake-arc lessons (2026-08-11, `implementations-plan/e2e-deflake/`)
+
+- **`navigateByHash`'s hash-equality wait proves nothing about router commitment.**
+  Setting `location.hash` updates the URL synchronously; a competing in-flight
+  `router.push` then supersedes the navigation and the hash REVERTS — the destination
+  page never mounts and any following selector wait parks. Reproduced solo/idle
+  (load-independent logic race). Fix pattern: settle-STABLE navigation — destination
+  selector mounted AND hash held continuously across a monotonic dwell; one
+  re-navigation for the characterized race; a second revert fails loudly (recurring
+  redirects are a product signal, never normalized). See `resetProfile`.
+- **A plain `waitForFunction` is NEVER a stability check** — it resolves on its first
+  truthy poll; `timeout` is a ceiling, not a dwell. A real dwell tracks continuity
+  in page state (`performance.now()` marker nulled on any deviation) and returns true
+  only after N continuous ms. (Round-2 codex catch — the fake version shipped first.)
+- **Write-gated retries starve on silent failures.** The token-balance projection
+  pipeline persists NO failure record (unlike the gas pipeline post-#355), so
+  "attempt still running" and "attempt failed" are indistinguishable from storage.
+  A retry that waits for the previous attempt's WRITE before re-kicking locks up
+  after one silent failure — bound the re-kick cadence with a documented envelope;
+  keep the ACCEPTANCE signal causal (freshness + exact value).
+- **Freshness-gate imported-state assertions.** An imported backup already carries
+  the expected balances with nonzero `updatedAt` — a value-only poll can pass with
+  ZERO post-import sync. Capture the baseline `updatedAt` first; require
+  `> baseline` AND the exact raw value AND a card-scoped render assert.
+- **Purge completion = row (proven present pre-submit) + exact tombstone + owned
+  roots all gone.** `reset.vue` AWAITS the full purge before navigating — route
+  waits sized for a hop race the cascade. Tombstone absence ALONE is also true
+  before deletion starts. See `captureSoleProfileId` + `waitForProfilePurged`.
+- **Execute popup: "op rows rendered" ≠ "approvable".** `waitForExecuteContent`
+  is strictly weaker than the confirm button's native `disabled` (init + metadata +
+  fee-selection gates). Wait on the LIVE disabled attribute + `pointerEvents`
+  (`waitForExecuteApprovable`) — never re-derive the Vue boolean logic. Timings are
+  appended to `.e2e-state/exec-approvable-timings.log` (1–402ms warm; CI cold-shard
+  multiplier is the budget rationale).
+- **Preserve FULL gate-run logs (tee to a file), never bare `tail`.** A clipped
+  failure block cost a diagnosis once; the very next preserved red was root-caused
+  from its dump in minutes.
+- **CI setup no longer installs foundry-toolchain** — the aztec pin's `internal-bin`
+  (own pinned+retried foundry) is the only consumed toolchain, now preflight-asserted
+  in `setup-aztec` (fails loudly if an installer regression drops it).
+- **The smoke `backup-roundtrip` post-import route wait is OPEN (owner)**: the route
+  is gated on `isLogined`, flipped only after the RPC-bound `syncTransactions`
+  against the seeded public testnet — an RPC-dependency, not a timeout problem.
+  Diagnostics (route trace + parked-state dump) are armed; do NOT raise the bound.
+
 ## PR-workflow silence — check mergeability first
 
 If a push to a PR branch triggers NO workflows at all (not even Quality; only Cloudflare checks
@@ -222,3 +281,271 @@ held by LIVE processes. `ps -eo pid,rss,etimes,cmd | grep -E 'aztec|anvil'` find
 - **Best fix (infra, separate PR): move `AZTEC_DATA_DIR` off tmpfs onto real disk** (`~/.cache/…`
   or the gitignored `.e2e-state/…`). Then a leaked run wastes cheap disk you reap later instead of
   RAM that breaks the machine.
+
+## Build-time-armed tests: silent-unarmed-run trap (bitten twice — 2026-08)
+
+Several e2e fixtures are compiled INTO the wallet bundle at BUILD time via `VITE_NULO_E2E_*` flags
+(proverless incoming-poll gate, migration-fixture sentinels). A test that needs one of these,
+run against an UNARMED dist, does not error — the hook is tree-shaken out, `?.` no-ops, and the
+test polls into a multi-minute timeout that looks exactly like a product bug or machine flake.
+Both suffered instances: `backup-migration.test.ts` (env set at runtime but dist built unarmed)
+and `account-switch-isolation.test.ts` (bare `bun run e2e:agent <file>` builds unarmed; CI always
+arms, so it's deterministically red locally / green on CI). Third instance (2026-08-15): a
+mid-session PRODUCTION build (`bun run build:chrome` to package the extension for manual install)
+silently OVERWROTE the armed dist — the next `test:e2e` run failed its 5 migration tests with
+90s waits, twice, and read as branch breakage. The same 5 deterministic failures across runs is
+the un-armed signature (load flake scatters; disarming repeats exactly). **After ANY other build
+in the session, re-arm before smoke**: `VITE_NULO_E2E_MIGRATION_FIXTURE=1
+VITE_NULO_E2E_DEFAULT_NET=testnet bun run build:chrome` (CI parity, `_smoke-e2e.yml`).
+Fourth instance (2026-08-12): `bun run audit:vue` ends with a plain `build` — running it as a
+pre-push gate silently un-arms the dist, so the armed-smoke gate that follows it reds on the
+same 90s-import signature. Gate ordering matters: audit:vue first, THEN the armed build, THEN
+armed smoke.
+
+### Rules
+
+- **A runtime env var can never arm a build-time flag.** Arming is `VITE_…=1` at `bun run build`
+  time; the runtime twin only tells the TEST the dist is supposed to be armed.
+- **Every build-armed test file carries a formal marker** (`@requires-proverless` today) that
+  `scripts/e2e/agent.sh` scans BEFORE spending ports/build — unarmed runs are refused with the
+  exact remedial command. Add a marker (+ scan clause) when introducing a new build-armed fixture.
+- **Every build-armed test file also carries a `beforeAll` dist preflight** (grep the loaded
+  extension's `assets/*.js` for the compile-time stamp; hard-abort with the remedial command) —
+  the belt for direct-vitest invocations that bypass agent.sh. Idioms:
+  `backup-migration.test.ts` (arming-contract test), `account-switch-isolation.test.ts`
+  (beforeAll stamp scan).
+- **Diagnosing "deterministic local red, CI green" on a gated test**: FIRST grep the local dist
+  for the fixture's stamp/strings (`grep -rl "NULO_E2E_PROVERLESS_BUILD_STAMP" dist/chrome`)
+  before suspecting timing or hardware — absence proves an unarmed build in seconds.
+
+## Suite-wide mass failure across UNRELATED files (timeouts, retry x2 everywhere)
+
+If a full `e2e:agent` run fails DOZENS of unrelated files while a targeted run of the same
+files is green, suspect the RUN ENVIRONMENT before any code path:
+
+1. **Concurrent heavy load on the same host is the #1 cause.** A full vitest suite,
+   `audit:vue` (build + tests), or a proving run executing in PARALLEL with the e2e suite
+   starves the sandbox and the browser — 25s silent-call timeouts and 70s feed waits blow
+   across the board. Run the e2e suite ALONE; treat its wall-clock as reserved.
+2. **`[aztec-node] Error: Address already in use (os error 98)` printed once at node boot is
+   BENIGN** — it appears in green runs too (a sub-service retries on another port). Do NOT
+   chase it as the root cause of a red suite.
+3. Orphaned sandboxes from dead runs (ppid 1, old `lstart`, absent from `~/.agents/ports.md`)
+   are still worth reaping — by OWN pgid only (`kill -TERM -<pgid>`), never `pkill -f` —
+   but verify the claim: in the observed incident the orphans held unrelated ports and the
+   re-run reproduced the boot line anyway.
+4. A green isolated re-run of a few failed files confirms environment, not code. Re-run the
+   full suite solo before touching any test.
+
+### CI variant: every shard dead at sandbox BOOT with the same module/setup error
+
+When the whole CI network matrix (all shards + heavies + canary) fails identically at
+`e2e-setup` while local solo runs are green, suspect the FRESH toolchain install, not the
+tests (2026-08-12: `snappy@7.4.0` published that day broke every fresh `aztec-up` install with
+`ERR_MODULE_NOT_FOUND: @napi-rs/snappy-wasm32-wasi`; local runs never saw it because the
+pre-existing `~/.aztec` predated the publish). Protocol: (1) read the FIRST error in the
+`[aztec-node]` boot log — the `Address already in use (os error 98)` line above it is benign
+noise (see rule 2); (2) correlate `registry.npmjs.org/<pkg>` publish times against the failure
+window; (3) reproduce with a bare `npm install <pkg>@<ver>` + load-check OUTSIDE CI before
+burning reruns — if it reproduces, reruns can NEVER go green and the fix is a toolchain pin
+(see the `aztec-update` skill), not patience. Two same-signature rerun failures = stop
+assuming "transient".
+
+## Deflake-round-2 lessons (2026-08-14, `implementations-plan/deflake-round-2/`)
+
+- **A wait is only as honest as the SIGNAL it polls.** Visibility (`offsetParent`) is a
+  rendering artifact: a `<Transition>`-leaving dropdown keeps its items visible while the
+  component state is already closed — a one-shot sample mid-close reads "open", skips the
+  trigger, and the option click times out (the appearance retry-flake, reproduced under CPU
+  load). Gate on STATE attributes (`data-dropdown-open`, `data-toggle-active`), never on a
+  visibility snapshot; expose the state attribute if it doesn't exist.
+- **Retry-masked flakes are now diagnosable from CI**: `RetryErrorReporter` (all three e2e
+  configs, single-owned in `vite.shared.ts#e2eReporters`) prints the retained first-attempt
+  errors of retried passes. NOTE: an explicit `reporters` list suppresses vitest's auto-added
+  `github-actions` annotations reporter — `e2eReporters()` re-adds it; never inline a
+  reporters array in a config.
+- **Local flake repro recipe**: run the file with `--retry=0` (first-attempt errors become
+  terminal) in batches, no-load baseline first, then under OWNED CPU hogs (setsid + kill by
+  pgid). One failing run with the real waiter identified beats 30 green speculation cycles.
+- **Red-team a pin against deletion of what it guards.** A disabled-binding pin that passes
+  with the binding term removed pins nothing (the harness's OTHER gates held it disabled) —
+  establish the enabled state first, flip exactly the guarded flag, assert the transition.
+- **An exactness upgrade finds producer dirt the fuzzy assert absorbed** (block-forcing mints
+  accumulating raw dust the display rounding hid) — audit every producer feeding an assert
+  you tighten, especially fixtures with no current consumer (no run can red on them).
+- **Verify the primitive does what its name says, before hardening anything built on it.**
+  `Runtime.terminateExecution` does NOT end the extension's service worker: the target
+  survives, `chrome.storage.session` survives, the wallet stays unlocked, and
+  `nulo:liveness` merely advances by one HEARTBEAT_INTERVAL_MS — enough to satisfy a
+  post-kill liveness gate with no respawn having happened. Chrome's documented method is
+  `await (await target.worker()).close()`; assert the ORIGINAL target is destroyed (arm a
+  `targetdestroyed` listener before closing and compare Target object identity — not
+  puppeteer's private `_targetId`). Two arcs hardened waits on top of the fake kill before
+  anyone measured it.
+- **A passing test is a claim, not evidence, until you know WHY it passes.** With a kill
+  that never killed, three of four SW-lifecycle tests passed for reasons unrelated to their
+  subject, and no number of re-runs could have shown that. When a test's premise involves a
+  disruptive action, assert the disruption actually occurred.
+- **Setup steps can be silently dead.** Driving a wallet service from a page via
+  `chrome.runtime.sendMessage` does NOTHING — services listen on PORTS, and the SW's only
+  `onMessage` listener returns false. A config toggle written that way never applied, so
+  the test asserted a behaviour its own setup had not enabled. Assert the setup took effect
+  (read the state back) before depending on it.
+- **Verify the storage key and the stored SHAPE before concluding from a read.**
+  `ValueStorage` persists `JSON.stringify(value)`, so `chrome.storage.*.get()` returns a
+  STRING, not the object; and config lives at `nulo:config`, not `nulo:core:config`. Both
+  cost a debugging cycle in one arc: a shape check that could never be true, and a probe
+  whose "absent before and after" proved nothing.
+- **Deterministic failure and flake are cheap to tell apart** — three identical solo runs at
+  `--retry=0`. A skip note asserting "intrinsically flaky" survived months without that
+  check, and was wrong.
+- **Duplicate check-runs from labeled PR opens do not explain the observed blocks.** Opening a labeled
+  PR fires opened+labeled events; the concurrency-cancelled duplicates leave FAILURE
+  aggregator check-runs beside the survivors' successes on the same SHA. A measured probe
+  (deflake-round-3 `lessons/phase-1.md`) shows the PR going CLEAN once the survivors land,
+  with those FAILUREs still present, so a duplicate FAILURE alone is not what blocks a
+  merge. Round 2's blocks were observed with all gates green and remain UNEXPLAINED, so
+  treat this as "the known mechanism does not hold", not "duplicates can never matter".
+  **Do not reflex-push an empty commit.**
+  If you see BLOCKED with every gate terminal-green, CAPTURE FIRST — full
+  `/commits/<sha>/check-runs`, repeated `mergeStateStatus` reads over ≥2 minutes, and the
+  base branch's protection config — because two arcs have now destroyed that state by
+  remedying immediately, and the round-2 blocks remain unexplained.
+
+## Deflake-round-4 lessons (2026-08-18, `implementations-plan/deflake-round-4/`)
+
+- **Deterministic kill anchoring: the RestoreGate rendezvous.** "Kill the SW
+  mid-restore" is only a real test if the kill provably lands while a restore
+  RPC is in flight at a KNOWN phase. The pattern (sibling of the proof gate):
+  a `chrome.storage.session` record armed by the test (`{at}`), ACKNOWLEDGED
+  by the SW-side handler (`{at, held:true}`), and only then killed — "armed"
+  must never be mistaken for "reached". The gate's own safety timer dies with
+  the killed worker, so the TEST's `finally` owns cleanup; the armed record
+  survives in session storage and will re-park the next import if left behind.
+- **A PR with ABSENT (not red) Actions is a mergeability symptom.** GitHub
+  builds no merge ref for a CONFLICTING PR and therefore runs no
+  `pull_request` workflows at all — zero check-runs, no failure anywhere.
+  Check `gh pr view --json mergeable,mergeStateStatus` before debugging CI.
+- **Terminal predicates over pages that can navigate must count
+  "already-routed" as terminal.** A clean import flips its stage attribute and
+  auto-routes between two polls; the attribute unmounts with the page, so a
+  predicate watching only in-page state starves against a COMPLETED flow
+  (`stage=<unbound>` in the diagnostics = the page moved on).
+- **Guard variables rot silently — grep the runner.** Two agent-contract
+  tests checked an env var NOTHING sets (`NULO_E2E_REQUIRE_CONFIG` vs the
+  runner's actual `E2E_REQUIRE_SETUP=1`) and were inert across seven evidence
+  runs. When copying a guard pattern, grep the runner/script for the exact
+  variable name it exports.
+- **De-vacuize failure-path pins.** A rejection mock proves nothing unless
+  the test also proves the mocked call RAN (`toHaveBeenCalled`) — a fixture
+  missing the slice that routes execution to the mock makes every assert pass
+  trivially. Both review lenses independently caught the same vacuous pin.
+- **`@requires-proverless` marks gate-dependent files.** The agent runner
+  refuses prover-ON invocations of marked files pre-build (exit 2) instead of
+  letting them hang at a held-wait for minutes. Any test whose mechanism is
+  compiled out of prover-ON builds needs the marker; keep a prover-capable
+  sibling file carrying the surface's prover-ON coverage.
+- **The e2e consoleErrors capture cannot see app `console.*`** (popup-side
+  console API calls never reach the fixture's CDP stream; browser-emitted
+  entries do) — consoleErrors-based assertions are weaker than they look.
+  Since root-caused and CLOSED permanent-by-design — see the
+  Import-stage-deadlines lessons below for the mechanism + channels.
+
+
+## Import-stage-deadlines lessons (2026-08-18, `implementations-plan/import-stage-deadlines/`)
+
+- **`consoleErrors` is structurally blind to app `console.*` — permanent, by
+  product design.** The console-sniffer (first module script in the popup/
+  onboarding/offscreen entry pages; the setup page carries none) reroutes
+  `console.*` over LoggerService RPC to the SW
+  realm; the native page console never fires on the success path, so
+  `page.on("console")` sees only BROWSER-emitted entries (Chrome's bindings
+  hold a pre-patch reference). Never "fix" a test by hunting page console
+  output that cannot exist. Channels that DO work (probe-verified,
+  `_probe-console-capture.test.ts` under `NULO_E2E_CONSOLE_PROBE=1`):
+  `pageerror` for uncaught throws + unhandled rejections; `readSwLogTrail`
+  (`fixtures/journal.ts`) for app logs — delayed 2s (flush debounce) and
+  bounded, so POLL past the debounce. Residual: an error the app catches and
+  merely logs is invisible to BOTH fixture arrays (`consoleErrors` AND
+  `pageErrors`; it does reach the SW log ring) — assert on DOM/storage/stage
+  evidence instead. Full residual list: the flake-ledger's closed
+  consoleErrors entry.
+- **Observe stage markers with a pre-armed MutationObserver + ONE final
+  read — never a poll loop.** `importFullBackup` arms an observer on
+  `[data-restore-stage]` BEFORE submit (baseline-seeded, so a stale
+  pre-submit value can't read as this attempt's transition) and reads the
+  buffer once when the unchanged 300s hash wait settles. A 200ms evaluate
+  loop would add ~1,500 page evaluations per wait and perturb the timing it
+  measures; the success route is a HASH route (same window), so the buffer
+  survives to the final read. Stages Vue coalesces into one render produce
+  NO mutation — report them unobserved, never as 0ms rows
+  (`restoring:account-state` rendered in 0/30 campaign imports).
+- **A 300s lapse now reports the labeled stage trajectory** (failure
+  terminals, the Continue-gated DEGRADED-partial-success screen — which is
+  NOT a failure state — and the `finished`+`#/popup/auth` activation
+  fallback) instead of a bare TimeoutError. Labels only, never early exits:
+  the settled classification (measured, both proving modes) yielded no
+  stage warranting an e2e early-fail window.
+- **The armed-build discipline applies to SMOKE, not just the network
+  runner**: a plain `bun run build:chrome` fails backup-migration's
+  arming-contract test by design. Mirror `_smoke-e2e.yml`
+  (`VITE_NULO_E2E_MIGRATION_FIXTURE=1` + `VITE_NULO_E2E_DEFAULT_NET=testnet`
+  at build, `NULO_E2E_MIGRATION_FIXTURE=1` at run) for local smoke.
+
+## Imported-account coverage arc lessons (2026-08-20, `feat/kdf-v2-e2e-coverage`)
+
+- **`popupStore.open()` on an already-open key is not a reactive change — a
+  DOM-cleared popup goes PERMANENTLY dead.** The store is a plain
+  `popups[key] = {...}` map with no open-guard; `:show="isOpened(key)"`
+  never re-fires when the key is re-set. So the sequence *preview-only popup
+  left open → `closeStuckPopup` force-removes its teleported DOM → later
+  `open()` on the same key* leaves `:show` true, DOM gone, and no amount of
+  clicking (even kick-until-rendered) revives it. **Any helper that opens a
+  store-tracked popup and does NOT drive it to its self-closing action must
+  close it THROUGH the UI** (`popup-close-btn` on `PopupHeader`, added for
+  exactly this) — `closeStuckPopup` is for stuck *transition remnants*, not
+  a substitute for closing. The failure surfaces far from the cause: the
+  NEXT open attempt times out on a healthy-looking page.
+- **Never match an imported account row by name.** An import carries the
+  SOURCE profile's account name, so it routinely collides with the target's
+  own derived row (both "Account" by default) and a `data-account-name`
+  `.find()` silently exports the WRONG row — a wrong-target pass/fail, not
+  an error. Scope through `account-imported-badge` → `closest(row)`.
+- **Destructive scenarios get `retry: 0`** (the `transfers.test.ts` rule,
+  sharpened): a scenario that changes the profile password or corrupts
+  storage mid-test cannot re-enter — every retry fails on the mutated state
+  (wrong password at unlock) and buries the original failure under
+  unrelated symptoms. One honest fail beats three misleading ones.
+- **Post-unlock/bootstrap routing can yank a just-navigated route.**
+  `bootstrapActiveProfile` may push `/popup/general` LATE; a hash
+  navigation issued in that window gets unmounted under its own
+  `waitForSelector`. Gate follow-on navigation on hash STABILITY (~1.5s
+  unchanged, bounded) rather than on reaching the hash once.
+- **Helpers that assume `/popup/general` say so nowhere** — `importToken`
+  (tokens-menu trigger) and `switchAccountByAddress` (header selector) both
+  need the home screen; a caller parked on a settings page times out on a
+  2s internal wait with no useful message. Navigate to general first.
+
+## Post-unlock navigation races (2026-08-23, `implementations-plan/mac-identity-binding/` phase 2)
+
+A smoke failure whose captured page state is a HEALTHY wallet (right account, balances
+rendered) while a `navigateByHash`/agree-gate wait times out is usually NOT the awaited
+element's bug — it's a navigation race yanking the page elsewhere mid-wait. Four such races
+(fixed 2026-08-23) all lived in the window between an accepted unlock and `isLogined`
+flipping at the END of the activation bootstrap: that window is ~100ms warm but SECONDS on a
+starved 2-core CI runner, which is why these fire in CI and "never reproduce" locally.
+
+- Reproduce with `taskset -c 0,1 bun run --cwd apps/extension test:e2e <files>` (~40%
+  failure rate pre-fix). Freeze the tree during comparison loops, run them solo on the host.
+- Attribute with a throwaway probe test that wraps `$router.push/replace` + `hashchange`
+  in-page and records stacks; match stack chunk+offset against the built bundle to name the
+  pusher. Guessing from symptoms produced wrong fixes; attribution produced right ones.
+- The four mechanisms + residuals: `implementations-plan/mac-identity-binding/lessons/phase-2-smoke-deflake.md`.
+  Guard-vs-bootstrap decisions now live in `apps/extension/src/popup/auth-guard.ts` — extend
+  that decision core (it's unit-tested) rather than re-adding flag checks in the router guard.
+
+## Testing product flows that call `chrome.runtime.reload()` (2026-08-24, `implementations-plan/migration-lifecycle/`)
+
+The standing rule above ("never use `runtime.reload()` for state reset") gained a second face: the PRODUCT now calls it legitimately (the migration barrier's Retry button — a deterministic restart, since popup close doesn't kill the SW). Under `--load-extension`, Chrome DISABLES the unpacked extension on `runtime.reload()`: every later `chrome-extension://` goto fails `net::ERR_BLOCKED_BY_CLIENT` until a browser restart — no retry loop recovers it.
+
+Harness pattern: click the button, wait briefly for its pre-reload storage write to land (belt — the handler awaits the write before reloading), then `browser.close()` + relaunch over the same `userDataDir`. Design the product flow so convergence is IMPOSSIBLE without the button's side effect (the migration gate short-circuits without the one-shot token), and the relaunch-based assertion proves the whole chain — no in-harness reload observation needed. Worked example: `tests/e2e/migration.test.ts` `retryAndReopen`.

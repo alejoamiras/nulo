@@ -1,6 +1,6 @@
 import { Buffer } from "buffer"
 import { expect, test } from "vitest"
-import { getEntropy, getMnemonic } from "./mnemonic"
+import { canonicalizeMnemonic, getEntropy, getMnemonic } from "./mnemonic"
 
 const testcases = [
 	["00000000000000000000000000000000", "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"],
@@ -118,4 +118,31 @@ test("random 16-bytes entropy", async () => {
 		const _entropy = await getEntropy(mnemonic)
 		expect(Buffer.from(_entropy).toString("hex")).toEqual(Buffer.from(entropy).toString("hex"))
 	}
+})
+
+test("a corrupted final word fails the checksum, never decodes", async () => {
+	const words = testcases[8]![1]!.split(" ")
+	expect(words).toHaveLength(24)
+	const corrupted = [...words.slice(0, 23), "abandon"]
+	await expect(getEntropy(corrupted)).rejects.toThrow("Invalid checksum")
+})
+
+test("a word swap inside the phrase fails the checksum", async () => {
+	const words = testcases[9]![1]!.split(" ")
+	const swapped = [...words]
+	;[swapped[0], swapped[1]] = [swapped[1]!, swapped[0]!]
+	await expect(getEntropy(swapped)).rejects.toThrow("Invalid checksum")
+})
+
+test("canonicalizeMnemonic: NFKD + lowercase + whitespace collapse, sentence or array", () => {
+	const canonical = testcases[8]![1]!.split(" ")
+	expect(canonicalizeMnemonic(`  ${testcases[8]![1]!.toUpperCase().replace(/ /g, "  \t")} `)).toEqual(canonical)
+	expect(canonicalizeMnemonic(canonical.map((w) => ` ${w} `))).toEqual(canonical)
+	expect(canonicalizeMnemonic("")).toEqual([])
+})
+
+test("canonicalized input round-trips through getEntropy", async () => {
+	const canonical = canonicalizeMnemonic(testcases[8]![1]!.toUpperCase())
+	const entropy = await getEntropy(canonical)
+	expect(Buffer.from(entropy).toString("hex")).toBe(testcases[8]![0])
 })

@@ -4,7 +4,8 @@ import { EventHandler } from "@nulo/wallet-core/utils"
 import type { EventsMap, MethodsMap } from "@nulo/wallet-core/base"
 import { decodeResult } from "./decode"
 import { wrapParams } from "../utils"
-import type { RequestTerminalStatus } from "../offscreen/telemetry"
+import { CLIENT_DISCONNECTED_MESSAGE, remoteErrorFromResponseContent, RpcDisconnectedError, RpcTimeoutError } from "../errors"
+import type { RequestTerminalStatus } from "./terminal-status"
 
 /**
  * Shared request-correlator core for both transport clients (popup↔SW Port and
@@ -24,12 +25,12 @@ import type { RequestTerminalStatus } from "../offscreen/telemetry"
  *
  *   - liveness / readiness (`ensureTransportReady`) and the wire send
  *     (`sendEnvelope`); the message listener + routing stay in the subclass.
- *   - the error-VALUE construction (`makeRemoteError` / `makeTimeoutError` /
- *     `makeSendFailureError` / `makeDisconnectError`). The background transport
- *     rejects with typed `WalletError`s; the offscreen transport currently
- *     rejects with raw strings. Keeping error shaping in hooks is what lets the
- *     offscreen string→typed flip be a localized, later change rather than a
- *     behavior change smuggled into this core.
+ *   - the human-readable timeout/send-failure MESSAGE wording
+ *     (`timeoutMessage` / `sendFailureMessage`). Both transports reject with
+ *     the same typed `WalletError` shapes, so the error-VALUE construction
+ *     (`make*Error`) lives here with the messages as the only per-transport
+ *     variation; a transport with a genuinely different error SHAPE can still
+ *     override the concrete `make*Error` hooks.
  *   - terminal observability (`onTerminal`); the offscreen subclass records
  *     telemetry, the background subclass does not.
  */
@@ -101,28 +102,38 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		method: T,
 		...params: Parameters<TRequests[T]>
 	): Promise<Awaited<ReturnType<TRequests[T]>>> {
+		const requestId = this.nextRequestId++
+		const methodName = String(method)
+		const timeoutMs = this.getRequestTimeoutMs(method)
+		// The request deadline is set BEFORE awaiting transport readiness so it
+		// covers connection establishment too (B-13/B-15): a wedged transport whose
+		// `connect()` retries forever would otherwise hang the request past its
+		// configured timeout, because the timeout timer used to start only after
+		// readiness resolved.
+		const deadline = Date.now() + timeoutMs
+
 		// Only suspend if the transport actually needs to wait. A transport
 		// that is ready synchronously (the background Port when already
 		// connected) returns void, so the request runs straight through to the
 		// wire send without an intervening microtask — preserving the
 		// synchronous-send timing the Port transport always had.
 		const ready = this.ensureTransportReady()
-		if (ready) await ready
-		const requestId = this.nextRequestId++
-		const methodName = String(method)
+		if (ready) await this.awaitReadyWithinDeadline(ready, deadline, requestId, methodName, timeoutMs)
 		const startedAtMs = Date.now()
 		const content = {
 			requestId,
 			method,
 			params: jsonSanitize(wrapParams(params)) as unknown as Parameters<TRequests[T]>,
 		}
-		const timeoutMs = this.getRequestTimeoutMs(method)
 		this.logDebug(`→ ${methodName}`)
 
 		const promise = new Promise<Awaited<ReturnType<TRequests[T]>>>((resolve, reject) => {
+			// Remaining budget after readiness — so the TOTAL request time
+			// (readiness + wire) is bounded by `timeoutMs`.
+			const remainingMs = Math.max(0, deadline - Date.now())
 			const timeoutHandle = setTimeout(() => {
 				this.settle(requestId, { reject: this.makeTimeoutError({ requestId, methodName, timeoutMs }) }, "timeout", "timeout_fired")
-			}, timeoutMs)
+			}, remainingMs)
 			const warnHandle =
 				this.warnAfterMs === undefined
 					? undefined
@@ -147,7 +158,21 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		// `postMessage` before returning, so its throw is caught here too.
 		try {
 			const sent = this.sendEnvelope(content, methodName, requestId)
-			if (sent) await sent
+			if (sent) {
+				// Do NOT await the wire send: a wedged async transport must not hold the
+				// request past its deadline (the correlated `promise` already carries the
+				// timeout timer; B-15). An async send FAILURE still settles early via the
+				// catch below; a sync throw is caught by the enclosing try. `settle` is
+				// idempotent, so a disconnect that raced the timeout simply loses.
+				void sent.catch((cause) => {
+					this.settle(
+						requestId,
+						{ reject: this.makeSendFailureError({ requestId, methodName, cause }) },
+						"send_failed",
+						"sendMessage_threw",
+					)
+				})
+			}
 		} catch (cause) {
 			this.settle(
 				requestId,
@@ -245,6 +270,30 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 		this.logDebug(`← ${entry.method} (${endedAtMs - entry.startedAtMs}ms)`, "pending:", this.pending.size)
 	}
 
+	/** Await transport readiness but never past the request deadline (B-15). A
+	 *  wedged transport (its `connect()` retrying forever) rejects with the same
+	 *  timeout error the request itself would produce, so the caller isn't held past
+	 *  its configured timeout while connection establishment stalls. */
+	private async awaitReadyWithinDeadline(
+		ready: Promise<void>,
+		deadline: number,
+		requestId: number,
+		methodName: string,
+		timeoutMs: number,
+	): Promise<void> {
+		const remainingMs = deadline - Date.now()
+		if (remainingMs <= 0) throw this.makeTimeoutError({ requestId, methodName, timeoutMs })
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const timeout = new Promise<never>((_resolve, reject) => {
+			timer = setTimeout(() => reject(this.makeTimeoutError({ requestId, methodName, timeoutMs })), remainingMs)
+		})
+		try {
+			await Promise.race([ready, timeout])
+		} finally {
+			if (timer) clearTimeout(timer)
+		}
+	}
+
 	// ── Transport hooks (subclass-owned) ────────────────────────────────
 
 	/** Block until the transport can carry a request (connect / spawn offscreen).
@@ -256,17 +305,43 @@ export abstract class BaseServiceClient<TRequests extends MethodsMap, TEvents ex
 	 *  core treats both as a send failure. */
 	protected abstract sendEnvelope(content: unknown, methodName: string, requestId: number): void | Promise<void>
 
-	/** Build the rejection value for a remote (service-side) error response. */
-	protected abstract makeRemoteError(content: ResponseContentLike): unknown
+	/** Build the rejection value for a remote (service-side) error response:
+	 *  reconstruct the typed WalletError (or plain Error) from the envelope. */
+	protected makeRemoteError(content: ResponseContentLike): unknown {
+		return remoteErrorFromResponseContent(content)
+	}
 
-	/** Build the rejection value for a hard timeout. */
-	protected abstract makeTimeoutError(meta: RequestErrorMeta): unknown
+	/** Build the rejection value for a hard timeout. Shape (class + details) is
+	 *  owned here; only the message wording is the transport's. */
+	protected makeTimeoutError(meta: RequestErrorMeta): unknown {
+		return new RpcTimeoutError(this.timeoutMessage(meta), {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+		})
+	}
 
-	/** Build the rejection value when the wire send fails. */
-	protected abstract makeSendFailureError(meta: RequestErrorMeta): unknown
+	/** Build the rejection value when the wire send fails. Shape owned here;
+	 *  message wording is the transport's. */
+	protected makeSendFailureError(meta: RequestErrorMeta): unknown {
+		return new RpcDisconnectedError(this.sendFailureMessage(meta), {
+			requestId: meta.requestId,
+			methodName: meta.methodName,
+			cause: meta.cause === undefined ? undefined : String(meta.cause),
+		})
+	}
 
-	/** Build the rejection value for an explicit `disconnect()`. */
-	protected abstract makeDisconnectError(): unknown
+	/** Build the rejection value for an explicit `disconnect()`. Deliberately a
+	 *  plain Error: the shared teardown message is a string-shaped contract —
+	 *  see `CLIENT_DISCONNECTED_MESSAGE` / `isClientDisconnectRejection`. */
+	protected makeDisconnectError(): unknown {
+		return new Error(CLIENT_DISCONNECTED_MESSAGE)
+	}
+
+	/** Transport-specific wording for a hard-timeout rejection. */
+	protected abstract timeoutMessage(meta: RequestErrorMeta): string
+
+	/** Transport-specific wording for a wire-send-failure rejection. */
+	protected abstract sendFailureMessage(meta: RequestErrorMeta): string
 
 	/** Per-method timeout. Defaults to the constructor default; offscreen
 	 *  overrides for long-running methods (e.g. proveTx). */

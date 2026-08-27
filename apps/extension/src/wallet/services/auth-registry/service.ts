@@ -1,5 +1,6 @@
 import type { ILogger } from "@/wallet/logger"
-import { toRestoreError } from "@/utils/restore-error"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
+import { restoreRows } from "@/wallet/services/restore-rows"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { maybeRethrowAsRpcCancel } from "@/wallet/services/execution/rpc-cancel"
@@ -8,7 +9,7 @@ import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService } from "@/wallet/services/network/service"
 import { AccountService } from "@/wallet/services/account/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import type { WrappedTask } from "@/wallet/services/task/wrapped-task"
 import { TaskService, RevokeAuthwitsContent, StepContent } from "@/wallet/services/task/service"
 import { TransactionService, OriginType } from "@/wallet/services/transaction/service"
@@ -63,7 +64,19 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 
 	public constructor(logger: ILogger, browserApi: BrowserApi) {
 		super(AUTH_REGISTRY_SERVICE_NAME, logger)
-		this.authwits = new EntityStorage<Authwit>(AUTH_REGISTRY_STORAGE_ROOT, browserApi.storage.local, (raw) => AuthwitSchema.parse(raw))
+		// The journal is keyed BY the authwit's numeric id and every mutation site derives its
+		// storage key from the row's embedded id — so a raw-storage row copied under a foreign
+		// key (id aliasing) would make revoke/delete/reconcile operate on the wrong row. The
+		// id/key guard hides such rows at read time; honest rows always agree.
+		this.authwits = new EntityStorage<Authwit>(
+			AUTH_REGISTRY_STORAGE_ROOT,
+			browserApi.storage.local,
+			(raw) => AuthwitSchema.parse(raw),
+			{
+				requireKeyIdentityMatch: true,
+				keyIdentityMode: "numeric",
+			},
+		)
 		this.statuses = new EntityStorage<boolean>(AUTH_REGISTRY_ENABLED_STORAGE_ROOT, browserApi.storage.local, (raw) =>
 			AuthwitStatusSchema.parse(raw),
 		)
@@ -143,8 +156,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  retry after a partial write does not duplicate. */
 	public async recordPendingAuthwits(account: string, items: { hash: string; content: AuthwitContent }[], txHash: string): Promise<void> {
 		if (items.length === 0) return
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const existing = await this.authwits.getValues()
 			const seen = new Set(existing.filter((x) => x.account === account).map((x) => x.hash))
 			let nextId = array_max(existing.map((x) => x.id)) + 1
@@ -155,9 +167,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 				await this.authwits.set(`${authwit.id}`, authwit)
 				this.emit("onAuthwitAdded", authwit)
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Reconcile pending rows for a tx once its outcome is known: `mined` clears
@@ -165,8 +175,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	 *  rows (the grant never landed, so the local index must not claim it exists).
 	 *  Confirmed (non-pending) rows are untouched. */
 	public async reconcileAuthwits(txHash: string, outcome: "mined" | "dropped"): Promise<void> {
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const rows = (await this.authwits.getValues()).filter((x) => x.pending && x.txHash === txHash)
 			for (const row of rows) {
 				if (outcome === "mined") {
@@ -176,9 +185,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 					this.emit("onAuthwitDeleted", row)
 				}
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async revokeAuthwits(networkId: string, account: string, ids: number[], feeSettings: FeeSettings): Promise<void> {
@@ -359,15 +366,12 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		if (await isAuthwitConsumable(node, authwit.account, authwit.hash)) return
 		const task = parentTask.startSubtask(new StepContent(`Sync authwit #${authwit.id}`))
 		try {
-			try {
-				await this.lock.enter()
+			await this.lock.withLock(async () => {
 				if (await this.authwits.get(`${authwit.id}`)) {
 					await this.authwits.delete(`${authwit.id}`)
 					this.emit("onAuthwitDeleted", authwit)
 				}
-			} finally {
-				this.lock.leave()
-			}
+			})
 			task.complete()
 		} catch (error) {
 			task.fail(error)
@@ -379,8 +383,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 		const task = parentTask.startSubtask(new StepContent("Sync status"))
 		try {
 			const isEnabled = await isAuthRegistryEnabled(node, account)
-			try {
-				await this.lock.enter()
+			await this.lock.withLock(async () => {
 				const enabled = await this.statuses.get(account)
 				if (enabled !== isEnabled) {
 					if (isEnabled) {
@@ -391,9 +394,7 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 						this.emit("onRegistryDisabled", account)
 					}
 				}
-			} finally {
-				this.lock.leave()
-			}
+			})
 			task.complete()
 		} catch (error) {
 			task.fail(error)
@@ -427,50 +428,97 @@ export class AuthRegistryService extends Service<Methods, Events> implements Ser
 	public async purgeForAccounts(addresses: readonly string[]): Promise<void> {
 		await this.ensureInitialized()
 		const set = new Set(addresses)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const authwits = (await this.authwits.getValues()).filter((a) => set.has(a.account))
 			await purgeRows(
 				authwits,
 				(authwit) => this.authwits.delete(`${authwit.id}`),
 				(authwit) => this.emit("onAuthwitDeleted", authwit),
 			)
+			// F-B23: raw second pass — a validation-failed row for a purged account
+			// is invisible to getValues() and would otherwise survive forever.
+			await purgeMalformedRows(
+				this.authwits,
+				(raw) => typeof raw.account === "string" && set.has(raw.account),
+				(id) => this.logDebug(`purged malformed authwit row ${id}`),
+			)
 			for (const addr of set) {
 				if (await this.statuses.contains(addr)) await this.statuses.delete(addr)
 			}
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
-	public async restore(authwits: Authwit[]): Promise<Restored<Authwit>[]> {
+	public async restore(authwits: Authwit[], profileId: string): Promise<Restored<Authwit>[]> {
 		await this.ensureInitialized()
+		// Deletion fence keyed on the composable's authoritative created-profile
+		// id — authwit rows carry NO profileId (unscoped numeric keys), so only
+		// the threaded id can anchor it. Fail closed: dispatch has no schema
+		// validation.
+		if (typeof profileId !== "string" || profileId.length === 0) {
+			throw new Error("restore requires the created profile id")
+		}
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(deletion, [profileId])
 
-		const result: Restored<Authwit>[] = []
-
-		try {
-			await this.lock.enter()
-
-			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
-			for (const authwit of authwits) {
+		return await this.lock.withLock(async () => {
+			// Duplicate identity is the compound (account, hash) — hashes are
+			// legitimately shared ACROSS accounts, so a bare-hash check would
+			// false-reject. Encoded injectively (JSON array): accounts/hashes are
+			// attacker-shaped strings, so any in-band delimiter is forgeable.
+			// The seed comes from RAW payloads — decoded reads hide malformed
+			// rows whose pairs must still block duplicates; a row too corrupt to
+			// yield both strings has no identity to collide with. NO cap check
+			// here: these are already-granted authorizations, and rejecting a
+			// unique row would destroy the only revocation index.
+			const pairKeyOf = (account: string, hash: string) => JSON.stringify([account, hash])
+			const seen = new Set<string>()
+			for (const [, raw] of await this.authwits.rawStringEntries()) {
 				try {
-					// Parse the persisted shape so a malformed backup authwit is recorded
-					// as restoreError, not silently written + codec-hidden on read.
-					const row = AuthwitSchema.parse({ ...authwit, id })
-					await this.authwits.set(`${id}`, row)
-					result.push(row)
-					id++
-				} catch (err) {
-					result.push({
-						...authwit,
-						restoreError: toRestoreError(err),
-					})
+					const v = JSON.parse(raw) as { account?: unknown; hash?: unknown }
+					if (typeof v.account === "string" && typeof v.hash === "string") {
+						seen.add(pairKeyOf(v.account, v.hash))
+					}
+				} catch {
+					// No extractable identity — nothing to dedupe against.
 				}
 			}
-
-			return result
-		} finally {
-			this.lock.leave()
-		}
+			// Occupancy from the PHYSICAL key space: the cursor must never land on
+			// a key a decoded read can't see (a hidden row would be overwritten).
+			// Writes use canonical String(id), so noncanonical aliases can't
+			// falsely collide.
+			const occupied = new Set(await this.authwits.getKeys())
+			let id = array_max((await this.authwits.getValues()).map((x) => x.id)) + 1
+			// `id` advances only after a successful write: restoreRows routes a
+			// throwing row to `restoreError` and never reaches the `id++`, so a
+			// malformed authwit doesn't consume a cursor slot. Ordering inside the
+			// writer is load-bearing: validate → dedupe-check → write → record —
+			// a malformed or duplicate row must neither block nor poison a valid
+			// sibling.
+			return await restoreRows(authwits, async (authwit) => {
+				// The safe-integer guard lives INSIDE the loop condition: a hostile
+				// decodable row can sit at MAX_SAFE_INTEGER, past which the float
+				// cursor stops advancing (id++ is a no-op) — an unguarded skip
+				// loop would spin forever under the service-wide lock, and an
+				// unguarded write would land key-identity-hidden on read. Fail
+				// the ROW (restoreRows tags it), never the service.
+				while (Number.isSafeInteger(id) && occupied.has(`${id}`)) id++
+				if (!Number.isSafeInteger(id)) {
+					throw new Error("authwit id space exhausted (hostile id boundary)")
+				}
+				// Parse the persisted shape so a malformed backup authwit is recorded
+				// as restoreError, not silently written + codec-hidden on read.
+				const row = AuthwitSchema.parse({ ...authwit, id })
+				const pairKey = pairKeyOf(row.account, row.hash)
+				if (seen.has(pairKey)) {
+					throw new Error("authwit already exists (account+hash)")
+				}
+				assertRestoreEpoch(deletion, epochs, profileId)
+				await this.authwits.set(`${id}`, row)
+				occupied.add(`${id}`)
+				seen.add(pairKey)
+				id++
+				return row
+			})
+		})
 	}
 }

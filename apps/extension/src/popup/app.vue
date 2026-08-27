@@ -9,7 +9,9 @@ import { isPrefersDarkScheme, persistThemeHint } from "@/utils/general"
 import { getLastActiveProfileId } from "@/utils/lastActiveProfile"
 import { shouldAdvanceToGeneral } from "./should-advance-to-general"
 import { defaultConfig } from "@/wallet/config"
-import { AccountServiceClient, AccountType } from "@/wallet/services/account/client"
+import { AccountServiceClient } from "@/wallet/services/account/client"
+import { createNetworkSwitchHandler } from "@/popup/network-switch"
+import { runFencedBootstrap } from "@/popup/profile-bootstrap"
 import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Composables */
@@ -21,6 +23,7 @@ import { usePopupStore } from "@/stores/popup.store"
 const appStore = useAppStore()
 const popupStore = usePopupStore()
 const { bootstrapActiveProfile } = useProfileBootstrap()
+const { openToast } = useToast()
 
 /** Update theme */
 const root = document.querySelector("html")
@@ -95,57 +98,90 @@ watch(
 	},
 )
 
-/** todo: ref */
+// Identity-fenced network-switch orchestration — the body lives in
+// `network-switch.ts` so its fence is unit-testable (this shell has no
+// harness). The factory owns run invalidation, scope capture, and the
+// generation+live-scope guard at every await boundary.
 watch(
 	() => appStore.network,
-	async () => {
-		if (!appStore.network) return
-
-		appStore.syncNetworkStatus()
-
-		// Re-fetch accounts for the new chain, and auto-create a default if
-		// the chain has NO accounts yet. The earlier comment here said
-		// auto-create lives ONLY in `initAccount()` to avoid a duplicate-
-		// account race during initial profile load. The empty-list guard
-		// below preserves that property: when `initAccount()` already
-		// created the default for the current chain, `getAccounts()` returns
-		// non-empty and we skip the second `ensureDefaultAccount` call.
-		// When the user switches to a chain with no prior accounts (which
-		// is the common case for the freshly-deployed Local Network in
-		// e2e), `getAccounts` returns empty and we deterministically derive
-		// + persist a default. Without this, the popup is stranded with
-		// `account = undefined` indefinitely on freshly-switched chains
-		// and every reader of `appStore.account.address` (NewTokenPopup,
-		// NewContactPopup, EditContactPopup, etc.) silently fails.
-		managers.account?.disconnect()
-		managers.account = new AccountServiceClient()
-		appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
-		if (appStore.accounts.length === 0) {
-			await managers.account.ensureDefaultAccount(appStore.profile.id, appStore.network.chainId, AccountType.Nulo_v1, "Account")
-			appStore.accounts = await managers.account.getAccounts(appStore.profile.id, appStore.network.chainId, true)
-		}
-		await appStore.setupActiveAccount()
-		await appStore.syncTransactions()
-	},
+	createNetworkSwitchHandler({
+		getScope: () =>
+			appStore.network && appStore.profile ? { profileId: appStore.profile.id, chainId: appStore.network.chainId } : undefined,
+		liveScopeMatches: (scope) => appStore.profile?.id === scope.profileId && appStore.network?.chainId === scope.chainId,
+		syncNetworkStatus: () => appStore.syncNetworkStatus(),
+		replaceAccountClient: () => {
+			managers.account?.disconnect()
+			managers.account = new AccountServiceClient()
+			return managers.account
+		},
+		setAccounts: (accounts) => {
+			appStore.accounts = accounts
+		},
+		setupActiveAccount: () => appStore.setupActiveAccount(),
+		syncTransactions: () => appStore.syncTransactions(),
+	}),
 )
 
+/** Sequence token for profile events. Handlers await service round-trips, and under load a
+ *  stale LOCK event can resume after its own unlock has already re-activated the profile — its
+ *  routing side effects would eject an active session to the auth screen (observed as e2e
+ *  navigation stalls under CPU restriction). A newer event of either kind supersedes every
+ *  older handler; superseded handlers abandon their mutations instead of racing them. */
+let profileEventSeq = 0
+
 const onActiveProfileChanged = async (profile) => {
+	const seq = ++profileEventSeq
 	if (profile) {
-		await bootstrapActiveProfile(profile)
-	} else {
-		popupStore.closeAll()
-		appStore.isLogined = false
-		// Every cached scope goes with the lock, so no profile's activity outlives
-		// it in memory. Switching profiles runs through lock/unlock, which means a
-		// switch deliberately starts cold rather than repainting from cache.
-		appStore.clearActivity()
-		appStore.profiles = await managers.profile.getProfiles()
-		router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
+		// bootstrapActiveProfile carries its own lock-wins guard: a stale profile event whose
+		// session was already locked re-checks getActiveProfile() before flipping isLogined.
+		// The wrap is load-bearing: an emitter-callback rejection would otherwise become an
+		// unhandled rejection that silently starves the unlock flow's activation wait. The
+		// identity-keyed failure record releases that waiter IMMEDIATELY (never the full
+		// timeout); the seq fence makes the channel compare-and-commit, so a superseded run
+		// can neither clear a newer run's record nor toast over a newer profile's outcome.
+		await runFencedBootstrap({
+			profileId: profile.id,
+			bootstrap: () => bootstrapActiveProfile(profile),
+			isCurrent: () => seq === profileEventSeq,
+			setFailure: (record) => {
+				appStore.bootstrapFailure = record
+			},
+			shouldToast: () => !appStore.isLogined || appStore.profile?.id === profile.id,
+			toast: () => openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG),
+		})
+		return
 	}
+	// Lock cleanup must survive a failed lookup: a transport rejection here (SW churn at the
+	// exact moment of a lock) must not leave the popup rendered as authenticated over a closed
+	// session. The list only picks auth vs register — the cached one is good enough for that.
+	let profiles = appStore.profiles
+	try {
+		profiles = await managers.profile.getProfiles()
+	} catch {
+		// Cached list stands in; the cleanup below runs regardless.
+	}
+	if (seq !== profileEventSeq) return
+	popupStore.closeAll()
+	appStore.isLogined = false
+	// Every cached scope goes with the lock, so no profile's activity outlives
+	// it in memory. Switching profiles runs through lock/unlock, which means a
+	// switch deliberately starts cold rather than repainting from cache.
+	appStore.clearActivity()
+	appStore.profiles = profiles
+	router.push(appStore.profiles.length ? "/popup/auth" : "/popup/register")
+}
+
+/** The profile unlocked DERIVED-ONLY: its imported-keys DEK (or the envelope MAC over it) failed,
+ *  so every imported account is unusable until the cause is repaired. The service deliberately does
+ *  NOT block the profile — derived funds stay reachable — which means this warning is the only
+ *  signal the user gets before an imported account fails at use time. */
+const onImportedKeysDegraded = (profile) => {
+	openToast({ label: `Imported accounts unavailable in "${profile.name}"`, icon: "warning" }, TOAST_DURATION.LONG)
 }
 
 const loadProfile = async () => {
 	managers.profile.onActiveProfileChanged.add(onActiveProfileChanged)
+	managers.profile.onImportedKeysDegraded.add(onImportedKeysDegraded)
 
 	appStore.profiles = await managers.profile.getProfiles()
 	const activeProfile = await managers.profile.getActiveProfile()

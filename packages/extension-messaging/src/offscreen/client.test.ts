@@ -40,10 +40,48 @@ class TestClient extends ServiceClient<Methods> {
 		return this.request("echo", val)
 	}
 
+	public echoAlreadyReady(val: string): Promise<string> {
+		return this.requestAlreadyReady("echo", val)
+	}
+
 	public multiply(a: number, b: number): Promise<number> {
 		return this.request("multiply", a, b)
 	}
 }
+
+describe("frozen transport error contract", () => {
+	// Mirror of the background transport's pin suite: same base-built VALUES
+	// (class + details), offscreen-specific wording frozen exactly.
+	type ErrorHooks = {
+		makeTimeoutError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeSendFailureError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeDisconnectError(): unknown
+	}
+	const hooks = new TestClient() as unknown as ErrorHooks
+
+	test("timeout → RpcTimeoutError with exact message + details", () => {
+		const err = hooks.makeTimeoutError({ requestId: 7, methodName: "echo", timeoutMs: 500 })
+		expect(err).toBeInstanceOf(RpcTimeoutError)
+		expect((err as RpcTimeoutError).code).toBe("RPC_TIMEOUT") // literal: pins static + instance code together
+		expect((err as RpcTimeoutError).message).toBe("Offscreen request timed out: echo")
+		expect((err as RpcTimeoutError).details).toEqual({ requestId: 7, methodName: "echo" })
+	})
+
+	test("send failure → RpcDisconnectedError with exact message + stringified cause", () => {
+		const err = hooks.makeSendFailureError({ requestId: 8, methodName: "echo", cause: new Error("gone") })
+		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as RpcDisconnectedError).code).toBe("RPC_DISCONNECTED") // literal: pins static + instance code together
+		expect((err as RpcDisconnectedError).message).toBe("Offscreen send failed: echo")
+		expect((err as RpcDisconnectedError).details).toEqual({ requestId: 8, methodName: "echo", cause: "Error: gone" })
+	})
+
+	test("disconnect → plain Error (NOT WalletError) with the shared teardown message", () => {
+		const err = hooks.makeDisconnectError()
+		expect(err).toBeInstanceOf(Error)
+		expect(err).not.toBeInstanceOf(WalletError)
+		expect((err as Error).message).toBe("Client disconnected")
+	})
+})
 
 /** Capture the request envelope (requestId + from-uid) from the most recent
  *  chrome.runtime.sendMessage call so we can build a matching response. */
@@ -520,5 +558,61 @@ describe("leak guards for the unified correlator (single pending entry)", () => 
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+})
+
+describe("requestAlreadyReady (internal readiness bypass)", () => {
+	// The bypass exists for a caller that already awaited readiness and must
+	// not allow a SECOND readiness pass (offscreen recreation window) between
+	// an authority check and the wire. The flag is consumed synchronously —
+	// `request()` invokes `ensureTransportReady()` in the same call stack — so
+	// concurrent ordinary requests can never inherit it.
+
+	test("skips onReady and reaches the wire SYNCHRONOUSLY (zero microtask gap)", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const p = client.echoAlreadyReady("hi")
+		// The authority-to-wire guarantee: sendMessage has ALREADY been invoked
+		// when control returns to the caller — a resolved-Promise readiness
+		// would defer the send by a microtask, reopening the recreation gap.
+		expect(captureMessage()).toHaveBeenCalledTimes(1)
+		expect(client.readyHook).not.toHaveBeenCalled()
+		await flush()
+		const { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "hi"))
+		await expect(p).resolves.toBe("hi")
+	})
+
+	test("a concurrent ordinary request issued in the same tick still runs onReady", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const a = client.echoAlreadyReady("bypass")
+		const b = client.echo("ordinary")
+		await flush()
+		expect(client.readyHook).toHaveBeenCalledTimes(1)
+		const sendMessageMock = captureMessage()
+		for (const call of sendMessageMock.mock.calls) {
+			const [request] = call as [{ content: { requestId: number }; from: string }]
+			emitMessage(makeResponse(request.content.requestId, request.from, "done"))
+		}
+		await expect(a).resolves.toBe("done")
+		await expect(b).resolves.toBe("done")
+	})
+
+	test("the bypass is one-call: the next ordinary request runs onReady again", async () => {
+		const client = new TestClient(new MemoryTelemetrySink())
+		client.connect()
+		const a = client.echoAlreadyReady("first")
+		await flush()
+		let { requestId, fromUid } = getLastRequest()
+		emitMessage(makeResponse(requestId, fromUid, "first"))
+		await expect(a).resolves.toBe("first")
+
+		const b = client.echo("second")
+		await flush()
+		expect(client.readyHook).toHaveBeenCalledTimes(1)
+		;({ requestId, fromUid } = getLastRequest())
+		emitMessage(makeResponse(requestId, fromUid, "second"))
+		await expect(b).resolves.toBe("second")
 	})
 })

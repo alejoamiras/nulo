@@ -4,12 +4,7 @@ import ActionButtonsView from "./ActionButtonsView.vue"
 import GasBalanceCard from "./GasBalanceCard.vue"
 import { Dropdown } from "@/components/ui/Dropdown"
 
-/** Vendor */
-import { DateTime } from "luxon"
-
 /** Services */
-import { ContentKind } from "@/wallet/services/task/spec"
-import { TaskServiceClient } from "@/wallet/services/task/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import { TokenServiceClient } from "@/wallet/services/token/client"
 import { PriceServiceClient } from "@/wallet/services/price/client"
@@ -17,6 +12,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyToClipboard } from "@/utils/clipboard"
 import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Composables */
@@ -74,12 +70,6 @@ const publicBalanceFormatted = computed(() => {
 	const decimals = tokenBalanceToDisplay.value?.token?.decimals || 0
 	return balanceFormatted(tokenBalanceToDisplay.value?.publicBalance || 0, decimals, 10).value
 })
-
-const BalanceDisplayOptionsMap = {
-	total_account_value: "Account Value",
-	total_private_balances: "Private Account Value",
-	total_public_balances: "Public Account Value",
-}
 
 /** Live prices (A1). Parent owns the client lifecycle; the composable owns
  *  freshness. Every fiat element below renders ONLY with a usable quote —
@@ -143,20 +133,12 @@ const aggregate = computed(() => {
 const aggregateFiatDisplay = computed(() => prices.formatUsdMicro(aggregate.value.micro))
 const isAggregatePartial = computed(() => aggregate.value.priced < aggregate.value.holdings)
 
-const isCopied = ref(false)
 const handleCopy = (value, label) => {
-	isCopied.value = true
-	window.navigator.clipboard.writeText(value)
-	openToast({ label: `${label} is copied`, icon: "copy" })
-	setTimeout(() => {
-		isCopied.value = false
-	}, 2500)
+	void copyToClipboard(value, openToast, {
+		success: { label: `${label} is copied` },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
-const handleRefreshBalance = () => {
-	tokenBalanceService.refreshTokenBalance(tokenBalanceToDisplay.value?.id)
-}
-const isRefreshingBalance = ref(false)
-
 const handleTokenBalanceClick = async () => {
 	let balance = totalTokenBalance.value?.value
 	if (totalTokenBalance.value?.slashed || showFullBalance.value) {
@@ -166,51 +148,6 @@ const handleTokenBalanceClick = async () => {
 	}
 
 	handleCopy(balance, "Balance")
-}
-
-const taskService = new TaskServiceClient()
-taskService.onTaskCreated.add(onTaskCreated)
-taskService.onTaskUpdated.add(onTaskUpdated)
-taskService.onTaskDeleted.add(onTaskDeleted)
-function onTaskCreated(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = true
-
-			break
-
-		default:
-			break
-	}
-}
-function onTaskUpdated(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (!task.finishedAt) return
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = false
-
-			break
-
-		default:
-			break
-	}
-}
-function onTaskDeleted(task) {
-	switch (task.content.kind) {
-		case ContentKind.BalanceUpdate:
-			if (tokenBalanceToDisplay.value?.id !== task.content.tbId) return
-
-			isRefreshingBalance.value = false
-
-			break
-
-		default:
-			break
-	}
 }
 
 const tokenBalanceService = new TokenBalanceServiceClient()
@@ -252,13 +189,6 @@ function onTokenDeleted(token) {
 
 async function fetchTokenBalances() {
 	tokenBalances.value = await tokenBalanceService.getTokenBalances(undefined, appStore.account?.address)
-	isRefreshingBalance.value = (await taskService.getTasks()).some(
-		(t) =>
-			!t.finishedAt &&
-			t.content.kind === ContentKind.BalanceUpdate &&
-			t.content.account === appStore.account.address &&
-			t.content.tbId === tokenBalanceToDisplay.value?.id,
-	)
 }
 
 async function loadBalanceDisplayOption(profileId, networkId) {
@@ -316,7 +246,6 @@ onMounted(async () => {
 	await loadBalanceDisplayOption(appStore.profile.id, appStore.network.id)
 })
 onBeforeUnmount(() => {
-	taskService.disconnect()
 	tokenBalanceService.disconnect()
 	tokenService.disconnect()
 	prices.dispose()
@@ -333,7 +262,7 @@ onBeforeUnmount(() => {
 				v-if="tokenToDisplay || showFiatValues"
 				@click="handleTokenBalanceClick"
 				data-testid="balance-amount"
-				:class="[$style.balance_amount, isRefreshingBalance && $style.refreshing]"
+				:class="$style.balance_amount"
 			>
 				<template v-if="tokenToDisplay">
 					{{ totalTokenBalance.value }}
@@ -349,13 +278,17 @@ onBeforeUnmount(() => {
 				priced assets only
 			</div>
 
+			<!-- Glyphs-only: the lock/globe pair IS the vocabulary (same as the token rows) — no
+			     PRIVATE/PUBLIC words doubling it (owner call, post-approval). -->
 			<Flex v-if="tokenToDisplay" align="center" justify="center" gap="12" :class="$style.breakdown">
-				<span :class="$style.breakdown_item">
-					<span :class="$style.breakdown_dot" /> PRIVATE: <span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
+				<span :class="$style.breakdown_item" aria-label="Private balance">
+					<span :class="$style.breakdown_private"><Icon name="lock" size="12" /></span>
+					<span data-testid="private-balance-value">{{ privateBalanceFormatted }}</span>
 				</span>
 				<span :class="$style.breakdown_divider">|</span>
-				<span :class="$style.breakdown_item">
-					<span :class="[$style.breakdown_dot, $style.public_dot]" /> PUBLIC: <span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
+				<span :class="$style.breakdown_item" aria-label="Public balance">
+					<span :class="$style.breakdown_public"><Icon name="globe" size="12" /></span>
+					<span data-testid="public-balance-value">{{ publicBalanceFormatted }}</span>
 				</span>
 			</Flex>
 		</section>
@@ -381,8 +314,8 @@ onBeforeUnmount(() => {
 	align-items: center;
 	text-align: center;
 
-	margin-top: 32px;
-	margin-bottom: 16px;
+	margin-top: 22px;
+	margin-bottom: 10px;
 }
 
 .balance_amount {
@@ -402,16 +335,6 @@ onBeforeUnmount(() => {
 .balance_symbol {
 	font-size: 24px;
 	color: var(--txt-tertiary);
-}
-
-@keyframes blink {
-	0% { opacity: 1; }
-	50% { opacity: 0.3; }
-	100% { opacity: 1; }
-}
-
-.refreshing {
-	animation: blink 2s linear infinite;
 }
 
 .fiat_line {
@@ -445,14 +368,15 @@ onBeforeUnmount(() => {
 	color: var(--nulo-secondary);
 }
 
-.breakdown_dot {
-	width: 6px;
-	height: 6px;
-	background: var(--nulo-accent);
+/* Same private/public vocabulary as TokenCard's split: bone lock = private, grey globe = public. */
+.breakdown_private {
+	display: inline-flex;
+	color: var(--nulo-accent);
 }
 
-.public_dot {
-	background: var(--nulo-outline);
+.breakdown_public {
+	display: inline-flex;
+	color: var(--nulo-secondary);
 }
 
 .breakdown_divider {
@@ -461,18 +385,6 @@ onBeforeUnmount(() => {
 
 .actions {
 	width: 100%;
-	margin-top: 16px;
-}
-
-.hover_red {
-	& svg,
-	& span {
-		transition: all 0.2s var(--bezier);
-	}
-
-	&:hover {
-		svg { fill: var(--red); }
-		span { color: var(--red); }
-	}
+	margin-top: 12px;
 }
 </style>

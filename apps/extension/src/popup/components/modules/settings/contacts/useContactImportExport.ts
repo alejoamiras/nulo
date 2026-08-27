@@ -1,6 +1,6 @@
 import type { Ref } from "vue"
 import { useToast, TOAST_DURATION } from "@/composables/toast"
-import { downloadFile, pickFile, sanitizeString } from "@/utils"
+import { FileTooLargeError, downloadFile, pickFile, sanitizeString } from "@/utils"
 import { MAX_CONTACT_IMPORT_BYTES, parseContactsExport } from "@/utils/contacts-export-format"
 import type { AccountStateServiceClient } from "@/wallet/services/account-state/client"
 import type { ContactServiceClient } from "@/wallet/services/contact/client"
@@ -84,7 +84,10 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 
 	async function importContacts() {
 		try {
-			const file = await pickFile(".json", true)
+			// The `.json` accept filter is UI guidance, not a boundary — a
+			// `.gz`-named pick still auto-decompresses inside pickFile, so the
+			// byte cap must ride along there too.
+			const file = await pickFile(".json", true, true, MAX_CONTACT_IMPORT_BYTES)
 			if (!file) return
 
 			// Byte-level bound BEFORE reading — `raw.length` in the parser counts
@@ -232,6 +235,10 @@ export function useContactImportExport(opts: UseContactImportExportOptions) {
 				openToast({ label: "Import completed successfully", icon: "info" })
 			}
 		} catch (err) {
+			if (err instanceof FileTooLargeError) {
+				openToast({ label: "Contacts file is too large", icon: "warning" }, TOAST_DURATION.LONG)
+				return
+			}
 			console.error("Error occurred during import", (err as Error)?.message || (err as Error)?.stack || err)
 			openToast({ label: "Error occurred during import", icon: "warning" }, TOAST_DURATION.LONG)
 		} finally {

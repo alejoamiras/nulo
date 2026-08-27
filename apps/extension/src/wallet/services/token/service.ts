@@ -5,16 +5,17 @@ import { normalizeError } from "@nulo/wallet-core/jobs"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { OperationJournalService } from "@/wallet/services/operation-journal/service"
-import type { OperationContext } from "@/wallet/services/operation-journal/spec"
+import type { OperationContext, OperationOrigin } from "@/wallet/services/operation-journal/spec"
 import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { nextNumericId } from "@/wallet/services/id-allocators"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
 import { AccountService } from "@/wallet/services/account/service"
 import { DEFAULT_SHALLOW_PXE_CLIENT_FACTORY, type ShallowPxeClient, type ShallowPxeClientFactory } from "@/wallet/services/pxe/shallow-port"
 import { TaskService, StepContent, type WrappedTask } from "@/wallet/services/task/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { canonicalNumericStorageId, purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
 import { Lock } from "@/wallet/utils"
@@ -48,7 +49,6 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		"addToken",
 		"updateToken",
 		"deleteToken",
-		"getTokenInterface",
 		"parseTokenInterface",
 		"previewTokenMetadata",
 	)
@@ -183,10 +183,49 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		opContext: OperationContext,
 	): Promise<TokenInfo> {
 		await this.ensureInitialized()
+		// Phase 2.5: the journal entry is created up-front (title=undefined) so
+		// the tokens-view TokenImportRow pops in immediately after approval,
+		// carrying the "Requested by <origin>" subtitle; `persistToken` backfills
+		// the title once the live fetch resolves the symbol.
+		return await this.persistToken({
+			profileId,
+			networkId,
+			tokenInterface,
+			journal: {
+				origin: opContext.origin,
+				accountAddress,
+				title: undefined,
+				subtitle: opContext.origin === "dapp" ? `Requested by ${opContext.dappOrigin}` : "Adding token…",
+			},
+			metadata: {
+				kind: "live",
+				fetch: () => this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface),
+			},
+		})
+	}
+
+	/**
+	 * The shared token-persist machine behind `addToken` (live) and
+	 * `addSeededToken` (seeded). The metadata source is a DISCRIMINATED value,
+	 * not an open callback: the seeded arm carries only already-validated data
+	 * and structurally cannot fetch — preserving the seeder's no-refetch TOCTOU
+	 * fix by construction. The live arm's fetch (and its title backfill) runs
+	 * INSIDE the token lock, in the not-yet-persisted branch only.
+	 */
+	private async persistToken(input: {
+		profileId: string
+		networkId: string
+		tokenInterface: TokenInterface
+		journal: { origin: OperationOrigin; accountAddress: string; title: string | undefined; subtitle: string }
+		metadata:
+			| { kind: "seeded"; name: string; symbol: string; decimals: number }
+			| { kind: "live"; fetch: () => Promise<[string, string, number]> }
+	}): Promise<TokenInfo> {
+		const { profileId, networkId, tokenInterface, metadata } = input
 
 		// Fast idempotency short-circuit (Opus H2 / codex DEFERRED).
 		// If the token is already on this profile+chain, return without
-		// creating a new journal entry or running fetchTokenMetadata.
+		// creating a new journal entry or running a live metadata fetch.
 		// Without this guard, a malicious or buggy dApp could spam
 		// registerToken with the same contract address and force a PXE
 		// round-trip + journal write per attempt. The lock still protects
@@ -196,75 +235,75 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 			return getTokenInfo(existing)
 		}
 
-		// Phase 2.5: durable journal entry for the import. Created up-front
-		// (title=undefined) so the tokens-view TokenImportRow pops in
-		// immediately after approval, carrying the "Requested by <origin>"
-		// subtitle. The title gets backfilled with the resolved symbol once
-		// fetchTokenMetadata returns (via `setOperationMeta`) — without this
-		// backfill the row would show the short contract address as a
-		// fallback (TokenImportRow.vue:30-33).
 		const journalOp = await this.journal.createOperation({
 			kind: "token_import",
-			origin: opContext.origin,
+			origin: input.journal.origin,
 			profileId,
-			accountAddress,
+			accountAddress: input.journal.accountAddress,
 			networkId,
 			contractAddress: tokenInterface.contract,
-			title: undefined,
-			subtitle: opContext.origin === "dapp" ? `Requested by ${opContext.dappOrigin}` : "Adding token…",
+			title: input.journal.title,
+			subtitle: input.journal.subtitle,
 		})
 
-		let holdsLock = false
-		try {
-			await this.lock.enter()
-			holdsLock = true
-			await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
-			let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-			if (!token) {
-				const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
-				// Backfill the title with the resolved symbol so the in-flight
-				// TokenImportRow stops falling back to the short contract
-				// address. Safe to call even if the row has already vanished
-				// (setOperationMeta tolerates terminal records).
-				await this.journal.setOperationMeta(journalOp.id, { title: symbol })
-				token = {
-					id: await nextNumericId(this.tokens),
-					profileId,
-					chainId: tokenInterface.chainId,
-					contract: tokenInterface.contract,
-					name: name,
-					symbol: symbol,
-					decimals: decimals,
-					getNameFn: tokenInterface.getNameFn,
-					getSymbolFn: tokenInterface.getSymbolFn,
-					getDecimalsFn: tokenInterface.getDecimalsFn,
-					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-					transferPublicFn: tokenInterface.transferPublicFn,
-					transferPrivateFn: tokenInterface.transferPrivateFn,
-					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+		// The catch stays INSIDE the locked section: the journal's "failed"
+		// transition must complete while the token lock is held, so a queued
+		// token op can never observe the operation mid-failure (audit D3).
+		return await this.lock.withLock(async () => {
+			try {
+				await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
+				let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
+				if (!token) {
+					let name: string
+					let symbol: string
+					let decimals: number
+					if (metadata.kind === "live") {
+						;[name, symbol, decimals] = await metadata.fetch()
+						// Backfill the title with the resolved symbol so the in-flight
+						// TokenImportRow stops falling back to the short contract
+						// address. Safe to call even if the row has already vanished
+						// (setOperationMeta tolerates terminal records).
+						await this.journal.setOperationMeta(journalOp.id, { title: symbol })
+					} else {
+						;({ name, symbol, decimals } = metadata)
+					}
+					token = {
+						id: await nextNumericId(this.tokens),
+						profileId,
+						chainId: tokenInterface.chainId,
+						contract: tokenInterface.contract,
+						name: name,
+						symbol: symbol,
+						decimals: decimals,
+						getNameFn: tokenInterface.getNameFn,
+						getSymbolFn: tokenInterface.getSymbolFn,
+						getDecimalsFn: tokenInterface.getDecimalsFn,
+						balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
+						balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
+						transferPublicFn: tokenInterface.transferPublicFn,
+						transferPrivateFn: tokenInterface.transferPrivateFn,
+						transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
+						transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+					}
+					await this.tokens.set(`${token.id}`, token)
+					this.emit("onTokenAdded", getTokenInfo(token))
 				}
-				await this.tokens.set(`${token.id}`, token)
-				this.emit("onTokenAdded", getTokenInfo(token))
+				const result = getTokenInfo(token)
+				// Codex's success-boundary call: succeeded means "token added to
+				// watchlist". Balance-load is a separate phase handled by the
+				// caller (NewTokenPopup's balanceWait + TokenCard's initial-sync
+				// spinner via updatedAt === 0).
+				await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
+				return result
+			} catch (error) {
+				await this.journal.transitionOperation(
+					journalOp.id,
+					{ stage: "failed" },
+					normalizeError(error, classifyTokenImportError(error)),
+				)
+				throw error
 			}
-			const result = getTokenInfo(token)
-			// Codex's success-boundary call: succeeded means "token added to
-			// watchlist". Balance-load is a separate phase handled by the
-			// caller (NewTokenPopup's balanceWait + TokenCard's initial-sync
-			// spinner via updatedAt === 0).
-			await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
-			return result
-		} catch (error) {
-			await this.journal.transitionOperation(
-				journalOp.id,
-				{ stage: "failed" },
-				normalizeError(error, classifyTokenImportError(error)),
-			)
-			throw error
-		} finally {
-			if (holdsLock) this.lock.leave()
-		}
+		})
 	}
 
 	/** Test/SW-internal trigger for a seed pass (also driven by the unlock and
@@ -291,64 +330,13 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	}): Promise<TokenInfo> {
 		await this.ensureInitialized()
 		const { profileId, networkId, accountAddress, tokenInterface, name, symbol, decimals } = input
-
-		const existing = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-		if (existing) {
-			return getTokenInfo(existing)
-		}
-
-		const journalOp = await this.journal.createOperation({
-			kind: "token_import",
-			origin: "seed",
+		return await this.persistToken({
 			profileId,
-			accountAddress,
 			networkId,
-			contractAddress: tokenInterface.contract,
-			title: symbol,
-			subtitle: "Default token",
+			tokenInterface,
+			journal: { origin: "seed", accountAddress, title: symbol, subtitle: "Default token" },
+			metadata: { kind: "seeded", name, symbol, decimals },
 		})
-
-		let holdsLock = false
-		try {
-			await this.lock.enter()
-			holdsLock = true
-			await this.journal.transitionOperation(journalOp.id, { stage: "simulating" })
-			let token = await this.findToken(profileId, tokenInterface.chainId, tokenInterface.contract)
-			if (!token) {
-				token = {
-					id: await nextNumericId(this.tokens),
-					profileId,
-					chainId: tokenInterface.chainId,
-					contract: tokenInterface.contract,
-					name,
-					symbol,
-					decimals,
-					getNameFn: tokenInterface.getNameFn,
-					getSymbolFn: tokenInterface.getSymbolFn,
-					getDecimalsFn: tokenInterface.getDecimalsFn,
-					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-					transferPublicFn: tokenInterface.transferPublicFn,
-					transferPrivateFn: tokenInterface.transferPrivateFn,
-					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
-				}
-				await this.tokens.set(`${token.id}`, token)
-				this.emit("onTokenAdded", getTokenInfo(token))
-			}
-			const result = getTokenInfo(token)
-			await this.journal.transitionOperation(journalOp.id, { stage: "succeeded" })
-			return result
-		} catch (error) {
-			await this.journal.transitionOperation(
-				journalOp.id,
-				{ stage: "failed" },
-				normalizeError(error, classifyTokenImportError(error)),
-			)
-			throw error
-		} finally {
-			if (holdsLock) this.lock.leave()
-		}
 	}
 
 	public async updateToken(
@@ -362,49 +350,51 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		const stepContent = new StepContent("Updating token")
 		const task = this.tasks.startNewTask(stepContent)
 
-		try {
-			await this.lock.enter()
-			const _token = await this.tokens.get(`${tokenId}`)
-			if (!_token) {
-				throw new Error("unknown token id")
+		// Catch stays INSIDE the locked section: task.fail must be recorded
+		// while the token lock is held, so a freed waiter can never run before
+		// the task reflects the failure (audit H1 — same class as addToken).
+		return await this.lock.withLock(async () => {
+			try {
+				const _token = await this.tokens.get(`${tokenId}`)
+				if (!_token) {
+					throw new Error("unknown token id")
+				}
+				if (
+					_token.profileId !== profileId ||
+					_token.chainId !== tokenInterface.chainId ||
+					_token.contract !== tokenInterface.contract
+				) {
+					throw new Error("token profile id, chain id and contract cannot change")
+				}
+				const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
+				const token: Token = {
+					id: _token.id,
+					profileId: _token.profileId,
+					chainId: _token.chainId,
+					contract: _token.contract,
+					name: name,
+					symbol: symbol,
+					decimals: decimals,
+					getNameFn: tokenInterface.getNameFn,
+					getSymbolFn: tokenInterface.getSymbolFn,
+					getDecimalsFn: tokenInterface.getDecimalsFn,
+					balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
+					balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
+					transferPublicFn: tokenInterface.transferPublicFn,
+					transferPrivateFn: tokenInterface.transferPrivateFn,
+					transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
+					transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
+				}
+				await this.tokens.set(`${token.id}`, token)
+				this.emit("onTokenUpdated", getTokenInfo(token))
+				const result = getTokenInfo(token)
+				task.complete()
+				return result
+			} catch (error) {
+				task.fail(error)
+				throw error
 			}
-			if (
-				_token.profileId !== profileId ||
-				_token.chainId !== tokenInterface.chainId ||
-				_token.contract !== tokenInterface.contract
-			) {
-				throw new Error("token profile id, chain id and contract cannot change")
-			}
-			const [name, symbol, decimals] = await this.fetchTokenMetadata(profileId, networkId, accountAddress, tokenInterface)
-			const token: Token = {
-				id: _token.id,
-				profileId: _token.profileId,
-				chainId: _token.chainId,
-				contract: _token.contract,
-				name: name,
-				symbol: symbol,
-				decimals: decimals,
-				getNameFn: tokenInterface.getNameFn,
-				getSymbolFn: tokenInterface.getSymbolFn,
-				getDecimalsFn: tokenInterface.getDecimalsFn,
-				balanceOfPublicFn: tokenInterface.balanceOfPublicFn,
-				balanceOfPrivateFn: tokenInterface.balanceOfPrivateFn,
-				transferPublicFn: tokenInterface.transferPublicFn,
-				transferPrivateFn: tokenInterface.transferPrivateFn,
-				transferPublicToPrivateFn: tokenInterface.transferPublicToPrivateFn,
-				transferPrivateToPublicFn: tokenInterface.transferPrivateToPublicFn,
-			}
-			await this.tokens.set(`${token.id}`, token)
-			this.emit("onTokenUpdated", getTokenInfo(token))
-			const result = getTokenInfo(token)
-			task.complete()
-			return result
-		} catch (error) {
-			task.fail(error)
-			throw error
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteToken(id: number): Promise<TokenInfo> {
@@ -428,100 +418,19 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 	 * them). The public `deleteToken` RPC does the ownership check first.
 	 */
 	private async _deleteTokenById(id: number, emit = true): Promise<TokenInfo> {
-		try {
-			await this.lock.enter()
-			const token = await this.tokens.get(`${id}`)
-			if (!token) {
-				throw new Error("unknown token id")
-			}
-			await this.tokens.delete(`${id}`)
-			if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
-			return getTokenInfo(token)
-		} finally {
-			this.lock.leave()
-		}
+		return await this.lock.withLock(() => this._deleteTokenByIdHoldingLock(id, emit))
 	}
 
-	public async getTokenInterface(networkId: string, tokenId: number): Promise<TokenInterface> {
-		await this.ensureInitialized()
-		const profile = await requireActiveProfile(this.profiles)
-		const token = requireOwnedRow(await this.tokens.get(`${tokenId}`), profile.id, "unknown token id")
-
-		const network = await this.networks.getNetwork(networkId)
-		if (!network) {
-			throw new Error("unknown network id")
+	/** Body of `_deleteTokenById`. The caller MUST already hold `this.lock`
+	 *  (the lock is not reentrant — taking it again here would deadlock). */
+	private async _deleteTokenByIdHoldingLock(id: number, emit = true): Promise<TokenInfo> {
+		const token = await this.tokens.get(`${id}`)
+		if (!token) {
+			throw new Error("unknown token id")
 		}
-
-		const pxe = this.pxeService.getPXE(networkInfoFrom(network))
-
-		const instance = await pxe.getContractInstance(AztecAddress.fromStringUnsafe(token.contract))
-		if (!instance) {
-			throw new Error("contract instance not found")
-		}
-
-		const artifact = await pxe.getContractArtifact(instance.currentContractClassId)
-		if (!artifact) {
-			throw new Error("contract artifact not found")
-		}
-
-		await ensureRegistered(pxe, token.contract, instance, artifact)
-
-		const getNameFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getName, artifact).map((x) => x.getImpl())
-		const getNameFn = token.getNameFn
-
-		const getSymbolFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getSymbol, artifact).map((x) => x.getImpl())
-		const getSymbolFn = token.getSymbolFn
-
-		const getDecimalsFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.getDecimals, artifact).map((x) => x.getImpl())
-		const getDecimalsFn = token.getDecimalsFn
-
-		const balanceOfPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPrivate, artifact).map((x) => x.getImpl())
-		const balanceOfPrivateFn = token.balanceOfPrivateFn
-
-		const balanceOfPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.balanceOfPublic, artifact).map((x) => x.getImpl())
-		const balanceOfPublicFn = token.balanceOfPublicFn
-
-		const transferPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublic, artifact).map((x) => x.getImpl())
-		const transferPublicFn = token.transferPublicFn
-
-		const transferPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivate, artifact).map((x) => x.getImpl())
-		const transferPrivateFn = token.transferPrivateFn
-
-		const transferPrivateToPublicFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPrivateToPublic, artifact).map((x) =>
-			x.getImpl(),
-		)
-		const transferPrivateToPublicFn = token.transferPrivateToPublicFn
-
-		const transferPublicToPrivateFnCandidates = getTokenFnCandidates(TOKEN_FN_DESCRIPTORS.transferPublicToPrivate, artifact).map((x) =>
-			x.getImpl(),
-		)
-		const transferPublicToPrivateFn = token.transferPublicToPrivateFn
-
-		const ti: TokenInterface = {
-			chainId: token.chainId,
-			contract: token.contract,
-			getNameFn,
-			getNameFnCandidates,
-			getSymbolFn,
-			getSymbolFnCandidates,
-			getDecimalsFn,
-			getDecimalsFnCandidates,
-			balanceOfPublicFn,
-			balanceOfPublicFnCandidates,
-			balanceOfPrivateFn,
-			balanceOfPrivateFnCandidates,
-			transferPublicFn,
-			transferPublicFnCandidates,
-			transferPrivateFn,
-			transferPrivateFnCandidates,
-			transferPublicToPrivateFn,
-			transferPublicToPrivateFnCandidates,
-			transferPrivateToPublicFn,
-			transferPrivateToPublicFnCandidates,
-			isComplete: false,
-		}
-		ti.isComplete = isTokenComplete(ti)
-		return ti
+		await this.tokens.delete(`${id}`)
+		if (emit) this.emit("onTokenDeleted", { ...getTokenInfo(token), profileId: token.profileId })
+		return getTokenInfo(token)
 	}
 
 	/**
@@ -703,6 +612,26 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		return tokens.find((token) => token.profileId === profileId && token.chainId === chainId && token.contract === contract)
 	}
 
+	/** F-B23: token ids harvested from RAW rows (codec-hidden included) owned by
+	 *  `profileId` — feeds the deletion snapshot so a malformed parent's dependent
+	 *  balance rows still cascade. The id comes from the TRUE storage key, never
+	 *  the row's self-reported field, and only when the key CANONICALLY encodes
+	 *  it: `Number("01") === 1`, so a non-canonical alias key must not donate a
+	 *  DIFFERENT valid token's id to the cascade (codex audit) — and no balance
+	 *  row can reference a non-canonical key anyway (its `token` field is a
+	 *  number). Read-only. */
+	public async rawTokenIdsForProfile(profileId: string): Promise<number[]> {
+		const out = new Set<number>()
+		for (const [id, raw] of await this.tokens.rawEntries()) {
+			if (typeof raw !== "object" || raw === null) continue
+			const r = raw as Record<string, unknown>
+			if (r.profileId !== profileId) continue
+			const n = canonicalNumericStorageId(id)
+			if (n !== undefined) out.add(n)
+		}
+		return [...out]
+	}
+
 	/** Awaited profile-scoped token purge, called by the deletion coordinator
 	 *  (relocated from the removed fire-and-forget `onProfileDeleted` sub — D).
 	 *  Idempotent. `_deleteTokenById` emits `onTokenDeleted` with the authoritative
@@ -717,13 +646,25 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 		// further commits, so an idempotent journal re-purge here catches
 		// exactly that window.
 		await this.journal.purgeForProfile(profileId)
-		for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
-			// SILENT (emit=false): the deletion coordinator awaits token-balance +
-			// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
-			// redundant and its fire-and-forget consumer could clobber a successor
-			// that reuses the highest token id (audit H3).
-			await this._deleteTokenById(token.id, false)
-		}
+		// ONE lock hold across snapshot + typed deletes + raw pass: restore()
+		// writes under this same lock, so it can neither land a row between the
+		// two passes nor after either snapshot was taken.
+		await this.lock.withLock(async () => {
+			for (const token of (await this.tokens.getValues()).filter((x) => x.profileId === profileId)) {
+				// SILENT (emit=false): the deletion coordinator awaits token-balance +
+				// incoming-transfer purges DIRECTLY, so re-emitting onTokenDeleted here is
+				// redundant and its fire-and-forget consumer could clobber a successor
+				// that reuses the highest token id (audit H3).
+				await this._deleteTokenByIdHoldingLock(token.id, false)
+			}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.tokens,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed token row ${id}`),
+			)
+		})
 	}
 
 	public async backup(): Promise<Token[]> {
@@ -734,25 +675,33 @@ export class TokenService extends Service<Methods, Events> implements ServiceSpe
 
 	public async restore(tokens: Token[]): Promise<Restored<Token>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts): rows written
+		// after a mid-restore deleteProfile must reject, not orphan.
+		const deletion = this.profiles.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			tokens.map((t) => (t as { profileId?: unknown } | null)?.profileId),
+		)
 
-		try {
-			await this.lock.enter()
-			// Shared numeric cursor across the batch: ids are one global sequence,
-			// so a single write consumes an id and the next row picks up after it.
-			let id = await nextNumericId(this.tokens)
+		return await this.lock.withLock(async () => {
 			return await restoreRows(tokens, async (token) => {
-				// Validate the persisted shape BEFORE consuming an id/writing: a token
-				// with e.g. `chainId: "1:"` would otherwise "succeed", have a balance
+				// Per-row allocation through the hardened allocator: a shared
+				// `id++` cursor assumed a forward-contiguous free space, which the
+				// allocator's hostile-boundary gap-fill deliberately does not
+				// guarantee — incrementing past it could land on (and overwrite)
+				// an occupied key. Each successful write is visible to the next
+				// row's allocation, so the batch still sequences.
+				const id = await nextNumericId(this.tokens)
+				// Validate the persisted shape BEFORE writing: a token with e.g.
+				// `chainId: "1:"` would otherwise "succeed", have a balance
 				// relinked to it, then be rejected by the read codec — leaving an
 				// orphaned balance. Parsing here records it as a restoreError instead.
 				const row = TokenSchema.parse({ ...token, id })
+				assertRestoreEpoch(deletion, epochs, row.profileId)
 				await this.tokens.set(`${id}`, row)
-				id++
 				return row
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }
 

@@ -1,0 +1,270 @@
+<!-- ELI5 companion source — published as a Claude Artifact (primary mode).
+     Self-contained: no relative links; plan.md referenced by path as text. -->
+<title>Import Stage Deadlines</title>
+<style>
+  :root {
+    --bg: #FAFAF7; --ink: #1F2328; --muted: #6E6A5E; --accent: #9A6A00;
+    --panel: #F3EFE6; --panel-edge: #E3DCC9; --card: #FFFFFF; --card-edge: #E8E5DD;
+    --code-bg: #F0EDE5; --good: #3D6B35;
+  }
+  :root:not([data-theme="light"]) { }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181C; --ink: #E8E6E1; --muted: #9B968A; --accent: #E3B341;
+      --panel: #21232A; --panel-edge: #383B45; --card: #1C1E24; --card-edge: #2E313A;
+      --code-bg: #22242B; --good: #7FB069;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181C; --ink: #E8E6E1; --muted: #9B968A; --accent: #E3B341;
+    --panel: #21232A; --panel-edge: #383B45; --card: #1C1E24; --card-edge: #2E313A;
+    --code-bg: #22242B; --good: #7FB069;
+  }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+    margin: 0; padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1, h2 {
+    font-family: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+    line-height: 1.2; text-wrap: balance; font-weight: 600;
+  }
+  h1 { font-size: 2.1rem; margin: 0 0 .4rem; }
+  h2 { font-size: 1.35rem; margin: 3rem 0 .8rem; }
+  .eyebrow {
+    font-size: .72rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; margin-bottom: .3rem;
+  }
+  .lede { font-size: 1.06rem; color: var(--muted); margin: 0 0 1rem; }
+  p { margin: .8rem 0; }
+  code, pre {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: .86em;
+  }
+  code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--card-edge);
+    padding: 1rem; border-radius: 6px; overflow-x: auto;
+    white-space: pre-wrap; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .phases { display: flex; flex-direction: column; gap: .9rem; margin: 1.2rem 0; }
+  .phase {
+    background: var(--card); border: 1px solid var(--card-edge);
+    border-radius: 8px; padding: 1rem 1.2rem;
+    display: grid; grid-template-columns: 2.2rem 1fr; gap: .2rem .8rem;
+  }
+  .phase .num {
+    font-family: ui-monospace, Menlo, monospace; color: var(--accent);
+    font-size: 1.05rem; font-weight: 700; grid-row: span 2; padding-top: .1rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .phase h3 { margin: 0; font-size: 1rem; font-weight: 650; }
+  .phase p { margin: .25rem 0 0; color: var(--muted); font-size: .95rem; }
+  .phase .proof { font-size: .85rem; color: var(--good); margin-top: .45rem; }
+  .decision {
+    background: var(--panel); border: 1px solid var(--panel-edge);
+    border-left: 4px solid var(--accent); border-radius: 8px;
+    padding: 1.2rem 1.4rem; margin: 1.4rem 0;
+  }
+  .decision h2 { margin-top: 0; }
+  ul { padding-left: 1.2rem; } li { margin: .45rem 0; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .verdicts { display: flex; flex-wrap: wrap; gap: .6rem; margin: .8rem 0; }
+  .verdict {
+    background: var(--card); border: 1px solid var(--card-edge); border-radius: 999px;
+    padding: .3rem .9rem; font-size: .82rem; color: var(--muted);
+  }
+  .verdict b { color: var(--ink); font-weight: 650; }
+  .warning { color: var(--accent); font-weight: 650; }
+  .seeds { border-top: 1px solid var(--panel-edge); margin-top: 3rem; padding-top: 1.5rem; }
+  .recommended {
+    border: 1px solid var(--panel-edge); border-left: 4px solid var(--good);
+    border-radius: 8px; padding: .9rem 1.1rem; background: var(--card); margin: 1rem 0;
+  }
+  .recommended h3, .alt h3 { margin: 0 0 .5rem; font-size: .95rem; }
+</style>
+<main>
+  <div class="eyebrow">Blueprint approval — Nulo e2e infrastructure</div>
+  <h1>Import Stage Deadlines</h1>
+  <p class="lede">Make the wallet-import test wait honest: measure how long
+  each restore step really takes, explain failures instead of timing out
+  silently, and close the mystery of the console errors the tests could
+  never see.</p>
+
+  <div class="verdicts">
+    <span class="verdict">Tier: <b>mid</b></span>
+    <span class="verdict">Codex round 1: <b>reject → findings folded</b></span>
+    <span class="verdict">Fable: <b>conditional approve → conditions folded</b></span>
+    <span class="verdict">Final fresh codex: <b>conditional approve → all conditions folded</b></span>
+  </div>
+
+  <h2>What this is about</h2>
+  <p>When a test restores a wallet from a backup file, it currently waits up
+  to five minutes for the whole thing to finish, watching only the final
+  "success" screen. If anything goes wrong in between, the test learns
+  nothing — it just burns the full five minutes and reports "timed out",
+  with no clue which step got stuck. This plan keeps that five-minute limit
+  exactly as it is (a hard rule: no limits get raised, ever), but teaches
+  the wait to <em>watch the steps</em>: which stage the import is in, how
+  long each stage took, and — when it fails — a full story of what happened.</p>
+  <p>Round 4 already shipped the progress markers. This plan is the second,
+  final half the team's own ledger called for: measure real timing envelopes
+  in both proving modes, then decide — honestly, from data — whether any
+  stage deserves its own earlier deadline.</p>
+
+  <h2>The honest surprise</h2>
+  <p>Reading the code settled the deadline question before any stopwatch ran:
+  only ONE stage has a real product-owned time budget (the chain-sync tail,
+  45 seconds) — and when it overruns, the app deliberately degrades and
+  keeps going rather than failing. Both independent reviewers reached the
+  same conclusion: adding test-side deadlines would create false alarms
+  without catching anything new. So the plan's answer is
+  <b>"diagnostics everywhere, deadlines nowhere"</b> — which the original
+  design explicitly allows. The measurement table still gets built (it's the
+  evidence), and the five-minute ceiling stays the only overall judge.</p>
+
+  <h2>The console mystery — solved</h2>
+  <p>A standing puzzle: tests that assert "no console errors" never saw the
+  app's own error logs. Recon found why — it's not a bug in the tests. The
+  wallet deliberately reroutes every page's <code>console.*</code> call to a
+  central log inside its background worker, so the browser's own console
+  never fires in the page, and the test framework (which listens to the
+  page) structurally cannot see it. The plan confirms this with a small
+  probe, then documents it permanently: crashes and unhandled errors ARE
+  still caught (that channel works), the background log is readable through
+  an existing helper when needed, and the test-suite documentation stops
+  overpromising what "no console errors" means.</p>
+
+  <div class="decision">
+    <h2>The one disputed call — and how it was settled</h2>
+    <p>Should the test <b>stop immediately</b> when the wallet announces
+    "this import failed" on screen, instead of waiting out the rest of the
+    five minutes? The two first-round reviewers split (fable: yes, with
+    guard rails; codex: no — beyond the original design's letter). A fresh
+    third review with the full decision trail ruled <b>no early stopping</b>,
+    on a new decisive fact: one of the proposed "failure" screens turns out
+    to be a <em>partial success</em> the product deliberately lets the user
+    continue from — stopping there would misread healthy-but-degraded
+    imports as failures. So: every failure state becomes a clearly-labeled
+    part of the timeout's story (you always learn exactly what happened and
+    when), but nothing ends early. The five-minute ceiling stays the only
+    judge.</p>
+    <p><b>Your options</b>: accept the ruling (recommended — the diagnostics
+    deliver nearly all the value), or overrule to early-stopping — which per
+    the ruling first requires amending the team's design record as its own
+    decision, recorded for later.</p>
+  </div>
+
+  <h2>Phases</h2>
+  <div class="phases">
+    <div class="phase"><span class="num">1</span>
+      <h3>Teach the wait to watch the steps</h3>
+      <p>One shared import helper gets a step-recorder (armed before the
+      import starts, read once at the end — so nothing is missed and nothing
+      is perturbed) and rich, labeled failure messages. Also removes a
+      copy-pasted duplicate of the same flow. Public behavior of every
+      existing test: unchanged.</p>
+      <p class="proof">Proves itself by: lint + typecheck + new focused unit
+      tests for the recorder logic + the full smoke e2e suite green.</p>
+    </div>
+    <div class="phase"><span class="num">2</span>
+      <h3>Measure — first leg</h3>
+      <p>Repeated solo runs of the two real import tests, alternating both
+      proving modes, no retries, recording every stage's timing into an
+      attributed log.</p>
+      <p class="proof">Proves itself by: every run green on the first
+      attempt; every import fully recorded.</p>
+    </div>
+    <div class="phase"><span class="num">3</span>
+      <h3>Measure — complete the sample set</h3>
+      <p>Keep alternating until at least five runs per proving mode exist,
+      kept strictly separated by scenario (they measure different things —
+      one even skips a whole stage by design).</p>
+      <p class="proof">Proves itself by: a complete per-scenario sample
+      table, no mixing.</p>
+    </div>
+    <div class="phase"><span class="num">4</span>
+      <h3>Publish the envelope table + close the ledger entry</h3>
+      <p>The committed timing table with its honest caveats (solo-machine
+      baseline, not a CI worst-case), the "no deadlines" conclusion, and the
+      team ledger updated in place.</p>
+      <p class="proof">Proves itself by: lint green + a recorded codex
+      verdict on the close.</p>
+    </div>
+    <div class="phase"><span class="num">5</span>
+      <h3>Console truth — probe, then document</h3>
+      <p>A tiny experiment proves the reroute mechanism (and that the
+      crash-error channel still works), then the fixture comments, the
+      testing skill, and the ledger all get the accurate story.</p>
+      <p class="proof">Proves itself by: probe evidence quoted in the log +
+      smoke suite green.</p>
+    </div>
+    <div class="phase"><span class="num">6</span>
+      <h3>Certify</h3>
+      <p>Three consecutive solo runs of the three import-heavy network
+      tests, zero retries allowed, all green on the first attempt — the same
+      bar earlier rounds used.</p>
+      <p class="proof">Proves itself by: the recorded 3× certification +
+      all fast checks green.</p>
+    </div>
+  </div>
+
+  <h2>Open questions for you</h2>
+  <ul>
+    <li>Accept the early-stop ruling (the panel above) — or overrule via a
+    design-record amendment.</li>
+    <li>Accept "no deadlines added" as the final answer to the original
+    design's question.</li>
+    <li>Accept the console posture: documented as designed, with the honest
+    residuals — an error the app catches and merely logs stays invisible to
+    test assertions, the background log is a delayed bounded ring, and very
+    early logs can replay at the wrong severity.</li>
+    <li>Three small product observations were found and recorded for later
+    (none touched here): a reset that doesn't clear the stage marker, a
+    degraded-import screen that requires a manual click, and one dead value
+    in a type definition.</li>
+  </ul>
+
+  <h2>Approval decision needed from you</h2>
+  <ul>
+    <li>Confirm scope: test-infrastructure only; zero product code changes;
+    no timeout raises anywhere.</li>
+    <li>Confirm tier <b>mid</b> and the two-PR delivery (stage-aware wait +
+    measurement; console truth).</li>
+    <li>Accept (or overrule) the early-stop ruling.</li>
+    <li>Approve, conditionally approve (with conditions), or reject (with
+    blocking findings).</li>
+  </ul>
+  <p class="muted">Full technical plan: <code>implementations-plan/import-stage-deadlines/plan.md</code>
+  in the repo (with recon, both audit transcripts, and the decision ledger).</p>
+
+  <section class="seeds">
+    <h2>Implementation seeds (draft — finalized after approval)</h2>
+    <p class="warning">Use exactly ONE per session — they don't compose.</p>
+    <div class="recommended">
+      <h3>Recommended: /goal</h3>
+      <pre><code>/goal ARC B complete: all six phases marked ✓ in
+implementations-plan/import-stage-deadlines/plan.md, each backed by its
+validation gate passing in the transcript (phases 2-3: alternated solo
+retry=0 runs, ≥5 per proving mode, attributed JSONL samples; phase 6: the 3×
+consecutive solo certification record); envelopes.md committed with the
+stratified table + caveats; BOTH flake-ledger entries re-dispositioned;
+/code-review max --fix applied+committed; codex post-impl fix loop converged
+(resumed pass with no new material findings quoted); gh stack PRs ready +
+green on quality-status/smoke-e2e-status/network-e2e-status; bun run test
+and bun run lint exit 0 in the transcript.</code></pre>
+    </div>
+    <div class="alt">
+      <h3>Alternative: /loop 15m</h3>
+      <pre><code>/loop 15m Drive implementations-plan/import-stage-deadlines forward. Never
+idle. Each firing: read plan.md + lessons/ (authoritative state); run the
+next pending phase per its validation gate; solo retry=0 for network runs
+in tmux; codex xhigh at any fork; 5 failures on a step → reassess with
+codex; all phases ✓ → run the plan's Post-implementation section, then
+report and stop. Hard limits: no timeout raises, no product code, no CI
+gate changes, merges only per the plan's authority.</code></pre>
+    </div>
+  </section>
+</main>

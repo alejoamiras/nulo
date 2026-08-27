@@ -18,6 +18,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import { CHAIN_IDS } from "@/utils/chain-ids"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { LoggerStore } from "@/wallet/logger"
 import { ConfigStore } from "@/wallet/config"
 import { FakeNodeFactory } from "@/core/testing/fake-node-factory"
@@ -25,6 +26,7 @@ import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import type { ProfileService } from "@/wallet/services/profile/service"
 import { NetworkService } from "./service"
+import { NodeStatus } from "./spec"
 import type { Network, NetworkEndpoint } from "./spec"
 
 type NodeInfo = {
@@ -63,6 +65,7 @@ function harness(seeded: Record<string, NodeInfo | Error>): {
 		getActiveProfile: async () => fakeProfile,
 		onActiveProfileChanged: { add: vi.fn(), remove: vi.fn() },
 		onProfileDeleted: { add: vi.fn(), remove: vi.fn() },
+		getDeletionState: () => new ProfileDeletionState(),
 	} as unknown as ProfileService
 
 	// Reach into the service's protected init via the services map the base
@@ -184,6 +187,7 @@ describe("NetworkService transient-node cache (M4.10)", () => {
 			id: "netA",
 			profileId: "p1",
 			chainId: 7,
+			l1ChainId: 0,
 			name: "A",
 			primaryEndpointId: "epA",
 			endpoints: [{ id: "epA", rpcUrl: "https://rpc.a" }],
@@ -192,6 +196,7 @@ describe("NetworkService transient-node cache (M4.10)", () => {
 			id: "netB",
 			profileId: "p2",
 			chainId: 7,
+			l1ChainId: 0,
 			name: "B",
 			primaryEndpointId: "epB",
 			endpoints: [{ id: "epB", rpcUrl: "https://rpc.b" }],
@@ -222,6 +227,7 @@ describe("NetworkService transient-node cache (M4.10)", () => {
 			id: "netB",
 			profileId: "p1",
 			chainId: 7,
+			l1ChainId: 0,
 			name: "B",
 			primaryEndpointId: "epB",
 			endpoints: [{ id: "epB", rpcUrl: "https://rpc.b" }],
@@ -304,6 +310,7 @@ function setupServiceWithStorage(seeded: Record<string, NodeInfo | Error>): {
 	local: FakeStorageArea
 	session: FakeStorageArea
 	pxeStub: ReturnType<typeof vi.fn>
+	deletionState: ProfileDeletionState
 } {
 	const local = new FakeStorageArea()
 	const session = new FakeStorageArea()
@@ -333,18 +340,20 @@ function setupServiceWithStorage(seeded: Record<string, NodeInfo | Error>): {
 	const service = new NetworkService(logger, browserApi, factory)
 	const fakeProfile = { id: "p1", name: "p1", type: "password" } as const
 	const pxeStub = vi.fn().mockResolvedValue(undefined)
+	const deletionState = new ProfileDeletionState()
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 	;(service as any).profileService = {
 		getActiveProfile: async () => fakeProfile,
 		onActiveProfileChanged: { add: vi.fn(), remove: vi.fn() },
 		onProfileDeleted: { add: vi.fn(), remove: vi.fn() },
+		getDeletionState: () => deletionState,
 	} as unknown as ProfileService
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 	;(service as any).pxeServiceClient = { clearChainState: pxeStub }
 	// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in (skip init() wait)
 	;(service as any).initialized = true
 
-	return { service, factory, local, session, pxeStub }
+	return { service, factory, local, session, pxeStub, deletionState }
 }
 
 /** Convenience: seed a single endpoint URL → chainId mapping for tests
@@ -634,6 +643,10 @@ describe("NetworkService public API (M4.10)", () => {
 				id: "local-1",
 				profileId: "p1",
 				chainId: 0,
+				// Matches the fake probe's l1ChainId (nodeInfoForChain reports l1=0) so the
+				// endpoint mutation's exact-L1 equality check passes alongside the composite
+				// short-circuit under test.
+				l1ChainId: 0,
 				name: "Local Network",
 				kind: "local" as const,
 				primaryEndpointId: "ep-1",
@@ -645,6 +658,152 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(ep.rpcUrl).toContain("localhost:18080")
 			const fetched = await service.getNetwork(localNet.id)
 			expect(fetched.endpoints).toHaveLength(2)
+		})
+	})
+
+	describe("updateEndpoint", () => {
+		// Characterization pins (F-Q09): this method had ZERO coverage — every
+		// branch below is pinned as-is before any structural refactor touches it.
+		test("replaces the endpoint in place — same id, new url + label, array length unchanged; emits onNetworkUpdated", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			const updates: Network[] = []
+			service.onNetworkUpdated.add((n) => {
+				updates.push(n)
+				return Promise.resolve()
+			})
+
+			const updated = await service.updateEndpoint(network.id, ep.id, "Renamed", "https://rpc.test/3")
+
+			expect(updated.id).toBe(ep.id)
+			expect(updated.label).toBe("Renamed")
+			expect(updated.rpcUrl).toContain("rpc.test/3")
+			const after = await service.getNetwork(network.id)
+			expect(after.endpoints).toHaveLength(2)
+			expect(after.endpoints.find((e) => e.id === ep.id)?.rpcUrl).toContain("rpc.test/3")
+			expect(updates).toHaveLength(1)
+		})
+
+		test("an unchanged URL does NOT collide with itself (self-excluding predicate)", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+
+			const updated = await service.updateEndpoint(network.id, ep.id, "Label only", "https://rpc.test/2")
+
+			expect(updated.label).toBe("Label only")
+			expect(updated.rpcUrl).toContain("rpc.test/2")
+		})
+
+		test("rejects DUPLICATE_ENDPOINT when ANOTHER endpoint of this network uses the URL", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			await expect(service.updateEndpoint(network.id, ep.id, "Steal", "https://rpc.test/1")).rejects.toThrow(/DUPLICATE_ENDPOINT/)
+		})
+
+		test("rejects on an invalid endpoint id", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			await expect(service.updateEndpoint(network.id, "nope", "X", "https://rpc.test/1")).rejects.toThrow(/Invalid endpoint id/)
+		})
+
+		test("rejects ENDPOINT_CHAIN_MISMATCH when the new URL probes a different chain", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.other": nodeInfoForChain(99),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			await expect(service.updateEndpoint(network.id, network.primaryEndpointId, "Wrong", "https://rpc.other")).rejects.toThrow(
+				/ENDPOINT_CHAIN_MISMATCH/,
+			)
+		})
+
+		test("evicts the transient-node cache for the OLD url unconditionally", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			const transients = (service as any).transientNodes as Map<string, unknown>
+			const oldUrl = ep.rpcUrl
+			transients.set(oldUrl, { node: {}, failures: 0 })
+
+			await service.updateEndpoint(network.id, ep.id, "Moved", "https://rpc.test/3")
+
+			expect(transients.has(oldUrl)).toBe(false)
+		})
+
+		test("evicts the chain node cache ONLY when the edited endpoint is the primary", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			await service.getNode(50)
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			const nodes = (service as any).nodes as Map<number, unknown>
+			expect(nodes.has(50)).toBe(true)
+
+			// Non-primary edit: chain node cache retained.
+			await service.updateEndpoint(network.id, ep.id, "Moved", "https://rpc.test/3")
+			expect(nodes.has(50)).toBe(true)
+
+			// Primary edit: chain node cache evicted.
+			await service.updateEndpoint(network.id, network.primaryEndpointId, "Primary moved", "https://rpc.test/2")
+			expect(nodes.has(50)).toBe(false)
+		})
+
+		test("evictions happen BEFORE onNetworkUpdated fires (subscribers observe post-eviction caches)", async () => {
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.test/2": nodeInfoForChain(50),
+				"https://rpc.test/3": nodeInfoForChain(50),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			const ep = await service.addEndpoint(network.id, "Backup", "https://rpc.test/2")
+			// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
+			const transients = (service as any).transientNodes as Map<string, unknown>
+			transients.set(ep.rpcUrl, { node: {}, failures: 0 })
+
+			let transientAtEmit: boolean | undefined
+			service.onNetworkUpdated.add(() => {
+				transientAtEmit = transients.has(ep.rpcUrl)
+				return Promise.resolve()
+			})
+
+			await service.updateEndpoint(network.id, ep.id, "Moved", "https://rpc.test/3")
+
+			expect(transientAtEmit).toBe(false)
+		})
+
+		test("guard precedence: unknown endpoint id + wrong-chain URL throws CHAIN_MISMATCH, not invalid id", async () => {
+			// The chain-mismatch guard runs BEFORE the endpoint-id lookup; a shared
+			// pipeline that hoists idx-resolution would flip this precedence.
+			const { service } = setupServiceWithStorage({
+				"https://rpc.test/1": nodeInfoForChain(50),
+				"https://rpc.other": nodeInfoForChain(99),
+			})
+			const network = await service.addNetwork("Chain50", "https://rpc.test/1")
+			await expect(service.updateEndpoint(network.id, "nope", "X", "https://rpc.other")).rejects.toThrow(/ENDPOINT_CHAIN_MISMATCH/)
 		})
 	})
 
@@ -892,6 +1051,60 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(result[0]!.restoreError).toMatch(/BACKUP_TOO_OLD/)
 		})
 
+		test("(N-14) a deleteProfile beginning DURING the restore rejects every later row write", async () => {
+			const { service, local, deletionState } = setupServiceWithStorage({})
+			const mkNet = (id: string, chainId: number): Network => ({
+				id,
+				profileId: "p1",
+				chainId,
+				l1ChainId: chainId,
+				name: `N${chainId}`,
+				primaryEndpointId: "e1",
+				endpoints: [{ id: "e1", rpcUrl: `https://rpc.test/${chainId}` }],
+			})
+			const origSet = local.set.bind(local)
+			let fired = false
+			local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					deletionState.beginDeletion("p1")
+				}
+			}
+			const result = await service.restore([mkNet("n1", 1), mkNet("n2", 2)])
+			expect(result[0]!.restoreError).toBeUndefined()
+			expect(result[1]!.restoreError).toMatch(/deleted/)
+			await expect(service.getNetwork("n2")).rejects.toThrow()
+		})
+
+		test("(N-14) a deletion that begins AND completes mid-restore still rejects later rows (entry-capture pin)", async () => {
+			// After begin+release the profile is unreserved and the epoch settled —
+			// a lazy per-row capture would pass; the entry-captured epoch has moved.
+			const { service, local, deletionState } = setupServiceWithStorage({})
+			const mkNet = (id: string, chainId: number): Network => ({
+				id,
+				profileId: "p1",
+				chainId,
+				l1ChainId: chainId,
+				name: `N${chainId}`,
+				primaryEndpointId: "e1",
+				endpoints: [{ id: "e1", rpcUrl: `https://rpc.test/${chainId}` }],
+			})
+			const origSet = local.set.bind(local)
+			let fired = false
+			local.set = async (items: Record<string, unknown>) => {
+				await origSet(items)
+				if (!fired) {
+					fired = true
+					deletionState.beginDeletion("p1")
+					deletionState.release("p1")
+				}
+			}
+			const result = await service.restore([mkNet("n1", 1), mkNet("n2", 2)])
+			expect(result[0]!.restoreError).toBeUndefined()
+			expect(result[1]!.restoreError).toMatch(/deleted/)
+		})
+
 		test("restore accepts new-shape entries", async () => {
 			const { service } = setupServiceWithStorage({})
 			const newShape: Network[] = [
@@ -899,6 +1112,7 @@ describe("NetworkService public API (M4.10)", () => {
 					id: "n1",
 					profileId: "p1",
 					chainId: 1,
+					l1ChainId: 1,
 					name: "Imported",
 					primaryEndpointId: "e1",
 					endpoints: [{ id: "e1", rpcUrl: "https://rpc.test/1" }],
@@ -922,6 +1136,7 @@ describe("NetworkService public API (M4.10)", () => {
 					id: "n1",
 					profileId: "p1",
 					chainId: 1,
+					l1ChainId: 1,
 					name: "Phishing",
 					primaryEndpointId: "e1",
 					endpoints: [{ id: "e1", rpcUrl: "javascript:alert(1)" }],
@@ -930,6 +1145,7 @@ describe("NetworkService public API (M4.10)", () => {
 					id: "n2",
 					profileId: "p1",
 					chainId: 2,
+					l1ChainId: 2,
 					name: "Plain HTTP",
 					primaryEndpointId: "e1",
 					endpoints: [{ id: "e1", rpcUrl: "http://evil.com" }],
@@ -950,6 +1166,7 @@ describe("NetworkService public API (M4.10)", () => {
 					id: "n1",
 					profileId: "p1",
 					chainId: 1,
+					l1ChainId: 1,
 					name: "Userinfo Phish",
 					primaryEndpointId: "e1",
 					endpoints: [{ id: "e1", rpcUrl: "https://user@evil.com@safe.com" }],
@@ -959,6 +1176,19 @@ describe("NetworkService public API (M4.10)", () => {
 			expect(result).toHaveLength(1)
 			expect(result[0]!.restoreError).toBeDefined()
 		})
+	})
+})
+
+describe("NetworkService default seeding", () => {
+	test("seeded dRPC endpoints carry the 'dRPC' label; Local Network stays unlabeled", async () => {
+		// Settings renders `endpoint.label || endpoint.rpcUrl` as the row title — the label is what
+		// keeps the raw provider URL out of the UI. Local Network is not dRPC-backed, so no label.
+		const { service } = setupServiceWithStorage({})
+		const networks = await service.getOrInitNetworks()
+		const byName = new Map(networks.map((n) => [n.name, n]))
+		expect(byName.get("Alpha V5")?.endpoints[0]?.label).toBe("dRPC")
+		expect(byName.get("Testnet")?.endpoints[0]?.label).toBe("dRPC")
+		expect(byName.get("Local Network")?.endpoints[0]?.label).toBeUndefined()
 	})
 })
 
@@ -982,7 +1212,6 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 
 		// Fire the private cascade handler directly (the EventHandler wiring is
 		// stubbed in the harness; we assert the handler's behavior in isolation).
-		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		await service.purgeForProfile("p1")
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
@@ -1011,10 +1240,57 @@ describe("NetworkService.onProfileDeleted cascade", () => {
 		}
 		local.store.set("nulo:core:networks@n-p2", JSON.stringify(p2Network))
 
-		// biome-ignore lint/suspicious/noExplicitAny: test-only reach-in
 		await service.purgeForProfile("p1")
 
 		expect(pxeStub).toHaveBeenCalledWith("p1", 42)
 		expect(pxeStub).not.toHaveBeenCalledWith("p2", 7)
+	})
+})
+
+describe("NetworkService.probeNodeStatus (bounded probe)", () => {
+	test("Active when the probe answers the row's chainId", async () => {
+		const { service } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		expect(await service.probeNodeStatus(network.id, 5_000)).toBe(NodeStatus.Active)
+	})
+
+	test("InvalidChain when the endpoint answers for a different chain", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		factory.setOverrides("https://rpc.example.com", {
+			getNodeInfo: vi.fn().mockResolvedValue(nodeInfoForChain(9)) as unknown as AztecNode["getNodeInfo"],
+		})
+		expect(await service.probeNodeStatus(network.id, 5_000)).toBe(NodeStatus.InvalidChain)
+	})
+
+	test("Inactive when the probe throws (refused / timed out)", async () => {
+		const { service, factory } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		factory.setOverrides("https://rpc.example.com", {
+			getNodeInfo: vi
+				.fn()
+				.mockRejectedValue(
+					new Error("Request to https://rpc.example.com timed out after 5000ms"),
+				) as unknown as AztecNode["getNodeInfo"],
+		})
+		expect(await service.probeNodeStatus(network.id, 5_000)).toBe(NodeStatus.Inactive)
+	})
+
+	test("rejects an out-of-range timeout at the schema boundary", async () => {
+		const { service } = setupServiceWithStorage({ "https://rpc.example.com": nodeInfoForChain(7) })
+		const network = await service.addNetwork("Seven", "https://rpc.example.com")
+		await expect(service.probeNodeStatus(network.id, 999_999)).rejects.toThrow()
+		await expect(service.probeNodeStatus(network.id, 1)).rejects.toThrow()
+	})
+})
+
+describe("NetworkService lock configuration", () => {
+	test("the service lock's watchdog is DISABLED — deleteNetwork's 30-min clearChainState drain is a by-design hold", () => {
+		const logger = new LoggerStore(new ConfigStore())
+		const service = new NetworkService(logger, new FakeBrowserApi())
+		// A force-release mid-cascade would admit a concurrent network mutator
+		// into the purge pipeline; queueing behind it is the correct semantic.
+		const lock = (service as unknown as { lock: { maxHoldMs: number | null } }).lock
+		expect(lock.maxHoldMs).toBeNull()
 	})
 })

@@ -9,7 +9,8 @@ on:
         type: boolean
         default: false
   pull_request:
-    branches: [main, dev]
+    # NO `branches:` filter — see pr-quick.yml: that key filters on the PR's BASE,
+    # so a stacked PR targeting its parent feature branch got no CI whatsoever.
     # `labeled` so adding `e2e:network` after open triggers a fresh run;
     # `unlabeled` so removing it re-evaluates the gate instead of leaving
     # a stale failing result; `ready_for_review` so a draft marked ready
@@ -62,6 +63,8 @@ jobs:
               - 'packages/design/package.json'
               - 'packages/extension-messaging/src/**'
               - 'packages/extension-messaging/package.json'
+              - 'packages/resolve-asset/src/**'
+              - 'packages/resolve-asset/package.json'
               - 'packages/wallet-bridge/src/**'
               - 'packages/wallet-bridge/package.json'
               - 'packages/wallet-core/src/**'

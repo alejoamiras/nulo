@@ -29,11 +29,7 @@ contract RouteValidationTest is Test {
 
     function _key(address c0, address c1, address hooks) internal pure returns (PoolKey memory) {
         return PoolKey({
-            currency0: Currency.wrap(c0),
-            currency1: Currency.wrap(c1),
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: IHooks(hooks)
+            currency0: Currency.wrap(c0), currency1: Currency.wrap(c1), fee: 3000, tickSpacing: 60, hooks: IHooks(hooks)
         });
     }
 
@@ -104,6 +100,37 @@ contract RouteValidationTest is Test {
         d[0] = true;
         d[1] = true;
         d[2] = true;
+        vm.expectRevert(bytes("UniswapFuelSwap: hop discontinuity"));
+        h.exposeValidate(USDC, p, d);
+    }
+
+    /// [F-G] / M-1, hermetic. `_validateRoute` accepts `{X/native},{native/FJ}`: the mid-path
+    /// native hop reads as continuous because `outI == inNext == address(0)`.
+    ///
+    /// Lives here rather than only in the fork suite because the function touches no
+    /// PoolManager state — it is pure logic over calldata and immutables — so gating the arc's
+    /// MEDIUM finding behind SEPOLIA_RPC_URL left it with strictly weaker regression cover than
+    /// the HIGH one, for no technical reason. The fork suite keeps the execution half, which
+    /// genuinely needs a live pool.
+    function test_FG_validationAcceptsMidNativeRoute() public view {
+        PoolKey[] memory p = new PoolKey[](2);
+        p[0] = _key(address(0), USDC, address(0)); // sell USDC (currency1), out native
+        p[1] = _key(address(0), FJ, address(0)); // sell native (currency0), out FJ
+        bool[] memory d = new bool[](2);
+        d[0] = false;
+        d[1] = true;
+        h.exposeValidate(USDC, p, d);
+    }
+
+    /// The REVERSE discontinuity (a hop emitting native that a WETH-selling hop then spends) is
+    /// rejected: settlement bridges ONLY WETH→native at the final boundary.
+    function test_reverseNativeUnwrapRejected() public {
+        PoolKey[] memory p = new PoolKey[](2);
+        bool[] memory d = new bool[](2);
+        p[0] = _key(address(0), USDC, address(0)); // sell USDC (c1) → outputs native ETH
+        d[0] = false;
+        p[1] = _key(WETH, FJ, address(0)); // sells WETH that nothing ever wrapped
+        d[1] = true;
         vm.expectRevert(bytes("UniswapFuelSwap: hop discontinuity"));
         h.exposeValidate(USDC, p, d);
     }

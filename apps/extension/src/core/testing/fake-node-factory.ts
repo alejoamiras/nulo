@@ -17,6 +17,7 @@
 
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { NodeFactory } from "@nulo/aztec-runtime/ports"
+import { walletChainId } from "@/utils/chain-ids"
 
 export type FakeNodeOverrides = Partial<AztecNode>
 
@@ -35,6 +36,15 @@ export class FakeNodeFactory implements NodeFactory {
 	/** Register per-rpcUrl overrides. Shadows `template`. */
 	public setOverrides(rpcUrl: string, overrides: FakeNodeOverrides): void {
 		this.perUrl.set(rpcUrl, overrides)
+	}
+
+	/** Mirrors the production probe against the same per-URL stubs: resolves the
+	 *  fake node's `getNodeInfo` and composes the chain id. `timeoutMs` is
+	 *  accepted but not enforced — fakes settle synchronously. */
+	public async probeChainId(rpcUrl: string, _timeoutMs: number): Promise<number> {
+		const node = this.createNode(rpcUrl)
+		const info = await node.getNodeInfo()
+		return walletChainId(info.l1ChainId, info.rollupVersion)
 	}
 
 	public createNode(rpcUrl: string): AztecNode {

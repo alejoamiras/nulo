@@ -44,6 +44,8 @@ export * from "./spec"
  * popup crash, MV3 suspension races). Longer than the longest realistic
  * prove+approve flow so legitimate users aren't surprised.
  */
+const CANCELLED_BEFORE_APPROVAL = "Request was cancelled before approval"
+
 const INTERACTION_TIMEOUT_MS = 10 * 60 * 1000
 
 export class DappInteractionService extends Service<Methods, Events> implements ServiceSpec<Methods, Events> {
@@ -52,6 +54,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		"approveInteraction",
 		"resolveInteraction",
 		"rejectInteraction",
+		"isInteractionCancelled",
 	)
 	public static name = DAPP_INTERACTION_SERVICE_NAME
 
@@ -91,10 +94,23 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		return interactionRequest.payload
 	}
 
-	public async approveInteraction(id: string, operations: Operation[], origin: LocalTxOrigin): Promise<void> {
+	public async approveInteraction(
+		id: string,
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		estimateIds?: (string | undefined)[],
+	): Promise<void> {
 		const interaction = this.storage.get(id)
 		if (!interaction) {
 			throw new Error("Invalid id")
+		}
+		// First service claim wins — service acceptance is the commit point, not
+		// the browser click. A cancel processed first leaves the record flagged;
+		// a later approve must refuse BEFORE claiming, so execution never
+		// starts. (Approve claimed first deletes the record; a later cancel then
+		// finds nothing — approval proceeds exactly once.)
+		if (interaction.cancelledAt !== undefined) {
+			throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 		}
 		this.storage.delete(id)
 		// Detach before handing off to executeAndResolve: the approval popup
@@ -106,13 +122,18 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		// the request enqueues on the execution mutex) via the hooks carried on
 		// `interaction`, NOT here — releasing at approval would let a later
 		// request overtake this one in the execution FIFO.
-		this.executeAndResolve(interaction, operations, origin)
+		this.executeAndResolve(interaction, operations, origin, estimateIds)
 	}
 
 	public async resolveInteraction(id: string, result: ExecutionResult | CapabilityResult | DiscoveryResult): Promise<void> {
 		const interactionRequest = this.storage.get(id)
 		if (!interactionRequest) {
 			throw new Error("Invalid id")
+		}
+		// Same first-claim-wins refusal as approveInteraction — capability and
+		// discovery approvals must not outrun a processed cancel either.
+		if (interactionRequest.cancelledAt !== undefined) {
+			throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 		}
 		this.storage.delete(id)
 		// Detach before settling: popup may close in the same event-loop turn
@@ -131,7 +152,12 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		this.windowManager.cancel(interactionRequest.handleId, reason)
 	}
 
-	private async executeAndResolve(interaction: DappInteraction, operations: Operation[], origin: LocalTxOrigin): Promise<void> {
+	private async executeAndResolve(
+		interaction: DappInteraction,
+		operations: Operation[],
+		origin: LocalTxOrigin,
+		estimateIds?: (string | undefined)[],
+	): Promise<void> {
 		const kinds = operations.map((o) => o.kind).join(", ")
 		this.logInfo(`executeAndResolve: starting [${kinds}] for ${origin.name}`)
 		try {
@@ -154,7 +180,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 			await this.profileService.refreshSession()
 			// Forward hooks captured at interaction-creation time. Survives the
 			// popup handoff because we stash them on the interaction record.
-			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks)
+			const result = await this.executionService.executeOperations(operations, origin, undefined, interaction.hooks, estimateIds)
 			this.logInfo(`executeAndResolve: resolved [${kinds}]`)
 			this.windowManager.settle(interaction.handleId, result)
 		} catch (error) {
@@ -166,8 +192,17 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 	public cancelInteraction(cancellationToken: string) {
 		const interaction = [...this.storage.values()].find((x) => x.cancellationToken === cancellationToken)
 		if (interaction) {
+			// Durable BEFORE the broadcast: an event alone is lost on a popup that
+			// hasn't subscribed yet; the record's flag is what late mounts replay
+			// and what approveInteraction refuses on. The record is kept — window
+			// dismissal owns its removal.
+			interaction.cancelledAt = Date.now()
 			this.emit("onInteractionCancelled", interaction.id)
 		}
+	}
+
+	public async isInteractionCancelled(id: string): Promise<boolean> {
+		return this.storage.get(id)?.cancelledAt !== undefined
 	}
 
 	public async execute(params: ExecutionParams, cancellationToken?: string, hooks?: ExecutionHooks): Promise<ExecutionResult> {
@@ -188,7 +223,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				this.logInfo(
 					`execute: queued record ${hooks.queuedJournalId} is ${queuedRec.progress?.stage}; short-circuiting before popup`,
 				)
-				throw new JobCancelledError("Request was cancelled before approval")
+				throw new JobCancelledError(CANCELLED_BEFORE_APPROVAL)
 			}
 		}
 
@@ -216,11 +251,14 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 		cancellationToken?: string,
 		hooks?: ExecutionHooks,
 	): Promise<ExecutionResult | CapabilityResult | DiscoveryResult> {
-		let interaction: DappInteraction
-
-		try {
-			await this.lock.enter()
-
+		// Assign-out shape: the closure CREATES the interaction promise (with its
+		// cleanup chain) and returns void — returning it from the closure would
+		// make withLock await the popup's settlement, holding the lock through
+		// the whole user interaction. The lock guards only id-mint + window-open
+		// + registration, exactly as before; the caller adopts the pending
+		// promise after release.
+		let pending!: Promise<ExecutionResult | CapabilityResult | DiscoveryResult>
+		await this.lock.withLock(async () => {
 			let id: string
 			do {
 				// 16 bytes / 128 bits (codex-round-1 defense-in-depth).
@@ -235,7 +273,7 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 				kind: type,
 			})
 
-			interaction = {
+			const interaction: DappInteraction = {
 				id,
 				payload,
 				handleId: handle.handleId,
@@ -248,12 +286,11 @@ export class DappInteractionService extends Service<Methods, Events> implements 
 
 			this.storage.set(id, interaction)
 
-			return handle.promise.finally(() => {
+			pending = handle.promise.finally(() => {
 				this.storage.delete(id)
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
+		return pending
 	}
 
 	private async silentInteraction(payload: ExecutionPayload, hooks?: ExecutionHooks): Promise<ExecutionResult> {

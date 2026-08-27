@@ -17,8 +17,17 @@ export function walletChainId(l1ChainId: number, rollupVersion: number): number 
 export const MAINNET_L1_CHAIN_ID = 1
 export const MAINNET_ROLLUP_VERSION = 4248422647
 
+/** V5 testnet identity — the L1/rollup pair behind CHAIN_IDS.TESTNET; the faucet's
+ *  chain-constants.ts independently pins the same pair (release chain-guard). */
+export const TESTNET_L1_CHAIN_ID = 11155111
+export const TESTNET_ROLLUP_VERSION = 1821665230
+
+/** Anvil's fixed default chain id — the seeded Local Network's L1 identity. Hardcoded (never
+ *  probed at seed time) so profile creation stays offline-safe; key derivation consumes it. */
+export const LOCAL_L1_CHAIN_ID = 31337
+
 export const CHAIN_IDS = {
 	MAINNET: walletChainId(MAINNET_L1_CHAIN_ID, MAINNET_ROLLUP_VERSION), // 4248422646
-	TESTNET: 1816023401, // (11155111 ^ 1821665230) >>> 0 — V5 testnet; canonical pair lives in the faucet's chain-constants.ts (release chain-guard single-sources it)
+	TESTNET: walletChainId(TESTNET_L1_CHAIN_ID, TESTNET_ROLLUP_VERSION), // 1816023401 — V5 testnet
 	SANDBOX: 0, // localhost:8080
 } as const

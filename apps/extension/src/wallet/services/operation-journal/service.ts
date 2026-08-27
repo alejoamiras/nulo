@@ -8,9 +8,9 @@ import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import type { ILogger } from "@/wallet/logger"
 import { NetworkService } from "@/wallet/services/network/service"
 import { ProfileService } from "@/wallet/services/profile/service"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex } from "@/wallet/utils"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import {
 	type Events,
 	type Methods,
@@ -172,17 +172,14 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// unserialized purge lets a transition that has already read a row write
 		// it back afterwards, and a snapshot outside the hold misses a row a
 		// concurrent `createOperation` (same lock) is about to land.
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const records = (await this._loadAllValidated()).filter((r) => r.networkId === networkId)
 			await purgeRows(
 				records,
 				(record) => this.storage.delete(record.id),
 				(record) => this.emit("onOperationDeleted", record),
 			)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	/** Awaited profile-scoped journal purge — the deletion coordinator calls this
@@ -194,17 +191,21 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// writes under the same lock, so a row can never land between the
 		// snapshot and the sweep. A snapshot taken outside missed exactly that
 		// row, leaving a record for the deleted profile behind.
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const records = (await this._loadAllValidated()).filter((r) => r.profileId === profileId)
 			await purgeRows(
 				records,
 				(record) => this.storage.delete(record.id),
 				(record) => this.emit("onOperationDeleted", record),
 			)
-		} finally {
-			this.transitionLock.leave()
-		}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to _loadAllValidated() and would otherwise survive forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed journal row ${id}`),
+			)
+		})
 	}
 
 	public async createOperation(input: NewOperationInput): Promise<OperationRecord> {
@@ -217,12 +218,9 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Without this, a creator that captured its profile before a deletion
 		// began could persist durable dApp metadata for an erased profile after
 		// its purge ran, and nothing would ever sweep it.
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			return await this._createOperationLocked(input)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	private async _createOperationLocked(input: NewOperationInput): Promise<OperationRecord> {
@@ -254,13 +252,10 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			}
 		}
 
-		let id: string
-		do {
-			// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
-			// codex round-1 (defense-in-depth against requestId / journal-id
-			// collisions once concurrent dApp interactions are possible).
-			id = getRandomHex(16)
-		} while (await this.storage.contains(id))
+		// 16 bytes / 128 bits — bumped from 8/32-bit on the recommendation of
+		// codex round-1 (defense-in-depth against requestId / journal-id
+		// collisions once concurrent dApp interactions are possible).
+		const id = await nextRandomId(this.storage, 16)
 
 		const now = Date.now()
 		const record: OperationRecord = {
@@ -306,12 +301,9 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Serialize ALL transitions globally — see `transitionLock` doc for
 		// the claim-vs-cancel race this closes. Critical section is small
 		// (one load + one validate + one write), so global is acceptable.
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			return await this._transitionLocked(id, progress, error)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	private async _transitionLocked(id: string, progress: JobProgress, error?: JobError | null): Promise<OperationRecord> {
@@ -407,8 +399,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// Load → merge → write on the same row, so it takes the same lock as
 		// `transitionOperation`: otherwise a transition landing in between is
 		// overwritten by this stale snapshot and its stage change is lost.
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) {
 				throw new Error(`Operation not found: ${id}`)
@@ -422,9 +413,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			await this.storage.set(id, updated)
 			this.emit("onOperationUpdated", updated)
 			return updated
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	/**
@@ -448,15 +437,12 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		// the write entirely once the record is terminal — a heartbeat must
 		// never resurrect a just-cancelled/failed/succeeded record's updatedAt
 		// (which could briefly hide it from a terminal-state consumer).
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) return
 			if (isTerminal(existing.progress.stage)) return
 			await this.storage.set(id, { ...existing, updatedAt: Date.now() })
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 
 	public async getOperation(id: string): Promise<OperationRecord | undefined> {
@@ -508,15 +494,44 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		await this.ensureInitialized()
 		// Serialized against transitions: a transition that has already read the
 		// row would otherwise write it back after the delete and resurrect it.
-		await this.transitionLock.enter()
-		try {
+		await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) return
 			await this.storage.delete(id)
 			this.emit("onOperationDeleted", existing)
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
+	}
+
+	/**
+	 * Conditionally transition: re-reads under the transition lock and no-ops
+	 * (with a discriminant) when the record left `allowedStages` or — when
+	 * `ifUpdatedAtIs` is given — when `updatedAt` moved since the caller's
+	 * snapshot (equality CAS; a monotonic check would mishandle clock rollback).
+	 * The reaper's sweep decisions ride this: its snapshot goes stale across the
+	 * per-record awaits, and an unconditional transition would fail a record
+	 * that was claimed or heartbeat-touched mid-sweep.
+	 */
+	public async transitionIfStage(
+		id: string,
+		allowedStages: readonly JobProgress["stage"][],
+		progress: JobProgress,
+		error?: JobError | null,
+		opts?: { ifUpdatedAtIs?: number },
+	): Promise<
+		| { outcome: "transitioned"; record: OperationRecord }
+		| { outcome: "missing" }
+		| { outcome: "stage"; stage: JobProgress["stage"] }
+		| { outcome: "touched" }
+	> {
+		await this.ensureInitialized()
+		return await this.transitionLock.withLock(async () => {
+			const existing = await this._loadValidated(id)
+			if (!existing) return { outcome: "missing" }
+			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
+			if (opts?.ifUpdatedAtIs !== undefined && existing.updatedAt !== opts.ifUpdatedAtIs) return { outcome: "touched" }
+			const record = await this._transitionLocked(id, progress, error)
+			return { outcome: "transitioned", record }
+		})
 	}
 
 	/**
@@ -539,8 +554,7 @@ export class OperationJournalService extends Service<Methods, Events> implements
 		{ outcome: "refiled"; record: OperationRecord } | { outcome: "missing" } | { outcome: "stage"; stage: JobProgress["stage"] }
 	> {
 		await this.ensureInitialized()
-		await this.transitionLock.enter()
-		try {
+		return await this.transitionLock.withLock(async () => {
 			const existing = await this._loadValidated(id)
 			if (!existing) return { outcome: "missing" }
 			if (!allowedStages.includes(existing.progress.stage)) return { outcome: "stage", stage: existing.progress.stage }
@@ -554,8 +568,6 @@ export class OperationJournalService extends Service<Methods, Events> implements
 			await this.storage.set(id, updated)
 			this.emit("onOperationUpdated", updated)
 			return { outcome: "refiled", record: updated }
-		} finally {
-			this.transitionLock.leave()
-		}
+		})
 	}
 }

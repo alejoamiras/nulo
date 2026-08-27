@@ -22,6 +22,8 @@ export class EntityStorage<T> {
 	private readonly storage: MinimalStorageArea
 	private readonly root: string
 	private readonly parse?: (raw: unknown) => T
+	private readonly requireKeyIdentityMatch: boolean
+	private readonly keyIdentityMode: "string" | "numeric"
 
 	/**
 	 * Callers must pass a concrete `MinimalStorageArea` (e.g.
@@ -32,30 +34,52 @@ export class EntityStorage<T> {
 	 * `parse` is an OPTIONAL boundary codec: `(raw: unknown) => T` (e.g. a zod
 	 * schema's `parse`). When omitted, reads keep the legacy `JSON.parse(...) as T`
 	 * behavior (no validation). When provided, every read validates the parsed
-	 * JSON — see `decodeRow` for the deliberate split between JSON-SYNTAX failure
-	 * (drop, legacy) and CODEC-VALIDATION failure (KEEP, never drop). wallet-core
-	 * carries no zod itself; the schema is injected from the app layer.
+	 * JSON. Both JSON-SYNTAX failure and CODEC-VALIDATION failure KEEP the row
+	 * (return undefined; the read path never deletes — see `decodeRow`).
+	 * wallet-core carries no zod itself; the schema is injected from the app layer.
+	 *
+	 * `requireKeyIdentityMatch` opts a root into the id/key consistency guard: a row whose
+	 * embedded `id` disagrees with the storage-key suffix reads as undefined. Only roots whose
+	 * SECURITY decisions trust the embedded id enable this — several roots legitimately key rows
+	 * by something other than the entity id (e.g. dapp sessions keyed per context).
+	 *
+	 * `keyIdentityMode` picks how the embedded id must match the suffix:
+	 *   - `"string"` (default): embedded id must be a STRING byte-equal to the suffix. For roots
+	 *     whose ids are hex strings (profiles).
+	 *   - `"numeric"`: the embedded id must be a POSITIVE SAFE INTEGER whose canonical decimal
+	 *     form equals the suffix (`Number.isSafeInteger(embedded) && embedded >= 1`). For roots
+	 *     minting sequence ids via `array_max(existing) + 1`, whose smallest honest id is 1 —
+	 *     negative/fractional/exponential hostiles would otherwise alias (`-0` → "0",
+	 *     `1e21` poisons future id allocation).
 	 */
-	public constructor(root: string, area: MinimalStorageArea, parse?: (raw: unknown) => T) {
+	public constructor(
+		root: string,
+		area: MinimalStorageArea,
+		parse?: (raw: unknown) => T,
+		options?: { requireKeyIdentityMatch?: boolean; keyIdentityMode?: "string" | "numeric" },
+	) {
 		this.root = root
 		this.storage = area
 		this.parse = parse
+		this.requireKeyIdentityMatch = options?.requireKeyIdentityMatch === true
+		this.keyIdentityMode = options?.keyIdentityMode ?? "string"
 	}
 
 	/**
-	 * Decode a raw storage value. Two failure modes, DELIBERATELY different:
+	 * Decode a raw storage value. Both failure modes KEEP the row (return
+	 * undefined = "present but unreadable"); the read path NEVER deletes by id.
 	 *
 	 *   - JSON-SYNTAX failure (`JSON.parse` throws — half-written mutation,
-	 *     genuine corruption): the byte is unrecoverable, so we log + DROP the
-	 *     row (fire-and-forget `remove`), the long-standing policy. Returns
-	 *     undefined.
+	 *     genuine corruption): log + KEEP. B-23: the old fire-and-forget `remove`
+	 *     raced a concurrent valid write and could destroy the newer value; the
+	 *     storage API has no atomic compare-and-delete, so deletion of a
+	 *     genuinely-dead row is left to an explicitly serialized repair path.
 	 *   - CODEC-VALIDATION failure (`parse` throws — the JSON is well-formed but
 	 *     doesn't match the schema, e.g. a forward-incompatible shape the app
-	 *     itself wrote): we must NEVER delete. Silently dropping a present-but-
-	 *     unreadable row turns a recoverable value into permanent data loss — the
-	 *     opposite of what a codec should do. Log, KEEP the row, return undefined
-	 *     ("present but unreadable"); a future migration / repair path can still
-	 *     see it. The write→read round-trip corpus tests guard against the codec
+	 *     itself wrote): log + KEEP. Silently dropping a present-but-unreadable
+	 *     row turns a recoverable value into permanent data loss — the opposite of
+	 *     what a codec should do; a future migration / repair path can still see
+	 *     it. The write→read round-trip corpus tests guard against the codec
 	 *     rejecting a shape the app actually produces.
 	 */
 	private decodeRow(fullKey: string, raw: unknown): T | undefined {
@@ -65,21 +89,58 @@ export class EntityStorage<T> {
 		} catch (err) {
 			const preview = typeof raw === "string" ? raw.slice(0, PARSE_FAILURE_PREVIEW_MAX) : String(raw)
 			const msg = err instanceof Error ? err.message : String(err)
-			console.error(`EntityStorage[${this.root}]: dropping malformed row "${fullKey}" — ${msg} — payload preview: ${preview}`)
-			void this.storage.remove(fullKey).catch((removeErr) => {
-				const rmsg = removeErr instanceof Error ? removeErr.message : String(removeErr)
-				console.error(`EntityStorage[${this.root}]: failed to delete malformed row "${fullKey}" — ${rmsg}`)
-			})
+			// B-23: KEEP the malformed row — the read path never deletes by id. The
+			// old fire-and-forget `remove(fullKey)` raced a concurrent valid write: a
+			// get() reads a stale malformed snapshot, a concurrent set() overwrites
+			// the key with valid JSON, then the delete lands on the NEW value it
+			// never observed — silent data loss. The storage API has no atomic
+			// compare-and-delete, and a non-atomic re-read-then-delete only shrinks
+			// the window (a set() can still land between them). So hide the
+			// unreadable row (return undefined) and leave deletion to an explicitly
+			// serialized repair path — see the purge-hardening follow-up — exactly as
+			// the validation-failure branch below already does.
+			console.error(
+				`EntityStorage[${this.root}]: row "${fullKey}" is malformed — KEEPING (not deleting) — ${msg} — payload preview: ${preview}`,
+			)
 			return undefined
 		}
-		if (!this.parse) return parsed as T
+		if (!this.parse) {
+			return this.requireIdMatch(fullKey, parsed as T)
+		}
+		let validated: T
 		try {
-			return this.parse(parsed)
+			validated = this.parse(parsed)
 		} catch (verr) {
 			const vmsg = verr instanceof Error ? verr.message : String(verr)
 			console.error(`EntityStorage[${this.root}]: row "${fullKey}" failed validation — KEEPING (not deleting) — ${vmsg}`)
 			return undefined
 		}
+		return this.requireIdMatch(fullKey, validated)
+	}
+
+	/**
+	 * A row whose embedded `id` disagrees with the storage-key suffix is treated exactly like a
+	 * malformed row: hidden (undefined), never deleted. Honest writers always agree — `set(id,
+	 * entity)` writes under the id it was given — so a disagreement means a raw storage writer
+	 * moved or duplicated a row's payload across keys. Serving such a row under the requested id
+	 * would let an attacker transplant another profile's ENTIRE record (id field included) and
+	 * have every downstream identity check pass against the forged embedded value.
+	 */
+	private requireIdMatch(fullKey: string, entity: T): T | undefined {
+		if (!this.requireKeyIdentityMatch) return entity
+		const suffix = fullKey.substring(this.root.length + 1)
+		const embedded = (entity as { id?: unknown }).id
+		// Strict: opt-in roots trust the embedded id for security decisions. A missing or
+		// wrongly-typed id is just as hostile as a wrong one.
+		const ok =
+			this.keyIdentityMode === "numeric"
+				? typeof embedded === "number" && Number.isSafeInteger(embedded) && embedded >= 1 && String(embedded) === suffix
+				: typeof embedded === "string" && embedded === suffix
+		if (!ok) {
+			console.error(`EntityStorage[${this.root}]: row "${fullKey}" embeds id "${String(embedded)}" — KEEPING (not deleting)`)
+			return undefined
+		}
+		return entity
 	}
 
 	public async contains(id: string): Promise<boolean> {
@@ -144,7 +205,7 @@ export class EntityStorage<T> {
 	 * For maintenance paths (e.g. a profile-scoped purge) that MUST act on every
 	 * row regardless of validity and cannot trust the row's self-reported id. A row
 	 * whose stored value is itself unparseable JSON is skipped (there is nothing to
-	 * key a predicate off) — those are handled by the syntax-drop path on normal reads.
+	 * key a predicate off) — a serialized repair path, not the read path, cleans those.
 	 */
 	public async rawEntries(): Promise<Array<[string, unknown]>> {
 		const path = `${this.root}@`
@@ -159,5 +220,31 @@ export class EntityStorage<T> {
 			}
 		}
 		return out
+	}
+
+	/** Raw STRING values by id, no parsing — the snapshot surface for the purge
+	 *  second pass (F-B23): a guarded delete re-reads `rawValue` and refuses
+	 *  unless the bytes still equal this snapshot. The re-read is NOT atomic
+	 *  with the delete (the storage API has no compare-and-delete) — it shrinks
+	 *  the race window; exclusion comes from the caller's key-attribution or
+	 *  lock. Non-string values skipped. */
+	public async rawStringEntries(): Promise<Array<[string, string]>> {
+		const path = `${this.root}@`
+		const res = await this.storage.get()
+		const out: Array<[string, string]> = []
+		for (const [k, v] of Object.entries(res)) {
+			if (!k.startsWith(path)) continue
+			if (typeof v !== "string") continue
+			out.push([k.substring(path.length), v])
+		}
+		return out
+	}
+
+	/** The raw stored string for one id (undefined when absent or non-string). */
+	public async rawValue(id: string): Promise<string | undefined> {
+		const key = `${this.root}@${id}`
+		const res = await this.storage.get(key)
+		const v = res[key]
+		return typeof v === "string" ? v : undefined
 	}
 }

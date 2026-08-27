@@ -7,7 +7,7 @@ the reference's attestation layer).
 
 ## Toolchain — use the 5.0.0 nargo (NOT the default)
 
-The contracts pin aztec-nr at the `v5.0.0` git tag. A mismatched default aztec
+The contracts pin aztec-nr at the `v5.0.1` git tag. A mismatched default aztec
 toolchain fails with a flood of macro errors (`cannot find self`, `Could not
 resolve 'at'` — the `#[aztec]` macros don't expand). Always compile via the
 pinned toolchain, which `scripts/compile.sh` selects for you:

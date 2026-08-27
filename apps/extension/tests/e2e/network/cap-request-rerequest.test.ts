@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { waitForPopup, waitForPopupClosed, approveCapabilities, rejectCapabilities, getCapItems } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -51,6 +51,6 @@ test.skipIf(!hasConfig)(
 
 		await approveCapabilities(popup2)
 		const ok = await waitForPgResult(page, "requestCapabilities", seqB, 20_000)
-		expect(ok.status).toBe("ok")
+		await assertPgOk(page, ok, "cap-request-rerequest:ok")
 	},
 )

@@ -200,7 +200,7 @@ onBeforeUnmount(() => {
 					<SettingItem
 						size="large"
 						title="Backup profile"
-						description="Get the seed phrase or secret key"
+						description="Get your recovery phrase"
 						icon="download"
 						to="/popup/settings/security/export"
 						data-testid="backup-link-btn"

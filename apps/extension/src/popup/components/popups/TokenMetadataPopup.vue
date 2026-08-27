@@ -6,6 +6,9 @@ import { TokenServiceClient } from "@/wallet/services/token/client"
 import { useToast } from "@/composables/toast"
 const { openToast } = useToast()
 
+/** Utils */
+import { copyToClipboard } from "@/utils/clipboard"
+
 /** Store */
 import { useAppStore } from "@/stores/app.store"
 import { usePopupStore } from "@/stores/popup.store"
@@ -37,8 +40,10 @@ function onTokenDeleted(token) {
 }
 
 const handleCopyAddress = () => {
-	window.navigator.clipboard.writeText(token.value.contract)
-	openToast({ label: "Contract address is copied", icon: "copy" })
+	void copyToClipboard(token.value.contract, openToast, {
+		success: { label: "Contract address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 
 watch(

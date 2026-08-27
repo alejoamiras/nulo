@@ -81,6 +81,9 @@ Hosting: **Cloudflare Pages** is the recommended fit.
 - Install: `bun install --frozen-lockfile`
 - Build: `bun run build`
 - Output: `dist`
+- Env (Production AND Preview): `BUN_VERSION=1.4.0` — the Pages build image
+  defaults to Bun 1.2.15, which cannot read the repo's v2 lockfile; only this
+  variable selects the Bun version (no version file or `packageManager` is honored).
 
 `bb.js` needs cross-origin isolation. The faucet ships a
 `public/_headers` file with `Cross-Origin-Opener-Policy: same-origin` +

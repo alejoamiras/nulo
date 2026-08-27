@@ -274,3 +274,91 @@ describe("ExecutionLane.cancelJob ownership (ledger D6: profile is the sole prin
 		expect(controller.signal.aborted).toBe(false)
 	})
 })
+
+function queuedWaiters(lane: ExecutionLane): Map<string, number> {
+	return (lane as unknown as { queuedWaiters: Map<string, number> }).queuedWaiters
+}
+
+describe("pre-claim wait heartbeat (N-07)", () => {
+	test("a pre-claim waiter is touched across the queued grace without any acquireSlot call", async () => {
+		vi.useFakeTimers()
+		try {
+			const { lane, touches } = makeLane()
+			lane.beginQueuedWait("pre-1")
+			await vi.advanceTimersByTimeAsync(30_000)
+			expect(touches).toContain("pre-1")
+			const count = touches.length
+			await vi.advanceTimersByTimeAsync(10 * 60_000) // the whole queued grace
+			expect(touches.length).toBeGreaterThan(count) // still vouched-for
+			lane.endQueuedWait("pre-1")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("the lease expires: a waiter past the ceiling stops being touched and is removed; a younger one continues", async () => {
+		vi.useFakeTimers()
+		try {
+			const { lane, touches } = makeLane()
+			lane.beginQueuedWait("old")
+			await vi.advanceTimersByTimeAsync(89 * 60_000) // just inside the 90-min ceiling
+			expect(touches.filter((t) => t === "old").length).toBeGreaterThan(0)
+			lane.beginQueuedWait("young")
+			await vi.advanceTimersByTimeAsync(5 * 60_000) // crosses old's ceiling
+			expect(queuedWaiters(lane).has("old")).toBe(false) // lease expired — removed
+			const oldTouches = touches.filter((t) => t === "old").length
+			await vi.advanceTimersByTimeAsync(60_000)
+			expect(touches.filter((t) => t === "old").length).toBe(oldTouches) // never touched again
+			expect(queuedWaiters(lane).has("young")).toBe(true) // younger waiter unaffected
+			lane.endQueuedWait("young")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("lease expiry of the LAST waiter stops the heartbeat timer (no zombie interval)", async () => {
+		vi.useFakeTimers()
+		try {
+			const { lane } = makeLane()
+			const timer = () => (lane as unknown as { executionHeartbeatTimer?: unknown }).executionHeartbeatTimer
+			lane.beginQueuedWait("solo")
+			expect(timer()).toBeDefined()
+			await vi.advanceTimersByTimeAsync(95 * 60_000) // past the 90-min ceiling
+			// endQueuedWait never fires for a lease-removed entry — the trailing
+			// stop check inside the heartbeat is the ONLY path that can clear
+			// the interval once the collections empty this way.
+			expect(queuedWaiters(lane).size).toBe(0)
+			expect(timer()).toBeUndefined()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	test("ownership migrates at mutex enqueue: the queued entry vanishes, the execution wait takes over", async () => {
+		const { lane } = makeLane()
+		lane.beginQueuedWait("mig-1")
+		expect(queuedWaiters(lane).has("mig-1")).toBe(true)
+		const holder = await lane.acquireSlot("net-1", undefined)
+		const waiting = lane.acquireSlot("net-1", "mig-1") // enqueue → migration
+		await flushMicrotasks()
+		expect(queuedWaiters(lane).has("mig-1")).toBe(false) // exactly one owner
+		holder.release()
+		const granted = (await waiting) as { release: () => void }
+		granted.release()
+	})
+
+	test("a pre-acquire cancelJob prunes the queued waiter (cap-bypass growth closed)", async () => {
+		const { lane, deps } = makeLane({
+			operationJournal: {
+				getOperation: vi.fn(async (id: string) => ({ id, profileId: "p1", progress: { stage: "queued" } }) as never),
+				transitionOperation: vi.fn(async () => ({})),
+				touchOperation: vi.fn(async () => {}),
+			} as never,
+		})
+		lane.beginQueuedWait("cancel-1")
+		expect(queuedWaiters(lane).has("cancel-1")).toBe(true)
+		await lane.cancelJob("cancel-1") // no controller registered — pre-acquire
+		expect(queuedWaiters(lane).has("cancel-1")).toBe(false)
+		expect(deps.operationJournal.transitionOperation).toHaveBeenCalled()
+	})
+})

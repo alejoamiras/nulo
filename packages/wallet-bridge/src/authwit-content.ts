@@ -1,13 +1,15 @@
-import type { CallAction, EncodedCallAction } from "./action"
+// Q-06: import the neutral call payloads (not `CallAction`/`EncodedCallAction`
+// from `action.ts`) so this module no longer forms a cycle with `action.ts`.
+import type { CallPayload, EncodedCallPayload } from "./call-shapes"
 
 export type AuthwitContent = CallAuthwitContent | EncodedCallAuthwitContent | IntentAuthwitContent | MessageHashAuthwitContent
 
-export type CallAuthwitContent = Omit<CallAction, "kind"> & {
+export type CallAuthwitContent = CallPayload & {
 	readonly kind: "call"
 	readonly caller: string
 }
 
-export type EncodedCallAuthwitContent = Omit<EncodedCallAction, "kind"> & {
+export type EncodedCallAuthwitContent = EncodedCallPayload & {
 	readonly kind: "encoded_call"
 	readonly caller: string
 }

@@ -7,6 +7,7 @@
  */
 import { getChainName } from "@/components/ui/utils.js"
 import { formatCaipAccount } from "@/wallet/utils/caip"
+import { trimAddress } from "@/utils/string"
 
 defineProps<{
 	account: { address: string; name: string; chainId: number }
@@ -48,7 +49,7 @@ const caip = (a: { address: string; chainId: number }) => formatCaipAccount(a.ch
 					<span :class="$style.chain_label">{{ getChainName(account.chainId).toUpperCase() }}</span>
 				</Flex>
 				<span :class="$style.row_address">
-					{{ `${account.address.slice(0, 6)}...${account.address.slice(-4)}` }}
+					{{ trimAddress(account.address, 6, 4, "...") }}
 				</span>
 			</Flex>
 		</Flex>

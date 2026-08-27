@@ -6,13 +6,17 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { createPxeOffscreen } from "@nulo/aztec-runtime/offscreen/entry"
 import { ProductionPxeFactory } from "@nulo/aztec-runtime/pxe"
 import { getErrorData } from "@nulo/wallet-core/utils"
-import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PING, OFFSCREEN_PONG } from "@/wallet/utils/offscreen"
+import { isSupersededByAdopt, OFFSCREEN_READY_MESSAGE, OFFSCREEN_PONG, shouldRespondPong } from "@/wallet/utils/offscreen"
 import { isBenignSwDisconnect } from "./is-benign-sw-disconnect"
 
-// Respond to health check pings from the service worker.
-// Registered before anything else so even a slow init doesn't block pong.
+// B-17: a PONG must mean "PXE services are up", not just "document loaded". The
+// listener is registered early (so a ping is never dropped for lack of a
+// receiver), but it withholds PONG until `servicesReady` flips true after
+// `createPxeOffscreen` below. A PONG during init previously let the SW adopt a
+// still-initializing document and dispatch a PXE RPC before PxeService existed.
+let servicesReady = false
 chrome.runtime.onMessage.addListener((message) => {
-	if (message === OFFSCREEN_PING) {
+	if (shouldRespondPong(message, servicesReady)) {
 		chrome.runtime.sendMessage(OFFSCREEN_PONG).catch(() => {})
 	}
 	return false
@@ -110,6 +114,8 @@ await createPxeOffscreen({
 				})
 			: undefined,
 })
+// B-17: PXE services are now up — start answering health PINGs with PONG.
+servicesReady = true
 logger.log("pxe", LogLevel.Info, `Offscreen services initialized (${Date.now() - t0}ms)`)
 
 // notify bg only after services are actually initialized

@@ -22,6 +22,7 @@ import { ConfigServiceClient } from "@/wallet/services/config/client"
 
 /** Utils */
 import { balanceFormatted } from "@/utils/amount.js"
+import { copyToClipboard } from "@/utils/clipboard"
 import { trimAddress } from "@/utils/string"
 import {
 	getTxCategory,
@@ -104,8 +105,10 @@ const txTime = computed(() => {
 })
 
 const handleCopy = (target) => {
-	window.navigator.clipboard.writeText(target)
-	openToast({ label: "Successfully copied", icon: "copy" })
+	void copyToClipboard(target, openToast, {
+		success: { label: "Successfully copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 
 const feePaymentLabel = computed(() => describeFeePaymentMethod(tx.value))

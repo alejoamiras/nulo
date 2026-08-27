@@ -6,13 +6,14 @@ import { ProfileService, type ProfileInfo } from "@/wallet/services/profile/serv
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { NetworkService, networkInfoFrom } from "@/wallet/services/network/service"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
-import { purgeRows } from "@/wallet/services/purge-rows"
+import { purgeMalformedRows, purgeRows } from "@/wallet/services/purge-rows"
+import { assertRestoreEpoch, captureRestoreEpochs } from "@/wallet/services/restore-fence"
 import { restoreRows } from "@/wallet/services/restore-rows"
-import { nextRandomId } from "@/wallet/services/id-allocators"
+import { nextRandomId, preferOrReallocId } from "@/wallet/services/id-allocators"
 import { requireOwnedRow } from "@/wallet/services/require-owned-row"
 import { ensureRegistered } from "@/wallet/services/execution/contract-resolver"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { resolveNetworkByChainId } from "@/wallet/utils/caip"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
@@ -149,9 +150,10 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 		if (!missingBeforeLock) return result.map((f) => this.decorate(f, protocols))
 
 		this.logInfo("Discovering missing protocol FPCs...")
-		try {
-			await this.lock.enter()
-
+		// Sentinel shape: the concurrent-holder early return maps UNDER the lock
+		// (as today), while the tail mapping below stays after release. `undefined`
+		// is the no-early-return sentinel — the mapped value is always an array.
+		const early = await this.lock.withLock(async () => {
 			// Re-read storage now that we hold the lock. A prior holder in the
 			// queue may have just completed discovery — if so, skip the PXE
 			// work entirely. Without this, every queued caller independently
@@ -214,9 +216,9 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					this.logError(`Failed to discover FPC ${contractInstance.address.toString()}`, err)
 				}
 			}
-		} finally {
-			this.lock.leave()
-		}
+			return undefined
+		})
+		if (early) return early
 		return result.map((f) => this.decorate(f, protocols))
 	}
 
@@ -257,8 +259,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 		const protocols = await this.getOrComputeProtocolAddresses(network.chainId)
 
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const id = await nextRandomId(this.storage)
 			const fpc: StoredFpc = {
 				id,
@@ -272,16 +273,13 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			const decorated = this.decorate(fpc, protocols)
 			this.emit("onFpcAdded", decorated)
 			return decorated
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async updateFpc(id: string, name: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const fpc = requireOwnedRow(await this.storage.get(id), profile.id)
 			const protocols = await this.getOrComputeProtocolAddresses(fpc.chainId)
 			if (this.decorate(fpc, protocols).isProtocol) {
@@ -292,9 +290,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			const decorated = this.decorate(fpc, protocols)
 			this.emit("onFpcUpdated", decorated)
 			return decorated
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async updateFpcAddress(id: string, address: string): Promise<FpcInfo> {
@@ -346,23 +342,19 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			throw new Error("Cannot promote user FPC to protocol slot")
 		}
 
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const next: StoredFpc = { ...existing, address }
 			await this.storage.set(id, next)
 			const decorated = this.decorate(next, protocols)
 			this.emit("onFpcUpdated", decorated)
 			return decorated
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async deleteFpc(id: string): Promise<FpcInfo> {
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService)
-		try {
-			await this.lock.enter()
+		return await this.lock.withLock(async () => {
 			const fpc = requireOwnedRow(await this.storage.get(id), profile.id)
 			const protocols = await this.getOrComputeProtocolAddresses(fpc.chainId)
 			const decorated = this.decorate(fpc, protocols)
@@ -372,9 +364,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 			await this.storage.delete(id)
 			this.emit("onFpcDeleted", decorated)
 			return decorated
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getFpcImpl(id: string): Promise<Fpc> {
@@ -411,8 +401,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related FPCs`)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			const fpcs = (await this.storage.getValues()).filter((fpc) => fpc.profileId === profileId)
 			await purgeRows(
 				fpcs,
@@ -422,9 +411,14 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 				},
 				(fpc) => this.emit("onFpcDeleted", this.decorate(fpc, this.protocolAddresses.get(fpc.chainId))),
 			)
-		} finally {
-			this.lock.leave()
-		}
+			// F-B23: raw second pass — a validation-failed row this profile owns is
+			// invisible to getValues() and would otherwise survive the purge forever.
+			await purgeMalformedRows(
+				this.storage,
+				(raw) => raw.profileId === profileId,
+				(id) => this.logDebug(`purged malformed fpc row ${id}`),
+			)
+		})
 	}
 
 	public async backup(): Promise<FpcInfo[]> {
@@ -436,10 +430,15 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 
 	public async restore(fpcs: FpcInfo[]): Promise<Restored<FpcInfo>[]> {
 		await this.ensureInitialized()
+		// Deletion fence captured at entry (see restore-fence.ts): rows written
+		// after a mid-restore deleteProfile must reject, not orphan.
+		const deletion = this.profileService.getDeletionState()
+		const epochs = captureRestoreEpochs(
+			deletion,
+			fpcs.map((f) => (f as { profileId?: unknown } | null)?.profileId),
+		)
 
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			return await restoreRows(fpcs, async (fpc) => {
 				// Reject legacy DefaultFpc (Token FPC) entries explicitly —
 				// post-deprecation they have no handler and would crash the
@@ -449,10 +448,7 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 					throw new Error("Token FPC deprecated and no longer supported")
 				}
 
-				let id = fpc.id
-				while (await this.storage.contains(id)) {
-					id = getRandomHex(8)
-				}
+				const id = await preferOrReallocId(this.storage, fpc.id)
 
 				// Strip `isProtocol` (recomputed at read time) and any
 				// legacy decoration fields a v3 backup might carry.
@@ -468,11 +464,10 @@ export class FpcService extends Service<Methods, Events> implements ServiceSpec<
 				// Parse the persisted shape so a malformed backup fpc is recorded as
 				// restoreError, not silently written + codec-hidden on read.
 				StoredFpcSchema.parse(stored)
+				assertRestoreEpoch(deletion, epochs, stored.profileId)
 				await this.storage.set(id, stored)
 				return { ...stored, isProtocol: false }
 			})
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

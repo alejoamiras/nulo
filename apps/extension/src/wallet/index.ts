@@ -16,6 +16,7 @@ import { RealChromeBrowserApi, SystemClock } from "@/core/adapters"
 import { ConfigStore } from "./config"
 import { consoleMethods, LoggerStore, LogLevel } from "./logger"
 import { createWalletRuntime } from "./runtime"
+import { registerContentMessageRelay } from "./services/wallet-sdk/content-message-relay"
 import { PRICE_REFRESH_ALARM_NAME, PriceService } from "./services/price/service"
 import { getErrorData } from "@nulo/wallet-core/utils"
 import { openOrFocusOnboardingTab } from "./utils/onboarding-tab"
@@ -47,6 +48,15 @@ chrome.runtime.onMessage.addListener((message: unknown): false => {
 	return false
 })
 
+// MV3: when a content-script message WAKES the SW, only listeners registered
+// synchronously at module scope receive the triggering event — the wallet-sdk
+// handler attaches at the tail of runtime.start(), far too late for the very
+// message that caused the wake (a dApp's discovery would be silently lost).
+// The relay owns the ONLY chrome.runtime.onMessage listener for content
+// traffic; the transport attaches to it once the handler exists. Registered
+// BEFORE any store/adapter construction so a throw below cannot precede it.
+registerContentMessageRelay()
+
 const config = new ConfigStore()
 const logger = new LoggerStore(config)
 const browserApi = new RealChromeBrowserApi()
@@ -69,7 +79,7 @@ self.onunhandledrejection = (e: PromiseRejectionEvent) => {
 
 logger.log("wallet", LogLevel.Info, "Runtime configured")
 
-const runtime = createWalletRuntime({ browserApi, clock, config, logger })
+const runtime = createWalletRuntime({ browserApi, clock, config, logger, manifestVersion: chrome.runtime.getManifest().version })
 
 // MV3: when an alarm WAKES the SW, only listeners registered synchronously
 // at module scope receive the triggering event — a listener added inside

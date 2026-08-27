@@ -27,16 +27,22 @@
  * gate is compiled in. Run zero-retry (`NULO_E2E_RETRY=0`): the file-scoped
  * `tokenReadyExtension` mutates on-chain + PXE state, so a retry would re-run
  * against a half-consumed sandbox.
+ *
+ * @requires-proverless — formal marker scanned by scripts/e2e/agent.sh; the
+ * beforeAll below is the belt for direct-vitest invocations that bypass it.
  */
-import { expect, inject } from "vitest"
+import { readFileSync, readdirSync } from "node:fs"
+import { join } from "node:path"
+import { beforeAll, expect, inject } from "vitest"
 import { openPopup, test, waitForHash } from "../fixtures/extension"
 import {
+	captureBalanceBaseline,
 	createSecondAccount,
 	getAccountAddress,
 	refreshBalances,
 	sendTransfer,
 	switchAccountByAddress,
-	waitForBalance,
+	waitForFreshBalanceRow,
 	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import { holdIncomingPoll, readIncomingPollStatus, releaseIncomingPoll, waitForIncomingPollPhase } from "../fixtures/incoming-poll-gate"
@@ -44,6 +50,25 @@ import type { AztecTestConfig } from "../fixtures/aztec"
 import type { Page } from "puppeteer"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
+
+// Arming preflight (hard abort, file-level): the incoming-poll gate exists in
+// the bundle ONLY under a proverless-armed build; against an unarmed dist this
+// file's polls time out after minutes with no hint why. Scan the loaded dist
+// for the compile-time stamp and fail in seconds with the remedial command
+// instead. beforeAll (not a sibling test) so the expensive tests never start.
+beforeAll(() => {
+	const extensionPath = inject("extensionPath") as string
+	const assetsDir = join(extensionPath, "assets")
+	const armed = readdirSync(assetsDir).some(
+		(f) => f.endsWith(".js") && readFileSync(join(assetsDir, f), "utf8").includes("NULO_E2E_PROVERLESS_BUILD_STAMP"),
+	)
+	expect(
+		armed,
+		"The extension build at EXTENSION_PATH is NOT proverless-armed — the incoming-poll gate is compiled out, " +
+			"and every test in this file would silently time out. Rebuild + run with: " +
+			"NULO_E2E_PROVERLESS=1 bun run e2e:agent tests/e2e/network/account-switch-isolation.test.ts",
+	).toBe(true)
+})
 const hasConfig = aztecConfig !== undefined
 
 /** Minimal projection of the persisted incoming record we correlate on. */
@@ -298,7 +323,16 @@ test.skipIf(!hasConfig)(
 		//    needed (SponsoredFPC pays). The unique amount `7` keys the settled
 		//    `tx-card`.
 		const SETTLED_AMOUNT = "7"
-		await waitForBalance(page, "1,000", 60_000)
+		{
+			const baseline = await captureBalanceBaseline(page, accountA, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page, {
+				account: accountA,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: baseline,
+				timeoutMs: 60_000,
+			})
+		}
 		await sendTransfer(page, { fromType: "public", toType: "public", amount: SETTLED_AMOUNT, destination: accountA })
 		await waitForTxConfirmation(page, { amount: SETTLED_AMOUNT, fromType: "public", toType: "public" })
 		console.log(`✓ A has a settled extension tx (amount ${SETTLED_AMOUNT})`)

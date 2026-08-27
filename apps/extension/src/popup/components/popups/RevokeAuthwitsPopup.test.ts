@@ -72,7 +72,10 @@ const STUBS = {
 	},
 	Button: {
 		props: ["loading", "disabled"],
-		template: `<button data-testid="revoke-authwits-submit" :disabled="disabled || loading"><slot /></button>`,
+		// The stub mirrors the REAL primitive: only `disabled` sets the native
+		// attribute (loading alone is CSS pointer-events). A `disabled || loading`
+		// stub previously masked the template's missing isLoading in :disabled.
+		template: `<button data-testid="revoke-authwits-submit" :disabled="disabled"><slot /></button>`,
 	},
 	Tooltip: { template: "<div><slot /><slot name='content' /></div>" },
 	Icon: { template: "<i />" },
@@ -164,6 +167,11 @@ describe("RevokeAuthwitsPopup — Enter-key gate", () => {
 		pressEnter()
 		await flushPromises()
 		expect(authwitsServiceMock.revokeAuthwits).toHaveBeenCalledTimes(1)
+		// And the real button is NATIVELY disabled mid-flight (the corrected
+		// stub only forwards `disabled`, so this proves the template's
+		// :disabled now includes isLoading — closing keyboard-focused
+		// activation, which pointer-events CSS never covered).
+		expect(w.find('[data-testid="revoke-authwits-submit"]').attributes("disabled")).toBeDefined()
 		resolveRevoke()
 	})
 

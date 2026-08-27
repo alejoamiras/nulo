@@ -59,6 +59,7 @@ const { openToast } = useToast()
 
 /** Store */
 import { useAppStore } from "@/stores/app.store"
+import { trimAddress } from "@/utils/string"
 const appStore = useAppStore()
 
 const route = useRoute()
@@ -122,7 +123,7 @@ const methodLabel = computed(() => {
 const recipientLabel = computed(() => {
 	const r = op.value?.recipientAddress
 	if (!r) return null
-	return `${r.slice(0, 6)}…${r.slice(-4)}`
+	return trimAddress(r, 6, 4, "…")
 })
 
 // Sanitize the dApp-controlled subtitle before rendering. A malicious dApp

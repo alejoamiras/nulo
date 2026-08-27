@@ -10,6 +10,7 @@
  */
 import { describe, expect, test, vi } from "vitest"
 import { type JobError, type JobProgress, JobCancelledSentinel, normalizeError } from "@nulo/wallet-core/jobs"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 import { markFailedUnlessCancelled } from "./mark-failed-unless-cancelled"
 
 function fakeLane() {
@@ -51,5 +52,20 @@ describe("markFailedUnlessCancelled", () => {
 		const lane = fakeLane()
 		await markFailedUnlessCancelled(new Error("x"), undefined, lane)
 		expect(lane.markJournal).toHaveBeenCalledWith(undefined, { stage: "failed" }, expect.anything())
+	})
+
+	test("(N-15) a DuplicateInitializationError carries its own journal kind — never the dapp_execute catch-all", async () => {
+		const lane = fakeLane()
+		await markFailedUnlessCancelled(new DuplicateInitializationError(), "j1", lane)
+		const err = (lane.markJournal as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { kind: string; message: string }
+		expect(err.kind).toBe("duplicate_initialization")
+		expect(err.message).toMatch(/wait for network sync, then retry/)
+	})
+
+	test("(N-15) any other error keeps the dapp_execute kind", async () => {
+		const lane = fakeLane()
+		await markFailedUnlessCancelled(new Error("boom"), "j1", lane)
+		const err = (lane.markJournal as ReturnType<typeof vi.fn>).mock.calls[0]?.[2] as { kind: string }
+		expect(err.kind).toBe("dapp_execute")
 	})
 })

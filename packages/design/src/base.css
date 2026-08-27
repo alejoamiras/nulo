@@ -367,7 +367,10 @@ body {
 }
 
 .copyable {
-	cursor: copy;
+	/* Pointer, NOT `cursor: copy` — the copy cursor is the drag-and-drop "a copy will be made here"
+	 * state (the OS draws a "+" badge), which misreads on click-to-copy targets. The affordance comes
+	 * from the copy icon + toast, per GitHub/Etherscan/MetaMask convention. */
+	cursor: pointer;
 }
 
 .capitalize {

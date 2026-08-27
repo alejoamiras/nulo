@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blueprint ELI5 — single-sim-estimates</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #222; line-height: 1.6; }
+    h1, h2, h3 { font-weight: 600; }
+    h1 { font-size: 1.8rem; margin-bottom: 1.5rem; }
+    h2 { font-size: 1.3rem; margin-top: 2.5rem; }
+    h3 { font-size: 1.05rem; margin-top: 1.5rem; color: #444; }
+    code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+    pre { background: #f6f6f6; padding: 1rem; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; }
+    .phase { margin: 1.5rem 0; padding: 1rem 1.25rem; border-left: 3px solid #ccc; background: #fafafa; }
+    .seeds { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid #eee; }
+    .recommended { background: #fff8e1; border-left-color: #f0a020; }
+    .warning { color: #b45309; font-weight: 600; margin: 1rem 0; }
+    .approval { background: #eef6ff; padding: 1rem 1.25rem; border-left: 3px solid #0366d6; margin: 1.5rem 0; }
+    a { color: #0366d6; }
+    .muted { color: #666; font-size: 0.9rem; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+    th, td { text-align: left; padding: .4rem .6rem .4rem 0; border-bottom: 1px solid #eee; }
+  </style>
+</head>
+<body>
+  <h1>single-sim-estimates</h1>
+  <p>The follow-up to the fee-estimation speedup you just merged. Three jobs in one arc: (1) make dApp fee estimates run on <b>one</b> local dry-run instead of two or three, wherever that's provably safe; (2) prove the safety with <b>real measurements against the live Aztec testnet</b> before anything changes how gas is sized — your rule: adopt automatically only if the measured difference is under 1%, otherwise stop and show you the numbers; (3) fix the local test that looked broken — it turned out to be a missing build flag, not a bug, and the real fix is making that mistake impossible to make silently again.</p>
+
+  <h2>Why this tier was chosen</h2>
+  <p><code>mid</code>: one high-risk dimension (this touches the machinery that decides what the wallet auto-signs and how transactions are gas-sized), but no novel territory — the design was pre-negotiated in the previous arc's audits, and this arc's two auditors re-attacked the dangerous parts specifically. A <code>deep</code> run was arguable; you invoked mid and the audit rounds behaved exactly like a deep's would (one rejection, one conditional approval, everything folded in).</p>
+
+  <h2>What actually changes for users</h2>
+  <table>
+    <tr><th>Moment</th><th>Dry-runs today</th><th>After</th></tr>
+    <tr><td>dApp approval estimate, default sponsor</td><td>2</td><td><b>1</b></td></tr>
+    <tr><td>dApp approval estimate, own fee juice</td><td>2</td><td><b>1</b></td></tr>
+    <tr><td>dApp approval estimate, mainnet private fee contract</td><td>3</td><td><b>2</b></td></tr>
+    <tr><td>Anything involving delegated permissions</td><td>2–3</td><td>2 — deliberately kept on the fully-checked path</td></tr>
+    <tr><td>Send page, confirm, everything else</td><td>—</td><td>unchanged</td></tr>
+  </table>
+
+  <h2>Human context</h2>
+  <p>The trick everywhere is the same: the wallet already runs a "scout" dry-run with a lightweight stand-in account to discover which permissions a dApp transaction needs. That scout's gas numbers are currently thrown away. If measurements prove the stand-in burns the same gas as the real account (our one datum so far: <em>exactly identical</em>), the scout can do double duty and the second dry-run disappears. The audits added two hard guardrails: the cheaper path is forbidden for any fee contract that isn't the pinned canonical one (a malicious look-alike must always hit the strict path — both auditors attacked this pin and couldn't break it), and any transaction already carrying delegated permissions always takes the fully-checked path.</p>
+  <p>One honest trade you're being asked to accept (Ask 1 below): on the fastest new path, some kinds of problems that today surface while the spinner says "estimating fee" would instead surface a bit later, after proving. The blockchain still rejects anything invalid — nothing unsafe can land — but the user would wait longer to hear "no" in those rare cases.</p>
+
+  <h2>Phases</h2>
+  <div class="phase"><h3>C1 — Fix the "broken" test properly</h3><p>The failing local test needed a special build flag nobody was told about; unarmed runs silently time out for 3 minutes. Fix: the test now aborts in seconds with the exact command to run instead, and the test runner warns you up front.</p><p class="muted">Proves itself by: the armed run passing, the unarmed run failing fast and loudly, all fast checks green.</p></div>
+  <div class="phase"><h3>A1 — Reshape without changing behavior</h3><p>Move the scout machinery into its new home with everything switched off — provably identical behavior, verified by the test pins not moving.</p><p class="muted">Proves itself by: every existing behavior pin unchanged in value.</p></div>
+  <div class="phase"><h3>B1 — Measure for real, on testnet</h3><p>A throwaway script runs six transaction shapes against the live testnet, stand-in vs real account, repeated to rule out noise, plus one real sponsored transaction sized from the stand-in's numbers to prove it lands on-chain. <b>Your rule applied here</b>: all differences under 1% → continue; anything at or over → full stop, you get the numbers.</p><p class="muted">Proves itself by: the complete measurement table in the plan's lessons, and nothing from the script committed.</p></div>
+  <div class="phase"><h3>A2 — The mainnet-contract fold (3→2) — runs only with Ask 4(a)</h3><p>Only unlocked by B1's funded measurement (needs your Sepolia key — see Ask 4; without it this phase is cleanly deferred and everything else still ships). The scout merges into the first of the private fee contract's two dry-runs; the second stays fully checked forever.</p><p class="muted">Proves itself by: updated count pins, the malicious-lookalike test fixtures, and real end-to-end dApp transactions with real proofs.</p></div>
+  <div class="phase"><h3>B2 — The one-dry-run estimates (2→1) + safety clamp</h3><p>Only unlocked by B1. Sponsor and own-fee-juice dApp estimates drop to one dry-run, and the wallet gains a safety clamp it never had: gas limits can no longer exceed what the network will actually accept.</p><p class="muted">Proves itself by: updated pins + the same end-to-end tests with real proofs.</p></div>
+  <div class="phase"><h3>B3 — Full validation</h3><p class="muted">Proves itself by: the repo's full pre-PR gate, armed smoke suite, and the entire network test suite.</p></div>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li><b>Ask 1 — the honest speed-vs-early-warning trade</b>, now including one rare corner the final audit found: a dApp contract that requires a special kind of delegated permission the user never granted would today fail during "estimating fee", but on the new fast path fails a bit later, after proving — still loudly, still before anything reaches the chain, funds always safe. A dedicated test pins exactly this. Recommended: accept.</li>
+    <li><b>Ask 2 — adopt the safety clamp</b> across every fee path (the audit made us enumerate all of them), including one deliberate behavior change: dApps supplying oversized gas limits get a clear error instead of a silent pass-through. Costs zero extra network calls. Recommended: yes.</li>
+    <li><b>Ask 3 — one real (free) transaction on public testnet</b> from a throwaway account as the proof-of-inclusion canary. Recommended: accept.</li>
+    <li><b>Ask 4 — the mainnet-contract improvement needs your Sepolia key, or it waits.</b> The final audit proved there is NO free way to measure the private fee contract (even simulating it requires funded private fee juice, and funding goes through L1). Real choice: (a) provide the key → full funded measurement + canary → the 3→2 improvement ships this arc; (b) no key → that one improvement is deferred, everything else proceeds. Recommended: (a) if the key is at hand, otherwise (b).</li>
+  </ul>
+
+  <div class="approval">
+    <h2>✅ Approved — 2026-08-10</h2>
+    <p>All four asks resolved: the speed-vs-early-warning trade accepted (failure-case-only framing); safety clamp yes; free canary yes; and the mainnet-contract measurement proceeds with an owner-provided key (an Aztec account secret — the first measurement step checks whether it already holds private fee juice). Original checklist kept for the record:</p>
+    <ul>
+      <li>Confirm the scope: the three dApp estimate reductions above; send page and permission-carrying transactions deliberately untouched.</li>
+      <li>Confirm the measurement gate is binding exactly as you set it (&lt;1% auto-adopt, else stop).</li>
+      <li>Answer Asks 1–4.</li>
+      <li>No <code>/harden</code> pass scheduled (no auth/secrets/CI surface). Override if you disagree.</li>
+      <li>Approve · conditionally approve (with conditions) · reject (with blocking findings).</li>
+    </ul>
+  </div>
+
+  <section class="seeds">
+    <h2>Implementation seeds (final)</h2>
+    <p class="warning">Use exactly ONE per session. They don't compose — setting one replaces the other.</p>
+    <div class="phase recommended">
+      <h3>Recommended for this plan: /goal</h3>
+      <pre><code>/goal All phases (C1, A1, B1, A2, B2, B3) marked ✓ in implementations-plan/single-sim-estimates/plan.md, each ✓ backed by its validation gate passing in the transcript; B1's measurement table in lessons with the checkpoint outcome stated (if any delta ≥1%: A2/B2 marked DEFERRED in plan.md counts as complete); LESSONS_FILE=implementations-plan/single-sim-estimates/lessons/phase-&lt;id&gt;.md printed per completed phase; the gh stack (PR1 e2e → PR2 inert decorator + measurement, merge-gated on the checkpoint → PR3 folds + clamp) open against dev with required checks green; /code-review max --fix applied + committed separately; codex post-impl audit complete with high/critical addressed; bun run test and bun run lint exit 0 in the transcript.</code></pre>
+    </div>
+    <h3>Alternative: /loop 15m</h3>
+    <pre><code>/loop 15m Drive implementations-plan/single-sim-estimates forward. Never idle. Each firing: (1) read plan.md + lessons/ (authoritative), git status/log; PRs → gh pr view --json statusCheckRollup. (2) CI waits fine if progressing; prep next phase meanwhile. (3) No task? Next pending phase; fast layers after each edit; commit → push. (4) Owner-grade decisions → /codex xhigh, decide, act, log — EXCEPT: the B1 checkpoint (any delta ≥1% ⇒ STOP A2/B2, mark DEFERRED, surface numbers, continue C/A1) and Ask 4 (never touch L1 keys/funding without explicit owner provision). Hard limits: never merge main/release, never publish, never stub a payload-inclusive sim for any non-canonical FPC, never let an intent-authwit-carrying op take a 1-sim fold, no scope beyond plan.md. (5) 5× failed step ⇒ reassess with codex. (6) Phase green = plan.md gate verbatim ⇒ ✓ + lessons + LESSONS_FILE line. (7) All ✓ (or A2/B2 DEFERRED)? /code-review max --fix → separate commit → codex post-impl audit → address high/critical → wrap-up with contentious calls ELI5'd. ASCII checklist visible.</code></pre>
+  </section>
+
+  <p class="muted"><a href="plan.md">Full plan.md</a> · <a href="./lessons/">Lessons logs</a></p>
+</body>
+</html>

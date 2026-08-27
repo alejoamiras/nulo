@@ -1,6 +1,6 @@
 import type { Page } from "puppeteer"
 import { TEST_PASSWORD } from "./constants"
-import { clickByTestId, clickSelector, replaceInputValue } from "./extension"
+import { clickByTestId, clickSelector, replaceInputValue, withTimeoutMessage } from "./extension"
 
 /**
  * Selector contract for tests in this directory.
@@ -72,23 +72,163 @@ export async function lockWallet(page: Page): Promise<void> {
 	await page.waitForFunction(() => window.location.hash.includes("/popup/auth"), { timeout: 15_000 })
 }
 
-/** If the wallet is locked (auth page), re-enter the password. Defaults to
- *  the standard test password; pass a different one if a prior test rotated
- *  it via change-password. */
+/** If the wallet is locked, re-enter the password; if it is already unlocked,
+ *  do nothing. Defaults to the standard test password; pass a different one if
+ *  a prior test rotated it via change-password.
+ *
+ *  Contract — this helper is authoritative only inside it:
+ *  - **Password profiles only.** A locked passkey profile keeps its session
+ *    record (`SessionManager.restore` returns early: WebAuthn needs a user
+ *    gesture), so it cannot be told apart from an unlocked one except by the
+ *    password field being absent on `/popup/auth`. On any other route it would
+ *    read as unlocked. Passkey lock/unlock is not e2e-drivable today anyway —
+ *    see `fixtures/passkey.ts`.
+ *  - **One profile, or a trustworthy `nulo:ui:lastActiveProfile`.** The unlock
+ *    proof is scoped to that id; `app.vue` can fall back to `profiles[0]`
+ *    WITHOUT persisting it, so with several profiles and no persisted id the
+ *    scope check degrades to "any newer well-formed record".
+ *  - **Callers keep an authoritative postcondition.** The session record is
+ *    persisted just before `activeSession` is assigned, so a success here can
+ *    in principle observe a session that a concurrent deletion fence then
+ *    closes. Every current caller follows with route convergence or an
+ *    account/on-chain read, which is what actually pins the outcome. */
 export async function ensureUnlocked(page: Page, password = TEST_PASSWORD): Promise<void> {
-	const hash = await page.evaluate(() => window.location.hash)
-	if (!hash.includes("/popup/auth")) return
+	// Lock state comes from the session record, never from the route and never
+	// from a lone DOM marker — each of those lies in one direction. `app.vue`
+	// pushes `/popup/auth` BEFORE `initNetworks()`/`initAccount()` finish and
+	// `openPopup` returns inside that window, so an UNLOCKED wallet transiently
+	// renders the password field; `header-lock` tracks `isLogined`, which
+	// lockWallet documents as stale-TRUE after an authoritative lock.
+	//
+	// The record's mere PRESENCE is not enough either: `SessionManager.restore`
+	// deliberately leaves it in place for a passkey profile (WebAuthn needs a
+	// user gesture, so the lock screen handles it) and preserves an undecodable
+	// one for repair. Presence therefore has to be paired with a shape check and
+	// with the route, giving two states that cannot both hold:
+	//   unlocked = a well-formed record AND the popup is not on /popup/auth
+	//   locked   = the password field is mounted AND no usable record exists
+	// Anything else — including a LOCKED passkey profile, which keeps its record
+	// while showing no password field — stays unresolved and lands in the
+	// timeout below, which names it.
+	//
+	// On the BUDGET, stated plainly because the arc bans raising bounds to paper
+	// over flakes: the old 5s governed a different question ("has the password
+	// field rendered"), which is answered in milliseconds. This wait asks "has the
+	// app DECIDED whether it is locked", and the answer legitimately takes as long
+	// as bootstrap does — the same transient window that makes a lone route or DOM
+	// read unsafe. A caller right after a service-worker restart (the canary) hit
+	// exactly that: record well-formed, hash still /popup/auth, field mounted, i.e.
+	// mid-decision, and 5s was simply too short to observe the outcome. The budget
+	// therefore matches the app's own post-restart envelope, in line with the
+	// neighbouring waits in `frozen-account-canary` (30s liveness, 60s hash, 120s
+	// general). Nothing here accepts a state it previously rejected.
+	const readSession = () =>
+		page.evaluate(async () => {
+			const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+			let rec: { profile?: unknown; since?: unknown } | undefined
+			try {
+				rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+			} catch {
+				rec = undefined
+			}
+			const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+			return { wellFormed, present: raw !== undefined, since: wellFormed ? (rec?.since as number) : 0 }
+		})
 
-	await page.waitForSelector('[data-testid="auth-password-input"]', {
-		visible: true,
-		timeout: 5_000,
-	})
+	const state = await withTimeoutMessage(
+		page
+			.waitForFunction(
+				async () => {
+					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+					let rec: { profile?: unknown; since?: unknown } | undefined
+					try {
+						rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+					} catch {
+						rec = undefined
+					}
+					const wellFormed = !!rec && typeof rec.profile === "string" && typeof rec.since === "number"
+					if (wellFormed && !window.location.hash.includes("/popup/auth")) return "unlocked"
+					if (!wellFormed && document.querySelector('[data-testid="auth-password-input"]')) return "locked"
+					return null
+				},
+				{ timeout: 30_000, polling: 200 },
+			)
+			.then((handle) => handle.jsonValue()),
+		async () => {
+			const diag = await page
+				.evaluate(async () => {
+					const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+					let rec: { profile?: unknown; since?: unknown } | undefined
+					try {
+						rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+					} catch {
+						rec = undefined
+					}
+					const shape =
+						raw === undefined
+							? "absent"
+							: rec && typeof rec.profile === "string" && typeof rec.since === "number"
+								? "well-formed"
+								: "malformed"
+					return {
+						hash: window.location.hash,
+						record: shape,
+						field: !!document.querySelector('[data-testid="auth-password-input"]'),
+					}
+				})
+				.catch(() => ({ hash: "<unreadable>", record: "<unreadable>", field: false }))
+			return (
+				`ensureUnlocked: lock state never settled within 30s (hash: ${diag.hash}, session record: ${diag.record}, ` +
+				`password field: ${diag.field}). A well-formed record on /popup/auth with no password field is a LOCKED ` +
+				"PASSKEY profile, which this helper cannot unlock — drive the passkey ceremony instead."
+			)
+		},
+	)
+
+	if (state === "unlocked") return
+
+	// Scope the proof below to THIS unlock: the profile the auth screen is about
+	// to unlock, and the record generation preceding it.
+	const before = await readSession()
+	const expectedProfile = await page.evaluate(
+		async () => (await chrome.storage.local.get("nulo:ui:lastActiveProfile"))["nulo:ui:lastActiveProfile"] as string | undefined,
+	)
+
 	await replaceInputValue(page, '[data-testid="auth-password-input"]', password)
-
 	await clickByTestId(page, "auth-submit")
 
-	// Wait for navigation away from auth
-	await page.waitForFunction(() => !window.location.hash.includes("/popup/auth"), { timeout: 10_000 })
+	// Prove the UNLOCK, not the navigation: leaving `/popup/auth` is also what
+	// the bootstrap's own redirect does, and any session record would also be
+	// written by a concurrent unlock of a different profile. Require a
+	// well-formed record for the expected profile, newer than the one we
+	// started from.
+	await withTimeoutMessage(
+		page.waitForFunction(
+			async (want: string | undefined, priorSince: number) => {
+				const raw = (await chrome.storage.session.get("nulo:core:session"))["nulo:core:session"]
+				let rec: { profile?: unknown; since?: unknown } | undefined
+				try {
+					rec = typeof raw === "string" ? JSON.parse(raw) : undefined
+				} catch {
+					rec = undefined
+				}
+				if (!rec || typeof rec.profile !== "string" || typeof rec.since !== "number") return false
+				if (want !== undefined && rec.profile !== want) return false
+				return rec.since > priorSince
+			},
+			{ timeout: 10_000, polling: 200 },
+			expectedProfile,
+			before.since,
+		),
+		async () => {
+			const wrong = await page.evaluate(() => !!document.querySelector('[data-testid="error-text"]')).catch(() => false)
+			const now = await readSession().catch(() => undefined)
+			return (
+				`ensureUnlocked: submitted the password but no session for profile ${expectedProfile ?? "<unknown>"} newer than ` +
+				`${before.since} appeared within 10s (wrong-password shown: ${wrong}; record now: ${JSON.stringify(now)})`
+			)
+		},
+	)
 }
 
 /**
@@ -203,6 +343,19 @@ export async function navigateToSettings(page: Page, ...segments: string[]): Pro
  * page and tap "Set as active".
  */
 export async function switchToNetwork(page: Page, networkName: string): Promise<void> {
+	// The BEFORE snapshot below disambiguates real vs repeat switch, so it
+	// must read a RENDERED header: on a freshly-opened popup the chip mounts
+	// with empty text for a beat, and an empty read misclassifies an
+	// already-on-target wallet as a real switch — whose "address flips" wait
+	// below can then never be satisfied, because the target chain re-derives
+	// the address the wallet already shows. Wait for the render signal.
+	await page.waitForFunction(
+		() => {
+			const btn = document.querySelector('[data-testid="network-button"]')
+			return !!btn && (btn.textContent ?? "").trim().length > 0
+		},
+		{ timeout: 15_000, polling: 200 },
+	)
 	// Snapshot the BEFORE state. The header text identifies the chain the
 	// popup is currently on; the activeAccount key identifies the address
 	// `setupActiveAccount` last wrote. Both are needed to disambiguate
@@ -814,24 +967,24 @@ export async function waitForTxConfirmation(
 	}
 }
 
-/** Wait for a specific balance text to appear on the general page.
- *  Uses textContent case-insensitive because balance labels are
- *  text-transform: uppercase via CSS (e.g. "PRIVATE" rendered, "Priv"
- *  in source). */
-export async function waitForBalance(page: Page, text: string, timeout = 60_000): Promise<void> {
-	await page.waitForFunction(
-		(t: string) => (document.body.textContent ?? "").toLowerCase().includes(t.toLowerCase()),
-		{ timeout, polling: 3_000 },
-		text,
-	)
-}
-
 // ── Fee Method ────────────────────────────────────────────────────────
 
-/** Select a fee payment method in the SendPopup's FeeSettingsCard dropdown.
- *  Uses data-testid on dropdown items: send-fee-method-{subtitle}
- *  @param methodSubtitle - "public" | "private" | "sponsored" | "token" */
-export async function selectFeeMethod(page: Page, methodSubtitle: string): Promise<void> {
+/** The three selectable fee methods (`send-fee-method-{subtitle}` testids);
+ *  the fourth rendered entry ("coming soon") is disabled by design. */
+export type FeeMethodSubtitle = "sponsored" | "public" | "private"
+
+/** Select a fee payment method in the shared FeeSettingsCard dropdown (the
+ *  send flow AND the dApp execute/authwit popups embed the same card).
+ *  `mountTimeoutMs` exists because the card mounts only after FPC
+ *  auto-discovery — an async service round-trip that can take seconds on a
+ *  cold path. */
+export async function selectFeeMethod(
+	page: Page,
+	methodSubtitle: FeeMethodSubtitle,
+	opts: { mountTimeoutMs?: number } = {},
+): Promise<void> {
+	const mountTimeoutMs = opts.mountTimeoutMs ?? 2_000
+	await page.waitForSelector('[data-testid="send-fee-method-trigger"]', { visible: true, timeout: mountTimeoutMs })
 	// Open the fee method dropdown (items teleport to #dropdown)
 	await page.evaluate(() => {
 		;(document.querySelector('[data-testid="send-fee-method-trigger"]') as HTMLElement)?.click()
@@ -839,7 +992,7 @@ export async function selectFeeMethod(page: Page, methodSubtitle: string): Promi
 
 	// Wait for the target item to teleport into the dropdown layer.
 	const testid = `send-fee-method-${methodSubtitle}`
-	await page.waitForSelector(`[data-testid="${testid}"]`, { visible: true, timeout: 2_000 })
+	await page.waitForSelector(`[data-testid="${testid}"]`, { visible: true, timeout: mountTimeoutMs })
 
 	// Click the method by data-testid on the teleported DropdownItem
 	await page.evaluate((id: string) => {
@@ -927,14 +1080,32 @@ export async function setInputAndBlur(page: Page, selector: string, value: strin
 // ── Settings: appearance + privacy ───────────────────────────────────────
 
 /** Click a theme button (system / light / dark) and wait for `html[theme=…]`
- *  to reflect the choice. The theme buttons are inside a Dropdown popup —
- *  open it by clicking the trigger first if the button isn't yet visible. */
+ *  to reflect the choice. The theme buttons are inside a Dropdown popup whose
+ *  leave `<Transition>` keeps the options VISIBLE while the dropdown's state
+ *  is already closed — a visibility sample taken mid-close (right after a
+ *  previous selection closed the menu) reads "open", skips the trigger click,
+ *  and then waits on an option that is about to disappear. Gate on the
+ *  dropdown's OWN state (`data-dropdown-open`, synchronous with `isOpen`). */
 export async function setTheme(page: Page, mode: "system" | "light" | "dark"): Promise<void> {
-	const visible = await page.evaluate((m: string) => {
-		const btn = document.querySelector(`[data-testid="theme-${m}-btn"]`) as HTMLElement | null
-		return btn ? btn.offsetParent !== null : false
-	}, mode)
-	if (!visible) await clickByTestId(page, "theme-trigger")
+	const readOpen = () =>
+		page.evaluate(
+			() =>
+				document
+					.querySelector('[data-testid="theme-trigger"]')
+					?.closest("[data-dropdown-open]")
+					?.getAttribute("data-dropdown-open") === "true",
+		)
+	if (!(await readOpen())) {
+		await clickByTestId(page, "theme-trigger")
+		await page.waitForFunction(
+			() =>
+				document
+					.querySelector('[data-testid="theme-trigger"]')
+					?.closest("[data-dropdown-open]")
+					?.getAttribute("data-dropdown-open") === "true",
+			{ timeout: 5_000 },
+		)
+	}
 	await clickByTestId(page, `theme-${mode}-btn`)
 	if (mode === "system") {
 		// system mode resolves to either "dark" or "light" via prefers-color-scheme
@@ -1031,12 +1202,102 @@ export async function changePassword(page: Page, oldPwd: string, newPwd: string)
  *  profile's name into the confirm input, and submit. Profile name is read
  *  from `data-profile-name` on the page root because it's auto-generated.
  *
+ *  Navigation is SETTLE-STABLE, not one-shot: setting `location.hash` updates the
+ *  URL before vue-router commits, so a hash-equality wait passes while a competing
+ *  `router.push("/popup/general")` (SW-reconnect `loadProfile` re-run, post-unlock
+ *  bootstrap churn) can still supersede the in-flight navigation and revert the
+ *  route — the checkbox then never mounts. Observed live: the 5s checkbox wait
+ *  parked with the app fully back on general. The awaited signal here is "the
+ *  reset route COMMITTED (checkbox mounted) and STUCK"; a reverted hash triggers
+ *  a re-navigate, not a longer clock.
+ *
  *  After submit the router redirects to either `/popup/auth` (if other
  *  profiles remain) or `/popup/register` (if it was the last profile). The
  *  caller asserts the redirect; this helper does not. */
 export async function resetProfile(page: Page): Promise<void> {
-	await navigateByHash(page, "#/popup/settings/security/reset")
-	await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+	const RESET_HASH = "#/popup/settings/security/reset"
+	// One re-navigation covers the single characterized race (a competing push
+	// already in flight when the hash was set supersedes our navigation). A SECOND
+	// revert would mean the app is repeatedly redirecting away from reset — a
+	// product-level condition this helper must surface, never normalize.
+	const ATTEMPTS = 2
+	// The dwell must be monotonic: the route+checkbox condition has to hold
+	// CONTINUOUSLY for the window, tracked in-page — a plain waitForFunction
+	// resolves on its first truthy poll and proves nothing about stability.
+	const DWELL_MS = 1_500
+
+	// Poll-based hash trajectory (vue-router hash nav is pushState-based — no
+	// hashchange/popstate fires), dumped into every failure for race forensics.
+	// Re-armed per call (a prior call's timer is cleared) so a second
+	// resetProfile on the same page never reports a frozen call-1 trace.
+	await page.evaluate(() => {
+		const w = window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }>; __nuloResetNavTraceTimer?: number }
+		if (w.__nuloResetNavTraceTimer) window.clearInterval(w.__nuloResetNavTraceTimer)
+		w.__nuloResetNavTrace = [{ t: Date.now(), hash: window.location.hash }]
+		w.__nuloResetNavTraceTimer = window.setInterval(() => {
+			const trace = w.__nuloResetNavTrace as Array<{ t: number; hash: string }>
+			if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
+		}, 100)
+	})
+
+	let lastDiag = ""
+	let settled = false
+	for (let attempt = 0; attempt < ATTEMPTS && !settled; attempt++) {
+		try {
+			// INSIDE the try: the competing-push race can also land between
+			// navigateByHash's hash-set and its equality poll — that throw must
+			// count as a failed attempt (retry + diagnostics), never escape the
+			// envelope uncaught with the trace interval still running.
+			await navigateByHash(page, RESET_HASH)
+			await page.waitForSelector('[data-testid="reset-checkbox-permanent"]', { visible: true, timeout: 5_000 })
+			await page.evaluate(() => {
+				;(window as unknown as { __resetStableSince: number | null }).__resetStableSince = null
+			})
+			await page.waitForFunction(
+				({ h, dwellMs }: { h: string; dwellMs: number }) => {
+					const w = window as unknown as { __resetStableSince: number | null }
+					const ok = window.location.hash === h && !!document.querySelector('[data-testid="reset-checkbox-permanent"]')
+					if (!ok) {
+						w.__resetStableSince = null
+						return false
+					}
+					// performance.now() — the dwell must be monotonic; a wall-clock
+					// adjustment could silently shorten or stretch it.
+					if (w.__resetStableSince == null) w.__resetStableSince = performance.now()
+					return performance.now() - w.__resetStableSince >= dwellMs
+				},
+				{ timeout: 8_000, polling: 150 },
+				{ h: RESET_HASH, dwellMs: DWELL_MS },
+			)
+			settled = true
+		} catch {
+			lastDiag = JSON.stringify(
+				await page
+					.evaluate(() => ({
+						hash: window.location.hash,
+						pageRootMounted: !!document.querySelector("[data-profile-name]"),
+						checkboxInDom: !!document.querySelector('[data-testid="reset-checkbox-permanent"]'),
+						navTrace: (window as unknown as { __nuloResetNavTrace?: Array<{ t: number; hash: string }> }).__nuloResetNavTrace,
+						testidsOnPage: [...document.querySelectorAll("[data-testid]")]
+							.slice(0, 12)
+							.map((el) => el.getAttribute("data-testid")),
+						readyState: document.readyState,
+					}))
+					.catch((e) => ({ evalFailed: String(e) })),
+			)
+		}
+	}
+	await page
+		.evaluate(() => {
+			const w = window as unknown as { __nuloResetNavTraceTimer?: number }
+			if (w.__nuloResetNavTraceTimer) window.clearInterval(w.__nuloResetNavTraceTimer)
+		})
+		.catch(() => {})
+	if (!settled) {
+		throw new Error(
+			`resetProfile: reset route never held for ${DWELL_MS}ms across ${ATTEMPTS} navigations; last parked state: ${lastDiag}`,
+		)
+	}
 	const profileName = await getActiveProfileName(page)
 
 	await clickByTestId(page, "reset-checkbox-permanent")
@@ -1044,6 +1305,268 @@ export async function resetProfile(page: Page): Promise<void> {
 	await clickByTestId(page, "reset-checkbox-sure")
 	await replaceInputValue(page, '[data-testid="reset-confirm-input"]', profileName)
 	await clickByTestId(page, "reset-submit-btn")
+}
+
+/** Highest `updatedAt` across the account's balance rows (0 if none). Captured
+ *  BEFORE a refresh so `waitForFreshBalanceRow` can require a projection that
+ *  happened AFTER it — an imported backup already carries the expected value
+ *  with a nonzero `updatedAt`, so a value-only poll could pass with zero
+ *  post-import/post-reopen sync, silently un-proving the re-sync the tests
+ *  exist to prove. */
+export async function captureBalanceBaseline(page: Page, account: string, tokenContract: string): Promise<number> {
+	return await page.evaluate(
+		async ({ acct, contract }: { acct: string; contract: string }) => {
+			const all = await chrome.storage.local.get(null)
+			// Bind to the exact (account, token) rows: another token's row with the same
+			// raw value must never satisfy the later freshness/value acceptance.
+			const tokenIds = new Set<number>()
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:tokens@")) continue
+				try {
+					const row = JSON.parse(v as string) as { id?: number; contract?: string }
+					if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+				} catch {
+					// Hostile-input discipline: a malformed row is ignored, never fatal.
+				}
+			}
+			let max = 0
+			for (const [k, v] of Object.entries(all)) {
+				if (!k.startsWith("nulo:core:token-balances@")) continue
+				try {
+					const row = JSON.parse(v as string) as { account?: string; token?: number; updatedAt?: number }
+					if (row.account !== acct || typeof row.token !== "number" || !tokenIds.has(row.token)) continue
+					if (typeof row.updatedAt === "number" && row.updatedAt > max) max = row.updatedAt
+				} catch {
+					// Malformed row: skip.
+				}
+			}
+			return max
+		},
+		{ acct: account, contract: tokenContract },
+	)
+}
+
+/** Wait for a balance row for `account` that is both FRESH (`updatedAt` past the
+ *  captured baseline — proves a re-projection actually ran) and CORRECT (exact
+ *  raw `publicBalance`, plus exact raw `privateBalance` when the caller proves
+ *  a private leg — note discovery is what several sweeps assert). Drives at
+ *  most `maxRefreshes` refreshes. Retry cadence: a refresh is re-kicked when
+ *  the previous projection observably finished (some row's `updatedAt`
+ *  advanced past the last refresh) OR the projection envelope elapsed with no
+ *  write (a failed projection persists `syncFailure` but leaves `updatedAt`
+ *  untouched, so a silent stall and a failure look alike here) — AND at least
+ *  the spacing floor has passed since the last kick, so a projection that
+ *  completes fast with stale values cannot burn the cap and leave a dead tail.
+ *  Both bounds pace only WHEN TO RE-KICK, never the acceptance signal, which
+ *  stays freshness + exact value. Bounded refreshes (not spam) matter: blind
+ *  spam starves the popup thread and queues PXE readers that delay any
+ *  subsequent purge (ReadWriteGuard drains readers first). The row read is
+ *  exact and locale-independent — a body-text scan for "1,000" can
+ *  false-positive on "$1,000.00" fiat or "11,000". Value-display call sites
+ *  pair this with a card-scoped DOM assertion (`waitForTokenCardAmount`). */
+export async function waitForFreshBalanceRow(
+	page: Page,
+	opts: {
+		account: string
+		tokenContract: string
+		expectedPublicRaw: string
+		expectedPrivateRaw?: string
+		baselineUpdatedAt: number
+		maxRefreshes?: number
+		timeoutMs?: number
+	},
+): Promise<void> {
+	// No ambient periodic re-sync exists (projections fire only on explicit
+	// refresh / token events / tx updates) and a failed batch is dropped, never
+	// re-enqueued — so the refresh budget must span the whole timeout. The
+	// envelope (queue tick + a ≤12-row batch + margin) re-kicks through silent
+	// stalls; both it and the spacing floor bound the re-kick cadence only,
+	// never the acceptance signal.
+	const REFRESH_ENVELOPE_MS = 15_000
+	// Floor between re-kicks: a projection that completes FAST with stale/wrong
+	// values must not burn the refresh cap in seconds and leave a dead tail —
+	// the cap is derived from this floor so kicks can span the whole deadline
+	// (the old per-site loops re-kicked at ~1.5-2s for up to 60 iterations).
+	const MIN_REFRESH_SPACING_MS = 2_000
+	const { account, tokenContract, expectedPublicRaw, expectedPrivateRaw, baselineUpdatedAt, timeoutMs = 120_000 } = opts
+	const maxRefreshes = opts.maxRefreshes ?? Math.ceil(timeoutMs / MIN_REFRESH_SPACING_MS)
+	const deadline = Date.now() + timeoutMs
+	type BalanceRow = { account?: string; token?: number; publicBalance?: string; privateBalance?: string; updatedAt?: number }
+	// The (account, token) join re-resolves EVERY poll: after a restore the token
+	// row itself can land later than the first read, and binding to the exact
+	// token is what stops another token's identical raw value from satisfying
+	// the acceptance (audit condition).
+	const readRows = (): Promise<BalanceRow[]> =>
+		page.evaluate(
+			async ({ acct, contract }: { acct: string; contract: string }) => {
+				const all = await chrome.storage.local.get(null)
+				const tokenIds = new Set<number>()
+				for (const [k, v] of Object.entries(all)) {
+					if (!k.startsWith("nulo:core:tokens@")) continue
+					try {
+						const row = JSON.parse(v as string) as { id?: number; contract?: string }
+						if (typeof row.id === "number" && row.contract?.toLowerCase() === contract.toLowerCase()) tokenIds.add(row.id)
+					} catch {
+						// Malformed row: skip.
+					}
+				}
+				const rows: Array<{
+					account?: string
+					token?: number
+					publicBalance?: string
+					privateBalance?: string
+					updatedAt?: number
+				}> = []
+				for (const [k, v] of Object.entries(all)) {
+					if (!k.startsWith("nulo:core:token-balances@")) continue
+					try {
+						const row = JSON.parse(v as string) as { account?: string; token?: number }
+						if (row.account === acct && typeof row.token === "number" && tokenIds.has(row.token)) rows.push(row)
+					} catch {
+						// Malformed row: skip.
+					}
+				}
+				return rows
+			},
+			{ acct: account, contract: tokenContract },
+		)
+
+	let refreshes = 0
+	let lastRefreshAt = 0
+	let rows: BalanceRow[] = []
+	while (Date.now() < deadline) {
+		rows = await readRows()
+		if (
+			rows.some(
+				(r) =>
+					(r.updatedAt ?? 0) > baselineUpdatedAt &&
+					r.publicBalance === expectedPublicRaw &&
+					(expectedPrivateRaw === undefined || r.privateBalance === expectedPrivateRaw),
+			)
+		)
+			return
+		const attemptFinished =
+			refreshes === 0 || rows.some((r) => (r.updatedAt ?? 0) >= lastRefreshAt) || Date.now() - lastRefreshAt >= REFRESH_ENVELOPE_MS
+		const spaced = refreshes === 0 || Date.now() - lastRefreshAt >= MIN_REFRESH_SPACING_MS
+		if (attemptFinished && spaced && refreshes < maxRefreshes) {
+			lastRefreshAt = Date.now()
+			refreshes++
+			await refreshBalances(page)
+		}
+		await new Promise((r) => setTimeout(r, 1_000))
+	}
+	// Census across roots, account-agnostic: distinguishes "the account's rows are
+	// keyed differently" from "the token/balance slices are simply absent" — the
+	// latter points at restore-slice loss, a product condition, not a wait problem.
+	const census = await page
+		.evaluate(async () => {
+			const all = await chrome.storage.local.get(null)
+			const keys = Object.keys(all)
+			const grab = (p: string) => keys.filter((k) => k.startsWith(p))
+			return {
+				tokenRows: grab("nulo:core:tokens@").length,
+				balanceRows: grab("nulo:core:token-balances@").map((k) => {
+					try {
+						const r = JSON.parse(all[k] as string) as { account?: string; updatedAt?: number }
+						return { account: `${r.account?.slice(0, 10)}…`, updatedAt: r.updatedAt }
+					} catch {
+						return { account: "unparseable", updatedAt: -1 }
+					}
+				}),
+				accountRows: grab("nulo:core:accounts@").length,
+			}
+		})
+		.catch((e) => ({ censusFailed: String(e) }))
+	throw new Error(
+		`waitForFreshBalanceRow: no (${account}, ${tokenContract}) row with publicBalance=${expectedPublicRaw}${expectedPrivateRaw !== undefined ? ` privateBalance=${expectedPrivateRaw}` : ""} and updatedAt>${baselineUpdatedAt} after ${refreshes} refresh(es); rows: ${JSON.stringify(rows)}; census: ${JSON.stringify(census)}`,
+	)
+}
+
+/** Card-scoped display assertion: the tokens-card for `symbol` shows exactly
+ *  `displayAmount` — the card is selected by its `data-symbol` attribute, the
+ *  fiat node is excluded (so "$1,000.00" can't satisfy a "1,000" check), and
+ *  the amount must sit on digit boundaries (so "11,000" or "1,000.5" can't
+ *  satisfy "1,000" as a substring — audit condition). */
+export async function waitForTokenCardAmount(page: Page, displayAmount: string, symbol: string, timeout = 30_000): Promise<void> {
+	await page.waitForFunction(
+		({ amt, sym }: { amt: string; sym: string }) => {
+			const boundary = new RegExp(`(^|[^\\d,.])${amt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\d,.])`)
+			return [...document.querySelectorAll('[data-testid="tokens-card"]')].some((card) => {
+				if (!card.querySelector(`[data-testid="token-symbol"][data-symbol="${sym}"]`)) return false
+				const clone = card.cloneNode(true) as HTMLElement
+				for (const fiat of clone.querySelectorAll('[data-testid="token-fiat"]')) fiat.remove()
+				return boundary.test(clone.textContent ?? "")
+			})
+		},
+		{ timeout, polling: 500 },
+		{ amt: displayAmount, sym: symbol },
+	)
+}
+
+/** Capture the sole profile's id from raw storage and PROVE its row exists — the
+ *  pre-condition that makes a later "row absent" read mean DELETED rather than
+ *  never-created. Expects exactly one profile row (the shape of every reset-flow
+ *  e2e); throws otherwise so a multi-profile drift can't silently weaken the
+ *  purge assertion. */
+export async function captureSoleProfileId(page: Page): Promise<string> {
+	const ids = await page.evaluate(async () => {
+		const all = await chrome.storage.local.get(null)
+		return Object.keys(all)
+			.filter((k) => k.startsWith("nulo:core:profiles@"))
+			.map((k) => k.slice("nulo:core:profiles@".length))
+	})
+	if (ids.length !== 1) throw new Error(`captureSoleProfileId: expected exactly 1 profile row, found ${ids.length}`)
+	return ids[0]
+}
+
+/** Wait until profile deletion COMPLETED for `profileId`: its row gone, its exact
+ *  tombstone (`nulo:core:profile-tombstones@<id>`) gone, and every given owned
+ *  root emptied. The tombstone is written BEFORE the row delete and cleared only
+ *  after the coordinator's full awaited purge resolves, so this combined
+ *  predicate — anchored on a row proven to exist beforehand — is the same
+ *  completion fact the reset page's awaited `deleteProfile` observes. Tombstone
+ *  absence ALONE would also be true before deletion ever started, which is why
+ *  callers must capture the id via `captureSoleProfileId` first. On timeout the
+ *  remaining keys are dumped: a persisting tombstone+row means a rejected or
+ *  wedged purge; owned-root leftovers mean a partial cascade. */
+export async function waitForProfilePurged(
+	page: Page,
+	profileId: string,
+	opts: { ownedRoots?: string[]; timeoutMs?: number } = {},
+): Promise<void> {
+	const { ownedRoots = [], timeoutMs = 75_000 } = opts
+	const deadline = Date.now() + timeoutMs
+	let last: Record<string, boolean> = {}
+	while (Date.now() < deadline) {
+		last = await page.evaluate(
+			async ({ id, roots }: { id: string; roots: string[] }) => {
+				const all = await chrome.storage.local.get(null)
+				const keys = Object.keys(all)
+				const state: Record<string, boolean> = {
+					profileRow: keys.includes(`nulo:core:profiles@${id}`),
+					tombstone: keys.includes(`nulo:core:profile-tombstones@${id}`),
+				}
+				for (const r of roots) state[r] = keys.some((k) => k.startsWith(`${r}@`))
+				return state
+			},
+			{ id: profileId, roots: ownedRoots },
+		)
+		if (!Object.values(last).some(Boolean)) return
+		await new Promise((r) => setTimeout(r, 500))
+	}
+	// The "Couldn't delete profile" rejection toast auto-dismisses in ~2s, so it
+	// cannot be sampled at timeout; the persisting tombstone+row combination IS the
+	// rejected-or-wedged signature. Session presence distinguishes "delete never
+	// started (still logged in, nothing changed)" from "mid-purge wedge".
+	const sessionPresent = await page
+		.evaluate(async () => {
+			const r = await chrome.storage.session.get("nulo:core:session")
+			return !!r["nulo:core:session"]
+		})
+		.catch(() => "unreadable")
+	throw new Error(
+		`waitForProfilePurged: purge incomplete after ${timeoutMs}ms for profile ${profileId}: ${JSON.stringify(last)}; sessionPresent=${sessionPresent}`,
+	)
 }
 
 /** Drive the seed-phrase reveal flow on `/popup/settings/security/export/seed`.
@@ -1055,33 +1578,6 @@ export async function revealSeedPhrase(page: Page, password: string): Promise<vo
 	await replaceInputValue(page, '[data-testid="unlock-password-input"]', password)
 	await clickByTestId(page, "unlock-submit-btn")
 	await page.waitForSelector('[data-testid="reveal-content"]', { visible: true, timeout: 5_000 })
-}
-
-/** Drive the secret-key reveal flow. The "encrypted" variant is gateless
- *  (auto-fetches public key on selection — async, so wait for the input to
- *  receive a non-empty value). The "plain" variant goes through the same
- *  agree → unlock chain as the seed page. Caller asserts on
- *  `[data-testid="reveal-content"]` afterwards. */
-export async function revealSecretKey(page: Page, password: string, variant: "plain" | "encrypted"): Promise<void> {
-	await navigateByHash(page, "#/popup/settings/security/export/key")
-	await clickByTestId(page, `key-variant-${variant}-btn`)
-	if (variant === "plain") {
-		await clickByTestId(page, "agree-continue-btn")
-		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 5_000 })
-		await replaceInputValue(page, '[data-testid="unlock-password-input"]', password)
-		await clickByTestId(page, "unlock-submit-btn")
-	}
-	await page.waitForSelector('[data-testid="reveal-content"]', { visible: true, timeout: 5_000 })
-	// Wait for the inner input to actually have a value — the encrypted
-	// variant fetches its key in an async watcher.
-	await page.waitForFunction(
-		() => {
-			const scope = document.querySelector('[data-testid="reveal-content"]')
-			const input = scope?.querySelector("input") as HTMLInputElement | null
-			return !!input && input.value.length > 0
-		},
-		{ timeout: 10_000, polling: 100 },
-	)
 }
 
 // ── Auth + profile flows ────────────────────────────────────────────────

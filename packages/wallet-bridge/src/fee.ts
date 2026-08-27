@@ -34,8 +34,11 @@ export type FeeSettings = {
 }
 
 export type GasBalances = {
-	/** Public FeeJuice balance (raw, 18 decimals) */
-	readonly publicFeeJuice: string
+	/** Public FeeJuice balance (raw, 18 decimals). Null = UNKNOWN (the read
+	 *  failed or timed out) — never a fabricated zero. Consumers must fail
+	 *  closed on null for anything gating-grade; only a confirmed "0" is a
+	 *  real empty balance. */
+	readonly publicFeeJuice: string | null
 	/** Private FeeJuice balance via PrivateFPC (raw, 18 decimals), null if no PrivateFPC */
 	readonly privateFeeJuice: string | null
 }

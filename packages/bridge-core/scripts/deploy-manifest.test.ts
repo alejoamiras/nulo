@@ -76,7 +76,7 @@ describe("writeCandidateAtomic", () => {
 		expect(back.l1.usdc).toBe(manifest.l1.usdc)
 		expect(back.l1.portal).toBe(manifest.l1.portal)
 		expect(back.l1.portalSource).toBe("forked-v1")
-		expect(back.l1.fuel.core.swapTarget).toBe((manifest.l1.fuel?.core as { swapTarget: string }).swapTarget)
+		expect(back.l1.fuel.core.swapTarget).toBe((manifest.l1.fuel?.core as { swapTarget: string } | undefined)?.swapTarget)
 		for (const k of ["proxy", "token", "bridge"] as const) {
 			expect(back.l2[k].address).toBe(manifest.l2[k].address)
 			expect(typeof back.l2[k].salt).toBe("number")

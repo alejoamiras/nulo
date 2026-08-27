@@ -17,6 +17,7 @@ import { LoggerStore } from "@/wallet/logger"
 import type { AztecNode } from "@aztec/stdlib/interfaces/client"
 import type { IPXE } from "@/wallet/services/pxe/client"
 import type { TaskService, WrappedTask } from "@/wallet/services/task/service"
+import { DuplicateInitializationError } from "@nulo/extension-messaging/errors"
 import { ExecutionCoordinator, type ProveAndSendContext } from "./execution-coordinator"
 
 const fakeTask = { complete: vi.fn(), fail: vi.fn(), startSubtask: vi.fn() } as unknown as WrappedTask
@@ -154,5 +155,42 @@ describe("proveAndSend: frozen sequence", () => {
 		await expect(makeCoordinator().proveAndSend(ctx)).rejects.toThrow("mempool full")
 		expect(calls).not.toContain("record")
 		expect(calls).not.toContain("journal:succeeded")
+	})
+})
+
+describe("sendTxTask — duplicate-initialization classification (N-15)", () => {
+	const NULLIFIER_REJECTION = new Error("Invalid tx: Existing nullifier")
+
+	function makeSendHarness(sendError: Error) {
+		const coordinator = makeCoordinator()
+		const node = { sendTx: vi.fn(async () => Promise.reject(sendError)) } as unknown as AztecNode
+		return { coordinator, node }
+	}
+
+	test("initializing build + existing-nullifier rejection → typed error with the honest copy, task fails with it", async () => {
+		const { coordinator, node } = makeSendHarness(NULLIFIER_REJECTION)
+		;(fakeTask.fail as ReturnType<typeof vi.fn>).mockClear()
+		const run = coordinator.sendTxTask(node, {} as never, fakeTask, true)
+		await expect(run).rejects.toBeInstanceOf(DuplicateInitializationError)
+		await expect(coordinator.sendTxTask(node, {} as never, fakeTask, true)).rejects.toThrow(/wait for network sync, then retry/)
+		const failedWith = (fakeTask.fail as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+		expect(failedWith).toBeInstanceOf(DuplicateInitializationError) // honest text reaches the task, not the raw validator string
+	})
+
+	test("NON-initializing build + the same rejection stays GENERIC (double-spend false-positive guard)", async () => {
+		const { coordinator, node } = makeSendHarness(NULLIFIER_REJECTION)
+		const run = coordinator.sendTxTask(node, {} as never, fakeTask, false)
+		await expect(run).rejects.toBe(NULLIFIER_REJECTION)
+	})
+
+	test("unknown provenance (undefined flag) stays GENERIC", async () => {
+		const { coordinator, node } = makeSendHarness(NULLIFIER_REJECTION)
+		await expect(coordinator.sendTxTask(node, {} as never, fakeTask, undefined)).rejects.toBe(NULLIFIER_REJECTION)
+	})
+
+	test("initializing build + an UNRELATED rejection stays GENERIC", async () => {
+		const other = new Error("Node unreachable")
+		const { coordinator, node } = makeSendHarness(other)
+		await expect(coordinator.sendTxTask(node, {} as never, fakeTask, true)).rejects.toBe(other)
 	})
 })

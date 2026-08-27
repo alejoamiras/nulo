@@ -9,9 +9,6 @@ import { useProfileBootstrap } from "@/composables/useProfileBootstrap"
 import { useProfileImportFlow } from "@/composables/useProfileImportFlow"
 import { useToast } from "@/composables/toast"
 
-/** Services */
-import { setSentinel } from "@/utils/core"
-
 /** Utils */
 import { setLastActiveProfileId } from "@/utils/lastActiveProfile"
 
@@ -41,7 +38,6 @@ const { bootstrapActiveProfile, hydrateKnownProfile } = useProfileBootstrap()
 async function completeImport(profile: unknown) {
 	const p = profile as { id: string; name: string; type: "password" | "passkey" }
 	await setLastActiveProfileId(p.id)
-	await setSentinel()
 	const outcome = await completeImportWithRecovery({
 		waitForActive: async () => {
 			if (!(await bootstrapActiveProfile(p))) throw new Error("bootstrap did not activate")
@@ -65,8 +61,6 @@ const {
 	onCeremonyReject,
 	selectedImportOption,
 	seedPhrase,
-	privateKey,
-	publicKey,
 	password,
 	repeatedPassword,
 	maxPasswordLength,
@@ -74,11 +68,10 @@ const {
 	error,
 	isCopied,
 	isAllowedToImportBySeedPhrase,
-	isAllowedToImportByPrivateKey,
-	isAllowedToImportByPublicKey,
 	selectedBackup,
 	decryptionPassword,
 	restoreStatus,
+	restoreStage,
 	importedProfile,
 	isAllowedToImportBackup,
 	isRestoreHasErrors,
@@ -87,8 +80,6 @@ const {
 	restoreBackup,
 	showRestoreErrorLog,
 	handleImportSeed,
-	handleImportPrivateKey,
-	handleImportPublicKey,
 	handleImportPasskey,
 	handlePasswordInput,
 	handleSecretInput,
@@ -132,13 +123,11 @@ onBeforeUnmount(() => {
 	password.value = ""
 	repeatedPassword.value = ""
 	seedPhrase.value = undefined
-	privateKey.value = undefined
-	publicKey.value = undefined
 })
 </script>
 
 <template>
-	<OnboardingPage :gap="24">
+	<OnboardingPage :gap="24" :data-restore-stage="restoreStage">
 		<button
 			type="button"
 			:class="$style.back"
@@ -152,7 +141,7 @@ onBeforeUnmount(() => {
 		<header :class="$style.hero">
 			<BrutalistTitle main="Import" sub="Profile" />
 			<div :class="$style.hero_bar" />
-			<Text size="14" color="secondary" height="150">Restore from a seed, key, or backup.</Text>
+			<Text size="14" color="secondary" height="150">Restore from a recovery phrase, passkey, or full backup.</Text>
 		</header>
 
 		<Flex direction="column" gap="8">
@@ -200,10 +189,8 @@ onBeforeUnmount(() => {
 		/>
 
 		<ImportSecretForm
-			v-if="selectedImportOption === 'seed' || selectedImportOption === 'private_key' || selectedImportOption === 'public_key'"
+			v-if="selectedImportOption === 'seed'"
 			v-model:seedPhrase="seedPhrase"
-			v-model:privateKey="privateKey"
-			v-model:publicKey="publicKey"
 			v-model:password="password"
 			v-model:repeatedPassword="repeatedPassword"
 			:method="selectedImportOption"
@@ -240,6 +227,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta"
 					size="large"
+					data-testid="import-full-backup-continue-btn"
 					@click="importedProfile && completeImport(importedProfile as { id: string })"
 				>
 					Continue
@@ -248,6 +236,7 @@ onBeforeUnmount(() => {
 					v-if="restoreStatus === 'finished' && isRestoreHasErrors"
 					variant="cta_outline"
 					size="large"
+					data-testid="import-full-backup-view-errors-btn"
 					@click="showRestoreErrorLog"
 				>
 					View errors
@@ -265,29 +254,6 @@ onBeforeUnmount(() => {
 			>
 				Import profile
 			</Button>
-			<Button
-				v-if="selectedImportOption === 'private_key'"
-				variant="cta"
-				size="large"
-				:disabled="!isAllowedToImportByPrivateKey || isImporting"
-				:loading="isImporting"
-				data-testid="onboarding-submit-import"
-				@click="handleImportPrivateKey"
-			>
-				Import profile
-			</Button>
-			<Button
-				v-if="selectedImportOption === 'public_key'"
-				variant="cta"
-				size="large"
-				:disabled="!isAllowedToImportByPublicKey || isImporting"
-				:loading="isImporting"
-				data-testid="onboarding-submit-import"
-				@click="handleImportPublicKey"
-			>
-				Import profile
-			</Button>
-
 			<Button
 				variant="cta_outline"
 				size="large"

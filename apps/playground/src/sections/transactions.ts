@@ -30,6 +30,12 @@ export function renderTransactions(): string {
 				<button data-testid="pg-btn-sendTx-multicall" type="button" ${dis}>sendTx multicall</button>
 				<button data-testid="pg-btn-sendTx-multicall-chunked" type="button" ${dis}>sendTx multicall &gt;5</button>
 			</div>
+			<div class="pg-row">
+				<label>Consumer (pull contract): <input data-testid="pg-input-consumerAddress" name="consumerAddress" type="text" placeholder="0x... (Crowdfunding)" /></label>
+				<label>Pull-token instance JSON: <textarea data-testid="pg-input-delegatedTokenInstance" name="delegatedTokenInstance" placeholder="{...}"></textarea></label>
+				<label>Consumer instance JSON: <textarea data-testid="pg-input-delegatedConsumerInstance" name="delegatedConsumerInstance" placeholder="{...}"></textarea></label>
+				<button data-testid="pg-btn-sendTx-delegated" type="button" ${dis}>sendTx delegated (donate)</button>
+			</div>
 		</fieldset>
 	`
 }
@@ -129,6 +135,44 @@ export function bindTransactions(root: HTMLElement): void {
 			const wallet = getWallet()!
 			const { exec, fromAddr } = await buildTransferExec(3)
 			// biome-ignore lint/suspicious/noExplicitAny: structural cast
+			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
+		}),
+	)
+
+	root.querySelector<HTMLButtonElement>('[data-testid="pg-btn-sendTx-delegated"]')?.addEventListener(
+		"click",
+		safe("sendTx", async () => {
+			// Delegated pull: the consumer contract (Crowdfunding) pulls the
+			// caller's tokens via `transfer_in_private` — msg.sender ≠ from, so
+			// the token asserts a call authwit against the CALLER's account. The
+			// dApp supplies NO witness: the wallet's estimate-time discovery must
+			// find the need and sign it, or the flow cannot complete.
+			const wallet = getWallet()!
+			const consumer = getInput("consumerAddress")
+			const amount = getInput("amount") || "100"
+			if (!consumer) throw new Error("consumerAddress input required")
+			const { CrowdfundingContract } = await import("@aztec/noir-contracts.js/Crowdfunding")
+			const { TokenContract: PullTokenContract } = await import("@aztec/noir-contracts.js/Token")
+			const s = getState()
+			if (!s.selectedAccount) throw new Error("no selected account")
+			const fromAddr = AztecAddress.fromStringUnsafe(s.selectedAccount)
+			// A real dApp introduces its own contracts: register instance+artifact
+			// with the wallet before calling (the test driver injects the deployed
+			// instances; artifacts ship in this bundle).
+			const tokenInstanceRaw = getInput("delegatedTokenInstance")
+			const consumerInstanceRaw = getInput("delegatedConsumerInstance")
+			if (tokenInstanceRaw) {
+				// biome-ignore lint/suspicious/noExplicitAny: instance wire shape
+				await wallet.registerContract(JSON.parse(tokenInstanceRaw) as any, PullTokenContract.artifact as any)
+			}
+			if (consumerInstanceRaw) {
+				// biome-ignore lint/suspicious/noExplicitAny: instance wire shape
+				await wallet.registerContract(JSON.parse(consumerInstanceRaw) as any, CrowdfundingContract.artifact as any)
+			}
+			// biome-ignore lint/suspicious/noExplicitAny: structural typing across SDK boundary
+			const crowdfunding: any = await CrowdfundingContract.at(AztecAddress.fromStringUnsafe(consumer), wallet as any)
+			const exec = await crowdfunding.methods.donate(BigInt(amount)).request()
+			// biome-ignore lint/suspicious/noExplicitAny: ExecutionPayload + SendOptions structural cast
 			return wallet.sendTx(exec as any, { from: fromAddr, wait: "NO_WAIT" } as any)
 		}),
 	)

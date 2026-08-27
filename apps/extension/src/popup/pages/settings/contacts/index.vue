@@ -17,6 +17,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 
 /** Utils */
 import { stringCompare } from "@/utils"
+import { copyToClipboard } from "@/utils/clipboard"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
@@ -119,8 +120,10 @@ function handleClickContact(contact) {
 	router.push("/popup/send")
 }
 const handleCopyContactAddress = (contact) => {
-	window.navigator.clipboard.writeText(contact.address)
-	openToast({ label: "Address is copied", icon: "copy" })
+	void copyToClipboard(contact.address, openToast, {
+		success: { label: "Address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 function handleEditContact(contact) {
 	cacheStore.contactToEditIdx = contact.id

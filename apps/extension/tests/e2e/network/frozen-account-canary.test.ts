@@ -25,8 +25,8 @@ import { expect, inject } from "vitest"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { mintPublicTokensForAccount, waitForTxMined, type AztecTestConfig } from "../fixtures/aztec"
 import { clickByTestId, openPopup, test, waitForHash, type ExtensionContext } from "../fixtures/extension"
-import { ensureUnlocked, getAccountAddress, revealSecretKey } from "../fixtures/helpers"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { ensureUnlocked, getAccountAddress, revealSeedPhrase } from "../fixtures/helpers"
+import { assertPgOk, formatPgMismatch, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { approveExecute, approveVerify, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { TEST_PASSWORD } from "../fixtures/constants"
 
@@ -66,7 +66,7 @@ function txHashOf(resultJson: unknown): string {
 			? resultJson.replace(/^"(.*)"$/, "$1")
 			: (resultJson as { txHash?: unknown } | null | undefined)?.txHash
 	if (typeof candidate !== "string" || !candidate.startsWith("0x")) {
-		throw new Error(`cannot extract tx hash from result: ${JSON.stringify(resultJson)}`)
+		throw new Error(`cannot extract tx hash from result: ${(JSON.stringify(resultJson) ?? "undefined").slice(0, 2_000)}`)
 	}
 	return candidate
 }
@@ -95,32 +95,41 @@ test.skipIf(!hasConfig)(
 		expect(accountAddresses.length).toBe(2)
 
 		// ── Stage 1: frozen derivation reproduces the live wallet's addresses ──
-		step("revealing profile master")
+		// Capture the recovery phrase (plain-key export is gone in KDF v2) and derive the master
+		// test-side through the standard BIP-39 step — the same path the wallet uses.
+		step("revealing recovery phrase")
 		const popup = await openPopup(ctx)
 		await waitForHash(popup, "#/popup/general", 30_000)
-		await revealSecretKey(popup, TEST_PASSWORD, "plain")
-		const masterBase64 = await popup.evaluate(() => {
+		await revealSeedPhrase(popup, TEST_PASSWORD)
+		const words = await popup.evaluate(() => {
 			const scope = document.querySelector('[data-testid="reveal-content"]')
 			const input = scope?.querySelector("input") as HTMLInputElement | null
 			if (!input) throw new Error("reveal-content input not present")
 			return input.value
 		})
 		await popup.close()
-		expect(masterBase64.length).toBeGreaterThan(0)
+		expect(words.split(" ").length).toBe(24)
 
 		step("deriving accounts test-side through the frozen path")
 		const { Fr } = await import("@aztec/aztec.js/fields")
 		const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
+		const { deriveMasterFromMnemonic } = await import("@nulo/wallet-crypto")
 		const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 		const { computeSiloedPrivateInitializationNullifier } = await import("@aztec/stdlib/hash")
 		const { createLogger } = await import("@aztec/foundation/log")
 		const logger = createLogger("frozen-account-canary")
-		const master = Fr.fromBuffer(Buffer.from(masterBase64, "base64"))
-		// Same formula as the wallet's account service: poseidon2Hash([master, chainId, type, index])
-		// with Local Network chainId=0 and AccountType.Nulo_v1=0.
+		const master = Fr.fromBuffer(Buffer.from(await deriveMasterFromMnemonic(words.split(" "))))
+		// DELIBERATELY INDEPENDENT recompute of the wallet's NULO-ACCOUNT-KDF v2 account-seed
+		// formula (poseidon2HashWithSeparator = separator unshifted as Fr):
+		// poseidon2Hash([SEP, master, l1ChainId, type, index]) with SEP = NULO_ACCOUNT_SEED_SEP
+		// (0xa22f2a02 = sha256("nulo:account-seed:v2")[0..4]), Local Network l1ChainId = 31337
+		// (anvil), AccountType.Nulo_v1 = 0. Hand-rolled ON PURPOSE — never import the wallet's
+		// deriveAccountSeed here; this test is the external cross-check.
+		const NULO_ACCOUNT_SEED_SEP = 2720999938
+		const LOCAL_L1_CHAIN_ID = 31337
 		const derived = await Promise.all(
 			[0, 1].map(async (index) => {
-				const seed = poseidon2Hash([master, new Fr(0), new Fr(0), new Fr(index)])
+				const seed = poseidon2Hash([new Fr(NULO_ACCOUNT_SEED_SEP), master, new Fr(LOCAL_L1_CHAIN_ID), new Fr(0), new Fr(index)])
 				const account = await NuloAccount.new(seed, logger)
 				const instance = (account as unknown as { instance: { initializationHash: InstanceType<typeof Fr> } }).instance
 				const initNullifier = await computeSiloedPrivateInitializationNullifier(account.address, instance.initializationHash)
@@ -159,9 +168,9 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-grantPublicAuthwit")
 		const grantPopup = await grantPopupP
 		await waitForExecuteContent(grantPopup)
-		await approveExecute(grantPopup)
+		await approveExecute(grantPopup, { approvableTimeoutMs: 120_000 })
 		const grantResult = await waitForPgResult(page, "grantPublicAuthwit", seqGrant, 300_000)
-		expect(grantResult.status).toBe("ok")
+		await assertPgOk(page, grantResult, "frozen-account-canary:grantResult")
 		const grantTxHash = txHashOf(grantResult.resultJson)
 		step(`grant submitted (${grantTxHash.slice(0, 12)}…); waiting for the node to mine it`)
 		await waitForTxMined(aztecConfig!, grantTxHash, 300_000)
@@ -183,9 +192,9 @@ test.skipIf(!hasConfig)(
 		await clickByTestId(page, "pg-btn-consumeAuthwit")
 		const consumePopup = await consumePopupP
 		await waitForExecuteContent(consumePopup)
-		await approveExecute(consumePopup)
+		await approveExecute(consumePopup, { approvableTimeoutMs: 120_000 })
 		const consumeResult = await waitForPgResult(page, "sendTx", seqConsume, 300_000)
-		expect(consumeResult.status).toBe("ok")
+		await assertPgOk(page, consumeResult, "frozen-account-canary:consumeResult")
 		const consumeTxHash = txHashOf(consumeResult.resultJson)
 		await waitForTxMined(aztecConfig!, consumeTxHash, 300_000)
 		expect(await node.getNullifierMembershipWitness("latest", derivedB.initNullifier)).toBeDefined()
@@ -193,21 +202,44 @@ test.skipIf(!hasConfig)(
 
 		// ── Stage 5: SW restart → recovery re-derives and still operates ──
 		step("terminating the service worker")
+		// Snapshot liveness BEFORE the kill: session storage retains the pre-kill
+		// heartbeat, so a truthy check passes instantly against a stale value and
+		// the next UI wait races the worker. Strictly-newer at least proves the
+		// worker is live and writing now — it does NOT prove a respawn, since the
+		// terminate leaves this worker running and its heartbeat supplies a fresh
+		// timestamp on its own (deflake-round-3 `lessons/phase-3.md`). The stage's
+		// real assertion — that the frozen account still re-derives and operates —
+		// is unaffected. The snapshot MUST run in an extension page: chrome.storage
+		// is undefined on the playground page, where the catch's 0 would let the
+		// stale heartbeat satisfy the gate.
+		const snapshotPopup = await openPopup(ctx)
+		const preKillLiveness = await snapshotPopup.evaluate(async () => {
+			try {
+				const r = await chrome.storage.session.get("nulo:liveness")
+				return Number(r["nulo:liveness"] ?? 0)
+			} catch {
+				return 0
+			}
+		})
+		await snapshotPopup.close()
+		// The SW has heartbeat through four stages by now — a zero snapshot means
+		// the read itself broke (wrong page type), which would silently degrade
+		// the strictly-newer gate back to truthy.
+		expect(preKillLiveness).toBeGreaterThan(0)
 		await stopServiceWorker(ctx)
 
 		const recoveryPopup = await openPopup(ctx)
-		// SW "target found" ≠ ready — poll the app's liveness heartbeat before driving the UI
-		// (sw-restart-network.test.ts precedent).
 		await recoveryPopup.waitForFunction(
-			async () => {
+			async (priorTs: number) => {
 				try {
 					const result = await chrome.storage.session.get("nulo:liveness")
-					return !!result["nulo:liveness"]
+					return Number(result["nulo:liveness"] ?? 0) > priorTs
 				} catch {
 					return false
 				}
 			},
 			{ timeout: 30_000, polling: 500 },
+			preKillLiveness,
 		)
 		await recoveryPopup.waitForFunction(() => window.location.hash.length > 2, { timeout: 60_000 })
 		await ensureUnlocked(recoveryPopup, TEST_PASSWORD)
@@ -242,7 +274,7 @@ test.skipIf(!hasConfig)(
 		const seqCaps = await snapshotResultSeq(page)
 		await clickByTestId(page, "pg-btn-requestCapabilities")
 		const capsResult = await waitForPgResult(page, "requestCapabilities", seqCaps, 60_000)
-		expect(capsResult.status).toBe("ok")
+		await assertPgOk(page, capsResult, "frozen-account-canary:capsResult")
 		// The reconnected session must expose both granted accounts before the acting-account
 		// switch — an empty select would silently no-op the value assignment.
 		await page.waitForFunction(() => document.querySelectorAll('[data-testid="pg-select-account"] option').length >= 2, {
@@ -275,7 +307,7 @@ test.skipIf(!hasConfig)(
 			waitForPgResult(page, "sendTx", seqFinal, 175_000).then(
 				(r) => {
 					if (r.status === "error") {
-						reject(new Error(`post-restart sendTx errored dApp-side: ${JSON.stringify(r.errorJson)}`))
+						reject(new Error(`post-restart sendTx errored dApp-side: ${formatPgMismatch(r)}`))
 					}
 				},
 				() => {},
@@ -283,9 +315,9 @@ test.skipIf(!hasConfig)(
 		})
 		const finalPopup = await Promise.race([finalPopupP, errorSentinel])
 		await waitForExecuteContent(finalPopup)
-		await approveExecute(finalPopup)
+		await approveExecute(finalPopup, { approvableTimeoutMs: 120_000 })
 		const finalResult = await waitForPgResult(page, "sendTx", seqFinal, 300_000)
-		expect(finalResult.status).toBe("ok")
+		await assertPgOk(page, finalResult, "frozen-account-canary:finalResult")
 		const finalTxHash = txHashOf(finalResult.resultJson)
 		await waitForTxMined(aztecConfig!, finalTxHash, 300_000)
 		step("post-restart tx mined — re-derived frozen account fully operational")

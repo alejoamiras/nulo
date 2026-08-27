@@ -6,6 +6,8 @@ import { storageLocalSet } from "@/utils/storage"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -40,11 +42,17 @@ const name = form.fields.name.value
 
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist")
 const isAvailableToCreateAccount = computed(() => {
+	// Full-lifetime submit latch: a running create closes the form on EVERY
+	// route (button, Enter, future callers) — the name-uniqueness check below
+	// is synchronous against a post-await push, so two concurrent invocations
+	// could otherwise both pass it and create two same-named accounts.
+	if (isCreatingAccount.value) return false
 	if (!name.value.length) return false
 	if (form.fields.name.error.value) return false
 	return true
 })
 
+const isCreatingAccount = ref(false)
 const handleCreateAccount = async () => {
 	if (!isAvailableToCreateAccount.value) return
 
@@ -55,30 +63,35 @@ const handleCreateAccount = async () => {
 		return
 	}
 
-	const account = await managers.account.createAccount(
-		appStore.profile.id,
-		appStore.network.chainId,
-		AccountType.Nulo_v1,
-		name.value.trim(),
-	)
+	isCreatingAccount.value = true
+	try {
+		const account = await managers.account.createAccount(
+			appStore.profile.id,
+			appStore.network.chainId,
+			AccountType.Nulo_v1,
+			name.value.trim(),
+		)
 
-	// The account is created either way; only SELECTING it moves the scope, so
-	// that part is re-checked after the creation RPC.
-	appStore.accounts.push(account)
-	const selected = await appStore.commitScopeChange(() => {
-		appStore.account = account
-	})
-	if (!selected) {
-		openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+		// The account is created either way; only SELECTING it moves the scope, so
+		// that part is re-checked after the creation RPC.
+		appStore.accounts.push(account)
+		const selected = await appStore.commitScopeChange(() => {
+			appStore.account = account
+		})
+		if (!selected) {
+			openToast({ label: "Finish or cancel your pending transaction first", icon: "info" }, 3_000)
+			emit("onClose")
+			return
+		}
+
+		await storageLocalSet({
+			"nulo:ui:activeAccount": account.address,
+		})
+
 		emit("onClose")
-		return
+	} finally {
+		isCreatingAccount.value = false
 	}
-
-	await storageLocalSet({
-		"nulo:ui:activeAccount": account.address,
-	})
-
-	emit("onClose")
 }
 
 usePopupEntity(() => props.show, {
@@ -104,6 +117,7 @@ usePopupEntity(() => props.show, {
 		title="New account"
 		submitLabel="Create"
 		:submitDisabled="!isAvailableToCreateAccount"
+		:submitLoading="isCreatingAccount"
 		submitTestId="new-account-submit"
 		@submit="handleCreateAccount"
 	>
@@ -128,67 +142,9 @@ usePopupEntity(() => props.show, {
 
 		<template #belowSubmit>
 			<Text size="12" weight="500" color="tertiary" height="140" align="center" style="padding: 0 20px">
-				New accounts do not require the creation of a new seed phrase
+				New accounts do not require the creation of a new recovery phrase
 			</Text>
 		</template>
 	</FormPopup>
 </template>
 
-<style module>
-.network {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
-}
-
-.item {
-	height: 30px;
-
-	border-radius: 8px;
-	border: 2px solid var(--nulo-border);
-	cursor: pointer;
-
-	padding: 0 16px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		border: 2px solid var(--nulo-outline);
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-
-	&.selected {
-		background: var(--green);
-	}
-
-	&.disabled {
-		opacity: 0.5;
-		pointer-events: none;
-	}
-}
-</style>

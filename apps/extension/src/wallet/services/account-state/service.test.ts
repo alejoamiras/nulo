@@ -157,32 +157,159 @@ describe("AccountStateService.restore (nested restoreError normalization)", () =
 
 	test("normalizes nested sender + contract restore errors to message strings", async () => {
 		// A backup item whose networkId is absent from `networks` makes both
-		// inner loops throw "Network not found"; the per-item catch stores the
-		// normalized message STRING (via toRestoreError) at the nested
-		// sender/contract level — not a raw Error object.
-		const backup = [{ networkId: "missing", senders: [{ address: "0x1" }], contracts: [{ address: "0x2" }] }] as unknown as Parameters<
-			typeof accountStateService.restore
-		>[0]
+		// inner loops throw "Network not found"; the per-child catch stores the
+		// normalized message STRING (via toRestoreError) — not a raw Error
+		// object. (Contract entries need instance+artifact to pass the
+		// normalizer's shape boundary.)
+		const backup = [
+			{
+				networkId: "missing",
+				senders: [{ address: "0x1" }],
+				contracts: [{ address: "0x2", instance: { i: 1 }, artifact: { a: 1 } }],
+			},
+		] as unknown as Parameters<typeof accountStateService.restore>[0]
 
 		const restored = await accountStateService.restore(backup, [])
-		expect(restored[0]!.senders[0]!.restoreError).toBe("Network not found")
-		expect(restored[0]!.contracts[0]!.restoreError).toBe("Network not found")
-		expect(typeof restored[0]!.senders[0]!.restoreError).toBe("string")
+		const item = restored.find((r) => r.networkId === "missing")
+		expect(item?.senders[0]?.restoreError).toBe("Network not found")
+		expect(item?.contracts[0]?.restoreError).toBe("Network not found")
+		expect(typeof item?.senders[0]?.restoreError).toBe("string")
 	})
 
-	test("a shape-malformed item (senders: null) is a recorded per-item error, NOT an uncaught throw", async () => {
+	test("a shape-malformed item (senders: null) becomes a bounded violation record, NOT an uncaught throw", async () => {
 		// This runs AFTER finalizeRestore where rollback is suppressed — a checksum-valid but
 		// malformed slice must not throw uncaught mid-iteration and strand a partial restore
-		// (codex audit MED). It becomes a per-item restoreError instead.
+		// (codex audit MED). The normalizer collapses it into top-level violation records
+		// (previously a per-item restoreError that the error collector silently DROPPED —
+		// the vanishing-malformed-item bug).
 		const backup = [
 			{ networkId: "n1", senders: null, contracts: [] },
 			{ networkId: "n2", senders: [], contracts: undefined },
 		] as unknown as Parameters<typeof accountStateService.restore>[0]
 
 		const restored = await accountStateService.restore(backup, [])
-		expect(restored).toHaveLength(2)
-		expect(typeof restored[0]!.restoreError).toBe("string")
-		expect(restored[0]!.restoreError).toMatch(/malformed account-state item/)
-		expect(typeof restored[1]!.restoreError).toBe("string")
+		const violations = restored.filter(
+			(r) => typeof r.restoreError === "string" && /malformed account-state item/.test(String(r.restoreError)),
+		)
+		expect(violations.map((v) => v.networkId).sort()).toEqual(["n1", "n2"])
+		// The coerced items still come back (empty children, no error).
+		expect(
+			restored
+				.filter((r) => !r.restoreError)
+				.map((r) => r.networkId)
+				.sort(),
+		).toEqual(["n1", "n2"])
+	})
+})
+
+describe("AccountStateService.restore (bounded)", () => {
+	let networkService: FakeNetworkService
+	let accountStateService: AccountStateService
+	let logger: LoggerStore
+
+	interface FakePxe {
+		registerSender: ReturnType<typeof vi.fn>
+		registerContract: ReturnType<typeof vi.fn>
+	}
+	let pxe: FakePxe
+
+	// A network with a resolvable primary endpoint — `networkInfoFrom` needs it
+	// before any register call can even be built.
+	// Must pass the restore boundary's NetworkSchema filter (an invalid row
+	// behaves as an absent network), so every schema-required field is real.
+	const NET = {
+		id: "net-a",
+		profileId: "p1",
+		chainId: 1,
+		l1ChainId: 1,
+		name: "Net net-a",
+		endpoints: [{ id: "primary", rpcUrl: "http://localhost:9" }],
+		primaryEndpointId: "primary",
+	} as Network
+	const sender = (i: number) => ({ address: `0x${String(i).padStart(2, "0").repeat(32)}` })
+	const item = (senders: Array<{ address: string }>) => ({ networkId: "net-a", senders, contracts: [] })
+
+	beforeEach(async () => {
+		networkService = new FakeNetworkService()
+		logger = new LoggerStore(new ConfigStore())
+		const services = new ServiceCollection()
+		services.add(networkService)
+		accountStateService = new AccountStateService(logger)
+		services.add(accountStateService)
+		await services.start()
+		pxe = {
+			registerSender: vi.fn(async (_info: unknown, addr: { toString(): string }) => addr),
+			registerContract: vi.fn(async () => undefined),
+		}
+		;(accountStateService as unknown as { pxeService: FakePxe }).pxeService = pxe
+	})
+
+	test("registers every sender/contract when nothing fails and no deadline is set", async () => {
+		const result = await accountStateService.restore([item([sender(1), sender(2)])], [NET])
+		expect(pxe.registerSender).toHaveBeenCalledTimes(2)
+		expect(result).toHaveLength(1)
+		expect(result[0].restoreError).toBeUndefined()
+		expect(result[0].senders.every((s) => !s.restoreError)).toBe(true)
+	})
+
+	test("PER-LAUNCH deadline: a slow-but-successful first registration crossing the deadline stops the SECOND from ever launching", async () => {
+		pxe.registerSender.mockImplementationOnce(async (_info: unknown, addr: { toString(): string }) => {
+			await new Promise((r) => setTimeout(r, 30))
+			return addr
+		})
+		const result = await accountStateService.restore([item([sender(1), sender(2), sender(3)])], [NET], 10)
+		expect(pxe.registerSender).toHaveBeenCalledTimes(1)
+		expect(result[0].senders).toHaveLength(1)
+		expect(result[0].restoreError).toContain("ran out of time")
+		expect(result[0].restoreError).toContain("2 registration(s) not attempted")
+	})
+
+	test("deadline clamp floor: a hostile negative deadline skips everything without launching", async () => {
+		const result = await accountStateService.restore([item([sender(1)])], [NET], -5)
+		expect(pxe.registerSender).not.toHaveBeenCalled()
+		expect(result[0].restoreError).toContain("ran out of time")
+	})
+
+	test("connectivity fail-fast: a transport-shaped failure skips the network's REMAINING registrations without launching them", async () => {
+		pxe.registerSender.mockRejectedValueOnce(new Error("Request to http://x timed out after 5000ms"))
+		const result = await accountStateService.restore(
+			[
+				{
+					networkId: "net-a",
+					senders: [sender(1), sender(2)],
+					contracts: [{ address: `0x${"07".repeat(32)}`, instance: { i: 1 }, artifact: { a: 1 } }],
+				},
+			] as never,
+			[NET],
+		)
+		expect(pxe.registerSender).toHaveBeenCalledTimes(1)
+		expect(pxe.registerContract).not.toHaveBeenCalled()
+		expect(result[0].senders[0].restoreError).toContain("timed out")
+		expect(result[0].senders[1].restoreError).toBe("Skipped — couldn't reach the network")
+		expect(result[0].contracts[0].restoreError).toBe("Skipped — couldn't reach the network")
+	})
+
+	test("a payload-shaped failure does NOT fail-fast the rest", async () => {
+		pxe.registerSender.mockRejectedValueOnce(new Error("Invalid artifact: missing function abi"))
+		const result = await accountStateService.restore([item([sender(1), sender(2)])], [NET])
+		expect(pxe.registerSender).toHaveBeenCalledTimes(2)
+		expect(result[0].senders[0].restoreError).toContain("Invalid artifact")
+		expect(result[0].senders[1].restoreError).toBeUndefined()
+	})
+
+	test("malformed slice content becomes bounded violation records, never a throw", async () => {
+		const result = await accountStateService.restore([null, { networkId: "net-a", senders: null, contracts: [] }] as never, [NET])
+		expect(result.some((r) => String(r.restoreError).includes("malformed"))).toBe(true)
+		expect(pxe.registerSender).not.toHaveBeenCalled()
+	})
+
+	test("unknown network: per-child 'Network not found' errors, no dial, no fail-fast misclassification", async () => {
+		const result = await accountStateService.restore(
+			[{ networkId: "ghost", senders: [sender(1), sender(2)], contracts: [] }] as never,
+			[NET],
+		)
+		expect(pxe.registerSender).not.toHaveBeenCalled()
+		expect(result.at(-1)?.senders).toHaveLength(2)
+		expect(result.at(-1)?.senders.every((s) => String(s.restoreError).includes("Network not found"))).toBe(true)
 	})
 })

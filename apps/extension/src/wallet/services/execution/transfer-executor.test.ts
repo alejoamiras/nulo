@@ -9,6 +9,7 @@
 
 import { describe, expect, test, vi } from "vitest"
 import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { TransferType } from "@/wallet/services/transaction/service"
 import type { TransferRequest } from "./operation-planner"
 import { TransferExecutor, type TransferExecutorDeps } from "./transfer-executor"
@@ -51,6 +52,7 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 	} as never
 	const built = {
 		txRequest: makeTxRequest(),
+		initializesAccount: true,
 		node: { kind: "node" },
 		pxe: { kind: "pxe" },
 		account: { address: "0xacct-addr" },
@@ -93,6 +95,17 @@ function makeHarness(overrides: Partial<TransferExecutorDeps> = {}) {
 }
 
 describe("TransferExecutor.execute", () => {
+	test("the task's TransferContent is stamped with the request's networkId", async () => {
+		// The producer stamp is what lets the activity view scope transfer tasks
+		// per network — a UI test supplying the field manually cannot see it vanish.
+		const { executor, deps } = makeHarness()
+		await executor.execute(makeReq())
+		const content = (deps.tasks.startNewTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+			networkId?: string
+		}
+		expect(content.networkId).toBe("net-1")
+	})
+
 	test("rebuild path: planner + buildAndEstimate, transfer-only activity record, scopes = [account.address]", async () => {
 		const { executor, deps, task, proveAndSend } = makeHarness()
 		const result = await executor.execute(makeReq())
@@ -127,14 +140,18 @@ describe("TransferExecutor.execute", () => {
 			fnName: "transfer_private",
 			args: ["0xme", "0xyou", 5n],
 		}
-		const { executor, deps } = makeHarness({
-			estimateReuse: { tryConsume: vi.fn(async () => snapshot), stash: vi.fn() } as never,
+		const { executor, deps, proveAndSend } = makeHarness({
+			estimateReuse: { tryConsume: vi.fn(async () => ({ ...snapshot, initializesAccount: true })), stash: vi.fn() } as never,
 		})
 		const result = await executor.execute(makeReq(), "est-1")
 
 		expect(result).toBe("0xhash")
 		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
 		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		// (N-15) the cached build's provenance reaches the send context — a
+		// dropped executor assignment would classify a real init race generic.
+		const reuseCtx = (proveAndSend.mock.calls[0] as unknown[])[0] as { initializesAccount?: boolean }
+		expect(reuseCtx.initializesAccount).toBe(true)
 		// Reuse path resolves its own network/node/pxe/account bindings.
 		expect(deps.getNetwork).toHaveBeenCalledWith("net-1")
 		expect(deps.getAccountContract).toHaveBeenCalledWith("p1", 7, "0xme")
@@ -201,6 +218,10 @@ describe("TransferExecutor.estimateFee", () => {
 			primaryEndpointId: "e1",
 			pendingHashes: ["0xpending"],
 			baseFeeFingerprint: "2:3",
+			// (N-15) the stash persists the BUILD's provenance (the harness build
+			// sets true) — a hardcoded false here would strip classification
+			// from every estimate→confirm transfer.
+			initializesAccount: true,
 			fnName: "transfer_private",
 		})
 	})
@@ -227,5 +248,41 @@ describe("TransferExecutor.estimateFee", () => {
 
 		expect(result.maxFee).toBe("880")
 		expect(result.estimateId).toBeUndefined()
+	})
+})
+
+describe("TransferExecutor.estimateFee cancellation", () => {
+	test("pre-aborted signal: sentinel thrown before any pipeline work, nothing stashed", async () => {
+		const { executor, deps } = makeHarness()
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(executor.estimateFee(makeReq(), controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.planner.buildTransferOperation).not.toHaveBeenCalled()
+		expect(deps.buildAndEstimate).not.toHaveBeenCalled()
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("cancel landing during the sim: estimate rejects and NO reuse entry is stashed", async () => {
+		const controller = new AbortController()
+		const { executor, deps, built } = makeHarness()
+		// The abort arrives while buildAndEstimate (the simulation stage) is
+		// in flight — the post-sim checkpoint must block the stash so a
+		// cancelled estimate never leaves a signed request cached.
+		;(deps.buildAndEstimate as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			controller.abort()
+			return built as never
+		})
+
+		await expect(executor.estimateFee(makeReq(), controller.signal)).rejects.toThrow(JobCancelledSentinel)
+		expect(deps.estimateReuse.stash).not.toHaveBeenCalled()
+	})
+
+	test("signal forwarded into buildAndEstimate so multi-pass strategies can bail between passes", async () => {
+		const { executor, deps } = makeHarness()
+		const controller = new AbortController()
+		await executor.estimateFee(makeReq(), controller.signal)
+		const call = (deps.buildAndEstimate as ReturnType<typeof vi.fn>).mock.calls[0] as unknown[]
+		expect(call[3]).toBe(controller.signal)
 	})
 })

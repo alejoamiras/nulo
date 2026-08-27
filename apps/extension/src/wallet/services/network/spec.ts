@@ -30,8 +30,13 @@ export type Network = {
 	id: string
 	/** Profile scoping — Networks are per-profile. */
 	profileId: string
-	/** Logical chain identity (XOR of l1ChainId + rollupVersion, or 0 for localhost). */
+	/** Logical chain identity (XOR of l1ChainId + rollupVersion, or 0 for localhost). STORAGE
+	 *  SCOPING ONLY — never a key-derivation input. */
 	chainId: number
+	/** The EXACT L1 chain id (1 / 11155111 / 31337 / probed) — the key-derivation chain input.
+	 *  Seeded from hardcoded constants (never probed at seed time); captured from the node probe
+	 *  for custom networks. Kept separate from the XOR composite above on purpose. */
+	l1ChainId: number
 	/** User-customizable display name. */
 	name: string
 	/** Persisted user choice — which endpoint receives traffic by default. */
@@ -58,6 +63,10 @@ export const NetworkRowSchema: z.ZodType<Network> = z.object({
 	id: z.string(),
 	profileId: z.string(),
 	chainId: z.number(),
+	// Key-derivation chain input: canonical u32, REQUIRED even in the lax row codec — a row
+	// without it cannot participate in account derivation, and a silent default would collapse
+	// the chain separation the field exists to provide (pre-production baseline, no migration).
+	l1ChainId: z.number().int().nonnegative().max(0xffffffff),
 	name: z.string(),
 	primaryEndpointId: z.string(),
 	endpoints: z.array(NetworkEndpointRowSchema),
@@ -177,6 +186,7 @@ export const NetworkSchema: z.ZodType<Network> = z.object({
 	id: z.string(),
 	profileId: z.string(),
 	chainId: z.number(),
+	l1ChainId: z.number().int().nonnegative().max(0xffffffff),
 	name: z.string(),
 	primaryEndpointId: z.string(),
 	endpoints: z.array(NetworkEndpointSchema).min(1),
@@ -258,6 +268,12 @@ export const NetworkMethodSchemas = {
 		params: z.tuple([z.string().min(1)]),
 		result: NodeStatusSchema,
 	},
+	probeNodeStatus: {
+		// timeoutMs bounds ONE non-retrying attempt; clamped well under the
+		// popup→SW request ceiling so the probe can never outlive its caller.
+		params: z.tuple([z.string().min(1), z.number().int().min(100).max(30_000)]),
+		result: NodeStatusSchema,
+	},
 } as const
 
 export type Methods = {
@@ -322,6 +338,12 @@ export type Methods = {
 	setPrimaryEndpoint(networkId: string, endpointId: string): Network
 	/** Probes the network's primary endpoint and returns Active/Inactive/InvalidChain. */
 	getNodeStatus(networkId: string): NodeStatus
+	/**
+	 * Like `getNodeStatus`, but with a caller-owned budget: ONE non-retrying
+	 * probe whose socket aborts at `timeoutMs` (no retry chain, no work left
+	 * running past the budget). Timeout/refusal ⇒ `Inactive`.
+	 */
+	probeNodeStatus(networkId: string, timeoutMs: number): NodeStatus
 }
 
 export type Events = {

@@ -11,11 +11,13 @@
  * raw `chrome.storage.local` outside this file + the composition-root adapter).
  *
  * Deliberately NO timeout: proceeding while a migration is mid-flight is the
- * corruption we're preventing. Liveness leans on the engine's journal — EVERY
- * path out of a run (success, failure, resume, crash + next boot) clears the
- * marker, so a wait here can only outlive the current boot if the SW died
- * mid-migration, and the next boot's resume unblocks it. The shell shows
- * "Updating…" (see `MigrationBarrier.vue`) rather than silently racing.
+ * corruption we're preventing. Liveness leans on the engine's journal — every
+ * ENGINE RUN clears the marker on its way out (success, failure, resume), but
+ * the boot GATE can short-circuit engineless over a blocked status, so a
+ * `running` marker stranded beside a blocked one (the restore-failure state)
+ * keeps waiters here pending until a gesture retry or the backstop authorizes
+ * the next run. The shell covers it: `MigrationBarrier.vue` ranks blocked
+ * above updating, so the user sees the recovery screen, never a silent hang.
  *
  * Residual TOCTOU, accepted: the barrier is check-then-act, not a lock — a
  * write dispatched in the gap between the idle check and the marker being set
@@ -30,7 +32,7 @@ import { SCHEMA_RUNNING_KEY } from "@nulo/wallet-core/migration"
 export async function migrationIdle(): Promise<void> {
 	const flag = await chrome.storage.local.get(SCHEMA_RUNNING_KEY)
 	if (!(SCHEMA_RUNNING_KEY in flag)) return
-	await new Promise<void>((resolve) => {
+	await new Promise<void>((resolve, reject) => {
 		const listener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
 			if (area !== "local" || !(SCHEMA_RUNNING_KEY in changes)) return
 			if (changes[SCHEMA_RUNNING_KEY].newValue === undefined) {
@@ -41,12 +43,25 @@ export async function migrationIdle(): Promise<void> {
 		chrome.storage.onChanged.addListener(listener)
 		// Re-check after subscribing: the marker may have cleared between the
 		// first read and the listener attach (classic check-then-subscribe race).
-		void chrome.storage.local.get(SCHEMA_RUNNING_KEY).then((again) => {
-			if (!(SCHEMA_RUNNING_KEY in again)) {
+		chrome.storage.local.get(SCHEMA_RUNNING_KEY).then(
+			(again) => {
+				if (!(SCHEMA_RUNNING_KEY in again)) {
+					chrome.storage.onChanged.removeListener(listener)
+					resolve()
+				}
+			},
+			// B-22: without this rejection handler the re-check's promise had no
+			// `.catch`, so a transient storage error on it left the outer promise
+			// unsettled forever — and if the marker had already cleared before we
+			// subscribed, no `onChanged` event will ever arrive to resolve it, so
+			// EVERY subsequent UI storage access hangs. A failed re-check can't
+			// confirm the migration finished, so surface the error instead of
+			// hanging (or proceeding mid-migration).
+			(err) => {
 				chrome.storage.onChanged.removeListener(listener)
-				resolve()
-			}
-		})
+				reject(err)
+			},
+		)
 	})
 }
 

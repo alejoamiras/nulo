@@ -25,14 +25,17 @@ export class WalletError extends Error {
 	public readonly code: string
 	public readonly details?: unknown
 
-	public constructor(code: string, message: string, details?: unknown) {
+	public constructor(code: string, message: string, details?: unknown, name = "WalletError") {
 		super(message)
-		this.name = "WalletError"
+		this.name = name
 		this.code = code
 		this.details = details
-		// Ensure `instanceof` works when errors are reconstructed across
-		// workers/JSON boundaries. Subclasses repeat this in their ctors.
-		Object.setPrototypeOf(this, WalletError.prototype)
+		// Prototype identity is owned HERE, once: `new.target.prototype` resolves to
+		// the most-derived class, so `instanceof` survives reconstruction across
+		// workers/JSON boundaries without any per-subclass fixup. Subclasses pass
+		// their frozen literal name through `super` — never derive it from
+		// `new.target.name`; the production minifier mangles class names.
+		Object.setPrototypeOf(this, new.target.prototype)
 	}
 
 	public toPayload(): WalletErrorPayload {
@@ -48,9 +51,7 @@ export class RpcTimeoutError extends WalletError {
 	public static readonly CODE = "RPC_TIMEOUT"
 
 	public constructor(message: string, details?: unknown) {
-		super(RpcTimeoutError.CODE, message, details)
-		this.name = "RpcTimeoutError"
-		Object.setPrototypeOf(this, RpcTimeoutError.prototype)
+		super(RpcTimeoutError.CODE, message, details, "RpcTimeoutError")
 	}
 }
 
@@ -69,10 +70,28 @@ export class RpcDisconnectedError extends WalletError {
 	public static readonly CODE = "RPC_DISCONNECTED"
 
 	public constructor(message: string, details?: unknown) {
-		super(RpcDisconnectedError.CODE, message, details)
-		this.name = "RpcDisconnectedError"
-		Object.setPrototypeOf(this, RpcDisconnectedError.prototype)
+		super(RpcDisconnectedError.CODE, message, details, "RpcDisconnectedError")
 	}
+}
+
+/**
+ * The exact message both transports use when rejecting every in-flight
+ * request on channel teardown (`makeDisconnectError` in the Port and
+ * offscreen clients). Deliberately a plain `Error`, not a `WalletError` —
+ * part of the string-shaped disconnect contract; the constant keeps the
+ * constructors and `isClientDisconnectRejection` from drifting apart.
+ */
+export const CLIENT_DISCONNECTED_MESSAGE = "Client disconnected"
+
+/**
+ * True for the expected teardown rejection a client emits for each in-flight
+ * request when its channel drops (SW restart, page close). The Port transport
+ * reconnects immediately after, so for a global rejection handler these are
+ * transient churn to log quietly, not actionable errors — a SW restart under
+ * an open page used to spam one error-level line per pending request.
+ */
+export function isClientDisconnectRejection(reason: unknown): boolean {
+	return reason instanceof Error && reason.message === CLIENT_DISCONNECTED_MESSAGE
 }
 
 /** User explicitly rejected a prompt (approval, passkey, etc). */
@@ -80,9 +99,7 @@ export class UserRejectedError extends WalletError {
 	public static readonly CODE = "USER_REJECTED"
 
 	public constructor(message = "User rejected the request", details?: unknown) {
-		super(UserRejectedError.CODE, message, details)
-		this.name = "UserRejectedError"
-		Object.setPrototypeOf(this, UserRejectedError.prototype)
+		super(UserRejectedError.CODE, message, details, "UserRejectedError")
 	}
 }
 
@@ -106,9 +123,7 @@ export class JobCancelledError extends WalletError {
 	public static readonly CODE = "JOB_CANCELLED"
 
 	public constructor(message = "Transaction cancelled by user", details?: { jobId?: string }) {
-		super(JobCancelledError.CODE, message, details)
-		this.name = "JobCancelledError"
-		Object.setPrototypeOf(this, JobCancelledError.prototype)
+		super(JobCancelledError.CODE, message, details, "JobCancelledError")
 	}
 }
 
@@ -134,9 +149,7 @@ export class CapabilityNotGrantedError extends WalletError {
 	public static readonly CODE = "CAPABILITY_NOT_GRANTED"
 
 	public constructor(capabilityType: string, message = `${capabilityType} capability not granted. Call requestCapabilities() first.`) {
-		super(CapabilityNotGrantedError.CODE, message, { capabilityType })
-		this.name = "CapabilityNotGrantedError"
-		Object.setPrototypeOf(this, CapabilityNotGrantedError.prototype)
+		super(CapabilityNotGrantedError.CODE, message, { capabilityType }, "CapabilityNotGrantedError")
 	}
 }
 
@@ -156,9 +169,26 @@ export class TooManyPendingError extends WalletError {
 	public static readonly CODE = "TOO_MANY_PENDING"
 
 	public constructor(message = "Too many pending transactions; retry after the in-flight ones settle.") {
-		super(TooManyPendingError.CODE, message)
-		this.name = "TooManyPendingError"
-		Object.setPrototypeOf(this, TooManyPendingError.prototype)
+		super(TooManyPendingError.CODE, message, undefined, "TooManyPendingError")
+	}
+}
+
+/**
+ * A first (account-initializing) transaction lost the initialization race:
+ * the node rejected it with an existing-nullifier error while the wallet
+ * KNOWS it wrapped the account constructor (another device, or a re-send
+ * against a node that lagged behind the earlier init). Classification is
+ * provenance-gated — a bare existing-nullifier rejection on a
+ * NON-initializing tx is an ordinary double-spend and must stay generic.
+ */
+export class DuplicateInitializationError extends WalletError {
+	public static readonly CODE = "DUPLICATE_INITIALIZATION"
+
+	public constructor(
+		message = "Another first transaction initialized this account — wait for network sync, then retry.",
+		details?: unknown,
+	) {
+		super(DuplicateInitializationError.CODE, message, details, "DuplicateInitializationError")
 	}
 }
 
@@ -167,9 +197,7 @@ export class ValidationError extends WalletError {
 	public static readonly CODE = "VALIDATION"
 
 	public constructor(message: string, details?: unknown) {
-		super(ValidationError.CODE, message, details)
-		this.name = "ValidationError"
-		Object.setPrototypeOf(this, ValidationError.prototype)
+		super(ValidationError.CODE, message, details, "ValidationError")
 	}
 }
 
@@ -183,9 +211,7 @@ export class InvalidPasswordError extends WalletError {
 	public static readonly LEGACY_MESSAGE = "Invalid profile password"
 
 	public constructor(message: string = InvalidPasswordError.LEGACY_MESSAGE, details?: unknown) {
-		super(InvalidPasswordError.CODE, message, details)
-		this.name = "InvalidPasswordError"
-		Object.setPrototypeOf(this, InvalidPasswordError.prototype)
+		super(InvalidPasswordError.CODE, message, details, "InvalidPasswordError")
 	}
 }
 
@@ -200,9 +226,24 @@ export class AccountAddressInconsistencyError extends WalletError {
 	public static readonly CODE = "ACCOUNT_ADDRESS_INCONSISTENCY"
 
 	public constructor(message = "Account address inconsistency", details?: unknown) {
-		super(AccountAddressInconsistencyError.CODE, message, details)
-		this.name = "AccountAddressInconsistencyError"
-		Object.setPrototypeOf(this, AccountAddressInconsistencyError.prototype)
+		super(AccountAddressInconsistencyError.CODE, message, details, "AccountAddressInconsistencyError")
+	}
+}
+
+/**
+ * A profile's backup restore never finished its storage-slice phase: the
+ * durable restore-pending marker (written before the profile row, cleared at
+ * `finalizeRestore` entry) is still present — the popup/SW died mid-restore
+ * and the profile's slices may be incomplete. Opening a session would let the
+ * bootstrap silently re-seed missing data (e.g. mint a fresh default account),
+ * so unlock is refused; consumers `instanceof` this to explain and point at
+ * delete + re-import. NEVER surfaced verbatim to dApps.
+ */
+export class RestoreTornError extends WalletError {
+	public static readonly CODE = "RESTORE_TORN"
+
+	public constructor(message = "This profile's import didn't finish", details?: unknown) {
+		super(RestoreTornError.CODE, message, details, "RestoreTornError")
 	}
 }
 
@@ -223,9 +264,23 @@ export class ProfileIdConflictError extends WalletError {
 	public static readonly CODE = "PROFILE_ID_CONFLICT"
 
 	public constructor(message = "Profile id was claimed during WebAuthn prompt; retry with a new id.", details?: unknown) {
-		super(ProfileIdConflictError.CODE, message, details)
-		this.name = "ProfileIdConflictError"
-		Object.setPrototypeOf(this, ProfileIdConflictError.prototype)
+		super(ProfileIdConflictError.CODE, message, details, "ProfileIdConflictError")
+	}
+}
+
+/**
+ * A profile with the same wallet fingerprint (same recovery phrase → same master) already exists
+ * on this device. Thrown by `importMnemonic` / `importPasskey` / `restore` unless the caller
+ * passes `allowDuplicate: true` — the UI catches this, shows the warn-and-confirm dialog, and
+ * retries with the override (duplicates are a warned choice, never a hard block — owner policy).
+ * `details.existingProfileName` names the colliding profile for the dialog copy; the error NEVER
+ * carries key material.
+ */
+export class DuplicateWalletError extends WalletError {
+	public static readonly CODE = "DUPLICATE_WALLET"
+
+	public constructor(message = "A profile with this recovery phrase already exists", details?: { existingProfileName?: string }) {
+		super(DuplicateWalletError.CODE, message, details, "DuplicateWalletError")
 	}
 }
 
@@ -247,7 +302,10 @@ type KnownWalletErrorPayload =
 	| { code: typeof ValidationError.CODE; message: string; details?: unknown }
 	| { code: typeof InvalidPasswordError.CODE; message: string; details?: unknown }
 	| { code: typeof AccountAddressInconsistencyError.CODE; message: string; details?: unknown }
+	| { code: typeof RestoreTornError.CODE; message: string; details?: unknown }
 	| { code: typeof ProfileIdConflictError.CODE; message: string; details?: unknown }
+	| { code: typeof DuplicateWalletError.CODE; message: string; details?: { existingProfileName?: string } }
+	| { code: typeof DuplicateInitializationError.CODE; message: string; details?: unknown }
 
 /**
  * Reconstruct a WalletError (concrete subclass if the code is recognised)
@@ -279,8 +337,14 @@ export function walletErrorFromPayload(payload: WalletErrorPayload): WalletError
 			return new InvalidPasswordError(known.message, known.details)
 		case AccountAddressInconsistencyError.CODE:
 			return new AccountAddressInconsistencyError(known.message, known.details)
+		case RestoreTornError.CODE:
+			return new RestoreTornError(known.message, known.details)
 		case ProfileIdConflictError.CODE:
 			return new ProfileIdConflictError(known.message, known.details)
+		case DuplicateWalletError.CODE:
+			return new DuplicateWalletError(known.message, known.details)
+		case DuplicateInitializationError.CODE:
+			return new DuplicateInitializationError(known.message, known.details)
 		default:
 			return new WalletError(payload.code, payload.message, payload.details)
 	}

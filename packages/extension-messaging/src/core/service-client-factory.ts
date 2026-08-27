@@ -25,6 +25,30 @@ import type { MethodsMap } from "@nulo/wallet-core/base"
  * Methods are installed non-enumerable + writable + configurable to mirror
  * ordinary `class` prototype methods (which are non-enumerable).
  */
+/**
+ * `definePassthroughs` with the completeness proof built into the signature.
+ *
+ * Curried: bind `M` once per client (`definePassthroughsExhaustive<Methods>()`),
+ * then call the returned installer with the prototype and the method-name tuple.
+ * The tuple's inferred literal type is checked in BOTH directions against `M`:
+ * every element must be a key of `M`, and every key of `M` must appear in the
+ * tuple. A missing key surfaces as a compile error naming the missing key(s)
+ * directly in the `{ missingMethods: ... }` mismatch — no separate type alias,
+ * dummy const, or `void` statement needed at the call site.
+ *
+ * Currying is load-bearing, not stylistic: a single two-type-param generic
+ * would force callers to either supply both type arguments (defeating inference
+ * of the tuple) or none (losing the explicit `M` binding call sites rely on).
+ */
+export function definePassthroughsExhaustive<M extends MethodsMap>() {
+	return <const T extends readonly (keyof M & string)[]>(
+		proto: object,
+		methods: Exclude<keyof M, T[number]> extends never ? T : { missingMethods: Exclude<keyof M, T[number]> },
+	): void => {
+		definePassthroughs<M>(proto, methods as unknown as readonly (keyof M & string)[])
+	}
+}
+
 export function definePassthroughs<M extends MethodsMap>(proto: object, methods: readonly (keyof M & string)[]): void {
 	for (const name of methods) {
 		const forward = function (

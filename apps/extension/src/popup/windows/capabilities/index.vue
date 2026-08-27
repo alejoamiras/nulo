@@ -6,11 +6,13 @@ import { onMounted, onUnmounted } from "vue"
 import DappStatusStrip from "@/components/composite/DappStatusStrip.vue"
 import DappIdentityBlock from "@/components/composite/DappIdentityBlock.vue"
 import DappCancelledOverlay from "@/components/composite/DappCancelledOverlay.vue"
+import DappApprovalFooter from "@/components/composite/DappApprovalFooter.vue"
 import CapabilityCard from "./CapabilityCard.vue"
 import AccountSelectRow from "./AccountSelectRow.vue"
 
 /** Utils */
 import { getErrorData } from "@nulo/wallet-core/utils"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { formatCaipAccount } from "@/wallet/utils/caip"
 import { buildCapabilityItems, buildGrantedAccountsCap, type UICapabilityItem } from "./build-items"
 
@@ -179,6 +181,10 @@ const selectAccount = (account: UIAccount) => {
 const isAccountSelected = (account: UIAccount) => selectedAccounts.value.some((acc) => acc.address === account.address)
 
 const approve = async () => {
+	// Full-lifetime submit latch: `loading` alone only sets pointer-events CSS,
+	// so a keyboard-focused Approve can still emit a click mid-grant — the
+	// handler must self-guard like execute/discover already do.
+	if (isLoading.value) return
 	// Defense in depth: template's `:disabled="!initComplete"` should already
 	// block this, but if Enter / programmatic click slips through during init,
 	// throw loudly instead of silently no-opping (which was the 19-iteration
@@ -229,8 +235,14 @@ const approve = async () => {
 		})
 		closeWindow(true)
 	} catch (error) {
-		console.error(getErrorData(error))
-		setError("Something went wrong")
+		if (error instanceof JobCancelledError) {
+			// A raced approve refused service-side (the dApp cancelled first):
+			// the refusal IS the cancelled state — overlay, not an error banner.
+			isInteractionCancelled.value = true
+		} else {
+			console.error(getErrorData(error))
+			setError("Something went wrong")
+		}
 	} finally {
 		isLoading.value = false
 	}
@@ -331,43 +343,19 @@ onUnmounted(disposeWindow)
 			</Flex>
 		</Flex>
 
-		<Flex direction="column" gap="10" :class="$style.footer">
-			<Tooltip v-if="processingError" side="top" position="start" wide :disabled="!processingError.tooltip">
-				<Flex align="center" wide gap="6">
-					<Icon name="info" size="14" :color="processingError.type === 'warning' ? 'orange' : 'red'" />
-					<Text data-testid="error-text" role="alert" size="12" weight="600" color="secondary">{{ processingError.title }}</Text>
-				</Flex>
-
-				<template #content>
-					<Text size="12" color="secondary">{{ processingError.tooltip }}</Text>
-				</template>
-			</Tooltip>
-
-			<Flex align="center" justify="between" gap="12">
-				<Button
-					data-testid="cap-reject-btn"
-					@click="reject"
-					wide
-					variant="primary_outline"
-					size="medium"
-					:disabled="isLoading || !requestId"
-				>
-					Reject
-				</Button>
-
-				<Button
-					data-testid="cap-approve-btn"
-					@click="approve"
-					wide
-					variant="primary"
-					size="medium"
-					:loading="isLoading"
-					:disabled="processingError?.type === 'error' || !initComplete"
-				>
-					<Text size="13" color="inverse">Approve</Text>
-				</Button>
-			</Flex>
-		</Flex>
+		<DappApprovalFooter
+			:processing-error="processingError"
+			wide-tooltip
+			reject-testid="cap-reject-btn"
+			reject-label="Reject"
+			:reject-disabled="isLoading || !requestId"
+			confirm-testid="cap-approve-btn"
+			confirm-label="Approve"
+			:confirm-loading="isLoading"
+			:confirm-disabled="isLoading || processingError?.type === 'error' || !initComplete"
+			@reject="reject"
+			@approve="approve"
+		/>
 
 		<DappCancelledOverlay
 			v-if="isInteractionCancelled"
@@ -400,11 +388,4 @@ onUnmounted(disposeWindow)
 	padding: 16px;
 }
 
-.footer {
-	flex-shrink: 0;
-
-	padding: 16px;
-	border-top: 1px solid var(--nulo-border);
-	background: var(--nulo-surface);
-}
 </style>

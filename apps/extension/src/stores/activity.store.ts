@@ -116,14 +116,41 @@ export const useActivityStore = defineStore("activity", () => {
 	 * invalidate anything.
 	 */
 	const mutationVersion = shallowRef(new Map<string, number>())
+	/**
+	 * Strictly-increasing, store-lifetime sequence. A mutation version is drawn
+	 * from it and NEVER reused, so a fetch's captured version can't recur for a
+	 * scope that was evicted and later recreated (the ABA that would let a stale
+	 * fetch silently revert a live transaction). Per-scope entries may be dropped
+	 * for privacy (clear*) or kept across a cache eviction; either way the next
+	 * mutation draws a fresh, higher value, so no captured version is ever matched
+	 * by a different state.
+	 */
+	let mutationSeq = 0
+	/**
+	 * The baseline a NEVER-mutated scope reports. A clear* advances it past every
+	 * prior version so a fetch that captured a virgin scope's baseline (the old
+	 * absent-key sentinel `0`) can't be accepted after a lock/clear repopulates
+	 * that scope — the absent-key ABA the per-scope sequence alone can't see.
+	 */
+	let incarnation = 0
 
 	function bumpMutation(key: string): void {
-		mutationVersion.value.set(key, (mutationVersion.value.get(key) ?? 0) + 1)
+		mutationSeq += 1
+		mutationVersion.value.set(key, mutationSeq)
 	}
 
-	/** The mutation count a fetch should carry, captured before it awaits. */
+	/** Advance the virgin baseline past every issued version. Called by clear* so a
+	 *  pre-clear capture of an absent key can never match its post-clear absent state. */
+	function advanceIncarnation(): void {
+		mutationSeq += 1
+		incarnation = mutationSeq
+	}
+
+	/** The mutation count a fetch should carry, captured before it awaits. An absent
+	 *  key reports the current incarnation (not a fixed `0`), so a capture taken
+	 *  before a clear can't match the same key after it. */
 	function mutationVersionFor(scope: ActivityScope): number {
-		return mutationVersion.value.get(activityScopeKey(scope)) ?? 0
+		return mutationVersion.value.get(activityScopeKey(scope)) ?? incarnation
 	}
 
 	const activeSlice = computed<ActivitySlice>(() => {
@@ -161,12 +188,19 @@ export const useActivityStore = defineStore("activity", () => {
 		if (slices.value.size <= MAX_CACHED_SLICES) return
 		const evictable = [...slices.value.entries()]
 			.filter(([key]) => key !== activeKey.value)
+			// A slice holding unresolved optimistic placeholders is live work, not a
+			// cold cache entry: evicting it would silently drop an AwaitingTx that has
+			// no durable backing (mirrors balances.store's forcedGasPending exemption).
+			.filter(([, slice]) => slice.awaiting.length === 0)
 			.sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt)
 		// Dropping an inactive slice only drops a cache: the rows are durable and
 		// the scope re-populates from storage the next time it is activated.
 		for (const [key] of evictable.slice(0, slices.value.size - MAX_CACHED_SLICES)) {
 			slices.value.delete(key)
-			mutationVersion.value.delete(key)
+			// Keep the mutation version: eviction is a cache drop, and resetting the
+			// fence would let a pre-eviction fetch's captured version recur once the
+			// scope is recreated (ABA), silently reverting a live transaction that
+			// arrived after the capture. The map is bounded by the real scope count.
 		}
 	}
 
@@ -265,6 +299,7 @@ export const useActivityStore = defineStore("activity", () => {
 		const key = activityScopeKey(scope)
 		slices.value.delete(key)
 		mutationVersion.value.delete(key)
+		advanceIncarnation()
 		touch()
 	}
 
@@ -272,8 +307,15 @@ export const useActivityStore = defineStore("activity", () => {
 		for (const [key, slice] of [...slices.value]) {
 			if (slice.scope.profileId !== profileId) continue
 			slices.value.delete(key)
-			mutationVersion.value.delete(key)
 		}
+		// Drop version entries by KEY, not by surviving slice: an EVICTED scope keeps
+		// its version (eviction no longer deletes it), so a slices-only sweep would
+		// leave a stale entry a pre-clear fetch could still match. The key is
+		// `JSON.stringify([profileId, ...])`, so its first element is the profile id.
+		for (const key of [...mutationVersion.value.keys()]) {
+			if ((JSON.parse(key) as [string])[0] === profileId) mutationVersion.value.delete(key)
+		}
+		advanceIncarnation()
 		touch()
 	}
 
@@ -289,6 +331,9 @@ export const useActivityStore = defineStore("activity", () => {
 		// Keyed by scope, so leaving it behind would retain profile + address
 		// identifiers past a lock.
 		mutationVersion.value.clear()
+		// Advance the virgin baseline so a pre-lock fetch that captured a scope's
+		// absent-key sentinel can't be accepted after unlock and repopulate it.
+		advanceIncarnation()
 		activeKey.value = null
 		activeScope.value = null
 		touch()

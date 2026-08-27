@@ -10,14 +10,15 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@aztec/aztec.js": "5.0.1",
-		"@aztec/bb.js": "5.0.1",
-		"@aztec/foundation": "5.0.1",
-		"@aztec/noir-acvm_js": "5.0.1",
-		"@aztec/noir-noirc_abi": "5.0.1",
-		"@aztec/stdlib": "5.0.1",
-		"@aztec/wallet-sdk": "5.0.1",
 		"@aztec-foundation/aztec-standards": "5.0.1",
+		"@aztec/aztec.js": "5.2.0",
+		"@aztec/bb.js": "5.2.0",
+		"@aztec/foundation": "5.2.0",
+		"@aztec/noir-acvm_js": "5.2.0",
+		"@aztec/noir-contracts.js": "5.2.0",
+		"@aztec/noir-noirc_abi": "5.2.0",
+		"@aztec/stdlib": "5.2.0",
+		"@aztec/wallet-sdk": "5.2.0",
 		"@nulo/wallet-sdk-schema-patch": "workspace:*",
 		"zod": "^4.4.3"
 	},

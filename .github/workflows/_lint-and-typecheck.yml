@@ -9,6 +9,11 @@ on:
         type: string
         default: ""
 
+# Read-only job: it lints, typechecks, and audits — it never writes to the repo,
+# so the token gets the least-privilege default explicitly.
+permissions:
+  contents: read
+
 jobs:
   lint-and-typecheck:
     name: Biome + vue-tsc
@@ -67,23 +72,55 @@ jobs:
       # Catches malformed/deprecated Renovate config keys. Does NOT catch
       # semantic issues like packageRules precedence bugs or the bun
       # packageManager / setup-bun action drift — those need manual review.
-      # Run via npx because the renovate package pulls in re2, whose native
-      # binding segfaults under bun's loader (bun 1.3.x). Pin to a vetted
-      # renovate version so npx doesn't fetch arbitrary fresh code on every
-      # PR (supply-chain hardening for a wallet repo). --strict fails on
-      # any warning. --no-global forces repo-config validation semantics
-      # (default treats a filename argument as global/self-hosted config).
+      # Runs via bunx since Bun 1.4. Two distinct facts: (1) bunx honors
+      # renovate's node shebang, so the validator still EXECUTES under Node —
+      # same runtime as the old npx step, one less toolchain; (2) the re2
+      # native binding that segfaulted under Bun 1.3.x's loader was separately
+      # verified to load under the Bun runtime too (`bunx --bun`, warm + cold
+      # cache), so `--bun` is available if Node ever leaves the runners.
+      # The renovate version stays pinned, but its TRANSITIVE closure is
+      # resolved fresh at run time — exactly as it was under npx; neither
+      # runner applies bunfig's minimumReleaseAge here.
+      # Accepted + documented (owner ruling A4, bun-1.4-bump plan): vendoring
+      # renovate into the lockfile for one config check isn't worth the tree.
+      # --strict fails on any warning. --no-global forces repo-config
+      # validation semantics (default treats a filename argument as
+      # global/self-hosted config).
       - name: Renovate config validator
-        run: npx --yes --package renovate@43.150.0 -- renovate-config-validator --strict --no-global renovate.json
+        run: bunx --package renovate@43.150.0 renovate-config-validator --strict --no-global renovate.json
 
       - name: Typecheck all packages
         run: bun run typecheck:all
 
+      # `bun dedupe --check` is advisory: it reds when the lockfile carries two
+      # versions of one package, but collapsing resolves to the RANGE
+      # INTERSECTION — which can silently DOWNGRADE transitives — and
+      # update→dedupe can oscillate. So a human reviews each collapse; this
+      # step only surfaces drift in the step summary. Deliberate future flip
+      # to blocking once a downgrade policy exists.
+      - name: bun dedupe check (advisory)
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          bun dedupe --check > /tmp/dedupe.txt 2>&1
+          code=$?
+          set -e
+          {
+            echo "## bun dedupe --check (advisory, exit=$code)"
+            echo ""
+            echo '```'
+            cat /tmp/dedupe.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$code"
+
       # `bun audit` is advisory: surfaces npm advisories in the step summary
-      # but does not block the PR. Bun 1.3.x exits 0 even when vulnerabilities
-      # are present, so we don't gate on the exit code today; promotion to
-      # required happens via a follow-up once we tune --audit-level + parse
-      # the JSON output for actual findings.
+      # but does not block the PR. Bun 1.4 DOES exit 1 on findings (1.3.x
+      # always exited 0), so exit-code gating is now possible — staying
+      # advisory is a deliberate choice until the pre-existing advisory
+      # backlog (all dev/tooling-side, see SECURITY.md) is triaged to zero;
+      # only then does a blocking flip produce signal instead of noise.
       #
       # We capture the exit code explicitly so a *tool* failure (segfault,
       # missing arg, network) is distinguishable from a clean run with

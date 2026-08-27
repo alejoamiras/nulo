@@ -6,6 +6,7 @@ import { AccountStateServiceClient } from "@/wallet/services/account-state/clien
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -34,8 +35,11 @@ const fillError = (type, title, tooltip) => {
 
 const isAlreadyExist = computed(() => senders.value?.includes(senderAddress.value))
 const isAvailableToAddSender = computed(() => {
-	if (!senderAddress.value.length) return
-	if (!isValidHex(senderAddress.value)) return
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
+	if (!senderAddress.value.length) return false
+	if (!isValidHex(senderAddress.value)) return false
 
 	return true
 })
@@ -74,27 +78,18 @@ watch(
 	() => senderAddress.value,
 	() => validateSenderAddress(),
 )
-watch(
-	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			accountStateClientService.disconnect()
-			accountStateClientService = null
-			senderAddress.value = ""
-		} else {
-			accountStateClientService = new AccountStateServiceClient()
-			senders.value = await accountStateClientService.getSenders(appStore.network.id)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+usePopupEntity(() => props.show, {
+	submit: handleAddSender,
+	onShow: async () => {
+		accountStateClientService = new AccountStateServiceClient()
+		senders.value = await accountStateClientService.getSenders(appStore.network.id)
 	},
-)
-
-const onKeydown = (e) => {
-	if (e.key === "Enter") handleAddSender()
-}
+	onHide: () => {
+		accountStateClientService.disconnect()
+		accountStateClientService = null
+		senderAddress.value = ""
+	},
+})
 </script>
 
 <template>
@@ -161,7 +156,7 @@ const onKeydown = (e) => {
 						size="medium"
 						:loading="isLoading"
 						:class="error.type === 'error' && $style.shake"
-						:disabled="!!error.type || !senderAddress"
+						:disabled="!isAvailableToAddSender || !!error.type"
 						data-testid="new-sender-submit"
 					>
 						Add sender
@@ -175,63 +170,6 @@ const onKeydown = (e) => {
 <style module>
 .wrapper {
 	padding: 0 20px 24px 20px;
-}
-
-.network {
-	border-radius: 0;
-	cursor: pointer;
-	border: 1px solid var(--nulo-border);
-
-	padding: 12px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		background: var(--nulo-surface-low);
-
-		& .icons {
-			opacity: 1;
-		}
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-}
-
-.icons {
-	opacity: 0;
-
-	transition: all 0.2s var(--bezier);
-}
-
-.item {
-	height: 30px;
-
-	border-radius: 8px;
-	border: 2px solid var(--nulo-border);
-	cursor: pointer;
-
-	padding: 0 16px;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		border: 2px solid var(--nulo-outline);
-	}
-
-	&:active {
-		background: var(--nulo-surface-high);
-	}
-
-	&.selected {
-		background: var(--green);
-	}
-
-	&.disabled {
-		opacity: 0.5;
-		pointer-events: none;
-	}
 }
 
 .shake {

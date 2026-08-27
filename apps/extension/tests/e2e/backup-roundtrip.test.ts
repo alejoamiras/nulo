@@ -46,9 +46,20 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 		await clickByTestId(page, "agree-continue-btn")
 		await page.waitForSelector('[data-testid="unlock-password-input"]', { visible: true, timeout: 10_000 })
 		await replaceInputValue(page, '[data-testid="unlock-password-input"]', TEST_PASSWORD)
-		await clickByTestId(page, "unlock-submit-btn")
+		// Re-entry poke, atomic on purpose: the create click AND two document-level
+		// Enter presses run in ONE in-page task, so both Enters land after the
+		// handler's synchronous status flip and before any await resolves — the
+		// exact double-fire vector that used to start a second assembly and ship
+		// a checksum-corrupt file. The round-trip below passing IS the pin.
+		await page.evaluate(() => {
+			const btn = document.querySelector<HTMLButtonElement>('[data-testid="unlock-submit-btn"]')
+			if (!btn || btn.disabled) throw new Error("unlock-submit-btn missing or disabled — the poke would silently degrade")
+			btn.click()
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+		})
 
-		// The 11-service backup chain is slow on hosted runners — same budget
+		// The 12-service backup chain is slow on hosted runners — same budget
 		// the security-backup export test uses, with headroom.
 		await page.waitForFunction(
 			() => {
@@ -121,24 +132,92 @@ test.skipIf(IS_RELEASE_ARTIFACT_RUN)(
 				},
 				{ timeout: 10_000 },
 			)
+			// Route-trajectory recorder, armed BEFORE submit: vue-router's hash nav is
+			// pushState-based (no hashchange/popstate fires), so transitions must be
+			// POLLED. On a timeout below, the trace turns a silent 90s park into a
+			// diagnosable record (which leg stalled: restore, activation, or routing).
+			await page2.evaluate(() => {
+				const w = window as unknown as { __nuloImportNavTrace?: Array<{ t: number; hash: string }> }
+				w.__nuloImportNavTrace = [{ t: Date.now(), hash: window.location.hash }]
+				window.setInterval(() => {
+					const trace = w.__nuloImportNavTrace as Array<{ t: number; hash: string }>
+					if (window.location.hash !== trace[trace.length - 1].hash) trace.push({ t: Date.now(), hash: window.location.hash })
+				}, 200)
+			})
+			const submittedAt = Date.now()
 			await clickByTestId(page2, "import-full-backup-submit-btn")
 
 			// REALISTIC settle: the MV3 worker can restart mid-import (P0-proven), so a
 			// straight assertion of `/popup/general` is wrong — the honest post-import
-			// state is an ACTIONABLE screen, either `/popup/general` (session survived)
-			// or `/popup/auth` (strict mode + worker restart dropped the master → unlock
-			// to finish). What must NEVER happen is a silent dead-end on "Finishing…".
-			// Wait for whichever actionable screen the recovery lands on.
-			await page2.waitForFunction(
-				() => {
-					const h = window.location.hash
-					return h.includes("/popup/general") || h.includes("/popup/auth")
-				},
-				{ timeout: 90_000, polling: 250 },
-			)
-			// If the recovery routed to auth (locked), unlock to finish — this is the
-			// documented strict-mode recovery, not a failure.
-			if (await page2.evaluate(() => window.location.hash.includes("/popup/auth"))) await ensureUnlocked(page2)
+			// state is an ACTIONABLE screen: `/popup/general` (session survived),
+			// `/popup/auth` (strict mode + worker restart dropped the master → unlock
+			// to finish), or the finished-with-errors screen (the app's BOUNDED
+			// chain-registration leg skipped unreachable networks — Continue proceeds;
+			// the wallet requires a reachable RPC to re-register chain state, and says
+			// so instead of hanging). What must NEVER happen is a silent dead-end.
+			//
+			// LEDGER ENTRY 1 (e2e-deflake) FIX: the import's account-state leg used to
+			// await unbounded PXE registrations against the backup-carried public-RPC
+			// URL — a degraded endpoint parked this wait through no fault of the
+			// runner. The leg is now preflight-gated + deadline-bounded in-product, so
+			// every branch below lands well inside the SAME 90s deadline (UNCHANGED —
+			// the Continue click below consumes the remainder, never a fresh budget).
+			// ONE absolute deadline for the whole post-submit settle: both waits
+			// below consume the REMAINDER of `submittedAt + 90_000` — never a fresh
+			// budget (a fresh post-click wait would silently raise the bound).
+			const routeDeadlineAt = submittedAt + 90_000
+			const routeRemainder = () => {
+				const remainder = routeDeadlineAt - Date.now()
+				if (remainder <= 0) throw new Error(`post-import 90s deadline exhausted (${Date.now() - submittedAt}ms since submit)`)
+				return remainder
+			}
+			try {
+				await page2.waitForFunction(
+					() => {
+						const h = window.location.hash
+						if (h.includes("/popup/general") || h.includes("/popup/auth")) return true
+						return !!document.querySelector('[data-testid="import-full-backup-continue-btn"]')
+					},
+					{ timeout: routeRemainder(), polling: 250 },
+				)
+				// Errors-screen branch: acknowledge the recorded skips (what a real
+				// user does) and continue INTO the wallet on the remaining deadline.
+				const continueVisible = await page2.evaluate(
+					() => !!document.querySelector('[data-testid="import-full-backup-continue-btn"]'),
+				)
+				if (continueVisible) {
+					await clickByTestId(page2, "import-full-backup-continue-btn")
+					await page2.waitForFunction(
+						() => {
+							const h = window.location.hash
+							return h.includes("/popup/general") || h.includes("/popup/auth")
+						},
+						{ timeout: routeRemainder(), polling: 250 },
+					)
+				}
+			} catch (err) {
+				const diag = await page2
+					.evaluate(async () => {
+						const all = await chrome.storage.local.get(null)
+						const keys = Object.keys(all)
+						return {
+							hash: window.location.hash,
+							navTrace: (window as unknown as { __nuloImportNavTrace?: Array<{ t: number; hash: string }> })
+								.__nuloImportNavTrace,
+							profileRows: keys.filter((k) => k.startsWith("nulo:core:profiles@")).length,
+							activeAccountPointer: !!all["nulo:ui:activeAccount"],
+							bodySnippet: (document.body.innerText ?? "").slice(0, 120),
+						}
+					})
+					.catch((e) => ({ evalFailed: String(e) }))
+				throw new Error(
+					`post-import route wait timed out ${Date.now() - submittedAt}ms after submit; parked state: ${JSON.stringify(diag)}; original: ${(err as Error).message}`,
+				)
+			}
+			// The recovery lands either locked (the documented strict-mode path, not a
+			// failure) or already unlocked; ensureUnlocked reads the shell's own state
+			// and no-ops in the latter, so it needs no caller-side hash sample.
+			await ensureUnlocked(page2)
 			await waitForHash(page2, "#/popup/general", 30_000)
 
 			// Same profile id + master key ⇒ identical derived account. Proves the

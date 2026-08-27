@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -43,7 +43,7 @@ test.skipIf(!hasConfig)(
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "getContractMetadata", async () => {
 			await clickByTestId(page, "pg-btn-getContractMetadata")
 		})
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "contracts-getMetadata:result")
 		expect(result.resultJson).toBeDefined()
 	},
 )

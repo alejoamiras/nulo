@@ -42,6 +42,15 @@ export type Methods = {
 	getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): GasBalances
 
 	/**
+	 * Cache-only peek at the last-known FeeJuice balances — instant, never
+	 * triggers a fetch. `stale: true` marks an entry past the TTL or
+	 * invalidated (settled tx / PrivateFPC change); callers render it dimmed
+	 * while a real `getGasBalances` refresh runs. `null` means this key was
+	 * never fetched in the current service-worker lifetime.
+	 */
+	peekGasBalances(networkId: string, accountAddress: string): { balances: GasBalances; stale: boolean } | null
+
+	/**
 	 * Estimates the fee for a transfer without executing it.
 	 * Runs simulation in the background and returns fee breakdown.
 	 */
@@ -53,12 +62,26 @@ export type Methods = {
 		recipientAddress: string,
 		amount: bigint,
 		feeSettings: FeeSettings,
+		estimateToken?: string,
 	): TransferFeeEstimate
 
 	/**
 	 * Estimates the fee for a pre-built operation (send_transaction or aztec_sendTx).
 	 */
-	estimateOperationFee(operation: Operation, feeSettings: FeeSettings): TransferFeeEstimate
+	estimateOperationFee(operation: Operation, feeSettings: FeeSettings, estimateToken?: string, flowKey?: string): TransferFeeEstimate
+
+	/**
+	 * Cancel an in-flight fee estimate by its caller-minted token.
+	 *
+	 * Estimates have no journal record, so this is the estimate-side sibling
+	 * of {@link cancelJob}, backed by the SW's EstimateCancelRegistry:
+	 * abort-if-running (the pipeline stops at its next stage boundary — an
+	 * ACVM simulation already in flight cannot be preempted) AND
+	 * evict-if-stashed (a completed estimate's cached reuse entry is dropped,
+	 * so a cancelled estimate can never be consumed at confirm). Unknown or
+	 * foreign-profile tokens no-op silently.
+	 */
+	cancelEstimate(estimateToken: string): void
 
 	/**
 	 * Cancel an in-flight job by its operation-journal id.

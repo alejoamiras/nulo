@@ -1,7 +1,6 @@
 <script setup>
 /**
- * Page chrome shared by `pages/settings/security/export/key.vue` and
- * `.../export/seed.vue`. Owns:
+ * Page chrome for `pages/settings/security/export/seed.vue`. Owns:
  *
  * - SubPageHeader with the scroll-collapse "secondary title" treatment
  * - Hero block (big two-tone title + accent bar)

@@ -4,15 +4,17 @@ import type { ILogger } from "@/wallet/logger"
 import { ProfileService } from "@/wallet/services/profile/service"
 import { requireActiveProfile } from "@/wallet/services/profile/require-active-profile"
 import { purgeRows } from "@/wallet/services/purge-rows"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import { EntityStorage } from "@/wallet/storage"
 import { DappSessionMacStorage } from "./mac-storage"
-import { getRandomHex, Lock } from "@/wallet/utils"
+import { Lock } from "@/wallet/utils"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import {
 	DAPP_SESSION_SERVICE_NAME,
 	type DappMetadata,
 	type DappPermissions,
+	type CapabilityDecision,
 	type DappSession,
 	type GrantedCapabilityRecord,
 	type RejectedCapabilityRecord,
@@ -38,6 +40,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		"getCapabilityGrants",
 		"setCapabilityRejections",
 		"getCapabilityRejections",
+		"applyCapabilityDecision",
 	)
 	public static name = DAPP_SESSION_SERVICE_NAME
 
@@ -108,14 +111,24 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	 * shape: `DappSession.chainId` is the source of truth; no
 	 * `permissions[].chains?: string[]` redundancy.
 	 */
-	public async tryGetDappSessionByOriginAndChain(origin: string, chainId: string): Promise<DappSession | undefined> {
+	public async tryGetDappSessionByOriginAndChain(
+		origin: string,
+		chainId: string,
+		forProfileId?: string,
+	): Promise<DappSession | undefined> {
 		await this.ensureInitialized()
-		const profile = await this.profileService.getActiveProfile()
-		if (!profile) {
+		// `forProfileId` ANCHORS the lookup to a caller-known identity: the
+		// dispatch path passes the session's establishment-stamped profile, so
+		// an in-flight message racing a profile switch resolves its OWN
+		// profile's row or nothing — never the newly active profile's. Callers
+		// without a stamped identity (discovery, establishment) omit it and get
+		// the live active profile, as before.
+		const profileId = forProfileId ?? (await this.profileService.getActiveProfile())?.id
+		if (!profileId) {
 			return undefined
 		}
 		const sessions = (await this.storage.getValues()).filter(
-			(x) => x.profileId === profile.id && x.dappMetadata.url === origin && x.chainId === chainId,
+			(x) => x.profileId === profileId && x.dappMetadata.url === origin && x.chainId === chainId,
 		)
 		for (const session of sessions) {
 			if (!(await this.isExpired(session))) {
@@ -135,13 +148,8 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		await this.ensureInitialized()
 		const profile = await requireActiveProfile(this.profileService, "Wallet is locked")
 		await this.deleteExpired()
-		try {
-			await this.lock.enter()
-
-			let id: string
-			do {
-				id = getRandomHex(64)
-			} while (await this.storage.contains(id))
+		return await this.lock.withLock(async () => {
+			const id = await nextRandomId(this.storage, 64)
 
 			const session: DappSession = {
 				id,
@@ -157,9 +165,25 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionAdded", session)
 
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
+	}
+
+	/**
+	 * Q-09: the shared "load → require → mutate → persist → emit" body every
+	 * single-field setter below repeats. Under the session lock: load the row,
+	 * throw `Invalid id` if absent, apply `mutate` (synchronous), persist, and
+	 * emit `onDappSessionUpdated`. `applyCapabilityDecision` intentionally does
+	 * NOT route through here (it merges deltas under one lock).
+	 */
+	private patchSession(sessionId: string, mutate: (session: DappSession) => void): Promise<DappSession> {
+		return this.lock.withLock(async () => {
+			const session = await this.storage.get(sessionId)
+			if (!session) throw new Error("Invalid id")
+			mutate(session)
+			await this.storage.set(sessionId, session)
+			this.emit("onDappSessionUpdated", session)
+			return session
+		})
 	}
 
 	public async updateDappSession(
@@ -168,29 +192,15 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		accounts: string[],
 		confirmationLevel: AccessLevel,
 	): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-
-			const session = await this.storage.get(sessionId)
-			if (!session) {
-				throw new Error("Invalid id")
-			}
+		return await this.patchSession(sessionId, (session) => {
 			session.permissions = permissions
 			session.accounts = accounts
 			session.confirmationLevel = confirmationLevel
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-
-			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async upgradeDappSession(sessionId: string, newSessionId: string, newExpiry: number): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-
+		return await this.lock.withLock(async () => {
 			if (await this.storage.contains(newSessionId)) {
 				throw new Error("Invalid new id")
 			}
@@ -207,65 +217,31 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionAdded", newSession)
 
 			return newSession
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setVerificationHash(sessionId: string, verificationHash: string): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.verificationHash = verificationHash
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setTrustedVerification(sessionId: string, trusted: boolean): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.trustedVerification = trusted
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setAccountAliases(sessionId: string, aliases: Record<string, string>): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.accountAliases = { ...session.accountAliases, ...aliases }
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async setCapabilityGrants(sessionId: string, grants: GrantedCapabilityRecord[]): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.capabilityGrants = grants
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getCapabilityGrants(sessionId: string): Promise<GrantedCapabilityRecord[]> {
@@ -275,17 +251,9 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	}
 
 	public async setCapabilityRejections(sessionId: string, rejections: RejectedCapabilityRecord[]): Promise<DappSession> {
-		try {
-			await this.lock.enter()
-			const session = await this.storage.get(sessionId)
-			if (!session) throw new Error("Invalid id")
+		return await this.patchSession(sessionId, (session) => {
 			session.capabilityRejections = rejections
-			await this.storage.set(sessionId, session)
-			this.emit("onDappSessionUpdated", session)
-			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async getCapabilityRejections(sessionId: string): Promise<RejectedCapabilityRecord[]> {
@@ -294,10 +262,62 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 		return session.capabilityRejections ?? []
 	}
 
-	public async deleteDappSession(sessionId: string): Promise<DappSession> {
-		try {
-			await this.lock.enter()
+	/**
+	 * Apply a capability decision atomically (B-14). The dispatcher used to push
+	 * precomputed whole-row arrays across FOUR separately-locked writes
+	 * (updateDappSession → setAccountAliases → setCapabilityGrants →
+	 * setCapabilityRejections), so a concurrent revoke could throw mid-sequence
+	 * (discarding the approval + a cryptic error) and two concurrent approvals both
+	 * snapshotted the pre-write row, the later clobbering the earlier. This merges
+	 * the DELTAS against the LATEST row under ONE lock: accounts UNION, aliases
+	 * merge, grants keep-latest-minus-REPLACED + new records (a rejected/denied
+	 * widening PRESERVES its older grant), and rejections preserve unrelated types
+	 * (an approval clears its type's rejection).
+	 * A missing row rejects cleanly with no partial write.
+	 *
+	 * Concurrent SAME-type approvals are last-completion-wins (an accepted deviation
+	 * — two popups approving the same capability type for one session simultaneously
+	 * is not a real flow); DIFFERENT-type concurrent approvals both survive because
+	 * the merge reads the latest row.
+	 */
+	public async applyCapabilityDecision(sessionId: string, decision: CapabilityDecision): Promise<DappSession> {
+		return await this.lock.withLock(async () => {
+			const session = await this.storage.get(sessionId)
+			if (!session) throw new Error("Invalid id")
+			const now = Date.now()
 
+			if (decision.addAccounts.length > 0) {
+				session.accounts = [...new Set([...(session.accounts ?? []), ...decision.addAccounts])]
+			}
+			if (Object.keys(decision.aliasPatch).length > 0) {
+				session.accountAliases = { ...session.accountAliases, ...decision.aliasPatch }
+			}
+
+			// Only REPLACED types drop their stored grant; a REJECTED type keeps its
+			// existing grant — a denied widening (a re-consent the user declined) must
+			// preserve the older, narrower grant, never revoke it.
+			const replaceSet = new Set(decision.replaceTypes)
+			session.capabilityGrants = [
+				...(session.capabilityGrants ?? []).filter((g) => !replaceSet.has(g.capability.type)),
+				...decision.grantRecords,
+			]
+
+			// Preserve rejections for types this decision didn't touch; an approval
+			// clears its type's prior rejection (only rejectedTypes get re-recorded).
+			const touched = new Set<string>([...decision.approvedTypes, ...decision.rejectedTypes])
+			session.capabilityRejections = [
+				...(session.capabilityRejections ?? []).filter((r) => !touched.has(r.capabilityType)),
+				...decision.rejectedTypes.map((t) => ({ capabilityType: t, rejectedAt: now })),
+			]
+
+			await this.storage.set(sessionId, session)
+			this.emit("onDappSessionUpdated", session)
+			return session
+		})
+	}
+
+	public async deleteDappSession(sessionId: string): Promise<DappSession> {
+		return await this.lock.withLock(async () => {
 			const session = await this.storage.get(sessionId)
 			if (!session) {
 				throw new Error("Invalid id")
@@ -306,33 +326,25 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 			this.emit("onDappSessionDeleted", session)
 
 			return session
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	public async isExpired(session: DappSession): Promise<boolean> {
 		if (session.expiry < Date.now()) {
-			try {
-				await this.lock.enter()
-
+			await this.lock.withLock(async () => {
 				if (await this.storage.contains(session.id)) {
 					this.logDebug(`Session ${session.id} has expired`)
 					await this.storage.delete(session.id)
 					this.emit("onDappSessionDeleted", session)
 				}
-			} finally {
-				this.lock.leave()
-			}
+			})
 			return true
 		}
 		return false
 	}
 
 	public async deleteExpired(): Promise<void> {
-		try {
-			await this.lock.enter()
-
+		await this.lock.withLock(async () => {
 			const now = Date.now()
 			const expired = (await this.storage.getValues()).filter((x) => x.expiry < now)
 			await purgeRows(
@@ -343,9 +355,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 				},
 				(session) => this.emit("onDappSessionDeleted", session),
 			)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 
 	/** Awaited profile-scoped purge, called by the deletion coordinator (relocated
@@ -353,8 +363,7 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 	public async purgeForProfile(profileId: string): Promise<void> {
 		await this.ensureInitialized()
 		this.logDebug(`purgeForProfile ${profileId}: remove related dapp sessions`)
-		try {
-			await this.lock.enter()
+		await this.lock.withLock(async () => {
 			// MAC-free, key-aware raw purge: a DELETED profile may be INACTIVE (MAC
 			// key underivable → `getValues()` HIDES its rows) or hold a schema-invalid
 			// / key-aliased row; all must be removed or they revive on a same-secret
@@ -370,8 +379,6 @@ export class DappSessionService extends Service<Methods, Events> implements Serv
 				},
 				({ row }) => this.emit("onDappSessionDeleted", row),
 			)
-		} finally {
-			this.lock.leave()
-		}
+		})
 	}
 }

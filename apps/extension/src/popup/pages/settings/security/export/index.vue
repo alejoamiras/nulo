@@ -43,8 +43,14 @@ const appStore = useAppStore()
 
 				<ItemsContainer title="Choose backup mode">
 					<SettingItem title="Full Backup" icon="package" iconBgColor="blue" to="/popup/settings/security/export/full" data-testid="full-backup-link-btn" />
-					<SettingItem title="Seed Phrase" icon="text" iconBgColor="blue" to="/popup/settings/security/export/seed" data-testid="seed-phrase-link-btn" />
-					<SettingItem title="Secret Key" icon="key" iconBgColor="blue" to="/popup/settings/security/export/key" data-testid="secret-key-link-btn" />
+					<SettingItem title="Recovery Phrase" icon="text" iconBgColor="blue" to="/popup/settings/security/export/seed" data-testid="seed-phrase-link-btn" />
+					<SettingItem
+						title="Account"
+						icon="key"
+						iconBgColor="blue"
+						to="/popup/settings/security/export/account"
+						data-testid="account-backup-link-btn"
+					/>
 				</ItemsContainer>
 			</template>
 

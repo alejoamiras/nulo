@@ -3,10 +3,13 @@
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Utils */
+import { copyToClipboard } from "@/utils/clipboard"
 import { isValidHex } from "@/utils/string"
 
 /** Composables */
 import { useToast } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -74,6 +77,9 @@ const hasChanges = computed(() => nameChanged.value || addressChanged.value)
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist" && nameChanged.value)
 const isAddressValid = computed(() => isValidHex(addressTerm.value))
 const isAvailableToUpdateFpc = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isFpcUpdateInProgress.value) return false
 	if (!hasChanges.value) return false
 	// Name is locked on protocol rows; if it differs, that's an invalid edit.
 	if (isProtocol.value && nameChanged.value) return false
@@ -144,23 +150,17 @@ const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
 const handleCopyAddress = () => {
-	window.navigator.clipboard.writeText(fpcToEdit.value.address)
-	openToast({ label: "FPC's address is copied", icon: "copy" })
+	void copyToClipboard(fpcToEdit.value.address, openToast, {
+		success: { label: "FPC's address is copied" },
+		failure: { label: "Couldn't copy", icon: "warning", duration: 3_000 },
+	})
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			fpcService.disconnect()
-			fpcService = null
-			fpcToEdit.value = null
-			fpcs.value = []
-			form.reset()
-			processingError.value = { show: false, title: "", tooltip: "" }
-		} else {
+	{
+		submit: handleUpdateFpc,
+		onShow: async () => {
 			fpcService = new FpcServiceClient()
 			fpcService.onFpcAdded.add(onFpcAdded)
 			fpcService.onFpcDeleted.add(onFpcDeleted)
@@ -173,10 +173,20 @@ watch(
 			nameTerm.value = fpcToEdit.value.name ?? ""
 			addressTerm.value = fpcToEdit.value.address ?? ""
 			fpcs.value = await fpcService.getFpcs(appStore.network.chainId)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			fpcService.disconnect()
+			fpcService = null
+			fpcToEdit.value = null
+			fpcs.value = []
+			form.reset()
+			processingError.value = { show: false, title: "", tooltip: "" }
+		},
 	},
+	// The edit target and the collision list arrive with the awaits above — a
+	// premature first submit must stay inert, exactly as when the hand-rolled
+	// watcher installed its listener only after them.
+	{ submitWaitsForShow: true },
 )
 
 watch(
@@ -185,13 +195,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateFpc()
-}
 </script>
 
 <template>

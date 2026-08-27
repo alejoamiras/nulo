@@ -7,13 +7,13 @@
 		".": "./src/index.ts"
 	},
 	"scripts": {
-		"test": "vitest run",
+		"test": "bun --bun vitest run",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@aztec/accounts": "5.0.1",
-		"@aztec/constants": "5.0.1",
-		"@aztec/foundation": "5.0.1",
+		"@aztec/accounts": "5.2.0",
+		"@aztec/constants": "5.2.0",
+		"@aztec/foundation": "5.2.0",
 		"@nulo/wallet-core": "workspace:*"
 	},
 	"devDependencies": {

@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup } from "../fixtures/playground"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
 const aztecConfig = inject("aztecTestConfig") as AztecTestConfig | undefined
@@ -21,7 +21,7 @@ test.skipIf(!hasConfig)(
 		const result = await callExpectingNoPopup(dappConnectedExtension, dappConnectedExtension.playgroundPage, "batch", async () => {
 			await clickByTestId(dappConnectedExtension.playgroundPage, "pg-btn-batch-meta")
 		})
-		expect(result.status).toBe("ok")
+		await assertPgOk(dappConnectedExtension.playgroundPage, result, "meta-batch:result")
 		const arr = result.resultJson as Array<{ name: string }>
 		expect(arr.length).toBe(3)
 		expect(arr.map((r) => r.name)).toEqual(["getChainInfo", "getChainInfo", "getChainInfo"])

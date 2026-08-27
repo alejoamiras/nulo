@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/aztec.js/addresses"
+import { fuelRecipientFor } from "@/lib/fuel-target"
 import { InboxAbi } from "@aztec/l1-artifacts"
 import { Contract } from "@aztec/aztec.js/contracts"
 import { computeSecretHash } from "@aztec/aztec.js/crypto"
@@ -23,6 +24,7 @@ import {
 	isSealTrusted,
 	markSealTrusted,
 	minOutputForSlippage,
+	PERMIT_DEADLINE_SECONDS,
 	predictedWorstMinFees,
 	PRIVATE_FPC_ADDRESS,
 	parseFeeJuiceDeposit,
@@ -35,6 +37,7 @@ import {
 import { tokenBridgeArtifact } from "@nulo/bridge-core/artifacts"
 import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { parseEventLogs } from "viem"
+import { classifyClaimReceipt } from "@/lib/claim-receipt"
 import { NETWORK } from "@/lib/network"
 import { ref, watch } from "vue"
 import {
@@ -605,19 +608,7 @@ export function ensureDepositJournalDeps(): void {
 			const node = createAztecNodeClient(NODE_URL)
 			try {
 				const receipt = await node.getTxReceipt(TxHash.fromString(txHash))
-				// TxStatus (4.2.0) is BLOCK-finalization state with NO "success" value: a confirmed tx
-				// reads checkpointed -> proven -> finalized. Inclusion at ANY of those = landed; the
-				// separate executionResult carries the revert signal. Waiting for "finalized" alone
-				// stranded confirmed claims at "Confirming" for epochs.
-				const status = String(receipt?.status ?? "pending").toLowerCase()
-				const included = /checkpointed|proven|finalized|success|mined/.test(status)
-				if (included) {
-					const exec = String(receipt?.executionResult ?? "success").toLowerCase()
-					return exec.includes("revert") ? "reverted" : "success"
-				}
-				if (status.includes("dropped")) return "dropped"
-				if (status.includes("reverted")) return "reverted"
-				return "pending"
+				return classifyClaimReceipt(receipt as { status?: unknown; executionResult?: unknown })
 			} catch (e) {
 				// A dead RPC must read as connectivity, never as a slow claim (plan D2).
 				log("receipt lookup failed:", e instanceof Error ? e.message : String(e))
@@ -873,7 +864,7 @@ export function useDepositFlow() {
 
 				setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature covers swap + deposit")
 				const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-				const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+				const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 				const witness: BridgeWitness = {
 					tokenPortal: L1_PORTAL,
 					bridgeToken: L1_USDC,
@@ -884,7 +875,7 @@ export function useDepositFlow() {
 					aztecRecipient: (isPrivate ? `0x${"0".repeat(64)}` : recipient) as `0x${string}`,
 					// PRIVATE fuel lands at the PrivateFPC (claimer-bound by the secret); PUBLIC fuel at the user.
 					// A bug here either leaks (user addr on L1) or strands (FJ to a non-FPC) — the headline invariant.
-					fuelRecipient: (isPrivate ? PRIVATE_FPC_ADDRESS : recipient) as `0x${string}`,
+					fuelRecipient: fuelRecipientFor(isPrivate, recipient),
 					tokenSecretHash: id as `0x${string}`,
 					fuelSecretHash: fuelPre.secretHashHex as `0x${string}`,
 					minFuelOutput: fuelPre.minOutput,
@@ -1008,7 +999,7 @@ export function useDepositFlow() {
 
 			setRecordStep(id, "signing", "sign the bridge intent in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 			const bridgeWitness: BridgeWitness = {
 				tokenPortal: L1_PORTAL,
 				bridgeToken: L1_USDC,

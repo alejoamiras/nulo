@@ -30,6 +30,7 @@ writeFileSync(
 			source: "contracts/bridge/evm/upstream/NuloTokenPortal.sol",
 			sourceKeccak: FORKED_PORTAL_KECCAK,
 			solcVersion: built.solcVersion,
+			immutableReferences: built.immutableReferences,
 			initCodeHash: built.initCodeHash,
 			runtimeCodeHash: built.runtimeCodeHash,
 			abi: built.abi,

@@ -21,6 +21,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
 import { flushPromises, mount } from "@vue/test-utils"
 import { reactive, ref, type Ref } from "vue"
 
@@ -129,6 +130,11 @@ vi.mock("@/composables/useFeeEstimationMap", () => ({
 		results: ref({}),
 		estimating: ref({}),
 		estimate: vi.fn(),
+		cancel: vi.fn(),
+		cancelAll: vi.fn(),
+		handoffAll: vi.fn(() => ({})),
+		rearm: vi.fn(),
+		dispose: vi.fn(),
 	})),
 }))
 
@@ -290,7 +296,7 @@ const STUBS = {
 	DappCancelledOverlay: {
 		props: ["message"],
 		emits: ["dismiss"],
-		template: `<div data-testid="cancelled-overlay" :data-message="message" @click="$emit('dismiss')" />`,
+		template: `<div data-testid="dapp-cancelled-overlay" :data-message="message" @click="$emit('dismiss')" />`,
 	},
 }
 
@@ -301,10 +307,21 @@ const factory = () => mount(Execute, { global: { stubs: STUBS } })
 
 type ExecVm = {
 	reject: () => Promise<void>
+	approve: () => Promise<void>
 	closeWindow: (interactionCompleted?: boolean) => void
 	isWrongProfile: boolean
 	initComplete: boolean
+	operations: unknown[]
 }
+
+/** One executable operation: fee settled, so neither the fee gate nor the
+ *  empty-operations gate trips — the state both cancellation pins need. */
+const makeExecutableOp = () => ({
+	kind: "send_transaction",
+	feeSettings: { paymentMethod: { kind: "sponsored_fpc" } },
+	network: { chainId: 1, name: "TestNet" },
+	account: { address: "0x1", chainId: 1, name: "TestAccount" },
+})
 
 /** Drive init to completion: resolve the profile fetch, then the payload load. */
 const completeInit = async (profile: { id: string } = { id: "p1" }) => {
@@ -462,11 +479,30 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		expect(networkServiceCtorMock).not.toHaveBeenCalled()
 		// init's catch also set the generic error, but the wrong-profile overlay
 		// wins the template precedence chain.
-		const overlay = w.find('[data-testid="cancelled-overlay"]')
+		const overlay = w.find('[data-testid="dapp-cancelled-overlay"]')
 		expect(overlay.exists()).toBe(true)
 		expect(overlay.attributes("data-message")).toContain("different profile")
 		// The request must still be rejectable on close.
 		expect(beforeunloadAdds()).toBe(1)
+	})
+
+	test("(B-30) init throwing AFTER the account/network clients are built disconnects both", async () => {
+		// Same profile (construction proceeds), then an unknown op kind throws inside
+		// the ops loop — after `new AccountServiceClient()` / `new NetworkServiceClient()`.
+		// Pre-fix the disconnect ran only on the success path, leaking both ports.
+		payloadToLoad = {
+			session: { profileId: "p1", dappMetadata: { name: "D", url: "https://x" } },
+			params: { operations: [{ kind: "definitely_not_a_valid_kind", chain: "eip155:1" }] },
+		}
+		w = factory()
+		await completeInit({ id: "p1" })
+
+		expect(accountServiceCtorMock).toHaveBeenCalledTimes(1)
+		expect(networkServiceCtorMock).toHaveBeenCalledTimes(1)
+		const acct = accountServiceCtorMock.mock.results[0]?.value as { disconnect: ReturnType<typeof vi.fn> }
+		const net = networkServiceCtorMock.mock.results[0]?.value as { disconnect: ReturnType<typeof vi.fn> }
+		expect(acct.disconnect).toHaveBeenCalledTimes(1)
+		expect(net.disconnect).toHaveBeenCalledTimes(1)
 	})
 
 	test("D14: wrong-profile rejection is delivered on dismiss → unload, not inline", async () => {
@@ -477,7 +513,7 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		expect(rejectViaInteractionServiceMock).not.toHaveBeenCalled()
 		callLog.length = 0
 		// OK on the overlay → closeWindow() with NO arg → listener stays attached.
-		await w.find('[data-testid="cancelled-overlay"]').trigger("click")
+		await w.find('[data-testid="dapp-cancelled-overlay"]').trigger("click")
 		expect(windowsRemoveMock).toHaveBeenCalledTimes(1)
 		expect(beforeunloadRemoves()).toBe(0)
 		// The real window would now unload; the still-attached handler delivers
@@ -485,5 +521,54 @@ describe("execute window — shell lifecycle frozen oracle", () => {
 		window.dispatchEvent(new Event("beforeunload"))
 		expect(rejectViaInteractionServiceMock).toHaveBeenCalledWith("User rejected")
 		expect(callLog).toEqual(["windows.remove", "composableReject:User rejected", "removeEventListener:beforeunload", "windows.remove"])
+	})
+})
+
+describe("execute window — dApp cancellation state", () => {
+	test("the cancelled state renders the overlay (no error banner)", async () => {
+		// The minimal harness keeps Confirm disabled via its other gates, so
+		// this pin owns only the overlay half; the raced-approve pin below is
+		// what discriminates the cancelled path end to end.
+		w = factory()
+		await completeInit()
+		expect(w!.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(false)
+
+		isCancelledMock.value = true
+		await flushPromises()
+		expect(w!.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(true)
+		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
+	})
+
+	test("cancellation flips a genuinely ENABLED Confirm to disabled (the binding's own term)", async () => {
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm
+		vm.operations = [makeExecutableOp()]
+		vm.initComplete = true
+		await flushPromises()
+		const confirm = () => w!.find('[data-testid="execute-confirm-btn"]')
+		expect(confirm().attributes("disabled")).toBeUndefined()
+
+		isCancelledMock.value = true
+		await flushPromises()
+		expect(confirm().attributes("disabled")).toBeDefined()
+	})
+
+	test("a raced approve refused with JobCancelledError classifies as CANCELLED, not an error", async () => {
+		// The dApp cancelled while the click was in flight and the broadcast
+		// never reached this popup: the typed service refusal alone must land
+		// the window in the cancelled UI — overlay up, no error banner.
+		approveInteractionMock.mockRejectedValueOnce(new JobCancelledError())
+		w = factory()
+		await completeInit()
+		const vm = w.vm as unknown as ExecVm
+		vm.operations = [makeExecutableOp()]
+		vm.initComplete = true
+		await flushPromises()
+
+		await vm.approve()
+		await flushPromises()
+		expect(w!.find('[data-testid="dapp-cancelled-overlay"]').exists()).toBe(true)
+		expect(w!.find('[data-testid="error-text"]').exists()).toBe(false)
 	})
 })

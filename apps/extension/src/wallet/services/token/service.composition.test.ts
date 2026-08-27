@@ -15,6 +15,7 @@
  */
 import { describe, expect, test, vi } from "vitest"
 import type { Fr } from "@aztec/foundation/curves/bn254"
+import { ProfileDeletionState } from "@/wallet/services/profile/profile-deletion-state"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
 import type { ContractInstanceWithAddress } from "@aztec/stdlib/contract"
 import { TokenContractArtifact } from "@aztec/noir-contracts.js/Token"
@@ -69,6 +70,7 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 			getActiveProfile: async () => ({ id: "p1" }),
 			onProfileDeleted: { add: () => {} },
 			onActiveProfileChanged: new EventHandler(),
+			getDeletionState: () => new ProfileDeletionState(),
 		}),
 	)
 	collection.add(
@@ -79,12 +81,13 @@ async function makeHarness(fakeConfig?: ShallowPxeFakeConfig) {
 		}),
 	)
 	collection.add(svc(AccountService.name, {}))
-	collection.add(svc(TaskService.name, { startNewTask: () => fakeTask }))
+	const startNewTask = vi.fn(() => fakeTask)
+	collection.add(svc(TaskService.name, { startNewTask }))
 	collection.add(svc(OperationJournalService.name, {}))
 	const tokenService = new TokenService(logger, api, () => fake.client)
 	collection.add(tokenService)
 	await collection.start()
-	return { tokenService, fake, api }
+	return { tokenService, fake, api, fakeTask, startNewTask }
 }
 
 describe("TokenService composition — in-process, no sandbox", () => {
@@ -182,6 +185,7 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 				getActiveProfile: async () => ({ id: "p1" }),
 				onProfileDeleted: { add: () => {} },
 				onActiveProfileChanged,
+				getDeletionState: () => new ProfileDeletionState(),
 			}),
 		)
 		collection.add(
@@ -244,6 +248,63 @@ describe("TokenService seeding — composition (simulate-free slice)", () => {
 		await tokenService.addSeededToken(input)
 		expect(journal.createOperation).toHaveBeenCalledTimes(1)
 		expect(await tokenService.getTokensRaw("p1", NETWORK.chainId)).toHaveLength(1)
+	})
+
+	test("(Q-01 ordering pin) a failed import journals 'failed' BEFORE the token lock releases", async () => {
+		// The catch lives INSIDE the withLock closure: a queued token op must
+		// never observe the operation mid-failure. If the catch ever moves
+		// outside the lock, the queued op below runs before the journal write
+		// and this ordering assertion reds.
+		const { tokenService, journal } = await seedHarness()
+		const events: string[] = []
+		let releaseFailed!: () => void
+		const failedGate = new Promise<void>((r) => {
+			releaseFailed = r
+		})
+		let startQueued!: () => void
+		const queuedStarted = new Promise<void>((r) => {
+			startQueued = r
+		})
+		;(journal.transitionOperation as ReturnType<typeof vi.fn>).mockImplementation(async (...args: unknown[]) => {
+			const stage = (args[1] as { stage: string }).stage
+			if (stage === "simulating") {
+				// We are UNDER the token lock now: let the test enqueue a second
+				// locked op behind us, give it a beat to reach the lock queue,
+				// then fail the import.
+				startQueued()
+				await new Promise((r) => setTimeout(r, 0))
+				throw new Error("sim boom")
+			}
+			if (stage === "failed") {
+				// The discriminator: the failed transition BLOCKS until the test
+				// releases it. With the catch inside the closure, the token lock
+				// is held through this await — the queued op below must stay
+				// blocked while the gate is closed. A catch outside the lock
+				// releases first and the mid-flight assertion reds.
+				await failedGate
+				events.push("journal:failed-complete")
+			}
+		})
+		const failing = tokenService
+			.addSeededToken({
+				profileId: "p1",
+				networkId: NETWORK.id,
+				accountAddress: "0xacc1",
+				tokenInterface: seedIface(NETWORK.chainId, CONTRACT),
+				name: "Compressed USD",
+				symbol: "cUSD",
+				decimals: 6,
+			})
+			.catch(() => {})
+		await queuedStarted
+		const queued = tokenService.restore([]).then(() => events.push("queued-op:ran"))
+		// Generous window for the queued op to (wrongly) slip in while the failed
+		// transition is still pending — it must not.
+		await new Promise((r) => setTimeout(r, 20))
+		expect(events).toEqual([])
+		releaseFailed()
+		await Promise.all([failing, queued])
+		expect(events).toEqual(["journal:failed-complete", "queued-op:ran"])
 	})
 
 	test("deleting a DEFAULT token writes the user tombstone marker", async () => {

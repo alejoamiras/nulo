@@ -76,7 +76,15 @@ export async function downloadFile({
 	}
 }
 
-export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, autoDecompress = true): Promise<File> {
+/** Thrown when a picked (or decompressed) file exceeds the caller's byte cap. */
+export class FileTooLargeError extends Error {
+	constructor(public readonly limitBytes: number) {
+		super(`File exceeds the ${limitBytes}-byte limit`)
+		this.name = "FileTooLargeError"
+	}
+}
+
+export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, autoDecompress = true, maxBytes?: number): Promise<File> {
 	return new Promise((resolve, reject) => {
 		const input = document.createElement("input")
 		input.type = "file"
@@ -94,6 +102,16 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 				return
 			}
 
+			// The cap must run HERE, not in callers: for compressed files the
+			// unbounded materialization would otherwise already have happened
+			// inside the decompress below by the time a caller can look at
+			// `.size`. A throw would leave the outer promise pending (async
+			// onchange callback) — reject-and-return, always.
+			if (maxBytes !== undefined && file.size > maxBytes) {
+				reject(new FileTooLargeError(maxBytes))
+				return
+			}
+
 			const compressionFormat = getCompressionFormat(file?.name)
 			if (!compressionFormat || !autoDecompress) {
 				resolve(file)
@@ -101,7 +119,7 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 			}
 
 			try {
-				const decompressedBlob = await decompressData(file, compressionFormat)
+				const decompressedBlob = await decompressData(file, compressionFormat, maxBytes)
 				const decompressedFile = new File([decompressedBlob], file.name.replace(`${getExtension(file.name)}`, ""), {
 					type: decompressedBlob.type,
 					lastModified: file.lastModified,
@@ -109,6 +127,13 @@ export async function pickFile(accept = ".json,.txt,.gz,.gzip", delay = false, a
 
 				resolve(decompressedFile)
 			} catch (err) {
+				// The cap error must NOT fall into the warn-and-fallback below —
+				// resolving with the still-compressed original would reclassify a
+				// decompression bomb as a plain file.
+				if (err instanceof FileTooLargeError) {
+					reject(err)
+					return
+				}
 				console.warn(`Failed to decompress ${file.name}:`, err instanceof Error ? err.message : err)
 				resolve(file)
 			}
@@ -246,7 +271,7 @@ export async function compressData(data: string | ArrayBuffer | Blob | ReadableS
 	}
 }
 
-export async function decompressData(compressedData: Blob | ArrayBuffer, format: CompressionFormat): Promise<Blob> {
+export async function decompressData(compressedData: Blob | ArrayBuffer, format: CompressionFormat, maxBytes?: number): Promise<Blob> {
 	if (!isCompressionStreamSupported()) {
 		throw new Error("Compression Streams API is not supported in this browser version")
 	}
@@ -265,9 +290,29 @@ export async function decompressData(compressedData: Blob | ArrayBuffer, format:
 	const ds = new DecompressionStream(format)
 	const writer = ds.writable.getWriter()
 
-	writer.write(uint8Array as BufferSource)
-	writer.close()
+	// The producer promises must settle even when the reader cancels
+	// mid-stream (the over-cap abort): a genuine write failure still surfaces
+	// through the reader side, so these catches only prevent an unhandled
+	// rejection — they never hide a failure.
+	writer.write(uint8Array as BufferSource).catch(() => {})
+	writer.close().catch(() => {})
 
-	const decompressedResponse = new Response(ds.readable)
-	return await decompressedResponse.blob()
+	// Chunk-wise drain with a running total: a small compressed input can
+	// inflate arbitrarily, so the cap must be enforced DURING inflation —
+	// checking the result's size afterwards would be after the memory is
+	// already spent.
+	const reader = ds.readable.getReader()
+	const chunks: BlobPart[] = []
+	let total = 0
+	for (;;) {
+		const { done, value } = await reader.read()
+		if (done) break
+		total += value.byteLength
+		if (maxBytes !== undefined && total > maxBytes) {
+			await reader.cancel()
+			throw new FileTooLargeError(maxBytes)
+		}
+		chunks.push(value as BlobPart)
+	}
+	return new Blob(chunks)
 }

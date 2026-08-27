@@ -7,8 +7,8 @@
  * caused phantom ports when multiple popup surfaces loaded the bundle.
  *
  * The public shape (`managers`, `isBackgroundConnected`, `initTransactionService`,
- * `refreshBalances`, `setSentinel`, `checkSentinel`) is preserved — every
- * existing consumer keeps working unchanged. Under the hood:
+ * `refreshBalances`) is preserved — every existing consumer keeps working
+ * unchanged. Under the hood:
  *   1. `managers` is a Proxy; client construction is deferred until first
  *      access (or until `initAppServiceContext()` is called explicitly).
  *   2. `initAppServiceContext()` is the explicit boot hook. Called from
@@ -26,7 +26,6 @@ import { ProfileServiceClient } from "@/wallet/services/profile/client"
 import { TokenBalanceServiceClient } from "@/wallet/services/token-balance/client"
 import type { Tx } from "@/wallet/services/transaction/spec"
 import { TransactionServiceClient } from "@/wallet/services/transaction/client"
-import { storageLocalGet, storageLocalSet } from "@/utils/storage"
 
 /** Reactive: true when the long-lived port to the service worker is open. */
 export const isBackgroundConnected = ref(false)
@@ -144,23 +143,34 @@ export async function refreshBalances(_minutes: number | undefined, accounts: Ar
 	if (!accounts?.length) return
 
 	const tokenBalanceService = new TokenBalanceServiceClient()
-	const tokenBalances: Array<{ id: number | string; updatedAt: number }> = []
-	for (const acc of accounts) {
-		tokenBalances.push(...(await tokenBalanceService.getTokenBalances(undefined, acc.address)))
-	}
+	try {
+		const tokenBalances: Array<{ id: number | string; updatedAt: number }> = []
+		for (const acc of accounts) {
+			tokenBalances.push(...(await tokenBalanceService.getTokenBalances(undefined, acc.address)))
+		}
 
-	function checkAge(updatedAt: number, minutes?: number): boolean {
-		if (!minutes) return true
-		const now = Date.now()
-		const diff = now - updatedAt
-		return diff >= minutes * 60 * 1_000
-	}
+		function checkAge(updatedAt: number, minutes?: number): boolean {
+			if (!minutes) return true
+			const now = Date.now()
+			const diff = now - updatedAt
+			return diff >= minutes * 60 * 1_000
+		}
 
-	for (const tb of tokenBalances) {
-		if (checkAge(tb.updatedAt, 30)) tokenBalanceService.refreshTokenBalance(tb.id as number)
+		// The refreshes must settle BEFORE the disconnect: tearing the port down with them
+		// in flight rejected the client's own pending calls, so the refresh outcome was lost
+		// (and surfaced only as unhandled rejections). allSettled so one failed token's
+		// refresh doesn't cut short the others.
+		const refreshes: Array<Promise<unknown>> = []
+		for (const tb of tokenBalances) {
+			if (checkAge(tb.updatedAt, 30)) refreshes.push(tokenBalanceService.refreshTokenBalance(tb.id as number))
+		}
+		for (const result of await Promise.allSettled(refreshes)) {
+			if (result.status === "rejected") console.error(result.reason)
+		}
+	} finally {
+		// A thrown balance read used to skip the disconnect entirely, leaking the connection.
+		tokenBalanceService.disconnect()
 	}
-
-	tokenBalanceService.disconnect()
 }
 
 export function initTransactionService(onTransactionAdded: (tx: Tx) => void, onTransactionUpdated: (tx: Tx) => void): void {
@@ -170,14 +180,4 @@ export function initTransactionService(onTransactionAdded: (tx: Tx) => void, onT
 	transactionService.onTransactionUpdated.add(onTransactionUpdated)
 	transactionService.connect()
 	managers.transaction = transactionService
-}
-
-const sentinelPath = "nulo:ui:sentinel"
-
-export async function setSentinel(): Promise<void> {
-	await storageLocalSet({ [sentinelPath]: __SENTINEL__ })
-}
-
-export async function checkSentinel(): Promise<boolean> {
-	return (await storageLocalGet(sentinelPath))[sentinelPath] === __SENTINEL__
 }

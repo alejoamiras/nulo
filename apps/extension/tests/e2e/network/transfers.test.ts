@@ -1,12 +1,14 @@
 import { inject, expect } from "vitest"
 import { test, openPopup, waitForHash, clickByTestId } from "../fixtures/extension"
 import {
-	sendTransfer,
-	waitForBalance,
-	waitForTxConfirmation,
-	navigateToTokenDetail,
-	getTokenDetailBalances,
+	captureBalanceBaseline,
 	clickNavTab,
+	getTokenDetailBalances,
+	navigateToTokenDetail,
+	sendTransfer,
+	waitForFreshBalanceRow,
+	waitForTokenCardAmount,
+	waitForTxConfirmation,
 } from "../fixtures/helpers"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -42,7 +44,18 @@ test.skipIf(!hasConfig)(
 		{
 			const page = await openPopup(tokenReadyExtension)
 			await waitForHash(page, "#/popup/general")
-			await waitForBalance(page, "1,000", 60_000)
+			// Token-scoped freshness + exact raw value + card-scoped display —
+			// a body-text "1,000" scan can false-positive on fiat ("$1,000.00")
+			// or larger numbers ("11,000").
+			const baseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page, {
+				account: tokenReadyExtension.accountAddress,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (1000n * 10n ** 18n).toString(),
+				baselineUpdatedAt: baseline,
+				timeoutMs: 60_000,
+			})
+			await waitForTokenCardAmount(page, "1,000", "TST")
 			console.log("✓ Initial balance: 1,000 public tokens")
 			await page.close()
 		}
@@ -76,8 +89,18 @@ test.skipIf(!hasConfig)(
 			console.log("✓ Public → Private (shield) submitted")
 			await waitForTxConfirmation(page, { amount: "100", fromType: "public", toType: "private" })
 			console.log("✓ Shield tx confirmed")
-			await waitForBalance(page, "Priv", 60_000)
-			console.log("✓ Private balance visible")
+			// Exact post-shield split (public 900 / private 100) proven at the
+			// row, not via a rendered-section scan.
+			const shieldBaseline = await captureBalanceBaseline(page, tokenReadyExtension.accountAddress, aztecConfig!.tokenAddress)
+			await waitForFreshBalanceRow(page, {
+				account: tokenReadyExtension.accountAddress,
+				tokenContract: aztecConfig!.tokenAddress,
+				expectedPublicRaw: (900n * 10n ** 18n).toString(),
+				expectedPrivateRaw: (100n * 10n ** 18n).toString(),
+				baselineUpdatedAt: shieldBaseline,
+				timeoutMs: 60_000,
+			})
+			console.log("✓ Private balance visible (public 900 / private 100 exact)")
 			await page.close()
 		}
 
@@ -125,18 +148,18 @@ test.skipIf(!hasConfig)(
 			// tokens/[id].vue:onMounted), so we wait for the DOM to reflect the
 			// projection result instead of clicking the Refresh button via a
 			// helper. Poll the balance selectors until both flip to expected.
+			// EXACT normalized compare — `includes("50")` also matches "950"/"150".
 			await page.waitForFunction(
 				() => {
-					const pub = document.querySelector('[data-testid="public-balance-value"]')?.textContent?.trim() ?? ""
-					const priv = document.querySelector('[data-testid="private-balance-value"]')?.textContent?.trim() ?? ""
-					return pub.includes("950") && priv.includes("50")
+					const norm = (sel: string) => (document.querySelector(sel)?.textContent ?? "").replace(/[,\s]/g, "")
+					return norm('[data-testid="public-balance-value"]') === "950" && norm('[data-testid="private-balance-value"]') === "50"
 				},
 				{ timeout: 30_000, polling: 500 },
 			)
 			const { privateBalance, publicBalance } = await getTokenDetailBalances(page)
 			console.log(`Token detail balances — public: "${publicBalance}", private: "${privateBalance}"`)
-			expect(publicBalance).toContain("950")
-			expect(privateBalance).toContain("50")
+			expect(publicBalance.replace(/[,\s]/g, "")).toBe("950")
+			expect(privateBalance.replace(/[,\s]/g, "")).toBe("50")
 			console.log("✓ Token detail balances correct (pub=950, priv=50)")
 			await page.close()
 		}

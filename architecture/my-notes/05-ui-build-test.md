@@ -148,10 +148,10 @@ const navigationLinks = [
    - Used by: `appStore.loggerWindowId` (persistent logger window ID)
    - Watchers sync on both mutation and chrome.storage.onChanged
 
-2. **`notification.js`** (src/composables/notification.js:1-66)
-   - Stateful: uses app/popup/notification stores + toast composable
-   - `getTemplate()` — notification templates (aztecReset)
-   - `checkNotificationsForShow()` — async sentinel check + trigger
+2. **`notification.js`** — REMOVED (owner-authorized). The aztecReset/sentinel
+   reset path (`getTemplate()`, `checkNotificationsForShow()`, the `setSentinel`
+   call sites, `package.json#sentinel`, and the `__SENTINEL__` define) was
+   deleted; the notification store/manager and its inline producers remain.
 
 3. **`configClient.ts`** (src/composables/configClient.ts)
    - ConfigServiceClient wrapper for settings updates
@@ -331,7 +331,7 @@ COOP: "same-origin" (Cross-Origin-Opener-Policy)
 
 ```typescript
 __VERSION__: "0.11.0"
-__SENTINEL__: "7" (schema version)
+__SENTINEL__: "7" (schema version — define since removed with the sentinel path)
 __AZTEC_VERSION__: "4.2.0-nightly.20260413"
 __NAME__: "@nulo/extension"
 __DISPLAY_NAME__: "Nulo"

@@ -27,6 +27,7 @@ import { TransferType } from "@/wallet/services/transaction/client"
 import { isValidHex } from "@/utils/string"
 import { FEE_JUICE_BRIDGE_URL } from "@/popup/components/modules/send/fee-helpers"
 import { validateSendAmount } from "@/popup/pages/send-amount"
+import { applyBalanceAdd, applyBalanceUpdate } from "@/popup/pages/send-balance-events"
 import { evaluateFiatGate } from "@/popup/pages/send-fiat-gate"
 import { classifyCancellableRejection } from "@/popup/utils/cancellable-rejection"
 
@@ -102,15 +103,10 @@ const tokenBalanceService = new TokenBalanceServiceClient()
 tokenBalanceService.onTokenBalanceAdded.add(onBalanceAdded)
 tokenBalanceService.onTokenBalanceUpdated.add(onBalanceUpdated)
 function onBalanceAdded(balance) {
-	if (balance.account !== appStore.account.address) return
-
-	tokenBalance.push(balance)
+	applyBalanceAdd(tokenBalances.value, appStore.account.address, balance)
 }
 function onBalanceUpdated(balance) {
-	const idx = tokenBalances.value.findIndex((tb) => tb.id === balance.id)
-	if (idx === -1) return
-
-	tokenBalances.value[idx] = balance
+	applyBalanceUpdate(tokenBalances.value, balance)
 }
 
 const tokenBalances = ref([])
@@ -250,6 +246,22 @@ const transferType = computed(() => {
 })
 
 const executionService = new ExecutionServiceClient()
+// B-30: executionService opens a live SW port as soon as fee estimation runs
+// (before any submit). Its ONLY disconnect used to live in executeTransfer's
+// `.finally`, which never runs unless Send was actually clicked — so the common
+// "open Send, pick amount, navigate away" flow leaked the port. Disconnect it in
+// onBeforeUnmount too, idempotently (submit + unmount must not double-disconnect).
+let executionDisconnected = false
+function disconnectExecution() {
+	if (executionDisconnected) return
+	executionDisconnected = true
+	executionService.disconnect()
+}
+// While a submit is in flight, teardown is OWNED by executeTransfer's `.finally`
+// — the page navigates away immediately after submitting, so disconnecting in
+// onBeforeUnmount would reject the still-pending executeTransfer RPC and surface
+// a false "transaction not sent" for a tx the SW is actually executing.
+let submitInFlight = false
 
 // Per-mount instance id so the in-app log viewer can pin which Send
 // page mount initiated each estimate / submit. Helps diagnose
@@ -263,11 +275,15 @@ const {
 	isEstimating,
 	estimate: scheduleFeeEstimate,
 	cancel: cancelFeeEstimate,
+	handoff: handoffFeeEstimate,
 } = useFeeEstimation({
 	debounceMs: 800,
-	estimate: ({ networkId, accountAddress, tokenId, transferType: tt, destination, amount, settings }) => {
+	estimate: ({ networkId, accountAddress, tokenId, transferType: tt, destination, amount, settings }, estimateToken) => {
 		console.log(`[send:${sendInstanceId}] estimateTransferFee firing`)
-		return executionService.estimateTransferFee(networkId, accountAddress, tokenId, tt, destination, amount, settings)
+		return executionService.estimateTransferFee(networkId, accountAddress, tokenId, tt, destination, amount, settings, estimateToken)
+	},
+	cancelRemote: (estimateToken) => {
+		executionService.cancelEstimate(estimateToken).catch(() => {})
 	},
 	onError: (err) => {
 		console.error(`[send:${sendInstanceId}] estimateTransferFee failed:`, err)
@@ -306,7 +322,14 @@ const handleSend = async () => {
 	// redundant `buildAndEstimateTxRequest` round-trip and reuse the
 	// pre-built TxRequest. The SW validates a snapshot (base fee, primary
 	// endpoint, inputs) at consume time and rebuilds on any drift.
+	// Ownership handoff: submitting transfers the estimate to the execution
+	// path — unmount cleanup must NOT remote-cancel it, or the eviction
+	// would race the fire-and-forget executeTransfer out of its reuse hit.
+	// Only when a consumable id exists: handing off a still-in-flight
+	// estimate would orphan its eventual stash (nobody consumes, nobody can
+	// cancel) for the full TTL.
 	const precomputedEstimateId = feeEstimate.value?.estimateId
+	if (precomputedEstimateId) handoffFeeEstimate()
 	const transferArgs = [
 		appStore.network.id,
 		appStore.account.address,
@@ -329,6 +352,7 @@ const handleSend = async () => {
 		contract,
 	})
 
+	submitInFlight = true
 	executionService
 		.executeTransfer(...transferArgs)
 		.then(() => {
@@ -347,7 +371,8 @@ const handleSend = async () => {
 			console.error("[send] executeTransfer failed:", err)
 		})
 		.finally(() => {
-			executionService.disconnect()
+			submitInFlight = false
+			disconnectExecution()
 		})
 
 	// Navigate away immediately. Progress is visible on the general page
@@ -488,6 +513,9 @@ onBeforeUnmount(() => {
 	tokenService.disconnect()
 	prices.dispose()
 	priceService.disconnect()
+	// Only when NO submit is in flight — otherwise executeTransfer's `.finally`
+	// owns the disconnect, and tearing down here would abort the pending RPC.
+	if (!submitInFlight) disconnectExecution()
 
 	cancelFeeEstimate()
 

@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest"
+import { EncryptionKey } from "@nulo/wallet-crypto"
+import { describe, expect, it, vi } from "vitest"
 import {
+	AssemblyAbortedError,
+	assembleFullBackup,
+	type BackupSource,
+	MAX_BACKUP_FILE_BYTES,
 	collectRestoreErrors,
 	detectBackupType,
 	normalizeAllIds,
@@ -7,6 +12,88 @@ import {
 	remapByMap,
 	resolveRestoredActiveNetworkId,
 } from "./full-backup-helpers"
+
+describe("assembleFullBackup", () => {
+	const twelveSources = (slice: (name: string) => unknown): { sources: BackupSource[]; spies: ReturnType<typeof vi.fn>[] } => {
+		const names = [
+			"profile",
+			"network",
+			"account",
+			"imported-keys",
+			"transaction",
+			"token",
+			"token-balance",
+			"account-state",
+			"auth-registry",
+			"fpc",
+			"contact",
+			"config",
+		]
+		const spies = names.map((name) => vi.fn(async () => slice(name)))
+		return { sources: names.map((name, i) => ({ name, backup: spies[i] })), spies }
+	}
+
+	it("calls every source exactly once (single-execution proof) and keys slices by source name", async () => {
+		const { sources, spies } = twelveSources((name) => [{ from: name }])
+		const result = await assembleFullBackup({ "wallet-version": "1.0.0" }, sources)
+		for (const spy of spies) expect(spy).toHaveBeenCalledTimes(1)
+		const parsed = JSON.parse(result.compact) as { data: Record<string, unknown> }
+		expect(Object.keys(parsed.data)).toHaveLength(12)
+		expect(parsed.data.config).toEqual([{ from: "config" }])
+	})
+
+	it("seals so the import-side recompute reproduces the checksum (pretty file path)", async () => {
+		const { sources } = twelveSources((name) => [{ from: name }])
+		const result = await assembleFullBackup({ "wallet-version": "1.0.0", "master-key": "mk" }, sources)
+		// Exactly what the importer does: parse the downloaded pretty file,
+		// strip only `checksum`, compact-restringify, hash.
+		const parsed = JSON.parse(result.pretty) as Record<string, unknown>
+		const { checksum, ...body } = parsed
+		expect(checksum).toBe(result.checksum)
+		expect(await EncryptionKey.getHashHex(JSON.stringify(body))).toBe(result.checksum)
+	})
+
+	it("is immune to caller-side mutation after sealing (canonical snapshot)", async () => {
+		const envelope: Record<string, unknown> = { "wallet-version": "1.0.0" }
+		const slice: Record<string, unknown>[] = [{ v: 1 }]
+		const sources: BackupSource[] = [{ name: "profile", backup: async () => slice }]
+		const result = await assembleFullBackup(envelope, sources)
+		envelope["wallet-version"] = "TAMPERED"
+		slice[0].v = 999
+		const parsed = JSON.parse(result.compact) as { "wallet-version": string; data: { profile: Array<{ v: number }> } }
+		expect(parsed["wallet-version"]).toBe("1.0.0")
+		expect(parsed.data.profile[0].v).toBe(1)
+		const { checksum, ...body } = JSON.parse(result.compact) as Record<string, unknown>
+		expect(await EncryptionKey.getHashHex(JSON.stringify(body))).toBe(checksum)
+	})
+
+	it("rejects an envelope that already carries a checksum", async () => {
+		await expect(assembleFullBackup({ checksum: "forged" }, [])).rejects.toThrow(/must not carry a checksum/)
+	})
+
+	it("aborts via the onSlice probe without calling later sources", async () => {
+		const { sources, spies } = twelveSources(() => [])
+		let calls = 0
+		const probe = () => ++calls <= 2
+		await expect(assembleFullBackup({}, sources, probe)).rejects.toBeInstanceOf(AssemblyAbortedError)
+		expect(spies[0]).toHaveBeenCalledTimes(1)
+		expect(spies[1]).toHaveBeenCalledTimes(1)
+		for (const spy of spies.slice(2)) expect(spy).not.toHaveBeenCalled()
+	})
+
+	it("skips null/undefined slices and drops undefined envelope fields", async () => {
+		const sources: BackupSource[] = [
+			{ name: "a", backup: async () => null },
+			{ name: "b", backup: async () => undefined },
+			{ name: "c", backup: async () => [1] },
+		]
+		const result = await assembleFullBackup({ present: "x", absent: undefined }, sources)
+		const parsed = JSON.parse(result.compact) as Record<string, unknown> & { data: Record<string, unknown> }
+		expect(Object.keys(parsed.data)).toEqual(["c"])
+		expect("absent" in parsed).toBe(false)
+		expect(parsed.present).toBe("x")
+	})
+})
 
 describe("detectBackupType", () => {
 	it("detects plain JSON object", () => {
@@ -67,6 +154,22 @@ describe("readBackupFile", () => {
 	it("classifies garbage as unknown", async () => {
 		const { selection } = await readBackupFile(makeFile("hello world ###"))
 		expect(selection.type).toBe("unknown")
+	})
+
+	function makeSizedFile(size: number, name = "backup.json"): File {
+		return { name, size, text: async () => "{}" } as unknown as File
+	}
+
+	it("rejects an oversized file before reading it", async () => {
+		const { parseError, selection } = await readBackupFile(makeSizedFile(MAX_BACKUP_FILE_BYTES + 1))
+		expect(parseError?.title).toBe("Backup File Too Large")
+		expect(selection.type).toBe("unknown")
+		expect(selection.backup).toBeNull()
+	})
+
+	it("accepts a file exactly at the limit", async () => {
+		const { parseError } = await readBackupFile(makeSizedFile(MAX_BACKUP_FILE_BYTES))
+		expect(parseError).toBeUndefined()
 	})
 })
 
@@ -238,5 +341,45 @@ describe("resolveRestoredActiveNetworkId (item 1b — preserve active-network ac
 		expect(resolveRestoredActiveNetworkId(12345 as unknown, news, olds)).toBeUndefined()
 		expect(resolveRestoredActiveNetworkId({} as unknown, news, olds)).toBeUndefined()
 		expect(resolveRestoredActiveNetworkId("does-not-exist", news, olds)).toBeUndefined()
+	})
+})
+
+describe("collectRestoreErrors — account-state top-level records (skip/violation shapes)", () => {
+	it("collects an item-level restoreError even when every child is clean", () => {
+		const result = collectRestoreErrors("account-state", [
+			{ networkId: "n1", senders: [], contracts: [], restoreError: "Skipped — couldn't reach the network" },
+			{ networkId: "n2", senders: [{ address: "ok" }], contracts: [] },
+		])
+		expect(result).toEqual([{ networkId: "n1", contracts: [], senders: [], restoreError: "Skipped — couldn't reach the network" }])
+	})
+
+	it("carries the item-level error ALONGSIDE failed children", () => {
+		const result = collectRestoreErrors("account-state", [
+			{
+				networkId: "n1",
+				senders: [{ address: "s", restoreError: "boom" }],
+				contracts: [],
+				restoreError: "Skipped — ran out of time reaching the network (3 registration(s) not attempted)",
+			},
+		])
+		expect(result).toHaveLength(1)
+		const item = result?.[0] as { restoreError?: string; senders: unknown[] }
+		expect(item.restoreError).toContain("ran out of time")
+		expect(item.senders).toHaveLength(1)
+	})
+
+	it("collapses non-object result entries ([null]/[undefined]) into ONE constant record, never throws", () => {
+		const result = collectRestoreErrors("account-state", [null, undefined, 42] as unknown as unknown[])
+		expect(result).toEqual([
+			{ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" },
+		])
+	})
+
+	it("guards malformed child arrays instead of throwing (post-finalize path)", () => {
+		const result = collectRestoreErrors("account-state", [
+			{ networkId: "n1", senders: null, contracts: undefined, restoreError: "malformed account-state item" },
+			{ networkId: "n2", senders: [null, { address: "s", restoreError: "x" }], contracts: [undefined] },
+		] as unknown as unknown[])
+		expect(result).toHaveLength(2)
 	})
 })

@@ -242,7 +242,7 @@ const onKeydown = (event) => {
 </script>
 
 <template>
-	<div :class="$style.wrapper">
+	<div :class="$style.wrapper" :data-dropdown-open="isOpen ? 'true' : 'false'">
 		<div ref="trigger" id="trigger" @click="toggleDropdown" :class="[$style.trigger]">
 			<slot />
 			<slot name="trigger" :isOpen="isOpen" />

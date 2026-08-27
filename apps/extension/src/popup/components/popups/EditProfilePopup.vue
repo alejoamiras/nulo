@@ -3,7 +3,8 @@
 import { ProfileServiceClient } from "@/wallet/services/profile/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { TOAST_DURATION, useToast } from "@/composables/toast"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -43,6 +44,13 @@ const isCollision = computed(() => {
 	return otherProfileNames.value.includes(normalized)
 })
 const isAvailableToUpdateProfile = computed(() => {
+	// The single submit-validity source for BOTH the button and the Enter path.
+	// Full-lifetime submit latch first: a running rename closes the form on
+	// EVERY route. isStartedEditing must gate here too (not only on the
+	// button): isUnchanged and isCollision both require it, so without this
+	// gate a pre-edit Enter would submit the unchanged name.
+	if (isProfileUpdateInProgress.value) return
+	if (!isStartedEditing.value) return
 	if (!nameTerm.value?.length) return
 	if (isUnchanged.value) return
 	if (isCollision.value) return
@@ -75,41 +83,38 @@ const handleUpdateProfile = async () => {
 		emit("onClose")
 
 		openToast({ label: "Profile is updated" })
-	} catch (err) {
+	} catch {
+		// The rejection previously vanished with zero user feedback — the sole
+		// silent outlier in the popup family; the family's standard error toast
+		// handles it, and the finally still releases the latch.
+		openToast({ label: "Something went wrong", icon: "warning" }, TOAST_DURATION.LONG)
 	} finally {
 		isProfileUpdateInProgress.value = false
 	}
 }
 
-watch(
-	() => props.show,
-	async () => {
-		if (!props.show) {
-			document.removeEventListener("keydown", onKeydown)
-
-			profileService.disconnect()
-			profileService = null
-			nameTerm.value = ""
-			isStartedEditing.value = false
-			otherProfileNames.value = []
-		} else {
-			profileService = new ProfileServiceClient()
-			nameTerm.value = appStore.profile?.name
-			// Populate the cross-profile collision list. Excludes the
-			// current profile by id so renaming to the same name doesn't
-			// trigger a false-positive collision.
-			const currentId = appStore.profile?.id
-			const profiles = await profileService.getProfiles()
-			otherProfileNames.value = profiles.filter((p) => p.id !== currentId).map((p) => p.name.normalize("NFKC").toLocaleLowerCase())
-
-			document.addEventListener("keydown", onKeydown)
-		}
+usePopupEntity(() => props.show, {
+	submit: handleUpdateProfile,
+	onShow: async () => {
+		profileService = new ProfileServiceClient()
+		nameTerm.value = appStore.profile?.name
+		// Populate the cross-profile collision list. Excludes the
+		// current profile by id so renaming to the same name doesn't
+		// trigger a false-positive collision. An Enter during this await is
+		// safe: handleUpdateProfile re-validates against a fresh getProfiles()
+		// inside its in-progress latch.
+		const currentId = appStore.profile?.id
+		const profiles = await profileService.getProfiles()
+		otherProfileNames.value = profiles.filter((p) => p.id !== currentId).map((p) => p.name.normalize("NFKC").toLocaleLowerCase())
 	},
-)
-
-const onKeydown = (e) => {
-	if (e.key === "Enter") handleUpdateProfile()
-}
+	onHide: () => {
+		profileService.disconnect()
+		profileService = null
+		nameTerm.value = ""
+		isStartedEditing.value = false
+		otherProfileNames.value = []
+	},
+})
 </script>
 
 <template>
@@ -162,7 +167,7 @@ const onKeydown = (e) => {
 						wide
 						variant="primary"
 						size="medium"
-						:disabled="!isAvailableToUpdateProfile || !isStartedEditing"
+						:disabled="!isAvailableToUpdateProfile"
 						:loading="isProfileUpdateInProgress"
 						data-testid="edit-profile-submit"
 					>
@@ -180,20 +185,5 @@ const onKeydown = (e) => {
 <style module>
 .wrapper {
 	padding: 0 20px 24px 20px;
-}
-
-.icon_btn {
-	cursor: pointer;
-
-	transition: all 0.2s var(--bezier);
-
-	&:hover {
-		fill: var(--txt-primary);
-	}
-
-	&.disabled {
-		pointer-events: none;
-		opacity: 0.3;
-	}
 }
 </style>

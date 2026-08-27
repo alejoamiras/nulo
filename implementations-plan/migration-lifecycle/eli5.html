@@ -1,0 +1,81 @@
+<title>Migration Lifecycle</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground:#FAF9F6; --surface:#FFFFFF; --ink:#1C1E21; --muted:#5B6068;
+  --line:#DDD9D0; --accent:#0E7C66; --accent-ink:#0A5A4B; --card:#F1EFEA; --warn:#A86412;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#151719; --surface:#1D2023; --ink:#E8E6E1; --muted:#A0A6AD;
+    --line:#34393E; --accent:#3FBF9F; --accent-ink:#6FD3B9; --card:#24282C; --warn:#D99A4E;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#151719; --surface:#1D2023; --ink:#E8E6E1; --muted:#A0A6AD;
+  --line:#34393E; --accent:#3FBF9F; --accent-ink:#6FD3B9; --card:#24282C; --warn:#D99A4E;
+}
+* { box-sizing:border-box }
+body { margin:0; background:var(--ground); color:var(--ink); font-family:"Source Serif 4",Georgia,serif; font-size:17px; line-height:1.65 }
+.wrap { max-width:720px; margin:0 auto; padding:48px 24px 96px }
+h1,h2,h3 { font-family:"Archivo",sans-serif; text-wrap:balance }
+h1 { font-size:34px; font-weight:800; letter-spacing:-0.015em; margin:8px 0 12px }
+h2 { font-size:20px; font-weight:700; margin:44px 0 12px }
+h3 { font-size:15.5px; font-weight:700; margin:0 0 6px }
+p { margin:0 0 13px }
+.eyebrow { font-family:"Archivo",sans-serif; font-size:12px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent) }
+.phase { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--accent); padding:16px 18px 10px; margin:0 0 12px }
+.phase p { font-size:15.5px }
+.gate { font-size:13.5px; color:var(--muted); border-top:1px dashed var(--line); margin-top:6px; padding-top:8px }
+.note { background:var(--card); padding:14px 18px; margin:14px 0; font-size:15px }
+pre { background:var(--card); padding:14px 16px; overflow-x:auto; font-family:"JetBrains Mono",monospace; font-size:12.5px; line-height:1.5; white-space:pre-wrap }
+.warnline { color:var(--warn); font-family:"Archivo",sans-serif; font-size:13.5px; font-weight:600 }
+ul { margin:0 0 13px; padding-left:22px } li { margin-bottom:7px } li::marker { color:var(--accent) }
+.muted { color:var(--muted); font-size:14px }
+a { color:var(--accent-ink) }
+</style>
+<div class="wrap">
+<div class="eyebrow">Nulo · remediation batch 2 of 9</div>
+<h1>Migration Lifecycle</h1>
+<p>When a future wallet update needs to reshape stored data, a "migration" runs at startup. Today's machinery has a cruel flaw: the browser wakes the wallet's background engine constantly — a tab reloading, a price refresh — and <em>every single wake</em> re-runs a failing migration and spends one of only three retry tokens. A temporary hiccup (say, the disk was busy) can burn all three within the hour while you browse, and the wallet then tells you to <strong>reinstall</strong> — the harshest possible outcome for what was a passing glitch. A second flaw: if the browser kills the engine mid-update, that interruption is never counted, so a repeating kill can loop forever without ever showing you the recovery screen.</p>
+
+<h2>What changes, in plain words</h2>
+<ul>
+<li><strong>Background wakes stop spending your retries.</strong> While an update is stuck, ambient activity no longer touches the budget — at most one automatic retry happens per stuck episode (after a 30-minute breather).</li>
+<li><strong>You get a real Retry button.</strong> The "update interrupted" screen gains <em>Retry update</em>: tap it and the wallet restarts itself and tries again, deterministically. The final, decisive attempt can only ever be one you chose.</li>
+<li><strong>A shipped fix always wins.</strong> If we release a wallet update that repairs a broken migration, the "reinstall" verdict is automatically re-examined — a dead end can't outlive the code that caused it.</li>
+<li><strong>Interrupted updates are counted honestly.</strong> Kill-loops now bound out to the recovery screen instead of spinning forever — and each interruption is counted exactly once, never double.</li>
+<li><strong>A diagnostic line tells the truth.</strong> A startup log was counting records in the wrong storage drawer (always zero); it now reads the right one.</li>
+</ul>
+
+<h2>Why this level of ceremony (tier: mid)</h2>
+<p>This is the machinery every user's data passes through on update day — high blast radius, and the failure it prevents (a false "reinstall everything") is irreversible in spirit. But the surface is compact: one engine file, one boot file, one screen, with a 642-test suite already guarding the engine. Mid tier: one plan, a competing alternative, two independent reviewers, a fresh-eyes final pass.</p>
+
+<h2>Phases</h2>
+<div class="phase"><h3>Phase 1 — Count interruptions honestly (the engine)</h3>
+<p>Teach the update engine that a mid-write interruption is a failed attempt — counted exactly once — so repeating interruptions reach the recovery screen instead of looping invisibly forever.</p>
+<p class="gate">Proves itself by: the engine's test suite, extended with interruption-loop, exactly-once, and first-interruption-stays-silent cases — all green.</p></div>
+<div class="phase"><h3>Phase 2 — Gate the retries (the boot path)</h3>
+<p>At startup, check whether an update is already stuck before running the engine at all: stuck-and-waiting means stand down (spend nothing), a tapped Retry or the once-per-episode breather means try once, a newer wallet version means the old verdict is void. Reads that fail stand down too, safely. Plus the one-line diagnostic fix.</p>
+<p class="gate">Proves itself by: a new boot-path test suite driving the REAL engine through simulated background wakes — proving the budget survives them — plus retry, version-reset, and stand-down cases.</p></div>
+<div class="phase"><h3>Phase 3 — The Retry button (the screen)</h3>
+<p>Add the button to the interrupted-update screen, wire it to the restart-and-retry mechanism, and make every line of copy match what actually happens.</p>
+<p class="gate">Proves itself by: screen-level tests (button only when retryable, click writes the request, dead-end shows no button) and the project's full check battery including browser rehearsals.</p></div>
+
+<h2>Human context</h2>
+<p>All three flaws are dormant right now — no real migrations exist yet. They arm themselves the day the first one ships, which by policy is launch day. That's why this batch runs now, not later. The two reviewers earned their keep again: one proved the draft's automatic-retry timer would still have reached "reinstall" in about an hour unattended (fixed: capped to one automatic try per episode), and the other showed the draft would have made "reinstall" permanent even after we shipped a fix (fixed: verdicts are version-stamped and self-void on update).</p>
+
+<h2>Open questions</h2>
+<ul><li>None blocking. One logged disagreement: the reviewer wanted the audit's original (deliberately failing) proof file rewritten; the standing rule says audit records stay untouched, so the regression protection lives in the real test suite instead and the record keeps its history.</li></ul>
+
+<div class="note"><strong>Approval:</strong> delegated per your standing instruction — this batch ships once the final fresh-eyes review returns approval and every check is green. Full technical plan: <span class="muted">implementations-plan/migration-lifecycle/plan.md</span>.</div>
+
+<h2>Implementation seeds</h2>
+<p class="muted">Not needed for the active autonomous run. For a standalone re-run:</p>
+<p class="warnline">Use exactly one per session — they replace each other.</p>
+<h3>Recommended: /goal</h3>
+<pre>/goal All 3 phases marked ✓ in implementations-plan/migration-lifecycle/plan.md, each ✓ backed by its validation gate reported passing in the transcript; /code-review max --fix applied+committed; codex post-impl loop converged (quoted); PR to dev green (gh pr checks output in transcript); bun run audit:vue and bun run test:e2e both exit 0 in the transcript.</pre>
+<h3>Alternative: /loop</h3>
+<pre>/loop 15m Drive implementations-plan/migration-lifecycle forward per plan.md. Reality-check plan.md + lessons/ + git status; next pending phase step; validate with the phase's gate after each meaningful edit; ✓ only when the written gate passes; decisions via /codex xhigh; log consults in lessons/; after all phases ✓ run the plan's Post-implementation section verbatim.</pre>
+</div>

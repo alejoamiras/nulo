@@ -10,7 +10,7 @@ import { fakeBrowser } from "@webext-core/fake-browser"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
-import type { DefaultTokenSeed } from "./default-tokens"
+import { DEFAULT_TOKEN_SEEDS, type DefaultTokenSeed } from "./default-tokens"
 import { PinMismatchError, SEED_ATTEMPT_CAP, TokenSeeder, type SeedPreview, type TokenSeederDeps } from "./seeder"
 import type { TokenInterface } from "./spec"
 
@@ -167,6 +167,32 @@ describe("TokenSeeder — trust boundary (hard skips)", () => {
 			await seeder.run()
 			expect(deps.persist).not.toHaveBeenCalled()
 		}
+	})
+
+	test("PRODUCTION PIN: the shipped mainnet cUSDC seed accepts its live-captured metadata and rejects the old wrong pin", async () => {
+		// Guards the real seed list, not a synthetic fixture: the entry at
+		// 0x018d47… must accept exactly what Alpha serves (captured 2026-08-11
+		// via seed-preflight-metadata.ts) — the original "cUSD" pin silently
+		// hard-skipped this token on every unlock in production.
+		const cusdc = DEFAULT_TOKEN_SEEDS.find((s) => s.contract.startsWith("0x018d47f656"))
+		if (!cusdc) throw new Error("mainnet cUSDC seed missing from DEFAULT_TOKEN_SEEDS")
+		const liveMetadata: SeedPreview = { name: "Clean USDC", symbol: "cUSDC", decimals: 6, interface: IFACE }
+
+		const accepted = makeSeeder({
+			seeds: [cusdc],
+			getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: cusdc.chainId })),
+			preview: vi.fn(async () => liveMetadata),
+		})
+		await accepted.seeder.run()
+		expect(accepted.deps.persist).toHaveBeenCalledTimes(1)
+
+		const oldPin = makeSeeder({
+			seeds: [{ ...cusdc, expectedSymbol: "cUSD" }],
+			getActiveNetwork: vi.fn(async () => ({ id: "net1", chainId: cusdc.chainId })),
+			preview: vi.fn(async () => liveMetadata),
+		})
+		await oldPin.seeder.run()
+		expect(oldPin.deps.persist).not.toHaveBeenCalled()
 	})
 })
 

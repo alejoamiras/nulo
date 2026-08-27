@@ -1,6 +1,7 @@
 import vue from "@vitejs/plugin-vue"
 import useAutoImport from "unplugin-auto-import/vite"
 import { defineConfig } from "vitest/config"
+import { sharedTest } from "../../vitest.base"
 import { artifactAliases, sharedDefine, srcDir } from "./vite.shared"
 
 export default defineConfig({
@@ -23,12 +24,13 @@ export default defineConfig({
 	},
 	define: sharedDefine,
 	test: {
+		...sharedTest,
 		globals: true,
 		environment: "jsdom",
 		setupFiles: "./tests/vitest.setup.ts",
-		// Pick up co-located tests in extracted @nulo/* workspace packages
-		// (same pattern as source-first exports — no per-package vitest
-		// config, extension remains the single test runner).
+		// Also pick up the co-located tests of the extracted @nulo/* workspace
+		// packages: they run standalone under their own configs AND here under the
+		// extension's jsdom setup, so the aggregate re-runs them (see ARCHITECTURE §14).
 		include: [
 			"src/**/*.test.ts",
 			// e2e infra helpers that are pure TS (no sandbox) — e.g. the
@@ -50,12 +52,20 @@ export default defineConfig({
 			// that defers V4/V10 in key-vectors.test.ts). It runs in aztec-runtime's OWN suite
 			// (node environment) via `test:all`.
 			"../../packages/aztec-runtime/src/account/derivation-vectors.test.ts",
+			// Same bb.js WASM limitation (poseidon2HashWithSeparator in the account-seed fan-out
+			// + full-chain address derivation). Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/account/account-seed-vectors.test.ts",
+			// Same bb.js WASM limitation (NuloAccount address derivation in the round-trip KATs).
+			"../../packages/aztec-runtime/src/account/account-export.test.ts",
 			// Same bb.js WASM limitation (poseidon2 in the class-id hash) plus node-only fs
 			// digest reads. Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/account/artifact-freeze.test.ts",
 			// Same bb.js WASM limitation (address derivation + init-hash poseidon2) + node crypto.
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/account/instantiation-descriptor.test.ts",
+			// Same bb.js WASM limitation (NuloAccount.new key derivation is live poseidon2).
+			// Runs in aztec-runtime's own node-env suite via `test:all`.
+			"../../packages/aztec-runtime/src/account/nulo-account.test.ts",
 			// Node-only (fs + import.meta.url file resolution — jsdom's URL isn't file-scheme).
 			// Runs in aztec-runtime's own node-env suite via `test:all`.
 			"../../packages/aztec-runtime/src/pxe/opfs-store.test.ts",

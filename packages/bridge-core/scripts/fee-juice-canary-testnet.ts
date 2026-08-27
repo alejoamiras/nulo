@@ -14,13 +14,11 @@
  * Run: bun scripts/fee-juice-canary-testnet.ts --config <candidate.json>
  *      (PRIVATE_KEY + SEPOLIA_RPC_URL in packages/bridge-core/.env)
  */
-import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { BatchCall, Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { Gas } from "@aztec/stdlib/gas"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
@@ -29,12 +27,11 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { FeeJuiceContractArtifact } from "@aztec/noir-contracts.js/FeeJuice"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
-import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { parseCandidateManifest } from "../src/candidate-schema"
 import { feeJuiceAddress, predictedWorstMinFees, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
+import { createL1Clients, createL2Wallet, createNode, loadManifestFromConfigArg, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 const SEPOLIA_RPC = process.env.SEPOLIA_RPC_URL ?? "https://ethereum-sepolia-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://v5.testnet.rpc.aztec-labs.com"
@@ -43,20 +40,21 @@ if (!PRIVATE_KEY) throw new Error("PRIVATE_KEY required (packages/bridge-core/.e
 
 const here = dirname(fileURLToPath(import.meta.url))
 const configArg = process.argv.indexOf("--config")
+// Recomputed (not just derived from loadManifestFromConfigArg) because the error below reports
+// the ACTUAL resolved path, matching whichever of --config / the fallback was used.
 const CONFIG_PATH =
 	configArg !== -1
 		? (process.argv[configArg + 1] as string)
 		: join(here, "..", "..", "..", "apps", "faucet", "public", "testnet-bridge.json")
-const CONFIG = parseCandidateManifest(JSON.parse(readFileSync(CONFIG_PATH, "utf8")))
+const CONFIG = loadManifestFromConfigArg(process.argv, {
+	mode: "fallback",
+	fallbackPath: CONFIG_PATH,
+	parse: parseCandidateManifest,
+})
 if (!CONFIG.l1.feeJuice) throw new Error(`${CONFIG_PATH} has no l1.feeJuice block — nothing to canary`)
 const direct = CONFIG.l1.feeJuice
 
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
-})
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
 const ERC20_MIN = [
 	{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
@@ -77,11 +75,9 @@ const ERC20_MIN = [
 ] as const
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
 	const asset = direct.asset as `0x${string}`
 	const portal = direct.portal as `0x${string}`
 	const handler = direct.feeAssetHandler as `0x${string}`
@@ -126,8 +122,8 @@ async function main() {
 	}
 
 	// 3. L2 fresh account first (the deposit binds to its address), sponsored-FPC deploy.
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(Fr.random())
 	const manager = await ewallet.createSchnorrAccount(secretKey, Fr.random(), signingKey)
 	const from = (await manager.getAccount()).getAddress()

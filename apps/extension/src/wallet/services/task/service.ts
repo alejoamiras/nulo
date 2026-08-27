@@ -184,6 +184,13 @@ export class TaskService extends Service<Methods, Events> implements ServiceSpec
 		return task
 	}
 
+	/** Non-throwing existence check — unlike `getTaskById`/`startTask`/`getTaskSync`,
+	 *  which throw on a missing id. Lets callers distinguish a stale/cleared task id
+	 *  (e.g. after a profile switch wipes the map) from a genuine invariant failure. */
+	public hasTask(taskId: string): boolean {
+		return this.tasks.has(taskId)
+	}
+
 	public async getTask(taskId: string): Promise<Task> {
 		const task = this.getTaskById(taskId)
 		this.cleanupStaleTasks()

@@ -1,92 +1,61 @@
 # Bun configuration. Docs: https://bun.com/docs/runtime/bunfig
 
 [install]
-# Keep the classic hoisted node_modules layout. A fresh lockfile on Bun 1.3.13 defaults new
-# workspace resolutions to the ISOLATED linker (per-workspace symlink trees + a .bun store),
-# which breaks this repo's hoisting assumptions: the foundry `@aztec/` remap into root
-# node_modules, resolvePackageFile walkers, and the bridge-core deploy-script paths.
-linker = "hoisted"
+# Isolated linker: per-workspace symlinked node_modules + a .bun store. Kills phantom
+# dependencies (a workspace resolves ONLY what it declares). The old hoisting assumptions
+# (foundry @aztec/ remap, resolvePackageFile walkers, bridge-core script paths) were made
+# layout-agnostic first via @nulo/resolve-asset + generated remappings; the executable
+# guarantee is apps/extension/scripts/layout-identity.test.ts.
+# `globalStore` is DELIBERATELY unset (defaults off): the committed layout uses per-project
+# hardlinked stores, so CI never creates or restores a shared symlink store
+# (~/.bun/install/cache/links). Worktree-heavy dev machines may opt in via their
+# user-level ~/.bunfig.toml. Evidence + posture memo:
+# implementations-plan/isolated-linker-store/lessons/phase-2.md.
+linker = "isolated"
 
 # Supply-chain defense: block packages published in the last 7 days.
 # Recent npm token-compromise attacks (axios 2026-03, chalk/debug 2025-09)
 # were detected and pulled within hours-to-days; a 7-day window catches
 # the publish-and-pull-within-hours attack pattern with margin.
 #
-# Why 7 days (was 14 in the original plan, then 3 after a Bun bug, now 7):
-#
-# Bun's docs (https://bun.com/docs/cli/install) state that
-# `minimumReleaseAge` "only affects new package resolution - existing
-# packages in bun.lock remain unchanged." Empirically on Bun 1.3.1 with
-# this repo's lockfile, setting the value to 1209600 (14d) and running
-# `bun install --frozen-lockfile` against an unchanged manifest fails
-# with: `error: No version matching "puppeteer" found for specifier
-# "^24.43.0" (blocked by minimum-release-age: 1209600 seconds)`.
-# Puppeteer 24.43.1 is already pinned in the lockfile and `^24.43.0` is
-# unchanged in the manifest — so the gate IS gating frozen-lockfile
-# installs of currently-pinned versions, contrary to the docs.
-#
-# 7 days (604800s) is the widest gate that passes against the current
-# lockfile today. Re-test wider windows when patch deps age or when Bun
-# fixes the frozen-lockfile gate behavior upstream.
+# Why 7 days (was 14 in the original plan, then 3 after a Bun 1.3.1 bug,
+# now 7): Bun 1.3.1 erroneously gated frozen-lockfile installs of
+# already-pinned versions, and 7d was the widest window that passed.
+# RETESTED ON BUN 1.4.0 (2026-08-24): that bug is gone — a 14d gate
+# passes `bun install --frozen-lockfile` cleanly against this lockfile.
+# Widening back to 14d is now viable; deliberate policy change, not done
+# as part of the 1.4 bump. Evidence:
+# implementations-plan/bun-1.4-bump/lessons/phase-5.md.
 #
 # CVE bypass: when an advisory drops for a package newer than the gate,
-# temporarily add it to `minimumReleaseAgeExcludes` below, install the
-# patched version, open a follow-up PR removing the exclude after the
-# window passes. See SECURITY.md "Dependency policy".
+# temporarily add a `minimumReleaseAgeExcludes = ["<name>"]` entry here,
+# install the patched version, open a follow-up PR removing it after the
+# window passes. See SECURITY.md "Dependency policy". Exactly one exemption
+# is active — see below; the gate is otherwise REAL (the @aztec 5.0.1 /
+# @alejoamiras set aged out ~2026-07-23 and was removed 2026-08-24).
 #
-# Bun bug #25305: `bun update --latest` does not apply this gate to
-# transitive deps. Workaround for bulk re-resolves: delete bun.lock
-# first.
+# Bun bug #25305 (`bun update --latest` skipped this gate for transitive
+# deps on 1.3.x) is CLOSED on Bun 1.4.0 — verified 2026-08-24 with a
+# positive-control mock-registry probe: when a gated update actually
+# re-resolves, directs AND transitives are both held to the gate
+# (evidence + matrix: implementations-plan/bun-1.4-bump/lessons/phase-5.md).
+# The old "delete bun.lock first" workaround is retired. One nuance
+# remains BY DESIGN: update never re-gates versions already in bun.lock
+# (docs: the gate "only affects new package resolution"), so evicting a
+# too-young version that is already locked still takes a deliberate
+# lockfile regeneration.
 #
 # CLI equivalent: --minimum-release-age=604800
 minimumReleaseAge = 604800
 
-# Excludes (the ONLY packages exempt from the 7-day gate). Name-based, so they cover the 5.0.1
-# client re-resolution too:
-# - The @aztec/* 5.0.1 client set (names incl. transitives, enumerated from the lockfile — the
-#   gate bites ANY fresh resolution, not just direct pins): 5.0.1 published 2026-07-15, ages out
-#   ~2026-07-22. TEMPORARY — remove in a follow-up PR after that date. Provenance is checked at
-#   bump time instead (npm audit signatures + attestations; see the aztec-update skill +
-#   implementations-plan/aztec-5.0.1-line/).
-# - @alejoamiras/aztec-accelerator: 5.0.1 published 2026-07-16, ages out ~2026-07-23. Same
-#   follow-up removes it. @alejoamiras/aztec-{standards,fee-payment} STAY 5.0.0 this phase
-#   (identity-coupled — they move to @aztec-foundation / 5.0.1 in P4, re-dated there).
-# The puppeteer closure (aged out 2026-05) and the rc.1 set were dropped once past the
-# window. On Bun 1.3.13+ a frozen-lockfile install of already-pinned versions doesn't trip
-# the gate; it only bites active re-resolution, so dropping aged-out excludes is safe.
-minimumReleaseAgeExcludes = [
-	"@alejoamiras/aztec-accelerator",
-	"@aztec-foundation/aztec-standards",
-	"@alejoamiras/aztec-standards",
-	"@alejoamiras/private-fee-juice",
-	"@aztec/accounts",
-	"@aztec/aztec.js",
-	"@aztec/bb-prover",
-	"@aztec/bb.js",
-	"@aztec/blob-lib",
-	"@aztec/builder",
-	"@aztec/constants",
-	"@aztec/entrypoints",
-	"@aztec/ethereum",
-	"@aztec/foundation",
-	"@aztec/key-store",
-	"@aztec/kv-store",
-	"@aztec/l1-artifacts",
-	"@aztec/native",
-	"@aztec/noir-acvm_js",
-	"@aztec/noir-contracts.js",
-	"@aztec/noir-noir_codegen",
-	"@aztec/noir-noirc_abi",
-	"@aztec/noir-protocol-circuits-types",
-	"@aztec/noir-types",
-	"@aztec/protocol-contracts",
-	"@aztec/pxe",
-	"@aztec/simulator",
-	"@aztec/sqlite3mc-wasm",
-	"@aztec/standard-contracts",
-	"@aztec/stdlib",
-	"@aztec/telemetry-client",
-	"@aztec/wallet-sdk",
-	"@aztec/wallets",
-	"@aztec/world-state",
-]
+# TEMPORARY — remove on/after 2026-09-02T17:41Z, when 5.2.0 clears the gate on its own.
+# @alejoamiras/aztec-accelerator@5.2.0 is first-party (published by this repo's owner) and had
+# to land immediately: the 5.0.1 SDK pinned its own @aztec copies, and two generations of
+# @aztec/noir-protocol-circuits-types in one bundle make upstream's instanceof-based getVKIndex
+# mis-resolve. Verified before exempting: registry signature, npm publish attestation, and SLSA
+# v1 provenance binding the tarball to
+# alejoamiras/aztec-accelerator@acb3d317d4d64ca2aeee2e7a8d0d7dd90365e39b built by
+# .github/workflows/publish-testnet.yml. Provenance only proves origin — the release also
+# carries 2.x transport changes that were NOT reviewed here.
+minimumReleaseAgeExcludes = ["@alejoamiras/aztec-accelerator"]
+

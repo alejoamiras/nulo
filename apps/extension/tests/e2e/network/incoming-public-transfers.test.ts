@@ -75,7 +75,7 @@ test.skipIf(!hasConfig)(
 			await page.waitForFunction(
 				() => {
 					const el = document.querySelector('[data-testid="public-balance-value"]')
-					return (el?.textContent || "").replace(/[,\s]/g, "").includes("1010")
+					return (el?.textContent || "").replace(/[,\s]/g, "") === "1010"
 				},
 				{ timeout: 180_000, polling: 1_000 },
 			)

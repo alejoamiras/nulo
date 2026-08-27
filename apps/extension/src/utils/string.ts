@@ -3,9 +3,14 @@ export const capitalize = (s: string): string => {
 	return s.charAt(0).toUpperCase() + s.slice(1)
 }
 
-export const trimAddress = (address: string, start = 8, end = 4): string => {
+/** Truncate an address to `start`…`end` chars around a separator. The
+ *  separator parameter exists because the UI currently renders THREE styles
+ *  ("..", "...", "…") at different sites — each site states its own, so the
+ *  slicing policy still has one implementation. Unifying the visual style is
+ *  a deliberate owner decision, not a refactor side effect. */
+export const trimAddress = (address: string, start = 8, end = 4, separator = ".."): string => {
 	if (!address || address.length <= start + end) return address
-	return `${address.substring(0, start)}..${address.substring(address.length - end)}`
+	return `${address.substring(0, start)}${separator}${address.substring(address.length - end)}`
 }
 
 /**

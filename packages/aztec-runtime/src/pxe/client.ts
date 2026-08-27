@@ -158,13 +158,38 @@ export class PxeServiceClientBase extends ServiceClient<Methods> implements Serv
 			if (method === "provisionChainStoreKey" || !message.includes("PXE_STORE_KEY_MISSING") || !profileId || !this.storeKeyProvider) {
 				throw err
 			}
+			// AUDIT D4-hardening: the recovery sequence is readiness ONCE, then
+			// authority ONCE, then already-ready sends — no `onReady` (which can
+			// recreate the offscreen document and reset its lifecycle map) may run
+			// between the authority read and the wire, or a concurrent delete +
+			// recreation could let a stale provision land on an empty map.
+			await this.onReady()
 			const provision = await this.storeKeyProvider(profileId)
 			if (!provision) throw err
-			await super.request(
-				"provisionChainStoreKey" as T,
-				...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<Methods[T]>),
-			)
-			return await super.request(method, ...args)
+			try {
+				// Capture-equality guard, POST-STAMP (the capture block above mutated
+				// args[0]) and capture-conditional: an UNCAPTURED op keeps the
+				// documented provision-then-retry contract, but a captured op whose
+				// generation differs from the provider's current row must not
+				// side-effect-install a newer key from its own error path — the
+				// original error propagates untouched.
+				const captured = (args[0] as { pxeGeneration?: string } | undefined)?.pxeGeneration
+				if (captured && provision.generation !== captured) throw err
+				// The base64 wire copy cannot be zeroized (JS strings are
+				// immutable); the key bytes below are, in every exit path.
+				await this.requestAlreadyReady(
+					"provisionChainStoreKey" as T,
+					...([profileId, btoa(String.fromCharCode(...provision.key)), provision.generation] as unknown as Parameters<
+						Methods[T]
+					>),
+				)
+				// A provision/retry send failure propagates AS ITSELF (more
+				// diagnostic than the original marker error), and the retry runs
+				// exactly once — a second missing-key rejection is terminal.
+				return await this.requestAlreadyReady(method, ...args)
+			} finally {
+				provision.key.fill(0)
+			}
 		}
 	}
 

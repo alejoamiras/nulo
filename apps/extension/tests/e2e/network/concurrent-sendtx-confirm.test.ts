@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { openPopup, test } from "../fixtures/extension"
-import { snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { snapshotResultSeq, waitForPgResult, assertPgOk } from "../fixtures/playground"
 import { approveExecute, waitForExecuteContent, waitForPopup } from "../fixtures/popups"
 import { readDappExecuteRecords, waitForDappExecuteStagesPresent } from "../fixtures/journal"
 import { holdProofGate, releaseProofGate } from "../fixtures/proof-gate"
@@ -104,6 +104,6 @@ test.skipIf(!hasConfig)(
 		await orderingPopup.close()
 
 		const r1 = await waitForPgResult(page, "sendTx", seqBefore, 300_000)
-		expect(r1.status).toBe("ok")
+		await assertPgOk(page, r1, "concurrent-sendtx-confirm:r1")
 	},
 )

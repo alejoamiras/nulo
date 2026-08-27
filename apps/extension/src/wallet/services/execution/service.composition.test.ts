@@ -19,6 +19,7 @@
 import { describe, expect, test, vi } from "vitest"
 import { Gas } from "@aztec/stdlib/gas"
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { EventHandler } from "@nulo/wallet-core/utils"
 import { FakeBrowserApi } from "@nulo/wallet-core/testing"
 import { ConfigStore } from "@/wallet/config"
 import { LoggerStore } from "@/wallet/logger"
@@ -40,6 +41,10 @@ import type { PxeServiceClient } from "@/wallet/services/pxe/client"
 import type { ProofGate } from "@/e2e/proof-gate"
 import type { ExecutionLane } from "./execution-lane"
 import { DEFAULT_FEE_MULTIPLIER } from "./fee/fee-strategy"
+import { EmbeddedStrategy } from "./fee/embedded-strategy"
+import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
+import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
+import { FpcStrategy } from "./fee/fpc-strategy"
 import {
 	fingerprintBaseFee,
 	fingerprintFeeSettings,
@@ -112,6 +117,9 @@ async function makeHarness() {
 	// One shared ProfileDeletionState so Execution's captureFence + Transaction's
 	// addTransaction assert against the SAME epoch map (D13 fence wiring).
 	const deletionState = new ProfileDeletionState()
+	// Real handler so the facade's profile-switch invalidation (D12) is both
+	// subscribable by the service and firable by tests.
+	const profileChanged = new EventHandler<unknown>()
 	collection.add(
 		svc(ProfileService.name, {
 			getActiveProfile: async () => ({ id: "p1" }),
@@ -120,9 +128,11 @@ async function makeHarness() {
 			getProfiles: async () => [{ id: "p1" }],
 			getDeletionState: () => deletionState,
 			captureExecutionFence: async () => ({ profileId: "p1", epoch: deletionState.capture("p1") }),
+			onActiveProfileChanged: profileChanged,
 		}),
 	)
-	collection.add(svc(NetworkService.name, { getNetwork: async () => NETWORK, getNode: async () => fakeNode }))
+	const getNetwork = vi.fn(async () => NETWORK)
+	collection.add(svc(NetworkService.name, { getNetwork, getNode: async () => fakeNode }))
 	collection.add(svc(AccountService.name, { getAccountContract: async () => ({ address: ACCOUNT }) }))
 	collection.add(
 		svc(TransactionService.name, {
@@ -160,6 +170,7 @@ async function makeHarness() {
 	}
 	const entry: TransferEstimateReuseEntry = {
 		networkId: req.networkId,
+		initializesAccount: false,
 		accountAddress: req.accountAddress,
 		tokenId: req.tokenId,
 		transferType: req.transferType,
@@ -185,7 +196,19 @@ async function makeHarness() {
 	const reuse = (service as unknown as { estimateReuse: TransferEstimateReuse }).estimateReuse
 	reuse.stash("estimate-1", entry)
 
-	return { service, ctrl, req, estimateId: "estimate-1", journal, stages, sendTx, toTx, getJournalId: () => journalId }
+	return {
+		service,
+		ctrl,
+		req,
+		estimateId: "estimate-1",
+		journal,
+		stages,
+		sendTx,
+		toTx,
+		getJournalId: () => journalId,
+		profileChanged,
+		getNetwork,
+	}
 }
 
 const waitFor = async (pred: () => boolean, timeoutMs = 2000) => {
@@ -312,4 +335,138 @@ describe("ExecutionService composition — cancel during queued-wait (in-process
 		const held2 = await lane.acquireSlot(NETWORK.id, undefined)
 		held2.release()
 	}, 15_000)
+
+	// (B-02 forwarding-seam PIN) executeOperations must thread `hooks` (incl.
+	// originKey) all the way to DappSendExecutor.executeSendTransaction for the
+	// send_transaction kind — otherwise grants collapse into the __no_origin__
+	// slot bucket. The DappSendExecutor unit test injects hooks directly, so it
+	// can't catch a dropped forward at either ExecutionService hop.
+	test("send_transaction forwards hooks.originKey through executeOperations → executeSendTransaction → DappSendExecutor", async () => {
+		const { service } = await makeHarness()
+		const dse = (service as unknown as { dappSendExecutor: { executeSendTransaction: (...a: unknown[]) => Promise<string> } })
+			.dappSendExecutor
+		const spy = vi.spyOn(dse, "executeSendTransaction").mockResolvedValue("0xhash")
+
+		const sendTxOp = {
+			kind: "send_transaction",
+			networkId: NETWORK.id,
+			accountAddress: ACCOUNT.toString(),
+			feeSettings: { paymentMethod: { kind: "fj" } },
+			actions: [{ kind: "call", contract: "0xc", method: "m", args: [] }],
+		} as never
+		const origin = { type: OriginType.DAPP, name: "dapp" } as never
+		await service.executeOperations([sendTxOp], origin, undefined, { originKey: "https://dapp.example" } as never)
+
+		// 5th positional arg of DappSendExecutor.executeSendTransaction is `hooks`.
+		const hooks = spy.mock.calls[0]?.[4] as { originKey?: string } | undefined
+		expect(hooks?.originKey).toBe("https://dapp.example")
+	}, 15_000)
+})
+
+describe("ExecutionService composition — profile-switch gas-cache invalidation (D12)", () => {
+	test("active-profile change EVICTS cached gas balances: peek goes cold, the next read recomputes", async () => {
+		const h = await makeHarness()
+		// Prime the reader's cache (the compute path degrades to null balances
+		// against these shallow fakes, so the snapshot lands already-stale but
+		// PEEKABLE — the WIRING is under test, discriminated via peek: a mere
+		// stale-marking keeps the last-known peekable, only the profile-switch
+		// EVICTION clears it).
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		const afterPrime = h.getNetwork.mock.calls.length
+		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).not.toBeNull()
+
+		h.profileChanged.invoke(undefined)
+
+		// Evicted outright — the new profile must not see the old profile's
+		// figures even dimmed. (Stale-marked entries would still peek here.)
+		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).toBeNull()
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(afterPrime) // cold → recompute
+	}, 15_000)
+
+	test("a compute in flight across the profile switch neither caches nor peeks — the new profile starts cold", async () => {
+		// The reader's unit suite pins this against a mocked view layer; this
+		// runs it through the REAL facade wiring: eviction mid-compute must
+		// suppress the write-back (a stale-marked re-insert would paint the old
+		// profile's figures dimmed under the new one via peek).
+		const h = await makeHarness()
+		// Park the compute at its SECOND network dependency (the view-deps
+		// resolution, AFTER the profile context is acquired) — parking on the
+		// first would fence before any old-profile context existed, proving
+		// only the wiring, not the dangerous old-context write-back.
+		let releaseNet: (() => void) | undefined
+		h.getNetwork
+			.mockImplementationOnce(async () => NETWORK)
+			.mockImplementationOnce(
+				() =>
+					new Promise((r) => {
+						releaseNet = () => r(NETWORK)
+					}),
+			)
+		const inFlight = h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		// Yield until the compute reaches the deferred dependency.
+		for (let i = 0; i < 50 && !releaseNet; i++) await new Promise((r) => setTimeout(r, 0))
+		if (!releaseNet) throw new Error("compute never reached its second getNetwork call")
+		h.profileChanged.invoke(undefined) // switch lands while the compute is parked
+		releaseNet()
+		await inFlight // the pre-switch caller still receives its value
+
+		expect(await h.service.peekGasBalances(NETWORK.id, ACCOUNT.toString())).toBeNull()
+		const before = h.getNetwork.mock.calls.length
+		await h.service.getGasBalances(NETWORK.id, ACCOUNT.toString())
+		expect(h.getNetwork.mock.calls.length).toBeGreaterThan(before) // cold → recompute
+	}, 15_000)
+})
+
+describe("ExecutionService composition — fee-strategy map through real init (Q-04 pilot pins)", () => {
+	// Characterization pins written BEFORE the buildFeeStrategies extraction.
+	// Nothing else in the repo pins this field: the reuse fast paths and
+	// executor mocks bypass the dispatch, so an init that never assigned
+	// `feeStrategies` passed every prior test.
+	test("init builds the four-kind strategy map in insertion order, each kind paired to its class", async () => {
+		const { service } = await makeHarness()
+		const map = (service as unknown as { feeStrategies: Map<string, unknown> }).feeStrategies
+		expect([...map.keys()]).toEqual(["fj", "fjwc", "fpc", "embedded"])
+		expect(map.get("fj")).toBeInstanceOf(FeeJuiceStrategy)
+		expect(map.get("fjwc")).toBeInstanceOf(FeeJuiceWithClaimStrategy)
+		expect(map.get("fpc")).toBeInstanceOf(FpcStrategy)
+		expect(map.get("embedded")).toBeInstanceOf(EmbeddedStrategy)
+	})
+
+	test("an unknown payment-method kind rejects with 'Invalid fee payment method' at the map lookup", async () => {
+		const { service } = await makeHarness()
+		const dispatch = service as unknown as {
+			buildAndEstimateTxRequest: (op: unknown, feeSettings: unknown) => Promise<unknown>
+		}
+
+		await expect(
+			dispatch.buildAndEstimateTxRequest(
+				{ networkId: NETWORK.id, accountAddress: ACCOUNT.toString(), actions: [] },
+				{ paymentMethod: { kind: "bogus" } },
+			),
+		).rejects.toThrow("Invalid fee payment method")
+	})
+
+	test("a known kind dispatches to ITS strategy with a CLONED op (spy on the initialized 'fj' entry)", async () => {
+		const { service } = await makeHarness()
+		const map = (service as unknown as { feeStrategies: Map<string, { buildAndEstimate: (ctx: { op: unknown }) => Promise<unknown> }> })
+			.feeStrategies
+		const fj = map.get("fj")
+		if (!fj) throw new Error("fj strategy missing")
+		const spy = vi.spyOn(fj, "buildAndEstimate").mockResolvedValue({ marker: "dispatched" } as never)
+		const dispatch = service as unknown as {
+			buildAndEstimateTxRequest: (op: unknown, feeSettings: unknown) => Promise<unknown>
+		}
+
+		const inputOp = { networkId: NETWORK.id, accountAddress: ACCOUNT.toString(), actions: [] }
+		const result = await dispatch.buildAndEstimateTxRequest(inputOp, { paymentMethod: { kind: "fj" } })
+
+		expect(result).toEqual({ marker: "dispatched" })
+		expect(spy).toHaveBeenCalledTimes(1)
+		// The dispatcher clones op + actions before handing them to a strategy
+		// (fjwc/fpc mutate op.actions; a leaked reference breaks repeat estimates).
+		const ctxOp = spy.mock.calls[0][0].op as { actions: unknown[] }
+		expect(ctxOp).not.toBe(inputOp)
+		expect(ctxOp.actions).not.toBe(inputOp.actions)
+	})
 })

@@ -1,0 +1,10 @@
+# Phase 3 lessons — GasBalanceCard onto the store
+
+- **Two behavior-parity gaps were in the STORE, not the card** — found by walking the card's existing pins against the store's semantics before touching the card:
+  1. `primeFromPeek` hardcoded `stale: true` on every peek commit. The card's fresh-peek pin ("no dim, no dot while the round-trip is pending") requires honoring the SW's own verdict — fixed to `stale: peeked.stale`.
+  2. A forced (tx-settle) fetch didn't mark the entry stale at START, so the known-invalidated value rendered as current until the refresh landed (the #343 dim rule). Fixed: `cause === "forced"` sets `stale: true` in the fetching commit.
+- **Two tx-client instances now exist per mount** (the store's `onTransactionUpdated` settle subscriber + the card's `onTransactionAdded` overlay subscriber). Reach-ins that grabbed `mock.results[last]` broke silently — replaced with `txHandlerFor(event)` which scans instances back-to-front for the one that actually registered the event.
+- **Real-store-in-component tests need only `setActivePinia(createPinia())` in `beforeEach`** — pinia's `useStore` falls back to `activePinia` when no app-level plugin is installed, so `mount()` needs no plugin wiring. The store's module-level client constructions mean the test must mock every client the STORE builds (`FpcServiceClient` was new here), not just the ones the card uses.
+- **Never-resolving deferred fetches leak the store's real 20s `withTimeout` timer** across the test file (this suite doesn't use fake timers). Cleanup: resolve the deferred after the pin's assertions.
+- The D9 overlay pins drive the store directly (`useBalancesStore().ensure(SCOPE, …)` from the test, same pinia) to produce a generic version bump — no synthetic component hooks needed.
+- Validation: GasBalanceCard suite 13/13 (all prior pins preserved + the plan-mandated D9 trio: generic-bump never clears, failed forced retains, successful forced clears). Gate `bun run audit:vue` clean (typecheck → test → lint → build, zero step failures).

@@ -13,5 +13,7 @@ import { expect, test } from "vitest"
 test("base.css content is pinned (edits must be deliberate + visually re-verified)", () => {
 	const css = readFileSync(join(process.cwd(), "src/base.css"), "utf8")
 	const hash = createHash("sha256").update(css).digest("hex")
-	expect(hash).toBe("2e4e52d3ef5b3a0d2096489130285a74761946785900b744211b01de79796d04")
+	// 2026-08-13 (home-refresh): .copyable cursor: copy → pointer. Deliberate; visually re-verified
+	// in the Phase-5 manual pass (the copy cursor is a drag-and-drop signal, wrong for click-to-copy).
+	expect(hash).toBe("c23ee8970a1d4a9abe2220dcd165578e3274638b9ccf574f9635f64ce37475e4")
 })

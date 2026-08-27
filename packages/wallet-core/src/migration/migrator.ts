@@ -41,7 +41,10 @@ import { StagingArea } from "./staging"
 export const SCHEMA_VERSION_KEY = "nulo:schema:version"
 export const SCHEMA_RUNNING_KEY = "nulo:schema:running"
 const SCHEMA_BACKUP_KEY = "nulo:schema:backup"
-const SCHEMA_ATTEMPTS_KEY = "nulo:schema:attempts"
+/** Exported for the host's boot gate: a build-version invalidation of a
+ *  blocked verdict must also reset this durable budget — a new build is a new
+ *  episode, and its first failure must not inherit exhausted attempts. */
+export const SCHEMA_ATTEMPTS_KEY = "nulo:schema:attempts"
 /** Everything under this prefix belongs to the engine: migrations may not
  *  footprint or write it, and adapters (e.g. the backup-import migrator's
  *  scratch read-back) must filter it out of user data. */
@@ -55,7 +58,16 @@ export const RESERVED_KEYS: readonly string[] = [SCHEMA_VERSION_KEY, SCHEMA_RUNN
 
 const DEFAULT_MAX_RETRIES = 3
 
-type BackupPayload = { version: number; refs: StorageRef[]; entries: Record<string, unknown> }
+/** `counted` marks a retained journal whose failure has already been recorded
+ *  in the attempt counter — the resume path must not count it again. Set
+ *  BEFORE the bump wherever a journal outlives a counted failure, so a kill
+ *  between the two under-counts (never double-counts: the bias is to never
+ *  falsely terminalize). */
+type BackupPayload = { version: number; refs: StorageRef[]; entries: Record<string, unknown>; counted?: true }
+/** Attempt identity is the VERSION alone: kills, up() throws, and restore
+ *  failures of one migration all accumulate on one counter (a per-phase
+ *  identity would let alternating failure kinds reset each other forever).
+ *  `phase` records the LAST failure's kind, informationally. */
 type AttemptRecord = { version: number; phase: "up" | "restore"; count: number }
 
 function isValidRef(r: unknown): r is StorageRef {
@@ -121,6 +133,9 @@ export class Migrator {
 	 *  an armed backup restores or completes); this session the host's blocked
 	 *  status outranks the updating overlay, so no silent wedge either. */
 	async run(): Promise<MigrationResult> {
+		// Per-RUN flag — run() is reusable, so a bump in an earlier run on the
+		// same instance must not mask a later run's genuinely free failure.
+		this.attemptRecorded = false
 		try {
 			return await this.runInner()
 		} catch (err) {
@@ -128,6 +143,11 @@ export class Migrator {
 				kind: "needs-recovery",
 				reason: `unexpected storage failure during migration: ${message(err)}`,
 				retryable: true,
+				// "Free" ONLY when no bump landed this run — a throw can escape
+				// after a successful bump (e.g. the journal clear that follows
+				// it), and labeling that boot unrecorded would hand the host an
+				// extra autonomous retry past the gesture-terminalization bound.
+				...(this.attemptRecorded ? {} : { spentAttempt: false as const }),
 			}
 		}
 	}
@@ -233,6 +253,9 @@ export class Migrator {
 				await this.restore(backup)
 			} catch (restoreErr) {
 				// Journal kept: the next boot retries the restore (bounded).
+				// Marked counted FIRST so the resume path never re-counts this
+				// same incident.
+				await this.markJournalCounted(backup)
 				const attempts = await this.bumpAttempts(m.version, "restore")
 				return {
 					kind: "needs-recovery",
@@ -240,9 +263,11 @@ export class Migrator {
 					retryable: attempts < this.maxRetries,
 				}
 			}
-			// Attempts bump BEFORE the journal clear: a kill between the two must
-			// lose the (idempotently re-doable) clear, never the durable count
-			// that bounds retries.
+			// Marker → bump → clear, in that order: the journal is still armed
+			// here, so the bump must be preceded by the counted stamp — a throw
+			// (or kill) after the bump but before the clear would otherwise leave
+			// an armed UNcounted journal for the resume to count a second time.
+			await this.markJournalCounted(backup)
 			const attempts = await this.bumpAttempts(m.version, "up")
 			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
 			return {
@@ -323,6 +348,7 @@ export class Migrator {
 		try {
 			await this.restore(backup)
 		} catch (err) {
+			await this.markJournalCounted(backup)
 			const attempts = await this.bumpAttempts(backup.version, "restore")
 			return {
 				kind: "needs-recovery",
@@ -330,6 +356,26 @@ export class Migrator {
 				retryable: attempts < this.maxRetries,
 			}
 		}
+		if (backup.counted !== true) {
+			// An armed, uncounted journal means the previous boot's up() was
+			// interrupted before it could resolve — count it, then STAND DOWN:
+			// one boot's authorization covers at most one up() execution, so the
+			// re-attempt belongs to whatever NEXT boot gets authorized (without
+			// this, a resumed kill plus this run's own up() would spend two
+			// attempts under a single authorization and could terminalize on an
+			// autonomous wake). Marker-first + journal-clear-last: any kill in
+			// between under-counts once, never double-counts.
+			await this.markJournalCounted({ ...backup, counted: true })
+			const attempts = await this.bumpAttempts(backup.version, "up")
+			await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
+			return {
+				kind: "needs-recovery",
+				reason: `migration ${backup.version} was interrupted mid-write (restored cleanly)`,
+				retryable: attempts < this.maxRetries,
+			}
+		}
+		// A counted journal's failure is already on the books — resume silently;
+		// the run continuing past this point IS this boot's one authorized up().
 		await this.store.remove([SCHEMA_BACKUP_KEY, SCHEMA_RUNNING_KEY])
 		return undefined
 	}
@@ -353,11 +399,33 @@ export class Migrator {
 		if (toRemove.length) await this.store.remove(toRemove)
 	}
 
+	/** True once any bump landed durably in THIS run — `run()`'s catch uses it
+	 *  to report `spentAttempt: false` only when genuinely nothing was recorded
+	 *  (a throw can escape AFTER a successful bump, e.g. from the journal clear
+	 *  that follows it; labeling that boot "free" would hand the host an extra
+	 *  autonomous retry and break the gesture-terminalization bound). */
+	private attemptRecorded = false
+
 	private async bumpAttempts(version: number, phase: AttemptRecord["phase"]): Promise<number> {
 		const cur = (await this.store.get(SCHEMA_ATTEMPTS_KEY))[SCHEMA_ATTEMPTS_KEY] as AttemptRecord | undefined
-		const count = cur && cur.version === version && cur.phase === phase ? cur.count + 1 : 1
+		// The counter is the terminalization authority — a corrupt persisted
+		// count (string, NaN, negative) must reset to a fresh episode, never
+		// arithmetic its way into an instant terminal verdict.
+		const prior = cur && cur.version === version && Number.isInteger(cur.count) && cur.count >= 0 ? cur.count : 0
+		const count = prior + 1
 		await this.store.set({ [SCHEMA_ATTEMPTS_KEY]: { version, phase, count } satisfies AttemptRecord })
+		this.attemptRecorded = true
 		return count
+	}
+
+	/** `counted` stamp on a journal that is about to outlive a counted failure.
+	 *  NON-swallowing on purpose: a failed stamp must abort the bump (the throw
+	 *  escapes to `run()`'s catch, which reports the boot as unrecorded), so the
+	 *  incident is counted exactly once by a LATER boot's resume instead of
+	 *  possibly twice — never-double beats never-undercount now that the
+	 *  attempt-recorded flag keeps the free-failure classification honest. */
+	private async markJournalCounted(backup: BackupPayload): Promise<void> {
+		await this.store.set({ [SCHEMA_BACKUP_KEY]: { ...backup, counted: true } satisfies BackupPayload })
 	}
 
 	/** Every live key covered by the refs. The engine's namespace is excluded

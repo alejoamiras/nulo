@@ -38,21 +38,20 @@ import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/azt
 
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { RegistryAbi } from "@aztec/l1-artifacts"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
+import { type Abi, getContract, keccak256 } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { preexistingFeeJuicePayment, publicFeeJuicePayment } from "../src/fee-juice"
 import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPublicFuelDeposit } from "../src/fuel"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { requirePinnedSigner } from "./live-intent"
-import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { assertRuntimeMatchesTemplate, loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 // ── Canonical mainnet identity (same pins as DeployBridgeMainnet.s.sol / discover-mainnet-fuel.ts) ──
 const CIRCLE_USDC = "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" as const
@@ -91,12 +90,7 @@ const PUBLIC_DIR = join(here, "..", "..", "..", "apps", "faucet", "public")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "mainnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "mainnet-bridge.journal.jsonl")
 
-const mainnet = defineChain({
-	id: 1,
-	name: "ethereum",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [ETH_RPC] } },
-})
+const mainnet = mainnetChain(ETH_RPC)
 
 function nargoArtifact(rel: string) {
 	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
@@ -153,12 +147,11 @@ const ERC20_META = [
 ] as const
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// ─── 0. Reviewed portal bytes + live network identity ────────────
-	rebuildAndVerifyPortal()
 	const portalArt = loadForkedPortalArtifact()
+	rebuildAndVerifyPortal(portalArt.immutableReferences)
 	const info = await nodeInfo()
 	if (info.l1ChainId !== 1) throw new Error(`Alpha node reports l1ChainId ${info.l1ChainId} != 1 — wrong node; STOP`)
 	console.log(`Alpha node: rollupVersion ${info.rollupVersion}, registry ${info.l1ContractAddresses.registryAddress}`)
@@ -190,8 +183,7 @@ async function main() {
 		throw new Error(`L1 deployer ${account.address} != plan-pinned mainnet signer ${pinned} — wrong key; STOP`)
 	}
 	console.log("L1 deployer", account.address)
-	const wallet = createWalletClient({ account, chain: mainnet, transport: http(ETH_RPC) })
-	const pub = createPublicClient({ chain: mainnet, transport: http(ETH_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: mainnet, rpcUrl: ETH_RPC, account })
 
 	const usdcR = getContract({ address: CIRCLE_USDC, abi: ERC20_META as unknown as Abi, client: pub })
 	// biome-ignore lint/suspicious/noExplicitAny: viem read typing
@@ -259,11 +251,25 @@ async function main() {
 	console.log("L2 (precomputed) token:", tokenInstance.address.toString())
 	console.log("L2 (precomputed) bridge:", bridgeInstance.address.toString())
 
+	// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
+	// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
+	// landed the portal step — a different key gets NotInitializer and the run stops here.
 	if (!recorded?.confirmed["portal-init"]) {
 		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		const preBridge = String(await (portalPre.read as any).l2Bridge())
 		if (!/^0x0+$/.test(preBridge)) throw new Error(`portal already initialized (l2Bridge ${preBridge}) — reuse forbidden; STOP`)
+		// Wrong-key preflight: read the pinned initializer back and compare BEFORE broadcasting.
+		// Without it a resume under a different key discovers the mismatch only as a NotInitializer
+		// revert, after gas is spent and mid-way through a one-shot sequence.
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const pinnedInitializer = String(await (portalPre.read as any).initializer())
+		if (pinnedInitializer.toLowerCase() !== account.address.toLowerCase()) {
+			throw new Error(
+				`portal initializer is ${pinnedInitializer} but this run broadcasts from ${account.address} — ` +
+					"resume with the key that deployed the portal; initialize is pinned to it and there is no rescue path.",
+			)
+		}
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, CIRCLE_USDC, bridgeInstance.address.toString()])
@@ -275,7 +281,7 @@ async function main() {
 	}
 
 	// FJ deposit: approve (exact) + depositToAztecPublic(to = L2 deployer, derived secret).
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const manager = await ewallet.createSchnorrAccount(secretKey, acctSalt, signingKey)
 	const deployer = await manager.getAccount()
 	const from = deployer.getAddress()
@@ -334,7 +340,7 @@ async function main() {
 	}
 
 	// ─── 5. GROUP 3 (L2): account (claim-in-tx) + trio + wiring ──────
-	const node = createAztecNodeClient(NODE_URL)
+	const node = createNode(NODE_URL)
 	const claim = {
 		claimAmount: depositRecord.amount,
 		claimSecret,
@@ -436,7 +442,9 @@ async function main() {
 	if ((await pr.rollupVersion()) !== BigInt(info.rollupVersion)) throw new Error("read-back FAILED: portal.rollupVersion != node")
 	const onchain = await pub.getCode({ address: portal })
 	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
-	assertSame(keccak256(onchain), portalArt.runtimeCodeHash, "portal runtime code hash == pin")
+	// Immutable-aware verification — see deploy-bridge-testnet.ts for rationale.
+	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// Router wiring (group 1): swapTarget bound + the F-004 witness shape present.
 	const routerR = getContract({

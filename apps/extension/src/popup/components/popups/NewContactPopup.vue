@@ -8,6 +8,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -78,6 +79,9 @@ const isValidAddress = computed(() => isValidHex(contactAddressTerm.value))
 const isAlreadyExistAddress = computed(() => form.fields.address.error.value === "Already exist")
 
 const isAvailableToAddContact = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
 	if (!nameTerm.value.replace(/\s/g, "").length) return false
 	if (!isValidAddress.value) return false
 	if (form.fields.name.error.value) return false
@@ -117,29 +121,28 @@ const handleAddContact = async () => {
 	}
 }
 
-watch(
-	() => props.show,
-	async () => {
-		if (!props.show) {
-			contactService.disconnect()
-
-			contacts.value = []
-			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
-			// Reset BEFORE awaiting getContacts. The await is non-trivial under
-			// load (full chrome.storage scan + cross-context RPC); resetting
-			// after it raced with user typing — the input fires v-model writes
-			// before the await resolves, and the post-await `form.reset()`
-			// then wiped them. The form is freshly visible (popup just opened),
-			// so an immediate reset is correct UX as well.
-			form.reset()
-			document.addEventListener("keydown", onKeydown)
-			contacts.value = await contactService.getContacts()
-		}
+// No submitWaitsForShow here: this popup already installed its listener
+// BEFORE the getContacts await (Enter-live-during-population is its pinned
+// timing), and its duplicate checks tolerate the empty initial list.
+usePopupEntity(() => props.show, {
+	submit: handleAddContact,
+	onShow: async () => {
+		// Reset BEFORE awaiting getContacts. The await is non-trivial under
+		// load (full chrome.storage scan + cross-context RPC); resetting
+		// after it raced with user typing — the input fires v-model writes
+		// before the await resolves, and the post-await `form.reset()`
+		// then wiped them. The form is freshly visible (popup just opened),
+		// so an immediate reset is correct UX as well.
+		form.reset()
+		contacts.value = await contactService.getContacts()
 	},
-)
+	onHide: () => {
+		contactService.disconnect()
+
+		contacts.value = []
+		form.reset()
+	},
+})
 
 watch(
 	() => [nameTerm.value, contactAddressTerm.value],
@@ -147,19 +150,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	// Only fire on input/textarea fields. Without this guard, pressing
-	// Enter while focused on the Add button would double-fire: the button's
-	// native Enter→click activation already calls handleAddContact via
-	// FormPopup's @submit; the keydown listener would call it a second time.
-	// (The same shape pre-migration without FormPopup; the guard is correct
-	// either way.)
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleAddContact()
-}
 </script>
 
 <template>

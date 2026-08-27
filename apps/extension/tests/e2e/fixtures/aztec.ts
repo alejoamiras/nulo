@@ -68,13 +68,48 @@ export async function waitForLocalNode(url = LOCAL_NODE_URL, timeoutMs = 60_000)
 	throw new Error(`Local Aztec node at ${url} did not become healthy within ${timeoutMs}ms`)
 }
 
+/**
+ * Serves Nulo's FROZEN Schnorr artifact wherever upstream would serve its own.
+ *
+ * Upstream rebuilds `@aztec/accounts` artifacts on toolchain changes (5.2.0 moved the
+ * SchnorrAccount class id, and with it every address derived from it), while Nulo's address
+ * regime is pinned to a vendored copy. A script-side account built from the upstream artifact
+ * would land on a different address than the one the extension derives and this fixture funds.
+ * Only the artifact hook differs: upstream's constructor name (`constructor`), args ([x, y])
+ * and salt (ZERO) already match the frozen descriptor.
+ */
+class FrozenArtifactWallet extends EmbeddedWallet {
+	constructor(...[pxe, node, walletDB, accountContracts, log]: ConstructorParameters<typeof EmbeddedWallet>) {
+		const frozen: typeof accountContracts = {
+			...accountContracts,
+			getSchnorrAccountContract: async (signingKey) => {
+				const [{ SchnorrAccountContract }, { FrozenSchnorrAccountArtifact }] = await Promise.all([
+					import("@aztec/accounts/schnorr"),
+					import("@nulo/aztec-runtime/account"),
+				])
+				return new (class extends SchnorrAccountContract {
+					override getContractArtifact() {
+						return Promise.resolve(FrozenSchnorrAccountArtifact)
+					}
+				})(signingKey)
+			},
+			getSchnorrInitializerlessAccountContract: (k) => accountContracts.getSchnorrInitializerlessAccountContract(k),
+			getEcdsaRAccountContract: (k) => accountContracts.getEcdsaRAccountContract(k),
+			getEcdsaKAccountContract: (k) => accountContracts.getEcdsaKAccountContract(k),
+			getStubAccountContractArtifact: (t) => accountContracts.getStubAccountContractArtifact(t),
+			createStubAccount: (a, t) => accountContracts.createStubAccount(a, t),
+		}
+		super(pxe, node, walletDB, frozen, log)
+	}
+}
+
 /** Create an EmbeddedWallet connected to the local node. Returns wallet + cleanup function. */
 export async function createTestWallet(url = LOCAL_NODE_URL) {
 	const node = createAztecNodeClient(url)
 	await waitForNode(node)
 
 	const dataDirectory = join(tmpdir(), `nulo-e2e-${randomBytes(8).toString("hex")}`)
-	const wallet = await EmbeddedWallet.create(node, {
+	const wallet = await FrozenArtifactWallet.create(node, {
 		pxe: { dataDirectory, proverEnabled: false },
 	})
 
@@ -440,8 +475,13 @@ export async function claimFeeJuice(
  * derivation). Both public + private FeeJuice balances are pre-funded on-chain.
  */
 export interface PreFundedAccount {
+	/** The 24-word recovery phrase the fixture extension imports (KDF v2 — plain-key import is gone). */
+	words: string[]
 	masterBase64: string
 	accountAddress: AztecAddress
+	/** The account's Schnorr signing key (0x hex) — for building an account-export file to
+	 *  exercise the IMPORT-account flow against a pre-funded on-chain account. */
+	signingKeyHex: string
 }
 
 /**
@@ -475,37 +515,41 @@ export async function setupPreFundedAccount(
 		forceBlock?: () => Promise<unknown>
 	} = {},
 ): Promise<PreFundedAccount> {
-	// Mirrors Nulo's derivation exactly. Constants verified against source-of-truth:
-	const ACCOUNT_TYPE_NULO_V1 = 0 // account/spec.ts:5 — SECURITY: NEVER change
-	const LOCAL_NETWORK_CHAIN_ID = 0 // network/service.ts:85 — Local hardcodes 0
+	// Mirrors Nulo's KDF v2 derivation exactly. Constants verified against source-of-truth:
+	const ACCOUNT_TYPE_NULO_V1 = 0 // account/spec.ts — SECURITY: NEVER change
+	const LOCAL_L1_CHAIN_ID = 31337 // anvil — the EXACT L1 id KDF v2 derives under (NOT the composite 0)
 	const ACCOUNT_INDEX = 0 // first account
 	const publicAmount = opts.publicAmount ?? 1000n * 10n ** 18n
 	const privateAmount = opts.privateAmount ?? 1000n * 10n ** 18n
 
 	// Lazy imports: heavy aztec deps + workspace pkg, only needed when fixture runs.
-	const { poseidon2Hash } = await import("@aztec/foundation/crypto/sync")
-	const { deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
+	const { getMnemonic } = await import("@nulo/wallet-core/utils")
+	const { deriveAccountSeed, deriveMasterFromMnemonic, deriveNuloAccountKeys } = await import("@nulo/wallet-crypto")
 	const { NuloAccount } = await import("@nulo/aztec-runtime/account")
 	const { createLogger } = await import("@aztec/foundation/log")
 	const logger = createLogger("setup-pre-funded-account")
 
-	// Step 1 — Derive identity (matches Nulo's account/service.ts:117 formula).
-	// Use Fr.random for the master so the 32-byte buffer stays within BN254 modulus
-	// (Fr.fromBuffer is strict — see session-manager.ts:210).
-	const master = Fr.random()
-	const accountSeed = poseidon2Hash([master, new Fr(LOCAL_NETWORK_CHAIN_ID), new Fr(ACCOUNT_TYPE_NULO_V1), new Fr(ACCOUNT_INDEX)])
-	// Signing-key-root model (NULO-ACCOUNT-KDF v1): seed → signing key (root) → privacy secret.
+	// Step 1 — Derive identity via the SAME recovery-phrase path the extension imports through:
+	// random entropy → 24 words → PBKDF2 master → deriveAccountSeed(master, l1ChainId, type, index).
+	const entropy = crypto.getRandomValues(new Uint8Array(32))
+	const words = await getMnemonic(entropy)
+	const masterBytes = await deriveMasterFromMnemonic(words)
+	const master = Fr.fromBuffer(Buffer.from(masterBytes))
+	const accountSeed = await deriveAccountSeed(master, LOCAL_L1_CHAIN_ID, ACCOUNT_TYPE_NULO_V1, ACCOUNT_INDEX)
+	// Signing-key-root model (NULO-ACCOUNT-KDF v2): seed → signing key (root) → privacy secret.
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(accountSeed)
 
 	// Sanity check the derived address against NuloAccount's path so the fixture
-	// fails fast if the upstream Schnorr / NuloAccount implementations diverge.
+	// fails fast if the frozen-artifact account below and NuloAccount ever disagree.
 	const nuloAccountContract = await NuloAccount.new(accountSeed, logger)
 	const expectedAddress = nuloAccountContract.address
 	logger.info(`Expected derived address: ${expectedAddress.toString()}`)
 
 	// Step 2 — Create the script-side schnorr account in the wallet's PXE.
 	// EmbeddedWallet.createSchnorrAccount(secretKey, salt, signingKey) returns an AccountManager —
-	// called WITHOUT a cast so the compiler checks the argument order against upstream.
+	// called WITHOUT a cast so the compiler checks the argument order against upstream. The
+	// wallet was built with the frozen-artifact provider (see createTestWallet), so this derives
+	// Nulo's pinned address rather than whatever `@aztec/accounts` currently ships.
 	const accountManager = await wallet.createSchnorrAccount(secretKey, Fr.ZERO, signingKey)
 	if (accountManager.address.toString() !== expectedAddress.toString()) {
 		throw new Error(
@@ -616,7 +660,7 @@ export async function setupPreFundedAccount(
 	logger.info(`PrivateFPC.balance_of(account) = ${privateBal}`)
 
 	const masterBase64 = Buffer.from(master.toBuffer()).toString("base64")
-	return { masterBase64, accountAddress: expectedAddress }
+	return { words, masterBase64, accountAddress: expectedAddress, signingKeyHex: signingKey.toString() }
 }
 
 /**
@@ -637,6 +681,58 @@ export async function mintPublicTokensForAccount(
 	try {
 		const feeOptions = await createSponsoredFeeOptions(wallet)
 		await mintPublicTokens(wallet, aztecConfig.tokenAddress, accountAddress, amount, aztecConfig.minterAddress, feeOptions)
+	} finally {
+		await cleanup()
+	}
+}
+
+/**
+ * Delegated-pull rig for authwit-DISCOVERY coverage: an upstream Token plus a
+ * Crowdfunding consumer whose `donate` pulls the donor's tokens via
+ * `transfer_in_private` (msg.sender = crowdfunding ≠ from = donor), so the
+ * token asserts a call authwit against the DONOR's account — the shape the
+ * wallet's estimate-time discovery must detect and sign. The donor gets a
+ * private balance minted so the pull can execute. Returns the two addresses
+ * (instances are fetched from the node by the test driver for dApp-side
+ * `registerContract`).
+ */
+export async function deployDelegatedPullRig(
+	aztecConfig: AztecTestConfig,
+	donorAddress: string,
+	donorMint = 1_000_000n,
+): Promise<{ pullTokenAddress: string; consumerAddress: string }> {
+	const { TokenContract: PullTokenContract } = await import("@aztec/noir-contracts.js/Token")
+	const { CrowdfundingContract } = await import("@aztec/noir-contracts.js/Crowdfunding")
+	const { wallet, cleanup } = await createTestWallet(aztecConfig.nodeUrl)
+	try {
+		const feeOptions = await createSponsoredFeeOptions(wallet)
+		const minter = AztecAddress.fromStringUnsafe(aztecConfig.minterAddress)
+		const fee = { ...feeOptions, gasSettings: E2E_FEE_GAS }
+
+		const tokenDeploy = await PullTokenContract.deploy(wallet as never, minter, "PullToken", "PULL", 18).send({
+			from: minter,
+			fee,
+			wait: { timeout: 120 },
+		} as never)
+		const pullToken = (tokenDeploy as unknown as { contract: { address: AztecAddress } }).contract
+
+		const crowdDeploy = await CrowdfundingContract.deploy(
+			wallet as never,
+			pullToken.address,
+			minter,
+			// Deadline far in the future — u64 seconds.
+			2n ** 40n,
+		).send({ from: minter, fee, wait: { timeout: 120 } } as never)
+		const crowdfunding = (crowdDeploy as unknown as { contract: { address: AztecAddress } }).contract
+
+		const token = await PullTokenContract.at(pullToken.address, wallet as never)
+		await token.methods.mint_to_private(AztecAddress.fromStringUnsafe(donorAddress), donorMint).send({
+			from: minter,
+			fee,
+			wait: { timeout: 120 },
+		} as never)
+
+		return { pullTokenAddress: pullToken.address.toString(), consumerAddress: crowdfunding.address.toString() }
 	} finally {
 		await cleanup()
 	}

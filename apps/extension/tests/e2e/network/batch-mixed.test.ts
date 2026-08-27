@@ -1,6 +1,6 @@
 import { expect, inject } from "vitest"
 import { clickByTestId, test } from "../fixtures/extension"
-import { callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
+import { assertPgOk, callExpectingNoPopup, snapshotResultSeq, waitForPgResult } from "../fixtures/playground"
 import { waitForPopup, approveCapabilities } from "../fixtures/popups"
 import type { AztecTestConfig } from "../fixtures/aztec"
 
@@ -44,7 +44,7 @@ test.skipIf(!hasConfig)(
 		const result = await callExpectingNoPopup(dappConnectedExtension, page, "batch", async () => {
 			await clickByTestId(page, "pg-btn-batch-mixed")
 		})
-		expect(result.status).toBe("ok")
+		await assertPgOk(page, result, "batch-mixed:result")
 		const arr = result.resultJson as Array<{ name: string }>
 		expect(arr.map((r) => r.name).sort()).toEqual(["getChainInfo", "getContractMetadata", "getContractMetadata"])
 	},

@@ -16,7 +16,7 @@
 
 import type { BrowserApi } from "@nulo/wallet-core/ports"
 import { EntityStorage } from "@/wallet/storage"
-import { getRandomHex } from "@/wallet/utils"
+import { nextRandomId } from "@/wallet/services/id-allocators"
 import type { Profile } from "./spec"
 
 /** Storage root for profile records. Frozen: renaming detaches every
@@ -40,9 +40,13 @@ export class ProfileRepository {
 	 *        for legacy SW startup paths.
 	 */
 	public constructor(browserApi?: BrowserApi) {
+		// Profile rows are the auth-critical root: every sealed-slot/MAC/fingerprint decision
+		// trusts the row fetched BY id. The key-identity guard hides any raw-storage row whose
+		// embedded id disagrees with its storage key, closing the embedded-id transplant bypass.
+		const guard = { requireKeyIdentityMatch: true } as const
 		this.storage = browserApi
-			? new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, browserApi.storage.local)
-			: new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, chrome.storage.local)
+			? new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, browserApi.storage.local, undefined, guard)
+			: new EntityStorage<Profile>(PROFILE_STORAGE_ROOT, chrome.storage.local, undefined, guard)
 	}
 
 	/** Returns the profile with the given id, or `undefined`. */
@@ -80,12 +84,12 @@ export class ProfileRepository {
 	 * with a locked re-verification before `set()`:
 	 *
 	 *     const id = await repo.generateUniqueId()     // unlocked
-	 *     await facadeLock.enter()
-	 *     while (await repo.contains(id)) {            // re-verify
-	 *       id = await repo.generateUniqueId()          //   under lock
-	 *     }
-	 *     await repo.set(id, profile)
-	 *     facadeLock.leave()
+	 *     await facadeLock.withLock(async () => {
+	 *       while (await repo.contains(id)) {          // re-verify
+	 *         id = await repo.generateUniqueId()        //   under lock
+	 *       }
+	 *       await repo.set(id, profile)
+	 *     })
 	 *
 	 * This mirrors the existing pattern in `createPasskeyProfile`,
 	 * where the WebAuthn prompt between generation and persistence
@@ -99,10 +103,6 @@ export class ProfileRepository {
 	 * re-verify becomes a no-op but costs nothing.
 	 */
 	public async generateUniqueId(): Promise<string> {
-		let id: string
-		do {
-			id = getRandomHex(PROFILE_ID_HEX_LENGTH)
-		} while (await this.contains(id))
-		return id
+		return nextRandomId(this, PROFILE_ID_HEX_LENGTH)
 	}
 }

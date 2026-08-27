@@ -12,7 +12,7 @@
 		"pretypecheck": "bun run scripts/ensure-release-json.ts",
 		"typecheck": "tsc --noEmit",
 		"pretest": "bun run scripts/ensure-release-json.ts",
-		"test": "vitest run"
+		"test": "bun --bun vitest run"
 	},
 	"devDependencies": {
 		"typescript": "^6.0.3",

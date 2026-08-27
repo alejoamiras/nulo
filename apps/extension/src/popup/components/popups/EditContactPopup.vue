@@ -8,6 +8,7 @@ import { ContactServiceClient } from "@/wallet/services/contact/client"
 /** Composables */
 import { useToast, TOAST_DURATION } from "@/composables/toast"
 import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -99,6 +100,9 @@ const isAlreadyExistName = computed(() => form.fields.name.error.value === "Alre
 const isAlreadyExistAddress = computed(() => form.fields.address.error.value === "Already exist" && isStartedEditingAddress.value)
 const isValidAddress = computed(() => isValidHex(contactAddressTerm.value))
 const isAvailableToUpdateContact = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
 	if (!nameTerm.value?.replace(/\s/g, "").length) return false
 	if (!isValidAddress.value) return false
 	if (form.fields.name.error.value) return false
@@ -158,10 +162,19 @@ const handleUpdateContact = async () => {
 	}
 }
 
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
+	{
+		submit: handleUpdateContact,
+		onShow: async () => {
+			contacts.value = await contactService.getContacts()
+			contactToEdit.value = cacheStore.importContact
+				? cacheStore.importContact
+				: contacts.value.find((c) => c.id === cacheStore.contactToEditIdx)
+			nameTerm.value = contactToEdit.value?.name ?? ""
+			contactAddressTerm.value = contactToEdit.value?.address ?? ""
+		},
+		onHide: () => {
 			cacheStore.contactToEditIdx = ""
 
 			contactService.disconnect()
@@ -170,19 +183,12 @@ watch(
 			contacts.value = []
 
 			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
-			contacts.value = await contactService.getContacts()
-			contactToEdit.value = cacheStore.importContact
-				? cacheStore.importContact
-				: contacts.value.find((c) => c.id === cacheStore.contactToEditIdx)
-			nameTerm.value = contactToEdit.value?.name ?? ""
-			contactAddressTerm.value = contactToEdit.value?.address ?? ""
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
 	},
+	// The edit target (import mode included) arrives with the await above — a
+	// premature first submit must stay inert, exactly as when the hand-rolled
+	// watcher installed its listener only after it.
+	{ submitWaitsForShow: true },
 )
 
 watch(
@@ -191,16 +197,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-
-const onKeydown = (e) => {
-	// Only fire on input/textarea fields. Pressing Enter while focused on
-	// the Update button would otherwise double-fire (button activation
-	// triggers @submit on its own).
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleUpdateContact()
-}
 </script>
 
 <template>
@@ -296,24 +292,3 @@ const onKeydown = (e) => {
 	</FormPopup>
 </template>
 
-<style module>
-.shake {
-	animation: shake 0.5s ease;
-}
-
-@keyframes shake {
-	0%,
-	100% {
-		transform: translateX(0);
-	}
-	25% {
-		transform: translateX(-2px);
-	}
-	50% {
-		transform: translateX(2px);
-	}
-	75% {
-		transform: translateX(-2px);
-	}
-}
-</style>

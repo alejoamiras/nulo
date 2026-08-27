@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest"
-import { definePassthroughs } from "./service-client-factory"
+import { definePassthroughs, definePassthroughsExhaustive } from "./service-client-factory"
 
 /** Pin: definePassthroughs installs methods that forward to `this.request`
  *  preserving the method NAME and PARAMETER ORDER verbatim — the behavior the
@@ -55,4 +55,34 @@ describe("definePassthroughs", () => {
 		const instance = new C() as C & { baz: () => Promise<{ shaped: boolean }> }
 		expect(await instance.baz()).toEqual({ shaped: true })
 	})
+})
+
+describe("definePassthroughsExhaustive", () => {
+	type M = {
+		foo: (a: number) => Promise<number>
+		bar: () => Promise<void>
+	}
+
+	test("installs identically to definePassthroughs when the list is complete", async () => {
+		const request = vi.fn(async (_m: string, ..._a: unknown[]) => 42)
+		class C {
+			request = request
+		}
+		definePassthroughsExhaustive<M>()(C.prototype, ["foo", "bar"])
+		const instance = new C() as C & M
+		expect(await instance.foo(1)).toBe(42)
+		expect(request).toHaveBeenCalledWith("foo", 1)
+		expect((instance.bar as { name: string }).name).toBe("bar")
+	})
+
+	// Compile-time proof, both directions. Inside a never-executed function so the
+	// intentionally-invalid calls are typechecked (typecheck covers src/**/*.test.ts)
+	// without vitest ever installing anything from them.
+	function _compileTimeProof(): void {
+		// @ts-expect-error a MISSING Methods key ("bar") must fail the installer's signature
+		definePassthroughsExhaustive<M>()(class {}.prototype, ["foo"])
+		// @ts-expect-error an EXTRA/typo'd key must fail the tuple's element constraint
+		definePassthroughsExhaustive<M>()(class {}.prototype, ["foo", "bar", "nope"])
+	}
+	void _compileTimeProof
 })

@@ -12,10 +12,10 @@ const stubs = {
 }
 
 describe("ImportMethodPicker", () => {
-	it("renders all five method entries with import label by default", () => {
+	it("renders all three method entries with import label by default", () => {
 		const wrapper = mount(ImportMethodPicker, { global: { stubs } })
 		const items = wrapper.findAll("button")
-		expect(items).toHaveLength(5)
+		expect(items).toHaveLength(3)
 		expect(wrapper.text()).toContain("Import with")
 	})
 
@@ -36,16 +36,10 @@ describe("ImportMethodPicker", () => {
 		expect(wrapper.emitted("select")).toEqual([["seed"]])
 	})
 
-	it("emits select with private_key", async () => {
+	it("offers NO plain-key or encrypted-key entries (recovery phrase is the only secret import)", () => {
 		const wrapper = mount(ImportMethodPicker, { global: { stubs } })
-		await wrapper.find("[data-testid=import-option-private-key]").trigger("click")
-		expect(wrapper.emitted("select")).toEqual([["private_key"]])
-	})
-
-	it("emits select with public_key", async () => {
-		const wrapper = mount(ImportMethodPicker, { global: { stubs } })
-		await wrapper.find("[data-testid=import-option-public-key]").trigger("click")
-		expect(wrapper.emitted("select")).toEqual([["public_key"]])
+		expect(wrapper.find("[data-testid=import-option-private-key]").exists()).toBe(false)
+		expect(wrapper.find("[data-testid=import-option-public-key]").exists()).toBe(false)
 	})
 
 	it("emits passkey (not select) for the passkey row", async () => {

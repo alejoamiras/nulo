@@ -46,6 +46,47 @@ function newClient(timeoutMs?: number): TestClient {
 	return new TestClient(silentLogger, timeoutMs)
 }
 
+describe("frozen transport error contract", () => {
+	// The error VALUES (class + details) are built in BaseServiceClient; only the
+	// message wording is this transport's. These pins freeze both halves exactly —
+	// the strings are internal, but held constant deliberately (log/telemetry
+	// greppability), so a change must be a conscious edit here, not drift.
+	type ErrorHooks = {
+		makeTimeoutError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeSendFailureError(meta: { requestId: number; methodName: string; timeoutMs?: number; cause?: unknown }): unknown
+		makeDisconnectError(): unknown
+	}
+	const hooks = newClient() as unknown as ErrorHooks
+
+	test("timeout → RpcTimeoutError with exact message + details", () => {
+		const err = hooks.makeTimeoutError({ requestId: 7, methodName: "echo", timeoutMs: 500 })
+		expect(err).toBeInstanceOf(RpcTimeoutError)
+		expect((err as RpcTimeoutError).code).toBe("RPC_TIMEOUT") // literal: pins static + instance code together
+		expect((err as RpcTimeoutError).message).toBe("RPC 'echo' timed out after 500ms")
+		expect((err as RpcTimeoutError).details).toEqual({ requestId: 7, methodName: "echo" })
+	})
+
+	test("send failure → RpcDisconnectedError with exact message + stringified cause", () => {
+		const err = hooks.makeSendFailureError({ requestId: 8, methodName: "echo", cause: new Error("port gone") })
+		expect(err).toBeInstanceOf(RpcDisconnectedError)
+		expect((err as RpcDisconnectedError).code).toBe("RPC_DISCONNECTED") // literal: pins static + instance code together
+		expect((err as RpcDisconnectedError).message).toBe("RPC 'echo' aborted: port disconnected")
+		expect((err as RpcDisconnectedError).details).toEqual({ requestId: 8, methodName: "echo", cause: "Error: port gone" })
+	})
+
+	test("send failure without a cause keeps details.cause undefined", () => {
+		const err = hooks.makeSendFailureError({ requestId: 9, methodName: "fail" })
+		expect((err as RpcDisconnectedError).details).toEqual({ requestId: 9, methodName: "fail", cause: undefined })
+	})
+
+	test("disconnect → plain Error (NOT WalletError) with the shared teardown message", () => {
+		const err = hooks.makeDisconnectError()
+		expect(err).toBeInstanceOf(Error)
+		expect(err).not.toBeInstanceOf(WalletError)
+		expect((err as Error).message).toBe("Client disconnected")
+	})
+})
+
 function responseMessage(requestId: number, result?: unknown, error?: string, errorPayload?: unknown): ResponseMessage<TestMethods> {
 	return {
 		type: MessageType.Response,

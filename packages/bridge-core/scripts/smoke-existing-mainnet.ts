@@ -20,13 +20,10 @@ import { AztecAddress } from "@aztec/aztec.js/addresses"
 import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/aztec.js/contracts"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { createPublicClient, createWalletClient, defineChain, http } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { preexistingFeeJuicePayment } from "../src/fee-juice"
 import { runRouterDeposit } from "../src/flows"
@@ -34,6 +31,7 @@ import { ensurePermit2Allowance } from "../src/l1"
 import { SWAP_BRIDGE_ROUTER_ABI } from "../src/router-abi"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { requirePinnedSigner } from "./live-intent"
+import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 const ETH_RPC = process.env.ETH_RPC_URL ?? "https://ethereum-rpc.publicnode.com"
 const NODE_URL = process.env.AZTEC_NODE_URL ?? "https://lb.drpc.live/aztec-mainnet/Ak_eT5HA2kbyqamqGTF702cdsdWqLTIR8YdadmahlY6k"
@@ -66,28 +64,21 @@ const ERC20_MIN = [
 	{ type: "function", name: "balanceOf", stateMutability: "view", inputs: [{ type: "address" }], outputs: [{ type: "uint256" }] },
 ] as const
 
-const mainnet = defineChain({
-	id: 1,
-	name: "ethereum",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [ETH_RPC] } },
-})
+const mainnet = mainnetChain(ETH_RPC)
 
 function nargoArtifact(rel: string) {
 	return loadContractArtifact(JSON.parse(readFileSync(join(AZTEC, rel), "utf8")))
 }
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// ─── L1 (Ethereum mainnet, viem) ─────────────────────────────────
 	const account = privateKeyToAccount(PRIVATE_KEY as `0x${string}`)
 	const pinned = requirePinnedSigner("mainnet")
 	if (account.address.toLowerCase() !== pinned.toLowerCase()) throw new Error("L1 funder != plan-pinned mainnet signer; STOP")
 	console.log("L1 funder", account.address)
-	const wallet = createWalletClient({ account, chain: mainnet, transport: http(ETH_RPC) })
-	const pub = createPublicClient({ chain: mainnet, transport: http(ETH_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: mainnet, rpcUrl: ETH_RPC, account })
 
 	const usdc = CONFIG.l1.usdc as `0x${string}`
 	const portal = CONFIG.l1.portal as `0x${string}`
@@ -106,8 +97,9 @@ async function main() {
 	if (usdcBal < amount) throw new Error(`USDC balance ${usdcBal} < smoke amount ${amount}; STOP`)
 
 	// ─── L2: the FUNDED mainnet deployer pays its own fees ───────────
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	// Kept for parity with the testnet smoke even though nothing reads it here.
+	const _node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	const { secret, salt } = resolveDeployerKeys("mainnet")
 	const { signingKey, secretKey } = await deriveNuloAccountKeys(secret)
 	const manager = await ewallet.createSchnorrAccount(secretKey, salt, signingKey)

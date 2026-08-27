@@ -1,4 +1,5 @@
 import { AztecAddress } from "@aztec/stdlib/aztec-address"
+import { type RestoreGate, NOOP_RESTORE_GATE } from "@/e2e/restore-gate"
 import { toRestoreError } from "@/utils/restore-error"
 import type { ILogger } from "@/wallet/logger"
 import type { Restored, ServiceCollection, ServiceSpec } from "@/wallet/base"
@@ -6,7 +7,7 @@ import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { PxeServiceClient } from "@/wallet/services/pxe/client"
 import { NetworkService } from "@/wallet/services/network/service"
 import type { Network } from "@/wallet/services/network/spec"
-import { networkInfoFrom, NodeStatus } from "@/wallet/services/network/spec"
+import { networkInfoFrom, NetworkSchema, NodeStatus } from "@/wallet/services/network/spec"
 import { EventHandler } from "@nulo/wallet-core/utils"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import {
@@ -17,6 +18,14 @@ import {
 	type Events,
 	type Methods,
 } from "./spec"
+import {
+	ACCOUNT_STATE_CAPS,
+	ACCOUNT_STATE_SKIP_DEADLINE,
+	ACCOUNT_STATE_SKIP_UNREACHABLE,
+	isConnectivityErrorMessage,
+	normalizeAccountStateSlice,
+	truncateErrorMessage,
+} from "./normalize"
 
 export * from "./spec"
 
@@ -37,7 +46,10 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 	private pxeService: PxeServiceClient = null!
 	private networkService: NetworkService = null!
 
-	public constructor(logger: ILogger) {
+	public constructor(
+		logger: ILogger,
+		private readonly restoreGate: RestoreGate = NOOP_RESTORE_GATE,
+	) {
 		super(ACCOUNT_STATE_SERVICE_NAME, logger)
 	}
 
@@ -175,7 +187,7 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			let skipped = 0
 			for (const c of contracts) {
 				const instance = await this.pxeService.getContractInstance(nInfo, AztecAddress.fromStringUnsafe(c))
-				if (!instance || !instance.currentContractClassId) {
+				if (!instance?.currentContractClassId) {
 					skipped++
 					continue
 				}
@@ -205,76 +217,156 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 			})
 		}
 
+		// The slice is mostly contract ARTIFACTS, and the restore side rejects it wholesale past
+		// `maxSliceCodeUnits` — an export that silently crosses the cap only fails much later, on
+		// someone else's import. Report the size while the user can still act on it.
+		const sliceCodeUnits = JSON.stringify(result).length
+		if (sliceCodeUnits > ACCOUNT_STATE_CAPS.maxSliceCodeUnits * 0.8) {
+			const biggest = result
+				.flatMap((r) => r.contracts.map((c) => ({ address: c.address, units: JSON.stringify(c.artifact ?? {}).length })))
+				.sort((a, b) => b.units - a.units)
+				.slice(0, 5)
+				.map((c) => `${c.address.slice(0, 12)}…=${c.units}`)
+				.join(", ")
+			this.logWarn(
+				`backup: account-state slice is ${sliceCodeUnits} code units of ${ACCOUNT_STATE_CAPS.maxSliceCodeUnits} ` +
+					`(${result.reduce((n2, r) => n2 + r.contracts.length, 0)} contract(s)); largest artifacts: ${biggest}`,
+			)
+		}
+
 		return result
 	}
 
-	public async restore(backupAccountState: BackupAccountState[], networks: Network[]): Promise<Restored<BackupAccountState>[]> {
+	/**
+	 * Restore PXE registrations from a backup slice. The slice is
+	 * attacker-controlled and NOT registry-schema'd, so it passes through the
+	 * shared normalizer first (caps, duplicate-network merge, malformed-entry
+	 * collapse) — malformed content becomes bounded top-level records, never a
+	 * mid-loop throw (this runs AFTER finalizeRestore, where rollback is
+	 * suppressed, so an uncaught throw would leave a post-commit partial
+	 * restore).
+	 *
+	 * `deadlineMs` (clamped to 0…30_000) is an absolute budget computed at
+	 * entry and checked immediately before EVERY registration launch — one
+	 * network can hold ~96 registrations across the two loops, and each
+	 * launch carries the offscreen transport's own 90s envelope, so a
+	 * per-item-only check could traverse minutes of work after a
+	 * slow-but-successful call crossed the line. A connectivity-class failure
+	 * fails the REST of that network fast (the payload can't register against
+	 * an endpoint that isn't answering).
+	 */
+	public async restore(
+		backupAccountState: BackupAccountState[],
+		networks: Network[],
+		deadlineMs?: number,
+	): Promise<Restored<BackupAccountState>[]> {
+		// E2e hold point: "account-state" parks a POST-finalize import RPC here
+		// (this service restores only after finalizeRestore), so a crash test can
+		// kill the worker at a known post-finalize phase. Production resolves
+		// immediately.
+		await this.restoreGate.waitAt("account-state")
+		// The absolute deadline starts at ENTRY — init wait time counts against
+		// it, never extends it (the caller's clock started at dispatch).
+		const clamped =
+			typeof deadlineMs === "number" && Number.isFinite(deadlineMs) ? Math.min(Math.max(deadlineMs, 0), 30_000) : undefined
+		const deadlineAt = clamped !== undefined ? Date.now() + clamped : undefined
 		await this.ensureInitialized()
+		const expired = () => deadlineAt !== undefined && Date.now() >= deadlineAt
 
-		const result: Restored<BackupAccountState>[] = []
+		const { items, violations } = normalizeAccountStateSlice(backupAccountState)
+		const result: Restored<BackupAccountState>[] = [...violations]
 
-		for (const item of backupAccountState) {
+		// The networks argument crosses the same trust boundary as the slice:
+		// require an array, cap the scan, keep only schema-valid rows — an
+		// invalid entry behaves as an absent network ("Network not found").
+		const safeNetworks = (Array.isArray(networks) ? networks : []).slice(0, 64).filter((n) => NetworkSchema.safeParse(n).success)
+
+		for (const item of items) {
 			const senders: Restored<BackupSender>[] = []
 			const contracts: Restored<BackupContract>[] = []
-			// A checksum-valid but shape-malformed slice (e.g. `senders: null`) must NOT throw
-			// an uncaught TypeError mid-iteration — this runs AFTER finalizeRestore, where rollback
-			// is suppressed, so an uncaught throw leaves a post-commit partial restore (codex audit
-			// MED). Coerce non-array senders/contracts to empty + record a per-item error so it
-			// surfaces (and blocks auto-completion) without stranding the loop.
-			const itemSenders = Array.isArray(item.senders) ? item.senders : []
-			const itemContracts = Array.isArray(item.contracts) ? item.contracts : []
-			const network = networks.find((n) => n.id === item.networkId)
-			if (!Array.isArray(item.senders) || !Array.isArray(item.contracts)) {
-				result.push({
-					...item,
-					senders,
-					contracts,
-					restoreError: toRestoreError(new Error("malformed account-state item (senders/contracts not arrays)")),
-				})
-				continue
+			const network = safeNetworks.find((n) => n.id === item.networkId)
+			let unreachable = false
+			let skippedByDeadline = 0
+
+			const classify = (err: unknown): string => {
+				const message = truncateErrorMessage(toRestoreError(err))
+				if (isConnectivityErrorMessage(message)) unreachable = true
+				// The per-item errors only travel back in the RPC result, which gates the import's
+				// Continue screen without ever being rendered — log them or a degraded restore is
+				// undiagnosable in the field.
+				this.logWarn(`restore: registration failed on ${item.networkId} — ${message}`)
+				return message
 			}
-			for (const sender of itemSenders) {
+
+			for (const sender of item.senders) {
+				if (unreachable) {
+					senders.push({ ...sender, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
+					continue
+				}
+				if (expired()) {
+					skippedByDeadline++
+					continue
+				}
 				try {
 					if (!network) throw new Error("Network not found")
-
 					await this.pxeService.registerSender(networkInfoFrom(network), AztecAddress.fromStringUnsafe(sender.address))
 					senders.push(sender)
 				} catch (err) {
-					senders.push({
-						...sender,
-						restoreError: toRestoreError(err),
-					})
+					senders.push({ ...sender, restoreError: classify(err) })
 				}
 			}
 
-			for (const contract of itemContracts) {
+			for (const contract of item.contracts) {
+				if (unreachable) {
+					contracts.push({ ...contract, restoreError: ACCOUNT_STATE_SKIP_UNREACHABLE })
+					continue
+				}
+				// Network-first error precedence (pre-existing contract): a missing
+				// network reports "Network not found", not the address-parse error.
+				let addressNum: bigint
 				try {
 					if (!network) throw new Error("Network not found")
-
-					const addressNum = AztecAddress.fromStringUnsafe(contract.address).toBigInt()
-					if (addressNum >= 0 && addressNum <= 6) {
-						// ignore protocol contracts registration,
-						// because we cannot validate it due to hardcoded addresses
-						continue
-					}
-
+					addressNum = AztecAddress.fromStringUnsafe(contract.address).toBigInt()
+				} catch (err) {
+					contracts.push({ ...contract, restoreError: truncateErrorMessage(toRestoreError(err)) })
+					continue
+				}
+				if (addressNum >= 0 && addressNum <= 6) {
+					// ignore protocol contracts registration,
+					// because we cannot validate it due to hardcoded addresses
+					continue
+				}
+				if (expired()) {
+					skippedByDeadline++
+					continue
+				}
+				try {
+					if (!network) throw new Error("Network not found")
 					await this.pxeService.registerContract(networkInfoFrom(network), {
 						instance: contract.instance,
 						artifact: contract.artifact,
 					})
 					contracts.push(contract)
 				} catch (err) {
-					contracts.push({
-						...contract,
-						restoreError: toRestoreError(err),
-					})
+					contracts.push({ ...contract, restoreError: classify(err) })
 				}
 			}
 
+			if (skippedByDeadline > 0) {
+				// Same reasoning as the classify() log: an expired budget gates the import's
+				// Continue screen with nothing written anywhere a field report could show.
+				this.logWarn(
+					`restore: budget expired on ${item.networkId} — ${skippedByDeadline} registration(s) not attempted ` +
+						`(${senders.length} sender(s), ${contracts.length} contract(s) done)`,
+				)
+			}
 			result.push({
 				networkId: item.networkId,
 				senders,
 				contracts,
+				...(skippedByDeadline > 0
+					? { restoreError: `${ACCOUNT_STATE_SKIP_DEADLINE} (${skippedByDeadline} registration(s) not attempted)` }
+					: {}),
 			})
 		}
 

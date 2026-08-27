@@ -31,22 +31,21 @@ import { Contract, getContractInstanceFromInstantiationParams } from "@aztec/azt
 import { SponsoredFeePaymentMethod } from "@aztec/aztec.js/fee"
 import { Fr } from "@aztec/aztec.js/fields"
 import { PublicKeys } from "@aztec/aztec.js/keys"
-import { createAztecNodeClient } from "@aztec/aztec.js/node"
 import { TxStatus } from "@aztec/aztec.js/tx"
 import { SPONSORED_FPC_SALT } from "@aztec/constants"
 import { EthAddress } from "@aztec/foundation/eth-address"
 import { RegistryAbi } from "@aztec/l1-artifacts"
 import { SponsoredFPCContract } from "@aztec/noir-contracts.js/SponsoredFPC"
 import { deriveNuloAccountKeys } from "@nulo/wallet-crypto"
-import { EmbeddedWallet } from "@aztec/wallets/embedded"
 import { TokenContractArtifact } from "@aztec-foundation/aztec-standards/artifacts/src/artifacts/Token.js"
-import { type Abi, createPublicClient, createWalletClient, defineChain, getContract, http, keccak256 } from "viem"
+import { type Abi, getContract, keccak256 } from "viem"
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts"
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
-import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
+import { assertRuntimeMatchesTemplate, loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { assertPortalUninitialized, assertReuseMatchesManifest, assertReusedTokenMetadata, parseReuseTokenArg } from "../src/reuse-token"
 import { PLAN_PINNED_L1_SIGNER } from "./live-intent"
+import { createL1Clients, createL2Wallet, createNode, sepoliaChain, stopwatch } from "./script-bootstrap"
 
 // The bridged pair's identity - ONE source for both chains; the deploy asserts L1==L2 below.
 // Token identity — env-overridable so a token cutover (e.g. the DP7 TestUsdc) configures the
@@ -84,12 +83,7 @@ const LIVE_PATH = join(PUBLIC_DIR, "testnet-bridge.json")
 const CANDIDATE_PATH = join(PUBLIC_DIR, "testnet-bridge.candidate.json")
 const JOURNAL_PATH = join(PUBLIC_DIR, "testnet-bridge.journal.jsonl")
 
-const sepolia = defineChain({
-	id: 11155111,
-	name: "sepolia",
-	nativeCurrency: { decimals: 18, name: "Ether", symbol: "ETH" },
-	rpcUrls: { default: { http: [SEPOLIA_RPC] } },
-})
+const sepolia = sepoliaChain(SEPOLIA_RPC)
 
 function evmArtifact(name: string): { abi: unknown[]; bytecode: `0x${string}` } {
 	const j = JSON.parse(readFileSync(join(OUT, `${name}.sol`, `${name}.json`), "utf8"))
@@ -137,14 +131,13 @@ function assertSame(actual: unknown, expected: unknown, label: string): void {
 }
 
 async function main() {
-	const t0 = Date.now()
-	const mins = () => `${((Date.now() - t0) / 60000).toFixed(1)}m`
+	const mins = stopwatch()
 
 	// ─── 0. Reviewed bytes + drift alarm ─────────────────────────────
 	// Rebuild the fork from source and assert it still matches the reviewed pins, then deploy the
 	// COMMITTED bytes (exact reviewed bytes, not "whatever builds today").
-	rebuildAndVerifyPortal()
 	const portalArt = loadForkedPortalArtifact()
+	rebuildAndVerifyPortal(portalArt.immutableReferences)
 
 	// ─── 1. Resume gate (never fresh salts over a partial landing) ───
 	const recorded = resolveResume(readJournal(JOURNAL_PATH))
@@ -171,8 +164,7 @@ async function main() {
 		throw new Error(`L1 deployer ${account.address} != plan-pinned signer ${PLAN_PINNED_L1_SIGNER} — wrong key; STOP`)
 	}
 	console.log("L1 deployer", account.address)
-	const wallet = createWalletClient({ account, chain: sepolia, transport: http(SEPOLIA_RPC) })
-	const pub = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) })
+	const { wallet, pub } = createL1Clients({ chain: sepolia, rpcUrl: SEPOLIA_RPC, account })
 	const registry = await nodeRegistry()
 
 	// In --from-journal mode we never send L1/L2 deploys; we reuse the recorded addresses and only
@@ -255,8 +247,8 @@ async function main() {
 	const portal = await deployEvm("portal", "NuloTokenPortal", portalArt.abi, portalArt.bytecode, [])
 
 	// ─── L2 (testnet aztec.js - REAL proofs) ─────────────────────────
-	const node = createAztecNodeClient(NODE_URL)
-	const ewallet = await EmbeddedWallet.create(NODE_URL, { pxeConfig: { proverEnabled: true } })
+	const node = createNode(NODE_URL)
+	const ewallet = await createL2Wallet({ nodeUrl: NODE_URL, proverEnabled: true })
 	// STABLE deployer (never Fr.random()): derived from BRIDGE_DEPLOYER_SECRET_TESTNET so a crash
 	// mid-generation keeps control of the account (and any funds) — re-run with the same env resumes.
 	const { secret, salt } = resolveDeployerKeys("testnet")
@@ -370,6 +362,9 @@ async function main() {
 		}
 		console.log(`proxy wired (${mins()})`)
 
+		// F-001 hardening: the portal's initialize is guarded to the EOA that DEPLOYED it (constructor-
+		// pinned immutable). A journal resume must therefore broadcast with the SAME PRIVATE_KEY that
+		// landed the portal step — a different key gets NotInitializer and the run stops here.
 		const portalC = getContract({ address: portal, abi: portalArt.abi as never, client: wallet as never })
 		// Preflight (P5): the portal we are about to initialize must still be
 		// UNINITIALIZED — a non-zero l2Bridge() means this address is an
@@ -378,6 +373,17 @@ async function main() {
 		const portalPre = getContract({ address: portal, abi: portalArt.abi as Abi, client: pub })
 		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
 		assertPortalUninitialized(String(await (portalPre.read as any).l2Bridge()))
+		// Wrong-key preflight: read the pinned initializer back and compare BEFORE broadcasting.
+		// Without it a resume under a different key discovers the mismatch only as a NotInitializer
+		// revert, after gas is spent and mid-way through a one-shot sequence.
+		// biome-ignore lint/suspicious/noExplicitAny: viem read typing
+		const pinnedInitializer = String(await (portalPre.read as any).initializer())
+		if (pinnedInitializer.toLowerCase() !== account.address.toLowerCase()) {
+			throw new Error(
+				`portal initializer is ${pinnedInitializer} but this run broadcasts from ${account.address} — ` +
+					"resume with the key that deployed the portal; initialize is pinned to it and there is no rescue path.",
+			)
+		}
 		// biome-ignore lint/suspicious/noExplicitAny: viem contract write typing
 		const initHash = await (portalC as any).write.initialize([registry, usdc, bridge.address.toString()])
 		appendJournal(JOURNAL_PATH, { phase: "submitted", step: "portal-init", txHash: initHash })
@@ -402,7 +408,11 @@ async function main() {
 	if ((await pr.rollupVersion()) <= 0n) throw new Error("read-back FAILED: portal.rollupVersion is 0")
 	const onchain = await pub.getCode({ address: portal })
 	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
-	assertSame(keccak256(onchain), portalArt.runtimeCodeHash, "portal runtime code hash == pin")
+	// The constructor patches the immutable initializer into the runtime bytes, so raw keccak
+	// equality vs the template can never hold; verify structurally (diff confined to immutable
+	// words encoding THIS broadcaster) instead.
+	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// L2 read-backs are BEST-EFFORT (log, never abort): aztec.js view-simulate returns `{ result }` and
 	// the decoded shape varies (AztecAddress / Fr / bigint), so a decode quirk must not false-abort a

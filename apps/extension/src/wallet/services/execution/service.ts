@@ -29,6 +29,9 @@ import type { ILogger } from "@/wallet/logger"
 import type { ServiceCollection, ServiceSpec } from "@/wallet/base"
 import { Service, defineRpcMethods } from "@nulo/extension-messaging/background"
 import { classifyOperationCatch } from "./rpc-cancel"
+import { EstimateCancelRegistry } from "./estimate-cancel-registry"
+import { JobCancelledError } from "@nulo/extension-messaging/errors"
+import { JobCancelledSentinel } from "@nulo/wallet-core/jobs"
 import { getErrorMessage } from "@nulo/wallet-core/utils"
 import { assertLiveChainIdentity } from "@nulo/aztec-runtime/utils"
 import {
@@ -52,8 +55,10 @@ import {
 import { coerceAmount } from "./coerce-amount"
 import { OperationPlanner } from "./operation-planner"
 import { TransferEstimateReuse } from "./transfer-estimate-reuse"
+import { OperationEstimateReuse } from "./operation-estimate-reuse"
 import { TransferExecutor } from "./transfer-executor"
 import { DappSendExecutor } from "./dapp-send-executor"
+import { DiscoveryAwareEstimator, type DiscoveryProbe } from "./discovery-aware-estimator"
 import { ViewExecutor } from "./view-executor"
 import { ExecutionLane } from "./execution-lane"
 import { GasBalanceReader } from "./gas-balance-reader"
@@ -63,10 +68,7 @@ import type { MaterializedRegisterTokenOperation } from "./models"
 import { AuthwitDiscoverer } from "./authwit-discoverer"
 import { TxRequestBuilder } from "./tx-request-builder"
 import type { FeeEstimate, FeeStrategy, FeeStrategyContext, FeeStrategyDeps } from "./fee/fee-strategy"
-import { FeeJuiceStrategy } from "./fee/fee-juice-strategy"
-import { FeeJuiceWithClaimStrategy } from "./fee/fee-juice-with-claim-strategy"
-import { FpcStrategy } from "./fee/fpc-strategy"
-import { EmbeddedStrategy } from "./fee/embedded-strategy"
+import { buildFeeStrategies } from "./fee/build-fee-strategies"
 import { ExecutionCoordinator } from "./execution-coordinator"
 import { type ProofGate, NOOP_PROOF_GATE } from "@/e2e/proof-gate"
 
@@ -82,9 +84,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		"executeTransfer",
 		"executeOperations",
 		"getGasBalances",
+		"peekGasBalances",
 		"estimateTransferFee",
 		"estimateOperationFee",
 		"cancelJob",
+		"cancelEstimate",
 	)
 	public static name = EXECUTION_SERVICE_NAME
 
@@ -119,18 +123,23 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	/** TTL cache for gas balance queries (survives popup reopens). */
 	private gasBalances: GasBalanceReader = null!
 
-	/** Reuse cache for `executeTransfer` post-confirm. The popup-side fee
-	 *  estimator (`estimateTransferFee`) writes here; `executeTransfer`
-	 *  consumes when the caller passes a `precomputedEstimateId` AND the
-	 *  validation snapshot matches the SW's current view. Skips the
-	 *  `buildAndEstimateTxRequest` round-trip on the happy path — saves
-	 *  1-3s of post-confirm "estimating fee" UX delay.
+	/** Estimate→confirm reuse caches. The popup-side estimators write; the
+	 *  confirm paths consume when the caller passes an estimate id AND the
+	 *  validation snapshot matches the SW's current view — skipping the
+	 *  `buildAndEstimateTxRequest` round-trip (and, for dApp ops, the
+	 *  authwit-discovery simulation) on the happy path.
 	 *
-	 *  Scope: Send-page transfer flow only. dApp paths (estimateOperationFee
-	 *  + executeAztecSendTx) carve out per audit-codex-v3 — the embedded-fee
-	 *  and default_entrypoint variants take divergent code paths that the
-	 *  reuse contract doesn't yet cover. */
+	 *  Scope: `estimateReuse` covers the Send-page transfer flow
+	 *  (`estimateTransferFee` → `executeTransfer`); `operationEstimateReuse`
+	 *  covers standard-mode `aztec_sendTx` (`estimateOperationFee` →
+	 *  `executeAztecSendTx`, ids threaded via the popup-privileged
+	 *  `approveInteraction` envelope). Still carved out: `send_transaction`
+	 *  (its confirm path skips discovery today — reusing a
+	 *  discovery-inclusive estimate would change behavior), embedded-fee,
+	 *  `default_entrypoint`/NO_FROM, and `fjwc`. */
 	private estimateReuse: TransferEstimateReuse = null!
+	private operationEstimateReuse: OperationEstimateReuse = null!
+	private estimateCancel: EstimateCancelRegistry = null!
 	private transferExecutor: TransferExecutor = null!
 	private dappSendExecutor: DappSendExecutor = null!
 	private viewExecutor: ViewExecutor = null!
@@ -193,6 +202,28 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			logDebug: (msg) => this.logDebug(msg),
 		})
+		this.operationEstimateReuse = new OperationEstimateReuse({
+			getActiveProfile: () => this.profileService.getActiveProfile(),
+			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
+			getNode: (chainId) => this.networkService.getNode(chainId),
+			getLiveChainIdentity: async (network) => {
+				const node = await this.networkService.getNode(network.chainId)
+				const info = await node.getNodeInfo()
+				assertLiveChainIdentity(network, info)
+				return { l1ChainId: info.l1ChainId, rollupVersion: info.rollupVersion }
+			},
+			getFpcInfo: (fpcId) => this.fpcService.getFpc(fpcId),
+			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
+			logDebug: (msg) => this.logDebug(msg),
+		})
+		this.estimateCancel = new EstimateCancelRegistry({
+			// Ids are UUID-unique across both caches — evict from each.
+			evictStash: (estimateId) => {
+				this.estimateReuse.evict(estimateId)
+				this.operationEstimateReuse.evict(estimateId)
+			},
+			logDebug: (msg) => this.logDebug(msg),
+		})
 		this.lane = new ExecutionLane({
 			operationJournal: this.operationJournal,
 			getActiveProfile: () => this.profileService.getActiveProfile(),
@@ -218,7 +249,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
 			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
-			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
+			buildAndEstimate: (op, feeSettings, parentTask, signal) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			createJournalOperation: (input) => this.operationJournal.createOperation(input),
 			transitionJournal: (journalId, progress, error) => this.operationJournal.transitionOperation(journalId, progress, error),
 			logDebug: (msg) => this.logDebug(msg),
@@ -235,11 +266,33 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			this.authwit,
 			this.logger,
 		)
+		const estimateWithDiscovery = new DiscoveryAwareEstimator({
+			authwit: this.authwit,
+			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
+			buildAndEstimateFolded: (op, feeSettings, probe, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal, probe),
+			buildForDiscovery: async (op, method) => {
+				const { txRequest, node, pxe, account, network } = await this.txBuilder.buildStandard(
+					op as SendTransactionOperation,
+					method,
+				)
+				return { txRequest, node, pxe, account, network }
+			},
+		})
 		this.dappSendExecutor = new DappSendExecutor({
 			planner: this.planner,
-			authwit: this.authwit,
 			txBuilder: this.txBuilder,
 			coordinator: this.coordinator,
+			estimateWithDiscovery,
+			operationEstimateReuse: this.operationEstimateReuse,
+			getActiveProfile: () => this.profileService.getActiveProfile(),
+			getNetwork: (networkId) => this.networkService.getNetwork(networkId),
+			getNode: (chainId) => this.networkService.getNode(chainId),
+			getPXE: (network) => this.pxeService.getPXE(networkInfoFrom(network)),
+			getAccountContract: (profileId, chainId, address) => this.accountService.getAccountContract(profileId, chainId, address),
+			getPendingForAccount: (account) => this.transactionService.getPendingForAccount(account),
+			getFpcInfo: (fpcId) => this.fpcService.getFpc(fpcId),
 			lane: {
 				registerController: (journalId, controller) => this.lane.registerController(journalId, controller),
 				deleteController: (journalId) => this.lane.deleteController(journalId),
@@ -251,7 +304,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 					this.lane.beginJournal(networkId, accountAddress, origin, calls, fence),
 				markJournal: (journalId, progress, error) => this.lane.markJournal(journalId, progress, error),
 			},
-			buildAndEstimate: (op, feeSettings, parentTask) => this.buildAndEstimateTxRequest(op, feeSettings, parentTask),
+			buildAndEstimateValidated: (op, feeSettings, parentTask, signal) =>
+				this.buildAndEstimateTxRequest(op, feeSettings, parentTask, signal),
 			addTransaction: (...args) => this.transactionService.addTransaction(...args),
 			recordPendingAuthwits: (...args) => this.authRegistryService.recordPendingAuthwits(...args),
 			logDebug: (msg) => this.logDebug(msg),
@@ -268,6 +322,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			logDebug: (msg, ...rest) => this.logDebug(msg, ...rest),
 			logError: (msg, ...rest) => this.logError(msg, ...rest),
 		})
+		// The deps literal stays HERE (Q-04 pilot): every eager `this.*` read and
+		// the lazy coordinator closure keep their capture point at the root.
 		const feeDeps: FeeStrategyDeps = {
 			txBuilder: this.txBuilder,
 			simulateTxTask: (pxe, req, opts, parentTask) => this.coordinator.simulateTxTask(pxe, req, opts, parentTask),
@@ -275,12 +331,7 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			tasks: this.taskService,
 			logger: this.logger,
 		}
-		this.feeStrategies = new Map<FeeSettings["paymentMethod"]["kind"], FeeStrategy>([
-			["fj", new FeeJuiceStrategy(feeDeps)],
-			["fjwc", new FeeJuiceWithClaimStrategy(feeDeps)],
-			["fpc", new FpcStrategy(feeDeps)],
-			["embedded", new EmbeddedStrategy(feeDeps)],
-		])
+		this.feeStrategies = buildFeeStrategies(feeDeps)
 
 		// Invalidate gas balance cache when a transaction settles
 		this.transactionService.onTransactionUpdated.add((tx) => {
@@ -289,13 +340,21 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			}
 		})
 
+		// The cache key is profile-FREE while the private leg reads through the
+		// profile-FILTERED getFpcs — without this, switching profiles can serve
+		// profile A's cached PrivateFPC balance to profile B for up to the TTL.
+		// EVICT (not stale-mark): a stale-marked last-known would still be
+		// peekable, painting the old profile's figures dimmed under the new one.
+		this.profileService.onActiveProfileChanged.add(() => this.gasBalances.evictAll())
+
 		// PrivateFPC address is read on every getGasBalances() call to fetch
 		// `balance_of`. The cache is keyed only by `${networkId}:${account}`,
 		// so swapping the PrivateFPC address would otherwise serve stale
-		// private-FJ readouts for up to GAS_BALANCE_TTL_MS. Clear the cache
-		// on any PrivateFpc mutation. Coarse but correct.
+		// private-FJ readouts for up to GAS_BALANCE_TTL_MS. Invalidate on any
+		// PrivateFpc mutation (stale-marked, peek keeps serving last-known).
+		// Coarse but correct.
 		const invalidateOnPrivateFpc = (fpc: { type: FpcType }) => {
-			if (fpc.type === FpcType.PrivateFpc) this.gasBalances.clear()
+			if (fpc.type === FpcType.PrivateFpc) this.gasBalances.invalidateAll()
 		}
 		this.fpcService.onFpcUpdated.add(invalidateOnPrivateFpc)
 		this.fpcService.onFpcDeleted.add(invalidateOnPrivateFpc)
@@ -338,18 +397,68 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		recipientAddress: string,
 		amount: bigint,
 		feeSettings: FeeSettings,
+		estimateToken?: string,
 	): Promise<TransferFeeEstimate> {
 		await this.ensureInitialized()
 		amount = coerceAmount(amount)
-		return this.transferExecutor.estimateFee({
-			networkId,
-			accountAddress,
-			tokenId,
-			transferType,
-			recipientAddress,
-			amount,
-			feeSettings,
-		})
+		return this.withEstimateAdmission(estimateToken, "send", (signal) =>
+			this.transferExecutor.estimateFee(
+				{
+					networkId,
+					accountAddress,
+					tokenId,
+					transferType,
+					recipientAddress,
+					amount,
+					feeSettings,
+				},
+				signal,
+			),
+		)
+	}
+
+	/** Admission + cancellation envelope for the estimate entry points.
+	 *  Tokenless calls (legacy/internal) run un-tracked; tokened calls are
+	 *  admitted through the registry's per-profile cap, get an AbortSignal
+	 *  for stage-boundary checks, and ALWAYS settle — the settle carries the
+	 *  stashed estimateId so a post-completion `cancelEstimate` can still
+	 *  evict the cached signed request. The internal sentinel converts to the
+	 *  structured `JobCancelledError` at this RPC boundary. */
+	private async withEstimateAdmission(
+		estimateToken: string | undefined,
+		flowKey: string,
+		run: (signal?: AbortSignal) => Promise<TransferFeeEstimate>,
+	): Promise<TransferFeeEstimate> {
+		if (!estimateToken) return run()
+		const profile = await requireActiveProfile(this.profileService, "Wallet locked")
+		let admitted = false
+		let estimateId: string | undefined
+		try {
+			// Inside the try: a parked admission rejected by supersede/cancel
+			// throws the internal sentinel too, and it must cross the RPC
+			// boundary as the structured error like every other cancel.
+			const signal = await this.estimateCancel.admit(estimateToken, profile.id, flowKey)
+			admitted = true
+			const result = await run(signal)
+			estimateId = result.estimateId
+			return result
+		} catch (error) {
+			if (error instanceof JobCancelledSentinel) {
+				throw new JobCancelledError(undefined, { jobId: estimateToken })
+			}
+			throw error
+		} finally {
+			if (admitted) this.estimateCancel.settle(estimateToken, estimateId)
+		}
+	}
+
+	/** Cancel an in-flight or just-completed estimate. Best-effort: locked
+	 *  wallet or unknown/foreign tokens no-op silently. */
+	public async cancelEstimate(estimateToken: string): Promise<void> {
+		await this.ensureInitialized()
+		const profile = await this.profileService.getActiveProfile()
+		if (!profile) return
+		this.estimateCancel.cancel(estimateToken, profile.id)
 	}
 
 	/** Cancel an in-flight job. Semantics live on {@link ExecutionLane.cancelJob}
@@ -359,9 +468,29 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		return this.lane.cancelJob(jobId)
 	}
 
-	public async estimateOperationFee(operation: Operation, feeSettings: FeeSettings): Promise<TransferFeeEstimate> {
+	/** Start pre-claim liveness vouching for a queued journal record — see
+	 *  {@link ExecutionLane.beginQueuedWait}. Called by the wallet-sdk handler
+	 *  at queued-record creation; SW-internal, never RPC-exposed. */
+	public beginQueuedWait(journalId: string): void {
+		this.lane.beginQueuedWait(journalId)
+	}
+
+	/** Stop pre-claim vouching (handler settled). Idempotent backstop — the
+	 *  normal removal is the ownership migration at mutex enqueue. */
+	public endQueuedWait(journalId: string): void {
+		this.lane.endQueuedWait(journalId)
+	}
+
+	public async estimateOperationFee(
+		operation: Operation,
+		feeSettings: FeeSettings,
+		estimateToken?: string,
+		flowKey?: string,
+	): Promise<TransferFeeEstimate> {
 		await this.ensureInitialized()
-		return this.dappSendExecutor.estimateOperationFee(operation, feeSettings)
+		return this.withEstimateAdmission(estimateToken, flowKey ?? "op", (signal) =>
+			this.dappSendExecutor.estimateOperationFee(operation, feeSettings, signal),
+		)
 	}
 
 	public async executeOperations(
@@ -369,10 +498,16 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		origin: LocalTxOrigin,
 		parentTask?: WrappedTask,
 		hooks?: ExecutionHooks,
+		/** Popup-privileged estimate→confirm reuse ids, index-aligned with
+		 *  `operations` (never part of the shared `Operation` wire shape — a
+		 *  dApp cannot reach this parameter). */
+		estimateIds?: readonly (string | undefined)[],
 	): Promise<OperationResult[]> {
 		await this.ensureInitialized()
 		const results: OperationResult[] = []
+		let operationIndex = -1
 		for (const operation of operations) {
+			operationIndex++
 			if (results.length && results.at(-1)!.status !== "ok") {
 				results.push({ status: "skipped" })
 				continue
@@ -400,7 +535,10 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						break
 					}
 					case "send_transaction": {
-						result = await this.executeSendTransaction(operation, origin, operationTask)
+						// B-02: forward hooks so the slot buckets per-origin (grantPublicAuthwit
+						// carries { originKey }); without it hostile-dApp grants + UI auth ops
+						// collapse into one __no_origin__ capacity bucket, losing fairness.
+						result = await this.executeSendTransaction(operation, origin, operationTask, hooks)
 						break
 					}
 					case "simulate_transaction": {
@@ -458,7 +596,14 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 						// not at the batch top — read-only ops must not trip the
 						// unlock check, and this is still before the prove (D13).
 						const fence = await this.captureFence()
-						result = await this.dappSendExecutor.executeAztecSendTx(operation, origin, operationTask, hooks, fence)
+						result = await this.dappSendExecutor.executeAztecSendTx(
+							operation,
+							origin,
+							operationTask,
+							hooks,
+							fence,
+							estimateIds?.[operationIndex],
+						)
 						break
 					}
 					case "aztec_createAuthWit": {
@@ -582,10 +727,15 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		await this.tokenService.addToken(profile.id, op.networkId, op.accountAddress, ti, opContext)
 	}
 
-	public async executeSendTransaction(op: SendTransactionOperation, origin: LocalTxOrigin, parentTask?: WrappedTask): Promise<string> {
+	public async executeSendTransaction(
+		op: SendTransactionOperation,
+		origin: LocalTxOrigin,
+		parentTask?: WrappedTask,
+		hooks?: ExecutionHooks,
+	): Promise<string> {
 		await this.ensureInitialized()
 		const fence = await this.captureFence()
-		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence)
+		return this.dappSendExecutor.executeSendTransaction(op, origin, parentTask, fence, hooks)
 	}
 
 	/**
@@ -601,6 +751,11 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 	public async getGasBalances(networkId: string, accountAddress: string, forceRefresh?: boolean): Promise<GasBalances> {
 		await this.ensureInitialized()
 		return this.gasBalances.get(networkId, accountAddress, forceRefresh)
+	}
+
+	public async peekGasBalances(networkId: string, accountAddress: string): Promise<{ balances: GasBalances; stale: boolean } | null> {
+		await this.ensureInitialized()
+		return this.gasBalances.peek(networkId, accountAddress)
 	}
 
 	// Aztec.js interface:
@@ -746,6 +901,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 		},
 		feeSettings: FeeSettings,
 		parentTask?: WrappedTask,
+		signal?: AbortSignal,
+		probe?: DiscoveryProbe,
 	): Promise<FeeEstimate> {
 		// Clone the op + its actions array. fjwc / fpc branches mutate
 		// `op.actions` (unshift / splice) to prepend fee payloads; leaking
@@ -764,6 +921,8 @@ export class ExecutionService extends Service<Methods> implements ServiceSpec<Me
 			feeMultiplier,
 			gasPadding,
 			parentTask,
+			signal,
+			probe,
 		}
 		return strategy.buildAndEstimate(ctx)
 	}

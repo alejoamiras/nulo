@@ -106,6 +106,47 @@ export async function waitForPgResult(page: Page, method: string, fromSeq: numbe
 	return parsed
 }
 
+/** PER-FIELD cap on each dumped payload (the result/error field and the
+ *  pg-error-text line are bounded separately, so a full assertPgOk message
+ *  tops out around twice this plus fixed framing): big enough for every
+ *  legitimate error message, small enough that a hostile/degenerate payload
+ *  can't flood CI logs. */
+const PG_DUMP_MAX_CHARS = 2_000
+
+/** Bounded stringify of the branch-CORRECT payload field: `errorJson` when the
+ *  result settled to "error", `resultJson` when it settled "ok" — the two are
+ *  mutually exclusive on `PgResult`, so dumping the wrong one prints nothing. */
+export function formatPgMismatch(result: PgResult): string {
+	const field = result.status === "error" ? "errorJson" : "resultJson"
+	let payload: string
+	try {
+		payload = JSON.stringify(result.status === "error" ? result.errorJson : result.resultJson) ?? "undefined"
+	} catch {
+		payload = String(result.status === "error" ? result.errorJson : result.resultJson)
+	}
+	const bounded =
+		payload.length > PG_DUMP_MAX_CHARS
+			? `${payload.slice(0, PG_DUMP_MAX_CHARS)}…[truncated ${payload.length - PG_DUMP_MAX_CHARS} chars]`
+			: payload
+	return `${result.method} seq=${result.seq} status=${result.status}; ${field}=${bounded}`
+}
+
+/**
+ * Assert a settled pg result is "ok"; on mismatch, throw with the bounded
+ * payload dump plus the playground's own last-error line.
+ */
+export async function assertPgOk(page: Page, result: PgResult, label: string): Promise<void> {
+	if (result.status === "ok") return
+	const pgError = await page
+		.evaluate(() => document.querySelector('[data-testid="pg-error-text"]')?.textContent ?? "")
+		.catch(() => "<pg-error-text read failed>")
+	const boundedPgError =
+		pgError.length > PG_DUMP_MAX_CHARS
+			? `${pgError.slice(0, PG_DUMP_MAX_CHARS)}…[truncated ${pgError.length - PG_DUMP_MAX_CHARS} chars]`
+			: pgError
+	throw new Error(`[${label}] expected ok: ${formatPgMismatch(result)}; pg-error-text="${boundedPgError}"`)
+}
+
 /**
  * Like {@link waitForPgResult} but collects `count` settled results with
  * `seq > fromSeq`, ORDER-INDEPENDENTLY (returned ascending by seq). Concurrent

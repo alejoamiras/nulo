@@ -6,7 +6,9 @@ import { isValidHex } from "@/utils/string"
 import { FpcServiceClient, FpcType } from "@/wallet/services/fpc/client"
 
 /** Composables */
-import { useToast } from "@/composables/toast"
+import { useToast, TOAST_DURATION } from "@/composables/toast"
+import { useFormState } from "@/composables/useFormState"
+import { usePopupEntity } from "@/composables/usePopupEntity"
 const { openToast } = useToast()
 
 /** Store */
@@ -48,6 +50,9 @@ const fpcAddressTerm = form.fields.address.value
 const isAlreadyExist = computed(() => form.fields.name.error.value === "Already exist")
 const isValidAddress = computed(() => isValidHex(fpcAddressTerm.value))
 const isAvailableToAddFpc = computed(() => {
+	// Full-lifetime submit latch: a running save closes the form on EVERY
+	// route (button, Enter, future callers) — not just the pointer path.
+	if (isLoading.value) return false
 	if (!nameTerm.value.replace(/\s/g, "").length) return false
 	if (!isValidAddress.value) return false
 	if (form.fields.name.error.value) return false
@@ -91,26 +96,28 @@ const onFpcUpdated = (fpc) => {
 const onFpcDeleted = (fpc) => {
 	fpcs.value = fpcs.value.filter((f) => f.id !== fpc.id)
 }
-watch(
+usePopupEntity(
 	() => props.show,
-	async () => {
-		if (!props.show) {
-			fpcService.disconnect()
-			fpcService = null
-			fpcs.value = []
-			form.reset()
-
-			document.removeEventListener("keydown", onKeydown)
-		} else {
+	{
+		submit: handleAddFpc,
+		onShow: async () => {
 			fpcService = new FpcServiceClient()
 			fpcService.onFpcAdded.add(onFpcAdded)
 			fpcService.onFpcDeleted.add(onFpcDeleted)
 			fpcService.onFpcUpdated.add(onFpcUpdated)
 			fpcs.value = await fpcService.getFpcs(appStore.network.chainId)
-
-			document.addEventListener("keydown", onKeydown)
-		}
+		},
+		onHide: () => {
+			fpcService.disconnect()
+			fpcService = null
+			fpcs.value = []
+			form.reset()
+		},
 	},
+	// Duplicate-name knowledge arrives with getFpcs — a premature first submit
+	// must stay inert, exactly as when the hand-rolled watcher installed its
+	// listener only after this await.
+	{ submitWaitsForShow: true },
 )
 watch(
 	() => fpcAddressTerm.value,
@@ -118,13 +125,6 @@ watch(
 		processingError.value.show = false
 	},
 )
-const onKeydown = (e) => {
-	// Only fire on input/textarea fields — see NewContactPopup for rationale.
-	if (e.key !== "Enter") return
-	const target = e.target
-	if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLTextAreaElement)) return
-	handleAddFpc()
-}
 </script>
 
 <template>
