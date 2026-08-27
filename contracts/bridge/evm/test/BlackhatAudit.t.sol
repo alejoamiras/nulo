@@ -296,36 +296,37 @@ contract BlackhatAuditTest is Test {
     // ─────────────────────────── [F-A] portal init front-run ───────────────────────────
 
     /// The deploy conductor sends `deploy portal` and `initialize portal` as TWO separate txs.
-    /// An attacker front-running the initialize bricks the deployment — and if the poisoned
-    /// address were ever published, the fake-rollup outbox gives a FULL DRAIN of every deposit.
-    function test_FA_portalInitFrontRun_bricksAndDrains() public {
+    /// Pre-fix, an attacker front-running the initialize bricked the deployment — and a poisoned
+    /// address that got published would have been a full drain (fake registry → attacker outbox).
+    /// The deployer-only initializer guard must reject the front-run while the honest initialize
+    /// still succeeds. (The drain chain itself is unreachable post-guard; kept documented in
+    /// implementations-plan/bridge-hardening/audit-blackhat.md.)
+    function test_FA_portalInitFrontRun_reverts() public {
         MintableERC20 realUsdc = new MintableERC20("Circle USDC", "USDC", 6, 1_000_000_000);
         NuloTokenPortal portal = new NuloTokenPortal();
 
-        // 1. Attacker front-runs the FIRST initialize with their own registry.
+        // 1. Attacker front-runs the FIRST initialize with their own registry → rejected.
         FakeRegistry evilReg = new FakeRegistry();
         vm.prank(address(0xBAD));
+        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
         portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xAAAA)));
+        assertEq(address(portal.registry()), address(0), "front-run must not bind a registry");
 
-        // 2. Honest initialize now reverts forever → deployment bricked.
+        // 2. The honest initializer (the deploying EOA == this test contract) succeeds.
         FakeRegistry honestReg = new FakeRegistry();
-        vm.expectRevert(NuloTokenPortal.AlreadyInitialized.selector);
         portal.initialize(address(honestReg), address(realUsdc), bytes32(uint256(0xBBBB)));
+        assertEq(address(portal.registry()), address(honestReg), "honest init binds the registry");
 
-        // 3. WORST CASE: the poisoned address got published before anyone noticed.
+        // 3. Post-init, deposits flow to the honest binding and re-init stays impossible.
         realUsdc.mint(address(0xBEEF), 1000e6);
         vm.startPrank(address(0xBEEF));
         realUsdc.approve(address(portal), 1000e6);
         portal.depositToAztecPublic(RECIPIENT, 1000e6, SECRET);
         vm.stopPrank();
-        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by poisoned portal");
-
-        // 4. Attacker drains via their fake outbox.
-        address attacker = address(0xBAD);
-        vm.prank(attacker);
-        portal.withdraw(attacker, 1000e6, false, Epoch.wrap(0), 0, 0, new bytes32[](0));
-        assertEq(realUsdc.balanceOf(attacker), 1000e6, "attacker drained the poisoned portal");
-        assertEq(realUsdc.balanceOf(address(portal)), 0, "portal emptied");
+        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by the honest portal");
+        vm.prank(address(0xBAD));
+        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
+        portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xCCCC)));
     }
 
     // ─────────────────────── [F-B] donation-grief neutrality ───────────────────────
