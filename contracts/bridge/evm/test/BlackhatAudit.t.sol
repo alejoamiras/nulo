@@ -408,13 +408,25 @@ contract BlackhatAuditTest is Test {
             isPrivate: false
         });
 
-        vm.expectRevert();
+        // Pinned to the actual failure rather than a bare expectRevert, which cannot tell
+        // "failed closed on the haircut" from "reverted for some unrelated reason". The haircut
+        // means the router never receives the full pull, so the portal-deposit leg runs out of
+        // allowance — an allowance failure, not the arithmetic underflow it looks like from the
+        // outside. Selector only: the reported addresses and amounts are incidental.
+        // expectPartialRevert, not expectRevert: the latter requires the revert data to BE the
+        // four selector bytes, and this error carries three arguments whose values are incidental.
+        vm.expectPartialRevert(bytes4(keccak256("ERC20InsufficientAllowance(address,uint256,uint256)")));
         router.bridgeWithFuel(p, _permit(2));
     }
 
-    // ─────────────────────── [F-F] migration kills pending sigs ───────────────────────
+    // ─────────────────────── [F-F] migration changes the signed witness ───────────────────────
 
-    function test_FF_migrationInvalidatesPendingSignature() public {
+    /// Named for what it can actually prove. `RecordingPermit2` records the witness it is handed
+    /// and never verifies a signature against it, so nothing here demonstrates a pre-migration
+    /// signature being REJECTED afterwards — only that `swapTarget` is one of the hashed witness
+    /// fields, so rotating it changes what a user would have to sign. Rejection of a stale
+    /// signature is Permit2's own domain, covered by the real-fork suite.
+    function test_FF_migrationChangesSignedWitness() public {
         router.bridgeWithFuel(_fuelParams(false), _permit(1));
         bytes32 witnessBefore = permit2.lastWitness();
 
