@@ -322,6 +322,43 @@ describe("collectRestoreErrors", () => {
 			expect(result[0]).not.toHaveProperty("value")
 		})
 
+		it("does NOT keep `key` on a non-config service", () => {
+			// `restoreRows` preserves the raw failed row, so a crafted token can carry a `key` that
+			// was never validated by anything. It is only safe where the config restore path enforces
+			// the set it is drawn from.
+			const result = collectRestoreErrors("token", [{ id: "t1", key: "SECRET", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET")
+			expect(result[0]).not.toHaveProperty("key")
+		})
+
+		it("does NOT keep a config `key` that is not a restorable one", () => {
+			const result = collectRestoreErrors("config", [{ key: "strictSecurityMode", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(result[0]).not.toHaveProperty("key")
+		})
+
+		it("drops a chainId that is a string — a short string passes a length check but is not a chain id", () => {
+			const result = collectRestoreErrors("token", [{ id: "t1", chainId: "SECRET", restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(JSON.stringify(result)).not.toContain("SECRET")
+			expect(result[0]).not.toHaveProperty("chainId")
+		})
+
+		it("keeps a numeric chainId", () => {
+			const result = collectRestoreErrors("token", [{ id: "t1", chainId: 31337, restoreError: "boom" }]) as Array<
+				Record<string, unknown>
+			>
+
+			expect(result[0].chainId).toBe(31337)
+		})
+
 		it("constrains allowlisted fields by TYPE, not just by name", () => {
 			// Allowlisting names alone is not enough: a crafted backup can ship an allowlisted key
 			// whose VALUE is an object carrying whatever it likes, and a name-only filter copies it
@@ -332,7 +369,8 @@ describe("collectRestoreErrors", () => {
 
 			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
 			expect(JSON.stringify(result)).not.toContain("rpcUrl")
-			expect(result).toEqual([{ row: 0, id: "t1", chainId: "[object]", restoreError: "boom" }])
+			// `chainId` is typed numeric, so a non-number is dropped outright rather than described.
+			expect(result).toEqual([{ row: 0, id: "t1", restoreError: "boom" }])
 		})
 
 		it("bounds an allowlisted id that is really a payload wearing an id's name", () => {

@@ -6,6 +6,7 @@
 import { EncryptionKey } from "@nulo/wallet-crypto"
 import { fromBase64 } from "@/wallet/utils"
 import { scrubUrls } from "@/utils/scrub-urls"
+import { CONFIG_SERVICE_NAME, type ConfigKey, RESTORABLE_CONFIG_KEYS } from "@/wallet/services/config/spec"
 
 /**
  * One shared ceiling for backup files, enforced on BOTH sides: the import
@@ -163,11 +164,20 @@ interface GenericRestoreItem {
  * provider API key) and imported keys (`encryptedSigningKey`). The row id is what a developer
  * needs to find the row again; the rest is what leaks.
  *
- * `key` is included for config rows, where it is safe BY CONSTRUCTION rather than by filtering:
- * only members of `RESTORABLE_CONFIG_KEYS` ever reach a config restore result, so the value set is
- * a fixed allowlist and naming it beats an ordinal.
+ * Each field carries its EXPECTED TYPE, and `key` is scoped to the one service it means anything
+ * for. A name-and-length allowlist is not enough on its own: `restoreRows` preserves the raw failed
+ * row, so a crafted token row can ship `chainId: "SECRET"` or `key: "SECRET"` — short strings that
+ * pass a length check while being neither a chain id nor a config key.
  */
-const RESTORE_ERROR_ID_KEYS = ["id", "networkId", "chainId", "profileId", "key"] as const
+const RESTORE_ERROR_FIELDS = [
+	{ name: "id", kind: "identifier" },
+	{ name: "networkId", kind: "identifier" },
+	{ name: "profileId", kind: "identifier" },
+	// Chain ids are numeric everywhere in this codebase; a string one is not a chain id.
+	{ name: "chainId", kind: "number" },
+	// Only for config rows, and only when it is genuinely one of the restorable keys.
+	{ name: "key", kind: "configKey" },
+] as const
 
 /**
  * Upper bound on recorded failures. Nothing else bounds this: the viewer renders the whole log
@@ -215,10 +225,25 @@ function describeRestoreError(value: unknown): unknown {
  * transactions are keyed by `hash` and config by `key`, none of which are kept — so without a
  * position two failures in the same slice would be indistinguishable.
  */
-function projectRestoreErrorRow(row: Record<string, unknown>, index: number): Record<string, unknown> {
+function projectRestoreErrorRow(row: Record<string, unknown>, index: number, serviceName: string): Record<string, unknown> {
 	const out: Record<string, unknown> = { row: index }
-	for (const key of RESTORE_ERROR_ID_KEYS) {
-		if (row[key] !== undefined) out[key] = boundedScalar(row[key])
+	for (const field of RESTORE_ERROR_FIELDS) {
+		const value = row[field.name]
+		if (value === undefined) continue
+		if (field.kind === "number") {
+			// A string here is not a chain id, whatever it claims to be.
+			if (typeof value === "number" && Number.isFinite(value)) out[field.name] = value
+			continue
+		}
+		if (field.kind === "configKey") {
+			// Safe by construction, not by filtering — but only for the service whose restore path
+			// actually enforces that construction, and only for a value that really is in the set.
+			if (serviceName === CONFIG_SERVICE_NAME && typeof value === "string" && RESTORABLE_CONFIG_KEYS.has(value as ConfigKey)) {
+				out[field.name] = value
+			}
+			continue
+		}
+		out[field.name] = boundedScalar(value)
 	}
 	out.restoreError = describeRestoreError(row.restoreError)
 	return out
@@ -308,7 +333,7 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 	const filtered = (data as GenericRestoreItem[])
 		.map((item, index) => ({ item, index }))
 		.filter(({ item }) => item?.restoreError)
-		.map(({ item, index }) => projectRestoreErrorRow(item as Record<string, unknown>, index))
+		.map(({ item, index }) => projectRestoreErrorRow(item as Record<string, unknown>, index, serviceName))
 	return filtered.length ? capRecords(filtered) : null
 }
 
