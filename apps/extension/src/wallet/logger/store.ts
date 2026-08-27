@@ -11,9 +11,16 @@ export class LoggerStore implements ILoggerStore {
 	private flushTimer?: ReturnType<typeof setTimeout>
 	private persistEnabled: boolean
 
+	private readonly config: IConfig
+
 	public constructor(config: IConfig) {
+		this.config = config
 		this.logLevel = config.get("debugMode") ? LogLevel.Debug : LogLevel.Info
 		this.logs = new CircularBufferIterable(this.logLevel === LogLevel.Debug ? 10_000 : 1000)
+		// The persisted config has NOT loaded at construction — this store is built at module
+		// scope, while `config.load()` runs later inside `runtime.start()` (after migrations, an
+		// ordering that must not change). So this is the schema default, not the user's choice;
+		// `applyRetentionPolicy()` is what settles it once the real value is known.
 		this.persistEnabled = config.get("developerMode") === true
 		config.onUpdate.add(this.onConfigUpdate)
 	}
@@ -63,15 +70,15 @@ export class LoggerStore implements ILoggerStore {
 		print(log)
 	}
 
-	/** Rehydrate logs from chrome.storage.session (call on startup before wiring services). */
+	/**
+	 * Rehydrate logs from chrome.storage.session (call on startup before wiring services).
+	 *
+	 * Deliberately unconditional. It runs BEFORE the persisted config loads, so gating it on
+	 * `persistEnabled` would read the schema default and wipe a developer's logs on every worker
+	 * restart — the exact continuity the retention opt-in exists to preserve.
+	 * `applyRetentionPolicy()` undoes this if the loaded config turns out to disable retention.
+	 */
 	public async rehydrate(): Promise<void> {
-		// Anything still in session storage was captured under a PREVIOUS opt-in — the flag can be
-		// turned off while this worker is dead, so the disable-time purge never ran. Drop it rather
-		// than importing it back into memory.
-		if (!this.persistEnabled) {
-			await this.purgePersisted()
-			return
-		}
 		try {
 			const result = await chrome.storage.session.get("nulo:logs")
 			const saved = result["nulo:logs"] as Log[] | undefined
@@ -106,6 +113,23 @@ export class LoggerStore implements ILoggerStore {
 				// Session storage may not be available
 			}
 		}, 2000)
+	}
+
+	/**
+	 * Settle retention once the persisted config has actually loaded. MUST be called after
+	 * `config.load()` resolves.
+	 *
+	 * Two cases the config-update event alone cannot cover: `apply()` only emits when a value
+	 * CHANGES, so a stored `developerMode: false` matching the default emits nothing; and the flag
+	 * can be turned off while this worker is dead, so the disable-time purge never ran. Either way
+	 * the rehydrated entries and the stored copy must go — retention-off means nothing outlives the
+	 * worker that wrote it.
+	 */
+	public async applyRetentionPolicy(): Promise<void> {
+		this.persistEnabled = this.config.get("developerMode") === true
+		if (this.persistEnabled) return
+		this.logs.clear()
+		await this.purgePersisted()
 	}
 
 	/** Drop the persisted copy and cancel any in-flight flush that would recreate it. */
