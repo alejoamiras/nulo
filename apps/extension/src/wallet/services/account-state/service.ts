@@ -19,6 +19,7 @@ import {
 	type Methods,
 } from "./spec"
 import {
+	ACCOUNT_STATE_CAPS,
 	ACCOUNT_STATE_SKIP_DEADLINE,
 	ACCOUNT_STATE_SKIP_UNREACHABLE,
 	isConnectivityErrorMessage,
@@ -214,6 +215,23 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 				senders: senders.map((address) => ({ address })),
 				contracts: contractsFull,
 			})
+		}
+
+		// The slice is mostly contract ARTIFACTS, and the restore side rejects it wholesale past
+		// `maxSliceCodeUnits` — an export that silently crosses the cap only fails much later, on
+		// someone else's import. Report the size while the user can still act on it.
+		const sliceCodeUnits = JSON.stringify(result).length
+		if (sliceCodeUnits > ACCOUNT_STATE_CAPS.maxSliceCodeUnits * 0.8) {
+			const biggest = result
+				.flatMap((r) => r.contracts.map((c) => ({ address: c.address, units: JSON.stringify(c.artifact ?? {}).length })))
+				.sort((a, b) => b.units - a.units)
+				.slice(0, 5)
+				.map((c) => `${c.address.slice(0, 12)}…=${c.units}`)
+				.join(", ")
+			this.logWarn(
+				`backup: account-state slice is ${sliceCodeUnits} code units of ${ACCOUNT_STATE_CAPS.maxSliceCodeUnits} ` +
+					`(${result.reduce((n2, r) => n2 + r.contracts.length, 0)} contract(s)); largest artifacts: ${biggest}`,
+			)
 		}
 
 		return result
