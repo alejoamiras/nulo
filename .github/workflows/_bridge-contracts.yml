@@ -35,10 +35,14 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Pinned, not `stable`: a newer Foundry routes test-contract creation through the
+      # deployCode(string,bytes) cheatcode, which halmos 0.3.3 does not implement — setUp then
+      # finds no successful path and every proof fails. This is the version the suites were
+      # validated against. Bump it deliberately, re-running halmos when you do.
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          version: "1.7.1"
 
       # lib/ is gitignored and installed per-checkout. Pinned to COMMITS, not floating tags: the
       # README's unpinned install is what a contributor runs locally, but CI resolving a different
@@ -87,8 +91,9 @@ jobs:
           # the count is checked. Rebuild with the AST, then require exactly four proofs.
           forge build --ast --force
           halmos --contract FormalRouterTest | tee halmos.log
-          grep -q "4 passed; 0 failed" halmos.log || {
-            echo "::error::expected 4 passing symbolic proofs; see the log above"
+          # Anchored: a bare "4 passed" substring also matches "14 passed".
+          grep -qE "^Symbolic test result: 4 passed; 0 failed" halmos.log || {
+            echo "::error::expected exactly 4 passing symbolic proofs; see the log above"
             exit 1
           }
 
@@ -123,13 +128,14 @@ jobs:
 
       # Pure-library crates only: they need no TXE oracle, so they run unattended here.
       # The TokenBridge TXE suite is excluded on purpose — see the header.
+      #
+      # --force because target/ is tracked: without it nargo can report a stale success having
+      # compiled nothing. The claim_secret crate is deliberately absent — it carries no #[test]
+      # functions of its own, and its vectors are exercised through keystone; running it would
+      # have been a step that always passes without asserting anything.
       - name: keystone vectors
         working-directory: contracts/bridge/aztec/keystone
-        run: aztec-nargo test
-
-      - name: claim-secret vectors
-        working-directory: contracts/bridge/aztec/claim_secret
-        run: aztec-nargo test
+        run: aztec-nargo test --force
 
   sole-consumer:
     name: sole-consumer static guard
@@ -138,7 +144,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Guards the F-007 invariant that claim_private is the only consumer of a
-      # mint_to_private message. It has a --self-test mode and was never wired to anything.
+      # Guards the F-007 invariant that claim_private is the only consumer of a mint_to_private
+      # message. It was never wired to anything. --self-test first: it replays five crafted
+      # bearer regressions, so a guard whose own parser has broken fails here rather than
+      # reporting a clean scan of a file it can no longer read.
+      - name: check-sole-consumer (self-test)
+        run: bash contracts/bridge/aztec/scripts/check-sole-consumer.sh --self-test
+
       - name: check-sole-consumer
         run: bash contracts/bridge/aztec/scripts/check-sole-consumer.sh
