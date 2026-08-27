@@ -35,7 +35,7 @@ const PINS = [
 		// on the pinned 5.0.1 toolchain; keystone crypto vectors re-validated on 5.0.1 (unchanged).
 		name: "TokenBridge",
 		path: join(CONTRACTS, "token_bridge", "target", "token_bridge_contract-TokenBridge.json"),
-		classId: "0x0dd53083e003fb1e8a400d3574562d5490f362ba4e0f201096d6ea594872b1a3",
+		classId: "0x2cb5c6341bbae9bb0e78b64cfdd724cb493cc35dca46b122280fdf223b3d8713",
 	},
 ] as const
 

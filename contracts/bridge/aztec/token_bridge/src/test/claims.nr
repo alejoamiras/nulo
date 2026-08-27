@@ -82,15 +82,6 @@ unconstrained fn claim_public_zero_amount_rejected() {
     env.call_public(to, TokenBridge::at(bridge).claim_public(to, 0, 42, 0));
 }
 
-/// Public claims to the zero address are rejected BEFORE messaging — minting to zero would
-/// burn the deposit irrecoverably (audit L-5 fixed alongside this regression).
-#[test(should_fail_with = "Recipient cannot be zero")]
-unconstrained fn claim_public_zero_recipient_rejected() {
-    let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
-    let caller = env.create_light_account();
-    env.call_public(caller, TokenBridge::at(bridge).claim_public(AztecAddress::zero(), 1_000_000, 42, 0));
-}
-
 /// Pause is a toggle, not a one-way switch: unpause restores normal claims.
 #[test]
 unconstrained fn claim_public_unpause_restores_claims() {

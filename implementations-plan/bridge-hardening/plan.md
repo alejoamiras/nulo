@@ -18,6 +18,13 @@ actionable (H-1, M-1); the rest either proved defenses hold or are informational
 | M-1 | Medium | `_validateRoute` accepts `{X/native},{native/FJ}` which Case-C settlement cannot pay | Fix: delta-driven settlement (Arc 3) |
 | L-1..L-5 | Low/info | signable zero slippage, FoT DoS, migration sig invalidation, Permit2 allowance hardwire, zero-recipient mint | Documented; frontend/ops mitigations exist |
 
+L-5 (`claim_public` accepts a zero recipient) stays accepted for this arc. An in-contract guard
+changes TokenBridge bytecode, hence its class id and deployed address, which strands the faucet's
+committed manifests until a redeploy — and the redeploy is out of scope here. It ships as its own
+`fix(bridge)` PR sequenced with that redeploy. `claim_private` and both exit paths already carry
+their own zero-recipient guards; only the public claim is exposed, and only to a caller who
+supplies a valid L1 message naming the zero address as recipient.
+
 Independently verified sound: content-hash keystone (re-derived from first principles:
 `sha256(selector ++ args) >> 8`), witness binding + nonces, delta-based accounting vs
 donations, reentrancy posture, sole-consumer invariant, recipient-committed claim secret.

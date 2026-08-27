@@ -96,7 +96,6 @@ assert(self.storage.is_paused.read() == false, "Bridge is paused");
 fn claim_public(to: AztecAddress, amount: u128, secret: Field, message_leaf_index: Field) {
 assert(self.storage.is_paused.read() == false, "Bridge is paused");
 assert(amount > 0, "Amount must be greater than zero");
-assert(!to.is_zero(), "Recipient cannot be zero");
 let content_hash = get_mint_to_public_content_hash(to, amount);
 let config = self.storage.config.read();
 self.context.consume_l1_to_l2_message(content_hash, [secret], config.portal, message_leaf_index);
