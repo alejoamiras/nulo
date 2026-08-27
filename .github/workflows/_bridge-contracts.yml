@@ -1,0 +1,155 @@
+name: Bridge contracts
+
+# Runs the L1 (Foundry) and L2 (Noir) contract suites for contracts/bridge/**.
+#
+# Nothing under contracts/ was gated before this workflow existed, so a build-breaking
+# remap regression survived an entire ten-PR arc and a codex review: the only signal was
+# a local run on a machine that happened to still have a hoisted node_modules.
+#
+# Scope is deliberately the HERMETIC set. Fork-gated suites need SEPOLIA_RPC_URL and live
+# testnet state, and the TXE suite needs an oracle server that is not in the runner image
+# yet — both stay manual until they can be made reliable here. Better a narrow gate that
+# is always honest than a broad one that flakes and gets muted.
+
+on:
+  workflow_call:
+    inputs:
+      run-halmos:
+        description: Also run the halmos symbolic proofs.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  forge:
+    name: forge build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/setup-bun
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Pinned, not `stable`: a newer Foundry routes test-contract creation through the
+      # deployCode(string,bytes) cheatcode, which halmos 0.3.3 does not implement — setUp then
+      # finds no successful path and every proof fails. This is the version the suites were
+      # validated against. Bump it deliberately, re-running halmos when you do.
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: "1.7.1"
+
+      # lib/ is gitignored and installed per-checkout. Pinned to COMMITS, not floating tags: the
+      # README's unpinned install is what a contributor runs locally, but CI resolving a different
+      # forge-std than the one the suites were validated against is a silent divergence — an older
+      # one made halmos abort in setUp with "Unsupported cheat code", passing nothing.
+      #
+      # v4-core MUST stay v4.0.0: >=1.0.0 moves the SwapParams and ModifyLiquidityParams structs
+      # the fuel contracts use.
+      - name: Install forge libraries
+        working-directory: contracts/bridge/evm
+        run: |
+          forge install \
+            foundry-rs/forge-std@bf647bd6046f2f7da30d0c2bf435e5c76a780c1b \
+            OpenZeppelin/openzeppelin-contracts@cab19933c33c2ad1d4c7a84864a3601dddfd16f3 \
+            Uniswap/v4-core@e50237c43811bd9b526eff40f26772152a42daba
+
+      # foundry.toml's @aztec/ and @aztec-blob-lib/ remaps assume a hoisted node_modules;
+      # this repo uses bun's isolated linker, so the generated remappings.txt is what makes
+      # the project resolve at all.
+      - name: Generate remappings
+        run: bun packages/bridge-core/scripts/gen-remappings.ts
+
+      - name: forge build
+        working-directory: contracts/bridge/evm
+        run: forge build
+
+      - name: forge test (hermetic)
+        working-directory: contracts/bridge/evm
+        run: forge test --no-match-contract Fork
+
+      - name: halmos symbolic proofs
+        if: inputs.run-halmos
+        working-directory: contracts/bridge/evm
+        run: |
+          # The proofs arrive partway up the stack, so a branch below that point legitimately has
+          # no suite to run. Assert the count only where the file exists, rather than failing
+          # every earlier arc.
+          if [ ! -f test/FormalRouter.t.sol ]; then
+            echo "::notice::FormalRouter.t.sol not present on this ref — skipping the symbolic proofs"
+            exit 0
+          fi
+          pipx install "halmos==$(cat halmos.version)"
+          # --ast --force: halmos reads the solc AST from the artifacts, and the plain `forge
+          # build` above writes them without it. Against those artifacts halmos does not fail —
+          # it reports "No tests with --match-contract", which passes for a missing suite unless
+          # the count is checked. Rebuild with the AST, then require exactly four proofs.
+          forge build --ast --force
+          halmos --contract FormalRouterTest | tee halmos.log
+          # Anchored: a bare "4 passed" substring also matches "14 passed".
+          grep -qE "^Symbolic test result: 4 passed; 0 failed" halmos.log || {
+            echo "::error::expected exactly 4 passing symbolic proofs; see the log above"
+            exit 1
+          }
+
+  noir:
+    name: nargo test (keystone)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      # setup-aztec shells out to bun, so it has to be on PATH before that step runs.
+      - uses: ./.github/actions/setup-bun
+
+      # Read the toolchain out of the crate rather than hardcoding it: these Nargo.toml files pin
+      # aztec-packages to their own tag, and compiling that tag's aztec-nr with a newer nargo dies
+      # inside upstream's macros. Deriving it here means the job cannot drift from the pin.
+      - name: Resolve the pinned Aztec toolchain
+        id: aztec-pin
+        run: |
+          TAG=$(sed -n 's/.*aztec-packages\/".*tag = "v\([^"]*\)".*/\1/p' \
+            contracts/bridge/aztec/keystone/Nargo.toml | head -1)
+          if [ -z "$TAG" ]; then
+            echo "::error::could not read the aztec-packages tag from keystone/Nargo.toml"
+            exit 1
+          fi
+          echo "pinned Aztec toolchain: $TAG"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup-aztec
+        with:
+          version: ${{ steps.aztec-pin.outputs.version }}
+
+      # Pure-library crates only: they need no TXE oracle, so they run unattended here.
+      # The TokenBridge TXE suite is excluded on purpose — see the header.
+      #
+      # --force because target/ is tracked: without it nargo can report a stale success having
+      # compiled nothing. The claim_secret crate is deliberately absent — it carries no #[test]
+      # functions of its own, and its vectors are exercised through keystone; running it would
+      # have been a step that always passes without asserting anything.
+      - name: keystone vectors
+        working-directory: contracts/bridge/aztec/keystone
+        run: aztec-nargo test --force
+
+  sole-consumer:
+    name: sole-consumer static guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      # Guards the F-007 invariant that claim_private is the only consumer of a mint_to_private
+      # message. It was never wired to anything. --self-test first: it replays five crafted
+      # bearer regressions, so a guard whose own parser has broken fails here rather than
+      # reporting a clean scan of a file it can no longer read.
+      - name: check-sole-consumer (self-test)
+        run: bash contracts/bridge/aztec/scripts/check-sole-consumer.sh --self-test
+
+      - name: check-sole-consumer
+        run: bash contracts/bridge/aztec/scripts/check-sole-consumer.sh
