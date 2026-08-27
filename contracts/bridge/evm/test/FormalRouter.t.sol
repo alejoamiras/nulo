@@ -28,6 +28,7 @@ contract FormalRouterTest is Test {
     SwapBridgeRouter router;
 
     address constant USER = address(0xDA0);
+    address constant SWEEP_SINK = address(0x5117);
     bytes32 constant RECIPIENT = bytes32(uint256(0x1234));
     bytes32 constant FUEL_RECIPIENT = bytes32(uint256(0x5678));
     bytes32 constant SECRET = bytes32(uint256(0x5EC7E7));
@@ -127,13 +128,22 @@ contract FormalRouterTest is Test {
 
     /// Authority boundary: sweep is unreachable for any non-owner, and a failed attempt
     /// mutates nothing. (try/catch, not vm.expectRevert — halmos does not support the latter.)
+    ///
+    /// The unwanted-success branch MUST signal with assertTrue(false), never a bare revert:
+    /// halmos only detects forge-std assertion failures and EVM panics, so a `revert(string)`
+    /// here is indistinguishable from the guarded revert we are trying to prove and the check
+    /// passes even with `onlyOwner` removed from the function under test.
+    ///
+    /// The recipient is a fixed literal rather than `caller`: reusing the symbolic caller lets
+    /// the zero-address path trip sweep's own `to != address(0)` require, producing a legitimate
+    /// revert that reaches the catch branch and masks every unauthorized success.
     function check_sweep_revertsForNonOwner(address caller) public {
         vm.assume(caller != router.owner());
         usdc.mint(address(router), 5 * 1e6);
         uint256 balBefore = usdc.balanceOf(address(router));
         vm.prank(caller);
-        try router.sweep(address(usdc), caller) {
-            revert("sweep succeeded for a non-owner");
+        try router.sweep(address(usdc), SWEEP_SINK) {
+            assertTrue(false, "sweep succeeded for a non-owner");
         } catch {
             assertEq(usdc.balanceOf(address(router)), balBefore, "rejected sweep mutated state");
         }
@@ -142,12 +152,13 @@ contract FormalRouterTest is Test {
     /// Authority boundary: swap-target rotation is unreachable for any non-owner.
     function check_setSwapTarget_revertsForNonOwner(address caller) public {
         vm.assume(caller != router.owner());
+        address before = address(router.swapTarget());
         MockSwap next = new MockSwap(IERC20(address(fj)));
         vm.prank(caller);
         try router.setSwapTarget(address(next)) {
-            revert("setSwapTarget succeeded for a non-owner");
+            assertTrue(false, "setSwapTarget succeeded for a non-owner");
         } catch {
-            assertTrue(true);
+            assertEq(address(router.swapTarget()), before, "rejected rotation mutated state");
         }
     }
 }
