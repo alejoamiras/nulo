@@ -31,9 +31,14 @@ const SCANNED_EXT = /\.(ts|js|vue)$/
  */
 const SENSITIVE_IDENTIFIERS = [
 	"masterKey",
+	// Kebab spellings are not bare identifiers, but they ARE how exported backup JSON names these
+	// fields — and `${row["master-key"]}` is a template interpolation like any other.
+	"master-key",
 	"masterSecret",
 	"importedKeysDek",
+	"imported-keys-dek",
 	"dekSealed",
+	"imported-keys-dek-sealed",
 	"encryptedSigningKey",
 	"signingKey",
 	"privateKey",
@@ -73,24 +78,63 @@ function walk(dir: string, out: string[] = []): string[] {
 	return out
 }
 
+/**
+ * How many lines past a log-call opener still count as that call's arguments.
+ *
+ * Ten real multi-line log calls already exist in `wallet/services/**`, and their interpolations
+ * sit on continuation lines — a line-at-a-time scan sees the opener without a `${…}` and the
+ * argument without a call, so it reports nothing. The window is what closes that.
+ */
+const MAX_CALL_WINDOW_LINES = 12
+
+const COMMENT_LINE = /^(\/\/|\/?\*|<!--)/
+
+/**
+ * Lines belonging to the log call opened at `start`, up to the balanced closing paren.
+ *
+ * Depth is counted over raw characters, so a paren inside a string literal can hold the window
+ * open past the real end of the call. That direction is deliberate: an over-long window costs a
+ * false POSITIVE — loud, and fixed by rewriting one line — while a short one costs a false
+ * negative, which is silent and is the entire failure mode this test exists to prevent.
+ */
+function callWindow(lines: string[], start: number): number {
+	let depth = 0
+	for (let i = start; i < lines.length && i - start < MAX_CALL_WINDOW_LINES; i++) {
+		for (const ch of lines[i]) {
+			if (ch === "(") depth++
+			else if (ch === ")") depth--
+		}
+		if (depth <= 0) return i
+	}
+	return Math.min(start + MAX_CALL_WINDOW_LINES - 1, lines.length - 1)
+}
+
 /** Returns `file:line` for every log call interpolating a sensitive identifier. */
 function findLoggedSecrets(files: Array<{ path: string; content: string }>): string[] {
 	const offenders: string[] = []
 	for (const { path, content } of files) {
 		if (ALLOWLIST.some((re) => re.test(path))) continue
-		content.split("\n").forEach((line, i) => {
-			const trimmed = line.trim()
-			// Comments may legitimately name these; only code lines count.
-			if (/^(\/\/|\/?\*|<!--)/.test(trimmed)) return
-			if (!LOG_CALL.test(trimmed)) return
-			for (const id of SENSITIVE_IDENTIFIERS) {
-				// Interpolated into a template literal, which is what defeats `trim()`.
-				if (new RegExp(`\\$\\{[^}]*\\b${id}\\b`).test(trimmed)) {
-					offenders.push(`${path}:${i + 1} → ${id} interpolated into a log string`)
+		const lines = content.split("\n")
+		const reported = new Set<string>()
+		for (let i = 0; i < lines.length; i++) {
+			// Comments may legitimately name these; only code lines open a call.
+			if (COMMENT_LINE.test(lines[i].trim()) || !LOG_CALL.test(lines[i])) continue
+			const end = callWindow(lines, i)
+			for (let j = i; j <= end; j++) {
+				const trimmed = lines[j].trim()
+				if (COMMENT_LINE.test(trimmed)) continue
+				for (const id of SENSITIVE_IDENTIFIERS) {
+					// Interpolated into a template literal, which is what defeats `trim()`.
+					if (!new RegExp(`\\$\\{[^}]*\\b${id}\\b`).test(trimmed)) continue
+					const offense = `${path}:${j + 1} → ${id} interpolated into a log string`
+					if (!reported.has(offense)) {
+						reported.add(offense)
+						offenders.push(offense)
+					}
 					break
 				}
 			}
-		})
+		}
 	}
 	return offenders
 }
@@ -115,6 +159,46 @@ describe("log-payload ban (static)", () => {
 		expect(offenders).toHaveLength(1)
 		expect(offenders[0]).toContain("wallet/services/foo/service.ts:1")
 		expect(offenders[0]).toContain("password")
+	})
+
+	test("catches an interpolation on a CONTINUATION line of a multi-line call", () => {
+		// The shape that already exists ten times over in wallet/services/**: the opener carries no
+		// `${…}` and the argument carries no call, so a line-at-a-time scan sees neither.
+		const offenders = findLoggedSecrets([
+			{
+				path: "wallet/services/foo/service.ts",
+				content: ["this.logWarn(", "\t`restore failed for ${password}`,", "\tcount,", ")"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+		expect(offenders[0]).toContain("service.ts:2")
+	})
+
+	test("does not extend the window past the call that closes on its own line", () => {
+		const offenders = findLoggedSecrets([
+			{
+				path: "wallet/services/foo/service.ts",
+				content: ["this.logWarn('starting')", "const hash = await derive(`${password}:${salt}`)"].join("\n"),
+			},
+		])
+		expect(offenders).toEqual([])
+	})
+
+	test("reports a repeated offender once per line, not once per enclosing call", () => {
+		const offenders = findLoggedSecrets([
+			{
+				path: "wallet/services/foo/service.ts",
+				content: ["this.logWarn(fmt(", "\t`${mnemonic}`,", "))"].join("\n"),
+			},
+		])
+		expect(offenders).toHaveLength(1)
+	})
+
+	test("catches the kebab spelling reached by bracket access, as backup JSON names it", () => {
+		const offenders = findLoggedSecrets([
+			{ path: "utils/full-backup-helpers.ts", content: 'console.warn(`row: ${backup["master-key"]}`)' },
+		])
+		expect(offenders).toHaveLength(1)
 	})
 
 	test("catches a bare console call too", () => {
