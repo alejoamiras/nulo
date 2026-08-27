@@ -16,7 +16,7 @@ pragma solidity >=0.8.27;
 //   [F-H] minFuelOutput=0 is signable → contract permits dust fuel (user-signed)
 // ─────────────────────────────────────────────────────────────────────────────
 
-import {Test} from "forge-std/Test.sol";
+import {Test, stdError} from "forge-std/Test.sol";
 import {DataStructures} from "@aztec/core/libraries/DataStructures.sol";
 import {Epoch} from "@aztec/core/libraries/TimeLib.sol";
 import {SwapBridgeRouter, IUniswapFuelSwap} from "../src/SwapBridgeRouter.sol";
@@ -296,36 +296,37 @@ contract BlackhatAuditTest is Test {
     // ─────────────────────────── [F-A] portal init front-run ───────────────────────────
 
     /// The deploy conductor sends `deploy portal` and `initialize portal` as TWO separate txs.
-    /// An attacker front-running the initialize bricks the deployment — and if the poisoned
-    /// address were ever published, the fake-rollup outbox gives a FULL DRAIN of every deposit.
-    function test_FA_portalInitFrontRun_bricksAndDrains() public {
+    /// Pre-fix, an attacker front-running the initialize bricked the deployment — and a poisoned
+    /// address that got published would have been a full drain (fake registry → attacker outbox).
+    /// The deployer-only initializer guard must reject the front-run while the honest initialize
+    /// still succeeds. (The drain chain itself is unreachable post-guard; kept documented in
+    /// implementations-plan/bridge-hardening/audit-blackhat.md.)
+    function test_FA_portalInitFrontRun_reverts() public {
         MintableERC20 realUsdc = new MintableERC20("Circle USDC", "USDC", 6, 1_000_000_000);
         NuloTokenPortal portal = new NuloTokenPortal();
 
-        // 1. Attacker front-runs the FIRST initialize with their own registry.
+        // 1. Attacker front-runs the FIRST initialize with their own registry → rejected.
         FakeRegistry evilReg = new FakeRegistry();
         vm.prank(address(0xBAD));
+        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
         portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xAAAA)));
+        assertEq(address(portal.registry()), address(0), "front-run must not bind a registry");
 
-        // 2. Honest initialize now reverts forever → deployment bricked.
+        // 2. The honest initializer (the deploying EOA == this test contract) succeeds.
         FakeRegistry honestReg = new FakeRegistry();
-        vm.expectRevert(NuloTokenPortal.AlreadyInitialized.selector);
         portal.initialize(address(honestReg), address(realUsdc), bytes32(uint256(0xBBBB)));
+        assertEq(address(portal.registry()), address(honestReg), "honest init binds the registry");
 
-        // 3. WORST CASE: the poisoned address got published before anyone noticed.
+        // 3. Post-init, deposits flow to the honest binding and re-init stays impossible.
         realUsdc.mint(address(0xBEEF), 1000e6);
         vm.startPrank(address(0xBEEF));
         realUsdc.approve(address(portal), 1000e6);
         portal.depositToAztecPublic(RECIPIENT, 1000e6, SECRET);
         vm.stopPrank();
-        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by poisoned portal");
-
-        // 4. Attacker drains via their fake outbox.
-        address attacker = address(0xBAD);
-        vm.prank(attacker);
-        portal.withdraw(attacker, 1000e6, false, Epoch.wrap(0), 0, 0, new bytes32[](0));
-        assertEq(realUsdc.balanceOf(attacker), 1000e6, "attacker drained the poisoned portal");
-        assertEq(realUsdc.balanceOf(address(portal)), 0, "portal emptied");
+        assertEq(realUsdc.balanceOf(address(portal)), 1000e6, "victim funds held by the honest portal");
+        vm.prank(address(0xBAD));
+        vm.expectRevert(NuloTokenPortal.NotInitializer.selector);
+        portal.initialize(address(evilReg), address(realUsdc), bytes32(uint256(0xCCCC)));
     }
 
     // ─────────────────────── [F-B] donation-grief neutrality ───────────────────────
@@ -392,9 +393,15 @@ contract BlackhatAuditTest is Test {
         fot.mint(address(this), 10_000 ether);
         fot.approve(address(permit2), MAX_UINT);
 
+        // The portal must hold the SAME token being bridged. The shared fixture portal is bound to
+        // USDC, so bridging `fot` through it made the deposit leg fail on a missing USDC allowance
+        // — a failure that has nothing to do with the transfer tax, and that stayed green with the
+        // tax removed entirely.
+        MockTokenPortal fotPortal = new MockTokenPortal(IERC20(address(fot)));
+
         (IUniswapFuelSwap.PoolKey[] memory path, bool[] memory dirs) = _route();
         SwapBridgeRouter.BridgeParams memory p = SwapBridgeRouter.BridgeParams({
-            tokenPortal: address(tokenPortal),
+            tokenPortal: address(fotPortal),
             bridgeToken: address(fot),
             totalAmount: 1000 ether,
             fuelAmount: 100 ether,
@@ -413,9 +420,11 @@ contract BlackhatAuditTest is Test {
         // means the router never receives the full pull, so the portal-deposit leg runs out of
         // allowance — an allowance failure, not the arithmetic underflow it looks like from the
         // outside. Selector only: the reported addresses and amounts are incidental.
-        // expectPartialRevert, not expectRevert: the latter requires the revert data to BE the
-        // four selector bytes, and this error carries three arguments whose values are incidental.
-        vm.expectPartialRevert(bytes4(keccak256("ERC20InsufficientAllowance(address,uint256,uint256)")));
+        // The haircut is taken twice — once pulling to the router, once paying the swap target —
+        // so the router is short of the amount the deposit leg then tries to move, and the token's
+        // balance subtraction underflows. Pinned rather than left as a bare expectRevert, which
+        // cannot tell failing closed on the tax from failing for any other reason.
+        vm.expectRevert(stdError.arithmeticError);
         router.bridgeWithFuel(p, _permit(2));
     }
 
