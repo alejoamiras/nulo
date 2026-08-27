@@ -86,4 +86,14 @@ cd "$tb"
 # vacuously on that connect error. Override with TXE_TEST_THREADS if the server gains headroom.
 TEST_THREADS="${TXE_TEST_THREADS:-4}"
 # Not exec: that would replace this shell and skip the EXIT trap, orphaning the TXE server.
-"$NARGO" test --force --test-threads "$TEST_THREADS" --oracle-resolver "http://127.0.0.1:$TXE_PORT" "$@"
+# tee, and assert a POSITIVE count afterwards: nargo exits 0 when it discovers no tests at all,
+# so dropping `mod test;` would otherwise read as a clean pass.
+set -o pipefail
+"$NARGO" test --force --test-threads "$TEST_THREADS" --oracle-resolver "http://127.0.0.1:$TXE_PORT" "$@" \
+  | tee "$tb/txe-run.log"
+rc=$?
+grep -qE "[1-9][0-9]* tests? passed" "$tb/txe-run.log" || {
+  echo "run-txe-tests.sh: nargo reported no passing tests — is the test module still wired in?" >&2
+  exit 1
+}
+exit "$rc"

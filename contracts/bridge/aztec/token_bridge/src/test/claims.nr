@@ -24,7 +24,7 @@ unconstrained fn claim_public_mints_to_recipient() {
 }
 
 /// A claim naming a DIFFERENT recipient derives a different content hash — unconsumable.
-#[test(should_fail)]
+#[test(should_fail_with = "Tried to consume nonexistent L1-to-L2 message")]
 unconstrained fn claim_public_wrong_recipient_rejected() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let to = env.create_light_account();
@@ -38,7 +38,7 @@ unconstrained fn claim_public_wrong_recipient_rejected() {
 }
 
 /// A wrong consumption secret fails the message-membership check.
-#[test(should_fail)]
+#[test(should_fail_with = "Tried to consume nonexistent L1-to-L2 message")]
 unconstrained fn claim_public_wrong_secret_rejected() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let to = env.create_light_account();
@@ -49,7 +49,7 @@ unconstrained fn claim_public_wrong_secret_rejected() {
 }
 
 /// Nullifier replay: the same leaf cannot fund two claims.
-#[test(should_fail)]
+#[test(should_fail_with = "L1-to-L2 message is already nullified")]
 unconstrained fn claim_public_double_claim_rejected() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let to = env.create_light_account();

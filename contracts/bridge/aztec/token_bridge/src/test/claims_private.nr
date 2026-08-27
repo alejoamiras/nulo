@@ -47,7 +47,7 @@ unconstrained fn claim_private_via_relayer_mints_to_recipient() {
 
 /// A relayer redirecting to THEMSELVES derives a different secret — unconsumable. This is the
 /// F-007 recipient-commitment property, proven live in-circuit.
-#[test(should_fail)]
+#[test(should_fail_with = "No L1 to L2 message found")]
 unconstrained fn claim_private_relayer_redirect_rejected() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let recipient = env.create_contract_account();
@@ -61,7 +61,7 @@ unconstrained fn claim_private_relayer_redirect_rejected() {
 }
 
 /// A wrong salt derives the wrong consumption secret even with the right recipient.
-#[test(should_fail)]
+#[test(should_fail_with = "No L1 to L2 message found")]
 unconstrained fn claim_private_wrong_salt_rejected() {
     let (mut env, _admin, _proxy, _token, bridge) = utils::setup();
     let recipient = env.create_contract_account();

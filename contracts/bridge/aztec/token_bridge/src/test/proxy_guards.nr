@@ -23,7 +23,7 @@ unconstrained fn proxy_owner_cannot_mint() {
 
 /// set_bridge is single-shot: a second call reverts on the PublicImmutable guard (F-002 — the
 /// sole minter can never be repointed or extended, even by the owner).
-#[test(should_fail)]
+#[test(should_fail_with = "Attempted to emit duplicate nullifier")]
 unconstrained fn proxy_set_bridge_second_call_reverts() {
     let (mut env, admin, proxy, _token, _bridge) = utils::setup();
     let other = env.create_light_account();
