@@ -300,7 +300,14 @@ export function relinkRestoredTokenBalances(
 		const chainOk =
 			tokenChain !== undefined && typeof tb.account === "string" && importedChainAddress.has(`${tokenChain}:${tb.account}`)
 		if (newId === undefined || !chainOk) {
-			droppedBalances.push({ ...tb, restoreError: "Token balance could not be re-linked to a restored token" })
+			// This path bypasses `collectRestoreErrors` entirely (these rows are dropped BEFORE any
+			// service sees them), so it has to do its own allowlisting — `tb` is raw, unvalidated
+			// backup content and carries `publicBalance`/`privateBalance`.
+			droppedBalances.push({
+				id: tb.id,
+				token: tb.token,
+				restoreError: "Token balance could not be re-linked to a restored token",
+			})
 			return []
 		}
 		return [{ ...tb, token: newId }]

@@ -153,8 +153,57 @@ interface GenericRestoreItem {
 }
 
 /**
+ * Fields that identify WHICH row failed without describing what it held.
+ *
+ * Deliberately excludes `address` and `name`: the generic branch covers contacts (a counterparty
+ * address and a user-chosen label), network endpoints (`rpcUrl`, which routinely carries a
+ * provider API key) and imported keys (`encryptedSigningKey`). The row id is what a developer
+ * needs to find the row again; the rest is what leaks.
+ */
+const RESTORE_ERROR_ID_KEYS = ["id", "networkId", "chainId", "profileId"] as const
+
+/**
+ * Upper bound on recorded failures. Nothing else bounds this: the viewer renders the whole log
+ * and offers to copy it, and a hostile backup can carry tens of thousands of malformed rows.
+ */
+const MAX_RECORDED_RESTORE_ERRORS = 200
+
+/** Keep the identifying fields and the error; drop the row's payload. */
+function projectRestoreErrorRow(row: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = {}
+	for (const key of RESTORE_ERROR_ID_KEYS) {
+		if (row[key] !== undefined) out[key] = row[key]
+	}
+	out.restoreError = row.restoreError
+	return out
+}
+
+/**
+ * account-state children keep `address` — unlike the generic branch these are contract and
+ * tagging-sender addresses, and which one failed to register is the entire diagnosis. They carry
+ * no secret: the `instance`/`artifact` blobs beside them are the bulk, and are dropped.
+ */
+function projectAccountStateChild(child: Record<string, unknown>): Record<string, unknown> {
+	return { address: child.address, restoreError: child.restoreError }
+}
+
+/** Trim to the cap, replacing the tail with one constant marker rather than silently dropping. */
+function capRecords(records: unknown[]): unknown[] {
+	if (records.length <= MAX_RECORDED_RESTORE_ERRORS) return records
+	return [
+		...records.slice(0, MAX_RECORDED_RESTORE_ERRORS),
+		{ restoreError: `${records.length - MAX_RECORDED_RESTORE_ERRORS} further error(s) not recorded` },
+	]
+}
+
+/**
  * Filter restored data for items with `restoreError`. Returns `null` when
  * there are no errors to record (caller should skip writing to log).
+ *
+ * Every returned row is REBUILT from an allowlist rather than filtered: these records reach the
+ * "View Errors" viewer (which offers a one-click copy of the whole log) and a `console.warn`,
+ * which the hijacked console feeds into the log store. Passing rows through whole put
+ * `encryptedSigningKey`, `rpcUrl` and contact PII on both paths.
  */
 export function collectRestoreErrors(serviceName: string, data: unknown): unknown[] | null {
 	if (!Array.isArray(data) || !data.length || !serviceName) return null
@@ -171,8 +220,12 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 			// Presence-guard the child arrays: the result shape is built from an
 			// attacker-controlled slice, and this collector runs post-finalize
 			// where a throw would strand the import on a false "Import failed".
-			const failedContracts = (Array.isArray(item.contracts) ? item.contracts : []).filter((c) => c?.restoreError)
-			const failedSenders = (Array.isArray(item.senders) ? item.senders : []).filter((s) => s?.restoreError)
+			const failedContracts = (Array.isArray(item.contracts) ? item.contracts : [])
+				.filter((c) => c?.restoreError)
+				.map(projectAccountStateChild)
+			const failedSenders = (Array.isArray(item.senders) ? item.senders : [])
+				.filter((s) => s?.restoreError)
+				.map(projectAccountStateChild)
 			// ITEM-LEVEL errors (whole-network skips, deadline notes, normalizer
 			// violations) count too — a top-level restoreError with clean child
 			// arrays used to vanish here, letting a skipped registration
@@ -188,10 +241,12 @@ export function collectRestoreErrors(serviceName: string, data: unknown): unknow
 		if (malformedItems > 0) {
 			out.push({ networkId: "(result)", contracts: [], senders: [], restoreError: "malformed account-state restore result" })
 		}
-		return out.length ? out : null
+		return out.length ? capRecords(out) : null
 	}
-	const filtered = (data as GenericRestoreItem[]).filter((item) => item?.restoreError)
-	return filtered.length ? filtered : null
+	const filtered = (data as GenericRestoreItem[])
+		.filter((item) => item?.restoreError)
+		.map((item) => projectRestoreErrorRow(item as Record<string, unknown>))
+	return filtered.length ? capRecords(filtered) : null
 }
 
 /**

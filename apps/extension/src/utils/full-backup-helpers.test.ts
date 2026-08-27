@@ -216,6 +216,64 @@ describe("collectRestoreErrors", () => {
 			{ networkId: "net2", contracts: [], senders: [{ address: "t", restoreError: "boom" }] },
 		])
 	})
+
+	// These records reach the "View Errors" viewer, which offers a one-click copy of the whole
+	// log, AND a console.warn that the hijacked console feeds into the log store.
+	describe("payload stripping", () => {
+		it("drops an imported key's sealed signing key", () => {
+			const result = collectRestoreErrors("imported-keys", [
+				{ id: "k1", profileId: "p1", chainId: 1, address: "0xacc", encryptedSigningKey: "SEALED-BLOB", restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("SEALED-BLOB")
+			expect(result).toEqual([{ id: "k1", profileId: "p1", chainId: 1, restoreError: "boom" }])
+		})
+
+		it("drops an endpoint URL, which routinely carries a provider API key", () => {
+			const result = collectRestoreErrors("network", [
+				{ id: "n1", endpoints: [{ id: "e1", rpcUrl: "https://mainnet.example.com/v2/SECRET-KEY" }], restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("SECRET-KEY")
+			expect(result).toEqual([{ id: "n1", restoreError: "boom" }])
+		})
+
+		it("drops contact PII", () => {
+			const result = collectRestoreErrors("contact", [{ id: "c1", name: "Mom", address: "0xmom", restoreError: "boom" }])
+
+			expect(JSON.stringify(result)).not.toContain("Mom")
+			expect(JSON.stringify(result)).not.toContain("0xmom")
+		})
+
+		it("drops balances", () => {
+			const result = collectRestoreErrors("token-balance", [
+				{ id: "b1", publicBalance: "123456", privateBalance: "999999", restoreError: "boom" },
+			])
+
+			expect(JSON.stringify(result)).not.toContain("999999")
+		})
+
+		it("drops the instance/artifact blobs beside a failed account-state contract", () => {
+			const result = collectRestoreErrors("account-state", [
+				{
+					networkId: "net1",
+					contracts: [{ address: "0xc", instance: { packedBytecode: "BLOB" }, artifact: { name: "T" }, restoreError: "fail" }],
+					senders: [],
+				},
+			])
+
+			expect(JSON.stringify(result)).not.toContain("BLOB")
+			expect(result).toEqual([{ networkId: "net1", contracts: [{ address: "0xc", restoreError: "fail" }], senders: [] }])
+		})
+
+		it("caps a hostile backup's error count instead of recording all of it", () => {
+			const rows = Array.from({ length: 5000 }, (_, i) => ({ id: `r${i}`, restoreError: "boom" }))
+			const result = collectRestoreErrors("contact", rows)
+
+			expect(result).toHaveLength(201)
+			expect(JSON.stringify(result?.[200])).toContain("further error(s) not recorded")
+		})
+	})
 })
 
 describe("normalizeAllIds + remapByMap", () => {
