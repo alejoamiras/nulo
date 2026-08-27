@@ -40,6 +40,26 @@ describe("trim — secret key names", () => {
 		expect((out as Record<string, unknown>).keepMe).toBe("visible")
 	})
 
+	test("blanks the Aztec-side secrets that arrive through the bridge types", () => {
+		// `claimSecret` (fee.ts) and `secretKey` (the register-contract operation) are real fields;
+		// an `Fr secretKey` would otherwise be walked into its raw bigint.
+		const out = trim({ claimSecret: SECRET, secretKey: { value: SECRET } }) as Record<string, unknown>
+
+		expect(JSON.stringify(out)).not.toContain(SECRET)
+		expect(out.claimSecret).toBe("[claimSecret]")
+		expect(out.secretKey).toBe("[secretKey]")
+	})
+
+	test("blanks the whole *SecretKey family by suffix", () => {
+		const out = trim({
+			masterNullifierSecretKey: SECRET,
+			masterIncomingViewingSecretKey: SECRET,
+			masterTaggingSecretKey: SECRET,
+		})
+
+		expect(JSON.stringify(out)).not.toContain(SECRET)
+	})
+
 	test("still blanks the original five proof-material keys", () => {
 		const out = trim({ acir: SECRET, authWitnesses: SECRET, partialWitness: SECRET, publicInputs: SECRET, vk: SECRET })
 		expect(JSON.stringify(out)).not.toContain(SECRET)
@@ -113,19 +133,35 @@ describe("trim — errors", () => {
 		expect((out as Record<string, unknown>).message).toContain("wss://node.example.com")
 	})
 
-	test("scrubs a protocol-relative endpoint", () => {
-		const out = trim(new Error(`fetch failed: //rpc.example.com/v2/${SECRET}`))
+	test("scrubs an IPv6 endpoint WHOLE, leaving no path behind", () => {
+		// Excluding `]` from the match truncated it at the bracket and left the credential-bearing
+		// path sitting in the message.
+		const out = trim(new Error(`connect failed: http://[::1]:8080/v1/${SECRET}`))
 
 		expect(JSON.stringify(out)).not.toContain(SECRET)
+		expect((out as Record<string, unknown>).message).toContain("http://[::1]:8080")
 	})
 
-	test("redacts a raw key-shaped blob interpolated into the message", () => {
-		// The commonest way a secret reaches a log without anyone choosing to log it.
-		const blob = "dGhpcy1pcy1hLXZlcnktbG9uZy1zZWFsZWQta2V5LWJsb2ItdmFsdWU="
-		const out = trim(new Error(`failed to unseal ${blob}`))
+	test("trims sentence punctuation off a URL rather than swallowing it", () => {
+		const out = trim(new Error(`see https://docs.example.com/guide, then retry.`)) as Record<string, unknown>
 
-		expect(JSON.stringify(out)).not.toContain(blob)
-		expect((out as Record<string, unknown>).message).toContain("[redacted]")
+		expect(out.message).toContain("https://docs.example.com,")
+	})
+
+	test("does NOT mangle a doubled path separator or a comment-like run", () => {
+		// Protocol-relative matching used to eat these.
+		const out = trim(new Error("path //foo/bar is not a url")) as Record<string, unknown>
+
+		expect(out.message).toBe("path //foo/bar is not a url")
+	})
+
+	test("keeps identifiers a developer needs — no blanket high-entropy redaction", () => {
+		// A "long random-looking run" heuristic was tried and removed: it destroyed every address,
+		// tx hash and class id while still missing shorter secrets.
+		const address = "0x1c81a6d581e065e82d5a0a1a4a3c0c9e9f0b6d3c2a1b0987654321fedcba9876"
+		const out = trim(new Error(`pin mismatch: expected ${address}`)) as Record<string, unknown>
+
+		expect(out.message).toContain(address)
 	})
 
 	test("leaves ordinary prose alone", () => {
@@ -166,6 +202,16 @@ describe("trim — domain shapes", () => {
 		expect(JSON.stringify(out)).not.toContain(SECRET)
 		expect(JSON.stringify(out)).not.toContain("0xamount")
 		expect(out).toMatchObject({ note: "UintNote", contract: "0xcontract", rawContentLen: 2, contentKeys: 2 })
+	})
+
+	test("does NOT collapse an unrelated object that merely has a rawContent", () => {
+		// A two-field duck-type swallowed partial diagnostics; the collapse now requires all four
+		// fields a real Note always has.
+		const notANote = { rawContent: ["x"], storageSlot: "0x1", unrelated: "keep me" }
+		const out = trim(notANote) as Record<string, unknown>
+
+		expect(out.unrelated).toBe("keep me")
+		expect(out).not.toHaveProperty("note")
 	})
 
 	test("never emits an ActiveSession's plaintext master secret", () => {

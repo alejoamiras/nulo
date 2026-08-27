@@ -108,7 +108,20 @@ const REDACTED_KEYS: ReadonlySet<string> = new Set([
 	"passhash",
 	"passphrase",
 	"prf",
+	// Aztec-side secrets that reach us through the bridge/runtime types.
+	"claimSecret",
+	"claim-secret",
 ])
+
+/**
+ * Suffix rule for the `*SecretKey` family.
+ *
+ * Covers `secretKey` (a plaintext `Fr` on the register-contract operation, which the generic walk
+ * would otherwise descend into and print as a raw bigint) and Aztec's
+ * `masterNullifierSecretKey` / `masterIncomingViewingSecretKey` / … set, without enumerating
+ * every upstream spelling. No benign field in this codebase ends in `SecretKey`.
+ */
+const SECRET_KEY_SUFFIX = /secretkey$/i
 
 /**
  * Keys holding an endpoint URL. Commercial RPC providers routinely embed the API key in the path
@@ -118,40 +131,33 @@ const REDACTED_KEYS: ReadonlySet<string> = new Set([
 const URL_KEYS: ReadonlySet<string> = new Set(["rpcUrl", "submittedEndpointUrl", "endpointUrl"])
 
 /**
- * URL-ish runs in free text. Covers `ws://`/`wss://` (the Aztec node transport) alongside http(s),
- * and protocol-relative `//host/...`, because an endpoint carrying an API key is just as
- * credential-bearing over a socket as over HTTP.
- */
-const URL_LIKE = /(?:\b(?:https?|wss?):\/\/|(?<![:\w])\/\/)[^\s'"<>)\]}]+/gi
-
-/**
- * Long unbroken high-entropy runs — base64url or hex — interpolated into free text.
+ * URL-ish runs in free text. Covers `ws://`/`wss://` (the Aztec node transport) alongside http(s):
+ * an endpoint carrying an API key is just as credential-bearing over a socket as over HTTP.
  *
- * Error messages are the main way a secret reaches a log without anyone deciding to log it
- * ("failed to unseal <blob>"). Scrubbing URLs alone leaves those, so anything long enough to be a
- * key and dense enough not to be prose is replaced. 32 chars is comfortably above ordinary
- * identifiers (an Aztec address is longer, and losing it here costs little) and below any English
- * word.
+ * The character class deliberately allows `[` and `]` so an IPv6 authority (`http://[::1]:8080/…`)
+ * matches WHOLE — excluding them truncated the match at the bracket and left the credential-bearing
+ * path sitting in the message. Trailing punctuation is trimmed afterwards instead.
+ *
+ * Protocol-relative `//host/path` is NOT matched: it is indistinguishable from a comment or a
+ * doubled path separator in free text, and mangling those was worse than the rare miss.
  */
-const SECRET_BLOB = /\b[A-Za-z0-9+/=_-]{32,}\b/g
+const URL_LIKE = /\b(?:https?|wss?):\/\/[^\s'"<>]+/gi
 
-/** Reduce any URL in free text to its origin; userinfo, path and query go with it. */
+/** Sentence punctuation that follows a URL far more often than it belongs to one. */
+const TRAILING_PUNCTUATION = /[).,;:!?}]+$/
+
+/** Reduce any URL in free text to scheme + host; userinfo, path and query go with it. */
 function scrubUrls(text: string): string {
 	return text.replace(URL_LIKE, (candidate) => {
-		// Protocol-relative has no scheme for `new URL` to parse; give it one, then keep only the host.
-		const absolute = candidate.startsWith("//") ? `https:${candidate}` : candidate
+		const trailing = candidate.match(TRAILING_PUNCTUATION)?.[0] ?? ""
+		const url = trailing ? candidate.slice(0, -trailing.length) : candidate
 		try {
-			const { protocol, host } = new URL(absolute)
-			return candidate.startsWith("//") ? `//${host}` : `${protocol}//${host}`
+			const { protocol, host } = new URL(url)
+			return `${protocol}//${host}${trailing}`
 		} catch {
-			return "[url]"
+			return `[url]${trailing}`
 		}
 	})
-}
-
-/** Scrub free text of both credential-bearing URLs and raw key-shaped blobs. */
-function scrubFreeText(text: string): string {
-	return scrubUrls(text).replace(SECRET_BLOB, "[redacted]")
 }
 
 function toOrigin(value: unknown): unknown {
@@ -172,11 +178,14 @@ function toOrigin(value: unknown): unknown {
  * values that caused the failure, and stacks carry file paths, so the fix caps and scrubs the
  * message and drops the stack.
  *
- * Scrubbing covers URLs AND key-shaped blobs: an error message is the commonest way a secret
- * reaches a log without anyone choosing to log it.
+ * Scrubbing covers credential-bearing URLs only. A generic "long high-entropy run" heuristic was
+ * tried and removed: at any threshold low enough to catch a key it also redacted every Aztec
+ * address, tx hash and class id — the identifiers that make an error message worth reading — while
+ * still missing shorter or dotted secrets. Length is not an entropy test. Keeping a secret out of
+ * a message is the CALL SITE's job; this only bounds and de-credentials what arrives.
  */
 function projectError(error: Error): Record<string, unknown> {
-	const scrubbed = scrubFreeText(error.message ?? "")
+	const scrubbed = scrubUrls(error.message ?? "")
 	return {
 		name: error.name,
 		message: scrubbed.length > MAX_ERROR_MESSAGE_CHARS ? `${scrubbed.slice(0, MAX_ERROR_MESSAGE_CHARS - 1)}…` : scrubbed,
@@ -223,7 +232,15 @@ export const trim = (value: unknown, depth: number = 0): unknown => {
 				originalContractClassId: obj.originalContractClassId,
 			}
 		}
-		if ("rawContent" in value && "storageSlot" in value) {
+		// Four required fields, not two: a two-field test collapsed unrelated diagnostics that
+		// happened to carry a `rawContent`, destroying them for no gain. `Note` always has all four
+		// (`note/spec.ts`), so this stays exact without becoming brittle.
+		if (
+			Array.isArray((value as Record<string, unknown>).rawContent) &&
+			"storageSlot" in value &&
+			"contract" in value &&
+			"txHash" in value
+		) {
 			// Note — `rawContent`/`content` is the DECRYPTED private payload, the one thing this
 			// wallet exists to keep private. Keep enough to identify which note failed and how big
 			// it was; never what it holds.
@@ -250,7 +267,7 @@ export const trim = (value: unknown, depth: number = 0): unknown => {
 		}
 
 		return Object.entries(value as Record<string, unknown>).reduce<Record<string, unknown>>((acc, [k, v]) => {
-			if (REDACTED_KEYS.has(k)) {
+			if (REDACTED_KEYS.has(k) || SECRET_KEY_SUFFIX.test(k)) {
 				acc[k] = `[${k}]`
 			} else if (URL_KEYS.has(k)) {
 				acc[k] = toOrigin(v)

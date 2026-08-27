@@ -39,9 +39,11 @@ describe("LoggerServiceClient.log — redaction before the wire", () => {
 
 		client.log("ui", LogLevel.Error, new Error(`failed for https://rpc.example.com/v2/${SECRET}`))
 
-		const wire = JSON.stringify(sent)
-		expect(wire).not.toContain(SECRET)
-		expect(wire).not.toContain("stack")
+		// Asserted POSITIVELY on the transformed value. A `not.toContain` check would pass against
+		// an untrimmed client too, because `JSON.stringify(new Error(...))` is natively `{}` — the
+		// secret would be absent from the serialization while still sitting on the wire object.
+		expect(sent[4]).toEqual({ name: "Error", message: "failed for https://rpc.example.com" })
+		expect(sent[4]).not.toBeInstanceOf(Error)
 	})
 
 	test("summarises a typed array instead of shipping its bytes", () => {
@@ -56,18 +58,23 @@ describe("LoggerServiceClient.log — redaction before the wire", () => {
 		expect(wire).not.toContain('"0":1')
 	})
 
-	test("collapses a Note before it leaves the popup", () => {
+	test("collapses a real Note shape before it leaves the popup", () => {
 		const client = new LoggerServiceClient("popup")
 		const sent = captureSentParams(client)
 
+		// A COMPLETE Note — the collapse requires contract/txHash/storageSlot/rawContent, so a
+		// partial fixture would prove nothing about the real type.
 		client.log("ui", LogLevel.Warn, {
 			contract: "0xc",
 			storageSlot: "0x1",
+			txHash: "0xtx",
 			rawContent: [SECRET],
+			type: "UintNote",
 			content: { amount: SECRET },
 		})
 
 		expect(JSON.stringify(sent)).not.toContain(SECRET)
+		expect(sent[4]).toMatchObject({ note: "UintNote", rawContentLen: 1, contentKeys: 1 })
 	})
 
 	test("still forwards the routing arguments unchanged", () => {
