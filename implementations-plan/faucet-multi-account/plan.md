@@ -178,6 +178,35 @@ User selected Options 1+2 from the labels artifact (https://claude.ai/code/artif
 | D-44 | Visually-empty aliases (zero-width/whitespace) defeat fallbacks (LOW) | **Adopted**: sanitizer strips zero-widths (U+200B-200F, U+FEFF) + trims; empty alias → address fallback everywhere; test added. |
 | D-45 | Header wrap can split age/corner control on narrow widths (LOW) | **Accepted residual** — cosmetic; flagged for the user's manual smoke test. |
 
+## Merge refresh — dev @ 118 commits (2026-08-27)
+
+The branch sat ~4 weeks while `dev` moved 118 commits. Merged `origin/dev` (merge commit `57382339`;
+merge, NOT rebase — the PR squash-merges, so a merge commit costs nothing and rewrites no history).
+
+**Collision surface.** Only `implementations-plan/index.md` conflicted (pure append collision — both
+sides' entries kept). The four overlapping code files (`useBridgeJournal.ts`, `useDeposit.ts`,
+`useFuel.ts`, `vite.config.ts`) auto-merged; dev's edits landed in adjacent regions (receipt
+classification, permit deadline, `resolvePackageAsset`) rather than on top of ours.
+
+**Post-merge verification** (textual auto-merge is not semantic correctness):
+- All eight `withOperation` span sites, the fail-closed recipient guard, and `claimFuelStandalone`'s
+  guard verified present.
+- D-19 coverage invariant re-swept against dev's new code: dev's three new faucet libs
+  (`fuel-target`, `claim-receipt`, `bridge-steps`) contain zero wallet sends and dev added no new
+  exported actions — no new spans to wrap.
+- `vite.config.ts` kept BOTH sides: our plural `deriveAllowedPreviewHosts` and dev's
+  `resolvePackageAsset`.
+- **`@aztec` 5.0.1 → 5.2.0 re-probe**: `AztecAddress.fromStringUnsafe` behaves identically (throws on
+  short hex / bad hex / above-modulus; canonicalizes case and a missing `0x`), and both curve-validity
+  fixture pins still hold (`0x…02` valid, `0x…03` invalid) — so D-21/D-30/D-35 stand unchanged.
+- Faucet suites now run on the **bun runtime** (dev #459, `bun --bun vitest run`), so the local runs
+  below exercised the same runtime CI uses.
+
+**Gates on the merged tree**: faucet typecheck 0 · `bun run lint` 0 · `test:faucet` 615/615 (60 files —
+dev's new faucet suites and ours green together) · `test:e2e` 15/15 · `bun run audit:faucet` 0.
+
+**Merge-integration codex round**: verdict recorded in the audit log below.
+
 ## Security & Adversarial Considerations
 
 - **Threat model**: malicious/compromised wallet extension feeding hostile grant payloads (addresses, aliases, list size); same-origin storage tampering; user confusion about which account funds land in. Surface: grant parsing, localStorage, the two new UI surfaces.
