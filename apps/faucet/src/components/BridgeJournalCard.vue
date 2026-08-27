@@ -317,17 +317,20 @@ function onDiscard() {
 	>
 		<p v-if="stage === 'done'" class="stamp">{{ record.direction === "deposit" ? "BRIDGED ✓" : "RELEASED ✓" }}</p>
 		<header class="row">
-			<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
-			<span class="amt">{{ amountDisplay }} {{ amountSymbol }}<span v-if="fuelAmount && !isFuel" class="amt-fuel">{{ fuelAmount }}</span></span>
-			<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
-			<span
-				v-if="acct"
-				class="acct"
-				:class="{ other: !acct.active }"
-				:title="acct.addr"
-				:data-testid="TESTIDS.journalAccount"
-			>{{ acct.alias ?? shortAddr(acct.addr) }}<span v-if="acct.alias" class="acct-addr">{{ shortAddr(acct.addr) }}</span></span>
-			<span class="age">{{ age }}</span>
+			<span class="meta">
+				<span class="dir">{{ record.direction === "deposit" ? "ETHEREUM → AZTEC" : "AZTEC → ETHEREUM" }}</span>
+				<span class="amt">{{ amountDisplay }} {{ amountSymbol }}<span v-if="fuelAmount && !isFuel" class="amt-fuel">{{ fuelAmount }}</span></span>
+				<span class="tag" :class="{ private: record.isPrivate }">{{ record.isPrivate ? "PRIVATE" : "PUBLIC" }}</span>
+				<span
+					v-if="acct"
+					class="acct"
+					:class="{ other: !acct.active }"
+					:title="acct.addr"
+					:data-testid="TESTIDS.journalAccount"
+				>{{ acct.alias ?? shortAddr(acct.addr) }}<span v-if="acct.alias" class="acct-addr">{{ shortAddr(acct.addr) }}</span></span>
+			</span>
+			<span class="trail">
+				<span class="age">{{ age }}</span>
 			<button
 				v-if="stage === 'done'"
 				type="button"
@@ -349,6 +352,7 @@ function onDiscard() {
 			>
 				⤓
 			</button>
+			</span>
 		</header>
 		<div v-if="fuelRecoverable" class="fuel-recover">
 			<button
@@ -487,7 +491,25 @@ function onDiscard() {
 	display: flex;
 	align-items: baseline;
 	gap: 10px;
+}
+
+/* Only the metadata wraps. Age + the corner control travel as one trailing group pinned right, so a
+   header that spills to a second line can't strand the download icon there alone. */
+.meta {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
 	flex-wrap: wrap;
+	min-width: 0;
+	flex: 1;
+}
+
+.trail {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-left: auto;
+	flex: none;
 }
 
 .dir {
@@ -550,7 +572,6 @@ function onDiscard() {
 }
 
 .age {
-	margin-left: auto;
 	font: 500 11px/1 var(--font-mono);
 	color: var(--txt-secondary);
 }

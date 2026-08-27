@@ -73,6 +73,15 @@ describe("AccountSwitcher", () => {
 		expect(w.find(sel(TESTIDS.accountMenu)).exists()).toBe(false)
 	})
 
+	it("an unnamed account still shows its address in the chip (wallets may supply no name)", () => {
+		connectSession([{ address: ADDR_A, alias: "" }])
+		const w = mountSwitcher()
+		const chip = w.find(sel(TESTIDS.accountChip))
+		expect(chip.text()).toContain(`${ADDR_A.slice(0, 6)}…${ADDR_A.slice(-4)}`)
+		// The address element keeps its panel testid whether or not a name renders beside it.
+		expect(w.find(sel(TESTIDS.account)).exists()).toBe(true)
+	})
+
 	it("opens the menu with one row per account, active row checked", async () => {
 		connectSession()
 		const w = mountSwitcher()

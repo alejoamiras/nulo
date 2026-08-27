@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Icon } from "@nulo/design"
 import { computed, nextTick, onBeforeUnmount, ref } from "vue"
 import { useOpsInFlight } from "@/composables/useOpsInFlight"
 import { switchActiveAccount, useWalletConnection } from "@/composables/useWalletConnection"
@@ -9,16 +10,16 @@ import { TESTIDS } from "@/lib/testids"
  * Shared by WalletPanel and BridgeWalletPanel — both read the SAME session
  * singleton, so switching here drives every tab.
  *
- * The trigger is ONE button with plain-text content (no nested interactive
- * elements); the copy affordance lives in the menu rows as a SIBLING of the
- * selection button. The menu renders for single-account sessions too — it is
- * where Disconnect lives, and Disconnect must never disappear.
+ * The trigger is ONE button holding only non-interactive content; the copy
+ * affordance lives in the menu rows as a SIBLING of the selection button, so no
+ * button ever nests inside another. The menu renders for single-account sessions
+ * too — it is where Disconnect lives, and Disconnect must never disappear.
  *
- * The dropdown surface reproduces the design package's Popover recipe (the
- * system's one rounded, shadowed floating surface) as local scoped CSS: the
- * Popover component itself needs a `#popover` teleport root the faucet does
- * not declare, and carries a pinned open/close lifecycle bug — see
- * packages/design/src/ui/Popover.vue and the plan's D-4 ledger entry.
+ * The dropdown is deliberately NOT the design package's Popover: that component
+ * needs a `#popover` teleport root the faucet doesn't declare and carries a
+ * pinned open/close lifecycle bug (packages/design/src/ui/Popover.vue), and its
+ * rounded, inset-ringed surface reads as the one bordered floating panel in an
+ * app of sharp hairline boxes. Depth here comes from shadow alone.
  */
 
 const props = defineProps<{
@@ -128,11 +129,11 @@ onBeforeUnmount(() => {
 			@click="toggle"
 		>
 			<span class="net">Aztec</span>
-			<span v-if="active?.alias" class="alias">{{ active.alias }}</span>
-			<span v-if="selectedAccount" class="addr" :title="selectedAccount" :data-testid="props.addressTestid">
-				{{ shortAddress(selectedAccount) }}
+			<span v-if="selectedAccount" class="identity" :class="{ solo: !active?.alias }">
+				<span v-if="active?.alias" class="name">{{ active.alias }}</span>
+				<span class="addr" :title="selectedAccount" :data-testid="props.addressTestid">{{ shortAddress(selectedAccount) }}</span>
 			</span>
-			<span class="caret" aria-hidden="true">{{ open ? "▴" : "▾" }}</span>
+			<Icon name="chevron" size="16" color="secondary" :rotate="open ? 180 : 0" />
 		</button>
 
 		<div
@@ -149,7 +150,13 @@ onBeforeUnmount(() => {
 			<p v-if="busy" class="busy-hint" role="status">Finish the current operation to switch.</p>
 
 			<ul class="rows">
-				<li v-for="a in accounts" :key="a.address" role="none" class="row-line">
+				<li
+					v-for="a in accounts"
+					:key="a.address"
+					role="none"
+					class="row-line"
+					:class="{ inert: busy && a.address !== selectedAccount }"
+				>
 					<button
 						type="button"
 						class="row"
@@ -206,7 +213,11 @@ onBeforeUnmount(() => {
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	padding: 8px 12px;
+	/* No vertical padding: the 40px floor (shared with the design Button and the L1 chip) sets the
+	   height, and the identity capsule centres inside it. */
+	min-height: 40px;
+	padding: 0 12px;
+	box-sizing: border-box;
 	border: 1px solid var(--nulo-outline);
 	background: transparent;
 	cursor: pointer;
@@ -225,40 +236,51 @@ onBeforeUnmount(() => {
 	text-transform: uppercase;
 }
 
-.chip .alias {
+/* Name over address in one filled capsule — the same fill/border the shared AddressDisplay gives the
+   Ethereum chip, and the same two-line shape as the menu rows this chip opens. */
+.identity {
+	display: inline-flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 2px;
+	min-width: 0;
+	padding: 4px 10px;
+	border: 1px solid var(--nulo-outline);
+	background: var(--nulo-surface-low);
+}
+
+.identity .name {
 	color: var(--txt-primary);
-	font-weight: 600;
-	font-size: 12px;
-	max-width: 14ch;
+	font: 600 12px/1.1 var(--font-body);
+	max-width: 18ch;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.chip .addr {
-	color: var(--txt-primary);
-	font-family: var(--font-mono);
-	font-size: 12.5px;
-}
-
-.chip .caret {
+.identity .addr {
 	color: var(--txt-secondary);
-	font-size: 10px;
+	font: 400 10.5px/1.1 var(--font-mono);
 }
 
-/* The design system's Popover recipe (10px radius, dropdown bg, its exact shadow), local. */
+/* Unnamed account: the address carries the capsule alone, at AddressDisplay's own weight. */
+.identity.solo .addr {
+	color: var(--txt-primary);
+	font-size: 13px;
+}
+
+/* Sharp corners, depth from shadow alone — nothing outlines the panel, so it doesn't read as the
+   one bordered-and-rounded surface in an app of sharp hairline boxes. */
 .menu {
 	position: absolute;
 	top: calc(100% + 6px);
 	left: 0;
 	z-index: 50;
 	min-width: 264px;
-	border-radius: 10px;
 	background: var(--dropdown-bg);
 	box-shadow:
-		inset 0 0 0 1px color-mix(in srgb, var(--txt-primary) 8%, transparent),
-		0 14px 34px rgba(0, 0, 0, 0.15),
-		0 4px 14px rgba(0, 0, 0, 0.05);
+		0 14px 34px rgba(0, 0, 0, 0.35),
+		0 4px 14px rgba(0, 0, 0, 0.15);
 	padding: 6px 0;
 	display: flex;
 	flex-direction: column;
@@ -286,9 +308,16 @@ onBeforeUnmount(() => {
 	flex-direction: column;
 }
 
+/* The whole line is ONE hover surface: highlighting only the selection button left the fill
+   stopping short of the copy control. */
 .row-line {
 	display: flex;
 	align-items: stretch;
+	transition: background 0.15s ease;
+}
+
+.row-line:hover:not(.inert) {
+	background: var(--nulo-surface-high);
 }
 
 .row {
@@ -305,7 +334,6 @@ onBeforeUnmount(() => {
 	transition: background 0.15s ease;
 }
 
-.row:hover:not(:disabled),
 .row:focus-visible {
 	background: var(--nulo-surface-high);
 }
@@ -360,8 +388,10 @@ onBeforeUnmount(() => {
 	padding: 6px 12px 6px 6px;
 }
 
+/* Nested inside the row's hover rather than competing with it. */
 .copy:hover {
 	color: var(--txt-primary);
+	background: color-mix(in srgb, var(--txt-primary) 8%, transparent);
 }
 
 .truncation {

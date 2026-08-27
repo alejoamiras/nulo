@@ -35,7 +35,11 @@ const { address, isConnected, wrongChain, isConnecting, connect, disconnect, swi
 	display: inline-flex;
 	align-items: center;
 	gap: 10px;
-	padding: 8px 12px;
+	/* Shares the design Button's 40px floor with the Aztec chip, so connected and disconnected
+	   states across both networks sit on one baseline instead of three near-misses. */
+	min-height: 40px;
+	padding: 0 12px;
+	box-sizing: border-box;
 	border: 1px solid var(--nulo-outline);
 }
 
