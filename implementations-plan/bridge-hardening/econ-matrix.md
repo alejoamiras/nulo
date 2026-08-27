@@ -45,3 +45,21 @@ stated envelope.
   a "zero floor" config impossible, not operator discipline.
 - The deadline was the one UNTIGHTENED knob at audit time (30 min, unpinned); now 600 s with a
   CI tripwire. If congestion ever makes 600 s too tight, raise BOTH the constant and the pin.
+
+## Frontend review findings (Arc 7)
+
+Line-review of `useDeposit`/`useWithdraw`/`fuelClaim` against this matrix:
+
+- **Round-trip integrity holds**: quote (T0) → `minOutputForSlippage` → witness-bound
+  `minFuelOutput` + `routeHash` + `swapTarget` → router call re-passes the same values; claims
+  consume only the event-sourced `BridgeWithFuel.fuelAmount`, never the quote.
+- **Quote-before-approval staleness**: when a first-time Permit2 approval tx sits between the
+  quote and signing, the floor can be minutes old. Loss stays bounded by the slippage floor and
+  the window by the 600 s deadline — accepted, documented here rather than re-quoted.
+- **Fuel-target invariant now pinned**: `fuelRecipientFor` (public → user address, private →
+  canonical PrivateFPC) extracted and unit-tested; `useDeposit` consumes it. Previously inline
+  with zero coverage despite being the leak-or-strand headline.
+- **Withdraw fee policy verified**: all three withdraw sends route through one builder that has
+  no fee field by construction (`buildWithdrawSendOpts`) — nothing to drift.
+- `fuelSlice >= amount` and quote-vs-`minFuelFj` guards match the router's own requires; the UI
+  cannot sign an intent the router would reject on those bounds.
