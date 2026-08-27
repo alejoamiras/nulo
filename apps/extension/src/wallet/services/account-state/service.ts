@@ -222,11 +222,18 @@ export class AccountStateService extends Service<Methods, Events> implements Ser
 		// someone else's import. Report the size while the user can still act on it.
 		const sliceCodeUnits = JSON.stringify(result).length
 		if (sliceCodeUnits > ACCOUNT_STATE_CAPS.maxSliceCodeUnits * 0.8) {
+			// Artifact NAMES, never addresses. This line is pre-formatted, so it reaches the
+			// persisted + CSV-exportable log verbatim — the logger's `trim()` only collapses object
+			// arguments, and cannot reach inside a string. Which contracts a wallet has registered
+			// is a privacy signal; names carry the diagnosis without it, and are exactly what
+			// `trim()` itself keeps when it collapses a ContractArtifact.
 			const biggest = result
-				.flatMap((r) => r.contracts.map((c) => ({ address: c.address, units: JSON.stringify(c.artifact ?? {}).length })))
+				.flatMap((r) =>
+					r.contracts.map((c) => ({ name: c.artifact?.name ?? "(unnamed)", units: JSON.stringify(c.artifact ?? {}).length })),
+				)
 				.sort((a, b) => b.units - a.units)
 				.slice(0, 5)
-				.map((c) => `${c.address.slice(0, 12)}…=${c.units}`)
+				.map((c) => `${c.name}=${c.units}`)
 				.join(", ")
 			this.logWarn(
 				`backup: account-state slice is ${sliceCodeUnits} code units of ${ACCOUNT_STATE_CAPS.maxSliceCodeUnits} ` +
