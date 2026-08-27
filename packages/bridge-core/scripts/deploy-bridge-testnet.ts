@@ -412,7 +412,7 @@ async function main() {
 	// equality vs the template can never hold; verify structurally (diff confined to immutable
 	// words encoding THIS broadcaster) instead.
 	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
-	assertSame(observedInit, account.address, "portal initializer == broadcaster")
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// L2 read-backs are BEST-EFFORT (log, never abort): aztec.js view-simulate returns `{ result }` and
 	// the decoded shape varies (AztecAddress / Fr / bigint), so a decode quirk must not false-abort a

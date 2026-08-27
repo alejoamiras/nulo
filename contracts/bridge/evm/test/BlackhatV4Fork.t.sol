@@ -25,7 +25,9 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 // Uniswap V4 PoolManager on Sepolia (same deployment the bridge rides).
 address constant CANONICAL_PM = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
 // Fallback public RPC.
-string constant MAINNET_RPC = "https://ethereum-sepolia-rpc.publicnode.com";
+// CANONICAL_PM below is the SEPOLIA V4 PoolManager — the suite forks Sepolia, never mainnet,
+// whatever the old MAINNET_RPC constant name suggested. The endpoint comes from
+// SEPOLIA_RPC_URL; there is deliberately no default (see setUp).
 
 contract MinimalWETH {
     string public name = "WETH";
@@ -128,7 +130,15 @@ contract BlackhatV4ForkTest is Test {
     V4Seeder seeder;
 
     function setUp() public {
-        string memory rpc = vm.envOr("MAINNET_RPC_URL", MAINNET_RPC);
+        // Skip-by-default. Defaulting the RPC made a bare `forge test` reach out to a public
+        // third-party endpoint, so the suite was neither hermetic nor honest about needing the
+        // network: a rate-limited or unreachable node reads as a contract failure. Opt in by
+        // exporting SEPOLIA_RPC_URL, matching the convention the rest of the fork suites use.
+        string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
+        if (bytes(rpc).length == 0) {
+            vm.skip(true);
+            return;
+        }
         vm.createSelectFork(rpc);
 
         pm = IPoolManager(CANONICAL_PM);

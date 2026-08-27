@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { assertRuntimeMatchesTemplate } from "./portal-artifact"
+import { assertImmutableRefsMatch, assertRuntimeMatchesTemplate } from "./portal-artifact"
 
 // Mirrors the artifact's deployedBytecode.immutableReferences for the fork (slot-keyed map
 // flattened): two full-word sites holding left-padded address immutables.
@@ -80,7 +80,34 @@ describe.skipIf(!process.env.PORTAL_RUNTIME_CAPTURE)("real captured runtime", ()
 		expect(refs.length).toBeGreaterThan(0)
 		const DEPLOYER1 = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" as const
 		const DEPLOYER2 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" as const
-		expect(assertRuntimeMatchesTemplate(actualHex, template, DEPLOYER1, refs)).toBe(DEPLOYER1)
+		// Lowercased: the return is decoded from the deployed bytes, so it carries no checksum casing.
+		expect(assertRuntimeMatchesTemplate(actualHex, template, DEPLOYER1, refs).toLowerCase()).toBe(DEPLOYER1.toLowerCase())
 		expect(() => assertRuntimeMatchesTemplate(actualHex, template, DEPLOYER2, refs)).toThrow(/does not encode the expected initializer/)
+	})
+})
+
+/**
+ * The drift alarm guards the assumption every other check here rests on: that the committed
+ * artifact's immutable sites are where a rebuild actually puts them. If solc moves a site and
+ * nobody notices, `assertRuntimeMatchesTemplate` would carve out the wrong bytes — masking real
+ * runtime drift at the old offsets while comparing patched bytes at the new ones.
+ */
+describe("assertImmutableRefsMatch", () => {
+	it("accepts identical reference sets", () => {
+		expect(() => assertImmutableRefsMatch(IMMUTABLES, IMMUTABLES)).not.toThrow()
+	})
+
+	it("rejects a moved site", () => {
+		const moved = [{ start: 320, length: 32 }, IMMUTABLES[1]]
+		expect(() => assertImmutableRefsMatch(moved, IMMUTABLES)).toThrow(/immutableReferences drifted/)
+	})
+
+	it("rejects a resized site", () => {
+		const resized = [{ start: 313, length: 20 }, IMMUTABLES[1]]
+		expect(() => assertImmutableRefsMatch(resized, IMMUTABLES)).toThrow(/immutableReferences drifted/)
+	})
+
+	it("rejects a dropped site", () => {
+		expect(() => assertImmutableRefsMatch([IMMUTABLES[0]], IMMUTABLES)).toThrow(/immutableReferences drifted/)
 	})
 })

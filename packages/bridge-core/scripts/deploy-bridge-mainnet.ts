@@ -444,7 +444,7 @@ async function main() {
 	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
 	// Immutable-aware verification — see deploy-bridge-testnet.ts for rationale.
 	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
-	assertSame(observedInit, account.address, "portal initializer == broadcaster")
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// Router wiring (group 1): swapTarget bound + the F-004 witness shape present.
 	const routerR = getContract({

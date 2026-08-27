@@ -156,17 +156,25 @@ export function loadForkedPortalArtifact(): LoadedPortal {
 	}
 }
 
+/**
+ * Throws when a rebuild moves or resizes an immutable site relative to the committed artifact.
+ * Split out of `rebuildAndVerifyPortal` so it is reachable without a solc invocation — the
+ * caller needs a real build, which is why this branch had no coverage.
+ */
+export function assertImmutableRefsMatch(
+	rebuilt: ReadonlyArray<{ start: number; length: number }>,
+	committed: ReadonlyArray<{ start: number; length: number }>,
+): void {
+	if (JSON.stringify(rebuilt) !== JSON.stringify(committed)) {
+		throw new Error(`immutableReferences drifted: rebuilt ${JSON.stringify(rebuilt)} != committed ${JSON.stringify(committed)}`)
+	}
+}
+
 /** Deploy-time drift alarm: rebuild from source and assert bytes AND immutable sites match pins. */
 export function rebuildAndVerifyPortal(committedRefs?: ReadonlyArray<{ start: number; length: number }>): void {
 	const built = buildForkInL1Root()
 	assertPortalPins(built)
-	if (committedRefs) {
-		if (JSON.stringify(built.immutableReferences) !== JSON.stringify(committedRefs)) {
-			throw new Error(
-				`immutableReferences drifted: rebuilt ${JSON.stringify(built.immutableReferences)} != committed ${JSON.stringify(committedRefs)}`,
-			)
-		}
-	}
+	if (committedRefs) assertImmutableRefsMatch(built.immutableReferences, committedRefs)
 }
 
 /**
@@ -175,7 +183,8 @@ export function rebuildAndVerifyPortal(committedRefs?: ReadonlyArray<{ start: nu
  * immutableReferences, so raw keccak equality against the template can never hold. Reconstructs
  * the template by restoring every immutable site to its template bytes and requires byte-equality
  * with the real code; each site must encode exactly `expectedInitializer` (right-aligned in its
- * slot, leading zeros per solc address-immutable encoding). Returns that initializer.
+ * slot, leading zeros per solc address-immutable encoding). Returns the initializer DECODED from
+ * the deployed bytes, so a caller comparing it against the broadcaster is making a real check.
  */
 export function assertRuntimeMatchesTemplate(
 	actualHex: `0x${string}`,
@@ -209,5 +218,15 @@ export function assertRuntimeMatchesTemplate(
 			)
 		}
 	}
-	return expectedInitializer
+	if (immutableReferences.length === 0) {
+		throw new Error("artifact declares no immutable references — cannot verify the pinned initializer")
+	}
+	// Decoded from the deployed bytes rather than echoing the caller's argument: returning the
+	// input made every caller-side comparison against it true by construction, which reads like
+	// a second independent check and is not one.
+	const first = immutableReferences[0]
+	const decoded = `0x${Buffer.from(
+		actual.subarray(first.start + first.length - expectedAddr.length, first.start + first.length),
+	).toString("hex")}` as `0x${string}`
+	return decoded
 }
