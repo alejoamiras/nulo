@@ -521,6 +521,16 @@ PR-0**. Original ask texts kept below for context:
   provenance: registry signature + npm publish attestation + SLSA v1 binding the tarball to
   `alejoamiras/aztec-accelerator@acb3d317` built by `publish-testnet.yml` on a GitHub-hosted
   runner (verified before exempting). Follow-up removal PR is a Phase 6 deliverable.
+- **D12 — account-state slice cap 32 → 64 MiB (owner, 2026-08-27)**: the bump pushed a
+  3-network backup 0.29% past the 32 MiB cap, degrading full-backup import (two CI shards red).
+  Measured cause: the slice stores a full contract artifact PER NETWORK, so canonical contracts
+  are duplicated per network (HandshakeRegistry ×3, AuthRegistry ×3, PrivateFPC ×2 — ~35% of the
+  slice); 5.1.0's canonical HandshakeRegistry re-pin added ~4.5 MB and tipped it. The owner chose
+  the cap raise over filtering canonical contracts out of the export: that filtering needs to
+  know which contracts the wallet can always re-register locally (handshake/auth registry
+  tracking), which is real research, and there are **no user backups in the wild** — pre-production,
+  so no compatibility argument constrains the number. The cap remains a hard ceiling on
+  attacker-controlled input; only its value moved. Slice-shrinking stays open as future work.
 - **Rejected audit items** (with reasons, see audit-codex.md): removing the
   `NULO_E2E_DISABLE_ACCELERATOR` kill-switch (documented owner rollback lever; policy change →
   Ask 5 offers the narrower hardening); adding a CI-native PrivateFPC canary job in this bump

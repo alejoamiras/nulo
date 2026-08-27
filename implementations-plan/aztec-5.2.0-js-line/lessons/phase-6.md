@@ -119,3 +119,23 @@ observability (all three were genuinely missing):
 - `importFullBackup`: append the SW log trail to the timeout diagnostic.
 Without these the failure reads only as "IMPORT DEGRADED", with the reason stranded in an RPC
 result that nothing renders or logs.
+
+## Resolution — option 1 (raise the cap)
+
+Owner picked the cap raise on 2026-08-27, with the reasoning that option 2 (shrink the slice)
+"needs a lot more research (for example: handshake registries tracking on our application,
+authregistries, etc.)" and that there are **no user backups in the wild yet**, so no
+compatibility argument constrains the number.
+
+`ACCOUNT_STATE_CAPS.maxSliceCodeUnits` 32 MiB → 64 MiB, with the measured cause (per-network
+artifact duplication) written into the comment so the next person sizing it knows what actually
+fills the slice, and knows that deduplication is the deferred alternative rather than an
+oversight. The security property is unchanged: it is still a fixed hard ceiling applied to
+attacker-controlled backup content before any parsing work.
+
+**Durable lesson: a "cheap, still-hard bound" needs headroom proportional to what it bounds, not
+to what it currently measures.** This cap was sized at roughly 1.005× the real payload. Any cap
+whose margin is thinner than one upstream artifact-set change WILL fire on a dependency bump, and
+it fires as a functional degradation far from the bump, not as a build error. The export-time
+80%-of-cap warning added during the diagnosis is the cheap version of the fix — it turns the next
+occurrence into a log line at export instead of a mystery at import.
