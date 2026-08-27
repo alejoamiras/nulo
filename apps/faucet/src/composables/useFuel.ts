@@ -7,6 +7,7 @@ import {
 	awaitL1Receipt,
 	bridgeWitnessPermitTypedData,
 	ensurePermit2Allowance,
+	PERMIT_DEADLINE_SECONDS,
 	PRIVATE_FPC_ADDRESS,
 	feeJuiceAddress,
 	isSealTrusted,
@@ -208,7 +209,7 @@ export function useFuelFlow() {
 
 			setRecordStep(id, "signing", "sign the Fuel deposit in your Ethereum wallet - one signature")
 			const nonce = BigInt(`0x${crypto.randomUUID().replaceAll("-", "")}`)
-			const deadline = BigInt(Math.floor(Date.now() / 1000) + 1800)
+			const deadline = BigInt(Math.floor(Date.now() / 1000)) + PERMIT_DEADLINE_SECONDS
 			const fuelWitness: BridgeWitness = {
 				tokenPortal: fuelPortalAddr,
 				bridgeToken: feeAssetAddr,
