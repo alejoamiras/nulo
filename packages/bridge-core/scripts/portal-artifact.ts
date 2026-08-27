@@ -12,29 +12,31 @@
  * Toolchain pin: forge 1.4.1 + solc 0.8.30 (l1-contracts foundry.toml: optimizer=true,
  * evm_version=prague). Captured from a clean build of upstream/NuloTokenPortal.sol.
  */
+import { spawnSync } from "node:child_process"
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { keccak256 } from "viem"
-import { resolveBin, run } from "./run"
 
 /** keccak256 of upstream/NuloTokenPortal.sol (the reviewed fork source). Re-pinned for the
  *  F-001 hardening: the fork gained a deployer-only initializer guard (constructor-pinned
  *  immutable) on top of the init-once guard — closes the front-run of the FIRST initialize
  *  (deploy and initialize are separate transactions). Diff reviewed: guard + error + header
  *  comments only; deposit/withdraw bodies untouched. */
-export const FORKED_PORTAL_KECCAK = "0x5e81eaad47a3ccf2827635d0dc19c7abb218926112594009e56cd104b2bbdd95"
+export const FORKED_PORTAL_KECCAK = "0xde14278d6026459eec7461d12dd7d3bc57ff56d77cfee4b74a1ad2cc2d4d50ec"
 
-/** Creation/runtime code hashes + solc version of the reviewed fork build. Regenerated for the
- *  F-001 hardening (deployer-only initializer guard added to the init-once guard; same 0.8.30
- *  l1-contracts toolchain). The candidate smoke's deposit→claim round-trip is the empirical proof
- *  of the portal semantics post-guard. */
+/** Creation/runtime code hashes + solc version of the reviewed fork build. Regenerated twice for
+ *  F-001 hardening: once for the deployer-only initializer guard, again after correcting the
+ *  header's circularity wording — solc's metadata hash covers the source, so even comment-only
+ *  edits change bytecode. Diff reviewed both times: comments/guard only, deposit/withdraw bodies
+ *  untouched. The candidate smoke's deposit→claim round-trip is the empirical proof of the portal
+ *  semantics post-guard. */
 export const PORTAL_PIN = {
 	solc: "0.8.30",
-	initCodeHash: "0x5cd282db90ecdc2f8ed3992a0c36f22eb69e9f98ad262bd8abb06a25476411e1",
-	runtimeCodeHash: "0x7c7606cda9c2c7907a1abe2827b2c799fea571fa4edc3d11b07a4eaaf069b5d2",
+	initCodeHash: "0x4dfc96fc7f7de5e2aa5ca7de846ea6752f701b614ce0928e74e3c92522d8d7c1",
+	runtimeCodeHash: "0x580419318282b189e24afbdf32177d54a4579b19aba885cce664613c00bb8652",
 } as const
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -43,16 +45,12 @@ export const VENDORED_FORK = join(EVM_ROOT, "upstream", "NuloTokenPortal.sol")
 export const PORTAL_BUILD_JSON = join(EVM_ROOT, "upstream", "NuloTokenPortal.build.json")
 const STAGE_REL = join("test", "portals", "NuloTokenPortal.sol")
 
-let forge: string | undefined
-
-/** `FORGE_BIN` → PATH → the Aztec-bundled forge; resolved on first use, never at import. */
 export function forgeBin(): string {
-	forge ??= resolveBin("forge", {
-		envVar: "FORGE_BIN",
-		candidates: [join(homedir(), ".aztec", "current", "bin", "forge")],
-		prefer: "path",
-	})
-	return forge
+	if (process.env.FORGE_BIN) return process.env.FORGE_BIN
+	if (spawnSync("forge", ["--version"], { stdio: "ignore" }).status === 0) return "forge"
+	const aztec = join(homedir(), ".aztec", "current", "bin", "forge")
+	if (existsSync(aztec)) return aztec
+	throw new Error("forge not found - install foundry or set FORGE_BIN.")
 }
 
 export function l1ContractsRoot(): string {
@@ -81,6 +79,7 @@ export interface BuiltPortal {
 	solcVersion: string
 	initCodeHash: `0x${string}`
 	runtimeCodeHash: `0x${string}`
+	immutableReferences: ReadonlyArray<{ start: number; length: number }>
 }
 
 /** Stage + `forge build` the fork in the l1-contracts root; returns its bytes + hashes. */
@@ -88,13 +87,13 @@ export function buildForkInL1Root(): BuiltPortal {
 	const l1Root = l1ContractsRoot()
 	stageForkSource(l1Root)
 	const { FOUNDRY_PROFILE: _omit, ...env } = process.env
-	const res = run(forgeBin(), ["build", STAGE_REL, "--use", PORTAL_PIN.solc], {
+	const res = spawnSync(forgeBin(), ["build", STAGE_REL, "--use", PORTAL_PIN.solc], {
 		cwd: l1Root,
 		env,
+		encoding: "utf8",
 		maxBuffer: 64 * 1024 * 1024,
-		check: false,
 	})
-	if (res.exitCode !== 0) throw new Error(`forge build failed:\n${res.stdout}${res.stderr}`)
+	if (res.status !== 0) throw new Error(`forge build failed:\n${res.stdout ?? ""}${res.stderr ?? ""}`)
 	const a = JSON.parse(readFileSync(join(l1Root, "out", "NuloTokenPortal.sol", "NuloTokenPortal.json"), "utf8"))
 	const bytecode = a.bytecode.object as `0x${string}`
 	const deployedBytecode = a.deployedBytecode.object as `0x${string}`
@@ -106,6 +105,10 @@ export function buildForkInL1Root(): BuiltPortal {
 		solcVersion: meta?.compiler?.version as string,
 		initCodeHash: keccak256(bytecode),
 		runtimeCodeHash: keccak256(deployedBytecode),
+		immutableReferences: Object.values(a.deployedBytecode.immutableReferences ?? {}).flat() as ReadonlyArray<{
+			start: number
+			length: number
+		}>,
 	}
 }
 
@@ -123,6 +126,8 @@ export interface LoadedPortal {
 	abi: unknown[]
 	bytecode: `0x${string}`
 	runtimeCodeHash: `0x${string}`
+	deployedBytecode: `0x${string}`
+	immutableReferences: ReadonlyArray<{ start: number; length: number }>
 }
 
 /**
@@ -142,10 +147,86 @@ export function loadForkedPortalArtifact(): LoadedPortal {
 		)
 	}
 	assertPortalPins({ initCodeHash: a.initCodeHash, runtimeCodeHash: a.runtimeCodeHash, solcVersion: a.solcVersion })
-	return { abi: a.abi, bytecode: a.bytecode, runtimeCodeHash: a.runtimeCodeHash }
+	return {
+		abi: a.abi,
+		bytecode: a.bytecode,
+		deployedBytecode: a.deployedBytecode,
+		runtimeCodeHash: a.runtimeCodeHash,
+		immutableReferences: a.immutableReferences,
+	}
 }
 
-/** Deploy-time drift alarm: rebuild from source and assert the bytes still match the pins. */
-export function rebuildAndVerifyPortal(): void {
-	assertPortalPins(buildForkInL1Root())
+/**
+ * Throws when a rebuild moves or resizes an immutable site relative to the committed artifact.
+ * Split out of `rebuildAndVerifyPortal` so it is reachable without a solc invocation — the
+ * caller needs a real build, which is why this branch had no coverage.
+ */
+export function assertImmutableRefsMatch(
+	rebuilt: ReadonlyArray<{ start: number; length: number }>,
+	committed: ReadonlyArray<{ start: number; length: number }>,
+): void {
+	if (JSON.stringify(rebuilt) !== JSON.stringify(committed)) {
+		throw new Error(`immutableReferences drifted: rebuilt ${JSON.stringify(rebuilt)} != committed ${JSON.stringify(committed)}`)
+	}
+}
+
+/** Deploy-time drift alarm: rebuild from source and assert bytes AND immutable sites match pins. */
+export function rebuildAndVerifyPortal(committedRefs?: ReadonlyArray<{ start: number; length: number }>): void {
+	const built = buildForkInL1Root()
+	assertPortalPins(built)
+	if (committedRefs) assertImmutableRefsMatch(built.immutableReferences, committedRefs)
+}
+
+/**
+ * Verify on-chain runtime code against the artifact TEMPLATE, accounting for immutables: the
+ * constructor patches `initializer` into the deployed bytecode at the artifact's declared
+ * immutableReferences, so raw keccak equality against the template can never hold. Reconstructs
+ * the template by restoring every immutable site to its template bytes and requires byte-equality
+ * with the real code; each site must encode exactly `expectedInitializer` (right-aligned in its
+ * slot, leading zeros per solc address-immutable encoding). Returns the initializer DECODED from
+ * the deployed bytes, so a caller comparing it against the broadcaster is making a real check.
+ */
+export function assertRuntimeMatchesTemplate(
+	actualHex: `0x${string}`,
+	templateHex: `0x${string}`,
+	expectedInitializer: `0x${string}`,
+	immutableReferences: ReadonlyArray<{ start: number; length: number }>,
+): `0x${string}` {
+	const toBytes = (h: string) => Uint8Array.from(Buffer.from(h.replace(/^0x/, ""), "hex"))
+	const actual = toBytes(actualHex)
+	const template = toBytes(templateHex)
+	const expectedAddr = toBytes(expectedInitializer)
+	if (actual.length !== template.length) {
+		throw new Error(`runtime code length ${actual.length} != artifact template ${template.length}`)
+	}
+	for (const { start, length } of immutableReferences) {
+		if (length < expectedAddr.length || start + length > actual.length) {
+			throw new Error(`immutable reference [${start},${length}] out of bounds or too short for an address`)
+		}
+		const got = actual.subarray(start, start + length)
+		const zeros = got.subarray(0, length - expectedAddr.length)
+		const tail = got.subarray(length - expectedAddr.length)
+		if (!zeros.every((b) => b === 0) || !tail.every((b, i) => b === expectedAddr[i])) {
+			throw new Error(`immutable at ${start} does not encode the expected initializer (got 0x${Buffer.from(got).toString("hex")})`)
+		}
+	}
+	const inPatch = (i: number) => immutableReferences.some(({ start, length }) => i >= start && i < start + length)
+	for (let i = 0; i < actual.length; i++) {
+		if (!inPatch(i) && actual[i] !== template[i]) {
+			throw new Error(
+				`non-immutable runtime drift at byte ${i} (got 0x${actual[i].toString(16)}, want 0x${template[i].toString(16)})`,
+			)
+		}
+	}
+	if (immutableReferences.length === 0) {
+		throw new Error("artifact declares no immutable references — cannot verify the pinned initializer")
+	}
+	// Decoded from the deployed bytes rather than echoing the caller's argument: returning the
+	// input made every caller-side comparison against it true by construction, which reads like
+	// a second independent check and is not one.
+	const first = immutableReferences[0]
+	const decoded = `0x${Buffer.from(
+		actual.subarray(first.start + first.length - expectedAddr.length, first.start + first.length),
+	).toString("hex")}` as `0x${string}`
+	return decoded
 }

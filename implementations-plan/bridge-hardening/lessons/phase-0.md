@@ -54,5 +54,56 @@ same PR also claims 4 `BlackhatV4Fork` tests where 3 exist — a debug probe wit
 dropped in the branch's last commit and neither number was refreshed. Treat every self-reported
 count in this arc as unverified until re-run.
 
-Toolchain on this host: forge 1.7.1, aztec-nargo 5.0.1 available, node v24.18.0. `halmos` was not
-installed; it is a clean `pip install halmos` and the suite runs in seconds.
+Toolchain on this host: forge 1.7.1, aztec-nargo 5.0.1 available, node v24.18.0, halmos 0.3.3
+(installs cleanly, whole symbolic suite runs in ~6s — it was never the blocker it looked like).
+
+## Finding 2 (high): two of the four halmos proofs could not fail
+
+`check_sweep_revertsForNonOwner` and `check_setSwapTarget_revertsForNonOwner` signalled an
+unwanted success with `revert("...")`. halmos only recognises forge-std assertion failures and
+EVM panics, so that revert is indistinguishable from the guarded revert the check exists to prove.
+
+Verified by mutation on the real tree, not by reading: with `onlyOwner` removed from `sweep` —
+a direct fund-drain primitive — halmos still reported `[PASS] check_sweep_revertsForNonOwner`.
+
+A second, independent masking bug sat underneath it: the check passed the symbolic `caller` as
+the sweep *recipient*, so the `caller == address(0)` path tripped sweep's own
+`to != address(0)` require, producing a legitimate revert that reached the catch branch. Even
+with correct signalling, that one path would have hidden every unauthorized success.
+
+Both now signal with `assertTrue(false, ...)` and sweep to a fixed sink. Re-verified by mutation
+in both directions: each check fails with a counterexample against the stripped guard and passes
+once it is restored. The two accounting proofs were genuinely sound throughout.
+
+## Finding 3 (high): the router invariant campaign could not fail either
+
+Three compounding defects, all found by mutation testing rather than review:
+
+1. The only swap target ever installed reported exactly what it transferred — on construction
+   and again after every rotation — so I3 ("fee portal received exactly what swaps reported")
+   held by construction across 128,000 calls.
+2. The handler held no FJ. `MintableERC20`'s fourth constructor argument is a per-transaction
+   mint cap, not an initial supply, so every FJ donation reverted on insufficient balance and
+   was swallowed by the invariant runner's default `fail_on_revert = false`. That branch had
+   never executed once; I1's FJ leg only ever compared zero to zero. The 6-vs-18 decimal scaling
+   bug in `donate()` was invisible for the same reason.
+3. Fuzz and invariant settings were entirely unpinned, so coverage was whatever the installed
+   Foundry happened to default to.
+
+Fixed by adding a hostile under-delivering target plus a fourth invariant asserting the router
+refuses it, varying the honest reported output per call, minting the handler an FJ float,
+scaling FJ donations by `1 ether`, and pinning `[fuzz]`/`[invariant]` explicitly.
+
+**Mutation evidence.** Disabling the router's balance-delta guard is caught by all four
+invariants now; before this change it was caught by none. An intermediate version of the new
+hostile action signalled with `revert(...)` and was itself silently swallowed by
+`fail_on_revert = false` — the same defect class as Finding 2, caught in new code before it
+shipped. Detection now goes through a ghost flag that I4 asserts on.
+
+## Finding 4: the invariant regression was real and undisclosed
+
+The codex fix round rewrote I2 from observed-sink measurement back to a ghost-against-ghost
+comparison, and deleted the read-backs and rotation tracking it depended on. Both sides of that
+comparison are incremented from the same computed values in the handler, so it held regardless
+of router behaviour. An earlier commit in this same arc had specifically replaced that
+tautology. Neither the PR description nor the commit message mentions the change. Restored.

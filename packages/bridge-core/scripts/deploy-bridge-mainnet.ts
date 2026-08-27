@@ -28,6 +28,7 @@
  */
 import { randomInt } from "node:crypto"
 import { createHash } from "node:crypto"
+import { spawnSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -49,8 +50,7 @@ import { FeeJuicePortalAbi, feeJuiceDepositArgs, parseFeeJuiceDeposit, planPubli
 import { appendJournal, type CandidateManifest, readJournal, resolveResume, writeCandidateAtomic } from "./deploy-manifest"
 import { resolveDeployerKeys } from "./deployer-keys"
 import { requirePinnedSigner } from "./live-intent"
-import { loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
-import { run } from "./run"
+import { assertRuntimeMatchesTemplate, loadForkedPortalArtifact, rebuildAndVerifyPortal } from "./portal-artifact"
 import { createL1Clients, createL2Wallet, createNode, mainnetChain, stopwatch } from "./script-bootstrap"
 
 // ── Canonical mainnet identity (same pins as DeployBridgeMainnet.s.sol / discover-mainnet-fuel.ts) ──
@@ -150,8 +150,8 @@ async function main() {
 	const mins = stopwatch()
 
 	// ─── 0. Reviewed portal bytes + live network identity ────────────
-	rebuildAndVerifyPortal()
 	const portalArt = loadForkedPortalArtifact()
+	rebuildAndVerifyPortal(portalArt.immutableReferences)
 	const info = await nodeInfo()
 	if (info.l1ChainId !== 1) throw new Error(`Alpha node reports l1ChainId ${info.l1ChainId} != 1 — wrong node; STOP`)
 	console.log(`Alpha node: rollupVersion ${info.rollupVersion}, registry ${info.l1ContractAddresses.registryAddress}`)
@@ -442,7 +442,9 @@ async function main() {
 	if ((await pr.rollupVersion()) !== BigInt(info.rollupVersion)) throw new Error("read-back FAILED: portal.rollupVersion != node")
 	const onchain = await pub.getCode({ address: portal })
 	if (!onchain) throw new Error("read-back FAILED: portal has no deployed code")
-	assertSame(keccak256(onchain), portalArt.runtimeCodeHash, "portal runtime code hash == pin")
+	// Immutable-aware verification — see deploy-bridge-testnet.ts for rationale.
+	const observedInit = assertRuntimeMatchesTemplate(onchain, portalArt.deployedBytecode, account.address, portalArt.immutableReferences)
+	assertSame(observedInit.toLowerCase(), account.address.toLowerCase(), "portal initializer == broadcaster")
 
 	// Router wiring (group 1): swapTarget bound + the F-004 witness shape present.
 	const routerR = getContract({
@@ -520,8 +522,8 @@ async function main() {
 
 	if (process.env.ETHERSCAN_API_KEY) {
 		console.log("\nVerifying the candidate's L1 sources on Etherscan…")
-		const v = run("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit", check: false })
-		if (v.exitCode !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
+		const v = spawnSync("bun", [join(here, "verify-l1.ts"), "--config", CANDIDATE_PATH], { stdio: "inherit" })
+		if (v.status !== 0) console.log("⚠ verification failed — retry with `bun run verify:l1 --config <candidate>`.")
 	}
 	console.log(JSON.stringify(manifest, null, 2))
 }

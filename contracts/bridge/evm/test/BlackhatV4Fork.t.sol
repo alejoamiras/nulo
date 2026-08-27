@@ -24,6 +24,10 @@ import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 
 // Uniswap V4 PoolManager on Sepolia (same deployment the bridge rides).
 address constant CANONICAL_PM = 0xE03A1074c86CFeDd5C142C4F04F1a1536e203543;
+// Fallback public RPC.
+// CANONICAL_PM below is the SEPOLIA V4 PoolManager — the suite forks Sepolia, never mainnet,
+// whatever the old MAINNET_RPC constant name suggested. The endpoint comes from
+// SEPOLIA_RPC_URL; there is deliberately no default (see setUp).
 
 contract MinimalWETH {
     string public name = "WETH";
@@ -82,7 +86,9 @@ contract V4Seeder is IUnlockCallback {
             abi.decode(data, (PoolKey, int24, int24, int256));
         (BalanceDelta delta,) = pm.modifyLiquidity(
             key,
-            IPoolManager.ModifyLiquidityParams({tickLower: lower, tickUpper: upper, liquidityDelta: liquidity, salt: 0}),
+            IPoolManager.ModifyLiquidityParams({
+                tickLower: lower, tickUpper: upper, liquidityDelta: liquidity, salt: 0
+            }),
             ""
         );
         int128 d0 = delta.amount0();
@@ -124,6 +130,10 @@ contract BlackhatV4ForkTest is Test {
     V4Seeder seeder;
 
     function setUp() public {
+        // Skip-by-default. Defaulting the RPC made a bare `forge test` reach out to a public
+        // third-party endpoint, so the suite was neither hermetic nor honest about needing the
+        // network: a rate-limited or unreachable node reads as a contract failure. Opt in by
+        // exporting SEPOLIA_RPC_URL, matching the convention the rest of the fork suites use.
         string memory rpc = vm.envOr("SEPOLIA_RPC_URL", string(""));
         if (bytes(rpc).length == 0) {
             vm.skip(true);
@@ -185,12 +195,6 @@ contract BlackhatV4ForkTest is Test {
         dirs[1] = true; // sell native (currency0 of pool B)
     }
 
-    /// THE GAP: validation ACCEPTS the unexecutable route.
-    function test_FG_validationAcceptsUnsettleableRoute() public view {
-        (PoolKey[] memory path, bool[] memory dirs) = _hostilePath();
-        harness.exposeValidate(address(tokenX), path, dirs); // no revert = accepted
-    }
-
     /// Post-fix, the previously-hostile shape SETTLES EXACTLY: X in → FJ out, nothing stranded.
     function test_FG_midNativeRouteSettlesExactly() public {
         (PoolKey[] memory path, bool[] memory dirs) = _hostilePath();
@@ -208,7 +212,59 @@ contract BlackhatV4ForkTest is Test {
         assertEq(address(fuelSwap).balance, 0, "no ETH dust in the swap contract");
     }
 
-/// Sanity: a LEGIT all-native-final route (single-hop WETH→native→FJ) still works on the
+    /// DEBUG: raw PM swap probes on both pools.
+    function test_DEBUG_rawPmProbes() public {
+        RawSwapper raw = new RawSwapper(pm);
+        PoolKey memory poolA = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(tokenX)),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
+        // fund raw swapper, then sell X (zeroForOne=false)
+        tokenX.mint(address(raw), 1000 ether);
+        mockFj.mint(address(raw), 1000 ether);
+        vm.deal(address(raw), 100 ether);
+
+        (int128 o0, int128 o1) = raw.go(poolA, false, 1 ether);
+        emit log_named_int("sellX delta0(native)", o0);
+        emit log_named_int("sellX delta1(X)", o1);
+    }
+
+    /// Partial fills must fail ATOMICALLY with the full input intact: against a drained/thin
+    /// pool V4 returns early with unconsumed input; the per-hop consumption assert reverts
+    /// instead of stranding the remainder inside the swap contract.
+    function test_FG_thinPoolPartialFill_reverts() public {
+        // Fresh THIN pool {X/FJ}: L=1e15 → band depth ~8e14 wei, far below the 100e18 swap.
+        // mockFj sorts below tokenX on this deploy → FJ is currency0; selling X = zeroForOne=false.
+        PoolKey memory thin = PoolKey({
+            currency0: Currency.wrap(address(mockFj)),
+            currency1: Currency.wrap(address(tokenX)),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
+        pm.initialize(thin, TickMath.getSqrtPriceAtTick(0));
+        tokenX.mint(address(seeder), 1_000_000_000 ether);
+        mockFj.mint(address(seeder), 1_000_000_000 ether);
+        seeder.seed(thin, -12_000, 12_000, 1e15);
+
+        PoolKey[] memory path = new PoolKey[](1);
+        path[0] = thin;
+        bool[] memory dirs = new bool[](1);
+        dirs[0] = false; // sell X (currency1) for FJ
+
+        tokenX.mint(address(this), 100 ether);
+        uint256 userX = tokenX.balanceOf(address(this));
+        tokenX.approve(address(fuelSwap), 100 ether);
+        vm.expectRevert(bytes("UniswapFuelSwap: partial fill"));
+        fuelSwap.swap(address(tokenX), 100 ether, 1 wei, path, dirs);
+        // Atomic revert: caller balances exactly as before.
+        assertEq(tokenX.balanceOf(address(this)), userX, "caller paid on a reverted partial fill");
+    }
+
+    /// Sanity: a LEGIT all-native-final route (single-hop WETH→native→FJ) still works on the
     /// canonical PM — proving the harness itself is sound and only the hostile shape fails.
     function test_FG_sanity_legitSingleHopNativeRouteExecutes() public {
         PoolKey[] memory path = new PoolKey[](1);
@@ -241,8 +297,26 @@ contract BlackhatV4ForkTest is Test {
         MintableERC20 usdc = new MintableERC20("USDC", "USDC", 18, 1_000_000_000);
         // Seed {usdc/WETH} + {native/FJ}; order currencies by address (V4 requires c0 < c1).
         (PoolKey memory poolUW, bool sellUsdcZfo) = address(usdc) < address(weth)
-            ? (PoolKey({currency0: Currency.wrap(address(usdc)), currency1: Currency.wrap(address(weth)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), true)
-            : (PoolKey({currency0: Currency.wrap(address(weth)), currency1: Currency.wrap(address(usdc)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), false);
+            ? (
+                PoolKey({
+                    currency0: Currency.wrap(address(usdc)),
+                    currency1: Currency.wrap(address(weth)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                true
+            )
+            : (
+                PoolKey({
+                    currency0: Currency.wrap(address(weth)),
+                    currency1: Currency.wrap(address(usdc)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                false
+            );
 
         vm.deal(address(this), 2_000_000 ether);
         weth.deposit{value: 1_500_000 ether}();
@@ -252,7 +326,13 @@ contract BlackhatV4ForkTest is Test {
 
         PoolKey[] memory path = new PoolKey[](2);
         path[0] = poolUW;
-        path[1] = PoolKey({currency0: Currency.wrap(address(0)), currency1: Currency.wrap(address(mockFj)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))});
+        path[1] = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(mockFj)),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
         bool[] memory dirs = new bool[](2);
         dirs[0] = sellUsdcZfo; // sell USDC → receive WETH
         dirs[1] = true; // sell native → FJ
@@ -280,11 +360,47 @@ contract BlackhatV4ForkTest is Test {
         // and the settlement property under test is decimal-agnostic.
         MintableERC20 usdc = new MintableERC20("USDC", "USDC", 18, 1_000_000_000);
         (PoolKey memory poolUW, bool sellUsdcZfo) = address(usdc) < address(weth)
-            ? (PoolKey({currency0: Currency.wrap(address(usdc)), currency1: Currency.wrap(address(weth)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), true)
-            : (PoolKey({currency0: Currency.wrap(address(weth)), currency1: Currency.wrap(address(usdc)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), false);
+            ? (
+                PoolKey({
+                    currency0: Currency.wrap(address(usdc)),
+                    currency1: Currency.wrap(address(weth)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                true
+            )
+            : (
+                PoolKey({
+                    currency0: Currency.wrap(address(weth)),
+                    currency1: Currency.wrap(address(usdc)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                false
+            );
         (PoolKey memory poolWF, bool sellWethZfo) = address(weth) < address(mockFj)
-            ? (PoolKey({currency0: Currency.wrap(address(weth)), currency1: Currency.wrap(address(mockFj)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), true)
-            : (PoolKey({currency0: Currency.wrap(address(mockFj)), currency1: Currency.wrap(address(weth)), fee: 3000, tickSpacing: 60, hooks: IHooks(address(0))}), false);
+            ? (
+                PoolKey({
+                    currency0: Currency.wrap(address(weth)),
+                    currency1: Currency.wrap(address(mockFj)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                true
+            )
+            : (
+                PoolKey({
+                    currency0: Currency.wrap(address(mockFj)),
+                    currency1: Currency.wrap(address(weth)),
+                    fee: 3000,
+                    tickSpacing: 60,
+                    hooks: IHooks(address(0))
+                }),
+                false
+            );
 
         usdc.mint(address(seeder), 1_000_000_000 ether);
         vm.deal(address(this), 3_000_000 ether);

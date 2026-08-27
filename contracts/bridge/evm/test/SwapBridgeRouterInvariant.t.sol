@@ -17,6 +17,7 @@ import {RecordingPermit2, MockSwap, MockTokenPortal, MockFeeJuicePortal} from ".
 ///   I2  Conservation: every wei Permit2-pulled is accounted as fuel-swap input OR portal
 ///       deposit — no third destination exists.
 ///   I3  The fee portal received exactly what the swaps reported.
+///   I4  A swap target that under-delivers against its report is never accepted.
 contract SwapBridgeRouterInvariantTest is Test {
     RouterHandler internal handler;
 
@@ -32,9 +33,11 @@ contract SwapBridgeRouterInvariantTest is Test {
         assertEq(handler.routerFj(), handler.ghostDonatedFj() - handler.ghostSweptFj(), "fj residue != donations");
     }
 
-    /// I2 — pull-side conservation measured against OBSERVED sinks (not ghost bookkeeping):
+    /// I2 — pull-side conservation measured against OBSERVED sinks, never ghost against ghost:
     /// every wei Permit2 pulled must sit at a real sink (token portal | swap target), and the
-    /// fee portal must hold exactly what swaps reported.
+    /// fee portal must hold exactly what swaps reported. Comparing ghostPulled to the sum of
+    /// the other two ghosts restates the handler's own bookkeeping and holds regardless of what
+    /// the router does with the money.
     function invariant_pulledIsFullyAccounted() public view {
         assertEq(handler.tokenPortalBalance(), handler.ghostTokenDeposited(), "token portal != cumulative deposits");
         assertEq(handler.swapTargetBalance(), handler.ghostFuelSwapped(), "swap target != cumulative fuel slices");
@@ -112,7 +115,8 @@ contract RouterHandler is StdUtils {
 
     function bridgeWithFuel(uint256 seed) external {
         uint256 total = bound(seed % 1000, 2, 1000) * 1e6;
-        uint256 fuel = bound((seed >> 10) % 997, 1, total - 1);
+        // full-width seed: %997 would collapse fuel entropy to ≤996 base units
+        uint256 fuel = bound(seed >> 8, 1, total - 1);
         bool isPrivate = (seed >> 4) % 2 == 0;
         // Vary the honest output so I3 compares a moving sum rather than a constant multiple:
         // a fee-portal credit bug that scales with the reported amount stays visible.
