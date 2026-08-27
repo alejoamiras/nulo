@@ -75,3 +75,27 @@ fn claim_secret_hash_vectors_match_ts() {
         compute_secret_hash([derive_claim_secret(0x1234567890abcdef, AztecAddress::from_field(0xdeadbeef))]);
     assert(h2 == 0x2a636f84225eec69e412ed5dffd735f1ac8ff6d28b24dac5d796f0c2a648ac1c);
 }
+
+// ─── Fuzz properties (nargo runs parameterized tests with random inputs) ───
+// The recipient-commitment property needs derive_claim_secret to be injective ENOUGH that a
+// different (salt, recipient) never collides onto the committed secret; these random-input
+// assertions pin the two one-bit-flip neighbors across the whole field domain.
+
+#[test]
+fn fuzz_derive_changes_with_salt(salt: Field, recipient_field: Field) {
+    let r = AztecAddress::from_field(recipient_field);
+    assert(
+        derive_claim_secret(salt, r) != derive_claim_secret(salt + 1, r),
+        "salt neighbor collision in derive_claim_secret",
+    );
+}
+
+#[test]
+fn fuzz_derive_changes_with_recipient(salt: Field, recipient_field: Field) {
+    let r0 = AztecAddress::from_field(recipient_field);
+    let r1 = AztecAddress::from_field(recipient_field + 1);
+    assert(
+        derive_claim_secret(salt, r0) != derive_claim_secret(salt, r1),
+        "recipient neighbor collision in derive_claim_secret",
+    );
+}
