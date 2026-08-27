@@ -217,7 +217,7 @@ evidence + bb version recorded + size delta printed; layers: prover-ON local-san
 (canary file; the sandbox is local — no live-network broadcasts anywhere in this plan). Log:
 `lessons/phase-3.md`.
 
-## Phase 4 ✓ — Full battery: re-diff, detectors, builds, smoke, full prover-ON suite
+## Phase 4 ✓ — Full battery: re-diff, detectors, builds, smoke, targeted prover-ON + CI suite
 
 1. Re-diff the copied-logic list against installed 5.2.0 sources (verdicts per file in
    lessons): `fee-options.ts` + `embedded-fpc-cap.ts` (MIN_FEE_PADDING both),
