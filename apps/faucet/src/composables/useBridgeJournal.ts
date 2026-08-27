@@ -24,6 +24,7 @@ import { computed, ref } from "vue"
 import { BRIDGE, FUEL_PORTAL, L1_PORTAL } from "@/contracts/bridge-deployments"
 import { SYNC_TARGET_MARGIN_BLOCKS } from "@/lib/bridge-steps"
 import { humanizeWalletError, isUserRejection } from "@/lib/wallet-errors"
+import { isReceiptRecordMismatch } from "@/lib/fuel-claim-state"
 import { dropPhaseClock } from "@/lib/phase-clock"
 import { withOperation } from "./useOpsInFlight"
 
@@ -51,7 +52,17 @@ export const isMsgNotReady = (msg: string): boolean =>
 export const isMsgConsumed = (msg: string): boolean =>
 	/No non-nullified L1 to L2 message found|message has already been nullified/i.test(msg)
 
-export type Attention = "mismatch" | "tampered" | "unseal-failed" | "stale" | "stale-deployment" | "unknown-outcome" | "error"
+export type Attention =
+	| "mismatch"
+	| "tampered"
+	| "unseal-failed"
+	| "stale"
+	| "stale-deployment"
+	/** Terminal: the L1 receipt can't supply this record's fuel data. Retrying repeats the same
+	 *  immutable failure, so the card must not offer one — only a restore recovers it. */
+	| "receipt-mismatch"
+	| "unknown-outcome"
+	| "error"
 
 /** The live narration of what is happening RIGHT NOW for a record - engine steps plus the flows'
  *  L1/L2 legs. Ephemeral display state only - never persisted, never an input to completion logic. */
@@ -605,8 +616,8 @@ async function runDepositClaimInner(id: string, opts: { interactive?: boolean } 
 			try {
 				outcome = await deps.recoverDepositLeg(rec)
 			} catch (e) {
-				const msg = humanizeWalletError(e instanceof Error ? e.message : String(e))
-				setRuntime(id, { attention: "error", note: msg })
+				const raw = e instanceof Error ? e.message : String(e)
+				setRuntime(id, { attention: isReceiptRecordMismatch(raw) ? "receipt-mismatch" : "error", note: humanizeWalletError(raw) })
 				return
 			}
 			if (outcome === "pending") {

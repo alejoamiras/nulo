@@ -267,3 +267,12 @@ export function decideStandaloneFuelRecovery(i: StandaloneFuelRecoveryInputs): S
 	if (!i.isPrivate) return f?.received ? "offer" : "none"
 	return decideFuelLadder({ isPrivate: true, schema: i.schema, fuel: f }) === "private" ? "private-settled" : "private-unknown"
 }
+
+/** The terminal record/receipt mismatch: the L1 receipt cannot supply this record's fuel data, so a
+ *  retry repeats the same immutable failure forever. Matched by the engine to mark the record
+ *  terminally rather than as a retryable error. */
+export const RECEIPT_RECORD_MISMATCH_MSG = "receipt doesn't match its record"
+
+export function isReceiptRecordMismatch(message: string): boolean {
+	return message.includes(RECEIPT_RECORD_MISMATCH_MSG)
+}

@@ -442,6 +442,16 @@ describe("BridgeJournalCard — account attribution (Options 1+2)", () => {
 		expect(w.find(sel(TESTIDS.journalPrivateFuelUnknown)).exists()).toBe(true)
 	})
 
+	it("a terminal receipt/record mismatch offers no CLAIM or RETRY — the retry could only fail again", () => {
+		const rec = deposit({ leafIndex: "1" })
+		runtime.value = { [rec.id]: { attention: "receipt-mismatch", note: "…can't be recovered from the chain." } }
+		const w = mountCard(rec)
+		expect(w.find(sel(TESTIDS.journalClaim)).exists()).toBe(false)
+		// A retryable error on the same record DOES keep the action — the suppression is terminal-only.
+		runtime.value = { [rec.id]: { attention: "error", note: "transient" } }
+		expect(mountCard(rec).find(sel(TESTIDS.journalClaim)).exists()).toBe(true)
+	})
+
 	it("the PUBLIC twin still offers recovery — the gate is privacy-scoped, not a blanket removal", () => {
 		const w = mountCard(deposit({ isPrivate: false, recipient: "0xaztec", completedAt: Date.now(), fuel: FUEL }))
 		expect(w.find(sel(TESTIDS.journalClaimGas)).exists()).toBe(true)

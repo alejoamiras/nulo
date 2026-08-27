@@ -32,7 +32,16 @@ export const SYNC_TARGET_MARGIN_BLOCKS = 3
 
 // Every attention fails the active phase: the rail is where the note + the fix-instruction live
 // (mismatch/stale states used to render a calm "active" prompt with no note at all).
-const FAILED_ATTENTIONS = new Set(["error", "unknown-outcome", "mismatch", "tampered", "unseal-failed", "stale", "stale-deployment"])
+const FAILED_ATTENTIONS = new Set([
+	"error",
+	"unknown-outcome",
+	"mismatch",
+	"tampered",
+	"unseal-failed",
+	"stale",
+	"stale-deployment",
+	"receipt-mismatch",
+])
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n))
 

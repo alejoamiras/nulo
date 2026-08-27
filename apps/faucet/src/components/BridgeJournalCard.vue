@@ -194,7 +194,9 @@ const attention = computed(() => rt.value.attention)
 // Every attention except a deployment mismatch is retryable: the runs re-validate all guards
 // idempotently, so pressing CLAIM/FINISH after fixing the cause (switching accounts, etc.) is
 // exactly the recovery path - hiding the button stranded those states until a reload.
-const actionable = computed(() => attention.value !== "stale-deployment")
+// Terminal states: retrying repeats the same immutable failure, so offer no CLAIM/RETRY. The
+// journal-level Restore control stays available for both.
+const actionable = computed(() => attention.value !== "stale-deployment" && attention.value !== "receipt-mismatch")
 
 /** Guidance for an IDLE card only: while the engine drives (busy) the rail narrates live, and a
  *  done card's stamp says everything - a parallel stage line would just repeat them. */

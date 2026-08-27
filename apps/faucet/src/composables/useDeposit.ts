@@ -60,6 +60,7 @@ import {
 	decidePrivateFuelClaim,
 	decideStandaloneFuelRecovery,
 	isPrivateFuelInsufficiency,
+	RECEIPT_RECORD_MISMATCH_MSG,
 } from "@/lib/fuel-claim-state"
 import { getSponsoredFpcInstance } from "@/contracts/sponsored-fpc"
 import {
@@ -364,7 +365,7 @@ export function ensureDepositJournalDeps(): void {
 			// for fuel data: a schema-2 record that already has it is just recovering its token leaf.
 			if (rec.schema === 2 && (!rec.fuel?.received || !rec.fuel?.leafIndex)) {
 				throw new Error(
-					"This bridge's Ethereum receipt doesn't match its record - its gas details can't be recovered from the chain. Restore it from its backup file.",
+					`This bridge's Ethereum ${RECEIPT_RECORD_MISMATCH_MSG} - its gas details can't be recovered from the chain. Restore it from its backup file.`,
 				)
 			}
 			const sent = parseEventLogs({ abi: InboxAbi, eventName: "MessageSent", logs: receipt.logs })
